@@ -384,3 +384,76 @@ def test_proprietary_signals_multivariable_synthesis_and_state_tax_isolation() -
     assert all("$42,800" not in r[4] for r in traj_scorp["rows"])
 
 
+def test_closed_loop_empirical_substrate_three_tenant_parity() -> None:
+    """
+    Verifies x-like:2093323034195378306 closed-loop empirical substrate parity across
+    profithelm, prexvo, and gainhelm:
+    1. Domain-specific statutory series ranking & epoch timeline serialization (zero 'year' key inflation).
+    2. Non-linear statutory AST gradient evaluation across GainHelm (10/10), ProfitHelm, and Prexvo.
+    3. Grounded longitudinal trajectories and stateful comparators across GainHelm compliance verticals.
+    """
+    import pseofactory.proprietary_signals as ps
+
+    ps._TREND_DB_CACHE = None
+    scorp_bundle = ps.resolve_proprietary_signal_bundle(
+        property_id="profithelm",
+        slug="s-corp-reasonable-salary-tax-calculator",
+    )
+    top_ph_series = scorp_bundle["statutory_economic_matrix"]["series"][0]["series_id"]
+    assert top_ph_series in ("irs_sec199a_qbi", "ssa_fica_wage_base")
+    assert '"year":' not in json.dumps(scorp_bundle["statutory_economic_matrix"])
+    assert '"epoch":' in json.dumps(scorp_bundle["statutory_economic_matrix"])
+
+    cmmc_bundle = ps.resolve_proprietary_signal_bundle(
+        property_id="gainhelm",
+        slug="cmmc-2-0-compliance-cost-calculator",
+    )
+    assert cmmc_bundle["statutory_economic_matrix"]["series"][0]["series_id"] == "dod_cmmc_l2_c3pao_mandatory_pct"
+
+    hipaa_bundle = ps.resolve_proprietary_signal_bundle(
+        property_id="gainhelm",
+        slug="hipaa-violation-penalty-breach-cost-calculator",
+    )
+    assert hipaa_bundle["statutory_economic_matrix"]["series"][0]["series_id"] == "hhs_ocr_hipaa_tier4_annual_cap_usd"
+
+    # All 10 GainHelm fallback manifests must evaluate to non-linear statutory cliffs (not Linear Parity)
+    for gh_slug, gh_spec in RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS.items():
+        gh_rows = ps.compute_5point_nonlinear_sensitivity_rows(
+            gh_spec["formula"], gh_spec["inputs"], float(gh_spec["published_output"])
+        )
+        cons = next(r for r in gh_rows if r["css_class"] == "scenario-conservative")
+        assert "Non-Linear Cliff" in cons["cliff_delta"], f"{gh_slug} unexpectedly linear: {cons}"
+
+    # ProfitHelm & Prexvo fixed-basis / historical-cap calculators must evaluate to non-linear cliffs
+    for prop_map, slug_key in [
+        (RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS, "section-1031-calculator"),
+        (RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS, "r-and-d-tax-credit-section-174-amortization-calculator"),
+        (RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS, "section-301-tariff-landed-cost-calculator"),
+        (RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS, "crypto-tax-form-1099-da-mandatory-reporting"),
+        (RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS, "equipment-lease-vs-buy-section-179-calculator"),
+        (RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS, "grad-plus-borrowing-cap-calculator"),
+        (RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS, "student-loan-forgiveness-tax-bomb-insolvency-calculator"),
+    ]:
+        spec = prop_map[slug_key]
+        rows = ps.compute_5point_nonlinear_sensitivity_rows(
+            spec["formula"], spec["inputs"], float(spec["published_output"])
+        )
+        cons = next(r for r in rows if r["css_class"] == "scenario-conservative")
+        assert "Non-Linear Cliff" in cons["cliff_delta"], f"{slug_key} unexpectedly linear: {cons}"
+
+    # GainHelm vertical trajectories and comparators must be distinct across compliance families
+    t_soc2 = ps.compute_multi_year_longitudinal_trajectory("gainhelm", "soc-2-audit-cost-calculator", "SOC 2")
+    t_cmmc = ps.compute_multi_year_longitudinal_trajectory("gainhelm", "cmmc-2-0-compliance-cost-calculator", "CMMC 2.0")
+    t_hipaa = ps.compute_multi_year_longitudinal_trajectory("gainhelm", "hipaa-violation-penalty-breach-cost-calculator", "HIPAA")
+    t_pci = ps.compute_multi_year_longitudinal_trajectory("gainhelm", "pci-dss-4-0-compliance-cost-calculator", "PCI DSS")
+    assert len({t_soc2["summary_default"], t_cmmc["summary_default"], t_hipaa["summary_default"], t_pci["summary_default"]}) == 4
+    assert all("Proprietary Signal Telemetry:" in t["summary_default"] for t in (t_soc2, t_cmmc, t_hipaa, t_pci))
+
+    c_soc2 = ps.compute_stateful_comparator_defaults("gainhelm", "soc-2-audit-cost-calculator")
+    c_cmmc = ps.compute_stateful_comparator_defaults("gainhelm", "cmmc-2-0-compliance-cost-calculator")
+    c_fedramp = ps.compute_stateful_comparator_defaults("gainhelm", "fedramp-authorization-3pao-cost-calculator")
+    c_hipaa = ps.compute_stateful_comparator_defaults("gainhelm", "hipaa-violation-penalty-breach-cost-calculator")
+    assert len({c_soc2["base_a"], c_cmmc["base_a"], c_fedramp["base_a"], c_hipaa["base_a"]}) == 4
+
+
+

@@ -5421,9 +5421,11 @@ def _needs_page_structure_geo_normalization(
             flags=re.IGNORECASE,
         )
         qa_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_inner_chk)).strip()
+        qa_total_words = len(re.sub(r"<[^>]+>", " ", qa_chk.group(1)).split())
         if (
             detect_sentence_truncation_issues(qa_plain)
             or count_quick_answer_sentences(qa_plain) > 2
+            or qa_total_words > 60
             or ("grad-plus" in canon_url and ("tiered standard" in qa_plain.lower() or "225 percent" in qa_plain.lower()))
             or ("equipment-lease" in canon_url and "$2,560,000" in qa_plain)
             or (
@@ -5827,9 +5829,9 @@ def _normalize_spoke_and_synthesized_body_bloat(
                     qa_title_str = f"Key Finding: {st_name} 2027 Post-Sunset Tax Liability"
                     spoke_qa = (
                         f"For a {st_name} single filer earning the {inc_val} median wage benchmark, combined 2027 "
-                        f"post-sunset federal and {st_name} income tax totals {tot_val} ({eff_val} effective rate), leaving {th_val} "
+                        f"post-sunset federal and state income tax totals {tot_val} ({eff_val} effective rate), leaving {th_val} "
                         f"in net take-home pay. Under IRC Section 1(j) sunset reversion, federal brackets span 10% to 39.6% alongside "
-                        f"{st_name} statutory brackets and standard deductions."
+                        f"state statutory brackets and deductions."
                     )
                 qa_pat = re.compile(
                     r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
@@ -7509,6 +7511,35 @@ class RetroReflectionEngine:
             "economic_dataset": "IRS SOI Individual Income Tax Deduction Series and Federal Reserve G.19 Student Credit Dataset",
             "sample_calculation": "Under 26 U.S.C. Section 221, a Single filer at $89,000 MAGI within the $85,000 to $100,000 phaseout range deducts $1,833.33 of the $2,500 statutory cap, saving $403.33 in federal tax at the 22% marginal bracket.",
         },
+        "parent-plus-double-consolidation": {
+            "model_name": "Parent PLUS Double Consolidation and RAP Repayment Model",
+            "formula": "round(max(0, agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12, 2)",
+            "inputs": {
+                "loan_balance": 80000.0,
+                "agi": 65000.0,
+                "poverty_guideline": 15650.0,
+                "discretionary_multiplier": 2.25,
+                "rap_rate": 0.10,
+            },
+            "published_output": 248.23,
+            "statutory_authority": "34 CFR 685.220; 34 CFR Part 685 statutory consolidation provisions",
+            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
+            "sample_calculation": "Borrower with $80,000 in Parent PLUS loans completing double consolidation with $65,000 AGI: protected baseline is $15,650 * 2.25 = $35,212.50. Discretionary income is $29,787.50, unlocking a 10% RAP payment of $248.23 monthly.",
+        },
+        "repayment-estimator-student-loans": {
+            "model_name": "Title IV Student Loan Repayment Estimator Model",
+            "formula": "round(max(0, agi - (poverty_guideline * discretionary_multiplier)) * payment_rate / 12, 2)",
+            "inputs": {
+                "agi": 65000.0,
+                "poverty_guideline": 15650.0,
+                "discretionary_multiplier": 2.25,
+                "payment_rate": 0.10,
+            },
+            "published_output": 248.23,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR Part 685; 42 U.S.C. 9902(2)",
+            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
+            "sample_calculation": "Single borrower earning $65,000 with $15,650 poverty baseline: protected threshold is $15,650 * 2.25 = $35,212.50. Discretionary income is $65,000 - $35,212.50 = $29,787.50. Multiplying by 10% and dividing by 12 produces a monthly payment of $248.23.",
+        },
     }
 
     PROFITHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -7716,6 +7747,51 @@ class RetroReflectionEngine:
             "statutory_authority": "26 U.S.C. Section 6621; IRC Section 6622 Daily Compounding; IRC Section 6651(a)(2)",
             "economic_dataset": "Federal Reserve H.15 Short-Term Treasury Rate Series and IRS Quarterly Revenue Rulings",
             "sample_calculation": "On an $85,000 federal tax underpayment over 4 quarters at the 8.0% IRC Section 6621 underpayment rate ($7,006.73 compounded interest) plus 12 months of IRC Section 6651(a)(2) 0.5%/mo failure-to-pay penalty ($5,100.00), combined statutory interest and penalty exposure is $12,106.73.",
+        },
+        "contractor-surety-bond-cost-calculator": {
+            "model_name": "Contractor Surety Bond Underwriting Model",
+            "formula": "bond_penalty_amount * (credit_tier_rate_pct / 100.0)",
+            "inputs": {"bond_penalty_amount": 50000.0, "credit_tier_rate_pct": 1.5},
+            "published_output": 750.0,
+            "statutory_authority": "40 USC Section 3131 Federal Miller Act and 48 CFR Part 28 Surety Bond Regulations",
+            "economic_dataset": "FRED Construction Spending Series and SFAA Surety Underwriting Loss Benchmarks",
+            "sample_calculation": "Statutory $50,000 contractor license bond at a 1.5% standard credit tier underwriting rate yields a $750 annual bond premium.",
+        },
+        "equipment-lease-vs-buy-section-179-calculator": {
+            "model_name": "Equipment Lease Buy Section 179 Model",
+            "formula": "equipment_cost * marginal_tax_rate - year_one_financing_payments",
+            "inputs": {"equipment_cost": 180000.0, "marginal_tax_rate": 0.32, "year_one_financing_payments": 39600.0},
+            "published_output": 18000.0,
+            "statutory_authority": "IRC Section 179 First-Year Expensing and IRC Section 168(k) Bonus Depreciation",
+            "economic_dataset": "Federal Reserve G.19 Commercial Equipment Finance Rates and FRED Prime Rate Series",
+            "sample_calculation": "Financing $180,000 of qualifying equipment generates $57,600 in Year-1 Section 179 tax savings against $39,600 in payments for $18,000 positive Year-1 cash flow.",
+        },
+        "invoice-factoring-vs-business-line-of-credit-calculator": {
+            "model_name": "Invoice Factoring vs Line Of Credit Model",
+            "formula": "invoice_face_value * factor_fee_rate",
+            "inputs": {"invoice_face_value": 100000.0, "factor_fee_rate": 0.025},
+            "published_output": 2500.0,
+            "statutory_authority": "IRC Section 163 Business Interest Limitation and 12 CFR Part 1026 Commercial Credit Rules",
+            "economic_dataset": "Federal Reserve H.15 Selected Interest Rates and FRED Commercial Bank Prime Loan Series",
+            "sample_calculation": "Factoring a $100,000 commercial invoice at a 2.5% discount fee costs $2,500 (20.28% annualized APR across a 45-day net collection cycle).",
+        },
+        "medical-and-dental-equipment-section-179-roi-calculator": {
+            "model_name": "Medical Equipment Section 179 ROI Model",
+            "formula": "annual_procedure_net_revenue + (equipment_cost * marginal_tax_rate)",
+            "inputs": {"equipment_cost": 150000.0, "marginal_tax_rate": 0.35, "annual_procedure_net_revenue": 96000.0},
+            "published_output": 148500.0,
+            "statutory_authority": "IRC Section 179 Qualifying Medical Property and IRC Section 44 Disabled Access Credit",
+            "economic_dataset": "BLS Healthcare Wage Series, FRED Medical Care CPI Series, and CMS RVU Benchmarks",
+            "sample_calculation": "Clinical CBCT imaging system costing $150,000 yields $96,000 annual procedure net billings plus $52,500 Year-1 Section 179 tax savings for $148,500 first-year return.",
+        },
+        "workers-comp-and-payroll-burden-calculator": {
+            "model_name": "Workers Comp Payroll Burden Model",
+            "formula": "annual_payroll * statutory_tax_rate + (annual_payroll / 100.0) * workers_comp_rate_per_100",
+            "inputs": {"annual_payroll": 500000.0, "statutory_tax_rate": 0.0865, "workers_comp_rate_per_100": 3.45},
+            "published_output": 60500.0,
+            "statutory_authority": "IRC Section 3111 FICA, IRC Section 3301 FUTA, and NCCI Workers Compensation Class Manuals",
+            "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC) and State Rating Bureau Filings",
+            "sample_calculation": "Annual payroll of $500,000 at 8.65% combined FICA/FUTA/SUTA plus $3.45 per $100 workers comp rate yields $60,500 employer burden.",
         },
     }
 
@@ -8142,10 +8218,12 @@ class RetroReflectionEngine:
                             or str(curr_m.get("sample_calculation") or "") != expected_m["sample_calculation"]
                             or str(curr_m.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                             or (
-                                inferred_prop in ("profithelm", "prexvo")
+                                inferred_prop in ("profithelm", "prexvo", "gainhelm")
                                 and (
                                     not curr_m.get("statutory_economic_matrix")
                                     or not curr_m.get("proprietary_telemetry")
+                                    or '"year":' in json.dumps(curr_m.get("statutory_economic_matrix"))
+                                    or curr_m.get("statutory_economic_matrix") != expected_m.get("statutory_economic_matrix")
                                 )
                             )
                         ):
@@ -8174,9 +8252,20 @@ class RetroReflectionEngine:
                     html_content,
                     re.IGNORECASE,
                 )
+                from pseofactory.proprietary_signals import compute_5point_nonlinear_sensitivity_rows
+                exp_sens_rows = compute_5point_nonlinear_sensitivity_rows(
+                    expected_m["formula"], expected_m["inputs"], exp_pub
+                )
+                exp_con_delta = exp_sens_rows[1]["cliff_delta"] if len(exp_sens_rows) > 1 else ""
                 if scen_m and (
                     scen_m.group(1).strip() != exp_disp
-                    or (inferred_prop in ("profithelm", "prexvo") and 'class="scenario-ast-eval"' not in html_content)
+                    or (
+                        inferred_prop in ("profithelm", "prexvo", "gainhelm")
+                        and (
+                            'class="scenario-ast-eval"' not in html_content
+                            or (exp_con_delta and f">{exp_con_delta}<" not in html_content)
+                        )
+                    )
                 ):
                     if "server_rendered_sensitivity_grid" not in missing:
                         missing.append("server_rendered_sensitivity_grid")
@@ -8293,6 +8382,11 @@ class RetroReflectionEngine:
         has_stale_serp_depth = (
             "$42,800" in html_content
             or "$1,680 / yr" in html_content
+            or "$44,500" in html_content
+            or (
+                'id="multi-year-cliff-visualizer"' in html_content
+                and "Proprietary Signal Telemetry:" not in html_content
+            )
             or (
                 "California FTB Form 540" in html_content
                 and "california" not in canon_clean
@@ -8608,8 +8702,8 @@ class RetroReflectionEngine:
             "statutory_authority": statutory_authority,
             "economic_dataset": economic_dataset,
             "sample_calculation": sample_calc,
-            "statutory_economic_matrix": raw.get("statutory_economic_matrix") or signal_bundle["statutory_economic_matrix"],
-            "proprietary_telemetry": raw.get("proprietary_telemetry") or signal_bundle["proprietary_telemetry"],
+            "statutory_economic_matrix": signal_bundle["statutory_economic_matrix"],
+            "proprietary_telemetry": signal_bundle["proprietary_telemetry"],
         }
 
     _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str], Tuple[str, List[str]]] = {}
@@ -8618,7 +8712,15 @@ class RetroReflectionEngine:
     def _sidecar_needs_sync(cls, sidecar_path: Path, html_content: str) -> bool:
         """Checks whether a sidecar manifest JSON is missing entity_type or out of lockstep with embedded HTML manifest."""
         if not sidecar_path.is_file():
-            return False
+            return sidecar_path.parent.is_dir() and sidecar_path.stem not in (
+                "index",
+                "tool",
+                "tools",
+                "tools-directory",
+                "404",
+                "signal",
+                "tax-bracket-capital-allocation-hub",
+            )
         try:
             from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
             sc_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
@@ -8627,6 +8729,7 @@ class RetroReflectionEngine:
                 or str(sc_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                 or not sc_data.get("statutory_economic_matrix")
                 or not sc_data.get("proprietary_telemetry")
+                or '"year":' in json.dumps(sc_data.get("statutory_economic_matrix") or {})
             ):
                 return True
             m = re.search(
@@ -8641,6 +8744,10 @@ class RetroReflectionEngine:
                         sc_data.get("published_output") != emb_data.get("published_output")
                         or sc_data.get("formula") != emb_data.get("formula")
                         or sc_data.get("inputs") != emb_data.get("inputs")
+                        or (
+                            emb_data.get("statutory_economic_matrix")
+                            and sc_data.get("statutory_economic_matrix") != emb_data.get("statutory_economic_matrix")
+                        )
                     ):
                         return True
         except Exception:
@@ -9112,6 +9219,8 @@ class RetroReflectionEngine:
                         or str(existing_sidecar.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                         or not existing_sidecar.get("statutory_economic_matrix")
                         or not existing_sidecar.get("proprietary_telemetry")
+                        or '"year":' in json.dumps(existing_sidecar.get("statutory_economic_matrix") or {})
+                        or existing_sidecar.get("statutory_economic_matrix") != manifest["statutory_economic_matrix"]
                         or (
                             property_id.lower() != "prexvo"
                             and (
@@ -9138,6 +9247,17 @@ class RetroReflectionEngine:
                             sidecar_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
                         if "calculation_manifest" not in repaired:
                             repaired.append("calculation_manifest")
+                except Exception:
+                    pass
+            elif (
+                "/" not in slug
+                and slug not in ("index", "tool", "tools", "tools-directory", "404", "signal", "tax-bracket-capital-allocation-hub")
+                and sidecar_path.parent.is_dir()
+            ):
+                try:
+                    sidecar_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                    if "calculation_manifest" not in repaired:
+                        repaired.append("calculation_manifest")
                 except Exception:
                     pass
 

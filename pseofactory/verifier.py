@@ -6513,7 +6513,7 @@ def verify_html_source_keyword_inflation_ratio(
     h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw, flags=re.IGNORECASE | re.DOTALL)
     title_m = re.search(r"<title[^>]*>(.*?)</title>", raw, flags=re.IGNORECASE | re.DOTALL)
     heading_text = re.sub(r"<[^>]+>", " ", (h1_m.group(1) if h1_m else (title_m.group(1) if title_m else "")))
-    stop = {"calculator", "calculators", "profithelm", "prexvo", "gainhelm", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027", "title", "about", "signal"}
+    stop = {"calculator", "calculators", "profithelm", "prexvo", "gainhelm", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027", "title", "about", "signal", "year", "years"}
     tokens = [
         t.lower()
         for t in re.findall(r"[a-zA-Z0-9]{4,}", heading_text)

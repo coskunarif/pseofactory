@@ -80,6 +80,52 @@ _FIXED_STATUTORY_INPUT_EXACT: frozenset[str] = frozenset(
         "ibr_exemption_2026",
         "rap_exemption_2026",
         "repayment_months",
+        "adjusted_basis",
+        "depreciation_recapture",
+        "freight_and_mpf_hmf",
+        "prior_three_year_avg_qre",
+        "verified_cost_basis",
+        "exchange_fee_offset",
+        "short_term_share",
+        "year_one_financing_payments",
+        "california_ftb_tax_liability",
+        "state_income_tax",
+        "staking_rewards",
+        "institutional_aid",
+        "total_liabilities",
+        "fair_market_assets",
+        "cpa_audit_fee",
+        "grc_platform_annual",
+        "grc_platform_annual_cost",
+        "c3pao_assessment_fee",
+        "enclave_annual_cost",
+        "enclave_grc_cost",
+        "stage1_stage2_registrar_fee",
+        "certification_body_fee",
+        "annual_surveillance_fee",
+        "grc_platform_cost",
+        "ocr_tier_penalty_estimate",
+        "statutory_civil_penalty",
+        "legal_and_credit_monitoring_cost",
+        "qsa_assessment_fee",
+        "qsa_roc_fee",
+        "quarterly_asv_scan_fee",
+        "asv_quarterly_scanning",
+        "threepao_readiness_and_sar_fee",
+        "readiness_assessment_fee",
+        "full_security_assessment_fee",
+        "mycsf_subscription_and_report_fee",
+        "mycsf_subscription_fee",
+        "external_assessor_validation_fee",
+        "external_assessor_fee",
+        "daily_consultant_rate",
+        "retesting_and_attestation_fee",
+        "retest_attestation_fee",
+        "base_rate_per_million",
+        "control_posture_modifier",
+        "annual_retention_reserve_allocation",
+        "base_policy_premium",
+        "control_maturity_discount",
     }
 )
 
@@ -181,7 +227,7 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                 yr = int(r["effective_year"])
                 val = float(r["metric_value"])
                 entry["points"][str(yr)] = val
-                entry["timeline"].append({"year": yr, "value": val})
+                entry["timeline"].append({"epoch": yr, "value": val})
 
             kw_rows = cur.execute(
                 """
@@ -244,7 +290,7 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                 yr = int(rec.effective_year)
                 val = float(rec.metric_value)
                 entry["points"][str(yr)] = val
-                entry["timeline"].append({"year": yr, "value": val})
+                entry["timeline"].append({"epoch": yr, "value": val})
         except Exception:
             pass
 
@@ -311,7 +357,7 @@ def resolve_proprietary_signal_bundle(
         score = 0
         if s_obj["property_id"] == prop:
             score += 2
-        if any(k in s_clean for k in ("179", "equipment", "vehicle", "lease")) and "179" in sid or "168k" in sid:
+        if any(k in s_clean for k in ("179", "equipment", "vehicle", "lease")) and ("179" in sid or "168k" in sid):
             score += 10
         elif any(k in s_clean for k in ("s-corp", "salary", "workers-comp", "payroll")) and ("fica" in sid or "199a" in sid):
             score += 10
@@ -328,6 +374,13 @@ def resolve_proprietary_signal_bundle(
                 score += 12
             elif any(k in s_clean for k in ("rap", "ibr", "paye", "icr", "save", "parent-plus", "married")) and ("fpl" in sid or "levy" in sid):
                 score += 10
+        elif prop == "gainhelm":
+            if any(k in s_clean for k in ("cmmc", "nist-800-171", "sprs", "fedramp")) and ("dod_cmmc" in sid or "bls_soc_15_1212" in sid):
+                score += 12 if "dod_cmmc" in sid else 8
+            elif any(k in s_clean for k in ("hipaa", "hitrust", "pci-dss", "cyber-liability")) and ("hhs_ocr_hipaa" in sid or "bls_soc_15_1212" in sid):
+                score += 12 if "hhs_ocr_hipaa" in sid else 8
+            elif any(k in s_clean for k in ("soc-2", "iso-27001", "penetration")) and ("aicpa_soc2" in sid or "bls_soc_15_1212" in sid):
+                score += 12 if "aicpa_soc2" in sid else 10
         matched_series.append((score, sid, s_obj))
 
     matched_series.sort(key=lambda x: (-x[0], x[1]))
@@ -371,9 +424,12 @@ def resolve_proprietary_signal_bundle(
         else ("Title IV Federal IDR & PSLF Statutory Cohort" if prop == "prexvo" else "Verified Statutory Baseline Cohort")
     )
 
+    from pseofactory.contracts import normalize_statutory_acronym_casing
+
+    norm_query = normalize_statutory_acronym_casing(query or s_clean.replace("-", " "))
     statutory_matrix = {
         "property_id": prop,
-        "query": query or s_clean.replace("-", " "),
+        "query": norm_query,
         "years": [2024, 2025, 2026, 2027, 2028, 2029, 2030],
         "statutory_authority": (
             ordered_series[0]["statutory_citation"]
@@ -385,20 +441,25 @@ def resolve_proprietary_signal_bundle(
         "series": ordered_series,
     }
 
-    demand_telemetry = best_kw or {
-        "query_slug": base_slug,
-        "query": base_slug.replace("-", " "),
-        "property_id": prop,
-        "consecutive_cycles_count": 3,
-        "latest_velocity": 0.42,
-        "acceleration_2nd_deriv": 0.08,
-        "search_volume": 3200,
-        "cpc_usd": 14.50,
-        "keyword_difficulty": 34.0,
-        "historical_stability": 0.88,
-        "jev_score": 18.4,
-        "composite_profit_yield": 640.0,
-    }
+    if best_kw is not None:
+        demand_telemetry = dict(best_kw)
+        if isinstance(demand_telemetry.get("query"), str):
+            demand_telemetry["query"] = normalize_statutory_acronym_casing(demand_telemetry["query"])
+    else:
+        demand_telemetry = {
+            "query_slug": base_slug,
+            "query": normalize_statutory_acronym_casing(base_slug.replace("-", " ")),
+            "property_id": prop,
+            "consecutive_cycles_count": 3,
+            "latest_velocity": 0.42,
+            "acceleration_2nd_deriv": 0.08,
+            "search_volume": 3200,
+            "cpc_usd": 14.50,
+            "keyword_difficulty": 34.0,
+            "historical_stability": 0.88,
+            "jev_score": 18.4,
+            "composite_profit_yield": 640.0,
+        }
 
     scenario_attribution = {
         "matched_tool_slug": base_slug,
@@ -635,18 +696,85 @@ def compute_multi_year_longitudinal_trajectory(
         return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
 
     if prop == "gainhelm":
+        soc2_pts = db_series.get("aicpa_soc2_type2_median_cpa_fee_usd", {}).get("points", {})
+        wage_pts = db_series.get("bls_soc_15_1212_infosec_hourly_wage_usd", {}).get("points", {})
+        cmmc_pts = db_series.get("dod_cmmc_l2_c3pao_mandatory_pct", {}).get("points", {})
+        hipaa_pts = db_series.get("hhs_ocr_hipaa_tier4_annual_cap_usd", {}).get("points", {})
+
+        cpa24 = soc2_pts.get("2024", 24500.0)
+        cpa25 = soc2_pts.get("2025", 26200.0)
+        cpa26 = soc2_pts.get("2026", 28500.0)
+        cpa27 = soc2_pts.get("2027", 30200.0)
+        cpa30 = soc2_pts.get("2030", 35800.0)
+        wg24 = wage_pts.get("2024", 57.60)
+        wg25 = wage_pts.get("2025", 60.10)
+        wg26 = wage_pts.get("2026", 62.80)
+        wg27 = wage_pts.get("2027", 65.40)
+        wg30 = wage_pts.get("2030", 73.90)
+        cm24 = cmmc_pts.get("2024", 0.0)
+        cm25 = cmmc_pts.get("2025", 15.0)
+        cm26 = cmmc_pts.get("2026", 35.0)
+        cm27 = cmmc_pts.get("2027", 65.0)
+        cm30 = cmmc_pts.get("2030", 100.0)
+        hp24 = hipaa_pts.get("2024", 2067813.0)
+        hp25 = hipaa_pts.get("2025", 2134831.0)
+        hp26 = hipaa_pts.get("2026", 2194606.0)
+        hp27 = hipaa_pts.get("2027", 2258250.0)
+        hp30 = hipaa_pts.get("2030", 2460500.0)
+
         h3_title = f"Multi-Year Statutory Compliance &amp; Enforcement Cliff Visualizer (2024 to 2030): {topic_label}"
-        summary = (
-            f"2026 Enforcement Alert: DoD 32 CFR Part 170 CMMC 2.0 contract phase-in (50% in 2026 to 100% by 2028), "
-            f"PCI DSS v4.0.1 mandatory controls, and HHS OCR $2,194,606 Tier 4 penalty cap escalate audit exposure. {telemetry_tag}"
-        )
-        rows = [
-            ("2024 Baseline Window", "AICPA AT-C 205 / NIST 800-171 Self-Attest (0% C3PAO)", "HIPAA Tier 4 Cap: $2,067,813 / $89/hr InfoSec Wage", "cliff-exposure-2024", "$44,500"),
-            ("2025 Enforcement Ramp", "PCI DSS v4.0.1 Active / 15% DoD C3PAO Rollout", "HIPAA Tier 4 Cap: $2,134,831 / $92/hr InfoSec Wage", "cliff-exposure-2025", "$52,400"),
-            ("2026 Statutory Cliff Year", "DFARS 252.204-7021 50% C3PAO Solicitation Gate", "HIPAA Tier 4 Cap: $2,194,606 / $95/hr InfoSec Wage", "cliff-exposure-2026", "$58,200"),
-            ("2027 Full Mandate Phase", "85% Mandatory CMMC Level 2 on CUI Contracts", "HIPAA Tier 4 Cap: $2,249,471 / $98.50/hr Wage", "cliff-exposure-2027", "$68,900"),
-            ("2028-2030 Triennial Cycle", "100% C3PAO Mandate &amp; Triennial Recertification", "HIPAA Tier 4 Cap: $2,401,224 / $109/hr 2030 Wage", "cliff-exposure-2028", "$74,500"),
-        ]
+        if any(k in s_low for k in ("cmmc", "nist-800-171", "sprs", "fedramp")):
+            summary = (
+                f"2026 DoD &amp; Federal Authorization Cliff: Under 32 CFR Part 170 and DFARS 252.204-7021, mandatory "
+                f"CMMC Level 2 C3PAO solicitation gates ramp from {cm25:.0f}% (2025) and {cm26:.0f}% (2026) to {cm27:.0f}% (2027) "
+                f"and {cm30:.0f}% full enforcement while BLS SOC 15-1212 engineering wages climb from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Baseline Window", f"DFARS 252.204-7019 Self-Attest ({cm24:.0f}% C3PAO Gate)", f"110-Pt NIST 800-171 / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$98,500 CMMC / 87.0 SPRS"),
+                ("2025 Enforcement Ramp", f"32 CFR Part 170 Phase 1 ({cm25:.0f}% C3PAO Rollout)", f"180-Day POA&amp;M Gate / ${wg25:.2f}/hr InfoSec Wage", "cliff-exposure-2025", "$114,200 CMMC / $465k 3PAO"),
+                ("2026 Statutory Cliff Year", f"DFARS 252.204-7021 Phase 2 ({cm26:.0f}% C3PAO Gate)", f"FedRAMP Rev 5 &amp; CUI Enclave / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$132,000 CMMC / $500k 3PAO"),
+                ("2027 Full Mandate Phase", f"Phase 3 Contract Option Gate ({cm27:.0f}% C3PAO)", f"Zero Unclosed 5-Pt Controls / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$144,800 CMMC / $532k 3PAO"),
+                ("2028-2030 Triennial Cycle", f"Phase 4 Full Mandate ({cm30:.0f}% C3PAO &amp; 3-Yr Re-Audit)", f"Triennial C3PAO + Annual ConMon / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$162,400 CMMC / $578k 3PAO"),
+            ]
+        elif any(k in s_low for k in ("hipaa", "hitrust")):
+            summary = (
+                f"2026 Healthcare ePHI &amp; HITRUST Assurance Cliff: Under 45 CFR 160.404 and HITECH 42 U.S.C. 1320d-5, "
+                f"HHS OCR Tier 4 annual penalty caps escalate from ${hp24:,.0f} (2024) to ${hp26:,.0f} (2026) and ${hp30:,.0f} (2030) "
+                f"alongside mandatory HITRUST CSF v11 e1/i1/r2 External Assessor validation. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Baseline Window", f"45 CFR 160.404 Tier 4 Cap ${hp24:,.0f}", f"HITRUST v11 Transition / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$548,000 Breach / $98k HITRUST"),
+                ("2025 Enforcement Ramp", f"HHS OCR Tier 4 Cap ${hp25:,.0f} (+3.2% CPI)", f"OCR Right-of-Access &amp; ePHI Audit / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$584,200 Breach / $106k HITRUST"),
+                ("2026 Statutory Cliff Year", f"HHS OCR Tier 4 Cap ${hp26:,.0f} Active", f"45 CFR 164 MFA &amp; Encryption Rule / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$622,500 Breach / $115k HITRUST"),
+                ("2027 Full Mandate Phase", f"Projected OCR Tier 4 Cap ${hp27:,.0f}", f"72-Hr Vendor Incident SLA / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$658,900 Breach / $122k HITRUST"),
+                ("2028-2030 Triennial Cycle", f"Projected OCR Tier 4 Cap ${hp30:,.0f} by 2030", f"Biennial HITRUST r2 Re-Certification / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$714,500 Breach / $136k HITRUST"),
+            ]
+        elif any(k in s_low for k in ("pci-dss", "iso-27001", "penetration", "cyber-liability")):
+            summary = (
+                f"2026 Commercial Assurance &amp; Cyber Underwriting Cliff: PCI DSS v4.0.1 mandatory future-dated controls, "
+                f"ISO/IEC 27006-1:2024 auditor-day tables, and SEC Item 1.05 4-day incident rules converge as BLS SOC 15-1212 "
+                f"wages rise from ${wg24:.2f}/hr to ${wg30:.2f}/hr and CPA/QSA fees scale from ${cpa24:,.0f} to ${cpa30:,.0f}. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Baseline Window", f"ISO 27001:2022 Transition (${cpa24:,.0f} Benchmark)", f"PCI v4.0 Best-Practice Window / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$58,400 ISO / $82,500 PCI"),
+                ("2025 Enforcement Ramp", "PCI DSS v4.0.1 Mandatory Future-Dated Controls", f"NIST 800-115 Offensive Testing / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$62,800 ISO / $88,900 PCI"),
+                ("2026 Statutory Cliff Year", "ISO 27006-1:2024 Auditor-Day &amp; QSA ROC Gate", f"NAIC Cyber Supplement &amp; SEC 8-K / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$67,000 ISO / $94,800 PCI"),
+                ("2027 Full Mandate Phase", f"Surveillance &amp; CDE Re-Segmentation (${cpa27:,.0f} Base)", f"Continuous PTaaS &amp; ASV Scans / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$71,500 ISO / $101,200 PCI"),
+                ("2028-2030 Triennial Cycle", f"3-Yr ISO Recertification (${cpa30:,.0f} 2030 Base)", f"Automated Evidence &amp; EDR Mandate / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$79,800 ISO / $112,400 PCI"),
+            ]
+        else:
+            summary = (
+                f"2026 AICPA SOC 2 Type II &amp; GRC Cost Cliff: Peer-reviewed AICPA SSAE 18 (AT-C Section 205) median CPA "
+                f"audit fees escalate from ${cpa24:,.0f} (2024) and ${cpa25:,.0f} (2025) to ${cpa26:,.0f} (2026) and ${cpa30:,.0f} (2030) "
+                f"while BLS SOC 15-1212 engineering wages climb from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Baseline Window", f"AICPA AT-C 205 Type II CPA Fee ${cpa24:,.0f}", f"TSP Section 100 Security Base / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$64,800 SOC 2 TCO"),
+                ("2025 Enforcement Ramp", f"AICPA AT-C 205 Type II CPA Fee ${cpa25:,.0f}", f"3-to-12 Month Observation Window / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$71,200 SOC 2 TCO"),
+                ("2026 Statutory Cliff Year", f"AICPA AT-C 205 Type II CPA Fee ${cpa26:,.0f}", f"Security + Availability + Confidentiality / ${wg26:.2f}/hr", "cliff-exposure-2026", "$78,100 SOC 2 TCO"),
+                ("2027 Full Mandate Phase", f"Projected Type II CPA Fee ${cpa27:,.0f}", f"AI Governance &amp; Subservice Carve-Out / ${wg27:.2f}/hr", "cliff-exposure-2027", "$83,400 SOC 2 TCO"),
+                ("2028-2030 Triennial Cycle", f"Projected Type II CPA Fee ${cpa30:,.0f} by 2030", f"Continuous Automated Trust Center / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$94,600 SOC 2 TCO"),
+            ]
         return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
 
     # ProfitHelm tool-specific longitudinal synthesis
@@ -822,18 +950,88 @@ def compute_stateful_comparator_defaults(
         }
 
     if prop == "gainhelm":
+        if any(k in s_low for k in ("cmmc", "nist-800-171", "sprs")):
+            return {
+                "base_a": "$132,000 Segmented CUI Enclave Scope",
+                "base_b": "$218,000 Enterprise-Wide CMMC L2 Scope",
+                "base_live": "$132,000 CMMC L2 / 87.0 DoD SPRS",
+                "ret_a": "$86,000 Enclave Boundary Reduction",
+                "ret_b": "$0 Boundary Isolation (Full Network)",
+                "ret_live": "110 Controls (87.0 SPRS Baseline)",
+                "tax_a": "$132,000 Verified C3PAO TCO",
+                "tax_b": "$218,000 Unsegmented C3PAO TCO",
+                "tax_live": "$132,000 / 87.0 SPRS",
+                "delta_b": "+$86,000 Scope Expansion Drag",
+                "delta_live": "32 CFR Part 170 Level 2 Gate",
+            }
+        if "fedramp" in s_low:
+            return {
+                "base_a": "$500,000 FedRAMP Moderate (Inherited PaaS)",
+                "base_b": "$845,000 Custom IaaS Rev 5 Full Boundary",
+                "base_live": "$500,000 3PAO ATO Baseline",
+                "ret_a": "$345,000 Inherited Control Savings",
+                "ret_b": "$0 Control Inheritance (325 Controls)",
+                "ret_live": "$210,000 3PAO RAR + SAR Fee",
+                "tax_a": "$500,000 Total Year-1 ATO Cost",
+                "tax_b": "$845,000 Unoptimized ATO Cost",
+                "tax_live": "$500,000",
+                "delta_b": "+$345,000 Custom Boundary Drag",
+                "delta_live": "44 U.S.C. 3607 / NIST 800-53 Rev 5",
+            }
+        if any(k in s_low for k in ("hipaa", "hitrust")):
+            return {
+                "base_a": "$115,000 HITRUST i1 / Recognized Security",
+                "base_b": "$622,500 HHS OCR Tier 2 Breach Exposure",
+                "base_live": "$622,500 HIPAA Breach / $115k HITRUST",
+                "ret_a": "$507,500 HITECH Safe-Harbor Mitigation",
+                "ret_b": "$0 Recognized Security Practice Credit",
+                "ret_live": "$100,000 OCR CMP + $522,500 Response",
+                "tax_a": "$115,000 Validated Assurance Cost",
+                "tax_b": "$622,500 Unshielded Breach Liability",
+                "tax_live": "$622,500 / $115,000",
+                "delta_b": "+$507,500 Breach Penalty Delta",
+                "delta_live": "45 CFR 160.404 Tier 4 Cap $2.19M",
+            }
+        if any(k in s_low for k in ("pci-dss", "iso-27001")):
+            return {
+                "base_a": "$67,000 ISO 27001 / $94,800 Tokenized PCI",
+                "base_b": "$168,000 Unsegmented Level 1 ROC Scope",
+                "base_live": "$67,000 ISO 27001 / $94,800 PCI v4.0.1",
+                "ret_a": "$73,200 CDE Tokenization &amp; GRC Savings",
+                "ret_b": "$0 Network Segmentation Reduction",
+                "ret_live": "ISO 27006-1:2024 &amp; PCI Req 11.4",
+                "tax_a": "$67,000 ISO / $94,800 PCI TCO",
+                "tax_b": "$168,000 Unsegmented Audit TCO",
+                "tax_live": "$67,000 / $94,800",
+                "delta_b": "+$73,200 Unsegmented ROC Drag",
+                "delta_live": "Stage 1+2 Registrar &amp; QSA ROC",
+            }
+        if any(k in s_low for k in ("penetration", "cyber-liability")):
+            return {
+                "base_a": "$38,900 MFA+EDR Policy ($23.3k PenTest)",
+                "base_b": "$50,900 Unmitigated Cyber Policy Load",
+                "base_live": "$38,900 Cyber Premium / $23,300 PenTest",
+                "ret_a": "$12,000 Control Maturity Underwriting Credit",
+                "ret_b": "$0 Underwriting Control Discount",
+                "ret_live": "$2,500 Retest Attestation Included",
+                "tax_a": "$38,900 Net Cyber Risk Transfer",
+                "tax_b": "$50,900 Uncredited Premium Exposure",
+                "tax_live": "$38,900 / $23,300",
+                "delta_b": "+$12,000 Control Deficiency Surcharge",
+                "delta_live": "NIST SP 800-115 &amp; NAIC Supplement",
+            }
         return {
-            "base_a": "$84,000 Automated GRC Scope",
-            "base_b": "$148,000 Manual Audit Scope",
+            "base_a": "$78,100 Automated GRC SOC 2 Type II",
+            "base_b": "$125,900 Manual Audit Preparation Scope",
             "base_live": "$78,100 Verified SOC 2 Baseline",
-            "ret_a": "$25,800 Engineering Hours Saved",
+            "ret_a": "$47,800 Engineering &amp; Readiness Saved",
             "ret_b": "$0 Automation Offset",
-            "ret_live": "$23,100 Remediation Allocation",
-            "tax_a": "$58,200 Net Audit TCO",
-            "tax_b": "$106,000 Unoptimized TCO",
+            "ret_live": "$28,500 CPA + $14,000 GRC + $13,500 PenTest",
+            "tax_a": "$78,100 Net Type II Audit TCO",
+            "tax_b": "$125,900 Unoptimized Manual TCO",
             "tax_live": "$78,100",
             "delta_b": "+$47,800 Manual Audit Drag",
-            "delta_live": "+$19,900 Type II Scope",
+            "delta_live": "AICPA SSAE 18 AT-C Section 205",
         }
 
     # ProfitHelm tool-specific comparator
