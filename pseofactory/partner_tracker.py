@@ -8914,16 +8914,32 @@ def audit_end_to_end_monetization_and_fulfillment(
             "dead_end_404_routes_count": 0,
         }
 
+    try:
+        from pseofactory.visual_primitives import audit_monetization_and_datapack_ui_ux_surfaces
+        ui_surface_audit = audit_monetization_and_datapack_ui_ux_surfaces(execute_dom_simulation=execute_live)
+    except Exception as exc:
+        ui_surface_audit = {"all_surfaces_and_handlers_passed": False, "error": str(exc)}
+
     overall_ok = (
         all_skus_ok
         and ymyl_isolated
         and bool(settlement.get("charges_enabled"))
         and bool(settlement.get("payouts_enabled"))
+        and bool(ui_surface_audit.get("all_surfaces_and_handlers_passed"))
     )
     report: Dict[str, Any] = {
         "status": "PASS" if overall_ok else "FAIL",
         "audited_at": datetime.now(timezone.utc).isoformat(),
         "execute_live": execute_live,
+        "ui_ux_button_surface_audit": {
+            "all_surfaces_and_handlers_passed": bool(ui_surface_audit.get("all_surfaces_and_handlers_passed")),
+            "total_pages_audited": ui_surface_audit.get("total_pages_audited", 0),
+            "commercial_pages_audited": ui_surface_audit.get("commercial_pages_audited", 0),
+            "restricted_ymyl_pages_audited": ui_surface_audit.get("restricted_ymyl_pages_audited", 0),
+            "button_inventory_totals": ui_surface_audit.get("button_inventory_totals", {}),
+            "violations_count": len(ui_surface_audit.get("coexistence_and_surface_violations") or []),
+            "dom_action_simulation": ui_surface_audit.get("dom_action_simulation", {}),
+        },
         "stripe_and_mercury_settlement": {
             "stripe_account_id": diag.get("stripe_account_id"),
             "merchant_email": diag.get("merchant_email"),

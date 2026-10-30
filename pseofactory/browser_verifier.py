@@ -754,6 +754,7 @@ class UnifiedBrowserAuditor:
 
     JS_RUN_E2E_INTERACTIVE_SURFACE = """(async () => {
         window.__PSEO_SYNTHETIC_TEST__ = true;
+        window.__PSEO_PREVENT_AFFILIATE_NAV__ = true;
         const report = {
             route: window.location.pathname,
             console_errors: Array.isArray(window.__pseoConsoleErrors) ? [...window.__pseoConsoleErrors] : [],
@@ -763,10 +764,11 @@ class UnifiedBrowserAuditor:
             calculator_and_presets: { tested: false, passed: true, before_snapshot: '', after_snapshot: '', preset_clicked: false },
             cliff_visualizer: { present: false, passed: true, before_values: [], after_values: [] },
             scenario_comparator: { present: false, passed: true, pinned_a: '', pinned_b: '', live_delta: '' },
-            blueprint_actions: { present: false, passed: true, saved_status: '', shared_status: '', storage_keys: 0 },
+            blueprint_actions: { present: false, passed: true, saved_status: '', shared_status: '', exported_status: '', storage_keys: 0 },
+            post_calc_upgrade_drawer: { present: false, passed: true, preview_rendered: false, checkout_status: '', settlement_id: '', datapack_download_triggered: false },
             playbook_lead_capture_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
             partner_quote_intake_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
-            affiliate_redirect_and_telemetry: { tested: false, passed: true, redirect_status: 0, redirect_location: '', telemetry_status: '' }
+            affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '' }
         };
 
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary';
@@ -890,6 +892,7 @@ class UnifiedBrowserAuditor:
         // 3. Saveable Decision Blueprint actions
         const saveBtn = document.querySelector('[data-blueprint-action="save"]');
         const shareBtn = document.querySelector('[data-blueprint-action="share"]');
+        const exportBtn = document.querySelector('[data-blueprint-action="export"]');
         const statusNode = document.getElementById('blueprint-status-readout') || document.getElementById('serp-blueprint-status') || document.querySelector('.serp-blueprint-status');
         if (saveBtn) {
             report.blueprint_actions.present = true;
@@ -899,6 +902,10 @@ class UnifiedBrowserAuditor:
                 shareBtn.click();
                 report.blueprint_actions.shared_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
             }
+            if (exportBtn) {
+                exportBtn.click();
+                report.blueprint_actions.exported_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
+            }
             let bpKeys = 0;
             try {
                 for (let i = 0; i < localStorage.length; i++) {
@@ -907,8 +914,56 @@ class UnifiedBrowserAuditor:
                 }
             } catch (e) {}
             report.blueprint_actions.storage_keys = bpKeys;
-            if (!report.blueprint_actions.saved_status || bpKeys === 0) {
+            if (!report.blueprint_actions.saved_status || bpKeys === 0 || (exportBtn && exportBtn.getAttribute('data-blueprint-exported') !== '1')) {
                 report.blueprint_actions.passed = false;
+            }
+        }
+
+        // 3b. Post-Calculation Upgrade Drawer (Workpaper Preview + Statutory Data Pack Checkout + Deliverable Downloads)
+        const upgDrawer = document.getElementById('post-calculation-upgrade-drawer');
+        if (upgDrawer) {
+            report.post_calc_upgrade_drawer.present = true;
+            const previewBtn = document.getElementById('btn-preview-post-calc-workpaper') || upgDrawer.querySelector('[data-blueprint-action="preview_workpaper"]');
+            if (previewBtn) {
+                previewBtn.click();
+                for (let i = 0; i < 20; i++) {
+                    await new Promise(r => setTimeout(r, 40));
+                    if (document.getElementById('playbook-download-link') || document.getElementById('playbook-datapack-link')) break;
+                }
+                report.post_calc_upgrade_drawer.preview_rendered = Boolean(
+                    document.getElementById('playbook-download-link') &&
+                    document.getElementById('playbook-csv-link') &&
+                    document.getElementById('playbook-datapack-link')
+                );
+            }
+            const upgCheckoutBtn = document.getElementById('btn-post-calc-upgrade-checkout') || upgDrawer.querySelector('[data-checkout-trigger]');
+            if (upgCheckoutBtn) {
+                upgCheckoutBtn.click();
+                for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 50));
+                    if (upgCheckoutBtn.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
+                }
+                report.post_calc_upgrade_drawer.checkout_status = upgCheckoutBtn.getAttribute('data-checkout-status') || '';
+                report.post_calc_upgrade_drawer.settlement_id = upgCheckoutBtn.getAttribute('data-settlement-id') || '';
+                const ffHtml = document.getElementById('checkout-fulfillment-html-link');
+                const ffCsv = document.getElementById('checkout-fulfillment-csv-link');
+                const ffDp = document.getElementById('checkout-fulfillment-datapack-link');
+                if (ffHtml) ffHtml.click();
+                if (ffCsv) ffCsv.click();
+                if (ffDp) ffDp.click();
+                report.post_calc_upgrade_drawer.datapack_download_triggered = Boolean(
+                    ffDp && ffDp.getAttribute('data-download-triggered') === 'true'
+                );
+            }
+            const drawerAmt = parseInt(upgDrawer.getAttribute('data-calculated-amount') || '0', 10);
+            if (
+                !report.post_calc_upgrade_drawer.preview_rendered ||
+                report.post_calc_upgrade_drawer.checkout_status !== 'checkout_session_ready' ||
+                !report.post_calc_upgrade_drawer.settlement_id ||
+                !report.post_calc_upgrade_drawer.datapack_download_triggered ||
+                drawerAmt < 500
+            ) {
+                report.post_calc_upgrade_drawer.passed = false;
             }
         }
 
@@ -990,10 +1045,15 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        // 6. Outbound /r/<partner> redirect & /api/telemetry edge round-trip
+        // 6. Outbound /r/<partner> DOM click, redirect & /api/telemetry edge round-trip
         const firstAff = document.querySelector('a[href^="/r/"]');
         if (firstAff) {
             report.affiliate_redirect_and_telemetry.tested = true;
+            firstAff.click();
+            report.affiliate_redirect_and_telemetry.dom_click_handled = (
+                firstAff.getAttribute('data-affiliate-clicked') === 'true' &&
+                Boolean(firstAff.getAttribute('data-last-click-subid'))
+            );
             try {
                 const telResp = await fetch('/api/telemetry?synthetic_test=1', {
                     method: 'POST',
@@ -1026,7 +1086,10 @@ class UnifiedBrowserAuditor:
             } catch (e) {
                 report.affiliate_redirect_and_telemetry.passed = false;
             }
-            if (report.affiliate_redirect_and_telemetry.telemetry_status !== 'ok' && report.affiliate_redirect_and_telemetry.telemetry_status !== 'RECORDED') {
+            if (
+                !report.affiliate_redirect_and_telemetry.dom_click_handled ||
+                (report.affiliate_redirect_and_telemetry.telemetry_status !== 'ok' && report.affiliate_redirect_and_telemetry.telemetry_status !== 'RECORDED')
+            ) {
                 report.affiliate_redirect_and_telemetry.passed = false;
             }
         }
@@ -1043,6 +1106,7 @@ class UnifiedBrowserAuditor:
             report.cliff_visualizer.passed &&
             report.scenario_comparator.passed &&
             report.blueprint_actions.passed &&
+            report.post_calc_upgrade_drawer.passed &&
             report.playbook_lead_capture_and_checkout.passed &&
             report.partner_quote_intake_and_checkout.passed &&
             report.affiliate_redirect_and_telemetry.passed

@@ -1288,6 +1288,19 @@ def _render_runtime_sync_workbench_js() -> str:
             dst.value = src.value;
           }
         }
+        var hcEl = document.getElementById("calc-input-headcount");
+        var b2bGrossEl = document.getElementById("serp-b2b-gross");
+        if (hcEl && b2bGrossEl) {
+          var hcVal = Math.max(1, parseFloat(String(hcEl.value || "75").replace(/,/g, "")) || 75);
+          var critEl = document.getElementById("calc-input-extra_criteria");
+          var critVal = critEl ? Math.max(0, parseFloat(String(critEl.value || "2")) || 0) : 2;
+          var scaledGross = Math.round(54500 + (critVal * 4500) + ((hcVal / 75.0) * 20500));
+          b2bGrossEl.value = String(scaledGross);
+          var b2bDedEl = document.getElementById("serp-b2b-deduction");
+          if (b2bDedEl) {
+            b2bDedEl.value = String(Math.round(scaledGross * 0.307));
+          }
+        }
       } catch (e) {}
     }
 
@@ -1526,24 +1539,39 @@ def _render_runtime_sync_workbench_js() -> str:
           if (lBal > 0) {
             updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1), Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12)));
           }
-        } else if (mode === "b2b") {
-          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || "450000") || 0;
-          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || "165000") || 0;
-          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {}).value || "24.5") || 0) / 100;
+        } else if (mode === "b2b" || mode === "cyber_grc") {
+          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || (mode === "cyber_grc" ? "84000" : "450000")) || 0;
+          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || (mode === "cyber_grc" ? "25800" : "165000")) || 0;
+          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {}).value || (mode === "cyber_grc" ? "22.0" : "24.5")) || 0) / 100;
           var bReg = ((document.getElementById("serp-b2b-regime") || {}).value || "optimal_election").toLowerCase();
-          var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
-          var effDed = bReg === "unoptimized_baseline" ? 0 : bDed;
-          var netExp = Math.round(Math.max(0, bGross-effDed) * adjRate);
-          var unoptExp = Math.round(bGross * adjRate);
-          var alphaSaved = Math.max(0, unoptExp-netExp);
-          var netCap = Math.max(0, bGross-netExp);
-          if (out1) out1.textContent = fmtUsd(netExp);
-          if (out2) out2.textContent = fmtUsd(unoptExp);
-          if (out3) out3.textContent = fmtUsd(alphaSaved);
-          if (out4) out4.textContent = fmtUsd(netCap);
-          if (ban1) ban1.textContent = fmtUsd(netExp);
-          if (ban2) ban2.textContent = fmtUsd(alphaSaved);
-          updateSerpSvgChart(netCap, netExp, "Net Retained Capital", "Net Statutory Exposure");
+          if (mode === "cyber_grc") {
+            var effGrcDed = bReg === "unoptimized_baseline" ? 0 : (bReg === "stress_case" ? Math.round(bDed * 0.7) : bDed);
+            var netTco = Math.max(1000, Math.round(bGross-effGrcDed));
+            var unautoTco = Math.round(bGross);
+            var grcSaved = Math.max(0, unautoTco-netTco);
+            var revProtected = Math.round(bGross * (bRate > 0 ? (bRate * 26.4069) : 5.81));
+            if (out1) out1.textContent = fmtUsd(netTco);
+            if (out2) out2.textContent = fmtUsd(unautoTco);
+            if (out3) out3.textContent = fmtUsd(grcSaved);
+            if (out4) out4.textContent = fmtUsd(revProtected);
+            if (ban1) ban1.textContent = fmtUsd(netTco);
+            if (ban2) ban2.textContent = fmtUsd(grcSaved);
+            updateSerpSvgChart(unautoTco, netTco, "Unautomated Audit TCO", "Net Automated TCO");
+          } else {
+            var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
+            var effDed = bReg === "unoptimized_baseline" ? 0 : bDed;
+            var netExp = Math.round(Math.max(0, bGross-effDed) * adjRate);
+            var unoptExp = Math.round(bGross * adjRate);
+            var alphaSaved = Math.max(0, unoptExp-netExp);
+            var netCap = Math.max(0, bGross-netExp);
+            if (out1) out1.textContent = fmtUsd(netExp);
+            if (out2) out2.textContent = fmtUsd(unoptExp);
+            if (out3) out3.textContent = fmtUsd(alphaSaved);
+            if (out4) out4.textContent = fmtUsd(netCap);
+            if (ban1) ban1.textContent = fmtUsd(netExp);
+            if (ban2) ban2.textContent = fmtUsd(alphaSaved);
+            updateSerpSvgChart(netCap, netExp, "Net Retained Capital", "Net Statutory Exposure");
+          }
         }
       } catch (wbErr) {}
     }
@@ -1649,7 +1677,7 @@ def _render_runtime_sync_workbench_js() -> str:
         }
       }
       if (!document.getElementById("serp-incumbent-depth-workbench") && (document.getElementById("stateful-scenario-comparator") || document.getElementById("multi-year-cliff-visualizer"))) {
-        var fbPrimary = primaryNumEl ? (parseFloat(String(primaryNumEl.value).replace(/,/g, "")) || 100000) : 100000;
+        var fbPrimary = resolveActiveScenarioAmount();
         var fbRetained = Math.round(fbPrimary * 0.72);
         var fbTax = Math.max(1000, Math.round(fbPrimary * 0.28));
         updateInteractiveCliffAndComparator(fbRetained, fbTax);
@@ -1740,12 +1768,58 @@ def _render_runtime_sync_events_js() -> str:
       parent.appendChild(aEl);
     }
 
+    function resolveActiveScenarioAmount() {
+      var bestAmt = 0;
+      var socEl = document.getElementById("metric-soc2_total_cost");
+      if (socEl && socEl.textContent && socEl.textContent.indexOf("$") !== -1) {
+        var socV = parseFloat(socEl.textContent.replace(/[^0-9.]/g, ""));
+        if (!isNaN(socV) && socV >= 1000) bestAmt = socV;
+      }
+      var priorityIds = [
+        "sec1031-sale-price", "serp-1031-rel-debt", "sec179-cost", "serp-179-cost",
+        "tax-income", "field-gross_income", "serp-tax-gross", "crypto-short-term",
+        "serp-crypto-proceeds", "field-loan_balance", "input-loan_balance", "serp-loan-balance",
+        "runway-cash", "tey-principal", "cg-amount", "arb-capital", "pm-tax-gain",
+        "field-bond_amount", "field-invoice_face_value", "field-current_year_domestic_qre",
+        "field-declared_customs_value", "field-annual_covered_payroll",
+        "field-net_business_income", "serp-b2b-gross"
+      ];
+      for (var pIdx = 0; pIdx < priorityIds.length; pIdx++) {
+        var pEl = document.getElementById(priorityIds[pIdx]);
+        if (pEl && pEl.value !== undefined) {
+          var pVal = parseFloat(String(pEl.value || "0").replace(/,/g, ""));
+          if (!isNaN(pVal) && pVal >= 1000 && pVal > bestAmt) {
+            bestAmt = pVal;
+          }
+        }
+      }
+      var inps = document.querySelectorAll('input[type="number"], input[type="range"]');
+      for (var i = 0; i < inps.length; i++) {
+        var el = inps[i];
+        var key = (el.id || el.name || "").toLowerCase();
+        if (/^retro-range-/.test(key) || /cents|rate|pct|days|months|years|headcount|criteria|unimplemented|deps|family/.test(key)) {
+          continue;
+        }
+        var v = parseFloat(String(el.value || "0").replace(/,/g, ""));
+        if (!isNaN(v) && v >= 1000 && v > bestAmt) {
+          bestAmt = v;
+        }
+      }
+      if (bestAmt <= 0) {
+        var upgDrawer = document.getElementById("post-calculation-upgrade-drawer");
+        var qDrawer = document.getElementById("partner-quote-intake-step");
+        var dVal = upgDrawer ? parseFloat(upgDrawer.getAttribute("data-calculated-amount") || "0") : 0;
+        var qVal = qDrawer ? parseFloat(qDrawer.getAttribute("data-calculated-amount") || "0") : 0;
+        bestAmt = Math.max(dVal || 0, qVal || 0);
+      }
+      return Math.round(bestAmt);
+    }
+
     function syncOutboundAffiliateLinks() {
       try {
         var slug = resolveCurrentToolSlug();
         var trafficSource = resolveTrafficSourceAttribution();
-        var numEl = document.querySelector('input[type="number"], input[type="range"]');
-        var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
+        var numVal = resolveActiveScenarioAmount();
         var compRoot = document.getElementById("stateful-scenario-comparator");
         var bpRoot = document.getElementById("saveable-decision-blueprint");
         var hasPinned = Boolean(compRoot && (compRoot.getAttribute("data-pinned-a") === "1" || compRoot.getAttribute("data-pinned-b") === "1"));
@@ -1887,8 +1961,7 @@ def _render_runtime_sync_events_js() -> str:
       try {
         var slug = resolveCurrentToolSlug();
         var trafficSource = resolveTrafficSourceAttribution();
-        var numEl = document.querySelector('input[type="number"], input[type="range"]');
-        var numVal = numEl ? parseFloat(String(numEl.value || "0").replace(/,/g, "")) : 0;
+        var numVal = resolveActiveScenarioAmount();
         var tier = (!isNaN(numVal) && numVal >= 100000) ? "premium" : "starter";
         var slot = ctaSlot || "calculator_result_inline";
         var subid = slug + "_wb_" + String(interactionType || "interact");
@@ -1939,23 +2012,14 @@ def _render_runtime_sync_events_js() -> str:
         comparator: {}
       };
       var inps = document.querySelectorAll('input[type="number"], input[type="range"], select');
-      var maxInputVal = 0;
       for (var i = 0; i < inps.length; i++) {
         var el = inps[i];
         var key = el.id || el.name || "";
         if (key && !/^retro-range-/.test(key)) {
           state.inputs[key] = el.value;
-          if (el.type === "number" || el.type === "range") {
-            var numV = parseFloat(String(el.value || "0").replace(/,/g, ""));
-            if (!isNaN(numV) && numV > maxInputVal) {
-              maxInputVal = numV;
-            }
-          }
         }
       }
-      var quoteDrawer = document.getElementById("partner-quote-intake-step");
-      var drawerAmt = quoteDrawer ? (parseFloat(quoteDrawer.getAttribute("data-calculated-amount") || "0") || 0) : 0;
-      state.calculated_amount = Math.max(maxInputVal, drawerAmt);
+      state.calculated_amount = resolveActiveScenarioAmount();
       var p1 = document.getElementById("serp-out-primary");
       var p2 = document.getElementById("serp-out-secondary");
       var p3 = document.getElementById("serp-out-tertiary");
@@ -2074,39 +2138,69 @@ def _render_runtime_sync_events_js() -> str:
         if (mode === "checkout_fulfill" && ffUrl) {
           var ffLink = document.createElement("a");
           ffLink.id = "checkout-fulfillment-html-link";
+          ffLink.className = "touch-target";
           ffLink.href = ffUrl;
           ffLink.target = "_blank";
           ffLink.rel = "noopener";
-          ffLink.style.cssText = "font-weight:700;color:#0f766e;text-decoration:underline;";
+          ffLink.setAttribute("data-workpaper-html-download", "1");
+          ffLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#0f766e;text-decoration:underline;";
           ffLink.textContent = "Open Instant Audit Workpaper (HTML/PDF)";
+          ffLink.addEventListener("click", function(ev) {
+            ffLink.setAttribute("data-download-triggered", "true");
+            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+            emitWorkbenchEngagementBeacon("workpaper_html_opened", "post_calculation_upgrade_drawer", {
+              offer_sku: data.offer_sku || ""
+            });
+          });
           linksRow.appendChild(ffLink);
         } else if (pbUrl) {
           var pbLink = document.createElement("a");
           pbLink.id = "playbook-download-link";
+          pbLink.className = "touch-target";
           pbLink.href = pbUrl;
           pbLink.target = "_blank";
           pbLink.rel = "noopener";
-          pbLink.style.cssText = "font-weight:700;color:#0f766e;text-decoration:underline;";
+          pbLink.setAttribute("data-workpaper-html-download", "1");
+          pbLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#0f766e;text-decoration:underline;";
           pbLink.textContent = "Open Personalized Playbook Worksheet";
+          pbLink.addEventListener("click", function(ev) {
+            pbLink.setAttribute("data-download-triggered", "true");
+            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+            emitWorkbenchEngagementBeacon("workpaper_html_opened", "post_calculation_upgrade_drawer", {
+              offer_sku: data.offer_sku || ""
+            });
+          });
           linksRow.appendChild(pbLink);
         }
         if (csvUrl) {
           var csvLink = document.createElement("a");
           csvLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-csv-link" : "playbook-csv-link";
+          csvLink.className = "touch-target";
           csvLink.href = csvUrl;
-          csvLink.style.cssText = "font-weight:700;color:#1d4ed8;text-decoration:underline;";
+          csvLink.setAttribute("data-workpaper-csv-download", "1");
+          csvLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#1d4ed8;text-decoration:underline;";
           csvLink.textContent = "Download CSV Reconciliation Schedule";
+          csvLink.addEventListener("click", function(ev) {
+            csvLink.setAttribute("data-download-triggered", "true");
+            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+            emitWorkbenchEngagementBeacon("workpaper_csv_downloaded", "post_calculation_upgrade_drawer", {
+              offer_sku: data.offer_sku || ""
+            });
+          });
           linksRow.appendChild(csvLink);
         }
         var dpUrl = data.datapack_url ? String(data.datapack_url) : (data.fulfillment_url ? (String(data.fulfillment_url) + "&format=datapack") : "");
         if (dpUrl) {
           var dpLink = document.createElement("a");
           dpLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-datapack-link" : "playbook-datapack-link";
+          dpLink.className = "touch-target";
           dpLink.href = dpUrl;
           dpLink.setAttribute("data-datapack-download", "1");
-          dpLink.style.cssText = "font-weight:700;color:#7c3aed;text-decoration:underline;";
+          dpLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#7c3aed;text-decoration:underline;";
           dpLink.textContent = "Download Statutory Data Pack (JSON)";
-          dpLink.addEventListener("click", function() {
+          dpLink.addEventListener("click", function(ev) {
+            dpLink.setAttribute("data-download-triggered", "true");
+            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
             emitWorkbenchEngagementBeacon("statutory_datapack_downloaded", "post_calculation_upgrade_drawer", {
               offer_sku: data.offer_sku || "",
               datapack_id: (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ""
@@ -2402,8 +2496,7 @@ def _render_runtime_sync_events_js() -> str:
             var liveP = parseFloat(compRoot.getAttribute("data-live-primary") || "0") || 0;
             var liveS = parseFloat(compRoot.getAttribute("data-live-secondary") || "0") || 0;
             if (!liveP && !liveS) {
-              var pInp = document.querySelector('input[type="number"], input[type="range"]');
-              var baseNum = pInp ? (parseFloat(String(pInp.value).replace(/,/g, "")) || 100000) : 100000;
+              var baseNum = resolveActiveScenarioAmount();
               liveP = Math.round(baseNum * 0.72);
               liveS = Math.round(baseNum * 0.28);
             }
@@ -2479,7 +2572,12 @@ def _render_runtime_sync_events_js() -> str:
             }
           } else if (act === "export") {
             var jsonStr = JSON.stringify(bpState, null, 2);
-            if (typeof Blob === "function" && typeof URL !== "undefined" && URL.createObjectURL) {
+            bpBtn.setAttribute("data-blueprint-exported", "1");
+            if (bpRoot) {
+              bpRoot.setAttribute("data-blueprint-exported", "1");
+              bpRoot.setAttribute("data-exported-json-bytes", String(jsonStr.length));
+            }
+            if (!window.__PSEO_SYNTHETIC_TEST__ && typeof Blob === "function" && typeof URL !== "undefined" && URL.createObjectURL) {
               var b = new Blob([jsonStr], { type: "application/json" });
               var dl = document.createElement("a");
               dl.href = URL.createObjectURL(b);
@@ -2547,6 +2645,9 @@ def _render_runtime_sync_events_js() -> str:
       var affLink = e.target && e.target.closest ? e.target.closest('a[href^="/r/"]') : null;
       if (affLink) {
         try {
+          if (window.__PSEO_PREVENT_AFFILIATE_NAV__) {
+            e.preventDefault();
+          }
           syncOutboundAffiliateLinks();
           var href = affLink.getAttribute("href") || "";
           var pk = affLink.getAttribute("data-partner") || "";
@@ -2556,6 +2657,8 @@ def _render_runtime_sync_events_js() -> str:
           var tier = affLink.getAttribute("data-tier") || "starter";
           var trafficSource = affLink.getAttribute("data-traffic-source") || resolveTrafficSourceAttribution();
           var label = (affLink.textContent || "").replace(/\\s+/g, " ").trim();
+          affLink.setAttribute("data-affiliate-clicked", "true");
+          affLink.setAttribute("data-last-click-subid", subid);
           var evPayload = {
             tool: slug,
             source_tool: slug,
@@ -2587,6 +2690,105 @@ def _render_runtime_sync_events_js() -> str:
             properties: evPayload
           });
         } catch (err) {}
+        return;
+      }
+
+      var shareBtn = e.target && e.target.closest ? e.target.closest(".btn-share, [onclick*='copyScenarioLink']") : null;
+      if (shareBtn) {
+        e.preventDefault();
+        try {
+          var sBpState = collectWorkbenchBlueprintState();
+          var sQs = new URLSearchParams();
+          for (var sik in sBpState.inputs) {
+            if (sBpState.inputs[sik] !== undefined && sBpState.inputs[sik] !== "") {
+              sQs.set(sik, String(sBpState.inputs[sik]));
+            }
+          }
+          var sUrl = (window.location ? window.location.origin + window.location.pathname : "/") + "?" + sQs.toString();
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, "", window.location.pathname + "?" + sQs.toString());
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(sUrl).catch(function() {});
+          }
+          shareBtn.setAttribute("data-share-copied", "true");
+          shareBtn.setAttribute("data-share-url", sUrl);
+          shareBtn.textContent = "Scenario Link Copied";
+          var sStatusEl = resolveBlueprintStatusNode();
+          if (sStatusEl) {
+            sStatusEl.textContent = "Blueprint Status: Shareable URL state synchronized to address bar (" + sUrl.slice(0, 72) + ").";
+          }
+          emitWorkbenchEngagementBeacon("blueprint_share", "calculator_result_inline", { blueprint_action: "share", param_count: Object.keys(sBpState.inputs).length });
+        } catch (sErr) {}
+        return;
+      }
+
+      var pmGainBtn = e.target && e.target.closest ? e.target.closest("[data-preset-pm-gain]") : null;
+      if (pmGainBtn) {
+        e.preventDefault();
+        _userInteracted = true;
+        initBaseValues();
+        try {
+          var pmVal = parseFloat(pmGainBtn.getAttribute("data-preset-pm-gain") || "25000") || 25000;
+          var pmInp = document.getElementById("pm-tax-gain") || document.getElementById("serp-b2b-gross");
+          if (pmInp) {
+            pmInp.value = String(pmVal);
+            pmInp.dispatchEvent(new Event("input", { bubbles: true }));
+            pmInp.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          var b2bGrossInp = document.getElementById("serp-b2b-gross");
+          if (b2bGrossInp && b2bGrossInp !== pmInp) {
+            b2bGrossInp.value = String(pmVal);
+          }
+          var allPmBtns = document.querySelectorAll("[data-preset-pm-gain]");
+          for (var pmIdx = 0; pmIdx < allPmBtns.length; pmIdx++) {
+            allPmBtns[pmIdx].classList.remove("active");
+          }
+          pmGainBtn.classList.add("active");
+          updateOutputsSynchronously();
+          emitWorkbenchEngagementBeacon("preset_hydration", "calculator_result_inline", { preset_pm_gain: pmVal });
+        } catch (pmErr) {}
+        return;
+      }
+
+      var ghSwitchBtn = e.target && e.target.closest ? e.target.closest(".calc-switcher-btn[data-preset-hc]") : null;
+      if (ghSwitchBtn) {
+        e.preventDefault();
+        _userInteracted = true;
+        initBaseValues();
+        try {
+          var hcVal = ghSwitchBtn.getAttribute("data-preset-hc");
+          var exVal = ghSwitchBtn.getAttribute("data-preset-extra");
+          var u5Val = ghSwitchBtn.getAttribute("data-preset-u5");
+          var u3Val = ghSwitchBtn.getAttribute("data-preset-u3");
+          var u1Val = ghSwitchBtn.getAttribute("data-preset-u1");
+          var recVal = ghSwitchBtn.getAttribute("data-preset-rec");
+          var setIfPresent = function(id, v) {
+            if (v === null || v === undefined || v === "") return;
+            var node = document.getElementById(id);
+            if (node) {
+              node.value = String(v);
+              var prNode = findPairedRangeInput(node);
+              if (prNode) prNode.value = String(v);
+              node.dispatchEvent(new Event("input", { bubbles: true }));
+              node.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          };
+          setIfPresent("calc-input-headcount", hcVal);
+          setIfPresent("calc-input-extra_criteria", exVal);
+          setIfPresent("calc-input-unimplemented_5pt", u5Val);
+          setIfPresent("calc-input-unimplemented_3pt", u3Val);
+          setIfPresent("calc-input-unimplemented_1pt", u1Val);
+          setIfPresent("calc-input-compromised_records", recVal);
+          var allGhBtns = document.querySelectorAll(".calc-switcher-btn[data-preset-hc]");
+          for (var ghIdx = 0; ghIdx < allGhBtns.length; ghIdx++) {
+            allGhBtns[ghIdx].classList.remove("active");
+          }
+          ghSwitchBtn.classList.add("active");
+          ghSwitchBtn.setAttribute("data-preset-applied", "true");
+          updateOutputsSynchronously();
+          emitWorkbenchEngagementBeacon("preset_hydration", "calculator_result_inline", { preset_hc: hcVal });
+        } catch (ghErr) {}
         return;
       }
 
@@ -2673,6 +2875,24 @@ def _render_runtime_sync_events_js() -> str:
           updateOutputsSynchronously();
           emitWorkbenchEngagementBeacon("preset_hydration", "calculator_result_inline", { preset_keys: Object.keys(parsed).length });
         } catch (err) {}
+        return;
+      }
+
+      var calcSubBtn = e.target && e.target.closest ? e.target.closest("#calc-submit-btn, form.calculator-form button[type='submit']") : null;
+      if (calcSubBtn) {
+        e.preventDefault();
+        _userInteracted = true;
+        initBaseValues();
+        try {
+          var parentCalcForm = calcSubBtn.closest("form");
+          if (parentCalcForm) {
+            parentCalcForm.setAttribute("data-recalculated", "true");
+            parentCalcForm.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          calcSubBtn.setAttribute("data-recalculated", "true");
+          updateOutputsSynchronously();
+          emitWorkbenchEngagementBeacon("calculator_recalculate_submit", "calculator_result_inline", { form_id: parentCalcForm ? (parentCalcForm.id || "calculator-form") : "calculator-form" });
+        } catch (cSubErr) {}
         return;
       }
 
@@ -2828,7 +3048,20 @@ def _render_runtime_sync_events_js() -> str:
       }
 
       var qForm = e.target && e.target.id === "partner-quote-intake-form" ? e.target : null;
-      if (!qForm) return;
+      if (!qForm) {
+        var calcForm = e.target && e.target.tagName === "FORM" ? e.target : null;
+        if (calcForm) {
+          e.preventDefault();
+          _userInteracted = true;
+          initBaseValues();
+          calcForm.setAttribute("data-recalculated", "true");
+          var subBtn = calcForm.querySelector("#calc-submit-btn, button[type='submit']");
+          if (subBtn) subBtn.setAttribute("data-recalculated", "true");
+          updateOutputsSynchronously();
+          emitWorkbenchEngagementBeacon("calculator_recalculate_submit", "calculator_result_inline", { form_id: calcForm.id || "calculator-form" });
+        }
+        return;
+      }
       e.preventDefault();
       if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       try {
@@ -2918,6 +3151,38 @@ def _render_runtime_sync_events_js() -> str:
         }
       } catch (err) {}
     }, true);
+
+    if (typeof window.copyScenarioLink !== "function") {
+      window.copyScenarioLink = function(btn) {
+        try {
+          var sBpState = collectWorkbenchBlueprintState();
+          var sQs = new URLSearchParams();
+          for (var sik in sBpState.inputs) {
+            if (sBpState.inputs[sik] !== undefined && sBpState.inputs[sik] !== "") {
+              sQs.set(sik, String(sBpState.inputs[sik]));
+            }
+          }
+          var sUrl = (window.location ? window.location.origin + window.location.pathname : "/") + "?" + sQs.toString();
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, "", window.location.pathname + "?" + sQs.toString());
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(sUrl).catch(function() {});
+          }
+          if (btn && btn.setAttribute) {
+            btn.setAttribute("data-share-copied", "true");
+            btn.setAttribute("data-share-url", sUrl);
+            btn.textContent = "Scenario Link Copied";
+          }
+        } catch (err) {}
+      };
+    }
+
+    if (typeof window.handleLeadCapture !== "function") {
+      window.handleLeadCapture = function(e) {
+        if (e && typeof e.preventDefault === "function") e.preventDefault();
+      };
+    }
 
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", initBaseValues);
@@ -4369,6 +4634,10 @@ def normalize_html_visual_primitives(
                 or "data-checkout-trigger" not in sync_body
                 or "post-calculation-upgrade-drawer" not in sync_body
                 or "checkout-settlement-attribution-banner" not in sync_body
+                or "resolveActiveScenarioAmount" not in sync_body
+                or "data-affiliate-clicked" not in sync_body
+                or "data-blueprint-exported" not in sync_body
+                or "data-download-triggered" not in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
                 or "remBasis * 0.80" in sync_body
@@ -4398,10 +4667,888 @@ def normalize_html_visual_primitives(
     return updated, repaired
 
 
+RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS: Tuple[str, ...] = (
+    "ibr-hardship-cap-calculator",
+    "pslf-buyback-months-reconsideration-student-loan-calculator",
+    "pslf-qualifying-payment-simulator",
+    "save-plan-litigation-transition",
+    "pell-grant",
+    "idr-payment",
+    "student-loan-repayment",
+    "tuition-roi",
+)
+
+
+def _run_node_vm_button_action_simulation() -> Dict[str, Any]:
+    """
+    Executes the rendered <script id="pseo-runtime-sync"> inside a zero-dependency
+    Node.js vm DOM harness across ProfitHelm (b2b/prediction), Prexvo (student_loan),
+    and GainHelm (cyber_grc) calculator archetypes, dispatching click and submit
+    events on every affiliate CTA, statutory data pack checkout button, workpaper
+    preview button, deliverable download link, blueprint action button, scenario pin
+    button, preset pill, and lead/quote form.
+    """
+    import json
+    import subprocess
+
+    script_html = render_runtime_synchronizer_script()
+    m = re.search(r"<script[^>]*>([\s\S]*?)</script>", script_html, re.IGNORECASE)
+    js_code = m.group(1) if m else ""
+
+    node_harness = r"""
+const vm = require('vm');
+const runtimeCode = process.env.PSEO_RUNTIME_JS || '';
+
+function createSimulatedDom(tenantConfig) {
+  const elementsById = {};
+  const allElements = [];
+  const docListeners = { click: [], submit: [], input: [], change: [], DOMContentLoaded: [] };
+  const fetchCalls = [];
+  const beaconPayloads = [];
+  const storage = {};
+  let currentSearch = tenantConfig.initialSearch || '';
+
+  class SimElement {
+    constructor(tagName, attrs = {}, textContent = '') {
+      this.tagName = String(tagName || 'DIV').toUpperCase();
+      this.attributes = {};
+      this.style = { cssText: '', display: '', background: '', borderColor: '', color: '' };
+      this.children = [];
+      this.parentElement = null;
+      this.textContent = textContent;
+      this.value = attrs.value !== undefined ? String(attrs.value) : '';
+      this.type = attrs.type || '';
+      this.name = attrs.name || '';
+      this.checked = Boolean(attrs.checked);
+      this.disabled = false;
+      this.options = attrs.options || [];
+      this.selectedIndex = 0;
+      const clsSet = new Set(String(attrs.class || '').split(/\s+/).filter(Boolean));
+      const self = this;
+      this.classList = {
+        add(c) { clsSet.add(c); self.attributes['class'] = Array.from(clsSet).join(' '); },
+        remove(c) { clsSet.delete(c); self.attributes['class'] = Array.from(clsSet).join(' '); },
+        contains(c) { return clsSet.has(c); }
+      };
+      this._listeners = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === 'id') this.id = String(v);
+        this.attributes[k] = String(v);
+      }
+      if (this.id) elementsById[this.id] = this;
+      allElements.push(this);
+    }
+    addEventListener(type, fn) {
+      if (!this._listeners[type]) this._listeners[type] = [];
+      this._listeners[type].push(fn);
+    }
+    hasAttribute(k) {
+      return this.getAttribute(k) !== null;
+    }
+    getAttribute(k) {
+      if (k === 'id') return this.id || null;
+      if (k === 'href' && this.href !== undefined) return this.href;
+      return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null;
+    }
+    setAttribute(k, v) {
+      const sv = String(v);
+      this.attributes[k] = sv;
+      if (k === 'id') { this.id = sv; elementsById[sv] = this; }
+      if (k === 'href') this.href = sv;
+      if (k === 'value') this.value = sv;
+    }
+    removeAttribute(k) {
+      delete this.attributes[k];
+    }
+    appendChild(child) {
+      if (child && typeof child === 'object') {
+        child.parentElement = this;
+        this.children.push(child);
+        if (child.id) elementsById[child.id] = child;
+        if (!allElements.includes(child)) allElements.push(child);
+      }
+      return child;
+    }
+    removeChild(child) {
+      const idx = this.children.indexOf(child);
+      if (idx !== -1) this.children.splice(idx, 1);
+      return child;
+    }
+    insertBefore(newNode, refNode) {
+      return this.appendChild(newNode);
+    }
+    matchesSelector(sel) {
+      const parts = String(sel).split(',').map(s => s.trim()).filter(Boolean);
+      for (const p of parts) {
+        if (this._matchesSingle(p)) return true;
+      }
+      return false;
+    }
+    _matchesSingle(p) {
+      if (p.includes(' ')) {
+        const segs = p.split(/\s+/).filter(Boolean);
+        if (!this._matchesSingle(segs[segs.length - 1])) return false;
+        let cur = this.parentElement;
+        for (let i = segs.length - 2; i >= 0; i--) {
+          while (cur && !cur._matchesSingle(segs[i])) cur = cur.parentElement;
+          if (!cur) return false;
+          cur = cur.parentElement;
+        }
+        return true;
+      }
+      if (p.startsWith('#')) {
+        const [idPart, ...rest] = p.slice(1).split(/(?=\[|\.)/);
+        if (this.id !== idPart) return false;
+        return rest.every(r => this._matchesSingle(r));
+      }
+      if (p.startsWith('.')) {
+        const [clsPart, ...rest] = p.slice(1).split(/(?=\[|\.)/);
+        if (!this.classList.contains(clsPart)) return false;
+        return rest.every(r => this._matchesSingle(r));
+      }
+      const attrMatch = p.match(/^([a-zA-Z0-9_-]*)\[([a-zA-Z0-9_-]+)(?:([\^$*]?=)["']?([^"'\]]*)["']?)?\]$/);
+      if (attrMatch) {
+        const [, tagP, attrName, op, attrVal] = attrMatch;
+        if (tagP && this.tagName !== tagP.toUpperCase()) return false;
+        const curVal = this.getAttribute(attrName);
+        if (curVal === null) return false;
+        if (!op) return true;
+        if (op === '=') return curVal === attrVal;
+        if (op === '^=') return curVal.startsWith(attrVal);
+        if (op === '*=') return curVal.includes(attrVal);
+        return false;
+      }
+      if (p.includes('.')) {
+        const [tagP, clsP] = p.split('.');
+        if (tagP && this.tagName !== tagP.toUpperCase()) return false;
+        return this.classList.contains(clsP);
+      }
+      return this.tagName === p.toUpperCase();
+    }
+    closest(sel) {
+      let cur = this;
+      while (cur) {
+        if (cur.matchesSelector && cur.matchesSelector(sel)) return cur;
+        cur = cur.parentElement;
+      }
+      return null;
+    }
+    querySelector(sel) {
+      return this.querySelectorAll(sel)[0] || null;
+    }
+    querySelectorAll(sel) {
+      const descendants = [];
+      const walk = (node) => {
+        for (const ch of (node.children || [])) {
+          if (ch.matchesSelector && ch.matchesSelector(sel)) descendants.push(ch);
+          walk(ch);
+        }
+      };
+      walk(this);
+      return descendants;
+    }
+    dispatchEvent(ev) {
+      ev.target = this;
+      const ownList = this._listeners[ev.type] || [];
+      for (const fn of ownList) fn(ev);
+      const list = docListeners[ev.type] || [];
+      for (const fn of list) fn(ev);
+      return !ev.defaultPrevented;
+    }
+    click() {
+      const ev = {
+        type: 'click',
+        target: this,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopImmediatePropagation() {}
+      };
+      this.dispatchEvent(ev);
+      return ev;
+    }
+  }
+
+  const body = new SimElement('BODY');
+  const main = body.appendChild(new SimElement('MAIN', { id: 'main-content' }));
+
+  // Primary inputs
+  if (tenantConfig.mode === 'cyber_grc') {
+    const calcForm = main.appendChild(new SimElement('FORM', { id: 'gainhelm-compliance-form', class: 'calculator-form' }));
+    calcForm.appendChild(new SimElement('INPUT', { id: 'calc-input-headcount', type: 'number', value: '75', min: '5', max: '2500' }));
+    calcForm.appendChild(new SimElement('INPUT', { id: 'calc-input-extra_criteria', type: 'number', value: '8', min: '0', max: '25' }));
+    calcForm.appendChild(new SimElement('INPUT', { id: 'calc-input-unimplemented_5pt', type: 'number', value: '4', min: '0', max: '20' }));
+    calcForm.appendChild(new SimElement('INPUT', { id: 'calc-input-unimplemented_3pt', type: 'number', value: '5', min: '0', max: '20' }));
+    calcForm.appendChild(new SimElement('INPUT', { id: 'calc-input-unimplemented_1pt', type: 'number', value: '6', min: '0', max: '20' }));
+    calcForm.appendChild(new SimElement('INPUT', { id: 'calc-input-compromised_records', type: 'number', value: '5000', min: '100', max: '100000' }));
+    calcForm.appendChild(new SimElement('BUTTON', { id: 'calc-submit-btn', type: 'submit', class: 'touch-target' }, 'Recalculate GRC Posture'));
+    main.appendChild(new SimElement('BUTTON', {
+      id: 'gh-preset-switcher-1',
+      type: 'button',
+      class: 'calc-switcher-btn touch-target',
+      'data-preset-hc': '200',
+      'data-preset-extra': '15',
+      'data-preset-u5': '2',
+      'data-preset-u3': '3',
+      'data-preset-u1': '4',
+      'data-preset-rec': '12000'
+    }, 'Enterprise 200 HC'));
+  } else {
+    main.appendChild(new SimElement('INPUT', { id: 'field-gross_income', name: 'gross_income', type: 'number', value: '180000', min: '0', max: '2000000' }));
+    main.appendChild(new SimElement('INPUT', { id: 'pm-tax-gain', type: 'number', value: '50000', min: '0', max: '1000000' }));
+    main.appendChild(new SimElement('BUTTON', { id: 'pm-gain-preset-100k', type: 'button', class: 'touch-target', 'data-preset-pm-gain': '100000' }, '$100k Gain'));
+    main.appendChild(new SimElement('BUTTON', { id: 'btn-legacy-share', type: 'button', class: 'btn-share touch-target', onclick: 'copyScenarioLink(this)' }, 'Share Scenario'));
+    main.appendChild(new SimElement('A', { id: 'scenario-pill-aggressive', href: '?gross_income=250000', class: 'scenario-preset-link touch-target', 'data-preset': 'aggressive' }, 'Aggressive Scenario'));
+  }
+
+  main.appendChild(new SimElement('DIV', { id: 'primary-output', class: 'output-value', 'data-baseline-output': '42500' }, '$42,500'));
+
+  // Preset button
+  const ovScenarios = main.appendChild(new SimElement('DIV', { class: 'overlay-scenarios' }));
+  ovScenarios.appendChild(new SimElement('BUTTON', {
+    id: 'btn-preset-chip-1',
+    type: 'button',
+    class: 'serp-archetype-btn touch-target',
+    'data-calc-preset': JSON.stringify({ gross_income: 320000, deductible_expenses: 48000 })
+  }, 'Growth Preset'));
+
+  // SERP Workbench
+  const wb = main.appendChild(new SimElement('SECTION', { id: 'serp-incumbent-depth-workbench', 'data-workbench-mode': tenantConfig.mode }));
+  if (tenantConfig.mode === 'student_loan') {
+    wb.appendChild(new SimElement('INPUT', { id: 'serp-loan-balance', type: 'number', value: '95000' }));
+    wb.appendChild(new SimElement('INPUT', { id: 'serp-agi', type: 'number', value: '78000' }));
+    wb.appendChild(new SimElement('INPUT', { id: 'serp-family-size', type: 'number', value: '2' }));
+    wb.appendChild(new SimElement('SELECT', { id: 'serp-filing-status', value: 'single' }));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-out-rap', class: 'calc-metric-value' }, '$450/mo'));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-out-ibr', class: 'calc-metric-value' }, '$580/mo'));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-out-std', class: 'calc-metric-value' }, '$1,010/mo'));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-out-delta', class: 'calc-metric-value' }, '$130/mo'));
+  } else {
+    wb.appendChild(new SimElement('INPUT', { id: 'serp-b2b-gross', type: 'number', value: '180000' }));
+    wb.appendChild(new SimElement('INPUT', { id: 'serp-b2b-deduction', type: 'number', value: '32000' }));
+    wb.appendChild(new SimElement('SELECT', { id: 'serp-b2b-rate', value: '0.32' }));
+    wb.appendChild(new SimElement('SELECT', { id: 'serp-b2b-structure', value: 'scorp' }));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-b2b-out-net', class: 'calc-metric-value' }, '$100,640'));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-b2b-out-tax', class: 'calc-metric-value' }, '$47,360'));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-b2b-out-shield', class: 'calc-metric-value' }, '$14,820'));
+    wb.appendChild(new SimElement('DIV', { id: 'serp-b2b-out-rate', class: 'calc-metric-value' }, '26.3%'));
+  }
+
+  // Cliff + Scenario Comparator
+  const cliff = main.appendChild(new SimElement('SECTION', { id: 'multi-year-cliff-visualizer' }));
+  for (let i = 0; i < 5; i++) {
+    const col = cliff.appendChild(new SimElement('DIV', { 'data-cliff-col': String(i) }));
+    col.appendChild(new SimElement('DIV', { 'data-cliff-val': String(i) }, '$10,000'));
+    col.appendChild(new SimElement('DIV', { 'data-cliff-bar': String(i) }));
+  }
+  const comp = main.appendChild(new SimElement('SECTION', { id: 'stateful-scenario-comparator' }));
+  comp.appendChild(new SimElement('BUTTON', { id: 'btn-pin-a', type: 'button', class: 'touch-target', 'data-scenario-pin': 'A' }, 'Pin Scenario A'));
+  comp.appendChild(new SimElement('BUTTON', { id: 'btn-pin-b', type: 'button', class: 'touch-target', 'data-scenario-pin': 'B' }, 'Pin Scenario B'));
+  comp.appendChild(new SimElement('BUTTON', { id: 'btn-pin-reset', type: 'button', class: 'touch-target', 'data-scenario-pin': 'reset' }, 'Reset'));
+  comp.appendChild(new SimElement('DIV', { id: 'scn-a-primary' }, '$0'));
+  comp.appendChild(new SimElement('DIV', { id: 'scn-a-secondary' }, '$0'));
+  comp.appendChild(new SimElement('DIV', { id: 'scn-b-primary' }, '$0'));
+  comp.appendChild(new SimElement('DIV', { id: 'scn-b-secondary' }, '$0'));
+  comp.appendChild(new SimElement('DIV', { id: 'scn-delta-badge' }, '$0'));
+
+  // Decision Blueprint
+  const bp = main.appendChild(new SimElement('SECTION', { id: 'saveable-decision-blueprint' }));
+  bp.appendChild(new SimElement('BUTTON', { id: 'btn-bp-save', type: 'button', class: 'touch-target', 'data-blueprint-action': 'save' }, 'Save Scenario'));
+  bp.appendChild(new SimElement('BUTTON', { id: 'btn-bp-share', type: 'button', class: 'touch-target', 'data-blueprint-action': 'share' }, 'Copy Shareable URL'));
+  bp.appendChild(new SimElement('BUTTON', { id: 'btn-bp-export', type: 'button', class: 'touch-target', 'data-blueprint-action': 'export' }, 'Export JSON Blueprint'));
+  bp.appendChild(new SimElement('DIV', { id: 'blueprint-status-readout' }, 'Ready'));
+
+  // Post-Calculation Upgrade Drawer
+  const upg = main.appendChild(new SimElement('SECTION', {
+    id: 'post-calculation-upgrade-drawer',
+    class: 'post-calc-upgrade-drawer',
+    'data-tool-slug': tenantConfig.slug,
+    'data-offer-sku': tenantConfig.sku,
+    'data-offer-price-usd': String(tenantConfig.price),
+    'data-calculated-amount': '180000'
+  }));
+  upg.appendChild(new SimElement('SPAN', { id: 'post-calc-upgrade-amount-badge' }, '$180,000'));
+  upg.appendChild(new SimElement('A', {
+    id: 'btn-post-calc-upgrade-checkout',
+    href: `/api/lead-capture?checkout=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
+    class: 'touch-target',
+    'data-checkout-trigger': 'true',
+    'data-offer-sku': tenantConfig.sku,
+    'data-offer-price-usd': String(tenantConfig.price)
+  }, `Unlock Statutory Data Pack ($${tenantConfig.price})`));
+  upg.appendChild(new SimElement('BUTTON', {
+    id: 'btn-preview-post-calc-workpaper',
+    type: 'button',
+    class: 'touch-target',
+    'data-blueprint-action': 'preview_workpaper'
+  }, 'Preview Workpaper Schedule'));
+  upg.appendChild(new SimElement('DIV', { id: 'post-calc-workpaper-preview-slot' }));
+
+  // Lead Capture Form
+  const pbForm = main.appendChild(new SimElement('FORM', { id: 'lead-capture-form', class: 'lead-capture-form' }));
+  pbForm.appendChild(new SimElement('INPUT', { id: 'lead-email-input', type: 'email', name: 'email', value: 'audit-verify@example.com' }));
+  pbForm.appendChild(new SimElement('BUTTON', { id: 'btn-lead-submit', type: 'submit', class: 'touch-target' }, 'Get Free Playbook'));
+
+  // Partner Quote Intake Form
+  const qStep = main.appendChild(new SimElement('DIV', {
+    id: 'partner-quote-intake-step',
+    'data-quote-threshold': '25000',
+    'data-calculated-amount': '180000',
+    'data-tool-slug': tenantConfig.slug,
+    'data-partner-key': tenantConfig.partner,
+    'data-vertical': tenantConfig.vertical
+  }));
+  const qForm = qStep.appendChild(new SimElement('FORM', { id: 'partner-quote-intake-form' }));
+  qForm.appendChild(new SimElement('INPUT', { id: 'quote-intake-email', type: 'email', value: 'cfo-verify@example.com' }));
+  qForm.appendChild(new SimElement('SELECT', { id: 'quote-intake-state', name: 'state', value: 'NY' }));
+  qForm.appendChild(new SimElement('SELECT', { id: 'quote-intake-capital-band', name: 'capital_band', value: '100k_250k' }));
+  qForm.appendChild(new SimElement('INPUT', { id: 'quote-intake-consent', type: 'checkbox', checked: true }));
+  qForm.appendChild(new SimElement('BUTTON', { id: 'btn-quote-submit', type: 'submit', class: 'touch-target' }, 'Get Matched Partner Quote'));
+  qStep.appendChild(new SimElement('DIV', { id: 'partner-quote-intake-status' }));
+
+  // Outbound Affiliate Links
+  main.appendChild(new SimElement('A', {
+    id: 'aff-link-primary',
+    href: `/r/${tenantConfig.partner}?tool=${tenantConfig.slug}&subid=${tenantConfig.slug}_inline`,
+    class: 'cta-button touch-target',
+    'data-partner': tenantConfig.partner,
+    'data-tool': tenantConfig.slug,
+    'data-cta-slot': 'calculator_result_inline',
+    'data-subid': `${tenantConfig.slug}_inline`,
+    'data-tier': 'growth'
+  }, 'Compare Verified Partner Rates'));
+
+  const documentObj = {
+    readyState: 'complete',
+    referrer: 'https://www.google.com/',
+    body,
+    getElementById(id) { return elementsById[id] || allElements.find(el => el.id === id) || null; },
+    querySelector(sel) { return body.querySelector(sel); },
+    querySelectorAll(sel) { return body.querySelectorAll(sel); },
+    createElement(tag) { return new SimElement(tag); },
+    addEventListener(type, fn) {
+      if (!docListeners[type]) docListeners[type] = [];
+      docListeners[type].push(fn);
+    }
+  };
+
+  const windowObj = {
+    __PSEO_SYNTHETIC_TEST__: true,
+    __PSEO_PREVENT_AFFILIATE_NAV__: true,
+    addEventListener(type, fn) {
+      if (!docListeners['win_' + type]) docListeners['win_' + type] = [];
+      docListeners['win_' + type].push(fn);
+    },
+    location: {
+      origin: `https://${tenantConfig.host}`,
+      hostname: tenantConfig.host,
+      pathname: `/tools/${tenantConfig.slug}`,
+      search: currentSearch,
+      href: `https://${tenantConfig.host}/tools/${tenantConfig.slug}${currentSearch}`
+    },
+    history: {
+      replaceState(_st, _title, url) {
+        const qIdx = String(url).indexOf('?');
+        currentSearch = qIdx !== -1 ? String(url).slice(qIdx) : '';
+        windowObj.location.search = currentSearch;
+      }
+    },
+    localStorage: {
+      getItem(k) { return Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null; },
+      setItem(k, v) { storage[k] = String(v); }
+    },
+    navigator: {
+      clipboard: { writeText() { return Promise.resolve(); } },
+      sendBeacon(url, payload) { beaconPayloads.push({ url, payload: String(payload) }); return true; }
+    },
+    gtag(ev, name, payload) { beaconPayloads.push({ gtag: name, payload }); },
+    fetch(url, opts = {}) {
+      fetchCalls.push({ url: String(url), method: opts.method || 'GET' });
+      const u = String(url);
+      if (u.includes('checkout=1')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            status: 'checkout_session_ready',
+            checkout_session_id: 'chk_sim_991',
+            offer_sku: tenantConfig.sku,
+            offer_title: 'Statutory Audit Data Pack',
+            offer_price_usd: tenantConfig.price,
+            calculated_amount: 180000,
+            playbook_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000`,
+            fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
+            csv_fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
+            datapack_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
+            settlement_attribution: {
+              settlement_id: 'stl_sim_991',
+              realized_revenue_usd: tenantConfig.price,
+              scenario_fingerprint: `${tenantConfig.slug}__100k_250k__b2b`
+            },
+            reconciliation_schedule: [{ line_item: 'Gross Baseline', current_law_usd: '$180,000', optimized_election_usd: '$148,000', variance_usd: '+$32,000' }]
+          })
+        });
+      }
+      if (u.includes('playbook=1') || u.includes('fulfill=1')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            playbook_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000`,
+            fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
+            csv_fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
+            datapack_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
+            reconciliation_schedule: [{ line_item: 'Gross Baseline', current_law_usd: '$180,000', optimized_election_usd: '$148,000', variance_usd: '+$32,000' }]
+          })
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          status: 'qualified_partner_lead',
+          lead_id: 'lead_sim_882',
+          offer_sku: tenantConfig.sku,
+          offer_title: 'Statutory Audit Data Pack',
+          offer_price_usd: tenantConfig.price,
+          checkout_url: `/api/lead-capture?checkout=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
+          playbook_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000`,
+          fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
+          csv_fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
+          datapack_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
+          redirect_url: `/r/${tenantConfig.partner}?tool=${tenantConfig.slug}&subid=${tenantConfig.slug}_quote`,
+          zeptomail_status: 'queued_verified'
+        })
+      });
+    },
+    Event: class {
+      constructor(type, opts = {}) { this.type = type; this.bubbles = Boolean(opts.bubbles); }
+    },
+    URLSearchParams,
+    Blob: function(parts) { this.parts = parts; },
+    URL: { createObjectURL() { return 'blob:sim-blueprint'; } },
+    setTimeout(fn) { fn(); return 1; },
+    clearTimeout() {}
+  };
+  windowObj.window = windowObj;
+  windowObj.document = documentObj;
+
+  return { windowObj, documentObj, elementsById, fetchCalls, beaconPayloads, storage, docListeners };
+}
+
+async function runSimulationForTenant(tenantConfig) {
+  const sim = createSimulatedDom(tenantConfig);
+  const ctx = vm.createContext({
+    window: sim.windowObj,
+    document: sim.documentObj,
+    navigator: sim.windowObj.navigator,
+    location: sim.windowObj.location,
+    history: sim.windowObj.history,
+    localStorage: sim.windowObj.localStorage,
+    Event: sim.windowObj.Event,
+    URLSearchParams: sim.windowObj.URLSearchParams,
+    Blob: sim.windowObj.Blob,
+    URL: sim.windowObj.URL,
+    setTimeout: sim.windowObj.setTimeout,
+    clearTimeout: sim.windowObj.clearTimeout,
+    Math, JSON, Object, Array, String, Number, Boolean, RegExp, Date, Promise, parseFloat, parseInt, isNaN, encodeURIComponent, decodeURIComponent
+  });
+
+  vm.runInContext(runtimeCode, ctx);
+
+  // 1. Click scenario preset button
+  const presetBtn = sim.elementsById['btn-preset-chip-1'];
+  presetBtn.click();
+
+  // 1b. Tenant-specific preset / recalculate buttons
+  let tenantSpecificPassed = true;
+  if (tenantConfig.mode === 'cyber_grc') {
+    const ghSwitch = sim.elementsById['gh-preset-switcher-1'];
+    ghSwitch.click();
+    const calcSub = sim.elementsById['calc-submit-btn'];
+    calcSub.click();
+    tenantSpecificPassed = (
+      ghSwitch.getAttribute('data-preset-applied') === 'true' &&
+      calcSub.getAttribute('data-recalculated') === 'true' &&
+      parseInt(sim.elementsById['post-calculation-upgrade-drawer'].getAttribute('data-calculated-amount') || '0', 10) >= 25000
+    );
+  } else {
+    const pmBtn = sim.elementsById['pm-gain-preset-100k'];
+    pmBtn.click();
+    const shareBtn = sim.elementsById['btn-legacy-share'];
+    shareBtn.click();
+    const scnPill = sim.elementsById['scenario-pill-aggressive'];
+    scnPill.click();
+    tenantSpecificPassed = (
+      pmBtn.classList.contains('active') &&
+      shareBtn.getAttribute('data-share-copied') === 'true' &&
+      scnPill.classList.contains('active')
+    );
+  }
+
+  // 2. Click Scenario Pin A, Pin B, Reset
+  const comp = sim.elementsById['stateful-scenario-comparator'];
+  sim.elementsById['btn-pin-a'].click();
+  const pinnedA = comp.getAttribute('data-pinned-a') === '1' && parseFloat(comp.getAttribute('data-scn-a-input') || '0') >= 1000;
+  sim.elementsById['btn-pin-b'].click();
+  const pinnedB = comp.getAttribute('data-pinned-b') === '1' && parseFloat(comp.getAttribute('data-scn-b-input') || '0') >= 1000;
+  sim.elementsById['btn-pin-reset'].click();
+  const pinReset = comp.getAttribute('data-pinned-a') === null && comp.getAttribute('data-pinned-b') === null;
+
+  // 3. Click Decision Blueprint Save, Share, Export
+  const bp = sim.elementsById['saveable-decision-blueprint'];
+  sim.elementsById['btn-bp-save'].click();
+  sim.elementsById['btn-bp-share'].click();
+  sim.elementsById['btn-bp-export'].click();
+  const blueprintPassed = (
+    bp.getAttribute('data-blueprint-saved') === '1' &&
+    bp.getAttribute('data-blueprint-exported') === '1' &&
+    parseInt(bp.getAttribute('data-exported-json-bytes') || '0', 10) > 20 &&
+    Boolean(sim.storage['pseo_blueprint_' + tenantConfig.slug])
+  );
+
+  // 4. Click Workpaper Preview button
+  const previewBtn = sim.elementsById['btn-preview-post-calc-workpaper'];
+  previewBtn.click();
+  await new Promise(r => setImmediate(r));
+  const pbHtmlLink = sim.elementsById['playbook-download-link'];
+  const pbCsvLink = sim.elementsById['playbook-csv-link'];
+  const pbDpLink = sim.elementsById['playbook-datapack-link'];
+  const previewPassed = Boolean(pbHtmlLink && pbCsvLink && pbDpLink);
+
+  // 5. Click Statutory Data Pack Checkout button
+  const checkoutBtn = sim.elementsById['btn-post-calc-upgrade-checkout'];
+  checkoutBtn.click();
+  await new Promise(r => setImmediate(r));
+  const chkStatus = checkoutBtn.getAttribute('data-checkout-status');
+  const chkBanner = sim.elementsById['checkout-settlement-attribution-banner'];
+  const ffHtmlLink = sim.elementsById['checkout-fulfillment-html-link'];
+  const ffCsvLink = sim.elementsById['checkout-fulfillment-csv-link'];
+  const ffDpLink = sim.elementsById['checkout-fulfillment-datapack-link'];
+  if (ffHtmlLink) ffHtmlLink.click();
+  if (ffCsvLink) ffCsvLink.click();
+  if (ffDpLink) ffDpLink.click();
+  const checkoutPassed = (
+    (chkStatus === 'checkout_session_ready' || chkStatus === 'completed' || checkoutBtn.getAttribute('data-settlement-status') === 'settled') &&
+    Boolean(chkBanner && chkBanner.getAttribute('data-settlement-id') === 'stl_sim_991') &&
+    Boolean(ffHtmlLink && ffHtmlLink.getAttribute('data-download-triggered') === 'true') &&
+    Boolean(ffCsvLink && ffCsvLink.getAttribute('data-download-triggered') === 'true') &&
+    Boolean(ffDpLink && ffDpLink.getAttribute('data-download-triggered') === 'true')
+  );
+
+  // 6. Click Outbound Affiliate Link
+  const affLink = sim.elementsById['aff-link-primary'];
+  affLink.click();
+  const affiliateClicked = (
+    affLink.getAttribute('data-affiliate-clicked') === 'true' &&
+    (affLink.getAttribute('href') || '').startsWith('/r/' + tenantConfig.partner) &&
+    (affLink.getAttribute('href') || '').includes('subid=')
+  );
+
+  // 7. Submit Lead Capture Form & Partner Quote Intake Form
+  const pbForm = sim.elementsById['lead-capture-form'];
+  for (const fn of sim.docListeners.submit) {
+    fn({ target: pbForm, preventDefault() {}, stopImmediatePropagation() {} });
+  }
+  await new Promise(r => setImmediate(r));
+  const leadCaptured = pbForm.getAttribute('data-lead-captured') === 'true' && pbForm.getAttribute('data-submission-state') === 'success';
+
+  const qForm = sim.elementsById['partner-quote-intake-form'];
+  for (const fn of sim.docListeners.submit) {
+    fn({ target: qForm, preventDefault() {}, stopImmediatePropagation() {} });
+  }
+  await new Promise(r => setImmediate(r));
+  const quoteCaptured = qForm.getAttribute('data-submission-state') === 'success' && sim.elementsById['partner-quote-intake-step'].getAttribute('data-lead-captured') === 'true';
+
+  return {
+    tenant: tenantConfig.tenant,
+    slug: tenantConfig.slug,
+    mode: tenantConfig.mode,
+    preset_hydration_passed: presetBtn.classList.contains('active') && tenantSpecificPassed,
+    scenario_pin_passed: pinnedA && pinnedB && pinReset,
+    blueprint_actions_passed: blueprintPassed,
+    workpaper_preview_passed: previewPassed,
+    datapack_checkout_passed: checkoutPassed,
+    deliverable_downloads_passed: Boolean(ffDpLink && ffDpLink.getAttribute('data-download-triggered') === 'true'),
+    affiliate_cta_click_passed: affiliateClicked,
+    lead_and_quote_submit_passed: leadCaptured && quoteCaptured,
+    fetch_call_count: sim.fetchCalls.length,
+    beacon_count: sim.beaconPayloads.length,
+    passed: (
+      presetBtn.classList.contains('active') &&
+      tenantSpecificPassed &&
+      pinnedA && pinnedB && pinReset &&
+      blueprintPassed &&
+      previewPassed &&
+      checkoutPassed &&
+      affiliateClicked &&
+      leadCaptured &&
+      quoteCaptured
+    )
+  };
+}
+
+(async () => {
+  const configs = [
+    { tenant: 'profithelm', host: 'profithelm.com', slug: 's-corp-tax-advantage', mode: 'b2b', sku: 'ph_tax_election_pack', price: 49, partner: 'collective', vertical: 'tax_compliance' },
+    { tenant: 'prexvo', host: 'prexvo.com', slug: 'student-loan-refinance-math', mode: 'student_loan', sku: 'px_loan_refi_pack', price: 39, partner: 'sofi', vertical: 'student_loans' },
+    { tenant: 'gainhelm', host: 'gainhelm.com', slug: 'hipaa-fine-calculator', mode: 'cyber_grc', sku: 'gh_hipaa_compliance_pack', price: 59, partner: 'vanta', vertical: 'cyber_compliance' }
+  ];
+  const results = [];
+  for (const c of configs) {
+    results.push(await runSimulationForTenant(c));
+  }
+  console.log(JSON.stringify({ all_passed: results.every(r => r.passed), tenants: results }));
+})();
+"""
+    proc = subprocess.run(
+        ["node", "-e", node_harness],
+        env={"PATH": "/usr/local/bin:/usr/bin:/bin", "PSEO_RUNTIME_JS": js_code},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return {
+            "all_passed": False,
+            "error": (proc.stderr or proc.stdout or "node_vm_failed").strip()[:400],
+            "tenants": [],
+        }
+    try:
+        return json.loads((proc.stdout or "{}").strip().splitlines()[-1])
+    except Exception as exc:
+        return {
+            "all_passed": False,
+            "error": f"invalid_json: {exc}",
+            "tenants": [],
+        }
+
+
+def audit_monetization_and_datapack_ui_ux_surfaces(
+    dist_dirs: Optional[Dict[str, Any]] = None,
+    execute_dom_simulation: bool = True,
+) -> Dict[str, Any]:
+    """
+    Deterministic UI/UX surface and button action-mechanic audit across all compiled
+    calculator pages in profithelm, prexvo, and gainhelm.
+    Verifies:
+    1. Coexistence of outbound affiliate CTAs (a[href^="/r/"]) and statutory data pack
+       checkout buttons (#btn-post-calc-upgrade-checkout) on every commercial page, and
+       strict zero-affiliate compliance on restricted public-service YMYL pages.
+    2. Complete inventory and touch-target compliance (>=44px) across all 8 interactive
+       button families (affiliate CTAs, data pack checkout, workpaper preview, deliverable
+       download links, decision blueprint actions, scenario pin buttons, scenario presets,
+       and lead/quote/calculator submit buttons).
+    3. Live DOM click & submit handler verification via Node.js vm execution.
+    """
+    from pathlib import Path
+
+    if dist_dirs is None:
+        workspace_root = Path("/home/ubuntuadmin/projects")
+        dist_dirs = {
+            "profithelm": workspace_root / "profithelm-platform" / "dist" / "tools",
+            "prexvo": workspace_root / "prexvo" / "dist" / "tools",
+            "gainhelm": workspace_root / "gainhelm" / "dist" / "tools",
+        }
+
+    tenant_summaries: Dict[str, Any] = {}
+    total_pages = 0
+    total_commercial_pages = 0
+    total_restricted_pages = 0
+    total_affiliate_links = 0
+    total_datapack_checkout_buttons = 0
+    total_workpaper_preview_buttons = 0
+    total_blueprint_buttons = 0
+    total_scenario_pin_buttons = 0
+    total_preset_buttons = 0
+    total_lead_and_quote_submit_buttons = 0
+    violations: List[Dict[str, Any]] = []
+
+    for tenant, raw_dir in dist_dirs.items():
+        tools_dir = Path(raw_dir)
+        if not tools_dir.exists():
+            continue
+        html_files = sorted(tools_dir.glob("*/index.html"))
+        t_pages = 0
+        t_commercial = 0
+        t_restricted = 0
+        t_aff_links = 0
+        t_checkout_btns = 0
+        t_preview_btns = 0
+        t_bp_btns = 0
+        t_pin_btns = 0
+        t_preset_btns = 0
+        t_submit_btns = 0
+        t_page_records: List[Dict[str, Any]] = []
+
+        for html_file in html_files:
+            slug = html_file.parent.name
+            raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
+            norm_html, _ = normalize_html_visual_primitives(raw_html)
+            is_restricted = slug in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+
+            t_pages += 1
+            total_pages += 1
+            if is_restricted:
+                t_restricted += 1
+                total_restricted_pages += 1
+            else:
+                t_commercial += 1
+                total_commercial_pages += 1
+
+            aff_matches = re.findall(r'<a\b[^>]*href=["\']/r/[^"\']+["\'][^>]*>', norm_html, flags=re.IGNORECASE)
+            checkout_matches = re.findall(
+                r'<a\b[^>]*id=["\']btn-post-calc-upgrade-checkout["\'][^>]*>', norm_html, flags=re.IGNORECASE
+            )
+            preview_matches = re.findall(
+                r'<button\b[^>]*id=["\']btn-preview-post-calc-workpaper["\'][^>]*>', norm_html, flags=re.IGNORECASE
+            )
+            bp_matches = re.findall(
+                r'<button\b[^>]*data-blueprint-action=["\'](?:save|share|export)["\'][^>]*>',
+                norm_html,
+                flags=re.IGNORECASE,
+            )
+            pin_matches = re.findall(
+                r'<button\b[^>]*data-scenario-pin=["\'](?:A|B|reset)["\'][^>]*>', norm_html, flags=re.IGNORECASE
+            )
+            preset_matches = re.findall(
+                r'<(?:button|a)\b[^>]*(?:data-calc-preset|data-preset-pm-gain|data-preset-hc|class=["\'][^"\']*scenario-preset-link)[^>]*>',
+                norm_html,
+                flags=re.IGNORECASE,
+            )
+            lead_submit_matches = re.findall(
+                r'<form\b[^>]*id=["\'](?:lead-capture-form|partner-quote-intake-form|gainhelm-compliance-form)["\'][\s\S]*?</form>',
+                norm_html,
+                flags=re.IGNORECASE,
+            )
+
+            n_aff = len(aff_matches)
+            n_chk = len(checkout_matches)
+            n_prv = len(preview_matches)
+            n_bp = len(bp_matches)
+            n_pin = len(pin_matches)
+            n_pre = len(preset_matches)
+            n_sub = len(lead_submit_matches)
+
+            t_aff_links += n_aff
+            t_checkout_btns += n_chk
+            t_preview_btns += n_prv
+            t_bp_btns += n_bp
+            t_pin_btns += n_pin
+            t_preset_btns += n_pre
+            t_submit_btns += n_sub
+
+            total_affiliate_links += n_aff
+            total_datapack_checkout_buttons += n_chk
+            total_workpaper_preview_buttons += n_prv
+            total_blueprint_buttons += n_bp
+            total_scenario_pin_buttons += n_pin
+            total_preset_buttons += n_pre
+            total_lead_and_quote_submit_buttons += n_sub
+
+            page_issues: List[str] = []
+            if is_restricted:
+                if n_aff > 0:
+                    page_issues.append(f"restricted_ymyl_has_affiliate_links:{n_aff}")
+                if n_chk > 0:
+                    page_issues.append(f"restricted_ymyl_has_checkout_drawer:{n_chk}")
+            else:
+                if n_aff == 0:
+                    page_issues.append("missing_affiliate_cta")
+                if n_chk != 1:
+                    page_issues.append(f"expected_1_datapack_checkout_button_got_{n_chk}")
+                if n_prv != 1:
+                    page_issues.append(f"expected_1_workpaper_preview_button_got_{n_prv}")
+                if n_bp < 3:
+                    page_issues.append(f"expected_3_blueprint_buttons_got_{n_bp}")
+                if n_pin < 3:
+                    page_issues.append(f"expected_3_scenario_pin_buttons_got_{n_pin}")
+                if n_sub < 2:
+                    page_issues.append(f"expected_at_least_2_monetization_forms_got_{n_sub}")
+                for a_tag in aff_matches:
+                    if "touch-target" not in a_tag:
+                        page_issues.append("affiliate_cta_missing_touch_target")
+                        break
+                for c_tag in checkout_matches:
+                    if (
+                        ('data-checkout-trigger="1"' not in c_tag and 'data-checkout-trigger="true"' not in c_tag)
+                        or "touch-target" not in c_tag
+                    ):
+                        page_issues.append("datapack_checkout_missing_trigger_or_touch_target")
+                    if "amount=75" in c_tag or "amount=49&" in c_tag:
+                        page_issues.append("datapack_checkout_amount_clobbered_by_non_monetary_input")
+
+            if n_pre == 0:
+                page_issues.append("missing_scenario_preset_buttons")
+            if 'id="pseo-runtime-sync"' not in norm_html or "resolveActiveScenarioAmount" not in norm_html:
+                page_issues.append("missing_upgraded_runtime_synchronizer")
+
+            if page_issues:
+                violations.append({"tenant": tenant, "slug": slug, "issues": page_issues})
+
+            t_page_records.append(
+                {
+                    "slug": slug,
+                    "restricted_ymyl": is_restricted,
+                    "affiliate_links": n_aff,
+                    "datapack_checkout_buttons": n_chk,
+                    "workpaper_preview_buttons": n_prv,
+                    "blueprint_action_buttons": n_bp,
+                    "scenario_pin_buttons": n_pin,
+                    "preset_buttons": n_pre,
+                    "monetization_forms": n_sub,
+                    "coexistence_verified": (n_aff == 0 and n_chk == 0) if is_restricted else (n_aff >= 1 and n_chk == 1),
+                    "issues": page_issues,
+                }
+            )
+
+        tenant_summaries[tenant] = {
+            "total_pages": t_pages,
+            "commercial_pages": t_commercial,
+            "restricted_ymyl_pages": t_restricted,
+            "affiliate_links": t_aff_links,
+            "datapack_checkout_buttons": t_checkout_btns,
+            "workpaper_preview_buttons": t_preview_btns,
+            "blueprint_action_buttons": t_bp_btns,
+            "scenario_pin_buttons": t_pin_btns,
+            "preset_buttons": t_preset_btns,
+            "monetization_forms": t_submit_btns,
+            "coexistence_pass_count": sum(1 for r in t_page_records if r["coexistence_verified"] and not r["issues"]),
+            "pages": t_page_records,
+        }
+
+    dom_simulation = (
+        _run_node_vm_button_action_simulation()
+        if execute_dom_simulation
+        else {"all_passed": True, "skipped": True, "tenants": []}
+    )
+
+    return {
+        "version": VISUAL_PRIMITIVES_VERSION,
+        "total_pages_audited": total_pages,
+        "commercial_pages_audited": total_commercial_pages,
+        "restricted_ymyl_pages_audited": total_restricted_pages,
+        "button_inventory_totals": {
+            "affiliate_outbound_ctas": total_affiliate_links,
+            "datapack_checkout_buttons": total_datapack_checkout_buttons,
+            "workpaper_preview_buttons": total_workpaper_preview_buttons,
+            "decision_blueprint_buttons": total_blueprint_buttons,
+            "scenario_comparator_pin_buttons": total_scenario_pin_buttons,
+            "scenario_preset_buttons": total_preset_buttons,
+            "lead_quote_and_calc_forms": total_lead_and_quote_submit_buttons,
+        },
+        "coexistence_and_surface_violations": violations,
+        "dom_action_simulation": dom_simulation,
+        "tenants": tenant_summaries,
+        "all_surfaces_and_handlers_passed": len(violations) == 0 and bool(dom_simulation.get("all_passed")),
+    }
+
+
 __all__ = [
     "VISUAL_PRIMITIVES_VERSION",
     "SCREEN_ARCHETYPE_CONTRACTS",
     "REQUIRED_PRIMITIVE_TOKENS",
+    "RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS",
     "classify_screen_archetype",
     "get_screen_archetype_contract",
     "render_visual_primitives_style",
@@ -4409,5 +5556,7 @@ __all__ = [
     "detect_visual_and_ux_contract_issues",
     "assert_visual_and_ux_contracts",
     "normalize_html_visual_primitives",
+    "audit_monetization_and_datapack_ui_ux_surfaces",
 ]
+
 

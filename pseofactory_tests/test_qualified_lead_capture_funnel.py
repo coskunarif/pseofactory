@@ -898,6 +898,19 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series",
         },
+        {
+            "slug": "soc-2-audit-cost-calculator",
+            "title": "SOC 2 Type II Audit Cost & GRC Readiness Calculator",
+            "model_name": "SOC 2 Audit Cost Model",
+            "property_id": "gainhelm",
+            "canonical_base": "https://gainhelm.com",
+            "formula": "gross_amount * (1.0 - effective_rate)",
+            "inputs": {"gross_amount": 65000.0, "effective_rate": 0.15},
+            "published_output": 55250.0,
+            "sample_calculation": "Evaluating $65,000 SOC 2 readiness scope at 15% automation savings factor yields $55,250.00 net audit cost.",
+            "statutory_authority": "32 CFR Part 170 and AICPA SSAE 18 (AT-C Section 205)",
+            "economic_dataset": "BLS Occupational Employment and Wages Series",
+        },
     ]
 
     for spec in specs:
@@ -938,12 +951,17 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             assert report["scenario_comparator"]["passed"] is True
             assert report["blueprint_actions"]["present"] is True
             assert report["blueprint_actions"]["passed"] is True
+            assert report["post_calc_upgrade_drawer"]["present"] is True
+            assert report["post_calc_upgrade_drawer"]["passed"] is True
+            assert report["post_calc_upgrade_drawer"]["preview_rendered"] is True
+            assert report["post_calc_upgrade_drawer"]["datapack_download_triggered"] is True
             assert report["playbook_lead_capture_and_checkout"]["present"] is True
             assert report["playbook_lead_capture_and_checkout"]["passed"] is True
             assert report["partner_quote_intake_and_checkout"]["present"] is True
             assert report["partner_quote_intake_and_checkout"]["passed"] is True
             assert report["affiliate_redirect_and_telemetry"]["tested"] is True
             assert report["affiliate_redirect_and_telemetry"]["passed"] is True
+            assert report["affiliate_redirect_and_telemetry"]["dom_click_handled"] is True
 
             assert len(server.captured_leads) >= 2
             assert len(server.checkout_sessions) >= 2

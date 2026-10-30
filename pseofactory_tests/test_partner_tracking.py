@@ -3643,6 +3643,10 @@ def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e()
     mon = get_lead_monitoring_summary()
     assert "revenue_weighted_expansion_queue" in mon
     assert len(mon["revenue_weighted_expansion_queue"]["after_queue"]) >= 25
+    assert mon["monetization_e2e_audit"]["ui_ux_button_surface_audit"]["all_surfaces_and_handlers_passed"] is True
+    assert mon["monetization_e2e_audit"]["ui_ux_button_surface_audit"]["total_pages_audited"] == 50
+    assert mon["monetization_e2e_audit"]["ui_ux_button_surface_audit"]["violations_count"] == 0
+
 
 
 

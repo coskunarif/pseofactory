@@ -285,6 +285,19 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(payload)
                     return
+                if fmt == "datapack":
+                    dp_obj = wp.get("statutory_data_pack") or {}
+                    payload = json.dumps(dp_obj, indent=2).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header(
+                        "Content-Disposition",
+                        f'attachment; filename="datapack_{tool_slug}_{lead_id}.json"',
+                    )
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 self._send_json(200, {
                     "ok": True,
                     "success": True,
@@ -322,6 +335,7 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     lead_record=eff_rec_chk,
                     mode="paid_toolkit",
                 )
+                dp_url = offer.get("datapack_url") or (str(offer.get("fulfillment_url") or "") + "&format=datapack")
                 chk_record = {
                     "ok": True,
                     "success": True,
@@ -338,11 +352,15 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "calculated_amount": wp_chk["calculated_amount"],
                     "capital_band": wp_chk["capital_band"],
                     "custom_parameter_ledger": wp_chk["custom_parameter_ledger"],
+                    "reconciliation_schedule": wp_chk.get("reconciliation_schedule") or [],
+                    "statutory_data_pack": wp_chk.get("statutory_data_pack") or {},
+                    "settlement_attribution": wp_chk.get("settlement_attribution") or {},
                     "statutory_trend_series_count": len(wp_chk.get("statutory_trend_timeseries") or []),
                     "checkout_url": offer["checkout_url"],
                     "playbook_url": offer["playbook_url"],
                     "fulfillment_url": offer["fulfillment_url"],
                     "csv_fulfillment_url": offer["csv_fulfillment_url"],
+                    "datapack_url": dp_url,
                     "checkout_session_id": offer["checkout_session_id"],
                     "checkout_mode": "edge_checkout_rail",
                     "stripe_account_id": "acct_1T6fSTIq0ckFsf5j",
@@ -366,6 +384,23 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             events = list(dist_srv.telemetry_events) if dist_srv is not None else []
             self._send_json(200, {"ok": True, "count": len(events), "events": events})
             return
+        try:
+            fs_path = Path(self.translate_path(self.path))
+            if fs_path.is_dir():
+                fs_path = fs_path / "index.html"
+            if fs_path.is_file() and fs_path.suffix.lower() in (".html", ".htm"):
+                from pseofactory.visual_primitives import normalize_html_visual_primitives
+                raw_html = fs_path.read_text(encoding="utf-8", errors="ignore")
+                norm_html, _ = normalize_html_visual_primitives(raw_html)
+                payload = norm_html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+        except Exception:
+            pass
         super().do_GET()
 
     def do_HEAD(self) -> None:

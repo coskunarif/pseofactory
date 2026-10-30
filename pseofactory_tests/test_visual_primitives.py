@@ -385,3 +385,61 @@ def test_above_fold_preset_salience_and_ssr_latency_optimization():
     assert parser.h1_list == ["Silverado 2500HD Section 179 Calculator"]
 
 
+def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
+    """
+    Verifies audit_monetization_and_datapack_ui_ux_surfaces across all 50 compiled
+    calculator pages (profithelm: 22 commercial, prexvo: 14 commercial + 4 restricted
+    public-service YMYL, gainhelm: 10 commercial) and executes deterministic DOM
+    click/submit simulation for every button family:
+    - Outbound affiliate CTAs (a[href^="/r/"])
+    - Statutory data pack checkout buttons (#btn-post-calc-upgrade-checkout)
+    - Workpaper preview buttons (#btn-preview-post-calc-workpaper)
+    - Deliverable download links (HTML/PDF, CSV, JSON data pack)
+    - Decision blueprint buttons (save, share, export, .btn-share)
+    - Scenario comparator pin buttons (Pin A, Pin B, Reset across b2b, student_loan, and cyber_grc)
+    - Scenario preset pills ([data-calc-preset], [data-preset-pm-gain], .calc-switcher-btn[data-preset-hc])
+    - Lead capture, partner quote intake, and calculator submit buttons
+    """
+    from pseofactory.visual_primitives import audit_monetization_and_datapack_ui_ux_surfaces
+
+    audit = audit_monetization_and_datapack_ui_ux_surfaces(execute_dom_simulation=True)
+    assert audit["all_surfaces_and_handlers_passed"] is True, f"UI/UX button surface audit failed: {audit}"
+    assert audit["total_pages_audited"] == 50
+    assert audit["commercial_pages_audited"] == 46
+    assert audit["restricted_ymyl_pages_audited"] == 4
+    assert audit["coexistence_and_surface_violations"] == []
+
+    inv = audit["button_inventory_totals"]
+    assert inv["affiliate_outbound_ctas"] >= 150
+    assert inv["datapack_checkout_buttons"] == 46
+    assert inv["workpaper_preview_buttons"] == 46
+    assert inv["decision_blueprint_buttons"] >= 138
+    assert inv["scenario_comparator_pin_buttons"] >= 138
+    assert inv["scenario_preset_buttons"] >= 200
+    assert inv["lead_quote_and_calc_forms"] >= 92
+
+    assert audit["tenants"]["profithelm"]["total_pages"] == 22
+    assert audit["tenants"]["profithelm"]["coexistence_pass_count"] == 22
+    assert audit["tenants"]["prexvo"]["total_pages"] == 18
+    assert audit["tenants"]["prexvo"]["commercial_pages"] == 14
+    assert audit["tenants"]["prexvo"]["restricted_ymyl_pages"] == 4
+    assert audit["tenants"]["prexvo"]["coexistence_pass_count"] == 18
+    assert audit["tenants"]["gainhelm"]["total_pages"] == 10
+    assert audit["tenants"]["gainhelm"]["coexistence_pass_count"] == 10
+
+    sim = audit["dom_action_simulation"]
+    assert sim["all_passed"] is True
+    assert len(sim["tenants"]) == 3
+    for t_sim in sim["tenants"]:
+        assert t_sim["passed"] is True
+        assert t_sim["preset_hydration_passed"] is True
+        assert t_sim["scenario_pin_passed"] is True
+        assert t_sim["blueprint_actions_passed"] is True
+        assert t_sim["workpaper_preview_passed"] is True
+        assert t_sim["datapack_checkout_passed"] is True
+        assert t_sim["deliverable_downloads_passed"] is True
+        assert t_sim["affiliate_cta_click_passed"] is True
+        assert t_sim["lead_and_quote_submit_passed"] is True
+
+
+
