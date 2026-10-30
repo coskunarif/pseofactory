@@ -275,6 +275,7 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                         "query_slug": str(kr["query_slug"]),
                         "query": str(kr["query"]),
                         "property_id": prop,
+                        "source": "pseofactory/trends/data/trend_history.db",
                         "consecutive_cycles_count": int(kr["consecutive_cycles_count"] or 1),
                         "latest_velocity": round(float(kr["latest_velocity"] or 0.0), 4),
                         "acceleration_2nd_deriv": round(float(kr["acceleration_2nd_deriv"] or 0.0), 4),
