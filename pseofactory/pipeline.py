@@ -335,130 +335,66 @@ class FactoryPipeline:
         explicit_tenant: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Routes query to property tenant: prexvo, profithelm, or unassigned.
-        Scans for cross-property token contamination in fail-closed mode.
+        Routes query to a registered property tenant or unassigned via declarative
+        statutory intent tokens. Scans for cross-property token contamination in fail-closed mode.
         Zero em-dashes. Zero en-dashes.
         """
+        from pseofactory.tenant_facts import (
+            CANONICAL_TENANT_DECLARATIONS,
+            match_tenant_statutory_intent,
+        )
+
         assert_no_forbidden_dashes(query, "determine_property_assignment.query")
         q_lower = query.lower().strip()
-
-        is_prexvo = any(tok in q_lower for tok in PREXVO_STATUTORY_TOKENS)
-        is_profithelm = any(tok in q_lower for tok in PROFITHELM_STATUTORY_TOKENS) or (
-            "1031" in q_lower and "exchange" in q_lower
-        )
-        is_gainhelm = any(tok in q_lower for tok in GAINHELM_STATUTORY_TOKENS)
+        matched_map = match_tenant_statutory_intent(query)
 
         if explicit_tenant:
             tenant_norm = explicit_tenant.lower().strip()
-            if tenant_norm == "prexvo":
-                foreign = self.scanner.scan_text(query, "prexvo")
-                if is_profithelm:
-                    token_found = "1031 exchange" if "1031" in q_lower else "profithelm statutory token"
+            if tenant_norm in CANONICAL_TENANT_DECLARATIONS:
+                foreign = self.scanner.scan_text(query, tenant_norm)
+                for other_id, other_hit in matched_map.items():
+                    if other_id == tenant_norm or not other_hit:
+                        continue
+                    if other_id == "profithelm" and tenant_norm == "prexvo" and "1031" in q_lower:
+                        token_found = "1031 exchange"
+                    elif other_id == "prexvo" and tenant_norm == "profithelm" and "title iv" in q_lower:
+                        token_found = "title iv"
+                    else:
+                        token_found = f"{other_id} statutory token"
                     foreign = list(set(foreign + [token_found]))
-                if is_gainhelm:
-                    foreign = list(set(foreign + ["gainhelm statutory token"]))
                 if foreign:
                     return {
-                        "property_id": "prexvo",
+                        "property_id": tenant_norm,
                         "basis": "cross_contaminated",
                         "contamination_scan_passed": 0,
                         "foreign_tokens": foreign,
                     }
                 return {
-                    "property_id": "prexvo",
-                    "basis": "explicit_tenant",
-                    "contamination_scan_passed": 1,
-                    "foreign_tokens": [],
-                }
-            elif tenant_norm == "profithelm":
-                foreign = self.scanner.scan_text(query, "profithelm")
-                if is_prexvo:
-                    token_found = "title iv" if "title iv" in q_lower else "prexvo statutory token"
-                    foreign = list(set(foreign + [token_found]))
-                if is_gainhelm:
-                    foreign = list(set(foreign + ["gainhelm statutory token"]))
-                if foreign:
-                    return {
-                        "property_id": "profithelm",
-                        "basis": "cross_contaminated",
-                        "contamination_scan_passed": 0,
-                        "foreign_tokens": foreign,
-                    }
-                return {
-                    "property_id": "profithelm",
-                    "basis": "explicit_tenant",
-                    "contamination_scan_passed": 1,
-                    "foreign_tokens": [],
-                }
-            elif tenant_norm == "gainhelm":
-                foreign = self.scanner.scan_text(query, "gainhelm")
-                if is_prexvo:
-                    foreign = list(set(foreign + ["prexvo statutory token"]))
-                if is_profithelm:
-                    foreign = list(set(foreign + ["profithelm statutory token"]))
-                if foreign:
-                    return {
-                        "property_id": "gainhelm",
-                        "basis": "cross_contaminated",
-                        "contamination_scan_passed": 0,
-                        "foreign_tokens": foreign,
-                    }
-                return {
-                    "property_id": "gainhelm",
+                    "property_id": tenant_norm,
                     "basis": "explicit_tenant",
                     "contamination_scan_passed": 1,
                     "foreign_tokens": [],
                 }
 
-        if is_prexvo and not is_profithelm and not is_gainhelm:
-            foreign = self.scanner.scan_text(query, "prexvo")
+        matched_props = [p for p, hit in matched_map.items() if hit]
+        if len(matched_props) == 1:
+            target_prop = matched_props[0]
+            foreign = self.scanner.scan_text(query, target_prop)
             if foreign:
                 return {
-                    "property_id": "prexvo",
+                    "property_id": target_prop,
                     "basis": "cross_contaminated",
                     "contamination_scan_passed": 0,
                     "foreign_tokens": foreign,
                 }
             return {
-                "property_id": "prexvo",
+                "property_id": target_prop,
                 "basis": "statutory_token",
                 "contamination_scan_passed": 1,
                 "foreign_tokens": [],
             }
 
-        if is_profithelm and not is_prexvo and not is_gainhelm:
-            foreign = self.scanner.scan_text(query, "profithelm")
-            if foreign:
-                return {
-                    "property_id": "profithelm",
-                    "basis": "cross_contaminated",
-                    "contamination_scan_passed": 0,
-                    "foreign_tokens": foreign,
-                }
-            return {
-                "property_id": "profithelm",
-                "basis": "statutory_token",
-                "contamination_scan_passed": 1,
-                "foreign_tokens": [],
-            }
-
-        if is_gainhelm and not is_prexvo and not is_profithelm:
-            foreign = self.scanner.scan_text(query, "gainhelm")
-            if foreign:
-                return {
-                    "property_id": "gainhelm",
-                    "basis": "cross_contaminated",
-                    "contamination_scan_passed": 0,
-                    "foreign_tokens": foreign,
-                }
-            return {
-                "property_id": "gainhelm",
-                "basis": "statutory_token",
-                "contamination_scan_passed": 1,
-                "foreign_tokens": [],
-            }
-
-        if sum((1 if is_prexvo else 0, 1 if is_profithelm else 0, 1 if is_gainhelm else 0)) >= 2:
+        if len(matched_props) >= 2:
             return {
                 "property_id": "unassigned",
                 "basis": "cross_contaminated",

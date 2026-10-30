@@ -361,50 +361,7 @@ _RSS_FINANCIAL_STATUTORY_TOKENS = (
     "fedramp", "hitrust", "c3pao", "pentest",
 )
 
-TENANT_CATEGORY_SEED_TAXONOMY: Dict[str, Dict[str, List[str]]] = {
-    "profithelm": {
-        "b2b_corporate_tax_and_depreciation": [
-            "section 179 depreciation",
-            "section 174 r&d amortization",
-            "section 199a qbi deduction",
-            "corporate amt camt",
-            "qsbs section 1202 exclusion",
-        ],
-        "trade_tariffs_and_landed_cost": [
-            "section 301 import tariff",
-            "cbp customs bond",
-            "merchandise processing fee",
-        ],
-        "entity_payroll_and_commercial_finance": [
-            "s corp vs llc reasonable salary",
-            "commercial invoice factoring",
-            "workers comp class code rate",
-        ],
-    },
-    "prexvo": {
-        "title_iv_student_loan_repayment": [
-            "student loan save plan forbearance",
-            "pslf buyback months",
-            "ibr vs rap student loan",
-            "parent plus double consolidation",
-        ],
-        "student_loan_tax_and_default_relief": [
-            "student loan forgiveness tax bomb",
-            "student loan wage garnishment",
-            "sai fafsa pell grant",
-        ],
-    },
-    "gainhelm": {
-        "enterprise_grc_and_cyber_compliance": [
-            "soc 2 type 2 audit",
-            "cmmc level 2 c3pao",
-            "nist 800 171 sprs score",
-            "iso 27001 certification",
-            "hipaa compliance penalty",
-            "pci dss 4.0 assessment",
-        ],
-    },
-}
+from pseofactory.tenant_facts import TENANT_CATEGORY_SEED_TAXONOMY
 
 SPECIFIC_SUBTOPIC_INTENT_MODIFIERS: tuple[str, ...] = (
     "calculator",

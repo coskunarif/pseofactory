@@ -28,6 +28,13 @@ from pseofactory.contracts import (
     THIN_AFFILIATE_LISTICLE_PATTERNS,
     ECONOMIC_DATASET_PATTERNS,
 )
+from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_DECLARATIONS,
+    TENANT_CANNIBALIZATION_MAPS_BY_ID,
+    TENANT_CORE_TOOLS_BY_ID,
+    get_tenant_contract,
+    resolve_canonical_property_id,
+)
 
 STATUTORY_PROVENANCE_PATTERNS: List[str] = [
     r"\b(?:26\s+U\.?S\.?C\.?|Title\s+26|\d+\s+U\.?S\.?C\.?)\b",
@@ -1277,20 +1284,11 @@ def evaluate_query_modifier_expansion_vs_distinct_tool(
     Zero em-dashes. Zero en-dashes.
     """
     clean_q = str(query or "").strip()
-    prop_raw = str(property_id or "").lower()
-    prop = (
-        "prexvo"
-        if "prexvo" in prop_raw
-        else ("gainhelm" if "gainhelm" in prop_raw else "profithelm")
-    )
-    tools_catalog = list(existing_tools) if existing_tools is not None else (
-        list(_DEFAULT_PREXVO_CORE_TOOLS)
-        if prop == "prexvo"
-        else (
-            list(_DEFAULT_GAINHELM_CORE_TOOLS)
-            if prop == "gainhelm"
-            else list(_DEFAULT_PROFITHELM_CORE_TOOLS)
-        )
+    prop = resolve_canonical_property_id(property_id, default="profithelm")
+    tools_catalog = (
+        list(existing_tools)
+        if existing_tools is not None
+        else list(TENANT_CORE_TOOLS_BY_ID.get(prop) or _DEFAULT_PROFITHELM_CORE_TOOLS)
     )
     cannibal = check_search_intent_cannibalization(
         clean_q,
@@ -2603,24 +2601,14 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
     },
 }
 
-PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
-    "pslf-buyback-calculator": {
-        "canonical_slug": "pslf-qualifying-payment-simulator",
-        "redirect_target": "/tools/pslf-qualifying-payment-simulator/",
-    },
-    "repayment-assistance-plan-calculator": {
-        "canonical_slug": "rap-payment-calculator",
-        "redirect_target": "/tools/rap-payment-calculator/",
-    },
-    "student-loan-interest-subsidy-calculator": {
-        "canonical_slug": "save-plan-litigation-transition",
-        "redirect_target": "/tools/save-plan-litigation-transition/",
-    },
-    "tax-deduction-for-car-loan-interest": {
-        "canonical_slug": "student-loan-repayment-calculator",
-        "redirect_target": "/tools/",
-    },
-}
+for _ph_slug, _ph_info in CANNIBALIZING_CLONE_CONSOLIDATION_MAP.items():
+    TENANT_CANNIBALIZATION_MAPS_BY_ID.setdefault("profithelm", {})[_ph_slug] = dict(_ph_info)
+if "profithelm" in CANONICAL_TENANT_DECLARATIONS:
+    CANONICAL_TENANT_DECLARATIONS["profithelm"].cannibalizing_clone_consolidation_map.update(
+        TENANT_CANNIBALIZATION_MAPS_BY_ID["profithelm"]
+    )
+
+PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = TENANT_CANNIBALIZATION_MAPS_BY_ID["prexvo"]
 
 OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP: Dict[str, str] = {
     "/shopify-profit-tracker": "/tools/",
@@ -2705,32 +2693,28 @@ _B2B_ADJACENT_TOOL_METADATA: Dict[str, Dict[str, str]] = {
     },
 }
 
-GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
-    "cmmc-level-2-audit-cost-calculator": {
-        "canonical_slug": "cmmc-2-0-compliance-cost-calculator",
-        "redirect_target": "/tools/cmmc-2-0-compliance-cost-calculator/",
-    },
-    "penetration-testing-cost-estimator": {
-        "canonical_slug": "penetration-testing-scoping-cost-calculator",
-        "redirect_target": "/tools/penetration-testing-scoping-cost-calculator/",
-    },
-    "cyber-liability-insurance-premium-calculator": {
-        "canonical_slug": "cyber-liability-insurance-breach-exposure-calculator",
-        "redirect_target": "/tools/cyber-liability-insurance-breach-exposure-calculator/",
-    },
-    "fedramp-authorization-cost-calculator": {
-        "canonical_slug": "fedramp-authorization-3pao-cost-calculator",
-        "redirect_target": "/tools/fedramp-authorization-3pao-cost-calculator/",
-    },
-    "pci-dss-4-0-compliance-audit-cost-calculator": {
-        "canonical_slug": "pci-dss-4-0-compliance-cost-calculator",
-        "redirect_target": "/tools/pci-dss-4-0-compliance-cost-calculator/",
-    },
-    "hitrust-certification-cost-roi-calculator": {
-        "canonical_slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
-        "redirect_target": "/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/",
-    },
-}
+GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = TENANT_CANNIBALIZATION_MAPS_BY_ID["gainhelm"]
+
+
+def get_all_cannibalizing_clone_maps() -> Dict[str, Dict[str, str]]:
+    """Returns the merged cannibalization clone consolidation map across all registered declarative tenants."""
+    merged: Dict[str, Dict[str, str]] = dict(CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
+    for tenant_map in TENANT_CANNIBALIZATION_MAPS_BY_ID.values():
+        merged.update(tenant_map)
+    return merged
+
+
+def get_all_tenant_core_tools() -> List[Dict[str, Any]]:
+    """Returns the combined default core tools catalog across all registered declarative tenants."""
+    combined: List[Dict[str, Any]] = []
+    seen_slugs: Set[str] = set()
+    for tool_list in TENANT_CORE_TOOLS_BY_ID.values():
+        for tool in tool_list:
+            slug = str(tool.get("slug") or "").strip().lower()
+            if slug and slug not in seen_slugs:
+                combined.append(tool)
+                seen_slugs.add(slug)
+    return combined
 
 
 def is_retired_or_consolidated_slug(slug: str, property_id: Optional[str] = None) -> bool:
@@ -2741,22 +2725,25 @@ def is_retired_or_consolidated_slug(slug: str, property_id: Optional[str] = None
     if is_synthetic_test_candidate(s):
         return True
     prop = str(property_id or "").strip().lower()
-    if prop == "prexvo":
-        return s in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP or s == "loans"
-    if prop == "gainhelm":
-        return s in GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP or any(
-            t in s for t in _GAINHELM_PRE_PIVOT_TERMS
-        )
-    if prop == "profithelm":
-        return (
-            s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
-            or f"/tools/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
-            or f"/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
-        )
+    if prop:
+        resolved_prop = resolve_canonical_property_id(prop, default=prop)
+        tenant_map = TENANT_CANNIBALIZATION_MAPS_BY_ID.get(resolved_prop, {})
+        if s in tenant_map:
+            return True
+        if resolved_prop == "prexvo":
+            return s == "loans"
+        if resolved_prop == "gainhelm":
+            return any(t in s for t in _GAINHELM_PRE_PIVOT_TERMS)
+        if resolved_prop == "profithelm":
+            return (
+                s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+                or f"/tools/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+                or f"/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
+            )
+        return False
+    all_maps = get_all_cannibalizing_clone_maps()
     return (
-        s in CANNIBALIZING_CLONE_CONSOLIDATION_MAP
-        or s in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
-        or s in GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+        s in all_maps
         or f"/tools/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
         or f"/{s}" in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
     )
@@ -3033,14 +3020,8 @@ def reconcile_void_candidates_queue(
     if not raw_lines:
         return 0
 
-    all_clone_maps: Dict[str, Dict[str, str]] = {}
-    all_clone_maps.update(PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
-    all_clone_maps.update(CANNIBALIZING_CLONE_CONSOLIDATION_MAP)
-    combined_core_tools = (
-        list(_DEFAULT_PROFITHELM_CORE_TOOLS)
-        + list(_DEFAULT_PREXVO_CORE_TOOLS)
-        + list(_DEFAULT_GAINHELM_CORE_TOOLS)
-    )
+    all_clone_maps = get_all_cannibalizing_clone_maps()
+    combined_core_tools = get_all_tenant_core_tools()
 
     updated_count = 0
     reconciled_records: List[Dict[str, Any]] = []
@@ -3882,45 +3863,9 @@ _GENERIC_REDIRECT_SINKS: Set[str] = {
     "/terms/",
 }
 
-_DEFAULT_PROFITHELM_CORE_TOOLS: List[Dict[str, Any]] = [
-    {"slug": "irs-2027-tax-brackets", "primary_keyword": "irs 2027 tax brackets"},
-    {"slug": "crypto-tax-calculator", "primary_keyword": "crypto tax calculator"},
-    {"slug": "saas-runway-calculator", "primary_keyword": "saas runway calculator"},
-    {"slug": "prediction-market-odds", "primary_keyword": "prediction market odds"},
-    {"slug": "tcja-sunset-capital-gains", "primary_keyword": "tcja sunset capital gains"},
-    {"slug": "section-179-calculator", "primary_keyword": "section 179 calculator"},
-    {"slug": "treasury-yield-calculator", "primary_keyword": "treasury yield calculator"},
-    {"slug": "section-1031-calculator", "primary_keyword": "section 1031 calculator"},
-    {"slug": "prediction-market-tax", "primary_keyword": "prediction market tax"},
-]
-
-_DEFAULT_PREXVO_CORE_TOOLS: List[Dict[str, Any]] = [
-    {"slug": "rap-vs-ibr-calculator", "primary_keyword": "rap vs ibr calculator"},
-    {"slug": "tiered-standard-calculator", "primary_keyword": "tiered standard calculator"},
-    {"slug": "paye-sunset-calculator", "primary_keyword": "paye sunset calculator"},
-    {"slug": "icr-repayment-calculator", "primary_keyword": "icr repayment calculator"},
-    {"slug": "pslf-qualifying-payment-simulator", "primary_keyword": "pslf qualifying payment simulator"},
-    {"slug": "grad-plus-borrowing-cap-calculator", "primary_keyword": "grad plus borrowing cap calculator"},
-    {"slug": "ibr-hardship-cap-calculator", "primary_keyword": "ibr hardship cap calculator"},
-    {"slug": "married-filing-separately-student-loan-calculator", "primary_keyword": "married filing separately student loan calculator"},
-    {"slug": "parent-plus-double-consolidation", "primary_keyword": "parent plus double consolidation"},
-    {"slug": "rap-payment-calculator", "primary_keyword": "rap payment calculator"},
-    {"slug": "save-plan-litigation-transition", "primary_keyword": "save plan litigation transition"},
-    {"slug": "student-loan-refinance-break-even-calculator", "primary_keyword": "student loan refinance break even calculator"},
-]
-
-_DEFAULT_GAINHELM_CORE_TOOLS: List[Dict[str, Any]] = [
-    {"slug": "soc-2-audit-cost-calculator", "primary_keyword": "soc 2 audit cost calculator"},
-    {"slug": "cmmc-2-0-compliance-cost-calculator", "primary_keyword": "cmmc 2.0 compliance cost calculator"},
-    {"slug": "nist-800-171-sprs-score-calculator", "primary_keyword": "nist 800-171 sprs score calculator"},
-    {"slug": "iso-27001-certification-cost-calculator", "primary_keyword": "iso 27001 certification cost calculator"},
-    {"slug": "hipaa-violation-penalty-breach-cost-calculator", "primary_keyword": "hipaa violation penalty breach cost calculator"},
-    {"slug": "penetration-testing-scoping-cost-calculator", "primary_keyword": "penetration testing scoping cost calculator"},
-    {"slug": "cyber-liability-insurance-breach-exposure-calculator", "primary_keyword": "cyber liability insurance breach exposure calculator"},
-    {"slug": "fedramp-authorization-3pao-cost-calculator", "primary_keyword": "fedramp authorization 3pao cost calculator"},
-    {"slug": "pci-dss-4-0-compliance-cost-calculator", "primary_keyword": "pci dss 4.0 compliance cost calculator"},
-    {"slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator", "primary_keyword": "hitrust csf e1 i1 r2 certification cost calculator"},
-]
+_DEFAULT_PROFITHELM_CORE_TOOLS: List[Dict[str, Any]] = TENANT_CORE_TOOLS_BY_ID["profithelm"]
+_DEFAULT_PREXVO_CORE_TOOLS: List[Dict[str, Any]] = TENANT_CORE_TOOLS_BY_ID["prexvo"]
+_DEFAULT_GAINHELM_CORE_TOOLS: List[Dict[str, Any]] = TENANT_CORE_TOOLS_BY_ID["gainhelm"]
 
 
 def load_property_redirect_map(
@@ -3929,7 +3874,7 @@ def load_property_redirect_map(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Loads and normalizes all 301 consolidation and redirect rules for a property from:
-    1. Built-in CANNIBALIZING_CLONE_CONSOLIDATION_MAP / PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP
+    1. Built-in TENANT_CANNIBALIZATION_MAPS_BY_ID / CANNIBALIZING_CLONE_CONSOLIDATION_MAP
     2. Built-in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP
     3. On-disk content/redirects.json and dist/_redirects (if repo_root is provided)
     Resolves transitive targets and returns a lookup dictionary keyed by normalized source path
@@ -3938,24 +3883,12 @@ def load_property_redirect_map(
     """
     import urllib.parse
 
-    prop = str(property_id or "profithelm").strip().lower()
-    if "prexvo" in prop:
-        prop = "prexvo"
-    elif "gainhelm" in prop:
-        prop = "gainhelm"
-    else:
-        prop = "profithelm"
+    prop = resolve_canonical_property_id(property_id, default="profithelm")
+    contract = get_tenant_contract(prop)
 
     raw_pairs: Dict[str, Tuple[str, str]] = {}
 
-    if prop == "prexvo":
-        for c_slug, info in PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP.items():
-            t_path = str(info.get("redirect_target") or "/tools/").strip()
-            can_slug = str(info.get("canonical_slug") or "").strip() if t_path not in _GENERIC_REDIRECT_SINKS else ""
-            raw_pairs[f"/tools/{c_slug}/"] = (t_path, can_slug)
-    elif prop == "gainhelm":
-        pass
-    else:
+    if prop == "profithelm":
         for src_p, dst_p in OFF_TOPIC_REDIRECT_CONSOLIDATION_MAP.items():
             s_norm = "/" + src_p.strip("/") + "/" if src_p.strip("/") else "/"
             d_norm = "/" + dst_p.strip("/") + "/" if dst_p.strip("/") else "/"
@@ -3970,16 +3903,14 @@ def load_property_redirect_map(
             can_slug = str(info.get("canonical_slug") or "").strip() if t_norm not in _GENERIC_REDIRECT_SINKS else ""
             raw_pairs[f"/tools/{c_slug}/"] = (t_norm, can_slug)
         raw_pairs["/tools/query-two-buildable/"] = ("/tools/", "")
+    else:
+        for c_slug, info in TENANT_CANNIBALIZATION_MAPS_BY_ID.get(prop, {}).items():
+            t_path = str(info.get("redirect_target") or "/tools/").strip()
+            t_norm = "/" + t_path.strip("/") + "/" if t_path.strip("/") else "/"
+            can_slug = str(info.get("canonical_slug") or "").strip() if t_norm not in _GENERIC_REDIRECT_SINKS else ""
+            raw_pairs[f"/tools/{c_slug}/"] = (t_norm, can_slug)
 
-    default_tenant_root = (
-        Path("/home/ubuntuadmin/projects/prexvo")
-        if prop == "prexvo"
-        else (
-            Path("/home/ubuntuadmin/projects/gainhelm")
-            if prop == "gainhelm"
-            else Path("/home/ubuntuadmin/projects/profithelm-platform")
-        )
-    )
+    default_tenant_root = contract.repo_root_path if contract is not None else Path("/home/ubuntuadmin/projects/profithelm-platform")
     roots_to_scan: List[Path] = []
     if default_tenant_root.is_dir():
         roots_to_scan.append(default_tenant_root)
@@ -4287,19 +4218,9 @@ def resolve_redirected_gsc_target(
         property_id = str(row_d.get("property_id") or property_id or "profithelm")
     else:
         eff_url = str(target_url or page_url or "").strip()
-    prop = str(property_id or "profithelm").strip().lower()
-    if "prexvo" in prop or "prexvo.com" in eff_url.lower():
-        prop = "prexvo"
-    elif "gainhelm" in prop or "gainhelm.com" in eff_url.lower():
-        prop = "gainhelm"
-    else:
-        prop = "profithelm"
-
-    domain = (
-        "prexvo.com"
-        if prop == "prexvo"
-        else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
-    )
+    prop = resolve_canonical_property_id(eff_url or property_id, default=resolve_canonical_property_id(property_id, default="profithelm"))
+    contract = get_tenant_contract(prop)
+    domain = contract.domain if contract is not None else "profithelm.com"
     raw_url = eff_url
     raw_slug = str(slug or "").strip().strip("/").lower()
     raw_query = str(query or "").strip()
@@ -4471,15 +4392,7 @@ def resolve_redirected_gsc_target(
         # Check existing_tools (including default core catalog + dynamic_tools.json)
         tools_list = list(existing_tools or [])
         seen_t_slugs = {str(t.get("slug") or "").strip().lower() for t in tools_list if isinstance(t, dict)}
-        default_core = (
-            _DEFAULT_PREXVO_CORE_TOOLS
-            if prop == "prexvo"
-            else (
-                _DEFAULT_GAINHELM_CORE_TOOLS
-                if prop == "gainhelm"
-                else _DEFAULT_PROFITHELM_CORE_TOOLS
-            )
-        )
+        default_core = TENANT_CORE_TOOLS_BY_ID.get(prop) or _DEFAULT_PROFITHELM_CORE_TOOLS
         for dt in default_core:
             if dt["slug"] not in seen_t_slugs:
                 tools_list.append(dt)

@@ -68,9 +68,8 @@ def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.qualification import (
-        CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
-        PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
         evaluate_query_modifier_expansion_vs_distinct_tool,
+        get_all_cannibalizing_clone_maps,
         is_synthetic_test_candidate,
     )
 
@@ -85,7 +84,7 @@ def stamp_engine_verdict_status(record: Dict[str, Any]) -> Dict[str, Any]:
         record["status_reason"] = "Rejected synthetic, scraper, or off-topic candidate"
         return record
 
-    all_clone_maps = {**PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP, **CANNIBALIZING_CLONE_CONSOLIDATION_MAP}
+    all_clone_maps = get_all_cannibalizing_clone_maps()
     matched_clone = eff_slug if eff_slug in all_clone_maps else (slug_from_query if slug_from_query in all_clone_maps else "")
     if matched_clone:
         info = all_clone_maps[matched_clone]

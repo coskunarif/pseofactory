@@ -20,6 +20,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from pseofactory.edge import HostHygieneAuditor
 from pseofactory.telemetry import TelemetryEvent, AtomicTelemetryLogger
 from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_DECLARATIONS,
+    CANONICAL_TENANT_DOMAINS,
     CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER,
     CLOUDFLARE_REGISTRAR_ATTESTATION_SHA256,
     TenantFactStore,
@@ -27,11 +29,7 @@ from pseofactory.tenant_facts import (
 
 CLOUDFLARE_ACCOUNT_ID = "8789c54bef2d281d4a8afb4df34f9878"
 
-ACTIVE_TENANT_DOMAINS = (
-    "profithelm.com",
-    "prexvo.com",
-    "gainhelm.com",
-)
+ACTIVE_TENANT_DOMAINS = tuple(CANONICAL_TENANT_DOMAINS)
 PERSONAL_INFRA_DOMAINS = (
     "arifcoskun.com",
 )
@@ -45,16 +43,20 @@ DECOMMISSIONED_DOMAINS = (
 KEPT_DOMAINS = ACTIVE_TENANT_DOMAINS + PERSONAL_INFRA_DOMAINS + HIBERNATED_RESERVE_DOMAINS
 
 ACTIVE_ROUTABLE_ZONE_IDS: Dict[str, str] = {
-    "profithelm.com": "e0d591326d8e26365edd7867453b604f",
-    "prexvo.com": "fdc412697a55e721ddd3ec7d9070daff",
-    "gainhelm.com": "0a03264e19beb2cb17ba01860b701701",
+    **{
+        contract.domain: contract.cloudflare_zone_id
+        for contract in CANONICAL_TENANT_DECLARATIONS.values()
+        if contract.cloudflare_zone_id
+    },
     "arifcoskun.com": "23c4be6bf04fcde33b938b8f94907457",
 }
 
 EXPECTED_ACTIVE_CNAME_TARGETS: Dict[str, str] = {
-    "profithelm.com": "profithelm.pages.dev",
-    "prexvo.com": "prexvo.pages.dev",
-    "gainhelm.com": "gainhelm.pages.dev",
+    **{
+        contract.domain: contract.cloudflare_pages_cname_target
+        for contract in CANONICAL_TENANT_DECLARATIONS.values()
+        if contract.cloudflare_pages_cname_target
+    },
     "arifcoskun.com": "arif-coskun-platform.pages.dev",
 }
 
@@ -73,9 +75,7 @@ ALL_PORTFOLIO_ZONE_IDS: Dict[str, str] = {
 FORBIDDEN_ROUTING_RECORD_TYPES = ("A", "AAAA", "CNAME", "MX")
 
 DEFAULT_ENDPOINTS = [
-    "https://profithelm.com",
-    "https://prexvo.com",
-    "https://gainhelm.com",
+    *[contract.canonical_base for contract in CANONICAL_TENANT_DECLARATIONS.values()],
     "https://arifcoskun.com",
 ]
 

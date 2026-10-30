@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 import re
 from typing import Dict, List, Any, Optional, Set, Tuple
 
@@ -86,6 +87,9 @@ class TenantStatutoryTruth:
             "statutory_citations": dict(self.statutory_citations),
             "limits_and_thresholds": dict(self.limits_and_thresholds),
         }
+
+
+StatutoryTruthRule = TenantStatutoryTruth
 
 
 @dataclass(frozen=True)
@@ -918,6 +922,866 @@ def compute_registrar_ledger_sha256(
 CLOUDFLARE_REGISTRAR_ATTESTATION_SHA256: str = compute_registrar_ledger_sha256()
 
 
+@dataclass(frozen=True)
+class DeclarativeTenantContract:
+    """
+    Single declarative registration contract for a pseofactory tenant property.
+    All downstream discovery, qualification, syndication, video synthesis,
+    indexing velocity, GSC remediation, and maintenance loops derive their
+    per-tenant wiring and statutory/entity metadata from this contract.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    property_id: str
+    repo_dir_name: str
+    domain: str
+    canonical_base: str = ""
+    brand_name: str = ""
+    package_name: str = ""
+    dist_dir: str = "dist"
+    repo_root: str = ""
+    runner_work_dist_dir: str = ""
+    env_prefix: str = ""
+    linkedin_company_id: str = ""
+    cloudflare_zone_id: str = ""
+    cloudflare_pages_cname_target: str = ""
+    truth_profile: Optional[TenantTruthProfile] = None
+    statutory_truth: Optional[StatutoryTruthRule] = None
+    entity_type: str = ""
+    research_entity: str = ""
+    legal_entity: str = ""
+    publisher_entity_label: str = ""
+    editorial_classification: str = ""
+    primary_statutory_authority: str = ""
+    economic_dataset_label: str = ""
+    llms_manifest_title: str = ""
+    llms_statutory_summary_block: str = ""
+    home_topic_label: str = ""
+    tools_directory_topic_label: str = ""
+    fallback_calculator_title: str = ""
+    default_calculator_fallback_title: str = ""
+    default_heading_fallback_label: str = ""
+    default_query_syntax_template: str = ""
+    statutory_intent_tokens: Tuple[str, ...] = ()
+    own_boundary_tokens: Tuple[str, ...] = ()
+    cross_tenant_own_markers: Tuple[str, ...] = ()
+    category_seed_taxonomy: Dict[str, Any] = field(default_factory=dict)
+    default_core_tools: Tuple[Dict[str, Any], ...] = ()
+    cannibalization_clone_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    cannibalizing_clone_consolidation_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    flagship_anchor_slugs: Tuple[str, ...] = ()
+    video_branding: Dict[str, Any] = field(default_factory=dict)
+    default_cpc_usd: float = 10.5
+    default_erpm_usd: float = 85.0
+    default_sample_query: str = ""
+    default_sample_slug: str = ""
+    top_modifier_fallback: str = "(2026 Rules)"
+    top_modifier_family: str = ""
+    vertical_paren_modifier: str = "Statutory Guide"
+    default_smoke_probe: Dict[str, str] = field(default_factory=dict)
+    smoke_probe_query: str = ""
+    smoke_foreign_query: str = ""
+    priority_hub_slugs: Tuple[str, ...] = ()
+    default_complementary_peers: Tuple[Tuple[str, str], ...] = ()
+    primary_fallback_manifest_slug: str = ""
+    primary_partner_key: str = ""
+    primary_partner_name: str = ""
+    primary_partner_url: str = ""
+    primary_partner_cta: str = ""
+    tools_directory_seed_section_html: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.canonical_base and self.domain:
+            object.__setattr__(self, "canonical_base", f"https://{self.domain}")
+        if not self.package_name and self.property_id:
+            object.__setattr__(self, "package_name", self.property_id)
+        if not self.brand_name and self.property_id:
+            object.__setattr__(self, "brand_name", self.property_id.capitalize())
+        if self.cannibalizing_clone_consolidation_map and not self.cannibalization_clone_map:
+            object.__setattr__(
+                self,
+                "cannibalization_clone_map",
+                dict(self.cannibalizing_clone_consolidation_map),
+            )
+        elif self.cannibalization_clone_map and not self.cannibalizing_clone_consolidation_map:
+            object.__setattr__(
+                self,
+                "cannibalizing_clone_consolidation_map",
+                self.cannibalization_clone_map,
+            )
+        if self.default_calculator_fallback_title and not self.fallback_calculator_title:
+            object.__setattr__(self, "fallback_calculator_title", self.default_calculator_fallback_title)
+        elif self.fallback_calculator_title and not self.default_calculator_fallback_title:
+            object.__setattr__(self, "default_calculator_fallback_title", self.fallback_calculator_title)
+        if self.cross_tenant_own_markers and not self.own_boundary_tokens:
+            object.__setattr__(self, "own_boundary_tokens", tuple(self.cross_tenant_own_markers))
+        if (self.smoke_probe_query or self.smoke_foreign_query) and not self.default_smoke_probe:
+            object.__setattr__(
+                self,
+                "default_smoke_probe",
+                {
+                    "query": self.smoke_probe_query or f"{self.property_id} calculator",
+                    "foreign_query": self.smoke_foreign_query,
+                },
+            )
+        if self.truth_profile is None:
+            eff_stat = self.statutory_truth or TenantStatutoryTruth(tenant_id=self.property_id)
+            synth_profile = TenantTruthProfile(
+                tenant_id=self.property_id,
+                brand_name=self.brand_name,
+                canonical_domain=self.canonical_base,
+                pricing_tiers={},
+                features={},
+                statutory_truth=eff_stat,
+                claims_allowlist=[],
+                claims_banned=[],
+                mandatory_disclosures=[],
+                cross_tenant_forbidden_tokens=set(),
+            )
+            object.__setattr__(self, "truth_profile", synth_profile)
+
+    @property
+    def repo_root_path(self) -> Path:
+        if self.repo_root:
+            return Path(self.repo_root)
+        return Path(f"/home/ubuntuadmin/projects/{self.repo_dir_name or self.property_id}")
+
+    def to_tenant_config_dict(self) -> Dict[str, str]:
+        return {
+            "property_id": self.property_id,
+            "repo_dir_name": self.repo_dir_name,
+            "domain": self.domain,
+            "canonical_base": self.canonical_base,
+            "brand_name": self.brand_name,
+            "package_name": self.package_name,
+            "dist_dir": self.dist_dir,
+            "linkedin_company_id": self.linkedin_company_id,
+        }
+
+
+TenantRegistrationContract = DeclarativeTenantContract
+
+
+def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContract]:
+    return {
+        "profithelm": DeclarativeTenantContract(
+            property_id="profithelm",
+            repo_dir_name="profithelm-platform",
+            domain="profithelm.com",
+            canonical_base="https://profithelm.com",
+            brand_name="ProfitHelm",
+            package_name="profithelm",
+            dist_dir="dist",
+            repo_root="/home/ubuntuadmin/projects/profithelm-platform",
+            runner_work_dist_dir="/home/ubuntuadmin/.local/share/actions-runner/profithelm-platform/_work/profithelm-platform/profithelm-platform/dist",
+            env_prefix="PROFITHELM",
+            linkedin_company_id="143884102",
+            cloudflare_zone_id="e0d591326d8e26365edd7867453b604f",
+            cloudflare_pages_cname_target="profithelm.pages.dev",
+            truth_profile=_build_profithelm_profile(),
+            research_entity="ProfitHelm Quantitative Research",
+            legal_entity="ProfitHelm LLC",
+            publisher_entity_label="ProfitHelm LLC",
+            editorial_classification="Deterministic B2B Corporate Tax, Section 179 Depreciation, Section 1031 Exchange & Treasury Modeling Engine",
+            primary_statutory_authority="IRC Section 1(j); IRC Section 179; IRC Section 1031",
+            economic_dataset_label="IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series",
+            llms_manifest_title="ProfitHelm: Complete Machine Knowledge Base & Statutory Calculation Manifest",
+            llms_statutory_summary_block=(
+                "## Key Statutory Authorities\n"
+                "- TCJA Sunset: Federal marginal rates revert to 10%-39.6% on December 31, 2025 under IRC Section 1(j).\n"
+                "- Section 179: Maximum deduction cap $2,560,000 with $4,090,000 equipment phase-out under IRC Section 179 and IRC Section 168(k).\n"
+                "- Section 1031: 45-day replacement identification and 180-day closing deadlines under 26 U.S.C. Section 1031.\n"
+                "- GAAP ASC 205-40: Going-concern cash runway forecasting benchmarked to monthly net burn and liquid reserves.\n"
+            ),
+            home_topic_label="Statutory Tax, Depreciation & Corporate Treasury Calculators",
+            tools_directory_topic_label="Statutory Financial Calculators and Decision Tools",
+            fallback_calculator_title="Statutory Tax and Financial Model Calculator",
+            default_heading_fallback_label="Statutory Tax Calculator",
+            default_query_syntax_template="?income={income}&status={status}",
+            statutory_intent_tokens=(
+                "section 1031",
+                "1031 exchange",
+                "exchange 1031",
+                "like-kind exchange",
+                "like kind exchange",
+                "section 179",
+                "bonus depreciation",
+                "section 168",
+                "macrs",
+                "tcja",
+                "commercial clean energy 179d",
+                "commercial clean energy",
+                "clean energy 179d",
+                "cost segregation",
+                "capital gains tax",
+                "tax bracket",
+                "tax brackets",
+                "tcja sunset",
+                "saas runway",
+                "runway calculator",
+                "burn rate",
+                "prediction market tax",
+                "section 1256",
+                "1256 contract",
+                "section 1202",
+                "qsbs",
+                "section 174",
+                "r&d tax",
+                "corporate amt",
+                "camt",
+                "section 199a",
+                "199a",
+                "s-corp payroll",
+                "niit",
+                "crypto tax",
+                "treasury yield",
+                "financial simulation",
+            ),
+            own_boundary_tokens=(
+                "profithelm",
+                "profithelm.com",
+                "143884102",
+                "section 1031",
+                "1031 exchange",
+                "section 179",
+                "tcja",
+            ),
+            category_seed_taxonomy={
+                "b2b_corporate_tax_and_depreciation": [
+                    "section 179 depreciation",
+                    "section 174 r&d amortization",
+                    "section 199a qbi deduction",
+                    "corporate amt camt",
+                    "qsbs section 1202 exclusion",
+                ],
+                "trade_tariffs_and_landed_cost": [
+                    "section 301 import tariff",
+                    "cbp customs bond",
+                    "merchandise processing fee",
+                ],
+                "entity_payroll_and_commercial_finance": [
+                    "s corp vs llc reasonable salary",
+                    "commercial invoice factoring",
+                    "workers comp class code rate",
+                ],
+            },
+            default_core_tools=(
+                {"slug": "irs-2027-tax-brackets", "primary_keyword": "irs 2027 tax brackets"},
+                {"slug": "crypto-tax-calculator", "primary_keyword": "crypto tax calculator"},
+                {"slug": "saas-runway-calculator", "primary_keyword": "saas runway calculator"},
+                {"slug": "prediction-market-odds", "primary_keyword": "prediction market odds"},
+                {"slug": "tcja-sunset-capital-gains", "primary_keyword": "tcja sunset capital gains"},
+                {"slug": "section-179-calculator", "primary_keyword": "section 179 calculator"},
+                {"slug": "treasury-yield-calculator", "primary_keyword": "treasury yield calculator"},
+                {"slug": "section-1031-calculator", "primary_keyword": "section 1031 calculator"},
+                {"slug": "prediction-market-tax", "primary_keyword": "prediction market tax"},
+            ),
+            flagship_anchor_slugs=(
+                "section-179-calculator",
+                "irs-2027-tax-brackets",
+                "section-1031-calculator",
+                "quarterly-estimated-tax-penalty-calculator",
+                "commercial-heavy-vehicle-section-179-weight-calculator",
+                "macrs-depreciation-calculator",
+            ),
+            video_branding={
+                "brand_name": "ProfitHelm",
+                "domain": "profithelm.com",
+                "canonical_base": "https://profithelm.com",
+                "badge_text": "PROFITHELM.COM | IRC STATUTORY ENGINE",
+                "verification_pill": "2026 STATUTORY VERIFIED",
+                "bg_rgb": (15, 23, 42),
+                "card_rgb": (30, 41, 59),
+                "accent_rgb": (16, 185, 129),
+                "accent_hex": "#10b981",
+                "voice": "en-US-ChristopherNeural",
+            },
+            default_cpc_usd=10.5,
+            default_erpm_usd=85.0,
+            default_sample_query="ca tax brackets 2027",
+            default_sample_slug="irs-2027-tax-brackets/california",
+            top_modifier_fallback="(2026 Brackets)",
+            vertical_paren_modifier="IRC Guide",
+            default_smoke_probe={
+                "query": "section 179 deduction calculator",
+                "foreign_query": "save plan student loan repayment calculator",
+            },
+            priority_hub_slugs=(
+                "irs-2027-tax-brackets",
+                "crypto-tax-calculator",
+            ),
+            default_complementary_peers=(
+                ("irs-2027-tax-brackets", "Federal Tax Bracket & Marginal Rate Calculator"),
+                ("section-179-calculator", "Section 179 Equipment Depreciation Calculator"),
+                ("section-1031-calculator", "Section 1031 Real Estate Exchange Calculator"),
+            ),
+            primary_fallback_manifest_slug="tax-bracket-capital-allocation-hub",
+            primary_partner_key="mercury",
+            primary_partner_name="Mercury Business Banking",
+            primary_partner_url="https://mercury.com/r/profithelm-llc",
+            primary_partner_cta="Open a Mercury Account",
+            tools_directory_seed_section_html=(
+                '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                '        <h2>Verified Commercial Execution Partners</h2>\n'
+                '        <div class="affiliate-card partner-card"><a href="/r/crest_capital" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
+                '      </section>\n    '
+            ),
+        ),
+        "prexvo": DeclarativeTenantContract(
+            property_id="prexvo",
+            repo_dir_name="prexvo",
+            domain="prexvo.com",
+            canonical_base="https://prexvo.com",
+            brand_name="Prexvo",
+            package_name="prexvo",
+            dist_dir="dist",
+            repo_root="/home/ubuntuadmin/projects/prexvo",
+            runner_work_dist_dir="/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist",
+            env_prefix="PREXVO",
+            linkedin_company_id="106482194",
+            cloudflare_zone_id="fdc412697a55e721ddd3ec7d9070daff",
+            cloudflare_pages_cname_target="prexvo.pages.dev",
+            truth_profile=_build_prexvo_profile(),
+            research_entity="Prexvo Statutory Research Group",
+            legal_entity="Prexvo LLC",
+            publisher_entity_label="Prexvo Statutory Research Group",
+            editorial_classification="Deterministic Title IV Federal Student Loan & Private Refinance Decision Engine",
+            primary_statutory_authority="Title IV of the Higher Education Act; 34 CFR Part 685",
+            economic_dataset_label="Federal Student Aid Portfolio Summary and HHS Poverty Guidelines",
+            llms_manifest_title="Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest",
+            llms_statutory_summary_block=(
+                "## Title IV Statutory Parameter Specifications & Formula Definitions\n"
+                "- Repayment Assistance Plan (RAP): Discretionary income calculated at 225% of HHS Poverty Guidelines (42 U.S.C. 9902(2)). Statutory rate is 10% of discretionary income. 100% unpaid interest subsidy applies to undergraduate balances.\n"
+                "- Income-Based Repayment (IBR): Discretionary income calculated at 150% of HHS Poverty Guidelines under 34 CFR 685.221. Rate is 15% for pre-July 2014 borrowers (25-year forgiveness) and 10% for new borrowers (20-year forgiveness), capped at the 10-year standard payment amount.\n"
+                "- Pay As You Earn (PAYE): Governed by 34 CFR 685.209. 150% poverty exemption, 10% discretionary income rate, 20-year forgiveness horizon, capped at 10-year standard repayment payment.\n"
+                "- Income-Contingent Repayment (ICR): Governed by 34 CFR 685.209(b). Lesser of: 20% discretionary income over 100% poverty line, or 12-year income-adjusted payment formula. Sole direct IDR option for consolidated Parent PLUS loans.\n"
+                "- Tiered Standard Repayment: Governed by 34 CFR 685.208. Fixed amortization terms based on total debt: $7,500-$9,999 (12 years), $10,000-$19,999 (15 years), $20,000-$39,999 (20 years), $40,000-$59,999 (25 years), $60,000+ (30 years).\n"
+                "- PSLF Buyback (34 CFR 685.219(g)): Allows borrowers with 120 months of qualifying public service employment to buy back eligible months of deferment or forbearance at the lower historical IDR payment amount.\n"
+            ),
+            home_topic_label="Federal Student Loan Repayment, PSLF & Title IV Decision Engine",
+            tools_directory_topic_label="Statutory Financial Calculators and Decision Tools",
+            fallback_calculator_title="Title IV Student Loan Repayment Calculator",
+            default_heading_fallback_label="Title IV Repayment Calculator",
+            default_query_syntax_template="?agi={agi}&debt={debt}&family={size}&status={status}",
+            statutory_intent_tokens=(
+                "title iv",
+                "34 cfr",
+                "student loan",
+                "student loans",
+                "repayment assistance plan",
+                "pslf",
+                "direct consolidation loan",
+                "save plan",
+                "idr waiver",
+                "student loan forgiveness",
+                "forgiveness tax bomb",
+                "ibr tax bomb",
+                "ibr payment",
+                "ibr repayment",
+                "ibr calculator",
+                "vs ibr",
+                "ibr vs",
+                "parent plus",
+                "section 108f",
+            ),
+            own_boundary_tokens=(
+                "prexvo",
+                "prexvo.com",
+                "106482194",
+                "title iv",
+                "34 cfr",
+                "pslf",
+                "paye sunset",
+                "student loan",
+                "repayment assistance plan",
+                "income-contingent repayment",
+                "direct consolidation",
+            ),
+            category_seed_taxonomy={
+                "title_iv_student_loan_repayment": [
+                    "student loan save plan forbearance",
+                    "pslf buyback months",
+                    "ibr vs rap student loan",
+                    "parent plus double consolidation",
+                ],
+                "student_loan_tax_and_default_relief": [
+                    "student loan forgiveness tax bomb",
+                    "student loan wage garnishment",
+                    "sai fafsa pell grant",
+                ],
+            },
+            default_core_tools=(
+                {"slug": "rap-vs-ibr-calculator", "primary_keyword": "rap vs ibr calculator"},
+                {"slug": "tiered-standard-calculator", "primary_keyword": "tiered standard calculator"},
+                {"slug": "paye-sunset-calculator", "primary_keyword": "paye sunset calculator"},
+                {"slug": "icr-repayment-calculator", "primary_keyword": "icr repayment calculator"},
+                {"slug": "pslf-qualifying-payment-simulator", "primary_keyword": "pslf qualifying payment simulator"},
+                {"slug": "grad-plus-borrowing-cap-calculator", "primary_keyword": "grad plus borrowing cap calculator"},
+                {"slug": "ibr-hardship-cap-calculator", "primary_keyword": "ibr hardship cap calculator"},
+                {"slug": "married-filing-separately-student-loan-calculator", "primary_keyword": "married filing separately student loan calculator"},
+                {"slug": "parent-plus-double-consolidation", "primary_keyword": "parent plus double consolidation"},
+                {"slug": "rap-payment-calculator", "primary_keyword": "rap payment calculator"},
+                {"slug": "save-plan-litigation-transition", "primary_keyword": "save plan litigation transition"},
+                {"slug": "student-loan-refinance-break-even-calculator", "primary_keyword": "student loan refinance break even calculator"},
+            ),
+            cannibalization_clone_map={
+                "pslf-buyback-calculator": {
+                    "canonical_slug": "pslf-qualifying-payment-simulator",
+                    "redirect_target": "/tools/pslf-qualifying-payment-simulator/",
+                },
+                "repayment-assistance-plan-calculator": {
+                    "canonical_slug": "rap-payment-calculator",
+                    "redirect_target": "/tools/rap-payment-calculator/",
+                },
+                "student-loan-interest-subsidy-calculator": {
+                    "canonical_slug": "save-plan-litigation-transition",
+                    "redirect_target": "/tools/save-plan-litigation-transition/",
+                },
+                "tax-deduction-for-car-loan-interest": {
+                    "canonical_slug": "student-loan-repayment-calculator",
+                    "redirect_target": "/tools/",
+                },
+            },
+            flagship_anchor_slugs=(
+                "student-loan-rap-calculator",
+                "rap-vs-ibr-calculator",
+                "pslf-qualifying-payment-simulator",
+                "save-to-rap-migration-calculator",
+                "married-filing-separately-student-loan-calculator",
+                "parent-plus-double-consolidation",
+            ),
+            video_branding={
+                "brand_name": "Prexvo",
+                "domain": "prexvo.com",
+                "canonical_base": "https://prexvo.com",
+                "badge_text": "PREXVO.COM | TITLE IV STATUTORY ENGINE",
+                "verification_pill": "34 CFR PART 685 VERIFIED",
+                "bg_rgb": (15, 23, 42),
+                "card_rgb": (30, 41, 59),
+                "accent_rgb": (56, 189, 248),
+                "accent_hex": "#38bdf8",
+                "voice": "en-US-ChristopherNeural",
+            },
+            default_cpc_usd=8.0,
+            default_erpm_usd=75.0,
+            default_sample_query="rap calculator",
+            default_sample_slug="rap-payment-calculator",
+            top_modifier_fallback="(2026 RAP vs IBR)",
+            vertical_paren_modifier="IDR & RAP",
+            default_smoke_probe={
+                "query": "save plan student loan repayment calculator",
+                "foreign_query": "soc 2 type ii audit cost calculator",
+            },
+            priority_hub_slugs=(),
+            default_complementary_peers=(
+                ("student-loan-repayment-calculator", "Title IV Student Loan Repayment Calculator"),
+                ("rap-vs-ibr-calculator", "RAP vs IBR Repayment Comparison Calculator"),
+                ("pslf-buyback-calculator", "PSLF Buyback Settlement Calculator"),
+            ),
+            primary_fallback_manifest_slug="rap-payment-calculator",
+            primary_partner_key="splash_financial",
+            primary_partner_name="Splash Financial Student Loan Refinancing",
+            primary_partner_url="https://www.splashfinancial.com/",
+            primary_partner_cta="Compare Rates with Splash Financial",
+            tools_directory_seed_section_html=(
+                '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+                '      <a href="/r/splash_financial" target="_blank" rel="noopener sponsored nofollow">Splash Financial</a>\n'
+                '    </section>\n  '
+            ),
+        ),
+        "gainhelm": DeclarativeTenantContract(
+            property_id="gainhelm",
+            repo_dir_name="gainhelm",
+            domain="gainhelm.com",
+            canonical_base="https://gainhelm.com",
+            brand_name="GainHelm",
+            package_name="gainhelm",
+            dist_dir="dist",
+            repo_root="/home/ubuntuadmin/projects/gainhelm",
+            runner_work_dist_dir="/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist",
+            env_prefix="GAINHELM",
+            linkedin_company_id="106482195",
+            cloudflare_zone_id="0a03264e19beb2cb17ba01860b701701",
+            cloudflare_pages_cname_target="gainhelm.pages.dev",
+            truth_profile=_build_gainhelm_profile(),
+            research_entity="GainHelm Cyber Compliance & Audit Economics Research",
+            legal_entity="GainHelm LLC",
+            publisher_entity_label="GainHelm Cyber Compliance & Audit Economics Research",
+            editorial_classification="Deterministic Enterprise Cyber Compliance, GRC Audit Cost & Statutory Security Governance Engine",
+            primary_statutory_authority="AICPA SSAE 18 (AT-C Section 205); 32 CFR Part 170 (CMMC 2.0); 45 CFR 160.404",
+            economic_dataset_label="AICPA Assurance Services Benchmarks, DoD 32 CFR Part 170 Cost Tables, and HHS OCR Breach Archive",
+            llms_manifest_title="GainHelm: Complete Machine Knowledge Base & Cyber Compliance Statutory Manifest",
+            llms_statutory_summary_block=(
+                "## Key Cyber Compliance & Audit Statutory Authorities\n"
+                "- SOC 2 Type I & Type II: Governed by AICPA SSAE 18 (AT-C Section 205) and 2017 Trust Services Criteria (TSP Section 100).\n"
+                "- CMMC 2.0 & NIST SP 800-171: Governed by 32 CFR Part 170, DFARS 252.204-7012 / 7019 / 7020 / 7021, and DoD SPRS scoring [-203 to +110] with 88-point conditional POA&M floor.\n"
+                "- ISO/IEC 27001:2022: Governed by ISO/IEC 27006-1:2024 mandatory Stage 1 and Stage 2 auditor-day tables and 93 Annex A controls.\n"
+                "- HIPAA & HITECH Civil Monetary Penalties: Governed by 45 CFR 160.404 and 42 U.S.C. 1320d-5 four-tier culpability schedules and 500-record media notification triggers.\n"
+                "- FedRAMP & PCI DSS v4.0.1: Governed by 44 U.S.C. 3607 (NIST SP 800-53 Rev 5 3PAO baselines) and PCI DSS v4.0.1 Merchant Levels 1-4 QSA ROC standards.\n"
+            ),
+            home_topic_label="Enterprise Cyber Compliance, GRC Audit Cost & Statutory Security Governance Calculators",
+            tools_directory_topic_label="Enterprise Cyber Compliance and GRC Audit Cost Calculators",
+            fallback_calculator_title="Enterprise Cyber Compliance and GRC Audit Cost Calculator",
+            default_heading_fallback_label="Enterprise Compliance Calculator",
+            default_query_syntax_template="?headcount={headcount}&extra_criteria={extra_criteria}",
+            statutory_intent_tokens=(
+                "ssae 18",
+                "soc 2 audit",
+                "soc 2 type",
+                "soc 2 compliance",
+                "cmmc 2.0",
+                "c3pao",
+                "32 cfr part 170",
+                "nist 800-171",
+                "sprs score",
+                "iso 27001",
+                "iso 27006",
+                "45 cfr 160.404",
+                "hipaa violation penalty",
+                "hitrust certification",
+                "fedramp authorization",
+                "pci dss 4.0",
+                "penetration testing cost",
+                "cyber liability insurance",
+            ),
+            own_boundary_tokens=(
+                "gainhelm",
+                "gainhelm.com",
+                "106482195",
+                "vanta_security",
+                "drata_compliance",
+                "sprinto_compliance",
+                "thoropass_audit",
+                "coalition_cyber_insurance",
+                "cobalt_pentest",
+                "gh_soc2_cmmc_audit_workpapers",
+                "gh_hipaa_iso27001_governance_kit",
+            ),
+            category_seed_taxonomy={
+                "enterprise_grc_and_cyber_compliance": [
+                    "soc 2 type 2 audit",
+                    "cmmc level 2 c3pao",
+                    "nist 800 171 sprs score",
+                    "iso 27001 certification",
+                    "hipaa compliance penalty",
+                    "pci dss 4.0 assessment",
+                ],
+            },
+            default_core_tools=(
+                {"slug": "soc-2-audit-cost-calculator", "primary_keyword": "soc 2 audit cost calculator"},
+                {"slug": "cmmc-2-0-compliance-cost-calculator", "primary_keyword": "cmmc 2.0 compliance cost calculator"},
+                {"slug": "nist-800-171-sprs-score-calculator", "primary_keyword": "nist 800-171 sprs score calculator"},
+                {"slug": "iso-27001-certification-cost-calculator", "primary_keyword": "iso 27001 certification cost calculator"},
+                {"slug": "hipaa-violation-penalty-breach-cost-calculator", "primary_keyword": "hipaa violation penalty breach cost calculator"},
+                {"slug": "penetration-testing-scoping-cost-calculator", "primary_keyword": "penetration testing scoping cost calculator"},
+                {"slug": "cyber-liability-insurance-breach-exposure-calculator", "primary_keyword": "cyber liability insurance breach exposure calculator"},
+                {"slug": "fedramp-authorization-3pao-cost-calculator", "primary_keyword": "fedramp authorization 3pao cost calculator"},
+                {"slug": "pci-dss-4-0-compliance-cost-calculator", "primary_keyword": "pci dss 4.0 compliance cost calculator"},
+                {"slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator", "primary_keyword": "hitrust csf e1 i1 r2 certification cost calculator"},
+            ),
+            cannibalization_clone_map={
+                "cmmc-level-2-audit-cost-calculator": {
+                    "canonical_slug": "cmmc-2-0-compliance-cost-calculator",
+                    "redirect_target": "/tools/cmmc-2-0-compliance-cost-calculator/",
+                },
+                "penetration-testing-cost-estimator": {
+                    "canonical_slug": "penetration-testing-scoping-cost-calculator",
+                    "redirect_target": "/tools/penetration-testing-scoping-cost-calculator/",
+                },
+                "cyber-liability-insurance-premium-calculator": {
+                    "canonical_slug": "cyber-liability-insurance-breach-exposure-calculator",
+                    "redirect_target": "/tools/cyber-liability-insurance-breach-exposure-calculator/",
+                },
+                "fedramp-authorization-cost-calculator": {
+                    "canonical_slug": "fedramp-authorization-3pao-cost-calculator",
+                    "redirect_target": "/tools/fedramp-authorization-3pao-cost-calculator/",
+                },
+                "pci-dss-4-0-compliance-audit-cost-calculator": {
+                    "canonical_slug": "pci-dss-4-0-compliance-cost-calculator",
+                    "redirect_target": "/tools/pci-dss-4-0-compliance-cost-calculator/",
+                },
+                "hitrust-certification-cost-roi-calculator": {
+                    "canonical_slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+                    "redirect_target": "/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/",
+                },
+            },
+            flagship_anchor_slugs=(
+                "soc-2-compliance-cost-calculator",
+                "iso-27001-certification-cost-calculator",
+                "cmmc-2-0-compliance-cost-calculator",
+            ),
+            video_branding={
+                "brand_name": "GainHelm",
+                "domain": "gainhelm.com",
+                "canonical_base": "https://gainhelm.com",
+                "badge_text": "GAINHELM.COM | GRC AUDIT ENGINE",
+                "verification_pill": "AICPA & NIST VERIFIED",
+                "bg_rgb": (15, 23, 42),
+                "card_rgb": (30, 41, 59),
+                "accent_rgb": (99, 102, 241),
+                "accent_hex": "#6366f1",
+                "voice": "en-US-ChristopherNeural",
+            },
+            default_cpc_usd=14.5,
+            default_erpm_usd=95.0,
+            default_sample_query="soc 2 audit cost calculator",
+            default_sample_slug="soc-2-audit-cost-calculator",
+            top_modifier_fallback="(GRC Audit)",
+            vertical_paren_modifier="GRC Audit",
+            default_smoke_probe={
+                "query": "soc 2 type ii audit cost calculator",
+                "foreign_query": "section 179 deduction calculator",
+            },
+            priority_hub_slugs=(
+                "soc-2-audit-cost-calculator",
+                "cmmc-2-0-compliance-cost-calculator",
+            ),
+            default_complementary_peers=(
+                ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC Automation Calculator"),
+                ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Compliance Cost Calculator"),
+                ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
+            ),
+            primary_fallback_manifest_slug="soc-2-audit-cost-calculator",
+            primary_partner_key="vanta_security",
+            primary_partner_name="Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance",
+            primary_partner_url="https://www.vanta.com/",
+            primary_partner_cta="Automate Audit Readiness with Vanta",
+            tools_directory_seed_section_html=(
+                '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                '        <h2>Verified Enterprise GRC &amp; Security Execution Partners</h2>\n'
+                '        <div class="affiliate-card partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>\n'
+                '      </section>\n    '
+            ),
+        ),
+    }
+
+
+CANONICAL_TENANT_DECLARATIONS: Dict[str, DeclarativeTenantContract] = _build_canonical_tenant_declarations()
+CANONICAL_TENANT_REGISTRY: Dict[str, DeclarativeTenantContract] = CANONICAL_TENANT_DECLARATIONS
+
+CANONICAL_TENANT_IDS: List[str] = []
+CANONICAL_TENANT_DOMAINS: List[str] = []
+CANONICAL_TENANT_HOSTS: Dict[str, str] = {}
+CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {}
+DEFAULT_TENANT_LINKEDIN_IDS: Dict[str, str] = {}
+TENANT_STATUTORY_INTENT_TOKENS: Dict[str, List[str]] = {}
+TENANT_CATEGORY_SEED_TAXONOMY: Dict[str, Dict[str, List[str]]] = {}
+TENANT_VIDEO_BRANDING: Dict[str, Dict[str, Any]] = {}
+TENANT_FLAGSHIP_ANCHOR_SLUGS: Dict[str, Tuple[str, ...]] = {}
+TENANT_SMOKE_PROBES: Dict[str, Dict[str, str]] = {}
+TENANT_DEFAULT_CPC_USD: Dict[str, float] = {}
+TENANT_DEFAULT_ERPM_USD: Dict[str, float] = {}
+TENANT_CORE_TOOLS_BY_ID: Dict[str, List[Dict[str, Any]]] = {}
+TENANT_CANNIBALIZATION_MAPS_BY_ID: Dict[str, Dict[str, Dict[str, str]]] = {}
+TENANT_FOREIGN_BOUNDARY_TOKENS: Dict[str, Set[str]] = {}
+CANONICAL_PRODUCTION_PROPERTIES: Set[str] = set()
+REPO_DIR_TO_PROPERTY_ID: Dict[str, str] = {}
+
+
+def _sync_derived_tenant_registries() -> None:
+    """
+    Synchronizes all derived per-tenant dictionaries in-place from
+    CANONICAL_TENANT_DECLARATIONS so downstream loops hold live references
+    without touching separate modules when registering or updating a tenant.
+    """
+    CANONICAL_TENANT_IDS.clear()
+    CANONICAL_TENANT_DOMAINS.clear()
+    CANONICAL_TENANT_HOSTS.clear()
+    CANONICAL_TENANT_CONFIGS.clear()
+    DEFAULT_TENANT_LINKEDIN_IDS.clear()
+    TENANT_STATUTORY_INTENT_TOKENS.clear()
+    TENANT_CATEGORY_SEED_TAXONOMY.clear()
+    TENANT_VIDEO_BRANDING.clear()
+    TENANT_FLAGSHIP_ANCHOR_SLUGS.clear()
+    TENANT_SMOKE_PROBES.clear()
+    TENANT_DEFAULT_CPC_USD.clear()
+    TENANT_DEFAULT_ERPM_USD.clear()
+    active_pids = set(CANONICAL_TENANT_DECLARATIONS.keys())
+    for stale_pid in list(TENANT_CORE_TOOLS_BY_ID.keys()):
+        if stale_pid not in active_pids:
+            TENANT_CORE_TOOLS_BY_ID.pop(stale_pid, None)
+    for stale_pid in list(TENANT_CANNIBALIZATION_MAPS_BY_ID.keys()):
+        if stale_pid not in active_pids:
+            TENANT_CANNIBALIZATION_MAPS_BY_ID.pop(stale_pid, None)
+    TENANT_FOREIGN_BOUNDARY_TOKENS.clear()
+    CANONICAL_PRODUCTION_PROPERTIES.clear()
+    CANONICAL_PRODUCTION_PROPERTIES.update({"pseofactory", "factory", "default"})
+    REPO_DIR_TO_PROPERTY_ID.clear()
+
+    for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+        CANONICAL_TENANT_IDS.append(pid)
+        CANONICAL_TENANT_DOMAINS.append(contract.domain)
+        CANONICAL_TENANT_HOSTS[pid] = contract.domain
+        CANONICAL_TENANT_CONFIGS[pid] = contract.to_tenant_config_dict()
+        if contract.linkedin_company_id:
+            DEFAULT_TENANT_LINKEDIN_IDS[pid] = contract.linkedin_company_id
+        TENANT_STATUTORY_INTENT_TOKENS[pid] = list(contract.statutory_intent_tokens)
+        TENANT_CATEGORY_SEED_TAXONOMY[pid] = {
+            k: list(v) for k, v in contract.category_seed_taxonomy.items()
+        }
+        TENANT_VIDEO_BRANDING[pid] = dict(contract.video_branding)
+        TENANT_FLAGSHIP_ANCHOR_SLUGS[pid] = tuple(contract.flagship_anchor_slugs)
+        TENANT_SMOKE_PROBES[pid] = dict(contract.default_smoke_probe)
+        TENANT_DEFAULT_CPC_USD[pid] = float(contract.default_cpc_usd)
+        TENANT_DEFAULT_ERPM_USD[pid] = float(contract.default_erpm_usd)
+        existing_tools_list = TENANT_CORE_TOOLS_BY_ID.setdefault(pid, [])
+        existing_tools_list.clear()
+        existing_tools_list.extend(dict(t) for t in contract.default_core_tools)
+        existing_cann_map = TENANT_CANNIBALIZATION_MAPS_BY_ID.setdefault(pid, {})
+        existing_cann_map.update({
+            k: dict(v) for k, v in contract.cannibalization_clone_map.items()
+        })
+        CANONICAL_PRODUCTION_PROPERTIES.add(pid)
+        if contract.repo_dir_name:
+            CANONICAL_PRODUCTION_PROPERTIES.add(contract.repo_dir_name)
+            REPO_DIR_TO_PROPERTY_ID[contract.repo_dir_name.lower()] = pid
+        REPO_DIR_TO_PROPERTY_ID[pid] = pid
+
+    for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+        explicit_forbidden = (
+            {t.lower() for t in contract.truth_profile.cross_tenant_forbidden_tokens}
+            if contract.truth_profile and contract.truth_profile.cross_tenant_forbidden_tokens
+            else set()
+        )
+        peer_tokens: Set[str] = set()
+        for other_id, other_contract in CANONICAL_TENANT_DECLARATIONS.items():
+            if other_id == pid:
+                continue
+            peer_tokens.add(other_id.lower())
+            if other_contract.domain:
+                peer_tokens.add(other_contract.domain.lower())
+            if other_contract.linkedin_company_id:
+                peer_tokens.add(other_contract.linkedin_company_id.lower())
+            for own_tok in other_contract.own_boundary_tokens:
+                if own_tok:
+                    peer_tokens.add(own_tok.lower())
+        merged_forbidden = explicit_forbidden | peer_tokens
+        TENANT_FOREIGN_BOUNDARY_TOKENS[pid] = merged_forbidden
+        if contract.truth_profile is not None:
+            contract.truth_profile.cross_tenant_forbidden_tokens.update(merged_forbidden)
+
+
+_sync_derived_tenant_registries()
+
+
+def list_canonical_tenant_ids() -> Tuple[str, ...]:
+    """Returns ordered tuple of registered canonical tenant property IDs."""
+    return tuple(CANONICAL_TENANT_IDS)
+
+
+def list_canonical_tenant_domains() -> Tuple[str, ...]:
+    """Returns ordered tuple of registered canonical tenant domains."""
+    return tuple(CANONICAL_TENANT_DOMAINS)
+
+
+def list_canonical_repo_dir_names() -> Tuple[str, ...]:
+    """Returns ordered tuple of registered canonical tenant repository directory names."""
+    return tuple(c.repo_dir_name for c in CANONICAL_TENANT_DECLARATIONS.values() if c.repo_dir_name)
+
+
+def resolve_canonical_property_id(
+    tenant_or_context: Optional[str] = "profithelm",
+    repo_root: Optional[Any] = None,
+    default: str = "profithelm",
+) -> str:
+    """
+    Resolves a property_id, repo_dir_name, domain, URL, or filesystem path
+    to a registered tenant property_id in CANONICAL_TENANT_DECLARATIONS.
+    """
+    raw = str(tenant_or_context or "").strip().lower()
+    if raw in CANONICAL_TENANT_DECLARATIONS:
+        return raw
+    if raw in REPO_DIR_TO_PROPERTY_ID:
+        return REPO_DIR_TO_PROPERTY_ID[raw]
+    combined = f"{raw} {repo_root or ''}".lower()
+    # Check non-default tenants first so specific substrings win over default fallback
+    for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+        if pid == default:
+            continue
+        if (
+            pid in combined
+            or (contract.repo_dir_name and contract.repo_dir_name.lower() in combined)
+            or (contract.domain and contract.domain.lower() in combined)
+        ):
+            return pid
+    if default in CANONICAL_TENANT_DECLARATIONS:
+        def_c = CANONICAL_TENANT_DECLARATIONS[default]
+        if (
+            default in combined
+            or (def_c.repo_dir_name and def_c.repo_dir_name.lower() in combined)
+            or (def_c.domain and def_c.domain.lower() in combined)
+        ):
+            return default
+    return default
+
+
+def get_tenant_contract(
+    tenant_or_context: Optional[str] = "profithelm",
+    repo_root: Optional[Any] = None,
+    default: str = "profithelm",
+) -> DeclarativeTenantContract:
+    """Returns the DeclarativeTenantContract for a tenant ID, domain, or repo path."""
+    pid = resolve_canonical_property_id(tenant_or_context, repo_root=repo_root, default=default)
+    return CANONICAL_TENANT_DECLARATIONS.get(pid) or CANONICAL_TENANT_DECLARATIONS["profithelm"]
+
+
+def match_tenant_statutory_intent(query: str) -> Dict[str, bool]:
+    """
+    Evaluates a search query against all registered tenants' statutory_intent_tokens
+    in TENANT_STATUTORY_INTENT_TOKENS.
+    """
+    q_lower = (query or "").lower().strip()
+    matched: Dict[str, bool] = {}
+    for pid, tokens in TENANT_STATUTORY_INTENT_TOKENS.items():
+        hit = any(tok in q_lower for tok in tokens)
+        if not hit and pid == "profithelm" and ("1031" in q_lower and "exchange" in q_lower):
+            hit = True
+        matched[pid] = hit
+    return matched
+
+
+def register_declarative_tenant(contract: DeclarativeTenantContract) -> DeclarativeTenantContract:
+    """
+    Registers a DeclarativeTenantContract into CANONICAL_TENANT_DECLARATIONS and
+    synchronizes all derived per-tenant dictionaries and TenantFactStore profiles in-place.
+    """
+    pid = str(contract.property_id).strip().lower()
+    if not pid:
+        raise ValueError("DeclarativeTenantContract.property_id must be non-empty")
+    CANONICAL_TENANT_DECLARATIONS[pid] = contract
+    _sync_derived_tenant_registries()
+    if TenantFactStore._instance is not None and contract.truth_profile is not None:
+        TenantFactStore._instance._profiles[pid] = contract.truth_profile
+        for existing_pid, existing_prof in TenantFactStore._instance._profiles.items():
+            existing_prof.cross_tenant_forbidden_tokens.update(
+                TENANT_FOREIGN_BOUNDARY_TOKENS.get(existing_pid, set())
+            )
+    return contract
+
+
+def unregister_declarative_tenant(property_id: str) -> bool:
+    """
+    Unregisters a non-core or temporary tenant from CANONICAL_TENANT_DECLARATIONS
+    and restores derived registries (used by unit test fixtures).
+    """
+    pid = str(property_id or "").strip().lower()
+    if pid not in CANONICAL_TENANT_DECLARATIONS:
+        return False
+    del CANONICAL_TENANT_DECLARATIONS[pid]
+    # Restore canonical truth profiles for remaining tenants so test tokens are scrubbed
+    fresh_defaults = _build_canonical_tenant_declarations()
+    for rem_pid in list(CANONICAL_TENANT_DECLARATIONS.keys()):
+        if rem_pid in fresh_defaults:
+            CANONICAL_TENANT_DECLARATIONS[rem_pid] = fresh_defaults[rem_pid]
+    _sync_derived_tenant_registries()
+    if TenantFactStore._instance is not None:
+        TenantFactStore._instance._profiles.pop(pid, None)
+        for rem_pid, rem_contract in CANONICAL_TENANT_DECLARATIONS.items():
+            if rem_contract.truth_profile is not None:
+                TenantFactStore._instance._profiles[rem_pid] = rem_contract.truth_profile
+    return True
+
+
 class TenantFactStore:
     """
     Centralized singleton store for tenant truth profiles.
@@ -929,9 +1793,9 @@ class TenantFactStore:
 
     def __init__(self):
         self._profiles: Dict[str, TenantTruthProfile] = {
-            "profithelm": _build_profithelm_profile(),
-            "prexvo": _build_prexvo_profile(),
-            "gainhelm": _build_gainhelm_profile(),
+            pid: contract.truth_profile
+            for pid, contract in CANONICAL_TENANT_DECLARATIONS.items()
+            if contract.truth_profile is not None
         }
 
     @staticmethod
@@ -945,7 +1809,7 @@ class TenantFactStore:
         if not raw:
             return "UNMAPPED"
         norm = raw if "." in raw else f"{raw}.com"
-        if norm in ("profithelm.com", "prexvo.com", "gainhelm.com"):
+        if norm in CANONICAL_TENANT_DOMAINS or raw in CANONICAL_TENANT_DECLARATIONS:
             return "ACTIVE_TENANT"
         if norm in STAGED_RESERVE_TENANT_DOMAINS:
             return "STAGED_RESERVE"
@@ -1804,8 +2668,7 @@ class TruthReconciliationEngine:
 
         updated = html_content
         repairs: List[str] = []
-        raw_t = (tenant or "").lower()
-        tenant_norm = "prexvo" if "prexvo" in raw_t else ("gainhelm" if "gainhelm" in raw_t else "profithelm")
+        tenant_norm = resolve_canonical_property_id(tenant)
         combined_slug = f"{rel_path.lower()} {slug.lower()}"
 
         # 1. Strip speculative filler phrases across prose
@@ -1976,8 +2839,7 @@ class TruthReconciliationEngine:
         if not isinstance(raw_ov, dict):
             return raw_ov, False
         ov_slug = str(raw_ov.get("slug") or slug or "").lower()
-        raw_t = (tenant or "").lower()
-        tenant_norm = "prexvo" if "prexvo" in raw_t else ("gainhelm" if "gainhelm" in raw_t else "profithelm")
+        tenant_norm = resolve_canonical_property_id(tenant)
         serialized = _json_lib.dumps(raw_ov, ensure_ascii=False)
         updated_str = serialized
 
@@ -2046,8 +2908,7 @@ class TruthReconciliationEngine:
             if filler_old in html_content:
                 violations.append(f"Speculative filler phrase detected: '{filler_old.strip()}'")
 
-        raw_t = (tenant or "").lower()
-        tenant_norm = "prexvo" if "prexvo" in raw_t else ("gainhelm" if "gainhelm" in raw_t else "profithelm")
+        tenant_norm = resolve_canonical_property_id(tenant)
         if tenant_norm == "profithelm":
             for old_str, _ in cls.PROFITHELM_HTML_REPLACEMENTS:
                 if old_str in html_content:
@@ -2087,6 +2948,35 @@ __all__ = [
     "FeatureContract",
     "TenantStatutoryTruth",
     "TenantTruthProfile",
+    "DeclarativeTenantContract",
+    "TenantRegistrationContract",
+    "CANONICAL_TENANT_DECLARATIONS",
+    "CANONICAL_TENANT_REGISTRY",
+    "CANONICAL_TENANT_IDS",
+    "CANONICAL_TENANT_DOMAINS",
+    "CANONICAL_TENANT_HOSTS",
+    "CANONICAL_TENANT_CONFIGS",
+    "DEFAULT_TENANT_LINKEDIN_IDS",
+    "TENANT_STATUTORY_INTENT_TOKENS",
+    "TENANT_CATEGORY_SEED_TAXONOMY",
+    "TENANT_VIDEO_BRANDING",
+    "TENANT_FLAGSHIP_ANCHOR_SLUGS",
+    "TENANT_SMOKE_PROBES",
+    "TENANT_DEFAULT_CPC_USD",
+    "TENANT_DEFAULT_ERPM_USD",
+    "TENANT_CORE_TOOLS_BY_ID",
+    "TENANT_CANNIBALIZATION_MAPS_BY_ID",
+    "TENANT_FOREIGN_BOUNDARY_TOKENS",
+    "CANONICAL_PRODUCTION_PROPERTIES",
+    "REPO_DIR_TO_PROPERTY_ID",
+    "list_canonical_tenant_ids",
+    "list_canonical_tenant_domains",
+    "list_canonical_repo_dir_names",
+    "resolve_canonical_property_id",
+    "get_tenant_contract",
+    "match_tenant_statutory_intent",
+    "register_declarative_tenant",
+    "unregister_declarative_tenant",
     "TenantFactStore",
     "TruthReconciliationEngine",
     "PropertyContaminationError",

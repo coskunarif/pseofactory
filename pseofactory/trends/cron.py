@@ -53,89 +53,17 @@ from pseofactory.trends.jev_engine import (
 from pseofactory.trends.db import TrendHistoryDB, DEFAULT_DB_PATH
 
 
-# Authoritative tenant statutory keywords
-PREXVO_STATUTORY_TOKENS: List[str] = [
-    "title iv",
-    "34 cfr",
-    "student loan",
-    "student loans",
-    "repayment assistance plan",
-    "pslf",
-    "direct consolidation loan",
-    "save plan",
-    "idr waiver",
-    "student loan forgiveness",
-    "forgiveness tax bomb",
-    "ibr tax bomb",
-    "ibr payment",
-    "ibr repayment",
-    "ibr calculator",
-    "vs ibr",
-    "ibr vs",
-    "parent plus",
-    "section 108f",
-]
+from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_DOMAINS,
+    CANONICAL_TENANT_IDS,
+    TENANT_STATUTORY_INTENT_TOKENS,
+    match_tenant_statutory_intent,
+)
 
-PROFITHELM_STATUTORY_TOKENS: List[str] = [
-    "section 1031",
-    "1031 exchange",
-    "exchange 1031",
-    "like-kind exchange",
-    "like kind exchange",
-    "section 179",
-    "bonus depreciation",
-    "section 168",
-    "macrs",
-    "tcja",
-    "commercial clean energy 179d",
-    "commercial clean energy",
-    "clean energy 179d",
-    "cost segregation",
-    "capital gains tax",
-    "tax bracket",
-    "tax brackets",
-    "tcja sunset",
-    "saas runway",
-    "runway calculator",
-    "burn rate",
-    "prediction market tax",
-    "section 1256",
-    "1256 contract",
-    "section 1202",
-    "qsbs",
-    "section 174",
-    "r&d tax",
-    "corporate amt",
-    "camt",
-    "section 199a",
-    "199a",
-    "s-corp payroll",
-    "niit",
-    "crypto tax",
-    "treasury yield",
-    "financial simulation",
-]
-
-GAINHELM_STATUTORY_TOKENS: List[str] = [
-    "ssae 18",
-    "soc 2 audit",
-    "soc 2 type",
-    "soc 2 compliance",
-    "cmmc 2.0",
-    "c3pao",
-    "32 cfr part 170",
-    "nist 800-171",
-    "sprs score",
-    "iso 27001",
-    "iso 27006",
-    "45 cfr 160.404",
-    "hipaa violation penalty",
-    "hitrust certification",
-    "fedramp authorization",
-    "pci dss 4.0",
-    "penetration testing cost",
-    "cyber liability insurance",
-]
+# Authoritative tenant statutory keywords derived from declarative tenant contracts
+PREXVO_STATUTORY_TOKENS: List[str] = TENANT_STATUTORY_INTENT_TOKENS["prexvo"]
+PROFITHELM_STATUTORY_TOKENS: List[str] = TENANT_STATUTORY_INTENT_TOKENS["profithelm"]
+GAINHELM_STATUTORY_TOKENS: List[str] = TENANT_STATUTORY_INTENT_TOKENS["gainhelm"]
 
 GREENFIELD_DISCOVERY_SEEDS: List[str] = [
     "workers comp calculator",
@@ -183,21 +111,13 @@ class TrendCronRunner:
 
     def determine_property_assignment(self, query: str) -> Dict[str, Any]:
         """
-        Routes query to property tenant: prexvo, profithelm, or unassigned.
-        Scans for cross-property token contamination.
+        Routes query to a registered property tenant or unassigned via declarative
+        statutory intent tokens. Scans for cross-property token contamination.
         Zero em-dashes. Zero en-dashes.
         """
         assert_no_forbidden_dashes(query, "determine_property_assignment.query")
-        q_lower = query.lower().strip()
-
-        is_prexvo = any(tok in q_lower for tok in PREXVO_STATUTORY_TOKENS)
-        is_profithelm = any(tok in q_lower for tok in PROFITHELM_STATUTORY_TOKENS) or ("1031" in q_lower and "exchange" in q_lower)
-        is_gainhelm = any(tok in q_lower for tok in GAINHELM_STATUTORY_TOKENS)
-
-        matched_props = [
-            p for p, flag in (("prexvo", is_prexvo), ("profithelm", is_profithelm), ("gainhelm", is_gainhelm))
-            if flag
-        ]
+        matched_map = match_tenant_statutory_intent(query)
+        matched_props = [p for p, flag in matched_map.items() if flag]
         if len(matched_props) == 1:
             target_prop = matched_props[0]
             foreign = self.scanner.scan_text(query, target_prop)
@@ -392,21 +312,19 @@ class TrendCronRunner:
                 spikes = collector.harvest(seed_list)
 
             # 3. Preload existing tools and persisted GSC telemetry for cannibalization & ceiling checks
+            tenant_ids = tuple(CANONICAL_TENANT_IDS)
+            tenant_domains_set = {"https:", "http:", "tools", *CANONICAL_TENANT_DOMAINS}
             existing_tools_map: Dict[str, List[Dict[str, Any]]] = {}
             site_impressions_by_prop: Dict[str, int] = {
-                "prexvo": total_site_impressions,
-                "profithelm": total_site_impressions,
-                "gainhelm": total_site_impressions,
+                **{p_id: total_site_impressions for p_id in tenant_ids},
                 "unassigned": total_site_impressions,
             }
             ceiling_by_prop: Dict[str, Optional[Dict[str, Any]]] = {
-                "prexvo": None,
-                "profithelm": None,
-                "gainhelm": None,
+                **{p_id: None for p_id in tenant_ids},
                 "unassigned": None,
             }
-            gsc_qp_by_prop_slug: Dict[str, Dict[str, Dict[str, Any]]] = {"prexvo": {}, "profithelm": {}, "gainhelm": {}}
-            outbound_engagement_by_prop: Dict[str, Dict[str, Any]] = {"prexvo": {}, "profithelm": {}, "gainhelm": {}}
+            gsc_qp_by_prop_slug: Dict[str, Dict[str, Dict[str, Any]]] = {p_id: {} for p_id in tenant_ids}
+            outbound_engagement_by_prop: Dict[str, Dict[str, Any]] = {p_id: {} for p_id in tenant_ids}
             try:
                 from pseofactory.affiliates import (
                     GSC_EMPIRICAL_CLUSTER_TRAFFIC,
@@ -414,7 +332,7 @@ class TrendCronRunner:
                 )
 
                 reg = TenantRegistry.default()
-                for p_id in ("prexvo", "profithelm", "gainhelm"):
+                for p_id in tenant_ids:
                     try:
                         adapter = reg.get_adapter(p_id)
                         existing_tools_map[p_id] = [dict(t) for t in (getattr(adapter, "tools", []) or [])]
@@ -433,12 +351,12 @@ class TrendCronRunner:
                     except Exception:
                         existing_tools_map[p_id] = []
             except Exception:
-                existing_tools_map = {"prexvo": [], "profithelm": [], "gainhelm": []}
+                existing_tools_map = {p_id: [] for p_id in tenant_ids}
                 GSC_EMPIRICAL_CLUSTER_TRAFFIC = {}
 
-            gsc_rows_by_prop: Dict[str, List[Dict[str, Any]]] = {"prexvo": [], "profithelm": [], "gainhelm": []}
+            gsc_rows_by_prop: Dict[str, List[Dict[str, Any]]] = {p_id: [] for p_id in tenant_ids}
             try:
-                for p_id in ("prexvo", "profithelm", "gainhelm"):
+                for p_id in tenant_ids:
                     if total_site_impressions == 500:
                         daily_m = db.get_gsc_daily_metrics(p_id, days=28)
                         if daily_m:
@@ -464,7 +382,7 @@ class TrendCronRunner:
                             "ctr": wr.ctr,
                             "position": wr.position,
                         })
-                        p_parts = [pt for pt in wr.page.split("/") if pt and pt not in ("https:", "http:", "profithelm.com", "prexvo.com", "gainhelm.com", "tools")]
+                        p_parts = [pt for pt in wr.page.split("/") if pt and pt not in tenant_domains_set]
                         s_key = p_parts[0].lower() if p_parts else sanitize_url_slug(wr.query)
                         full_subroute_key = "/".join(p_parts).lower() if p_parts else s_key
                         for key_cand in {s_key, full_subroute_key}:
@@ -872,7 +790,7 @@ class TrendCronRunner:
                         cand.metadata["corroborating_sources"] = list(raw_meta["corroborating_sources"])
                     if "source_count" in raw_meta:
                         cand.metadata["source_count"] = int(raw_meta["source_count"])
-                    if assigned_property in ("prexvo", "profithelm", "gainhelm") and "closed_loop_feedback" not in cand.metadata:
+                    if assigned_property in CANONICAL_TENANT_IDS and "closed_loop_feedback" not in cand.metadata:
                         prop_gsc_map = gsc_qp_by_prop_slug.get(assigned_property, {})
                         prop_eng = outbound_engagement_by_prop.get(assigned_property, {})
                         cluster_tokens = [
@@ -940,7 +858,7 @@ class TrendCronRunner:
                             "realized_calculator_revenue_usd": float(rev_signal.get("realized_calculator_revenue_usd", 0.0) or 0.0),
                             "revenue_priority_bonus": float(rev_signal.get("revenue_priority_bonus", 0.0) or 0.0),
                         }
-                if assigned_property in ("prexvo", "profithelm", "gainhelm"):
+                if assigned_property in CANONICAL_TENANT_IDS:
                     cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
                         assigned_property, clean_q
                     )
@@ -971,7 +889,7 @@ class TrendCronRunner:
                 spec_payload = None
                 target_asset = decision.target_asset_type
 
-                if assigned_property in ("prexvo", "profithelm", "gainhelm"):
+                if assigned_property in CANONICAL_TENANT_IDS:
                     # Existing tenant: qualify improvements directly
                     if decision.action == "BUILD_PAGE":
                         spec_payload = decision.candidate_spec

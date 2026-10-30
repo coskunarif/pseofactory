@@ -1137,6 +1137,13 @@ __all__ = [
     "classify_longitudinal_trajectory",
     "route_validated_inflection_signals",
     "CANONICAL_TENANTS",
+    "DeclarativeTenantContract",
+    "TenantRegistrationContract",
+    "CANONICAL_TENANT_DECLARATIONS",
+    "CANONICAL_TENANT_REGISTRY",
+    "get_tenant_contract",
+    "register_declarative_tenant",
+    "unregister_declarative_tenant",
     "DepartmentContract",
     "CANONICAL_DEPARTMENT_CONTRACTS",
     "DepartmentHandoffChainVerifier",
@@ -1144,6 +1151,15 @@ __all__ = [
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses
+from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_DECLARATIONS,
+    CANONICAL_TENANT_REGISTRY,
+    DeclarativeTenantContract,
+    TenantRegistrationContract,
+    get_tenant_contract,
+    register_declarative_tenant,
+    unregister_declarative_tenant,
+)
 from pseofactory.supervisor import (
     CANONICAL_DEPARTMENT_CONTRACTS,
     CANONICAL_TENANTS,

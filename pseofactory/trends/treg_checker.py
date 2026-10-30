@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from typing import Dict, Any, Optional, List
 
 from pseofactory.contracts import assert_no_forbidden_dashes, sanitize_url_slug
+from pseofactory.tenant_facts import CANONICAL_TENANT_DOMAINS
 from pseofactory.trends.models import TregDurabilityResult
 
 
@@ -23,7 +24,7 @@ ENDPOINT_AI_CITATION = "dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-a
 MAX_ROUTE_COST = "0.05"
 MAX_AI_CITATION_COST = "0.01"
 
-DEFAULT_TENANT_DOMAINS = ("profithelm.com", "prexvo.com", "gainhelm.com")
+DEFAULT_TENANT_DOMAINS = tuple(CANONICAL_TENANT_DOMAINS)
 LOW_AUTHORITY_CITATION_DOMAINS = (
     "reddit.com",
     "quora.com",

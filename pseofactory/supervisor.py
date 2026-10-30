@@ -45,6 +45,11 @@ from pseofactory.drift import (
     record_asset_ledger,
     record_engine_hash,
 )
+from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_IDS,
+    TENANT_SMOKE_PROBES,
+    list_canonical_repo_dir_names,
+)
 
 MAX_CONSECUTIVE_FAILURES: int = 5
 DEFAULT_TICK_BUDGET: float = float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0"))
@@ -236,7 +241,7 @@ class HeartbeatTracker:
         return self.ledger.load_json(self.heartbeat_path)
 
 
-CANONICAL_TENANTS: Tuple[str, ...] = ("profithelm", "prexvo", "gainhelm")
+CANONICAL_TENANTS: Tuple[str, ...] = tuple(CANONICAL_TENANT_IDS)
 DEPARTMENT_PIPELINE_PATH: str = ".agy/department_pipeline_state.json"
 DEPARTMENT_STAGES: Tuple[str, ...] = (
     "DISCOVERY",
@@ -588,20 +593,7 @@ class DepartmentPipelineStateMachine:
         return payload
 
 
-_CANONICAL_TENANT_PROBES: Dict[str, Dict[str, str]] = {
-    "profithelm": {
-        "query": "section 179 deduction calculator",
-        "foreign_query": "save plan student loan repayment calculator",
-    },
-    "prexvo": {
-        "query": "save plan student loan repayment calculator",
-        "foreign_query": "soc 2 type ii audit cost calculator",
-    },
-    "gainhelm": {
-        "query": "soc 2 type ii audit cost calculator",
-        "foreign_query": "section 179 deduction calculator",
-    },
-}
+_CANONICAL_TENANT_PROBES: Dict[str, Dict[str, str]] = TENANT_SMOKE_PROBES
 
 
 class DepartmentHandoffChainVerifier:
@@ -629,7 +621,7 @@ class DepartmentHandoffChainVerifier:
         self.target_tenants: Tuple[str, ...] = tuple(
             [p.strip().lower() for p in property_ids if str(p).strip()]
             if property_ids
-            else list(CANONICAL_TENANTS)
+            else list(CANONICAL_TENANT_IDS)
         )
         self.heal_markers = bool(heal_markers)
         self.strict_current_engine_hash = bool(strict_current_engine_hash)
@@ -834,7 +826,7 @@ class DepartmentHandoffChainVerifier:
         pt_sync_dict = pt_sync.to_dict() if hasattr(pt_sync, "to_dict") else (pt_sync if isinstance(pt_sync, dict) else {})
         coverage_by_prop = {
             k: pt_sync_dict[k]
-            for k in ("profithelm", "prexvo", "gainhelm")
+            for k in discovered_tenants
             if isinstance(pt_sync_dict.get(k), dict)
         }
 
@@ -1106,7 +1098,7 @@ class DepartmentHandoffChainVerifier:
             )
             is_prod_canonical_tenant = (
                 repo_path_cand.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
-                and repo_path_cand.name in ("profithelm-platform", "prexvo", "gainhelm")
+                and repo_path_cand.name in list_canonical_repo_dir_names()
             )
 
             rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)

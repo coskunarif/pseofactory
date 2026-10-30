@@ -564,12 +564,13 @@ class JevEngine:
         is_restricted_ps = bool(monetization.get("restricted_public_service", False))
         prop_id_resolved = str(monetization.get("property_id") or "")
         bounty_est_val = float(monetization.get("expected_bounty_usd", 0.0) or 0.0)
+        from pseofactory.tenant_facts import CANONICAL_TENANT_IDS
         sponsor_coverage_verified = bool(
             monetization.get("partner_alignment_verified", True)
             and (
                 (len(rec_partners) >= 1 and bounty_est_val >= 25.0)
                 or is_restricted_ps
-                or prop_id_resolved not in ("profithelm", "prexvo", "gainhelm")
+                or prop_id_resolved not in CANONICAL_TENANT_IDS
             )
         )
         is_non_tool_question = (

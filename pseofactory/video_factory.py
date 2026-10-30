@@ -71,68 +71,12 @@ DEFAULT_YOUTUBE_TOKEN_PATH: Path = Path(
     "/home/ubuntuadmin/projects/MindBall/secrets/youtube_token.json"
 )
 
-FLAGSHIP_ANCHOR_SLUGS: Dict[str, Tuple[str, ...]] = {
-    "profithelm": (
-        "section-179-calculator",
-        "irs-2027-tax-brackets",
-        "section-1031-calculator",
-        "quarterly-estimated-tax-penalty-calculator",
-        "commercial-heavy-vehicle-section-179-weight-calculator",
-        "macrs-depreciation-calculator",
-    ),
-    "prexvo": (
-        "student-loan-rap-calculator",
-        "rap-vs-ibr-calculator",
-        "pslf-qualifying-payment-simulator",
-        "save-to-rap-migration-calculator",
-        "married-filing-separately-student-loan-calculator",
-        "parent-plus-double-consolidation",
-    ),
-    "gainhelm": (
-        "soc-2-compliance-cost-calculator",
-        "iso-27001-certification-cost-calculator",
-        "cmmc-2-0-compliance-cost-calculator",
-    ),
-}
-
-TENANT_VIDEO_BRANDING: Dict[str, Dict[str, Any]] = {
-    "profithelm": {
-        "brand_name": "ProfitHelm",
-        "domain": "profithelm.com",
-        "canonical_base": "https://profithelm.com",
-        "badge_text": "PROFITHELM.COM | IRC STATUTORY ENGINE",
-        "verification_pill": "2026 STATUTORY VERIFIED",
-        "bg_rgb": (15, 23, 42),
-        "card_rgb": (30, 41, 59),
-        "accent_rgb": (16, 185, 129),
-        "accent_hex": "#10b981",
-        "voice": "en-US-ChristopherNeural",
-    },
-    "prexvo": {
-        "brand_name": "Prexvo",
-        "domain": "prexvo.com",
-        "canonical_base": "https://prexvo.com",
-        "badge_text": "PREXVO.COM | TITLE IV STATUTORY ENGINE",
-        "verification_pill": "34 CFR PART 685 VERIFIED",
-        "bg_rgb": (15, 23, 42),
-        "card_rgb": (30, 41, 59),
-        "accent_rgb": (56, 189, 248),
-        "accent_hex": "#38bdf8",
-        "voice": "en-US-ChristopherNeural",
-    },
-    "gainhelm": {
-        "brand_name": "GainHelm",
-        "domain": "gainhelm.com",
-        "canonical_base": "https://gainhelm.com",
-        "badge_text": "GAINHELM.COM | GRC AUDIT ENGINE",
-        "verification_pill": "AICPA & NIST VERIFIED",
-        "bg_rgb": (15, 23, 42),
-        "card_rgb": (30, 41, 59),
-        "accent_rgb": (99, 102, 241),
-        "accent_hex": "#6366f1",
-        "voice": "en-US-ChristopherNeural",
-    },
-}
+from pseofactory.tenant_facts import (
+    TENANT_FLAGSHIP_ANCHOR_SLUGS as FLAGSHIP_ANCHOR_SLUGS,
+    TENANT_VIDEO_BRANDING,
+    get_tenant_contract,
+    resolve_canonical_property_id,
+)
 
 
 def _in_pytest() -> bool:
@@ -144,12 +88,7 @@ def _in_pytest() -> bool:
 
 
 def _normalize_property_id(property_id: str) -> str:
-    low = str(property_id or "profithelm").strip().lower()
-    if "prexvo" in low:
-        return "prexvo"
-    if "gainhelm" in low:
-        return "gainhelm"
-    return "profithelm"
+    return resolve_canonical_property_id(property_id, default="profithelm")
 
 
 def _resolve_default_tenant_repo(property_id: str) -> Path:
@@ -158,10 +97,9 @@ def _resolve_default_tenant_repo(property_id: str) -> Path:
         base = Path(tempfile.gettempdir()) / "pseofactory_pytest_video_factory" / prop
         base.mkdir(parents=True, exist_ok=True)
         return base
-    if prop == "prexvo":
-        return Path("/home/ubuntuadmin/projects/prexvo")
-    if prop == "gainhelm":
-        return Path("/home/ubuntuadmin/projects/gainhelm")
+    contract = get_tenant_contract(prop)
+    if contract is not None:
+        return contract.repo_root_path
     return Path("/home/ubuntuadmin/projects/profithelm-platform")
 
 

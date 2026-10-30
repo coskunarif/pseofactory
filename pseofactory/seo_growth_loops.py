@@ -27,6 +27,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.supervisor import AtomicStateLedger
+from pseofactory.tenant_facts import (
+    get_tenant_contract,
+    resolve_canonical_property_id,
+)
 from pseofactory.trends.models import (
     GSCDailyMetricRecord,
     GSCDeviceMetricRecord,
@@ -44,19 +48,16 @@ def _clean_dashes(text: str) -> str:
 
 def _resolve_property_id(property_id: str = "profithelm", repo_root: Optional[Union[str, Path]] = None) -> str:
     combined = f"{property_id or ''} {repo_root or ''}".lower()
-    if "gainhelm" in combined:
-        return "gainhelm"
-    return "prexvo" if "prexvo" in combined else "profithelm"
+    return resolve_canonical_property_id(combined, default="profithelm")
 
 
 def _resolve_tenant_repo_root(property_id: str = "profithelm", repo_root: Optional[Union[str, Path]] = None) -> Path:
     if repo_root is not None:
         return Path(repo_root).resolve()
     prop = _resolve_property_id(property_id)
-    if prop == "prexvo":
-        return Path("/home/ubuntuadmin/projects/prexvo")
-    if prop == "gainhelm":
-        return Path("/home/ubuntuadmin/projects/gainhelm")
+    contract = get_tenant_contract(prop)
+    if contract is not None:
+        return contract.repo_root_path
     return Path("/home/ubuntuadmin/projects/profithelm-platform")
 
 

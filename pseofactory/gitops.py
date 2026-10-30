@@ -29,6 +29,10 @@ from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Union
 
 from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.tenant_facts import (
+    CANONICAL_PRODUCTION_PROPERTIES,
+    REPO_DIR_TO_PROPERTY_ID,
+)
 
 
 def sanitize_dashes(text: str) -> str:
@@ -72,16 +76,6 @@ class GitOpsResult:
 
 
 DEFAULT_GITOPS_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/gitops_idempotency_ledger.json")
-
-CANONICAL_PRODUCTION_PROPERTIES = {
-    "profithelm",
-    "prexvo",
-    "gainhelm",
-    "pseofactory",
-    "profithelm-platform",
-    "factory",
-    "default",
-}
 
 KNOWN_TEST_PROPERTY_IDS = {
     "test_property",

@@ -27,17 +27,14 @@ LINKEDIN_COMPANY_ID = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID", "143884102")
 POST_URL_BASE = os.environ.get("FACTORY_POST_URL_BASE", CANONICAL_BASE)
 TOOLS: List[Dict[str, Any]] = []
 
-DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/distribution_idempotency.json")
+from pseofactory.tenant_facts import (
+    CANONICAL_PRODUCTION_PROPERTIES as _CANONICAL_PRODUCTION_PROPERTIES,
+    DEFAULT_TENANT_LINKEDIN_IDS,
+    get_tenant_contract,
+    resolve_canonical_property_id,
+)
 
-_CANONICAL_PRODUCTION_PROPERTIES = {
-    "profithelm",
-    "prexvo",
-    "gainhelm",
-    "pseofactory",
-    "profithelm-platform",
-    "factory",
-    "default",
-}
+DEFAULT_DISTRIBUTION_LEDGER_PATH = Path("/home/ubuntuadmin/projects/.agy/runs/distribution_idempotency.json")
 
 _TEST_PROPERTY_IDS = {
     "test_property",
@@ -85,48 +82,45 @@ def _is_test_context(
             return True
     return False
 
-TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = {
-    "profithelm": "143884102",
-    "prexvo": "106482194",
-    "gainhelm": "106482195",
-}
-DEFAULT_TENANT_LINKEDIN_IDS: Dict[str, str] = TENANT_LINKEDIN_COMPANY_IDS
+TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = DEFAULT_TENANT_LINKEDIN_IDS
 
 
 def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[str, str]:
     """
-    Resolves tenant-scoped distribution configuration backed by TenantFactStore
-    so Prexvo and GainHelm callers never inherit ProfitHelm module-level defaults.
+    Resolves tenant-scoped distribution configuration backed by DeclarativeTenantContract
+    and TenantFactStore so Prexvo, GainHelm, and future tenants never inherit ProfitHelm defaults.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.tenant_facts import TenantFactStore
 
     f_dom = os.environ.get("FACTORY_DOMAIN", "").lower()
-    eff_tenant = (
+    raw_tenant = (
         tenant_id
         or os.environ.get("FACTORY_TENANT_ID")
-        or ("gainhelm" if "gainhelm" in f_dom else ("prexvo" if "prexvo" in f_dom else "profithelm"))
+        or (f_dom if f_dom else "profithelm")
     ).strip().lower()
+    eff_tenant = resolve_canonical_property_id(raw_tenant, default=raw_tenant)
 
+    contract = get_tenant_contract(eff_tenant)
     store = TenantFactStore.get_instance()
     profile = store.get_profile(eff_tenant)
 
     if profile is not None:
         brand_name = profile.brand_name
         raw_domain = str(profile.canonical_domain or f"{eff_tenant}.com").strip()
+    elif contract is not None:
+        brand_name = contract.brand_name
+        raw_domain = contract.domain
     else:
-        brand_name = (
-            "GainHelm"
-            if eff_tenant == "gainhelm"
-            else ("Prexvo" if eff_tenant == "prexvo" else ("ProfitHelm" if eff_tenant == "profithelm" else eff_tenant.capitalize()))
-        )
+        brand_name = eff_tenant.capitalize()
         raw_domain = f"{eff_tenant}.com"
 
     domain = re.sub(r"^https?://", "", raw_domain, flags=re.IGNORECASE).rstrip("/")
     canonical_base = f"https://{domain}"
     linkedin_company_id = (
         os.environ.get(f"FACTORY_{eff_tenant.upper()}_LINKEDIN_COMPANY_ID")
-        or TENANT_LINKEDIN_COMPANY_IDS.get(eff_tenant, "143884102")
+        or TENANT_LINKEDIN_COMPANY_IDS.get(eff_tenant)
+        or (contract.linkedin_company_id if contract is not None else "143884102")
     )
 
     return {

@@ -1277,11 +1277,10 @@ PARASITE_LINK_WHEEL_INTERMEDIARY_HOSTS = (
     "medium.com",
     "quora.com",
 )
-TENANT_CANONICAL_HOSTS = {
-    "profithelm": "profithelm.com",
-    "prexvo": "prexvo.com",
-    "gainhelm": "gainhelm.com",
-}
+from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_HOSTS as TENANT_CANONICAL_HOSTS,
+    resolve_canonical_property_id as _resolve_canonical_tenant_id,
+)
 
 
 def _check_parasite_link_wheel_and_hub_spoke_gate(
@@ -1524,13 +1523,10 @@ def audit_syndication_asset_against_truth_store(
 
     store = fact_store or TenantFactStore.get_instance()
     slug = str(asset_pack.get("slug") or asset_pack.get("tool_slug") or "unknown-slug")
-    resolved_prop = str(asset_pack.get("property_id") or property_id or "profithelm").lower()
-    if "prexvo" in resolved_prop:
-        resolved_prop = "prexvo"
-    elif "gainhelm" in resolved_prop:
-        resolved_prop = "gainhelm"
-    else:
-        resolved_prop = "profithelm"
+    resolved_prop = _resolve_canonical_tenant_id(
+        str(asset_pack.get("property_id") or property_id or "profithelm"),
+        default="profithelm",
+    )
 
     violations: List[str] = []
     unknown_channels: List[str] = []

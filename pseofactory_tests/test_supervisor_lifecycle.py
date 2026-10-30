@@ -952,6 +952,210 @@ def test_three_tenant_uniform_lifecycle_contract_alignment(tmp_path: Path):
     assert "ProfitHelm" not in llms_full
 
 
+def test_declarative_tenant_registration_contract_derives_all_downstream_loops(tmp_path: Path):
+    """
+    Verifies that all per-tenant dictionaries and statutory fact definitions across
+    discovery, syndication, indexing velocity, and maintenance derive from the single
+    declarative registration contract (CANONICAL_TENANT_DECLARATIONS in tenant_facts.py),
+    and proves that registering a 4th declarative tenant automatically wires every
+    downstream loop without modifying individual modules.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import pseofactory
+    from pseofactory.audit import TENANT_CANONICAL_HOSTS
+    from pseofactory.distributor import (
+        DEFAULT_TENANT_LINKEDIN_IDS as DIST_LINKEDIN_IDS,
+        TENANT_LINKEDIN_COMPANY_IDS,
+        resolve_tenant_distribution_config,
+    )
+    from pseofactory.gitops import CANONICAL_PRODUCTION_PROPERTIES as GITOPS_PROD_PROPS
+    from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+    from pseofactory.infra_audit import ACTIVE_ROUTABLE_ZONE_IDS, ACTIVE_TENANT_DOMAINS
+    from pseofactory.maintenance import (
+        CANONICAL_TENANT_CONFIGS as MAINT_TENANT_CONFIGS,
+        CrossPropertyContaminationScanner,
+        sync_tenant_pseofactory_marker,
+    )
+    from pseofactory.pipeline import FactoryPipeline
+    from pseofactory.qualification import (
+        GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
+        PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP,
+        evaluate_query_modifier_expansion_vs_distinct_tool,
+        get_all_cannibalizing_clone_maps,
+        is_retired_or_consolidated_slug,
+    )
+    from pseofactory.seo_growth_loops import _resolve_property_id, _resolve_tenant_repo_root
+    from pseofactory.supervisor import _CANONICAL_TENANT_PROBES, CANONICAL_TENANTS
+    from pseofactory.tenant_facts import (
+        CANONICAL_TENANT_CONFIGS,
+        CANONICAL_TENANT_DECLARATIONS,
+        CANONICAL_TENANT_HOSTS,
+        DEFAULT_TENANT_LINKEDIN_IDS,
+        DeclarativeTenantContract,
+        StatutoryTruthRule,
+        TENANT_CANNIBALIZATION_MAPS_BY_ID,
+        TENANT_CATEGORY_SEED_TAXONOMY,
+        TENANT_FLAGSHIP_ANCHOR_SLUGS,
+        TENANT_FOREIGN_BOUNDARY_TOKENS,
+        TENANT_SMOKE_PROBES,
+        TENANT_VIDEO_BRANDING,
+        TenantFactStore,
+        get_tenant_contract,
+        register_declarative_tenant,
+        unregister_declarative_tenant,
+    )
+    from pseofactory.trends.collectors import (
+        TENANT_CATEGORY_SEED_TAXONOMY as COLLECTOR_SEED_TAXONOMY,
+    )
+    from pseofactory.trends.cron import TrendCronRunner
+    from pseofactory.video_factory import (
+        FLAGSHIP_ANCHOR_SLUGS as VF_FLAGSHIP_SLUGS,
+        TENANT_VIDEO_BRANDING as VF_VIDEO_BRANDING,
+    )
+
+    # 1. Verify top-level exports and shared identity across all downstream modules
+    assert hasattr(pseofactory, "DeclarativeTenantContract")
+    assert hasattr(pseofactory, "CANONICAL_TENANT_DECLARATIONS")
+    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm")
+    assert ACTIVE_TENANT_DOMAINS == ("profithelm.com", "prexvo.com", "gainhelm.com")
+    assert set(ACTIVE_ROUTABLE_ZONE_IDS.keys()) >= {"profithelm.com", "prexvo.com", "gainhelm.com"}
+
+    assert MAINT_TENANT_CONFIGS is CANONICAL_TENANT_CONFIGS
+    assert DIST_LINKEDIN_IDS is DEFAULT_TENANT_LINKEDIN_IDS
+    assert TENANT_LINKEDIN_COMPANY_IDS is DEFAULT_TENANT_LINKEDIN_IDS
+    assert COLLECTOR_SEED_TAXONOMY is TENANT_CATEGORY_SEED_TAXONOMY
+    assert VF_FLAGSHIP_SLUGS is TENANT_FLAGSHIP_ANCHOR_SLUGS
+    assert VF_VIDEO_BRANDING is TENANT_VIDEO_BRANDING
+    assert TENANT_CANONICAL_HOSTS is CANONICAL_TENANT_HOSTS
+    assert _CANONICAL_TENANT_PROBES is TENANT_SMOKE_PROBES
+    assert CrossPropertyContaminationScanner.DEFAULT_FOREIGN_TOKENS is TENANT_FOREIGN_BOUNDARY_TOKENS
+    assert PREXVO_CANNIBALIZING_CLONE_CONSOLIDATION_MAP is TENANT_CANNIBALIZATION_MAPS_BY_ID["prexvo"]
+    assert GAINHELM_CANNIBALIZING_CLONE_CONSOLIDATION_MAP is TENANT_CANNIBALIZATION_MAPS_BY_ID["gainhelm"]
+
+    # 2. Prove adding a 4th tenant via register_declarative_tenant wires all downstream loops automatically
+    synthetic_repo = tmp_path / "tariffhelm"
+    synthetic_repo.mkdir(parents=True, exist_ok=True)
+    synthetic_contract = DeclarativeTenantContract(
+        property_id="tariffhelm",
+        brand_name="TariffHelm",
+        domain="tariffhelm.com",
+        repo_dir_name="tariffhelm",
+        package_name="tariffhelm",
+        dist_dir="dist",
+        linkedin_company_id="106482999",
+        cloudflare_zone_id="11111111111111111111111111111111",
+        cloudflare_pages_cname_target="tariffhelm.pages.dev",
+        entity_type="Commercial Customs & CBAM Duty Simulation Engine",
+        statutory_truth=StatutoryTruthRule(
+            tenant_id="tariffhelm",
+            statutory_citations={"de_minimis": "19 U.S.C. Section 1321(a)(2)(C)"},
+            limits_and_thresholds={"de_minimis_section_321_usd": 800.0},
+        ),
+        statutory_intent_tokens=("hts code", "antidumping duty", "countervailing duty", "section 321"),
+        category_seed_taxonomy={
+            "customs_valuation": ("hts code duty calculator", "antidumping duty estimator"),
+        },
+        default_core_tools=(
+            {"slug": "hts-code-duty-calculator", "primary_keyword": "hts code duty calculator"},
+        ),
+        cannibalizing_clone_consolidation_map={
+            "hts-tariff-clone-calculator": {
+                "canonical_slug": "hts-code-duty-calculator",
+                "redirect_target": "/tools/hts-code-duty-calculator/",
+            },
+        },
+        flagship_anchor_slugs=("hts-code-duty-calculator",),
+        video_branding={
+            "brand_name": "TariffHelm",
+            "domain": "tariffhelm.com",
+            "canonical_base": "https://tariffhelm.com",
+            "badge_text": "TARIFFHELM.COM | CUSTOMS ENGINE",
+            "verification_pill": "19 USC VERIFIED",
+            "bg_rgb": (15, 23, 42),
+            "card_rgb": (30, 41, 59),
+            "accent_rgb": (245, 158, 11),
+            "accent_hex": "#f59e0b",
+            "voice": "en-US-ChristopherNeural",
+        },
+        smoke_probe_query="hts code duty calculator",
+        smoke_foreign_query="save plan student loan repayment calculator",
+        default_cpc_usd=12.0,
+        default_erpm_usd=90.0,
+        default_calculator_fallback_title="Customs Valuation and Tariff Duty Calculator",
+        default_heading_fallback_label="Customs Duty Calculator",
+        default_sample_query="hts code duty calculator",
+        default_sample_slug="hts-code-duty-calculator",
+        top_modifier_family="hts-code-duty-calculator",
+        publisher_entity_label="TariffHelm Customs Research Group",
+        cross_tenant_own_markers=("tariffhelm.com", "tariffhelm", "106482999"),
+    )
+
+    try:
+        register_declarative_tenant(synthetic_contract)
+
+        # Discovery & Routing
+        assert get_tenant_contract("tariffhelm") is synthetic_contract
+        assert "tariffhelm" in COLLECTOR_SEED_TAXONOMY
+        runner = TrendCronRunner()
+        cron_routed = runner.determine_property_assignment("hts code duty calculator")
+        assert cron_routed["property_id"] == "tariffhelm"
+        assert cron_routed["contamination_scan_passed"] == 1
+
+        pipe = FactoryPipeline()
+        routed = pipe.determine_property_assignment("hts code duty calculator", explicit_tenant=None)
+        assert routed["property_id"] == "tariffhelm"
+        assert routed["contamination_scan_passed"] == 1
+
+        # Qualification & Cannibalization
+        assert is_retired_or_consolidated_slug("hts-tariff-clone-calculator", property_id="tariffhelm") is True
+        assert "hts-tariff-clone-calculator" in get_all_cannibalizing_clone_maps()
+        mod_eval = evaluate_query_modifier_expansion_vs_distinct_tool(
+            "hts code duty calculator 2026",
+            property_id="tariffhelm",
+        )
+        assert mod_eval["parent_slug"] == "hts-code-duty-calculator"
+
+        # Syndication, Video & Audit
+        dist_cfg = resolve_tenant_distribution_config("tariffhelm")
+        assert dist_cfg["brand_name"] == "TariffHelm"
+        assert dist_cfg["domain"] == "tariffhelm.com"
+        assert dist_cfg["linkedin_company_id"] == "106482999"
+        assert VF_VIDEO_BRANDING["tariffhelm"]["brand_name"] == "TariffHelm"
+        assert VF_FLAGSHIP_SLUGS["tariffhelm"] == ("hts-code-duty-calculator",)
+        assert TENANT_CANONICAL_HOSTS["tariffhelm"] == "tariffhelm.com"
+        assert "tariffhelm" in GITOPS_PROD_PROPS
+
+        # Indexing Velocity & GSC Remediation
+        assert _resolve_property_id("tariffhelm") == "tariffhelm"
+        ov_spec = compile_remediation_overlay_spec(
+            {"slug": "hts-code-duty-calculator", "query": "hts code duty calculator"},
+            tenant_id="tariffhelm",
+        )
+        assert ov_spec["target_url"] == "https://tariffhelm.com/tools/hts-code-duty-calculator/"
+
+        # Maintenance, Marker Sync & Cross-Property Contamination
+        assert sync_tenant_pseofactory_marker(synthetic_repo, "tariffhelm") is True
+        marker_data = json.loads((synthetic_repo / ".pseofactory.json").read_text(encoding="utf-8"))
+        assert marker_data["brand_name"] == "TariffHelm"
+        assert marker_data["domain"] == "tariffhelm.com"
+
+        scanner = CrossPropertyContaminationScanner()
+        assert "tariffhelm.com" in scanner.scan_text("Check tariffhelm.com for customs rates", "profithelm")
+        assert "profithelm.com" in scanner.scan_text("Check profithelm.com for tax rates", "tariffhelm")
+
+        store = TenantFactStore.get_instance()
+        prof = store.get_profile("tariffhelm")
+        assert prof is not None
+        assert prof.brand_name == "TariffHelm"
+    finally:
+        unregister_declarative_tenant("tariffhelm")
+
+    assert "tariffhelm" not in CANONICAL_TENANT_DECLARATIONS
+    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm"}
+
+
+
 
 
 

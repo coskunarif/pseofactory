@@ -51,6 +51,15 @@ import bs4
 from pseofactory.indexing.preflight import IndexingPreflightEngine
 from pseofactory.partner_tracker import PartnerTrackingEngine
 from pseofactory.indexer import PushIndexer
+from pseofactory.tenant_facts import (
+    CANONICAL_TENANT_CONFIGS,
+    CANONICAL_TENANT_DECLARATIONS,
+    CANONICAL_TENANT_IDS,
+    DEFAULT_TENANT_LINKEDIN_IDS,
+    TENANT_FOREIGN_BOUNDARY_TOKENS,
+    get_tenant_contract,
+    resolve_canonical_property_id,
+)
 
 
 
@@ -247,121 +256,21 @@ class CrossPropertyContaminationScanner:
     Zero em-dashes. Zero en-dashes.
     """
 
-    DEFAULT_FOREIGN_TOKENS: Dict[str, Set[str]] = {
-        "prexvo": {
-            "section 1031",
-            "1031 exchange",
-            "exchange 1031",
-            "exchange1031",
-            "section 179",
-            "qsbs",
-            "section 1202",
-            "corporate tax",
-            "pass-through entity",
-            "tcja",
-            "profithelm.com",
-            "profithelm",
-            "143884102",
-            # ProfitHelm B2B affiliate partner keys
-            "coinledger",
-            "koinly",
-            "mercury",
-            "stripe",
-            "ramp",
-            "rho",
-            "gusto",
-            "rippling",
-            "crest_capital",
-            "ipx1031",
-            "exeter1031",
-            "first_american",
-            "turbotax",
-            "taxslayer",
-            "kalshi",
-            "interactive_brokers",
-            # GainHelm cyber compliance & GRC tokens
-            "gainhelm.com",
-            "gainhelm",
-            "vanta_security",
-            "drata_compliance",
-            "sprinto_compliance",
-            "thoropass_audit",
-            "coalition_cyber_insurance",
-            "cobalt_pentest",
-        },
-        "profithelm": {
-            "title iv",
-            "34 cfr",
-            "pslf",
-            "paye sunset",
-            "student loan",
-            "repayment assistance plan",
-            "income-contingent repayment",
-            "direct consolidation",
-            "prexvo.com",
-            "prexvo",
-            "106482194",
-            # Prexvo student loan refinance partner keys
-            "splash_financial",
-            "sofi",
-            "credible",
-            "earnest",
-            "lendkey",
-            # GainHelm cyber compliance & GRC tokens
-            "gainhelm.com",
-            "gainhelm",
-            "106482195",
-            "gh_soc2_cmmc_audit_workpapers",
-            "gh_hipaa_iso27001_governance_kit",
-        },
-        "gainhelm": {
-            "section 1031",
-            "1031 exchange",
-            "section 179",
-            "tcja",
-            "profithelm.com",
-            "profithelm",
-            "title iv",
-            "34 cfr",
-            "pslf",
-            "paye sunset",
-            "student loan",
-            "repayment assistance plan",
-            "income-contingent repayment",
-            "direct consolidation",
-            "prexvo.com",
-            "prexvo",
-            "106482194",
-            "splash_financial",
-            "sofi",
-            "credible",
-            "earnest",
-            "lendkey",
-            "coinledger",
-            "koinly",
-            "ipx1031",
-            "exeter1031",
-            "first_american",
-            "turbotax",
-            "taxslayer",
-            "kalshi",
-            "interactive_brokers",
-        },
-    }
+    DEFAULT_FOREIGN_TOKENS: Dict[str, Set[str]] = TENANT_FOREIGN_BOUNDARY_TOKENS
 
     def __init__(self, custom_foreign_tokens: Optional[Dict[str, Set[str]]] = None):
         self._tokens: Dict[str, Set[str]] = {}
         try:
             from pseofactory.tenant_facts import TenantFactStore
             fact_store = TenantFactStore.get_instance()
-            for prop in ["profithelm", "prexvo", "gainhelm"]:
+            for prop in list(CANONICAL_TENANT_IDS):
                 prof = fact_store.get_profile(prop)
                 if prof and prof.cross_tenant_forbidden_tokens:
                     self._tokens[prop] = {t.lower() for t in prof.cross_tenant_forbidden_tokens}
         except Exception:
             pass
-        if not self._tokens:
-            for k, v in self.DEFAULT_FOREIGN_TOKENS.items():
+        for k, v in self.DEFAULT_FOREIGN_TOKENS.items():
+            if k.lower() not in self._tokens or not self._tokens[k.lower()]:
                 self._tokens[k.lower()] = {t.lower() for t in v}
         if custom_foreign_tokens:
             for k, v in custom_foreign_tokens.items():
@@ -454,13 +363,6 @@ class CrossPropertyContaminationScanner:
                     property_id=property_id,
                     foreign_tokens=matched,
                 )
-
-
-DEFAULT_TENANT_LINKEDIN_IDS: Dict[str, str] = {
-    "profithelm": "143884102",
-    "prexvo": "106482194",
-    "gainhelm": "106482195",
-}
 
 
 class PropertyAdapter(ABC):
@@ -1321,40 +1223,6 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 
 
 
-CANONICAL_TENANT_CONFIGS: Dict[str, Dict[str, str]] = {
-    "profithelm": {
-        "property_id": "profithelm",
-        "repo_dir_name": "profithelm-platform",
-        "domain": "profithelm.com",
-        "canonical_base": "https://profithelm.com",
-        "brand_name": "ProfitHelm",
-        "package_name": "profithelm",
-        "dist_dir": "dist",
-        "linkedin_company_id": "143884102",
-    },
-    "prexvo": {
-        "property_id": "prexvo",
-        "repo_dir_name": "prexvo",
-        "domain": "prexvo.com",
-        "canonical_base": "https://prexvo.com",
-        "brand_name": "Prexvo",
-        "package_name": "prexvo",
-        "dist_dir": "dist",
-        "linkedin_company_id": "106482194",
-    },
-    "gainhelm": {
-        "property_id": "gainhelm",
-        "repo_dir_name": "gainhelm",
-        "domain": "gainhelm.com",
-        "canonical_base": "https://gainhelm.com",
-        "brand_name": "GainHelm",
-        "package_name": "gainhelm",
-        "dist_dir": "dist",
-        "linkedin_company_id": "106482195",
-    },
-}
-
-
 def sync_tenant_pseofactory_marker(repo_path: Union[str, Path], property_id: str) -> bool:
     """
     Ensures a canonical .pseofactory.json marker file is present and aligned across
@@ -2206,50 +2074,29 @@ class TenantRegistry:
     def _ensure_tenant_tools(cls, reg: TenantRegistry, workspace_root: Optional[Union[str, Path]] = None) -> None:
         """Populates tools on discovered adapters without importing tenant modules into host sys.modules."""
         in_pytest = "PYTEST_CURRENT_TEST" in os.environ and workspace_root is None
-        try:
-            px_adapter = reg.get_adapter("prexvo")
-            if not px_adapter.tools:
-                px_tools = (
-                    list(PREXVO_DEFAULT_TOOLS)
-                    if in_pytest
-                    else _discover_tenant_tools(px_adapter, PREXVO_DEFAULT_TOOLS)
-                )
-                if hasattr(px_adapter, "_tools"):
-                    px_adapter._tools = list(px_tools)
-                elif hasattr(px_adapter, "tools") and isinstance(px_adapter.tools, list):
-                    px_adapter.tools.extend(px_tools)
-        except KeyError:
-            pass
-
-        try:
-            ph_adapter = reg.get_adapter("profithelm")
-            if not ph_adapter.tools:
-                ph_tools = (
-                    list(PROFITHELM_DEFAULT_TOOLS)
-                    if in_pytest
-                    else _discover_tenant_tools(ph_adapter, PROFITHELM_DEFAULT_TOOLS)
-                )
-                if hasattr(ph_adapter, "_tools"):
-                    ph_adapter._tools = list(ph_tools)
-                elif hasattr(ph_adapter, "tools") and isinstance(ph_adapter.tools, list):
-                    ph_adapter.tools.extend(ph_tools)
-        except KeyError:
-            pass
-
-        try:
-            gh_adapter = reg.get_adapter("gainhelm")
-            if not gh_adapter.tools:
-                gh_tools = (
-                    list(GAINHELM_DEFAULT_TOOLS)
-                    if in_pytest
-                    else _discover_tenant_tools(gh_adapter, GAINHELM_DEFAULT_TOOLS)
-                )
-                if hasattr(gh_adapter, "_tools"):
-                    gh_adapter._tools = list(gh_tools)
-                elif hasattr(gh_adapter, "tools") and isinstance(gh_adapter.tools, list):
-                    gh_adapter.tools.extend(gh_tools)
-        except KeyError:
-            pass
+        default_tool_map: Dict[str, List[Dict[str, Any]]] = {
+            "prexvo": PREXVO_DEFAULT_TOOLS,
+            "profithelm": PROFITHELM_DEFAULT_TOOLS,
+            "gainhelm": GAINHELM_DEFAULT_TOOLS,
+        }
+        for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+            if pid not in default_tool_map and contract.default_core_tools:
+                default_tool_map[pid] = [dict(t) for t in contract.default_core_tools]
+        for pid, default_tools in default_tool_map.items():
+            try:
+                t_adapter = reg.get_adapter(pid)
+                if not t_adapter.tools:
+                    t_tools = (
+                        list(default_tools)
+                        if in_pytest
+                        else _discover_tenant_tools(t_adapter, default_tools)
+                    )
+                    if hasattr(t_adapter, "_tools"):
+                        t_adapter._tools = list(t_tools)
+                    elif hasattr(t_adapter, "tools") and isinstance(t_adapter.tools, list):
+                        t_adapter.tools.extend(t_tools)
+            except KeyError:
+                pass
 
     @classmethod
     def reset_default(cls) -> None:

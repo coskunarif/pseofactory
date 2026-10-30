@@ -22,6 +22,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from pseofactory.supervisor import AtomicStateLedger
+from pseofactory.tenant_facts import (
+    TENANT_DEFAULT_CPC_USD,
+    TENANT_DEFAULT_ERPM_USD,
+    TENANT_FOREIGN_BOUNDARY_TOKENS,
+    get_tenant_contract,
+    resolve_canonical_property_id,
+)
 
 EXPECTED_CTR_CURVE: Dict[int, float] = {
     1: 0.28,
@@ -1447,11 +1454,8 @@ def calculate_candidate_roi(
     if data.get("check_ai_citation") or ("ai_citation_vacant" in data and not citation_gap_status):
         try:
             from pseofactory.trends.treg_checker import TregChecker, parse_ai_citation_payload
-            domain_for_tenant = (
-                "prexvo.com"
-                if resolved_tenant == "prexvo"
-                else ("gainhelm.com" if resolved_tenant == "gainhelm" else "profithelm.com")
-            )
+            contract_for_tenant = get_tenant_contract(resolved_tenant)
+            domain_for_tenant = contract_for_tenant.domain if contract_for_tenant is not None else "profithelm.com"
             if "ai_citation_vacant" in data or "ai_cited_domains" in data:
                 parsed_ai = parse_ai_citation_payload(
                     {
@@ -1572,8 +1576,8 @@ def calculate_candidate_roi(
     effective_impressions = max(impressions, 60 if severity_factor >= 0.85 else 30)
     expected_click_lift = round(max(0.5, effective_impressions * ctr_deficit * severity_factor), 4)
 
-    default_cpc = 8.0 if resolved_tenant == "prexvo" else (14.5 if resolved_tenant == "gainhelm" else 10.5)
-    default_erpm = 75.0 if resolved_tenant == "prexvo" else (95.0 if resolved_tenant == "gainhelm" else 85.0)
+    default_cpc = float(TENANT_DEFAULT_CPC_USD.get(resolved_tenant, 10.5))
+    default_erpm = float(TENANT_DEFAULT_ERPM_USD.get(resolved_tenant, 85.0))
     cpc = float(data.get("cpc", default_cpc) or default_cpc)
     erpm_usd = float(data.get("erpm_usd", data.get("empirical_erpm_usd", default_erpm)) or default_erpm)
 
@@ -1958,14 +1962,11 @@ def _normalize_title_50_60(
         base = " ".join(dedup_words).strip(" |-:")
 
     if not base:
+        t_contract = get_tenant_contract(tenant_id)
         base = (
-            "Title IV Student Loan Repayment Calculator"
-            if tenant_id == "prexvo"
-            else (
-                "Enterprise Cyber Compliance and GRC Audit Cost Calculator"
-                if tenant_id == "gainhelm"
-                else "Statutory Tax and Financial Model Calculator"
-            )
+            t_contract.default_calculator_fallback_title
+            if (t_contract is not None and t_contract.default_calculator_fallback_title)
+            else "Statutory Tax and Financial Model Calculator"
         )
 
     max_base = 60 - len(suffix)
@@ -4125,8 +4126,9 @@ def compile_remediation_overlay_spec(
         or "profithelm"
     ).strip().lower()
 
-    brand = "Prexvo" if resolved_tenant == "prexvo" else ("GainHelm" if resolved_tenant == "gainhelm" else "ProfitHelm")
-    domain = "prexvo.com" if resolved_tenant == "prexvo" else ("gainhelm.com" if resolved_tenant == "gainhelm" else "profithelm.com")
+    t_contract = get_tenant_contract(resolved_tenant)
+    brand = t_contract.brand_name if t_contract is not None else "ProfitHelm"
+    domain = t_contract.domain if t_contract is not None else "profithelm.com"
     target_url = str(
         candidate.get("target_url")
         or candidate.get("page")
@@ -4238,9 +4240,9 @@ def compile_remediation_overlay_spec(
         " ".join(words)
         if words
         else (
-            "Title IV Repayment Calculator"
-            if resolved_tenant == "prexvo"
-            else ("Enterprise Compliance Calculator" if resolved_tenant == "gainhelm" else "Statutory Tax Calculator")
+            t_contract.default_heading_fallback_label
+            if (t_contract is not None and t_contract.default_heading_fallback_label)
+            else "Statutory Tax Calculator"
         )
     )
     heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
@@ -7911,11 +7913,8 @@ class AsyncRemediationQueue:
                 default_slug=str(cand.get("slug") or ""),
             )
             if not target_url:
-                domain = (
-                    "prexvo.com"
-                    if eff_tenant == "prexvo"
-                    else ("gainhelm.com" if eff_tenant == "gainhelm" else "profithelm.com")
-                )
+                eff_contract = get_tenant_contract(eff_tenant)
+                domain = eff_contract.domain if eff_contract is not None else "profithelm.com"
                 target_url = f"https://{domain}/tools/{slug}/"
 
             action_or_engine = str(
@@ -8129,16 +8128,13 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
     prop = str(property_id or "profithelm").strip().lower()
     if prop.startswith("sc-domain:"):
         prop = prop.split("sc-domain:", 1)[1].split(".", 1)[0].strip().lower()
+    prop = resolve_canonical_property_id(prop, default=prop)
+    prop_contract = get_tenant_contract(prop)
     if repo_root is not None:
         root = Path(repo_root).resolve()
     else:
-        default_roots = {
-            "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
-            "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
-            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
-        }
-        root = default_roots.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform"))
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+        root = prop_contract.repo_root_path if prop_contract is not None else Path("/home/ubuntuadmin/projects/profithelm-platform")
+    domain = prop_contract.domain if prop_contract is not None else "profithelm.com"
 
     if live_queries is not None:
         raw_rows = [dict(r) for r in live_queries if isinstance(r, dict)]
@@ -8298,14 +8294,14 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
 
     # Verify composite idempotency key and non-oscillating state machine determinism in memory/temp
     default_sample_query = (
-        "ca tax brackets 2027"
-        if prop == "profithelm"
-        else ("soc 2 audit cost calculator" if prop == "gainhelm" else "rap calculator")
+        prop_contract.default_sample_query
+        if (prop_contract is not None and prop_contract.default_sample_query)
+        else "ca tax brackets 2027"
     )
     default_sample_slug = (
-        "irs-2027-tax-brackets/california"
-        if prop == "profithelm"
-        else ("soc-2-audit-cost-calculator" if prop == "gainhelm" else "rap-payment-calculator")
+        prop_contract.default_sample_slug
+        if (prop_contract is not None and prop_contract.default_sample_slug)
+        else "irs-2027-tax-brackets/california"
     )
     sample_query = (
         statistically_significant_striking[0]["query"]
