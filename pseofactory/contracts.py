@@ -2025,10 +2025,10 @@ def extract_statutory_citations(text: str) -> List[Dict[str, str]]:
 
 
 _MALFORMED_USC_DANGLING_RE = re.compile(r'\b([0-9]{1,3})\s*U\.?S\.?C\.?(?:\s*A\.?)?', re.IGNORECASE)
-_MALFORMED_USC_AFTER_RE = re.compile(r'^(?:\s*(?:§+|Section|Sec\.)\s*|\s+)[0-9]+', re.IGNORECASE)
+_MALFORMED_USC_AFTER_RE = re.compile(r'^(?:\s*(?:§+|Sections?|Secs?\.)\s*|\s+)[0-9]+', re.IGNORECASE)
 _MALFORMED_CFR_DANGLING_RE = re.compile(r'\b([0-9]{1,3})\s*C\.?F\.?R\.?', re.IGNORECASE)
-_MALFORMED_CFR_AFTER_RE = re.compile(r'^(?:\s*(?:§+|Section|Sec\.|Part)\s*|\s+)[0-9]+', re.IGNORECASE)
-_MALFORMED_IRC_DANGLING_RE = re.compile(r'\bI\.?R\.?C\.?\s*(?:§+|Section|Sec\.)', re.IGNORECASE)
+_MALFORMED_CFR_AFTER_RE = re.compile(r'^(?:\s*(?:§+|Sections?|Secs?\.|Parts?)\s*|\s+)[0-9]+', re.IGNORECASE)
+_MALFORMED_IRC_DANGLING_RE = re.compile(r'\bI\.?R\.?C\.?\s*(?:§+|Sections?|Secs?\.)', re.IGNORECASE)
 _MALFORMED_IRC_AFTER_RE = re.compile(r'^\s*[0-9]+', re.IGNORECASE)
 _MALFORMED_USC_TITLE_RE = re.compile(
     r'\b([0-9]+)\s*U\.?S\.?C\.?(?:\s*A\.?)?\s*(?:(?:§+|Section|Sec\.)\s*)?([0-9]+[a-zA-Z]*(?:\([a-zA-Z0-9]+\))*)',

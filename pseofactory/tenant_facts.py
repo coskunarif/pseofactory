@@ -2528,6 +2528,9 @@ class TruthReconciliationEngine:
     )
 
     PROFITHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        ("IRC Sections 1001, 1012, 1222, and 1411", "IRC Section 1001, Section 1012, Section 1222, and Section 1411"),
+        ("IRC Sections 3111 and 3301", "IRC Section 3111 and Section 3301"),
+        ("IRC Sections ", "IRC Section "),
         # Stale 2024/2025 Section 179 caps and phaseout thresholds presented as 2026 rules
         ("$1,220,000 (Full Basis 100%)", "$2,560,000 (Full Basis 100%)"),
         ("up to $1,250,000 in qualifying commercial equipment", "up to $2,560,000 in qualifying commercial equipment"),

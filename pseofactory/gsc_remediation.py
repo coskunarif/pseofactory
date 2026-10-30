@@ -5353,7 +5353,7 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
         elif any(k in low for k in ("crypto", "1099-da", "1099 da", "digital-asset", "8949")):
             assertions = [
-                f"In 2026, {heading_label} reconciles digital asset cost basis and capital gains under IRC Sections 1001, 1012, 1222, and 1411 (3.8% Net Investment Income Tax) alongside mandatory custodial broker reporting on IRS Form 1099-DA.",
+                f"In 2026, {heading_label} reconciles digital asset cost basis and capital gains under IRC Section 1001, Section 1012, Section 1222, and Section 1411 (3.8% Net Investment Income Tax) alongside mandatory custodial broker reporting on IRS Form 1099-DA.",
                 "Under Treasury Regulation 1.6045-1 and IRS Revenue Procedure 2024-28, taxpayers must allocate cost basis per wallet or account using specific identification (HIFO/LIFO) prior to execution or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
                 "On $150,000 of digital asset proceeds with $45,000 verified cost basis ($105,000 net gain) taxed at the 20% long-term capital gains rate plus 3.8% NIIT ($24,990 tax), net after-tax proceeds equal $80,010 (or $14,880 in tax saved via HIFO lot selection on a $185,000 disposal).",
             ]
@@ -5556,7 +5556,7 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
         elif any(k in low for k in ("workers-comp", "payroll-burden", "invoice-factoring", "surety-bond", "llc")):
             assertions = [
-                f"In 2026, {heading_label} quantifies statutory employer payroll taxes (IRC Sections 3111 and 3301), NCCI workers' compensation Experience Modification Rate (EMR) premiums, and commercial operating costs.",
+                f"In 2026, {heading_label} quantifies statutory employer payroll taxes (IRC Section 3111 and Section 3301), NCCI workers' compensation Experience Modification Rate (EMR) premiums, and commercial operating costs.",
                 "Under IRC Section 3111 and 3301, employers pay 6.2% OASDI (up to $176,100 per employee), 1.45% Medicare, and 0.6% net FUTA (after the 5.4% SUTA credit on the first $7,000), while NCCI workers' comp manual rates scale by the employer's EMR.",
                 "For a $1,250,000 covered payroll with a $7.00 per $100 NCCI manual rate, achieving a 0.85 safety EMR credit reduces annual workers' compensation premium from $87,500 to $74,375 ($13,125 saved; $115,375 total burden with $41,000 FICA/FUTA/SUTA).",
             ]

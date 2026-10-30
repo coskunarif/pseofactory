@@ -1788,7 +1788,7 @@ PROFITHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Payroll & Workers Comp",
         "description": "Calculate fully burdened employee labor cost including FICA, FUTA, SUTA, and NCCI class-code workers compensation insurance premiums.",
         "primary_keyword": "workers comp and payroll burden calculator",
-        "quick_answer": "Under IRC Sections 3111 and 3301 plus NCCI payroll classification standards, true employer labor burden combines 7.65% FICA, federal/state unemployment taxes, and workers compensation rates per $100 of payroll.",
+        "quick_answer": "Under IRC Section 3111 and Section 3301 plus NCCI payroll classification standards, true employer labor burden combines 7.65% FICA, federal/state unemployment taxes, and workers compensation rates per $100 of payroll.",
         "category": "Corporate Finance",
     },
 ]
