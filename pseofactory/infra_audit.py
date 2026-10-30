@@ -270,19 +270,25 @@ def audit_active_zone_dns_hygiene(
 
     for domain, zid in zones.items():
         url = f"https://api.cloudflare.com/client/v4/zones/{zid}/dns_records?per_page=100"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-                records = body.get("result") if isinstance(body.get("result"), list) else []
-        except Exception as exc:
-            violations.append(f"{domain} (active zone DNS fetch failed: {exc})")
+        records: Optional[List[Dict[str, Any]]] = None
+        last_exc: Optional[Exception] = None
+        for _attempt in range(2):
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    records = body.get("result") if isinstance(body.get("result"), list) else []
+                    break
+            except Exception as exc:
+                last_exc = exc
+        if records is None:
+            violations.append(f"{domain} (active zone DNS fetch failed: {last_exc})")
             continue
 
         expected_cname = EXPECTED_ACTIVE_CNAME_TARGETS.get(domain)

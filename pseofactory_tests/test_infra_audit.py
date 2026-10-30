@@ -90,7 +90,8 @@ def test_consolidated_infra_audit_pass():
     with patch("pseofactory.infra_audit.audit_cloudflare_and_multi_cloud", return_value=(True, "Clean")), \
          patch("pseofactory.infra_audit.audit_gcp_billing_summary", return_value=(True, "Clean")), \
          patch("pseofactory.infra_audit.audit_host_hygiene", return_value=(True, "Clean")), \
-         patch("pseofactory.infra_audit.audit_live_edge_endpoints", return_value=(True, "Clean")):
+         patch("pseofactory.infra_audit.audit_live_edge_endpoints", return_value=(True, "Clean")), \
+         patch("pseofactory.infra_audit.audit_hibernated_and_retired_dns_isolation", return_value=(True, "Clean")):
         res = run_consolidated_infra_audit()
         assert res["status"] == "PASS"
         assert res["violations_count"] == 0
@@ -99,6 +100,7 @@ def test_consolidated_infra_audit_pass():
         assert res["checks"]["gcp_billing"]["ok"] is True
         assert res["checks"]["host_hygiene"]["ok"] is True
         assert res["checks"]["live_edge"]["ok"] is True
+        assert res["checks"]["dns_isolation"]["ok"] is True
 
 
 def test_consolidated_infra_audit_failure_telemetry_emission(tmp_path):
@@ -112,7 +114,8 @@ def test_consolidated_infra_audit_failure_telemetry_emission(tmp_path):
     with patch("pseofactory.infra_audit.audit_cloudflare_and_multi_cloud", return_value=(True, "Clean")), \
          patch("pseofactory.infra_audit.audit_gcp_billing_summary", return_value=(True, "Clean")), \
          patch("pseofactory.infra_audit.audit_host_hygiene", return_value=(False, "Lethal crawler barrier")), \
-         patch("pseofactory.infra_audit.audit_live_edge_endpoints", return_value=(True, "Clean")):
+         patch("pseofactory.infra_audit.audit_live_edge_endpoints", return_value=(True, "Clean")), \
+         patch("pseofactory.infra_audit.audit_hibernated_and_retired_dns_isolation", return_value=(True, "Clean")):
         res = run_consolidated_infra_audit(telemetry_logger=logger)
         assert res["status"] == "FAIL"
         assert res["violations_count"] == 1
