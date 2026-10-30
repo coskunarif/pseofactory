@@ -2378,7 +2378,19 @@ class LiveTruthAuditEngine:
             return []
         try:
             content = p.read_text(encoding="utf-8", errors="ignore")
-            return self.audit_html(content, property_id=property_id, context=p.name)
+            ctx = p.name
+            if p.name == "index.html" and p.parent.parent.name == "tools":
+                ctx = f"tools/{p.parent.name}/index.html"
+            elif p.name == "index.html" and p.parent.parent.parent.name == "tools":
+                ctx = f"tools/{p.parent.parent.name}/{p.parent.name}/index.html"
+            violations = self.audit_html(content, property_id=property_id, context=ctx)
+            if p.name == "index.html" and p.parent.parent.name == "tools":
+                sidecar_path = p.parent.parent.parent / "manifests" / f"{p.parent.name}.json"
+                if RetroReflectionEngine._sidecar_needs_sync(sidecar_path, content):
+                    violations.append(
+                        f"Sidecar manifest ({sidecar_path.name}) diverges from embedded calculation-manifest in {ctx}"
+                    )
+            return violations
         except Exception as ex:
             return [f"Failed to read file {p}: {ex}"]
 
@@ -7574,6 +7586,15 @@ class RetroReflectionEngine:
             "economic_dataset": "U.S. Department of the Treasury Daily Treasury Par Yield Curve Rates and Federal Reserve H.15",
             "sample_calculation": "Under 31 U.S.C. Section 3124, a 4.80% U.S. Treasury yield at a 38.8% federal + NIIT rate and 13.3% California state rate produces a 6.13% tax-equivalent yield.",
         },
+        "r-and-d-tax-credit-section-174-amortization-calculator": {
+            "model_name": "R&D Tax Credit and Section 174 Amortization Model",
+            "formula": "round((current_qre_spend - (0.5 * prior_three_year_avg_qre)) * asc_credit_rate, 2)",
+            "inputs": {"current_qre_spend": 800000.0, "prior_three_year_avg_qre": 500000.0, "asc_credit_rate": 0.14},
+            "published_output": 77000.0,
+            "statutory_authority": "IRC Section 41 Credit for Increasing Research Activities and IRC Section 174 R&E Amortization",
+            "economic_dataset": "FRED Private R&D Investment Series, BEA Innovation Accounts, and IRS Form 6765 Statistics",
+            "sample_calculation": "Qualifying research expenditures of $800,000 against a $500,000 prior 3-year average under the 14% Alternative Simplified Credit yields a $77,000.00 direct tax credit.",
+        },
     }
 
     GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8440,6 +8461,34 @@ class RetroReflectionEngine:
     _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str], Tuple[str, List[str]]] = {}
 
     @classmethod
+    def _sidecar_needs_sync(cls, sidecar_path: Path, html_content: str) -> bool:
+        """Checks whether a sidecar manifest JSON is missing entity_type or out of lockstep with embedded HTML manifest."""
+        if not sidecar_path.is_file():
+            return False
+        try:
+            from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+            sc_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if not isinstance(sc_data, dict) or str(sc_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY:
+                return True
+            m = re.search(
+                r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\'][^>]*>(.*?)</script>',
+                html_content,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if m:
+                emb_data = json.loads(m.group(1).strip())
+                if isinstance(emb_data, dict):
+                    if (
+                        sc_data.get("published_output") != emb_data.get("published_output")
+                        or sc_data.get("formula") != emb_data.get("formula")
+                        or sc_data.get("inputs") != emb_data.get("inputs")
+                    ):
+                        return True
+        except Exception:
+            return True
+        return False
+
+    @classmethod
     def retrofit_html(
         cls,
         html_content: str,
@@ -8461,20 +8510,14 @@ class RetroReflectionEngine:
             cached_res = cls._RETROFIT_HTML_CACHE.get(cache_key)
             if cached_res is not None:
                 out_html, out_rep = cached_res
-                if dist_dir is None or not (Path(dist_dir) / "manifests" / f"{slug}.json").is_file():
+                if dist_dir is None or not cls._sidecar_needs_sync(Path(dist_dir) / "manifests" / f"{slug}.json", out_html):
                     return out_html, list(out_rep)
 
         missing = cls.audit_html_mechanics(html_content)
         if not missing and dist_dir is not None:
             sidecar_pre = Path(dist_dir) / "manifests" / f"{slug}.json"
-            if sidecar_pre.is_file():
-                try:
-                    from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
-                    sc_pre_data = json.loads(sidecar_pre.read_text(encoding="utf-8"))
-                    if not isinstance(sc_pre_data, dict) or str(sc_pre_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY:
-                        missing.append("calculation_manifest")
-                except Exception:
-                    missing.append("calculation_manifest")
+            if cls._sidecar_needs_sync(sidecar_pre, html_content):
+                missing.append("calculation_manifest")
         if not missing:
             if cache_key is not None:
                 if len(cls._RETROFIT_HTML_CACHE) > 512:
@@ -10480,6 +10523,11 @@ class RetroReflectionEngine:
                 continue
             scanned += 1
             missing = cls.audit_html_mechanics(content)
+            if rel.startswith("tools/") and rel.endswith("/index.html"):
+                tool_slug_rel = rel[len("tools/") : -len("/index.html")]
+                if "/" not in tool_slug_rel and cls._sidecar_needs_sync(d / "manifests" / f"{tool_slug_rel}.json", content):
+                    if "calculation_manifest" not in missing:
+                        missing.append("calculation_manifest")
             if (
                 'data-status="pending"' in content
                 or 'data-partner="sofi_refi"' in content
@@ -12388,19 +12436,69 @@ def reflect_and_recompile_all_assets(
                         ('<td><span class="badge-tag">5.64% TEY</span></td>', '<td><span class="badge-tag">5.84% TEY</span></td>'),
                         ('<td><span class="badge-tag">5.62% TEY</span></td>', '<td><span class="badge-tag">5.82% TEY</span></td>'),
                         ('<td><span class="badge-tag">5.46% TEY</span></td>', '<td><span class="badge-tag">5.63% TEY</span></td>'),
+                        (
+                            "    calc_out = safe_eval_mathematical_formula(base_spec[\"formula\"], base_spec[\"inputs\"])\n    published_output = float(calc_out)",
+                            "    calc_out = safe_eval_mathematical_formula(base_spec[\"formula\"], base_spec[\"inputs\"])\n    published_output = round(float(calc_out), 4 if (0 < abs(float(calc_out)) < 1) else 2)",
+                        ),
                     ):
                         ph_b_src = ph_b_src.replace(old_b, new_b)
                     if ph_b_src != ph_b_orig:
                         ph_builder_file.write_text(ph_b_src, encoding="utf-8")
 
+                ph_cfg_file = Path(adapter.repo_path) / "profithelm" / "config.py"
+                if ph_cfg_file.is_file():
+                    ph_cfg_src = ph_cfg_file.read_text(encoding="utf-8")
+                    ph_cfg_orig = ph_cfg_src
+                    for fb_slug, fb_spec in RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS.items():
+                        cfg_pat = re.compile(
+                            rf'(    "{re.escape(fb_slug)}": \{{\n(?:        "(?:model_name|entity_type|statutory_authority|economic_dataset)": [^\n]+\n)+)(?:        "[^\n]+\n)+?(    \}},)'
+                        )
+                        cfg_repl = (
+                            rf'\g<1>'
+                            f'        "inputs": {json.dumps(fb_spec["inputs"])},\n'
+                            f'        "formula": {json.dumps(fb_spec["formula"])},\n'
+                            f'        "published_output": {float(fb_spec["published_output"])},\n'
+                            f'        "sample_calculation": {json.dumps(fb_spec["sample_calculation"])},\n'
+                            rf'\g<2>'
+                        )
+                        ph_cfg_src = cfg_pat.sub(cfg_repl, ph_cfg_src, count=1)
+                    if ph_cfg_src != ph_cfg_orig:
+                        ph_cfg_file.write_text(ph_cfg_src, encoding="utf-8")
+
                 ph_dyn_file = Path(adapter.repo_path) / "profithelm" / "data" / "dynamic_tools.json"
                 if ph_dyn_file.is_file():
                     ph_d_src = ph_dyn_file.read_text(encoding="utf-8")
+                    ph_d_orig = ph_d_src
                     if "face a $31,300 statutory Section 179 cap" in ph_d_src:
-                        ph_dyn_file.write_text(
-                            ph_d_src.replace("face a $31,300 statutory Section 179 cap", "face a $30,500 statutory Section 179 cap"),
-                            encoding="utf-8",
+                        ph_d_src = ph_d_src.replace(
+                            "face a $31,300 statutory Section 179 cap",
+                            "face a $30,500 statutory Section 179 cap",
                         )
+                    try:
+                        dyn_data = json.loads(ph_d_src)
+                        dyn_list = dyn_data if isinstance(dyn_data, list) else dyn_data.get("tools", [])
+                        dyn_changed = False
+                        for dt in dyn_list:
+                            dt_slug = str(dt.get("slug") or "")
+                            dt_cm = dt.get("calculation_manifest")
+                            fb_dt = RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS.get(dt_slug)
+                            if isinstance(dt_cm, dict) and fb_dt:
+                                if (
+                                    dt_cm.get("formula") != fb_dt["formula"]
+                                    or dt_cm.get("inputs") != fb_dt["inputs"]
+                                    or dt_cm.get("published_output") != float(fb_dt["published_output"])
+                                ):
+                                    dt_cm["inputs"] = dict(fb_dt["inputs"])
+                                    dt_cm["formula"] = str(fb_dt["formula"])
+                                    dt_cm["published_output"] = float(fb_dt["published_output"])
+                                    dt_cm["sample_calculation"] = str(fb_dt["sample_calculation"])
+                                    dyn_changed = True
+                        if dyn_changed:
+                            ph_d_src = json.dumps(dyn_data, ensure_ascii=False, indent=2) + "\n"
+                    except Exception:
+                        pass
+                    if ph_d_src != ph_d_orig:
+                        ph_dyn_file.write_text(ph_d_src, encoding="utf-8")
             except Exception:
                 pass
 
@@ -12482,6 +12580,7 @@ def reflect_and_recompile_all_assets(
                 px_obs = Path(adapter.repo_path) / "prexvo" / "observer.py"
                 if px_obs.is_file():
                     px_obs_src = px_obs.read_text(encoding="utf-8")
+                    px_obs_orig = px_obs_src
                     if '"published_output": 164.90,' in px_obs_src:
                         px_obs_src = (
                             px_obs_src.replace('"agi": 55000,', '"agi": 65000,')
@@ -12495,6 +12594,127 @@ def reflect_and_recompile_all_assets(
                                 "establishing $248.23 monthly payment with 100% interest subsidy protection.",
                             )
                         )
+                    old_gplus_obs = (
+                        '        "formula": "round(max(0, statutory_aggregate_cap - existing_direct_balance), 2)",\n'
+                        '        "inputs": {\n'
+                        '            "statutory_aggregate_cap": 138500,\n'
+                        '            "existing_direct_balance": 57500,\n'
+                        '        },\n'
+                        '        "published_output": 81000.0,\n'
+                        '        "sample_calculation": (\n'
+                        '            "Graduate borrower with $57,500 in existing Direct Loan debt against a $138,500 aggregate statutory cap retains $81,000.00 in remaining federal borrowing capacity."\n'
+                        '        ),\n'
+                        '        "calculation_manifest": {\n'
+                        '            "slug": "grad-plus-borrowing-cap-calculator",\n'
+                        '            "model_name": "Prexvo-GradPLUS-Borrowing-Cap-Model-2026",\n'
+                        '            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.203 aggregate loan limits",\n'
+                        '            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",\n'
+                        '            "formula": "round(max(0, statutory_aggregate_cap - existing_direct_balance), 2)",\n'
+                        '            "inputs": {\n'
+                        '                "statutory_aggregate_cap": 138500,\n'
+                        '                "existing_direct_balance": 57500,\n'
+                        '            },\n'
+                        '            "published_output": 81000.0,\n'
+                        '            "sample_calculation": (\n'
+                        '                "Graduate borrower with $57,500 in existing Direct Loan debt against a $138,500 aggregate statutory cap retains $81,000.00 in remaining federal borrowing capacity."\n'
+                        '            ),\n'
+                        '            "entity_type": "FinancialProductOrService",\n'
+                        '        },'
+                    )
+                    new_gplus_obs = (
+                        '        "formula": "round(min(cost_of_attendance - institutional_aid, direct_unsubsidized_annual_cap), 2)",\n'
+                        '        "inputs": {\n'
+                        '            "cost_of_attendance": 78000,\n'
+                        '            "institutional_aid": 15000,\n'
+                        '            "direct_unsubsidized_annual_cap": 20500,\n'
+                        '        },\n'
+                        '        "published_output": 20500.0,\n'
+                        '        "sample_calculation": (\n'
+                        '            "Under HEA Section 455(a) and 34 CFR 685.203, annual Direct Unsubsidized graduate borrowing is capped at $20,500.00 ($138,500 aggregate limit)."\n'
+                        '        ),\n'
+                        '        "calculation_manifest": {\n'
+                        '            "slug": "grad-plus-borrowing-cap-calculator",\n'
+                        '            "model_name": "Prexvo-GradPLUS-Borrowing-Cap-Model-2026",\n'
+                        '            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.203 aggregate loan limits",\n'
+                        '            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",\n'
+                        '            "formula": "round(min(cost_of_attendance - institutional_aid, direct_unsubsidized_annual_cap), 2)",\n'
+                        '            "inputs": {\n'
+                        '                "cost_of_attendance": 78000,\n'
+                        '                "institutional_aid": 15000,\n'
+                        '                "direct_unsubsidized_annual_cap": 20500,\n'
+                        '            },\n'
+                        '            "published_output": 20500.0,\n'
+                        '            "sample_calculation": (\n'
+                        '                "Under HEA Section 455(a) and 34 CFR 685.203, annual Direct Unsubsidized graduate borrowing is capped at $20,500.00 ($138,500 aggregate limit)."\n'
+                        '            ),\n'
+                        '            "entity_type": "FinancialProductOrService",\n'
+                        '        },'
+                    )
+                    if old_gplus_obs in px_obs_src:
+                        px_obs_src = px_obs_src.replace(old_gplus_obs, new_gplus_obs, 1)
+                    old_mfs_obs = (
+                        '        "formula": "round(max(0, (joint_agi - individual_agi) * rap_rate / 12), 2)",\n'
+                        '        "inputs": {\n'
+                        '            "joint_agi": 145000,\n'
+                        '            "individual_agi": 65000,\n'
+                        '            "rap_rate": 0.10,\n'
+                        '        },\n'
+                        '        "published_output": 666.67,\n'
+                        '        "sample_calculation": (\n'
+                        '            "Excluding $80,000 of spousal income ($145,000 joint AGI vs $65,000 individual AGI) at a 10% statutory rate reduces monthly IDR payments by $666.67."\n'
+                        '        ),\n'
+                        '        "calculation_manifest": {\n'
+                        '            "slug": "married-filing-separately-student-loan-calculator",\n'
+                        '            "model_name": "Prexvo-MFS-IDR-Exclusion-Model-2026",\n'
+                        '            "statutory_authority": "34 CFR 685.209; 34 CFR 685.221(b); 26 U.S.C. 1(d) Married Filing Separately provisions",\n'
+                        '            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",\n'
+                        '            "formula": "round(max(0, (joint_agi - individual_agi) * rap_rate / 12), 2)",\n'
+                        '            "inputs": {\n'
+                        '                "joint_agi": 145000,\n'
+                        '                "individual_agi": 65000,\n'
+                        '                "rap_rate": 0.10,\n'
+                        '            },\n'
+                        '            "published_output": 666.67,\n'
+                        '            "sample_calculation": (\n'
+                        '                "Excluding $80,000 of spousal income ($145,000 joint AGI vs $65,000 individual AGI) at a 10% statutory rate reduces monthly IDR payments by $666.67."\n'
+                        '            ),\n'
+                        '            "entity_type": "FinancialProductOrService",\n'
+                        '        },'
+                    )
+                    new_mfs_obs = (
+                        '        "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12), 2)",\n'
+                        '        "inputs": {\n'
+                        '            "borrower_agi": 72000,\n'
+                        '            "poverty_guideline": 15650,\n'
+                        '            "discretionary_multiplier": 2.25,\n'
+                        '            "rap_rate": 0.10,\n'
+                        '        },\n'
+                        '        "published_output": 306.56,\n'
+                        '        "sample_calculation": (\n'
+                        '            "Filing MFS excludes $80,000 spouse AGI, reducing borrower RAP payment on $72,000 separate AGI above the $35,212.50 (225% FPL) exemption to $306.56/mo."\n'
+                        '        ),\n'
+                        '        "calculation_manifest": {\n'
+                        '            "slug": "married-filing-separately-student-loan-calculator",\n'
+                        '            "model_name": "Prexvo-MFS-IDR-Exclusion-Model-2026",\n'
+                        '            "statutory_authority": "34 CFR 685.209; 34 CFR 685.221(b); 26 U.S.C. 1(d) Married Filing Separately provisions",\n'
+                        '            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",\n'
+                        '            "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12), 2)",\n'
+                        '            "inputs": {\n'
+                        '                "borrower_agi": 72000,\n'
+                        '                "poverty_guideline": 15650,\n'
+                        '                "discretionary_multiplier": 2.25,\n'
+                        '                "rap_rate": 0.10,\n'
+                        '            },\n'
+                        '            "published_output": 306.56,\n'
+                        '            "sample_calculation": (\n'
+                        '                "Filing MFS excludes $80,000 spouse AGI, reducing borrower RAP payment on $72,000 separate AGI above the $35,212.50 (225% FPL) exemption to $306.56/mo."\n'
+                        '            ),\n'
+                        '            "entity_type": "FinancialProductOrService",\n'
+                        '        },'
+                    )
+                    if old_mfs_obs in px_obs_src:
+                        px_obs_src = px_obs_src.replace(old_mfs_obs, new_mfs_obs, 1)
+                    if px_obs_src != px_obs_orig:
                         px_obs.write_text(px_obs_src, encoding="utf-8")
                 px_calc = Path(adapter.repo_path) / "prexvo" / "interactive_calculator.py"
                 if px_calc.is_file():

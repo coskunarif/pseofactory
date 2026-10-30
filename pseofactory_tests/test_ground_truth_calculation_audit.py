@@ -274,3 +274,61 @@ def test_tenant_fact_store_2026_poverty_guideline_consistency() -> None:
     prexvo_facts = profile.statutory_truth.limits_and_thresholds
     assert prexvo_facts["poverty_guidelines_2026_hhs_contiguous"] == 15650.0
     assert prexvo_facts["poverty_guidelines"][2026]["individual"] == 15650.0
+
+
+def test_sidecar_manifest_lockstep_audit_and_healing(tmp_path) -> None:
+    """Sidecar manifests in dist/manifests/ must be audited and healed into lockstep with embedded HTML manifests."""
+    dist_dir = tmp_path / "dist"
+    tool_dir = dist_dir / "tools" / "prediction-market-odds"
+    manifests_dir = dist_dir / "manifests"
+    tool_dir.mkdir(parents=True)
+    manifests_dir.mkdir(parents=True)
+
+    preset = RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS["prediction-market-odds"]
+    html_raw, _ = _wrap_valid_page(
+        preset,
+        '<div id="res-profit">$235</div>',
+        quick_answer="Under CFTC 17 CFR Part 40, the verified output is <strong class=\"output-value\">235.0</strong>.",
+    )
+    retro_html, _ = RetroReflectionEngine.retrofit_html(
+        html_raw,
+        property_id="profithelm",
+        slug="prediction-market-odds",
+        canonical_url="https://profithelm.com/tools/prediction-market-odds/",
+    )
+    html_file = tool_dir / "index.html"
+    html_file.write_text(retro_html, encoding="utf-8")
+
+    # Write a stale pre-upgrade sidecar manifest (350.0 instead of 235.0)
+    stale_sidecar = {
+        "slug": "prediction-market-odds",
+        "model_name": "PredictionMarketArbitrageModel",
+        "entity_type": "FinancialProductOrService",
+        "statutory_authority": "CFTC Rule 40.11",
+        "economic_dataset": "FRED Series DGS10",
+        "inputs": {"contracts_count": 1000, "cost_basis": 650},
+        "formula": "contracts_count * 1.0 - cost_basis",
+        "published_output": 350.0,
+        "sample_calculation": "Stale sample",
+    }
+    sidecar_file = manifests_dir / "prediction-market-odds.json"
+    sidecar_file.write_text(json.dumps(stale_sidecar), encoding="utf-8")
+
+    engine = LiveTruthAuditEngine()
+    file_violations = engine.audit_file(html_file, property_id="profithelm")
+    assert any("Sidecar manifest" in v for v in file_violations)
+
+    # RetroReflectionEngine must detect and heal the stale sidecar even when HTML mechanics are already complete
+    _, repaired = RetroReflectionEngine.retrofit_html(
+        retro_html,
+        property_id="profithelm",
+        slug="prediction-market-odds",
+        canonical_url="https://profithelm.com/tools/prediction-market-odds/",
+        dist_dir=dist_dir,
+    )
+    assert "calculation_manifest" in repaired
+    healed_sidecar = json.loads(sidecar_file.read_text(encoding="utf-8"))
+    assert healed_sidecar["published_output"] == 235.0
+    assert healed_sidecar["formula"] == preset["formula"]
+    assert engine.audit_file(html_file, property_id="profithelm") == []
+
