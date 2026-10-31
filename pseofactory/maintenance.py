@@ -8268,7 +8268,18 @@ class RetroReflectionEngine:
                                         .get("demand_telemetry", {})
                                         .get("source")
                                         == "pseofactory/trends/data/trend_history.db"
-                                        and curr_m.get("proprietary_telemetry") != expected_m.get("proprietary_telemetry")
+                                        and (
+                                            curr_m.get("proprietary_telemetry", {})
+                                            .get("demand_telemetry", {})
+                                            .get("source")
+                                            != "pseofactory/trends/data/trend_history.db"
+                                            or curr_m.get("proprietary_telemetry", {})
+                                            .get("demand_telemetry", {})
+                                            .get("property_id")
+                                            != expected_m.get("proprietary_telemetry", {})
+                                            .get("demand_telemetry", {})
+                                            .get("property_id")
+                                        )
                                     )
                                 )
                             )
@@ -11226,6 +11237,7 @@ class RetroReflectionEngine:
                 "retrofitted_paths": [],
             }
 
+        cls._RETROFIT_HTML_CACHE.clear()
         scanned = 0
         retrofitted_paths: List[str] = []
         agy_dir = d.parent / ".agy"
