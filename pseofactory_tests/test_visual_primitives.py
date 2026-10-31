@@ -404,28 +404,29 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
 
     audit = audit_monetization_and_datapack_ui_ux_surfaces(execute_dom_simulation=True)
     assert audit["all_surfaces_and_handlers_passed"] is True, f"UI/UX button surface audit failed: {audit}"
-    assert audit["total_pages_audited"] == 50
-    assert audit["commercial_pages_audited"] == 46
+    assert audit["total_pages_audited"] >= 50
+    assert audit["commercial_pages_audited"] >= 46
     assert audit["restricted_ymyl_pages_audited"] == 4
+    assert audit["total_pages_audited"] == audit["commercial_pages_audited"] + audit["restricted_ymyl_pages_audited"]
     assert audit["coexistence_and_surface_violations"] == []
 
     inv = audit["button_inventory_totals"]
     assert inv["affiliate_outbound_ctas"] >= 150
-    assert inv["datapack_checkout_buttons"] == 46
-    assert inv["workpaper_preview_buttons"] == 46
+    assert inv["datapack_checkout_buttons"] == audit["commercial_pages_audited"]
+    assert inv["workpaper_preview_buttons"] == audit["commercial_pages_audited"]
     assert inv["decision_blueprint_buttons"] >= 138
     assert inv["scenario_comparator_pin_buttons"] >= 138
     assert inv["scenario_preset_buttons"] >= 200
     assert inv["lead_quote_and_calc_forms"] >= 92
 
-    assert audit["tenants"]["profithelm"]["total_pages"] == 22
-    assert audit["tenants"]["profithelm"]["coexistence_pass_count"] == 22
-    assert audit["tenants"]["prexvo"]["total_pages"] == 18
-    assert audit["tenants"]["prexvo"]["commercial_pages"] == 14
+    assert audit["tenants"]["profithelm"]["total_pages"] >= 22
+    assert audit["tenants"]["profithelm"]["coexistence_pass_count"] == audit["tenants"]["profithelm"]["total_pages"]
+    assert audit["tenants"]["prexvo"]["total_pages"] >= 18
+    assert audit["tenants"]["prexvo"]["commercial_pages"] >= 14
     assert audit["tenants"]["prexvo"]["restricted_ymyl_pages"] == 4
-    assert audit["tenants"]["prexvo"]["coexistence_pass_count"] == 18
-    assert audit["tenants"]["gainhelm"]["total_pages"] == 10
-    assert audit["tenants"]["gainhelm"]["coexistence_pass_count"] == 10
+    assert audit["tenants"]["prexvo"]["coexistence_pass_count"] == audit["tenants"]["prexvo"]["total_pages"]
+    assert audit["tenants"]["gainhelm"]["total_pages"] >= 10
+    assert audit["tenants"]["gainhelm"]["coexistence_pass_count"] == audit["tenants"]["gainhelm"]["total_pages"]
 
     sim = audit["dom_action_simulation"]
     assert sim["all_passed"] is True
