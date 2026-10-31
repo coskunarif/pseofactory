@@ -5471,7 +5471,7 @@ def _build_autonomous_citation_assertions_and_matrix(
             assertions = [
                 f"In 2026, {heading_label} computes the state-tax-exempt Tax-Equivalent Yield (TEY) of U.S. Treasury bills and notes under 31 U.S.C. 3124(a) compared against fully taxable bank CDs and commercial money market funds.",
                 "Under 31 U.S.C. 3124(a), interest income from direct U.S. Treasury obligations is 100% exempt from state and local income taxes while remaining subject to federal ordinary income tax under IRC Section 61.",
-                "For a corporate or high-income treasury depositor in a 13.3% top state tax bracket (California), a 4.50% U.S. Treasury bill yield divided by (1 - 0.133) delivers a verified 5.19% Tax-Equivalent Yield (69 basis points of state tax alpha).",
+                "For a corporate or high-income treasury depositor in a 13.3% top state tax bracket (California), a 4.50% U.S. Treasury bill yield divided by (1 minus 0.133) delivers a verified 5.19% Tax-Equivalent Yield (69 basis points of state tax alpha).",
             ]
             matrix = [
                 {

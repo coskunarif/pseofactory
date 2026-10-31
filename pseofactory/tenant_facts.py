@@ -2528,6 +2528,7 @@ class TruthReconciliationEngine:
     )
 
     PROFITHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        ("divided by (1 - 0.133)", "divided by (1 minus 0.133)"),
         ("IRC Sections 1001, 1012, 1222, and 1411", "IRC Section 1001, Section 1012, Section 1222, and Section 1411"),
         ("IRC Sections 3111 and 3301", "IRC Section 3111 and Section 3301"),
         ("IRC Sections ", "IRC Section "),
