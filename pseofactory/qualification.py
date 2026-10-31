@@ -5330,7 +5330,7 @@ def sync_tenant_redirect_rollup_adapters(
             path = alt_path
     if not path.is_file():
         return None"""
-            new_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+            prev_load_ov_v2 = """    path = get_overlay_path(slug, base_dir=base_dir)
     root = Path(base_dir) if base_dir else BASE_DIR
     if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
         alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
@@ -5338,7 +5338,20 @@ def sync_tenant_redirect_rollup_adapters(
             path = alt_path
     if not path.is_file():
         return None"""
-            if prev_load_ov in g_txt:
+            new_load_ov = """    path = get_overlay_path(slug, base_dir=base_dir)
+    root = Path(base_dir) if base_dir else BASE_DIR
+    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):
+        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"
+        host_alt = Path("/home/ubuntuadmin/projects/profithelm-platform/.agy/overlays") / f"{slug}.json"
+        if alt_path.is_file():
+            path = alt_path
+        elif host_alt.is_file():
+            path = host_alt
+    if not path.is_file():
+        return None"""
+            if prev_load_ov_v2 in g_txt:
+                g_txt = g_txt.replace(prev_load_ov_v2, new_load_ov, 1)
+            elif prev_load_ov in g_txt:
                 g_txt = g_txt.replace(prev_load_ov, new_load_ov, 1)
             elif old_load_ov in g_txt and 'BASE_DIR / ".agy" / "overlays"' not in g_txt:
                 g_txt = g_txt.replace(old_load_ov, new_load_ov, 1)

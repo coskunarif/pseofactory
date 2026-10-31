@@ -2580,6 +2580,7 @@ def test_multi_tenant_engine_hash_latch_and_isolated_builder_offline_jev(tmp_pat
     """
     import json
     import subprocess
+    from pathlib import Path
     import pseofactory.drift as drift_mod
     from pseofactory.drift import (
         compute_engine_hash,
@@ -2661,8 +2662,18 @@ def test_multi_tenant_engine_hash_latch_and_isolated_builder_offline_jev(tmp_pat
         subprocess.run(["git", "-C", str(rp), "config", "user.name", "Test Worker"], check=True)
         (rp / "dist").mkdir(parents=True, exist_ok=True)
         (rp / "dist" / "index.html").write_text("<html><body>ok</body></html>\n", encoding="utf-8")
+        init_fp_fn = getattr(drift_mod, "compute_dist_lock_metrics", None)
+        init_fp, init_tot = init_fp_fn(rp / "dist") if init_fp_fn else ("", 1)
         (rp / "substrate_lock.json").write_text(
-            json.dumps({"property_id": repo_name, "engine_hash": lock_hash, "substrate_hash": lock_hash}),
+            json.dumps(
+                {
+                    "property_id": repo_name,
+                    "engine_hash": lock_hash,
+                    "substrate_hash": lock_hash,
+                    "dist_fingerprint": init_fp,
+                    "total_assets": init_tot,
+                }
+            ),
             encoding="utf-8",
         )
         subprocess.run(["git", "-C", str(rp), "add", "-A"], check=True, capture_output=True)
@@ -2686,8 +2697,17 @@ def test_multi_tenant_engine_hash_latch_and_isolated_builder_offline_jev(tmp_pat
     assert drift_res["reason"] == "TENANT_SUBSTRATE_OR_GIT_DRIFT"
 
     ph_repo = ws_root / "profithelm-platform"
+    ph_fp, ph_tot = init_fp_fn(ph_repo / "dist") if init_fp_fn else ("", 1)
     (ph_repo / "substrate_lock.json").write_text(
-        json.dumps({"property_id": "profithelm", "engine_hash": current_hash, "substrate_hash": current_hash}),
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "engine_hash": current_hash,
+                "substrate_hash": current_hash,
+                "dist_fingerprint": ph_fp,
+                "total_assets": ph_tot,
+            }
+        ),
         encoding="utf-8",
     )
     aligned_dirty, reasons_dirty = verify_fn(
@@ -2710,6 +2730,273 @@ def test_multi_tenant_engine_hash_latch_and_isolated_builder_offline_jev(tmp_pat
     drift_clean = detect_engine_drift(state_file=state_file, verify_tenants=True, workspace_root=ws_root)
     assert drift_clean["drifted"] is False
     assert drift_clean["status"] == "ALIGNED"
+
+
+def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
+    """
+    Verifies root-cause fixes for unattended tenant factory runs and CI runner dist isolation:
+    1. compute_dist_lock_metrics computes canonical (dist_fingerprint, total_assets) over dist/
+       without inflating total_assets with syndication/ files.
+    2. verify_all_tenants_aligned_for_latch and DepartmentHandoffChainVerifier._run_deployment_stage
+       fail closed when any tenant has:
+       - a dirty tracked file outside dist/ (such as content/deployed_voids.json), OR
+       - a substrate_lock.json whose dist_fingerprint or total_assets mismatches dist/
+         even when engine_hash and substrate_hash match compute_engine_hash().
+    3. sync_tenant_test_isolation_guards compiles tenant ci.yml so pytest runs BEFORE
+       canonical dist/ sync & audit (and before wrangler pages deploy), compiles
+       profithelm/gsc_adapter.py to fall back to host .agy/overlays, compiles
+       profithelm/builder.py to preserve canonical DIST_DIR during pytest, and compiles
+       prexvo/factory.py and profithelm/factory.py to update substrate_lock.json and stage
+       substrate_lock.json and content/deployed_voids.json with dist/.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    import subprocess
+    from pathlib import Path
+    import pseofactory.drift as drift_mod
+    from pseofactory.drift import (
+        compute_engine_hash,
+        record_asset_ledger,
+        record_engine_hash,
+        verify_all_tenants_aligned_for_latch,
+    )
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+    from pseofactory.maintenance import SubprocessPropertyAdapter
+    from pseofactory.supervisor import (
+        DepartmentHandoffChainVerifier,
+        DepartmentPipelineStateMachine,
+    )
+
+    compute_metrics = getattr(drift_mod, "compute_dist_lock_metrics", None)
+    assert compute_metrics is not None, "Missing canonical compute_dist_lock_metrics in pseofactory.drift"
+
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir(parents=True, exist_ok=True)
+    current_hash = compute_engine_hash()
+
+    adapters = {}
+    for pid, repo_name in (
+        ("profithelm", "profithelm-platform"),
+        ("prexvo", "prexvo"),
+        ("gainhelm", "gainhelm"),
+    ):
+        rp = ws_root / repo_name
+        rp.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(rp)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(rp), "config", "user.email", "test@antigravity.local"], check=True)
+        subprocess.run(["git", "-C", str(rp), "config", "user.name", "Test Worker"], check=True)
+        (rp / ".gitignore").write_text(".agy/\n", encoding="utf-8")
+        (rp / "dist").mkdir(parents=True, exist_ok=True)
+        (rp / "dist" / "index.html").write_text(f"<html><body>{pid}</body></html>\n", encoding="utf-8")
+        (rp / "dist" / "catalog.json").write_text("[]\n", encoding="utf-8")
+        # Extra syndication file outside dist/ must never inflate total_assets
+        (rp / "syndication").mkdir(parents=True, exist_ok=True)
+        (rp / "syndication" / "post.md").write_text("# Syndication\n", encoding="utf-8")
+        (rp / "content").mkdir(parents=True, exist_ok=True)
+        (rp / "content" / "deployed_voids.json").write_text("[]\n", encoding="utf-8")
+        (rp / "freshness_audit_report.json").write_text(
+            json.dumps({"verdict": "CERTIFIED_FRESH", "overall_pass": True}),
+            encoding="utf-8",
+        )
+        fp, tot = compute_metrics(rp / "dist")
+        assert tot == 2
+        (rp / "substrate_lock.json").write_text(
+            json.dumps(
+                {
+                    "property_id": pid,
+                    "engine_hash": current_hash,
+                    "substrate_hash": current_hash,
+                    "dist_fingerprint": fp,
+                    "total_assets": tot,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        record_engine_hash(rp / ".agy" / "engine_hash.json", hash_value=current_hash)
+        record_asset_ledger(
+            rp / ".agy" / "asset_ledger.json",
+            {"index.html": "a" * 64, "catalog.json": "b" * 64},
+            engine_hash=current_hash,
+        )
+        subprocess.run(["git", "-C", str(rp), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(rp), "commit", "-m", "initial clean state"], check=True, capture_output=True)
+        adapters[pid] = SubprocessPropertyAdapter(
+            property_id=pid,
+            brand_name=pid.title(),
+            domain=f"{pid}.com",
+            canonical_base=f"https://{pid}.com",
+            dist_dir=rp / "dist",
+            repo_path=rp,
+        )
+
+    # Baseline clean state must pass both verify_all_tenants_aligned_for_latch and _run_deployment_stage
+    ok_base, reasons_base = verify_all_tenants_aligned_for_latch(
+        workspace_root=ws_root,
+        expected_hash=current_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert ok_base is True, f"Expected clean baseline to pass, got: {reasons_base}"
+
+    verifier = DepartmentHandoffChainVerifier(workspace_root=ws_root, strict_current_engine_hash=True)
+    sm = DepartmentPipelineStateMachine(state_path=tmp_path / "dep_state.json")
+    ctx = {
+        "discovered_tenants": ["profithelm", "prexvo", "gainhelm"],
+        "tenant_adapters": adapters,
+        "engine_hash": current_hash,
+    }
+    dep_ok, _, _, dep_errs = verifier._run_deployment_stage(ctx, sm, cycle_id="test_clean", persist=False)
+    assert dep_ok is True, f"Expected deployment stage pass, got: {dep_errs}"
+
+    # Case A: Dirty content/deployed_voids.json in prexvo (simulating uncommitted factory void record) must fail closed
+    px_repo = ws_root / "prexvo"
+    (px_repo / "content" / "deployed_voids.json").write_text(
+        json.dumps([{"slug": "how-do-you-calculate-student-loan-repayments"}]) + "\n",
+        encoding="utf-8",
+    )
+    ok_dirty_void, reasons_dirty_void = verify_all_tenants_aligned_for_latch(
+        workspace_root=ws_root,
+        expected_hash=current_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert ok_dirty_void is False
+    assert any("prexvo" in r and "deployed_voids.json" in r for r in reasons_dirty_void)
+
+    dep_ok_void, _, _, dep_errs_void = verifier._run_deployment_stage(ctx, sm, cycle_id="test_void_dirty", persist=False)
+    assert dep_ok_void is False
+    assert any("prexvo" in e and "deployed_voids.json" in e for e in dep_errs_void)
+
+    # Restore clean prexvo working tree
+    subprocess.run(["git", "-C", str(px_repo), "checkout", "--", "content/deployed_voids.json"], check=True)
+
+    # Case B: Inflated total_assets (330 vs 2) or stale dist_fingerprint in profithelm substrate_lock.json must fail closed
+    ph_repo = ws_root / "profithelm-platform"
+    (ph_repo / "substrate_lock.json").write_text(
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "engine_hash": current_hash,
+                "substrate_hash": current_hash,
+                "dist_fingerprint": "d5fd68b493c2f623000000000000000000000000000000000000000000000000",
+                "total_assets": 330,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(ph_repo), "add", "substrate_lock.json"], check=True)
+    subprocess.run(["git", "-C", str(ph_repo), "commit", "-m", "committed stale lock"], check=True)
+
+    ok_stale_lock, reasons_stale_lock = verify_all_tenants_aligned_for_latch(
+        workspace_root=ws_root,
+        expected_hash=current_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert ok_stale_lock is False
+    assert any("profithelm: substrate_lock.json dist_fingerprint" in r for r in reasons_stale_lock)
+    assert any("profithelm: substrate_lock.json total_assets" in r for r in reasons_stale_lock)
+
+    dep_ok_stale, _, _, dep_errs_stale = verifier._run_deployment_stage(ctx, sm, cycle_id="test_stale_lock", persist=False)
+    assert dep_ok_stale is False
+    assert any("dist_fingerprint" in e for e in dep_errs_stale)
+    assert any("total_assets" in e for e in dep_errs_stale)
+
+    # Case C: Verify sync_tenant_test_isolation_guards compiles CI step order, builder/overlay guards, and factory lock+void staging
+    ph_pkg = ph_repo / "profithelm"
+    ph_pkg.mkdir(parents=True, exist_ok=True)
+    (ph_repo / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (ph_repo / ".github" / "workflows" / "ci.yml").write_text("name: old\n", encoding="utf-8")
+    (ph_pkg / "gsc_adapter.py").write_text(
+        'def load_page_overlay(slug, base_dir=None):\n'
+        '    path = get_overlay_path(slug, base_dir=base_dir)\n'
+        '    root = Path(base_dir) if base_dir else BASE_DIR\n'
+        '    if not path.is_file() and (base_dir is None or root.resolve() == BASE_DIR.resolve()):\n'
+        '        alt_path = BASE_DIR / ".agy" / "overlays" / f"{slug}.json"\n'
+        '        if alt_path.is_file():\n'
+        '            path = alt_path\n'
+        '    return None\n',
+        encoding="utf-8",
+    )
+    (ph_pkg / "builder.py").write_text(
+        'def build_all(extra_tools=None):\n'
+        '    DIST_DIR.mkdir(parents=True, exist_ok=True)\n'
+        '    in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PROFITHELM_IN_TEST") == "1")\n'
+        '    return DIST_DIR\n',
+        encoding="utf-8",
+    )
+    (ph_pkg / "factory.py").write_text(
+        '            # Universal idempotency: inspect git status --porcelain dist/ machine_endpoints/ .agy/runs/ profithelm/data/statutory.db\n'
+        '            status_proc = subprocess.run(\n'
+        '                ["git", "status", "--porcelain", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
+        '                capture_output=True,\n'
+        '                text=True,\n'
+        '                cwd=BASE_DIR,\n'
+        '                env=env,\n'
+        '            )\n'
+        '            raw_status = status_proc.stdout.strip()\n'
+        '            if not raw_status:\n'
+        '                print("   Universal idempotency: no pending changes detected across release artifacts (SKIPPED_NO_CHANGES).")\n'
+        '                git_push = {\n'
+        '                    "status": "SKIPPED_NO_CHANGES",\n'
+        '                    "returncode": 0,\n'
+        '                    "branch": target_branch,\n'
+        '                }\n'
+        '            else:\n'
+        '                # Force-stage release artifacts\n'
+        '                subprocess.run(\n'
+        '                    ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
+        '                    cwd=BASE_DIR,\n'
+        '                    env=env,\n'
+        '                    check=False,\n'
+        '                )\n',
+        encoding="utf-8",
+    )
+    sync_tenant_test_isolation_guards(ph_repo)
+    ph_ci_txt = (ph_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert ph_ci_txt.index("Execute Full Test Suite") < ph_ci_txt.index("Verify Compiled Static Distribution & Craftsmanship Audit")
+    assert ph_ci_txt.index("Verify Compiled Static Distribution & Craftsmanship Audit") < ph_ci_txt.index("Deploy to Cloudflare Pages Edge")
+    assert "host_alt =" in (ph_pkg / "gsc_adapter.py").read_text(encoding="utf-8")
+    assert "and not extra_tools" in (ph_pkg / "builder.py").read_text(encoding="utf-8")
+    assert "compute_dist_lock_metrics" in (ph_pkg / "factory.py").read_text(encoding="utf-8")
+    assert '"substrate_lock.json"' in (ph_pkg / "factory.py").read_text(encoding="utf-8")
+
+    px_pkg = px_repo / "prexvo"
+    px_pkg.mkdir(parents=True, exist_ok=True)
+    (px_repo / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (px_repo / ".github" / "workflows" / "ci.yml").write_text("name: old\n", encoding="utf-8")
+    (px_pkg / "factory.py").write_text(
+        '                if synthesized_spec and synthesized_spec.get("slug") not in {t["slug"] for t in TOOLS}:\n'
+        '                    record_deployed_void(synthesized_spec)\n'
+        '            status_proc = subprocess.run(\n'
+        '                ["git", "status", "--porcelain", "dist/", ".agy/runs/"],\n'
+        '                capture_output=True,\n'
+        '                text=True,\n'
+        '                cwd=BASE_DIR,\n'
+        '                env=env,\n'
+        '            )\n'
+        '            raw_status = status_proc.stdout.strip()\n'
+        '            if raw_status:\n'
+        '                subprocess.run(["git", "add", "-f", "dist/", ".agy/runs/"], cwd=BASE_DIR, env=env, check=False)\n'
+        '                subprocess.run(["git", "rm", "-rf", "--cached", "--ignore-unmatch", ".agy/runs"], cwd=BASE_DIR, env=env, capture_output=True, check=False)\n',
+        encoding="utf-8",
+    )
+    sync_tenant_test_isolation_guards(px_repo)
+    px_ci_txt = (px_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert px_ci_txt.index("Execute Full Test Suite") < px_ci_txt.index("Verify Compiled Static Distribution & Statutory Audit")
+    px_fac_txt = (px_pkg / "factory.py").read_text(encoding="utf-8")
+    assert "compute_dist_lock_metrics" in px_fac_txt
+    assert '"content/deployed_voids.json"' in px_fac_txt
+    assert '"substrate_lock.json"' in px_fac_txt
+
+    rel_pipe = Path("/home/ubuntuadmin/projects/.agy/release_pipeline.sh")
+    if rel_pipe.is_file():
+        rel_txt = rel_pipe.read_text(encoding="utf-8")
+        assert "runner test suite mutated runner dist/" not in rel_txt
+
 
 
 

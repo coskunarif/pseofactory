@@ -218,6 +218,31 @@ def compute_two_tier_merkle_hash(
     }
 
 
+def compute_dist_lock_metrics(dist_dir: Union[str, Path]) -> Tuple[str, int]:
+    """
+    Computes the canonical (dist_fingerprint, total_assets) tuple for a tenant's
+    compiled dist/ directory. Iterates all (.html, .xml, .txt, .json) files inside
+    dist_dir (excluding .tmp, .orig, .backup) in sorted relative-path order.
+    Zero em-dashes. Zero en-dashes.
+    """
+    d_root = Path(dist_dir)
+    if not d_root.is_dir():
+        return hashlib.sha256(b"").hexdigest(), 0
+    dist_assets = sorted(
+        p
+        for p in d_root.glob("**/*")
+        if p.is_file()
+        and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+        and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+    )
+    fp_hasher = hashlib.sha256()
+    for af in dist_assets:
+        rel_a = af.relative_to(d_root).as_posix()
+        af_fp = hashlib.sha256(af.read_bytes()).hexdigest()
+        fp_hasher.update(f"{rel_a}:{af_fp}\n".encode("utf-8"))
+    return fp_hasher.hexdigest(), len(dist_assets)
+
+
 def verify_all_tenants_aligned_for_latch(
     workspace_root: Union[str, Path] = "/home/ubuntuadmin/projects",
     expected_hash: Optional[str] = None,
@@ -225,8 +250,9 @@ def verify_all_tenants_aligned_for_latch(
 ) -> Tuple[bool, List[str]]:
     """
     Verifies that every canonical tenant repository (profithelm-platform, prexvo, gainhelm)
-    has compiled, updated substrate_lock.json to match expected_hash (or compute_engine_hash()),
-    and when require_git_clean_and_pushed is True, has a clean working tree (dist/ and substrate_lock.json)
+    has compiled, updated substrate_lock.json to match expected_hash (or compute_engine_hash())
+    as well as the live dist/ fingerprint and total_assets count, and when
+    require_git_clean_and_pushed is True, has a completely clean git working tree
     and 0 unpushed commits on main relative to origin/main.
     Returns (all_aligned, reasons).
     Zero em-dashes. Zero en-dashes.
@@ -252,6 +278,10 @@ def verify_all_tenants_aligned_for_latch(
         if not t_repo.is_dir():
             reasons.append(f"{pid}: missing tenant repository at {t_repo}")
             continue
+        dist_dir = t_repo / "dist"
+        if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
+            reasons.append(f"{pid}: missing compiled dist/index.html in {t_repo}")
+
         if not lock_file.is_file():
             reasons.append(f"{pid}: missing substrate_lock.json at {lock_file}")
         else:
@@ -263,24 +293,35 @@ def verify_all_tenants_aligned_for_latch(
                     reasons.append(
                         f"{pid}: substrate_lock.json hash '{l_eh[:12]}' != expected '{target_hash[:12]}'"
                     )
+                if dist_dir.is_dir():
+                    exp_fp, exp_tot = compute_dist_lock_metrics(dist_dir)
+                    l_fp = str(lock_data.get("dist_fingerprint") or "")
+                    l_tot = lock_data.get("total_assets")
+                    if l_fp != exp_fp:
+                        reasons.append(
+                            f"{pid}: substrate_lock.json dist_fingerprint '{l_fp[:12]}' != actual dist '{exp_fp[:12]}'"
+                        )
+                    if l_tot != exp_tot:
+                        reasons.append(
+                            f"{pid}: substrate_lock.json total_assets '{l_tot}' != actual dist '{exp_tot}'"
+                        )
             except Exception as exc:
                 reasons.append(f"{pid}: invalid substrate_lock.json ({exc})")
-
-        dist_dir = t_repo / "dist"
-        if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
-            reasons.append(f"{pid}: missing compiled dist/index.html in {t_repo}")
 
         if require_git_clean_and_pushed and has_git:
             try:
                 st_res = subprocess.run(
-                    ["git", "-C", str(t_repo), "status", "--porcelain", "--", "dist", "substrate_lock.json"],
+                    ["git", "-C", str(t_repo), "status", "--porcelain"],
                     capture_output=True,
                     text=True,
                     check=False,
                     timeout=5,
                 )
                 if st_res.returncode == 0 and st_res.stdout.strip():
-                    reasons.append(f"{pid}: uncommitted changes in dist/ or substrate_lock.json")
+                    first_dirty = st_res.stdout.strip().splitlines()[0].strip()
+                    reasons.append(
+                        f"{pid}: uncommitted changes in dist/ or substrate_lock.json or tracked tenant files ({first_dirty})"
+                    )
             except Exception:
                 pass
             try:

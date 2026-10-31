@@ -1107,7 +1107,7 @@ class DepartmentHandoffChainVerifier:
             p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
             aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
 
-            if is_prod_canonical_tenant and (
+            if self.heal_markers and is_prod_canonical_tenant and (
                 rep.status != "PASS" or rep.drifted_assets_count > 0 or stale_cnt > 0 or not aeo_ready
             ):
                 try:
@@ -1131,7 +1131,8 @@ class DepartmentHandoffChainVerifier:
                     pass
 
             if (
-                (rep.status != "PASS" or rep.drifted_assets_count > 0)
+                self.heal_markers
+                and (rep.status != "PASS" or rep.drifted_assets_count > 0)
                 and not self.strict_current_engine_hash
                 and "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
             ):
@@ -1354,7 +1355,8 @@ class DepartmentHandoffChainVerifier:
                 ignore_git_dirty=True,
             )
             if (
-                has_pending
+                self.heal_markers
+                and has_pending
                 and repo_path.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
                 and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm")
             ):
@@ -1448,8 +1450,37 @@ class DepartmentHandoffChainVerifier:
                         t_errs.append(
                             f"substrate_lock.json engine_hash '{lock_hash[:12]}' != current '{current_engine_hash[:12]}'"
                         )
+                    if dist_dir.is_dir():
+                        from pseofactory.drift import compute_dist_lock_metrics
+
+                        exp_fp, exp_tot = compute_dist_lock_metrics(dist_dir)
+                        lock_fp = str(lock_data.get("dist_fingerprint") or "")
+                        lock_tot = lock_data.get("total_assets")
+                        if lock_fp != exp_fp:
+                            t_errs.append(
+                                f"substrate_lock.json dist_fingerprint '{lock_fp[:12]}' != actual dist '{exp_fp[:12]}'"
+                            )
+                        if lock_tot != exp_tot:
+                            t_errs.append(
+                                f"substrate_lock.json total_assets '{lock_tot}' != actual dist '{exp_tot}'"
+                            )
                 except Exception as exc:
                     t_errs.append(f"invalid substrate_lock.json: {exc}")
+
+            if (repo_path / ".git").exists():
+                try:
+                    st_res = subprocess.run(
+                        ["git", "-C", str(repo_path), "status", "--porcelain"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if st_res.returncode == 0 and st_res.stdout.strip():
+                        first_dirty = st_res.stdout.strip().splitlines()[0].strip()
+                        t_errs.append(f"uncommitted tracked changes in {repo_path.name}: {first_dirty}")
+                except Exception as exc:
+                    t_errs.append(f"git status check failed in {repo_path.name}: {exc}")
             substrate_locks_by_tenant[pid] = {
                 "present": lock_file.is_file(),
                 "engine_hash": lock_hash,

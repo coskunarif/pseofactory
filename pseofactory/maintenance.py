@@ -4370,17 +4370,16 @@ class MaintenanceLifecycle:
                         if substrate_lock_path.is_file():
                             substrate_lock_existed = True
                             prior_substrate_lock = substrate_lock_path.read_text(encoding="utf-8")
+                        from pseofactory.drift import compute_dist_lock_metrics
+
                         cur_sub_hash = compute_engine_hash()
-                        dist_fp_hasher = hashlib.sha256()
-                        for a_file in sorted(adapter.list_assets()):
-                            rel_a = a_file.relative_to(adapter.dist_dir).as_posix()
-                            dist_fp_hasher.update(f"{rel_a}:{compute_asset_fingerprint(a_file)}\n".encode("utf-8"))
+                        dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(adapter.dist_dir)
                         lock_payload = {
                             "property_id": adapter.property_id,
                             "engine_hash": cur_sub_hash,
                             "substrate_hash": cur_sub_hash,
-                            "dist_fingerprint": dist_fp_hasher.hexdigest(),
-                            "total_assets": post_report.total_assets_checked,
+                            "dist_fingerprint": dist_fp_hex,
+                            "total_assets": total_dist_assets,
                         }
                         substrate_lock_path.write_text(
                             json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
@@ -13839,12 +13838,16 @@ def reflect_and_recompile_all_assets(
                     substrate_lock_stale = True
                 else:
                     try:
+                        from pseofactory.drift import compute_dist_lock_metrics
+
                         cur_sub_hash = compute_engine_hash()
+                        exp_dist_fp, exp_total_assets = compute_dist_lock_metrics(adapter.dist_dir)
                         lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
                         if (
                             lock_data.get("engine_hash") != cur_sub_hash
                             or lock_data.get("substrate_hash") != cur_sub_hash
-                            or lock_data.get("total_assets") != build_verified.total_assets_checked
+                            or lock_data.get("dist_fingerprint") != exp_dist_fp
+                            or lock_data.get("total_assets") != exp_total_assets
                         ):
                             substrate_lock_stale = True
                     except Exception:
@@ -13859,17 +13862,16 @@ def reflect_and_recompile_all_assets(
                 t_repo = Path(adapter.repo_path)
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
                     try:
+                        from pseofactory.drift import compute_dist_lock_metrics
+
                         cur_sub_hash = compute_engine_hash()
-                        dist_fp_hasher = hashlib.sha256()
-                        for a_file in sorted(adapter.list_assets()):
-                            rel_a = a_file.relative_to(adapter.dist_dir).as_posix()
-                            dist_fp_hasher.update(f"{rel_a}:{compute_asset_fingerprint(a_file)}\n".encode("utf-8"))
+                        exp_dist_fp, exp_total_assets = compute_dist_lock_metrics(adapter.dist_dir)
                         lock_payload = {
                             "property_id": adapter.property_id,
                             "engine_hash": cur_sub_hash,
                             "substrate_hash": cur_sub_hash,
-                            "dist_fingerprint": dist_fp_hasher.hexdigest(),
-                            "total_assets": build_verified.total_assets_checked,
+                            "dist_fingerprint": exp_dist_fp,
+                            "total_assets": exp_total_assets,
                         }
                         lock_text = json.dumps(lock_payload, indent=2, sort_keys=True) + "\n"
                         lock_path = t_repo / "substrate_lock.json"
