@@ -7158,11 +7158,13 @@ def _normalize_page_structure_and_geo_parity(
         )
         if aeo_ld_updated != updated:
             updated = aeo_ld_updated
-        if '"dateModified": "2026-10-27"' in updated or '"dateModified":"2026-10-27"' in updated:
-            updated = updated.replace('"dateModified": "2026-10-27"', '"dateModified": "2026-10-31"').replace(
-                '"dateModified":"2026-10-27"', '"dateModified":"2026-10-31"'
-            )
             changed = True
+
+    if '"dateModified": "2026-10-27"' in updated or '"dateModified":"2026-10-27"' in updated:
+        updated = updated.replace('"dateModified": "2026-10-27"', '"dateModified": "2026-10-31"').replace(
+            '"dateModified":"2026-10-27"', '"dateModified":"2026-10-31"'
+        )
+        changed = True
 
     if re.search(r"<th(?![^>]*\bscope=)\b[^>]*>", updated, re.IGNORECASE):
         th_scoped = re.sub(
