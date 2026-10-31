@@ -725,6 +725,10 @@ SEEDED_LIVE_GSC_URL_INSPECTIONS: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
+_LIVE_GSC_MULTIDIM_CACHE: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
+_LIVE_GSC_CONSOLIDATED_CACHE: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
+
+
 def harvest_and_sync_gsc_multidimensional_telemetry(
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
@@ -760,6 +764,32 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
 
     if live_gsc is None:
         live_gsc = "PYTEST_CURRENT_TEST" not in os.environ
+
+    use_live_cache = (
+        "PYTEST_CURRENT_TEST" not in os.environ
+        and fixture_payload is None
+        and db_path is None
+    )
+    cache_key = (prop, str(root.resolve()), bool(live_gsc))
+    if use_live_cache and cache_key in _LIVE_GSC_MULTIDIM_CACHE:
+        cached_ts, cached_payload = _LIVE_GSC_MULTIDIM_CACHE[cache_key]
+        if (time.monotonic() - cached_ts) < 180.0:
+            if persist:
+                out_path = root / ".agy" / "gsc_lifecycle_telemetry.json"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                AtomicStateLedger.save_json(out_path, cached_payload)
+            return cached_payload
+    if use_live_cache and str(root.resolve()).startswith("/home/ubuntuadmin/projects/"):
+        disk_tel_path = root / ".agy" / "gsc_lifecycle_telemetry.json"
+        if disk_tel_path.is_file():
+            try:
+                if (time.time() - disk_tel_path.stat().st_mtime) < 180.0:
+                    disk_payload = json.loads(disk_tel_path.read_text(encoding="utf-8"))
+                    if isinstance(disk_payload, dict) and disk_payload.get("status") == "PASS":
+                        _LIVE_GSC_MULTIDIM_CACHE[cache_key] = (time.monotonic(), disk_payload)
+                        return disk_payload
+            except Exception:
+                pass
 
     local_tdb = root / "pseofactory" / "trends" / "data" / "trend_history.db"
     sibling_tdb = root.parent / "trend_history.db"
@@ -1419,6 +1449,9 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         AtomicStateLedger.save_json(out_path, payload)
 
+    if use_live_cache:
+        _LIVE_GSC_MULTIDIM_CACHE[cache_key] = (time.monotonic(), payload)
+
     return payload
 
 
@@ -1447,6 +1480,16 @@ def load_consolidated_gsc_query_rows(
 
     if live_gsc is None:
         live_gsc = "PYTEST_CURRENT_TEST" not in os.environ
+
+    use_cons_cache = (
+        "PYTEST_CURRENT_TEST" not in os.environ
+        and live_queries is None
+    )
+    cons_cache_key = (prop, str(root.resolve()), bool(live_gsc))
+    if use_cons_cache and cons_cache_key in _LIVE_GSC_CONSOLIDATED_CACHE:
+        c_ts, c_bundle = _LIVE_GSC_CONSOLIDATED_CACHE[cons_cache_key]
+        if (time.monotonic() - c_ts) < 180.0:
+            return c_bundle
 
     raw_current_rows: List[Dict[str, Any]] = []
     raw_baseline_rows: List[Dict[str, Any]] = []
@@ -1764,7 +1807,7 @@ def load_consolidated_gsc_query_rows(
         else enriched_current_rows
     )
 
-    return {
+    result_bundle = {
         "property_id": prop,
         "current_rows": enriched_current_rows,
         "baseline_rows": baseline_rollup.get("rows", []),
@@ -1784,6 +1827,9 @@ def load_consolidated_gsc_query_rows(
         "earliest_recorded_at": earliest_recorded_at,
         "latest_recorded_at": latest_recorded_at,
     }
+    if use_cons_cache:
+        _LIVE_GSC_CONSOLIDATED_CACHE[cons_cache_key] = (time.monotonic(), result_bundle)
+    return result_bundle
 
 
 # ==============================================================================

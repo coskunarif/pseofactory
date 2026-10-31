@@ -274,6 +274,9 @@ class TrendHistoryDB:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_checked ON treg_metric_snapshots(query_slug, checked_at DESC);"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_metrics ON treg_metric_snapshots(query_slug, search_volume, cpc_usd, keyword_difficulty, historical_stability);"
+            )
 
             # 6. jev_evaluations
             conn.execute(
@@ -301,6 +304,9 @@ class TrendHistoryDB:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jev_eval_property_action ON jev_evaluations(property_id, action);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jev_eval_query_slug ON jev_evaluations(query_slug, jev_score, composite_profit_yield);"
             )
 
             # 7. niche_cluster_proposals

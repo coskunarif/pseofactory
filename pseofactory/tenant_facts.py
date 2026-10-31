@@ -1966,6 +1966,8 @@ class TenantFactStore:
                 return f_val.enabled
         return False
 
+    _VERIFY_CLAIM_CACHE: Dict[Tuple[str, str, str], Tuple[bool, List[str]]] = {}
+
     def verify_claim(
         self,
         tenant: str,
@@ -1988,9 +1990,17 @@ class TenantFactStore:
         if not profile:
             return False, [f"Unknown tenant '{tenant}'"]
 
+        tenant_norm = str(tenant).lower().strip()
+        cache_key: Optional[Tuple[str, str, str]] = None
+        if not spec_disclosures and len(text) >= 256:
+            text_digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+            cache_key = (tenant_norm, text_digest, str(context or ""))
+            cached = self._VERIFY_CLAIM_CACHE.get(cache_key)
+            if cached is not None:
+                return cached[0], list(cached[1])
+
         violations: List[str] = []
         text_lower = text.lower()
-        tenant_norm = str(tenant).lower().strip()
 
         # 1. Banned claims check
         for banned in profile.claims_banned:
@@ -2022,7 +2032,7 @@ class TenantFactStore:
         # 3. Cross-tenant boundary isolation
         for token in profile.cross_tenant_forbidden_tokens:
             tok_l = token.lower()
-            if re.search(rf"(?<![a-z0-9]){re.escape(tok_l)}(?![a-z0-9])", text_lower):
+            if tok_l in text_lower and re.search(rf"(?<![a-z0-9]){re.escape(tok_l)}(?![a-z0-9])", text_lower):
                 violations.append(
                     f"Cross-tenant contamination on {profile.brand_name}: found forbidden boundary token '{token}'"
                 )
@@ -2494,6 +2504,10 @@ class TenantFactStore:
                 )
 
         is_valid = len(violations) == 0
+        if cache_key is not None:
+            if len(self._VERIFY_CLAIM_CACHE) > 1024:
+                self._VERIFY_CLAIM_CACHE.clear()
+            self._VERIFY_CLAIM_CACHE[cache_key] = (is_valid, list(violations))
         return is_valid, violations
 
     def assert_tenant_isolation(self, tenant: str, text: str) -> None:
@@ -3160,6 +3174,8 @@ class TruthReconciliationEngine:
             return _json_lib.loads(updated_str), True
         return raw_ov, False
 
+    _AUDIT_TRUTH_CACHE: Dict[Tuple[str, str, str, str, bool], List[str]] = {}
+
     @classmethod
     def audit_html_truth_reconciliation(
         cls,
@@ -3174,6 +3190,15 @@ class TruthReconciliationEngine:
         intra-page statutory contradictions, inline JS cap mismatches, or speculative filler.
         Returns a list of violation descriptions (empty list == PASS).
         """
+        tenant_norm = resolve_canonical_property_id(tenant)
+        cache_key: Optional[Tuple[str, str, str, str, bool]] = None
+        if html_content and len(html_content) >= 256:
+            h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
+            cache_key = (h_digest, tenant_norm, str(rel_path), str(slug), bool(include_fact_store))
+            cached_v = cls._AUDIT_TRUTH_CACHE.get(cache_key)
+            if cached_v is not None:
+                return list(cached_v)
+
         violations: List[str] = []
         if include_fact_store:
             store = TenantFactStore.get_instance()
@@ -3185,7 +3210,6 @@ class TruthReconciliationEngine:
             if filler_old in html_content:
                 violations.append(f"Speculative filler phrase detected: '{filler_old.strip()}'")
 
-        tenant_norm = resolve_canonical_property_id(tenant)
         if tenant_norm == "profithelm":
             for old_str, _ in cls.PROFITHELM_HTML_REPLACEMENTS:
                 if old_str in html_content:
@@ -3223,6 +3247,10 @@ class TruthReconciliationEngine:
                     if msg not in violations:
                         violations.append(msg)
 
+        if cache_key is not None:
+            if len(cls._AUDIT_TRUTH_CACHE) > 1024:
+                cls._AUDIT_TRUTH_CACHE.clear()
+            cls._AUDIT_TRUTH_CACHE[cache_key] = list(violations)
         return violations
 
 

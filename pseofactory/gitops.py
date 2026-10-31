@@ -330,23 +330,40 @@ class ShipperQueue:
                     now_iso = now_dt.isoformat()
                     completed_tokens: Set[str] = set()
                     latest_completed_idx = -1
+                    latest_live_completed_idx = -1
                     for idx, rec in enumerate(records):
                         st = str(rec.get("status", ""))
                         if st in ("COMPLETED", "DRY_RUN", "RECONCILED_SUPERSEDED"):
                             if st in ("COMPLETED", "DRY_RUN"):
                                 latest_completed_idx = idx
+                            if st == "COMPLETED":
+                                latest_live_completed_idx = idx
                             tok = str(rec.get("payload", {}).get("token", ""))
                             if tok and st in ("COMPLETED", "DRY_RUN"):
                                 completed_tokens.add(tok)
 
                     for idx, rec in enumerate(records):
                         st = str(rec.get("status", ""))
-                        if st not in ("PENDING", "CI_FAILURE", "EDGE_VERIFICATION_FAILED", "FAILED"):
+                        if st not in ("PENDING", "CI_FAILURE", "EDGE_VERIFICATION_FAILED", "FAILED", "DRY_RUN", "STAGED"):
                             continue
                         tok = str(rec.get("payload", {}).get("token", ""))
                         is_stale = False
                         reason = ""
-                        if tok and tok in completed_tokens:
+                        if st in ("DRY_RUN", "STAGED"):
+                            if idx < latest_live_completed_idx:
+                                is_stale = True
+                                reason = "Superseded by newer completed live release on property"
+                            else:
+                                ts_str = str(rec.get("timestamp", ""))
+                                if ts_str and latest_live_completed_idx >= 0:
+                                    try:
+                                        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                        if (now_dt - dt).total_seconds() >= max_age_seconds:
+                                            is_stale = True
+                                            reason = f"Exceeded WAL {st} TTL ({int(max_age_seconds)}s)"
+                                    except Exception:
+                                        pass
+                        elif tok and tok in completed_tokens:
                             is_stale = True
                             reason = "Superseded by completed event with identical token"
                         elif idx < latest_completed_idx:
@@ -366,7 +383,7 @@ class ShipperQueue:
                         if is_stale:
                             if st != "PENDING":
                                 rec["previous_status"] = st
-                            rec["status"] = "RECONCILED_SUPERSEDED"
+                            rec["status"] = "COMPLETED" if st in ("DRY_RUN", "STAGED") else "RECONCILED_SUPERSEDED"
                             rec["completed_at"] = now_iso
                             rec["reconciliation_reason"] = reason
                             reconciled += 1

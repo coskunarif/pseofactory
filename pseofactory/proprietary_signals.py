@@ -250,23 +250,48 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                 entry["points"][str(yr)] = val
                 entry["timeline"].append({"epoch": yr, "value": val})
 
+            try:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_jev_eval_query_slug ON jev_evaluations(query_slug, jev_score, composite_profit_yield);"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_metrics ON treg_metric_snapshots(query_slug, search_volume, cpc_usd, keyword_difficulty, historical_stability);"
+                )
+            except Exception:
+                pass
             kw_rows = cur.execute(
                 """
+                WITH tm_agg AS (
+                    SELECT query_slug,
+                           MAX(search_volume) AS search_volume,
+                           MAX(cpc_usd) AS cpc_usd,
+                           MAX(keyword_difficulty) AS keyword_difficulty,
+                           MAX(historical_stability) AS historical_stability
+                    FROM treg_metric_snapshots
+                    WHERE search_volume > 0
+                    GROUP BY query_slug
+                ),
+                je_agg AS (
+                    SELECT query_slug,
+                           MAX(jev_score) AS jev_score,
+                           MAX(composite_profit_yield) AS composite_profit_yield
+                    FROM jev_evaluations
+                    WHERE jev_score > 0
+                    GROUP BY query_slug
+                )
                 SELECT kh.query_slug, kh.query, kh.current_property_id,
-                       MAX(kh.consecutive_cycles_count) AS consecutive_cycles_count,
-                       MAX(kh.latest_velocity) AS latest_velocity,
-                       MAX(kh.acceleration_2nd_deriv) AS acceleration_2nd_deriv,
-                       MAX(tm.search_volume) AS search_volume,
-                       MAX(tm.cpc_usd) AS cpc_usd,
-                       MAX(tm.keyword_difficulty) AS keyword_difficulty,
-                       MAX(tm.historical_stability) AS historical_stability,
-                       MAX(je.jev_score) AS jev_score,
-                       MAX(je.composite_profit_yield) AS composite_profit_yield
+                       kh.consecutive_cycles_count AS consecutive_cycles_count,
+                       kh.latest_velocity AS latest_velocity,
+                       kh.acceleration_2nd_deriv AS acceleration_2nd_deriv,
+                       tm.search_volume AS search_volume,
+                       tm.cpc_usd AS cpc_usd,
+                       tm.keyword_difficulty AS keyword_difficulty,
+                       tm.historical_stability AS historical_stability,
+                       je.jev_score AS jev_score,
+                       je.composite_profit_yield AS composite_profit_yield
                 FROM keyword_history kh
-                LEFT JOIN treg_metric_snapshots tm ON kh.query_slug = tm.query_slug
-                LEFT JOIN jev_evaluations je ON kh.query_slug = je.query_slug
-                WHERE tm.search_volume > 0 AND je.jev_score > 0
-                GROUP BY kh.query_slug
+                INNER JOIN tm_agg tm ON kh.query_slug = tm.query_slug
+                INNER JOIN je_agg je ON kh.query_slug = je.query_slug
                 ORDER BY composite_profit_yield DESC, jev_score DESC, latest_velocity DESC
                 """
             ).fetchall()

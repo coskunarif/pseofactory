@@ -218,12 +218,113 @@ def compute_two_tier_merkle_hash(
     }
 
 
+def verify_all_tenants_aligned_for_latch(
+    workspace_root: Union[str, Path] = "/home/ubuntuadmin/projects",
+    expected_hash: Optional[str] = None,
+    require_git_clean_and_pushed: bool = True,
+) -> Tuple[bool, List[str]]:
+    """
+    Verifies that every canonical tenant repository (profithelm-platform, prexvo, gainhelm)
+    has compiled, updated substrate_lock.json to match expected_hash (or compute_engine_hash()),
+    and when require_git_clean_and_pushed is True, has a clean working tree (dist/ and substrate_lock.json)
+    and 0 unpushed commits on main relative to origin/main.
+    Returns (all_aligned, reasons).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import subprocess
+
+    ws = Path(workspace_root).resolve()
+    target_hash = expected_hash or compute_engine_hash()
+    is_prod_ws = (ws == Path("/home/ubuntuadmin/projects").resolve())
+    reasons: List[str] = []
+
+    canonical_tenants = (
+        ("profithelm", "profithelm-platform"),
+        ("prexvo", "prexvo"),
+        ("gainhelm", "gainhelm"),
+    )
+    for pid, repo_dir_name in canonical_tenants:
+        t_repo = ws / repo_dir_name
+        has_git = (t_repo / ".git").exists()
+        lock_file = t_repo / "substrate_lock.json"
+        if not is_prod_ws and not has_git and not lock_file.is_file():
+            continue
+        if not t_repo.is_dir():
+            reasons.append(f"{pid}: missing tenant repository at {t_repo}")
+            continue
+        if not lock_file.is_file():
+            reasons.append(f"{pid}: missing substrate_lock.json at {lock_file}")
+        else:
+            try:
+                lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+                l_eh = str(lock_data.get("engine_hash") or "")
+                l_sh = str(lock_data.get("substrate_hash") or l_eh)
+                if l_eh != target_hash or l_sh != target_hash:
+                    reasons.append(
+                        f"{pid}: substrate_lock.json hash '{l_eh[:12]}' != expected '{target_hash[:12]}'"
+                    )
+            except Exception as exc:
+                reasons.append(f"{pid}: invalid substrate_lock.json ({exc})")
+
+        dist_dir = t_repo / "dist"
+        if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
+            reasons.append(f"{pid}: missing compiled dist/index.html in {t_repo}")
+
+        if require_git_clean_and_pushed and has_git:
+            try:
+                st_res = subprocess.run(
+                    ["git", "-C", str(t_repo), "status", "--porcelain", "--", "dist", "substrate_lock.json"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if st_res.returncode == 0 and st_res.stdout.strip():
+                    reasons.append(f"{pid}: uncommitted changes in dist/ or substrate_lock.json")
+            except Exception:
+                pass
+            try:
+                rem_res = subprocess.run(
+                    ["git", "-C", str(t_repo), "remote", "get-url", "origin"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if rem_res.returncode == 0 and rem_res.stdout.strip():
+                    ref_res = subprocess.run(
+                        ["git", "-C", str(t_repo), "rev-parse", "--verify", "origin/main"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if ref_res.returncode == 0:
+                        ahead_res = subprocess.run(
+                            ["git", "-C", str(t_repo), "rev-list", "--count", "origin/main..HEAD"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=5,
+                        )
+                        if ahead_res.returncode == 0 and int(ahead_res.stdout.strip() or "0") > 0:
+                            reasons.append(
+                                f"{pid}: {ahead_res.stdout.strip()} unpushed commit(s) on main ahead of origin/main"
+                            )
+            except Exception:
+                pass
+
+    return len(reasons) == 0, reasons
+
+
 def detect_engine_drift(
     state_file: Optional[Union[str, Path]] = None,
     include_paths: Optional[List[Union[str, Path]]] = None,
     base_dirs: Optional[List[Union[str, Path]]] = None,
     auto_record: bool = False,
     lock_path: Optional[Union[str, Path]] = None,
+    verify_tenants: Optional[bool] = None,
+    workspace_root: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Audits the current engine hash against recorded state in state_file (.agy/engine_hash.json).
@@ -259,18 +360,49 @@ def detect_engine_drift(
             current_hash = substrate_only_hash
 
     drift_detected = (recorded_hash != current_hash)
+    unaligned_reasons: List[str] = []
+    latch_blocked = False
 
-    if auto_record and drift_detected:
-        record_engine_hash(s_path, hash_value=current_hash, include_paths=include_paths, base_dirs=effective_base_dirs)
+    s_resolved = s_path.resolve()
+    eff_ws = Path(workspace_root).resolve() if workspace_root is not None else Path("/home/ubuntuadmin/projects").resolve()
+    is_workspace_engine_hash = bool(
+        verify_tenants
+        if verify_tenants is not None
+        else s_resolved in (
+            eff_ws / ".agy" / "engine_hash.json",
+            eff_ws / "pseofactory" / ".agy" / "engine_hash.json",
+        )
+    )
+    if is_workspace_engine_hash and base_dirs is None and include_paths is None:
+        all_ok, unaligned_reasons = verify_all_tenants_aligned_for_latch(
+            workspace_root=eff_ws,
+            expected_hash=current_hash,
+            require_git_clean_and_pushed=bool(auto_record or verify_tenants),
+        )
+        if not all_ok:
+            drift_detected = True
 
-    return {
-        "status": "DRIFT" if drift_detected else "ALIGNED",
+    if auto_record:
+        if is_workspace_engine_hash and unaligned_reasons:
+            latch_blocked = True
+        elif drift_detected or not s_path.exists():
+            record_engine_hash(s_path, hash_value=current_hash, include_paths=include_paths, base_dirs=effective_base_dirs)
+
+    res_out: Dict[str, Any] = {
+        "status": "TENANT_DRIFT_UNLATCHED" if latch_blocked else ("DRIFT" if drift_detected else "ALIGNED"),
         "drift_detected": drift_detected,
+        "drifted": drift_detected,
         "current_hash": current_hash,
         "recorded_hash": recorded_hash,
         "requires_recompile": drift_detected,
         "state_file": str(s_path),
     }
+    if unaligned_reasons:
+        res_out["unaligned_reasons"] = unaligned_reasons
+        res_out["reason"] = "TENANT_SUBSTRATE_OR_GIT_DRIFT"
+    if latch_blocked:
+        res_out["latch_blocked"] = True
+    return res_out
 
 
 def record_engine_hash(

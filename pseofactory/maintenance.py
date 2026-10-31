@@ -861,6 +861,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
                 env["GAINHELM_TARGET"] = slug
+                env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
                 if res.returncode == 75:
                     raise LockContentionError(
@@ -931,7 +932,21 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"    if hasattr(mod, 'build_asset'):\n"
             f"        mod.build_asset({repr(slug)}, target_file={repr(str(target_file) if target_file else None)})\n"
             f"        sys.exit(0)\n"
-            f"    elif hasattr(mod, 'build_all'):\n"
+            f"    elif hasattr(mod, 'build_tool_page') and hasattr(mod, 'TOOLS') and ({repr(str(self._dist_dir / 'index.html'))}):\n"
+            f"        from pathlib import Path\n"
+            f"        dist_p = Path({repr(str(self._dist_dir))})\n"
+            f"        matched = [t for t in getattr(mod, 'TOOLS', []) if isinstance(t, dict) and t.get('slug') == {repr(slug)}]\n"
+            f"        if matched and (dist_p / 'index.html').is_file():\n"
+            f"            mod.build_tool_page(matched[0])\n"
+            f"            t_html = dist_p / 'tools' / {repr(slug)} / 'index.html'\n"
+            f"            if t_html.is_file():\n"
+            f"                from pseofactory.maintenance import RetroReflectionEngine\n"
+            f"                raw_h = t_html.read_text(encoding='utf-8')\n"
+            f"                upd_h, _ = RetroReflectionEngine.retrofit_html(raw_h, {repr(self._property_id)}, slug={repr(slug)}, dist_dir=dist_p)\n"
+            f"                if upd_h != raw_h:\n"
+            f"                    t_html.write_text(upd_h, encoding='utf-8')\n"
+            f"            sys.exit(0)\n"
+            f"    if hasattr(mod, 'build_all'):\n"
             f"        try:\n"
             f"            mod.build_all(dist_dir={repr(str(self._dist_dir))})\n"
             f"        except TypeError:\n"
@@ -953,6 +968,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
             env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
             env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+            env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
             env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
             res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
             if res.returncode == 0:
@@ -1023,6 +1039,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["FACTORY_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
+                env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
 
                 cmd = self._build_command
                 if isinstance(cmd, str):
@@ -4475,17 +4492,25 @@ class MaintenanceLifecycle:
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
                 if getattr(adapter, "repo_path", None) and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/"):
                     ws_root = Path("/home/ubuntuadmin/projects")
-                    record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
-                    record_engine_hash(ws_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
+                    all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
+                        workspace_root=ws_root,
+                        expected_hash=current_engine_hash,
+                        require_git_clean_and_pushed=bool(enable_gitops),
+                    )
+                    if all_tenants_ok:
+                        record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+                        record_engine_hash(ws_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
                     try:
-                        from pseofactory.supervisor import HeartbeatTracker
-                        HeartbeatTracker(heartbeat_path=ws_root / "pseofactory" / ".agy" / "supervisor_heartbeat.json").emit(
-                            status="HEALTHY",
-                            cycle_id=run_id or "maintenance_sync",
-                            current_tenant=None,
-                            engine_hash=current_engine_hash,
-                            consecutive_failures=0,
-                        )
+                        if all_tenants_ok:
+                            from pseofactory.supervisor import HeartbeatTracker
+                            HeartbeatTracker(heartbeat_path=ws_root / "pseofactory" / ".agy" / "supervisor_heartbeat.json").emit(
+                                status="HEALTHY",
+                                cycle_id=run_id or "maintenance_sync",
+                                current_tenant=None,
+                                engine_hash=current_engine_hash,
+                                consecutive_failures=0,
+                            )
                         if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
                             from pseofactory.gitops import reconcile_workspace_tracking_state
                             reconcile_workspace_tracking_state(
@@ -11237,7 +11262,8 @@ class RetroReflectionEngine:
                 "retrofitted_paths": [],
             }
 
-        cls._RETROFIT_HTML_CACHE.clear()
+        if len(cls._RETROFIT_HTML_CACHE) > 1024:
+            cls._RETROFIT_HTML_CACHE.clear()
         scanned = 0
         retrofitted_paths: List[str] = []
         agy_dir = d.parent / ".agy"
@@ -13496,6 +13522,8 @@ def reflect_and_recompile_all_assets(
         recompiled_count = 0
         retrofitted_count = pre_retrofitted_count
         should_run_full_build = False
+        build_failed = False
+        build_error_msg: Optional[str] = None
 
         has_structural_drift = any(
             any(
@@ -13529,7 +13557,23 @@ def reflect_and_recompile_all_assets(
                             if d_rec.slug:
                                 adapter.build_asset(d_rec.slug)
                                 recompiled_count += 1
+                except (SubprocessCrashError, LockContentionError) as b_err:
+                    build_failed = True
+                    build_error_msg = str(b_err)
+                    if verbose:
+                        print(f"Error rebuilding assets for '{p_id}': {b_err}")
+                    t_repo_rb = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
+                    if (t_repo_rb / ".git").exists():
+                        subprocess.run(
+                            ["git", "-C", str(t_repo_rb), "checkout", "HEAD", "--", "dist"],
+                            capture_output=True,
+                            check=False,
+                            timeout=15,
+                        )
                 except Exception as b_err:
+                    if not isinstance(b_err, NotImplementedError) and isinstance(adapter, SubprocessPropertyAdapter):
+                        build_failed = True
+                        build_error_msg = str(b_err)
                     if verbose:
                         print(f"Error rebuilding assets for '{p_id}': {b_err}")
             elif not estate_needed_mutation and isinstance(adapter, SubprocessPropertyAdapter):
@@ -13538,7 +13582,7 @@ def reflect_and_recompile_all_assets(
 
             # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,
             # and heal any legacy cross-vertical polluted overlay specs in .agy/overlays/
-            if should_run_full_build or estate_needed_mutation:
+            if (should_run_full_build or estate_needed_mutation) and not build_failed:
                 try:
                     repo_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
                     from pseofactory.gsc_remediation import (
@@ -13640,7 +13684,7 @@ def reflect_and_recompile_all_assets(
                     pass
 
             # Execute 8-workflow agentic SEO growth loops & live contextual donor HTML link injection on forced/mutated reflection
-            if (should_run_full_build or estate_needed_mutation or force) and "PYTEST_CURRENT_TEST" not in os.environ:
+            if not build_failed and (should_run_full_build or estate_needed_mutation or force) and "PYTEST_CURRENT_TEST" not in os.environ:
                 try:
                     repo_root_wf = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
                     from pseofactory.seo_growth_loops import run_all_seo_growth_workflows
@@ -13658,7 +13702,7 @@ def reflect_and_recompile_all_assets(
                     pass
 
             # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess reflection is requested
-            if should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter):
+            if not build_failed and (should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter)):
                 try:
                     retro_res = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
@@ -13676,7 +13720,7 @@ def reflect_and_recompile_all_assets(
                         print(f"Error retro-reflecting estate for '{p_id}': {r_err}")
 
             # Final pass to ensure all HTML pages in dist_dir pass callout destination message match
-            if should_run_full_build or estate_needed_mutation or retrofitted_count > 0 or not isinstance(adapter, SubprocessPropertyAdapter):
+            if not build_failed and (should_run_full_build or estate_needed_mutation or retrofitted_count > 0 or not isinstance(adapter, SubprocessPropertyAdapter)):
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     for html_f in sorted(adapter.dist_dir.rglob("*.html")):
@@ -13695,7 +13739,8 @@ def reflect_and_recompile_all_assets(
                 evaluator._audit_cache.pop(_ck, None)
 
         will_run_downstream = bool(
-            run_downstream
+            not build_failed
+            and run_downstream
             and not is_foreign_pytest
             and (
                 estate_needed_mutation
@@ -13792,6 +13837,7 @@ def reflect_and_recompile_all_assets(
                         substrate_lock_stale = True
         if (
             (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or force or substrate_lock_stale)
+            and not build_failed
             and build_verified.status == "PASS"
             and not is_unmerged_worktree
         ):
@@ -13838,6 +13884,7 @@ def reflect_and_recompile_all_assets(
 
         if (
             (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh or substrate_lock_stale or force)
+            and not build_failed
             and latch_state
             and build_verified.status == "PASS"
             and not is_unmerged_worktree
@@ -14010,10 +14057,17 @@ def reflect_and_recompile_all_assets(
                         for a in adapter.list_assets()
                     }
                     record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
+                    all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
+                        workspace_root=scanner.workspace_root,
+                        expected_hash=cur_engine_hash,
+                        require_git_clean_and_pushed=True,
+                    )
                     root_s_file = scanner.workspace_root / ".agy" / "engine_hash.json"
                     root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
                     root_s_file.parent.mkdir(parents=True, exist_ok=True)
-                    record_engine_hash(root_s_file, hash_value=cur_engine_hash)
+                    if all_tenants_ok:
+                        record_engine_hash(root_s_file, hash_value=cur_engine_hash)
                     merged_root_hashes: Dict[str, str] = {}
                     try:
                         prev_root = load_asset_ledger(root_l_file)
@@ -14023,9 +14077,10 @@ def reflect_and_recompile_all_assets(
                         pass
                     merged_root_hashes.update(asset_hashes)
                     merged_root_hashes.update({f"{p_id}/{k}": v for k, v in asset_hashes.items()})
-                    record_asset_ledger(root_l_file, asset_hashes=merged_root_hashes, engine_hash=cur_engine_hash)
+                    if all_tenants_ok:
+                        record_asset_ledger(root_l_file, asset_hashes=merged_root_hashes, engine_hash=cur_engine_hash)
                     pf_dir = scanner.workspace_root / "pseofactory"
-                    if pf_dir.is_dir():
+                    if pf_dir.is_dir() and all_tenants_ok:
                         record_engine_hash(pf_dir / ".agy" / "engine_hash.json", hash_value=cur_engine_hash)
                         record_asset_ledger(
                             pf_dir / ".agy" / "asset_ledger.json",
@@ -14046,24 +14101,28 @@ def reflect_and_recompile_all_assets(
 
         post_report = (
             evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
-            if ((recompiled_count > 0 or retrofitted_count > 0) and latch_state and not is_unmerged_worktree)
+            if ((recompiled_count > 0 or retrofitted_count > 0) and not build_failed and latch_state and not is_unmerged_worktree)
             else build_verified
         )
+        prop_final_status = "FAIL" if build_failed else post_report.status
 
         results["total_assets_checked"] += build_verified.total_assets_checked
         results["total_drifted"] += len(drifted_records) + stale_mechanic_count
         results["total_recompiled"] += recompiled_count
         results["total_retrofitted"] += retrofitted_count
-        results["property_reports"][p_id] = {
+        prop_rep_entry: Dict[str, Any] = {
             "initial_drifted": len(drifted_records) + stale_mechanic_count,
             "stale_mechanics_detected": stale_mechanic_count,
             "recompiled": recompiled_count,
             "retrofitted": retrofitted_count,
-            "final_status": post_report.status,
+            "final_status": prop_final_status,
             "compliant_assets": post_report.compliant_assets_count,
             "downstream": downstream_summary,
         }
-        if post_report.status != "PASS":
+        if build_error_msg:
+            prop_rep_entry["build_error"] = build_error_msg
+        results["property_reports"][p_id] = prop_rep_entry
+        if prop_final_status != "PASS":
             results["status"] = "DRIFT"
 
     if latch_state and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:

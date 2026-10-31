@@ -1150,6 +1150,11 @@ class TrendCronRunner:
                             "proposals_count": len(proposals_created),
                         },
                     )
+                try:
+                    import pseofactory.proprietary_signals as _ps_mod
+                    _ps_mod._TREND_DB_CACHE = None
+                except Exception:
+                    pass
                 if sink_path:
                     from pseofactory.trends.pipeline import sink_records_to_jsonl
                     sink_candidates: List[Dict[str, Any]] = []

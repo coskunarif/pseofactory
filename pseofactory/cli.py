@@ -456,6 +456,10 @@ def cmd_drift(args: argparse.Namespace) -> int:
         print(json.dumps(drift_res, indent=2))
     else:
         print(f"[{drift_res['status']}] Current: {drift_res['current_hash'][:16]} | Recorded: {str(drift_res['recorded_hash'])[:16]} | Requires Recompile: {drift_res['requires_recompile']}")
+        for r_msg in drift_res.get("unaligned_reasons", []) or []:
+            print(f"  - {r_msg}")
+    if drift_res.get("latch_blocked"):
+        return 1
     if args.record:
         return 0
     return 0 if drift_res["status"] == "ALIGNED" else 1

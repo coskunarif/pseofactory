@@ -401,11 +401,12 @@ class SyndicationWALQueue:
                     now_iso = now_dt.isoformat()
                     latest_completed_idx = -1
                     for idx, rec in enumerate(records):
-                        if str(rec.get("status", "")) != "PENDING":
+                        if str(rec.get("status", "")) == "COMPLETED":
                             latest_completed_idx = idx
 
                     for idx, rec in enumerate(records):
-                        if rec.get("status") != "PENDING":
+                        prev_status = str(rec.get("status", ""))
+                        if prev_status not in ("PENDING", "STAGED", "DRY_RUN", "FAILED"):
                             continue
                         is_stale = False
                         reason = ""
@@ -424,7 +425,8 @@ class SyndicationWALQueue:
                                     is_stale = True
                                     reason = "Unparseable timestamp"
                         if is_stale:
-                            rec["status"] = "RECONCILED_SUPERSEDED"
+                            rec["reconciled_from"] = prev_status
+                            rec["status"] = "COMPLETED" if prev_status in ("STAGED", "DRY_RUN") else "RECONCILED_SUPERSEDED"
                             rec["completed_at"] = now_iso
                             rec["reconciliation_reason"] = reason
                             reconciled += 1

@@ -9240,6 +9240,9 @@ def _collect_jsonld_names_and_howto_issues(
     return names, howto_issues
 
 
+_ZERO_SIGNUP_ISSUES_CACHE: Dict[Tuple[str, str, bool], List[str]] = {}
+
+
 def detect_zero_signup_instant_result_issues(
     html_text: str,
     rel_path: str = "index.html",
@@ -9259,6 +9262,14 @@ def detect_zero_signup_instant_result_issues(
     issues: List[str] = []
     if not isinstance(html_text, str) or not html_text.strip():
         return [f"Page {rel_path}: HTML content must be a non-empty string"]
+
+    cache_key: Optional[Tuple[str, str, bool]] = None
+    if len(html_text) >= 256:
+        h_digest = hashlib.sha256(html_text.encode("utf-8", errors="ignore")).hexdigest()
+        cache_key = (h_digest, str(rel_path), bool(require_ssr_output))
+        cached_issues = _ZERO_SIGNUP_ISSUES_CACHE.get(cache_key)
+        if cached_issues is not None:
+            return list(cached_issues)
 
     if "\u2014" in html_text:
         issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
@@ -9341,6 +9352,10 @@ def detect_zero_signup_instant_result_issues(
                 f"Page {rel_path}: Contains unnormalized statutory acronym '{bad_token}' (expected '{canonical_token}')"
             )
 
+    if cache_key is not None:
+        if len(_ZERO_SIGNUP_ISSUES_CACHE) > 1024:
+            _ZERO_SIGNUP_ISSUES_CACHE.clear()
+        _ZERO_SIGNUP_ISSUES_CACHE[cache_key] = list(issues)
     return issues
 
 

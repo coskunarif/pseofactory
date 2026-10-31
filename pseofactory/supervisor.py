@@ -1935,6 +1935,12 @@ class AsyncFleetCoordinator:
         """
         if enable_distribution is None:
             enable_distribution = enable_gitops
+        os.environ.setdefault("PROFITHELM_OFFLINE_JEV", "1")
+        try:
+            import pseofactory.proprietary_signals as _ps_mod
+            _ps_mod._TREND_DB_CACHE = None
+        except Exception:
+            pass
         try:
             try:
                 return self.lifecycle.run(
@@ -2750,12 +2756,6 @@ class AutonomousLifecycleSupervisor:
                         for r in fleet_results.values()
                     ):
                         cascade_replayer.replay_quarantine()
-                    record_engine_hash(self.state_file, hash_value=current_engine_hash)
-                    if str(self.workspace_root) == "/home/ubuntuadmin/projects":
-                        record_engine_hash(
-                            self.workspace_root / "pseofactory" / ".agy" / "engine_hash.json",
-                            hash_value=current_engine_hash,
-                        )
                     all_asset_hashes: Dict[str, str] = {}
                     for pid, adapter in adapters.items():
                         if adapter.dist_dir and adapter.dist_dir.is_dir():
@@ -2773,17 +2773,29 @@ class AutonomousLifecycleSupervisor:
                                     asset_hashes=t_hashes,
                                     engine_hash=current_engine_hash,
                                 )
-                    record_asset_ledger(
-                        self.ledger_file,
-                        asset_hashes=all_asset_hashes,
-                        engine_hash=current_engine_hash,
+                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
+                    all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
+                        workspace_root=self.workspace_root,
+                        expected_hash=current_engine_hash,
+                        require_git_clean_and_pushed=bool(enable_gitops),
                     )
-                    if str(self.workspace_root) == "/home/ubuntuadmin/projects":
+                    if all_tenants_ok:
+                        record_engine_hash(self.state_file, hash_value=current_engine_hash)
                         record_asset_ledger(
-                            self.workspace_root / "pseofactory" / ".agy" / "asset_ledger.json",
+                            self.ledger_file,
                             asset_hashes=all_asset_hashes,
                             engine_hash=current_engine_hash,
                         )
+                        if str(self.workspace_root) == "/home/ubuntuadmin/projects":
+                            record_engine_hash(
+                                self.workspace_root / "pseofactory" / ".agy" / "engine_hash.json",
+                                hash_value=current_engine_hash,
+                            )
+                            record_asset_ledger(
+                                self.workspace_root / "pseofactory" / ".agy" / "asset_ledger.json",
+                                asset_hashes=all_asset_hashes,
+                                engine_hash=current_engine_hash,
+                            )
 
                 for stg, stg_summary in (
                     (

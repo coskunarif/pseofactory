@@ -2567,4 +2567,150 @@ def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_pa
     assert set(persisted["contracts"].keys()) == set(expected_order)
 
 
+def test_multi_tenant_engine_hash_latch_and_isolated_builder_offline_jev(tmp_path):
+    """
+    Verifies the GitOps multi-tenant truth guarantees:
+    1. detect_engine_drift blocks reporting ALIGNED whenever any canonical tenant
+       (profithelm-platform, prexvo, gainhelm) has a stale substrate_lock.json or
+       uncommitted dist/ changes, and only reports ALIGNED once all 3 tenants match expected_hash.
+    2. SubprocessPropertyAdapter.build_asset sets PROFITHELM_OFFLINE_JEV=1 and fast-paths single-tool
+       rebuilds via build_tool_page instead of falling back to full build_all() without offline JEV.
+    3. ShipperQueue.reconcile_stale_events and SyndicationWALQueue.reconcile_stale_events reconcile
+       stale DRY_RUN and STAGED events when superseded by a newer COMPLETED release/distribution.
+    """
+    import json
+    import subprocess
+    import pseofactory.drift as drift_mod
+    from pseofactory.drift import (
+        compute_engine_hash,
+        detect_engine_drift,
+        record_engine_hash,
+    )
+    from pseofactory.maintenance import SubprocessPropertyAdapter
+    from pseofactory.gitops import ShipperQueue
+    from pseofactory.distributor import SyndicationWALQueue
+
+    # 1. ShipperQueue and SyndicationWALQueue reconcile stale DRY_RUN and STAGED events when superseded by COMPLETED
+    q_dir = tmp_path / "queues"
+    q_dir.mkdir(parents=True, exist_ok=True)
+    sq = ShipperQueue(property_id="profithelm", queues_dir=q_dir)
+    e_dry = sq.enqueue({"run_id": "r1", "property_id": "profithelm"})
+    sq.complete_event(e_dry["event_id"], status="DRY_RUN")
+    e_live = sq.enqueue({"run_id": "r2", "property_id": "profithelm"})
+    sq.complete_event(e_live["event_id"], status="COMPLETED")
+    assert sq.reconcile_stale_events() == 1
+    sq_records = [json.loads(line) for line in sq.queue_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert all(r["status"] == "COMPLETED" for r in sq_records)
+
+    dq = SyndicationWALQueue(property_id="profithelm", queues_dir=q_dir)
+    d_staged = dq.enqueue({"run_id": "d1", "property_id": "profithelm"})
+    dq.complete_event(d_staged["event_id"], status="STAGED")
+    d_live = dq.enqueue({"run_id": "d2", "property_id": "profithelm"})
+    dq.complete_event(d_live["event_id"], status="COMPLETED")
+    assert dq.reconcile_stale_events() == 1
+    dq_records = [json.loads(line) for line in dq.queue_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert all(r["status"] == "COMPLETED" for r in dq_records)
+
+    # 2. SubprocessPropertyAdapter.build_asset sets PROFITHELM_OFFLINE_JEV=1 and fast-paths build_tool_page
+    mock_repo = tmp_path / "mock_profithelm"
+    pkg_dir = mock_repo / "profithelm"
+    dist_dir = mock_repo / "dist"
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text("<html><body>hub</body></html>\n", encoding="utf-8")
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "builder.py").write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "TOOLS = [{'slug': 'section-179-calculator', 'title': 'Section 179'}]\n"
+        "def build_tool_page(tool):\n"
+        "    assert os.environ.get('PROFITHELM_OFFLINE_JEV') == '1', 'Missing PROFITHELM_OFFLINE_JEV=1'\n"
+        "    out = Path(os.environ['FACTORY_DIST_DIR']) / 'tools' / tool['slug'] / 'index.html'\n"
+        "    out.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    out.write_text('<html><head><title>Section 179</title></head><body><h1>Section 179</h1></body></html>', encoding='utf-8')\n"
+        "def build_all(dist_dir=None):\n"
+        "    raise RuntimeError('Should not fall back to full build_all when build_tool_page fast-path applies')\n",
+        encoding="utf-8",
+    )
+    adapter = SubprocessPropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+        repo_path=mock_repo,
+    )
+    assert adapter.build_asset("section-179-calculator") is True
+    assert (dist_dir / "tools" / "section-179-calculator" / "index.html").is_file()
+
+    # 3. Multi-tenant substrate_lock.json and git working tree alignment check before latching engine_hash.json
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir(parents=True, exist_ok=True)
+    current_hash = compute_engine_hash()
+    stale_hash = "9777a1f36438134a8ad5c2e53e84074b9debbceeab1fd2df118229a1b6afc1c4"
+
+    for repo_name, lock_hash in (
+        ("profithelm-platform", stale_hash),
+        ("prexvo", current_hash),
+        ("gainhelm", current_hash),
+    ):
+        rp = ws_root / repo_name
+        rp.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(rp)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(rp), "config", "user.email", "test@antigravity.local"], check=True)
+        subprocess.run(["git", "-C", str(rp), "config", "user.name", "Test Worker"], check=True)
+        (rp / "dist").mkdir(parents=True, exist_ok=True)
+        (rp / "dist" / "index.html").write_text("<html><body>ok</body></html>\n", encoding="utf-8")
+        (rp / "substrate_lock.json").write_text(
+            json.dumps({"property_id": repo_name, "engine_hash": lock_hash, "substrate_hash": lock_hash}),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(rp), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(rp), "commit", "-m", "initial"], check=True, capture_output=True)
+
+    state_file = ws_root / ".agy" / "engine_hash.json"
+    record_engine_hash(state_file, hash_value=current_hash)
+    verify_fn = getattr(drift_mod, "verify_all_tenants_aligned_for_latch", None)
+    assert verify_fn is not None
+    aligned, reasons = verify_fn(
+        workspace_root=ws_root,
+        expected_hash=current_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert aligned is False
+    assert any("profithelm: substrate_lock.json hash" in r for r in reasons)
+
+    drift_res = detect_engine_drift(state_file=state_file, verify_tenants=True, workspace_root=ws_root)
+    assert drift_res["drifted"] is True
+    assert drift_res["status"] == "DRIFT"
+    assert drift_res["reason"] == "TENANT_SUBSTRATE_OR_GIT_DRIFT"
+
+    ph_repo = ws_root / "profithelm-platform"
+    (ph_repo / "substrate_lock.json").write_text(
+        json.dumps({"property_id": "profithelm", "engine_hash": current_hash, "substrate_hash": current_hash}),
+        encoding="utf-8",
+    )
+    aligned_dirty, reasons_dirty = verify_fn(
+        workspace_root=ws_root,
+        expected_hash=current_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert aligned_dirty is False
+    assert any("profithelm: uncommitted changes in dist/ or substrate_lock.json" in r for r in reasons_dirty)
+
+    subprocess.run(["git", "-C", str(ph_repo), "add", "substrate_lock.json"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(ph_repo), "commit", "-m", "align substrate lock"], check=True, capture_output=True)
+    aligned_clean, reasons_clean = verify_fn(
+        workspace_root=ws_root,
+        expected_hash=current_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert aligned_clean is True
+    assert reasons_clean == []
+    drift_clean = detect_engine_drift(state_file=state_file, verify_tenants=True, workspace_root=ws_root)
+    assert drift_clean["drifted"] is False
+    assert drift_clean["status"] == "ALIGNED"
+
+
+
 
