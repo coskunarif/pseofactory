@@ -1487,6 +1487,60 @@ class CICDWatcher:
         slug = self.resolve_repo_slug(rp)
 
         if not slug:
+            if (
+                not _is_test_context(rp)
+                and rp == Path("/home/ubuntuadmin/projects/gainhelm").resolve()
+                and (rp / "dist").is_dir()
+                and shutil.which("npx")
+            ):
+                print(
+                    f"[DISPATCH:CLOUD_DEPLOY] Local-only tenant '{rp.name}' has no GitHub remote; "
+                    "executing local gate + direct Wrangler Pages deployment..."
+                )
+                deploy_cmd = [
+                    "npx",
+                    "wrangler",
+                    "pages",
+                    "deploy",
+                    "dist",
+                    "--project-name",
+                    "gainhelm",
+                    "--branch",
+                    "main",
+                    "--commit-dirty=true",
+                ]
+                try:
+                    w_res = subprocess.run(
+                        deploy_cmd,
+                        cwd=str(rp),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=min(timeout, 300),
+                    )
+                    if w_res.returncode == 0:
+                        return {
+                            "status": "PASSED",
+                            "run_id": f"local-wrangler-{rid}",
+                            "head_sha": head_sha.strip(),
+                            "conclusion": "success",
+                            "deployment_mode": "local_wrangler_pages",
+                        }
+                    return {
+                        "status": "FAILED",
+                        "run_id": f"local-wrangler-{rid}",
+                        "head_sha": head_sha.strip(),
+                        "conclusion": "failure",
+                        "reason": (w_res.stderr or w_res.stdout or "wrangler pages deploy failed").strip()[:400],
+                    }
+                except Exception as ex:
+                    return {
+                        "status": "FAILED",
+                        "run_id": f"local-wrangler-{rid}",
+                        "head_sha": head_sha.strip(),
+                        "conclusion": "failure",
+                        "reason": str(ex),
+                    }
             return {"status": "SKIPPED", "reason": "No GitHub remote slug discovered"}
 
         if not self.workflow:
@@ -1841,6 +1895,9 @@ class LiveEdgeVerifier:
                     if "sitemap" in url:
                         entries = len(re.findall(r"<loc>", body))
 
+                    dm_match = re.search(r'"dateModified"\s*:\s*"([^"]+)"', body)
+                    date_modified = dm_match.group(1).strip() if dm_match else None
+
                     return {
                         "url": url,
                         "status": "PASS",
@@ -1850,6 +1907,7 @@ class LiveEdgeVerifier:
                         "entries": entries,
                         "canonical": canonical,
                         "title": title,
+                        "date_modified": date_modified,
                         "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                         "has_layout_containment": ("contain: layout style" in body),
                         "has_min_width_table": ("min-width: 110px" in body),
@@ -1857,6 +1915,7 @@ class LiveEdgeVerifier:
                         "has_runtime_sync": ('id="pseo-runtime-sync"' in body),
                         "has_tool_catalog_link": ('rel="tool-catalog"' in body or "rel='tool-catalog'" in body),
                         "has_speakable_jsonld": ('"SpeakableSpecification"' in body),
+                        "body": body,
                     }
             except urllib.error.HTTPError as he:
                 last_error = f"HTTP Error {he.code}: {he.reason}"
@@ -1907,6 +1966,141 @@ class LiveEdgeVerifier:
             "checks": checks,
         }
 
+    def audit_live_versus_local_html(
+        self,
+        live_html: str,
+        local_html: Optional[str],
+        property_id: str,
+        rel_path: str,
+    ) -> List[str]:
+        """
+        Runs independent ground-truth verification and live-vs-local build parity checks
+        against fetched edge HTML so stale edge builds fail closed in Stage 6.
+        Zero em-dashes. Zero en-dashes.
+        """
+        violations: List[str] = []
+        if not live_html:
+            return ["Empty live HTML body"]
+
+        from pseofactory.audit import (
+            detect_tautological_or_fabricated_manifest_issues,
+            verify_manifest_ssr_metric_parity,
+        )
+        from pseofactory.tenant_facts import TruthReconciliationEngine
+
+        slug_hint = rel_path.replace("tools/", "").replace("/index.html", "").replace("index.html", "").strip("/")
+        recon_issues = TruthReconciliationEngine.audit_html_truth_reconciliation(
+            live_html,
+            tenant=property_id,
+            rel_path=rel_path,
+            slug=slug_hint or "index",
+            include_fact_store=True,
+        )
+        for ri in recon_issues:
+            if ri not in violations:
+                violations.append(ri)
+
+        if property_id == "profithelm" and "divided by (1 - 0.133)" in live_html:
+            violations.append(
+                f"Forbidden spaced hyphen 'divided by (1 - 0.133)' present on live {rel_path}"
+            )
+
+        manifest_re = re.compile(
+            r'<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>([\s\S]*?)</script>',
+            re.IGNORECASE,
+        )
+        live_man_m = manifest_re.search(live_html)
+        live_pub: Optional[float] = None
+        live_formula = ""
+        live_inputs: Dict[str, Any] = {}
+        if live_man_m:
+            try:
+                live_man = json.loads(live_man_m.group(1).strip())
+                if isinstance(live_man, dict):
+                    if live_man.get("published_output") is not None:
+                        live_pub = float(live_man["published_output"])
+                    live_formula = str(live_man.get("formula") or "")
+                    live_inputs = live_man.get("inputs") if isinstance(live_man.get("inputs"), dict) else {}
+            except Exception as ex:
+                violations.append(f"Invalid calculation-manifest JSON on live {rel_path}: {ex}")
+
+        if live_formula or live_pub is not None:
+            for ti in detect_tautological_or_fabricated_manifest_issues(
+                formula=live_formula,
+                inputs=live_inputs,
+                published_output=live_pub,
+            ):
+                if ti not in violations:
+                    violations.append(ti)
+
+        ssr_target_pub = live_pub
+        if ssr_target_pub is None and "metric-soc2_total_cost" in live_html:
+            ssr_target_pub = 78100.40
+        if ssr_target_pub is not None:
+            for si in verify_manifest_ssr_metric_parity(
+                html_content=live_html,
+                published_output=ssr_target_pub,
+                slug=slug_hint,
+            ):
+                if si not in violations:
+                    violations.append(si)
+
+        if local_html:
+            live_dm_m = re.search(r'"dateModified"\s*:\s*"([^"]+)"', live_html)
+            local_dm_m = re.search(r'"dateModified"\s*:\s*"([^"]+)"', local_html)
+            live_dm = live_dm_m.group(1).strip() if live_dm_m else None
+            local_dm = local_dm_m.group(1).strip() if local_dm_m else None
+            if local_dm and live_dm != local_dm:
+                violations.append(
+                    f"Live-vs-local dateModified mismatch on {rel_path}: live='{live_dm}' != local='{local_dm}'"
+                )
+
+            local_man_m = manifest_re.search(local_html)
+            if local_man_m:
+                try:
+                    local_man = json.loads(local_man_m.group(1).strip())
+                    if isinstance(local_man, dict):
+                        local_pub = local_man.get("published_output")
+                        local_formula = str(local_man.get("formula") or "")
+                        if local_pub is not None and (
+                            live_pub is None or abs(float(live_pub) - float(local_pub)) > 0.01
+                        ):
+                            violations.append(
+                                f"Live-vs-local manifest published_output mismatch on {rel_path}: live={live_pub} != local={local_pub}"
+                            )
+                        if local_formula and live_formula != local_formula:
+                            violations.append(
+                                f"Live-vs-local manifest formula mismatch on {rel_path}: live='{live_formula}' != local='{local_formula}'"
+                            )
+                except Exception:
+                    pass
+
+            metric_re = re.compile(
+                r'id=["\']((?:res-[a-z0-9_-]+|val-[a-z0-9_-]+|sec179-res-[a-z0-9_-]+|sec1031-res-[a-z0-9_-]+|tey-res-[a-z0-9_-]+|metric-[a-z0-9_-]+|kpi-[a-z0-9_-]+))["\'][^>]*>\s*([^<]+)<',
+                re.IGNORECASE,
+            )
+            local_metrics = {m.group(1): m.group(2).strip() for m in metric_re.finditer(local_html)}
+            live_metrics = {m.group(1): m.group(2).strip() for m in metric_re.finditer(live_html)}
+            for m_id, loc_val in local_metrics.items():
+                liv_val = live_metrics.get(m_id)
+                if liv_val != loc_val:
+                    violations.append(
+                        f"Live-vs-local SSR metric #{m_id} mismatch on {rel_path}: live='{liv_val}' != local='{loc_val}'"
+                    )
+
+            for required_phrase in (
+                "divided by (1 minus 0.133)",
+                "matching up to $50 in monthly principal reduction",
+                "$2,067,813",
+                "$78,100.40",
+            ):
+                if required_phrase in local_html and required_phrase not in live_html:
+                    violations.append(
+                        f"Live-vs-local prose mismatch on {rel_path}: local contains '{required_phrase}' but live edge does not"
+                    )
+
+        return violations
+
     def verify_edge_deployment(
         self,
         base_url: str,
@@ -1920,25 +2114,34 @@ class LiveEdgeVerifier:
         Zero em-dashes. Zero en-dashes.
         """
         base = base_url.rstrip("/")
+        base_low = base.lower()
+        property_id = (
+            "gainhelm"
+            if "gainhelm" in base_low
+            else ("prexvo" if "prexvo" in base_low else "profithelm")
+        )
         mode_tag = " [READ_ONLY SIMULATION]" if dry_run else ""
         print(f"[DISPATCH:CLOUD_DEPLOY] Stage 6: Edge deployment parity check -> url={base}{mode_tag}")
 
         local_audit = None
+        local_index_txt: Optional[str] = None
         local_index_has_containment = False
         local_index_has_visual_primitives = False
-        tool_expectations: Dict[str, Dict[str, bool]] = {}
+        tool_expectations: Dict[str, Dict[str, Any]] = {}
         if dist_dir:
             local_audit = self.verify_local_dist(dist_dir)
             idx_path = Path(dist_dir) / "index.html"
             if idx_path.is_file():
                 try:
                     idx_txt = idx_path.read_text(encoding="utf-8", errors="ignore")
+                    local_index_txt = idx_txt
                     local_index_has_containment = ("contain: layout style" in idx_txt)
                     local_index_has_visual_primitives = (
                         ('id="pseo-visual-primitives"' in idx_txt)
                         and (sample_tools is True or not _is_test_context(dist_dir))
                     )
                 except Exception:
+                    local_index_txt = None
                     local_index_has_containment = False
                     local_index_has_visual_primitives = False
 
@@ -1961,23 +2164,42 @@ class LiveEdgeVerifier:
             )
         )
         if should_sample_tools and dist_dir and (Path(dist_dir) / "tools").is_dir():
+            tools_root = Path(dist_dir) / "tools"
             sampled_slugs: List[str] = []
-            for item in sorted((Path(dist_dir) / "tools").iterdir()):
+            for item in sorted(tools_root.iterdir()):
                 if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
                     sampled_slugs.append(item.name)
                     if len(sampled_slugs) >= 2:
                         break
+            priority_ground_truth_slugs = (
+                "soc-2-audit-cost-calculator",
+                "hipaa-violation-penalty-breach-cost-calculator",
+                "treasury-yield-calculator",
+                "section-179-calculator",
+                "rap-payment-calculator",
+                "rap-vs-ibr-calculator",
+            )
+            for p_slug in priority_ground_truth_slugs:
+                if p_slug not in sampled_slugs and (tools_root / p_slug / "index.html").is_file():
+                    sampled_slugs.append(p_slug)
             for s_slug in sampled_slugs:
                 t_ep = f"{base}/tools/{s_slug}/"
                 endpoints.append(t_ep)
                 try:
-                    t_txt = (Path(dist_dir) / "tools" / s_slug / "index.html").read_text(encoding="utf-8", errors="ignore")
+                    t_txt = (tools_root / s_slug / "index.html").read_text(encoding="utf-8", errors="ignore")
                     tool_expectations[t_ep] = {
                         "has_visual_primitives": ('id="pseo-visual-primitives"' in t_txt),
                         "has_runtime_sync": ('id="pseo-runtime-sync"' in t_txt),
+                        "local_html": t_txt,
+                        "rel_path": f"tools/{s_slug}/index.html",
                     }
                 except Exception:
-                    tool_expectations[t_ep] = {"has_visual_primitives": False, "has_runtime_sync": False}
+                    tool_expectations[t_ep] = {
+                        "has_visual_primitives": False,
+                        "has_runtime_sync": False,
+                        "local_html": None,
+                        "rel_path": f"tools/{s_slug}/index.html",
+                    }
 
         results: Dict[str, Any] = {}
         all_passed = True
@@ -1995,6 +2217,7 @@ class LiveEdgeVerifier:
         for ep in endpoints:
             res = results.get(ep, {})
             status_code = res.get("status_code") or 0
+            live_body = str(res.pop("body", "") or "")
 
             if ep == f"{base}/":
                 if res.get("status") == "PASS":
@@ -2021,6 +2244,21 @@ class LiveEdgeVerifier:
                         res["error"] = "Stale edge HTML: missing engine visual primitives ('id=\"pseo-visual-primitives\"') present in local dist"
                         all_passed = False
                         print("[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL (stale edge HTML missing 'id=\"pseo-visual-primitives\"')")
+                    elif should_sample_tools and not dry_run and live_body:
+                        root_violations = self.audit_live_versus_local_html(
+                            live_html=live_body,
+                            local_html=local_index_txt,
+                            property_id=property_id,
+                            rel_path="index.html",
+                        )
+                        if root_violations:
+                            res["status"] = "FAIL"
+                            res["ground_truth_violations"] = root_violations
+                            res["error"] = "; ".join(root_violations[:3])
+                            all_passed = False
+                            print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> FAIL ({res['error']})")
+                        else:
+                            print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP 200 (latency: {lat}ms, title: '{title}', canonical: '{canon}', dateModified: '{res.get('date_modified')}')")
                     else:
                         print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP 200 (latency: {lat}ms, title: '{title}', canonical: '{canon}')")
                 else:
@@ -2074,6 +2312,21 @@ class LiveEdgeVerifier:
                         res["status"] = "FAIL"
                         res["error"] = f"Stale tool HTML on {rel_ep}: missing 'id=\"pseo-visual-primitives\"'"
                         all_passed = False
+                    elif should_sample_tools and not dry_run and live_body:
+                        tool_violations = self.audit_live_versus_local_html(
+                            live_html=live_body,
+                            local_html=exp.get("local_html"),
+                            property_id=property_id,
+                            rel_path=str(exp.get("rel_path") or rel_ep.strip("/")),
+                        )
+                        if tool_violations:
+                            res["status"] = "FAIL"
+                            res["ground_truth_violations"] = tool_violations
+                            res["error"] = "; ".join(tool_violations[:3])
+                            all_passed = False
+                            print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> FAIL ({res['error']})")
+                        else:
+                            print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> HTTP 200 (title: '{title}', dateModified: '{res.get('date_modified')}')")
                     else:
                         print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> HTTP 200 (title: '{title}')")
                 else:

@@ -111,6 +111,10 @@ BANNED_TAUTOLOGICAL_FORMULA_PATTERNS: Tuple[Tuple[str, str], ...] = (
         "2134831.0",
         "Stale 2024 HIPAA annual penalty cap '2134831.0' (current 45 CFR 160.404 Tier 3/4 cap is 2067813.0)",
     ),
+    (
+        "$2,134,831",
+        "Stale 2024 HIPAA annual penalty cap '$2,134,831' (current 45 CFR 160.404 Tier 3/4 cap is $2,067,813)",
+    ),
 )
 
 

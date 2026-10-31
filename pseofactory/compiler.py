@@ -1148,7 +1148,7 @@ def _build_compiled_json_ld_graph(
                 "description": raw_meta_desc,
                 "inLanguage": "en-US",
                 "datePublished": "2026-01-15",
-                "dateModified": "2026-10-27",
+                "dateModified": "2026-10-31",
                 "speakable": {
                     "@type": "SpeakableSpecification",
                     "cssSelector": [".quick-answer", "h1"],
@@ -1163,7 +1163,7 @@ def _build_compiled_json_ld_graph(
                 "operatingSystem": "All",
                 "url": f"{canonical_base}/tools/{slug}/",
                 "inLanguage": "en-US",
-                "dateModified": "2026-10-27",
+                "dateModified": "2026-10-31",
                 "featureList": [
                     f"Deterministic Statutory Formula Evaluation ({statutory_authority})",
                     f"Empirical Benchmark Corroboration ({economic_dataset})",

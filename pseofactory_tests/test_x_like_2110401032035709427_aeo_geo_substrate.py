@@ -80,7 +80,7 @@ def test_jsonld_aeo_geo_graph_normalization_across_three_tenants() -> None:
     )
     assert changed is True
     assert '"inLanguage": "en-US"' in norm_tool
-    assert '"dateModified": "2026-10-27"' in norm_tool
+    assert '"dateModified": "2026-10-31"' in norm_tool
     assert '"SpeakableSpecification"' in norm_tool
     assert '"isRelatedTo"' in norm_tool
     assert '"https://schema.org/InStock"' in norm_tool
@@ -114,7 +114,7 @@ def test_jsonld_aeo_geo_graph_normalization_across_three_tenants() -> None:
     assert root_changed is True
     assert '"ItemList"' in norm_root
     assert '"inLanguage": "en-US"' in norm_root
-    assert '"dateModified": "2026-10-27"' in norm_root
+    assert '"dateModified": "2026-10-31"' in norm_root
     assert _needs_page_structure_geo_normalization(norm_root) is False
 
 

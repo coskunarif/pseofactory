@@ -5253,6 +5253,9 @@ def _needs_page_structure_geo_normalization(
     if '"WebApplication"' in html_content and '"priceCurrency"' not in html_content:
         return True
 
+    if '"dateModified": "2026-10-27"' in html_content or '"dateModified":"2026-10-27"' in html_content:
+        return True
+
     if check_aeo_geo_graph and '"@graph"' in html_content and (
         '"inLanguage"' not in html_content
         or '"dateModified"' not in html_content
@@ -7027,8 +7030,8 @@ def _normalize_page_structure_and_geo_parity(
                         if not n.get("datePublished"):
                             n["datePublished"] = "2026-01-15"
                             mod_g = True
-                        if not n.get("dateModified"):
-                            n["dateModified"] = "2026-10-27"
+                        if not n.get("dateModified") or n.get("dateModified") == "2026-10-27":
+                            n["dateModified"] = "2026-10-31"
                             mod_g = True
                         stamped_date = True
                     if any(t in nt_list for t in ("SoftwareApplication", "WebApplication")):
@@ -7102,7 +7105,7 @@ def _normalize_page_structure_and_geo_parity(
                 if not stamped_date and isinstance(g_nodes[0], dict):
                     if not g_nodes[0].get("datePublished"):
                         g_nodes[0]["datePublished"] = "2026-01-15"
-                    g_nodes[0]["dateModified"] = "2026-10-27"
+                    g_nodes[0]["dateModified"] = "2026-10-31"
                     mod_g = True
                 if has_qa_dom and not has_speakable:
                     target_sp = next(
@@ -7158,6 +7161,10 @@ def _normalize_page_structure_and_geo_parity(
         )
         if aeo_ld_updated != updated:
             updated = aeo_ld_updated
+        if '"dateModified": "2026-10-27"' in updated or '"dateModified":"2026-10-27"' in updated:
+            updated = updated.replace('"dateModified": "2026-10-27"', '"dateModified": "2026-10-31"').replace(
+                '"dateModified":"2026-10-27"', '"dateModified":"2026-10-31"'
+            )
             changed = True
 
     if re.search(r"<th(?![^>]*\bscope=)\b[^>]*>", updated, re.IGNORECASE):
@@ -10502,7 +10509,7 @@ class RetroReflectionEngine:
                             "inputs": m_info.get("inputs", {}),
                             "query_syntax": m_info.get("query_syntax", ""),
                             "inLanguage": "en-US",
-                            "dateModified": "2026-10-27",
+                            "dateModified": "2026-10-31",
                             "offers": {
                                 "@type": "Offer",
                                 "price": "0",
@@ -10519,7 +10526,7 @@ class RetroReflectionEngine:
                     "domain": "prexvo.com" if is_prexvo_cat else ("gainhelm.com" if is_gainhelm_cat else "profithelm.com"),
                     "canonical_url": canon,
                     "inLanguage": "en-US",
-                    "dateModified": "2026-10-27",
+                    "dateModified": "2026-10-31",
                     "tools_count": len(catalog_tools),
                     "tools": catalog_tools,
                 }

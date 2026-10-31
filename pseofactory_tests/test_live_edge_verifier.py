@@ -354,3 +354,88 @@ def test_master_seo_verifier_gates_29_and_30(tmp_path: Path):
     headers_file.write_text(valid_headers_text, encoding="utf-8")
     gate_30_pass = verifier.check_edge_cache_policy_gate(dist_dir)
     assert gate_30_pass["status"] == "PASS"
+
+
+def test_live_edge_verifier_rejects_stale_figures_and_local_dist_divergence(tmp_path: Path):
+    """8. LiveEdgeVerifier.verify_edge_deployment fails closed on stale live HTML figures and dateModified mismatch."""
+    dist_dir = tmp_path / "gainhelm_dist"
+    soc2_dir = dist_dir / "tools" / "soc-2-audit-cost-calculator"
+    hipaa_dir = dist_dir / "tools" / "hipaa-violation-penalty-breach-cost-calculator"
+    soc2_dir.mkdir(parents=True)
+    hipaa_dir.mkdir(parents=True)
+
+    (dist_dir / "robots.txt").write_text("User-agent: *\nAllow: /\n", encoding="utf-8")
+    (dist_dir / "sitemap.xml").write_text("<urlset><url><loc>https://gainhelm.com/</loc></url></urlset>", encoding="utf-8")
+    (dist_dir / "llms.txt").write_text("# GainHelm\n", encoding="utf-8")
+
+    fresh_index = (
+        '<!doctype html><html><head><title>GainHelm</title>'
+        '<link rel="canonical" href="https://gainhelm.com/">'
+        '<style id="pseo-visual-primitives">.card{contain: layout style}</style>'
+        '<script type="application/ld+json">{"@context":"https://schema.org","dateModified":"2026-10-31"}</script>'
+        '</head><body><p>4 penalty tiers ($141 to $2,067,813 annual cap per identical provision)</p></body></html>'
+    )
+    fresh_soc2 = (
+        '<!doctype html><html><head><title>SOC 2 Audit Cost Calculator</title>'
+        '<link rel="canonical" href="https://gainhelm.com/tools/soc-2-audit-cost-calculator/">'
+        '<style id="pseo-visual-primitives">.card{contain: layout style}</style>'
+        '<script type="application/ld+json">{"@context":"https://schema.org","dateModified":"2026-10-31"}</script>'
+        '</head><body>'
+        '<p class="calc-geo-answer-text">For a 75-employee enterprise, total first-year compliance investment totals $78,100.40.</p>'
+        '<span id="metric-soc2_total_cost">$78,100.40</span>'
+        '<script type="application/json" class="calculation-manifest">'
+        '{"published_output": 78100.4, "formula": "cpa_fee + grc_cost + pentest + labor", "inputs": {"cpa_fee": 35000, "grc_cost": 16500, "pentest": 12000, "labor": 14600.4}}'
+        '</script></body></html>'
+    )
+    fresh_hipaa = (
+        '<!doctype html><html><head><title>HIPAA Violation Penalty Calculator</title>'
+        '<link rel="canonical" href="https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/">'
+        '<style id="pseo-visual-primitives">.card{contain: layout style}</style>'
+        '<script type="application/ld+json">{"@context":"https://schema.org","dateModified":"2026-10-31"}</script>'
+        '</head><body><p>Annual cap $2,067,813 under 45 CFR 160.404.</p>'
+        '<script type="application/json" class="calculation-manifest">'
+        '{"published_output": 2455313.0, "formula": "min(records * per_violation, 2067813.0) + forensics", "inputs": {"records": 500, "per_violation": 68928.0, "forensics": 387500.0}}'
+        '</script></body></html>'
+    )
+    (dist_dir / "index.html").write_text(fresh_index, encoding="utf-8")
+    (soc2_dir / "index.html").write_text(fresh_soc2, encoding="utf-8")
+    (hipaa_dir / "index.html").write_text(fresh_hipaa, encoding="utf-8")
+
+    verifier = LiveEdgeVerifier(timeout=2, retries=1)
+    stale_index = fresh_index.replace('"2026-10-31"', '"2026-10-27"').replace("$2,067,813", "$2,134,831")
+    stale_soc2 = fresh_soc2.replace('"2026-10-31"', '"2026-10-27"').replace(
+        "totals $78,100.40.", "totals $78,100.00."
+    )
+    stale_hipaa = fresh_hipaa.replace('"2026-10-31"', '"2026-10-27"').replace(
+        "$2,067,813", "$2,134,831"
+    ).replace("2067813.0", "2134831.0")
+
+    idx_issues = verifier.audit_live_versus_local_html(
+        live_html=stale_index, local_html=fresh_index, property_id="gainhelm", rel_path="index.html"
+    )
+    assert any("$2,134,831" in v for v in idx_issues)
+    assert any("dateModified mismatch" in v for v in idx_issues)
+
+    soc2_issues = verifier.audit_live_versus_local_html(
+        live_html=stale_soc2,
+        local_html=fresh_soc2,
+        property_id="gainhelm",
+        rel_path="tools/soc-2-audit-cost-calculator/index.html",
+    )
+    assert any("78,100.00" in v and "78,100.40" in v for v in soc2_issues)
+
+    hipaa_issues = verifier.audit_live_versus_local_html(
+        live_html=stale_hipaa,
+        local_html=fresh_hipaa,
+        property_id="gainhelm",
+        rel_path="tools/hipaa-violation-penalty-breach-cost-calculator/index.html",
+    )
+    assert any("2134831" in v or "$2,134,831" in v for v in hipaa_issues)
+
+    assert verifier.audit_live_versus_local_html(
+        live_html=fresh_soc2,
+        local_html=fresh_soc2,
+        property_id="gainhelm",
+        rel_path="tools/soc-2-audit-cost-calculator/index.html",
+    ) == []
+
