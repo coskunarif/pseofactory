@@ -2929,6 +2929,36 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
         encoding="utf-8",
     )
     (ph_pkg / "factory.py").write_text(
+        '        # Search Console Lifecycle-Safe Performance Audit Pipeline\n'
+        '        sc_audit_rep = gsc_adapter.audit_search_console_performance(\n'
+        '            property_uri="sc-domain:profithelm.com",\n'
+        '            days=28,\n'
+        '            base_dir=BASE_DIR,\n'
+        '            queries_data=striking_queries,\n'
+        '            existing_tools=catalog_tools,\n'
+        '            auto_stage_overlays=not in_test,\n'
+        '        )\n\n'
+        '        # Day 28 GSC Closed-Loop Overlay Evaluation\n'
+        '        overlay_eval = gsc_adapter.evaluate_expired_overlays(\n'
+        '            site_url="sc-domain:profithelm.com",\n'
+        '            days_threshold=28,\n'
+        '            base_dir=BASE_DIR,\n'
+        '        )\n'
+        '        for degraded in (overlay_eval.get("degraded_rolled_back", []) if not in_test else []):\n'
+        '            d_slug = degraded.get("slug")\n'
+        '            d_path = BASE_DIR / "content" / "overlays" / f"{d_slug}.json"\n'
+        '            if d_path.is_file():\n'
+        '                try:\n'
+        '                    d_path.unlink()\n'
+        '                    print(f"   Purged degraded overlay: {d_slug}")\n'
+        '                except Exception as ex:\n'
+        '                    print(f"   Warning purging degraded overlay {d_slug}: {ex}")\n\n'
+        '        # For REFACTOR_PAGE actions: save overlay respecting 28-day measurement lock\n'
+        '        for refactor_act in gsc_actions.get("refactor_pages", []):\n'
+        '            refactor_slug = refactor_act.get("matching_tool") or refactor_act.get("slug")\n'
+        '            overlay_spec = refactor_act.get("overlay_spec") or {}\n'
+        '            if refactor_slug and overlay_spec and not in_test:\n'
+        '                pass\n'
         '            # Universal idempotency: inspect git status --porcelain dist/ machine_endpoints/ .agy/runs/ profithelm/data/statutory.db\n'
         '            status_proc = subprocess.run(\n'
         '                ["git", "status", "--porcelain", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db"],\n'
@@ -2961,9 +2991,12 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
     assert ph_ci_txt.index("Verify Compiled Static Distribution & Craftsmanship Audit") < ph_ci_txt.index("Deploy to Cloudflare Pages Edge")
     assert "host_alt =" in (ph_pkg / "gsc_adapter.py").read_text(encoding="utf-8")
     assert "and not extra_tools" in (ph_pkg / "builder.py").read_text(encoding="utf-8")
-    assert "compute_dist_lock_metrics" in (ph_pkg / "factory.py").read_text(encoding="utf-8")
-    assert '"git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/"' in (ph_pkg / "factory.py").read_text(encoding="utf-8")
-    assert '"substrate_lock.json"' in (ph_pkg / "factory.py").read_text(encoding="utf-8")
+    ph_fac_txt = (ph_pkg / "factory.py").read_text(encoding="utf-8")
+    assert "compute_dist_lock_metrics" in ph_fac_txt
+    assert '"git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/"' in ph_fac_txt
+    assert '"substrate_lock.json"' in ph_fac_txt
+    assert 'auto_stage_overlays=not os.getenv("PYTEST_CURRENT_TEST")' in ph_fac_txt
+    assert "auto_stage_overlays=not in_test" not in ph_fac_txt
 
     px_pkg = px_repo / "prexvo"
     px_pkg.mkdir(parents=True, exist_ok=True)

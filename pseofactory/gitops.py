@@ -3176,7 +3176,7 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 '            overlay_spec = refactor_act.get("overlay_spec") or {}\n'
                 '            if refactor_slug and overlay_spec:'
             )
-            new_ph_ov_stage = (
+            prev_ph_ov_stage = (
                 '        # Search Console Lifecycle-Safe Performance Audit Pipeline\n'
                 '        sc_audit_rep = gsc_adapter.audit_search_console_performance(\n'
                 '            property_uri="sc-domain:profithelm.com",\n'
@@ -3207,8 +3207,41 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 '            overlay_spec = refactor_act.get("overlay_spec") or {}\n'
                 '            if refactor_slug and overlay_spec and not in_test:'
             )
+            new_ph_ov_stage = (
+                '        # Search Console Lifecycle-Safe Performance Audit Pipeline\n'
+                '        sc_audit_rep = gsc_adapter.audit_search_console_performance(\n'
+                '            property_uri="sc-domain:profithelm.com",\n'
+                '            days=28,\n'
+                '            base_dir=BASE_DIR,\n'
+                '            queries_data=striking_queries,\n'
+                '            existing_tools=catalog_tools,\n'
+                '            auto_stage_overlays=not os.getenv("PYTEST_CURRENT_TEST"),\n'
+                '        )\n\n'
+                '        # Day 28 GSC Closed-Loop Overlay Evaluation\n'
+                '        overlay_eval = gsc_adapter.evaluate_expired_overlays(\n'
+                '            site_url="sc-domain:profithelm.com",\n'
+                '            days_threshold=28,\n'
+                '            base_dir=BASE_DIR,\n'
+                '        )\n'
+                '        for degraded in (overlay_eval.get("degraded_rolled_back", []) if not os.getenv("PYTEST_CURRENT_TEST") else []):\n'
+                '            d_slug = degraded.get("slug")\n'
+                '            d_path = BASE_DIR / "content" / "overlays" / f"{d_slug}.json"\n'
+                '            if d_path.is_file():\n'
+                '                try:\n'
+                '                    d_path.unlink()\n'
+                '                    print(f"   Purged degraded overlay: {d_slug}")\n'
+                '                except Exception as ex:\n'
+                '                    print(f"   Warning purging degraded overlay {d_slug}: {ex}")\n\n'
+                '        # For REFACTOR_PAGE actions: save overlay respecting 28-day measurement lock\n'
+                '        for refactor_act in gsc_actions.get("refactor_pages", []):\n'
+                '            refactor_slug = refactor_act.get("matching_tool") or refactor_act.get("slug")\n'
+                '            overlay_spec = refactor_act.get("overlay_spec") or {}\n'
+                '            if refactor_slug and overlay_spec and not os.getenv("PYTEST_CURRENT_TEST"):'
+            )
             if old_ph_ov_stage in f_new:
                 f_new = f_new.replace(old_ph_ov_stage, new_ph_ov_stage, 1)
+            elif prev_ph_ov_stage in f_new:
+                f_new = f_new.replace(prev_ph_ov_stage, new_ph_ov_stage, 1)
 
             if f_new != f_src:
                 factory_py.write_text(f_new, encoding="utf-8")
