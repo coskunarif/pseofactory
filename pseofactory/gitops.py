@@ -3064,6 +3064,32 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 '                record_engine_hash(BASE_DIR / ".agy" / "engine_hash.json", hash_value=_cur_eng)\n'
                 '            except Exception:\n'
                 '                pass\n\n'
+                '            # Universal idempotency: inspect git status --porcelain dist/ machine_endpoints/ .agy/runs/ profithelm/data/statutory.db substrate_lock.json profithelm/data/dynamic_tools.json content/redirects.json\n'
+                '            status_proc = subprocess.run(\n'
+                '                ["git", "status", "--porcelain", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db", "substrate_lock.json", "profithelm/data/dynamic_tools.json", "content/redirects.json"],\n'
+                '                capture_output=True,\n'
+                '                text=True,\n'
+                '                cwd=BASE_DIR,\n'
+                '                env=env,\n'
+                '            )\n'
+                '            raw_status = status_proc.stdout.strip()\n'
+                '            if not raw_status:\n'
+                '                print("   Universal idempotency: no pending changes detected across release artifacts (SKIPPED_NO_CHANGES).")\n'
+                '                git_push = {\n'
+                '                    "status": "SKIPPED_NO_CHANGES",\n'
+                '                    "returncode": 0,\n'
+                '                    "branch": target_branch,\n'
+                '                }\n'
+                '            else:\n'
+                '                # Force-stage release artifacts\n'
+                '                subprocess.run(\n'
+                '                    ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db", "substrate_lock.json", "profithelm/data/dynamic_tools.json", "content/redirects.json"],\n'
+                '                    cwd=BASE_DIR,\n'
+                '                    env=env,\n'
+                '                    check=False,\n'
+                '                )'
+            )
+            prev_ph_sync_tail = (
                 '            # Universal idempotency: inspect git status --porcelain dist/ machine_endpoints/ substrate_lock.json .agy/runs/ profithelm/data/statutory.db profithelm/data/dynamic_tools.json content/redirects.json\n'
                 '            status_proc = subprocess.run(\n'
                 '                ["git", "status", "--porcelain", "dist/", "machine_endpoints/", "substrate_lock.json", ".agy/runs/", "profithelm/data/statutory.db", "profithelm/data/dynamic_tools.json", "content/redirects.json"],\n'
@@ -3089,8 +3115,100 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 '                    check=False,\n'
                 '                )'
             )
+            new_ph_sync_tail = (
+                '            # Universal idempotency: inspect git status --porcelain dist/ machine_endpoints/ .agy/runs/ profithelm/data/statutory.db substrate_lock.json profithelm/data/dynamic_tools.json content/redirects.json\n'
+                '            status_proc = subprocess.run(\n'
+                '                ["git", "status", "--porcelain", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db", "substrate_lock.json", "profithelm/data/dynamic_tools.json", "content/redirects.json"],\n'
+                '                capture_output=True,\n'
+                '                text=True,\n'
+                '                cwd=BASE_DIR,\n'
+                '                env=env,\n'
+                '            )\n'
+                '            raw_status = status_proc.stdout.strip()\n'
+                '            if not raw_status:\n'
+                '                print("   Universal idempotency: no pending changes detected across release artifacts (SKIPPED_NO_CHANGES).")\n'
+                '                git_push = {\n'
+                '                    "status": "SKIPPED_NO_CHANGES",\n'
+                '                    "returncode": 0,\n'
+                '                    "branch": target_branch,\n'
+                '                }\n'
+                '            else:\n'
+                '                # Force-stage release artifacts\n'
+                '                subprocess.run(\n'
+                '                    ["git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/", "profithelm/data/statutory.db", "substrate_lock.json", "profithelm/data/dynamic_tools.json", "content/redirects.json"],\n'
+                '                    cwd=BASE_DIR,\n'
+                '                    env=env,\n'
+                '                    check=False,\n'
+                '                )'
+            )
             if old_ph_sync_block in f_new:
                 f_new = f_new.replace(old_ph_sync_block, new_ph_sync_block, 1)
+            elif prev_ph_sync_tail in f_new:
+                f_new = f_new.replace(prev_ph_sync_tail, new_ph_sync_tail, 1)
+
+            old_ph_ov_stage = (
+                '        # Search Console Lifecycle-Safe Performance Audit Pipeline\n'
+                '        sc_audit_rep = gsc_adapter.audit_search_console_performance(\n'
+                '            property_uri="sc-domain:profithelm.com",\n'
+                '            days=28,\n'
+                '            base_dir=BASE_DIR,\n'
+                '            queries_data=striking_queries,\n'
+                '            existing_tools=catalog_tools,\n'
+                '        )\n\n'
+                '        # Day 28 GSC Closed-Loop Overlay Evaluation\n'
+                '        overlay_eval = gsc_adapter.evaluate_expired_overlays(\n'
+                '            site_url="sc-domain:profithelm.com",\n'
+                '            days_threshold=28,\n'
+                '            base_dir=BASE_DIR,\n'
+                '        )\n'
+                '        for degraded in overlay_eval.get("degraded_rolled_back", []):\n'
+                '            d_slug = degraded.get("slug")\n'
+                '            d_path = BASE_DIR / "content" / "overlays" / f"{d_slug}.json"\n'
+                '            if d_path.is_file():\n'
+                '                try:\n'
+                '                    d_path.unlink()\n'
+                '                    print(f"   Purged degraded overlay: {d_slug}")\n'
+                '                except Exception as ex:\n'
+                '                    print(f"   Warning purging degraded overlay {d_slug}: {ex}")\n\n'
+                '        # For REFACTOR_PAGE actions: save overlay respecting 28-day measurement lock\n'
+                '        for refactor_act in gsc_actions.get("refactor_pages", []):\n'
+                '            refactor_slug = refactor_act.get("matching_tool") or refactor_act.get("slug")\n'
+                '            overlay_spec = refactor_act.get("overlay_spec") or {}\n'
+                '            if refactor_slug and overlay_spec:'
+            )
+            new_ph_ov_stage = (
+                '        # Search Console Lifecycle-Safe Performance Audit Pipeline\n'
+                '        sc_audit_rep = gsc_adapter.audit_search_console_performance(\n'
+                '            property_uri="sc-domain:profithelm.com",\n'
+                '            days=28,\n'
+                '            base_dir=BASE_DIR,\n'
+                '            queries_data=striking_queries,\n'
+                '            existing_tools=catalog_tools,\n'
+                '            auto_stage_overlays=not in_test,\n'
+                '        )\n\n'
+                '        # Day 28 GSC Closed-Loop Overlay Evaluation\n'
+                '        overlay_eval = gsc_adapter.evaluate_expired_overlays(\n'
+                '            site_url="sc-domain:profithelm.com",\n'
+                '            days_threshold=28,\n'
+                '            base_dir=BASE_DIR,\n'
+                '        )\n'
+                '        for degraded in (overlay_eval.get("degraded_rolled_back", []) if not in_test else []):\n'
+                '            d_slug = degraded.get("slug")\n'
+                '            d_path = BASE_DIR / "content" / "overlays" / f"{d_slug}.json"\n'
+                '            if d_path.is_file():\n'
+                '                try:\n'
+                '                    d_path.unlink()\n'
+                '                    print(f"   Purged degraded overlay: {d_slug}")\n'
+                '                except Exception as ex:\n'
+                '                    print(f"   Warning purging degraded overlay {d_slug}: {ex}")\n\n'
+                '        # For REFACTOR_PAGE actions: save overlay respecting 28-day measurement lock\n'
+                '        for refactor_act in gsc_actions.get("refactor_pages", []):\n'
+                '            refactor_slug = refactor_act.get("matching_tool") or refactor_act.get("slug")\n'
+                '            overlay_spec = refactor_act.get("overlay_spec") or {}\n'
+                '            if refactor_slug and overlay_spec and not in_test:'
+            )
+            if old_ph_ov_stage in f_new:
+                f_new = f_new.replace(old_ph_ov_stage, new_ph_ov_stage, 1)
 
             if f_new != f_src:
                 factory_py.write_text(f_new, encoding="utf-8")
@@ -3363,6 +3481,10 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                     "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
                     "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
                     "          export PROFITHELM_OFFLINE_JEV=\"1\"\n"
+                    "          if [ \"$(pwd)\" != \"/home/ubuntuadmin/projects/profithelm-platform\" ]; then\n"
+                    "            rm -rf content/overlays .agy/overlays 2>/dev/null || true\n"
+                    "            git checkout -q HEAD -- content/overlays 2>/dev/null || true\n"
+                    "          fi\n"
                     "          if [ -d /home/ubuntuadmin/projects/profithelm-platform/.agy/overlays ] && [ \"$(pwd)\" != \"/home/ubuntuadmin/projects/profithelm-platform\" ]; then\n"
                     "            mkdir -p .agy/overlays\n"
                     "            cp -rf /home/ubuntuadmin/projects/profithelm-platform/.agy/overlays/. .agy/overlays/\n"
@@ -3377,6 +3499,14 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                     "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
                     "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
                     "          export PROFITHELM_OFFLINE_JEV=\"1\"\n"
+                    "          if [ \"$(pwd)\" != \"/home/ubuntuadmin/projects/profithelm-platform\" ]; then\n"
+                    "            rm -rf content/overlays .agy/overlays 2>/dev/null || true\n"
+                    "            git checkout -q HEAD -- content/overlays 2>/dev/null || true\n"
+                    "          fi\n"
+                    "          if [ -d /home/ubuntuadmin/projects/profithelm-platform/.agy/overlays ] && [ \"$(pwd)\" != \"/home/ubuntuadmin/projects/profithelm-platform\" ]; then\n"
+                    "            mkdir -p .agy/overlays\n"
+                    "            cp -rf /home/ubuntuadmin/projects/profithelm-platform/.agy/overlays/. .agy/overlays/\n"
+                    "          fi\n"
                     "          if [ -d /home/ubuntuadmin/projects/profithelm-platform/dist ] && [ -f /home/ubuntuadmin/projects/profithelm-platform/dist/catalog.json ]; then\n"
                     "            mkdir -p dist\n"
                     "            cp -rf /home/ubuntuadmin/projects/profithelm-platform/dist/. dist/\n"

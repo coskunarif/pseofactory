@@ -6809,7 +6809,10 @@ def evaluate_expired_overlays(
 
     comb_site_root = f"{site_url or ''} {root}".lower()
     prop = "prexvo" if "prexvo" in comb_site_root else ("gainhelm" if "gainhelm" in comb_site_root else "profithelm")
-    in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+    in_pytest = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("PROFITHELM_IN_TEST") == "1"
+    if in_pytest and not str(root.resolve()).startswith("/tmp"):
+        persist = False
+        live_queries = None
     veh_slug_set = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
     paths_by_slug: Dict[str, List[Path]] = {}

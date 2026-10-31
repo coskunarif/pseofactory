@@ -2962,6 +2962,7 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
     assert "host_alt =" in (ph_pkg / "gsc_adapter.py").read_text(encoding="utf-8")
     assert "and not extra_tools" in (ph_pkg / "builder.py").read_text(encoding="utf-8")
     assert "compute_dist_lock_metrics" in (ph_pkg / "factory.py").read_text(encoding="utf-8")
+    assert '"git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/"' in (ph_pkg / "factory.py").read_text(encoding="utf-8")
     assert '"substrate_lock.json"' in (ph_pkg / "factory.py").read_text(encoding="utf-8")
 
     px_pkg = px_repo / "prexvo"
