@@ -450,6 +450,8 @@ def _build_prexvo_profile() -> TenantTruthProfile:
             "rap_50k_agi_monthly": 82.50,
             "rap_55k_agi_monthly": 164.90,
             "refi_break_even_monthly_savings": 82.50,
+            "rap_principal_match_monthly": 50.0,
+            "rap_minimum_payment_monthly": 10.0,
         },
     )
 
@@ -2743,6 +2745,10 @@ class TruthReconciliationEngine:
     )
 
     PREXVO_ALL_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        (
+            "matching up to $50 per month in principal reduction.",
+            "matching up to $50 in monthly principal reduction.",
+        ),
         (
             "data.offer_price_usd || 29",
             'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',

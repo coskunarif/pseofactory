@@ -4095,7 +4095,7 @@ def _append_query_subintent_blocks(
                     "Under OBBBA Title VIII and 34 CFR Part 685, the Repayment Assistance Plan (RAP) assesses "
                     "1 percent to 10 percent of Adjusted Gross Income across statutory $10,000 AGI tiers (with a "
                     "$50 per dependent monthly credit and $10 minimum monthly payment) while waiving 100 percent "
-                    "of unpaid monthly interest and matching up to $50 per month in principal reduction."
+                    "of unpaid monthly interest and matching up to $50 in monthly principal reduction."
                 ),
             )
         if any(k in joined_low for k in ("college loan", "payment estimator", "student loan repayment")):
