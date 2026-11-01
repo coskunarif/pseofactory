@@ -6969,19 +6969,32 @@ def rank_revenue_weighted_expansion_queue(
 
 def _load_stripe_credentials() -> Dict[str, str]:
     """
-    Loads Stripe credentials from environment variables, `~/.config/stripe/config.toml`,
-    or workspace `.env` files.
+    Loads Stripe credentials from environment variables, workspace `.env` files,
+    or `~/.config/stripe/config.toml`. An unmasked live key (`sk_live_...` or `rk_live_...`)
+    always takes precedence over a `sk_test_...` / `rk_test_...` fallback.
     """
+    def _is_unmasked_live_key(val: str) -> bool:
+        return bool(val and "*" not in val and val.startswith(("sk_live_", "rk_live_")))
+
+    def _is_unmasked_key(val: str) -> bool:
+        return bool(val and "*" not in val)
+
+    env_secret = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+    env_pub = os.environ.get("STRIPE_PUBLISHABLE_KEY", "").strip()
     creds: Dict[str, str] = {
         "account_id": os.environ.get("STRIPE_ACCOUNT_ID", "acct_1T6fSTIq0ckFsf5j"),
         "merchant_email": "arif.coskun@profithelm.com",
         "display_name": "CoachOS",
         "device_name": "IN-PF4HYA85",
-        "secret_key": os.environ.get("STRIPE_SECRET_KEY", "").strip(),
-        "publishable_key": os.environ.get("STRIPE_PUBLISHABLE_KEY", "").strip(),
+        "secret_key": env_secret if _is_unmasked_key(env_secret) else "",
+        "publishable_key": env_pub,
         "live_mode_api_key_masked": "false",
-        "source": "environment" if os.environ.get("STRIPE_SECRET_KEY") else "stripe_cli_config",
+        "source": "environment" if _is_unmasked_key(env_secret) else "stripe_cli_config",
     }
+    cli_live_secret = ""
+    cli_test_secret = ""
+    cli_live_pub = ""
+    cli_test_pub = ""
     cfg_path = os.path.expanduser("~/.config/stripe/config.toml")
     if os.path.isfile(cfg_path):
         try:
@@ -6995,46 +7008,80 @@ def _load_stripe_credentials() -> Dict[str, str]:
                 creds["display_name"] = str(def_sec["display_name"])
             if def_sec.get("device_name"):
                 creds["device_name"] = str(def_sec["device_name"])
-            if not creds["publishable_key"]:
-                creds["publishable_key"] = str(
-                    def_sec.get("live_mode_pub_key") or def_sec.get("test_mode_pub_key") or ""
-                )
-            raw_live = str(def_sec.get("live_mode_api_key") or "")
-            raw_test = str(def_sec.get("test_mode_api_key") or "")
+            cli_live_pub = str(def_sec.get("live_mode_pub_key") or "").strip()
+            cli_test_pub = str(def_sec.get("test_mode_pub_key") or "").strip()
+            raw_live = str(def_sec.get("live_mode_api_key") or "").strip()
+            raw_test = str(def_sec.get("test_mode_api_key") or "").strip()
             if "*" in raw_live:
                 creds["live_mode_api_key_masked"] = "true"
-            if not creds["secret_key"]:
-                if raw_live and "*" not in raw_live:
-                    creds["secret_key"] = raw_live
-                elif raw_test and "*" not in raw_test:
-                    creds["secret_key"] = raw_test
+            if _is_unmasked_key(raw_live):
+                cli_live_secret = raw_live
+            if _is_unmasked_key(raw_test):
+                cli_test_secret = raw_test
             creds["key_expires_at"] = str(
                 def_sec.get("live_mode_key_expires_at") or def_sec.get("test_mode_key_expires_at") or ""
             )
         except Exception:
             pass
-    if not creds["secret_key"] or not creds["publishable_key"]:
-        for env_candidate in (
-            "/home/ubuntuadmin/projects/pseofactory/.env",
-            "/home/ubuntuadmin/projects/.env",
-        ):
-            if os.path.isfile(env_candidate):
-                try:
-                    with open(env_candidate, "r", encoding="utf-8") as fh:
-                        for raw_line in fh:
-                            line = raw_line.strip()
-                            if not line or line.startswith("#") or "=" not in line:
-                                continue
-                            k, v = line.split("=", 1)
-                            k = k.strip()
-                            v = v.strip().strip('"').strip("'")
-                            if k == "STRIPE_SECRET_KEY" and v and not creds["secret_key"]:
-                                creds["secret_key"] = v
-                                creds["source"] = "workspace_dotenv"
-                            elif k == "STRIPE_PUBLISHABLE_KEY" and v and not creds["publishable_key"]:
-                                creds["publishable_key"] = v
-                except Exception:
-                    pass
+
+    dotenv_secret = ""
+    dotenv_pub = ""
+    for env_candidate in (
+        "/home/ubuntuadmin/projects/pseofactory/.env",
+        "/home/ubuntuadmin/projects/.env",
+    ):
+        if os.path.isfile(env_candidate):
+            try:
+                with open(env_candidate, "r", encoding="utf-8") as fh:
+                    for raw_line in fh:
+                        line = raw_line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k == "STRIPE_SECRET_KEY" and _is_unmasked_key(v):
+                            if not dotenv_secret or (_is_unmasked_live_key(v) and not _is_unmasked_live_key(dotenv_secret)):
+                                dotenv_secret = v
+                        elif k == "STRIPE_PUBLISHABLE_KEY" and v and not dotenv_pub:
+                            dotenv_pub = v
+            except Exception:
+                pass
+
+    secret_candidates = [
+        (env_secret, "environment"),
+        (dotenv_secret, "workspace_dotenv"),
+        (cli_live_secret, "stripe_cli_config"),
+        (cli_test_secret, "stripe_cli_config"),
+    ]
+    chosen_secret = ""
+    chosen_source = creds["source"]
+    for cand_val, cand_src in secret_candidates:
+        if _is_unmasked_live_key(cand_val):
+            chosen_secret = cand_val
+            chosen_source = cand_src
+            break
+    if not chosen_secret:
+        for cand_val, cand_src in secret_candidates:
+            if _is_unmasked_key(cand_val):
+                chosen_secret = cand_val
+                chosen_source = cand_src
+                break
+    creds["secret_key"] = chosen_secret
+    creds["source"] = chosen_source
+
+    pub_candidates = [env_pub, dotenv_pub, cli_live_pub, cli_test_pub]
+    chosen_pub = ""
+    for p_val in pub_candidates:
+        if p_val and p_val.startswith("pk_live_"):
+            chosen_pub = p_val
+            break
+    if not chosen_pub:
+        for p_val in pub_candidates:
+            if p_val:
+                chosen_pub = p_val
+                break
+    creds["publishable_key"] = chosen_pub
     return creds
 
 

@@ -60,6 +60,19 @@ HARNESS = textwrap.dedent(
       let body = null; try { body = JSON.parse(text); } catch (_) {}
       return { status: r.status, body, location: r.headers.get("location") };
     };
+    const callPost = async (qs, payload = {}, e = env, headers = {}) => {
+      const r = await mod.onRequestPost({
+        request: new Request("https://t.example/api/lead-capture?" + qs, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify(payload),
+        }),
+        env: e,
+      });
+      const text = await r.text();
+      let body = null; try { body = JSON.parse(text); } catch (_) {}
+      return { status: r.status, body, location: r.headers.get("location") };
+    };
     const base = "lead_id=LEAD&tool_slug=" + (tenant === "prexvo" ? "student-loan-refinance-break-even-calculator" : tenant === "gainhelm" ? "soc-2-audit-cost-calculator" : "section-1031-calculator");
     results.no_session = await call(base + "&fulfill=1");
     results.cs_edge = await call(base + "&fulfill=1&session_id=cs_edge_LEAD");
@@ -68,6 +81,9 @@ HARNESS = textwrap.dedent(
     results.other_tenant = await call(base + "&fulfill=1&session_id=cs_live_OTHERTENANT");
     results.unknown = await call(base + "&fulfill=1&session_id=cs_live_NOPE");
     results.no_key = await call(base + "&fulfill=1&session_id=cs_live_PAID", { LEADS_KV: kv });
+    results.post_no_session = await callPost(base + "&fulfill=1", { lead_id: "LEAD", fulfill: true });
+    results.post_cs_edge = await callPost(base + "&fulfill=1", { lead_id: "LEAD", fulfill: true, session_id: "cs_edge_LEAD" });
+    results.post_unpaid = await callPost(base + "&fulfill=1", { lead_id: "LEAD", fulfill: true, session_id: "cs_live_UNPAID" });
     results.settle_param = await call(base + "&checkout=1&settle=1&format=json", { LEADS_KV: kv });
     results.settle_redirect = await call(base + "&checkout=1&settle=1&redirect=1", { LEADS_KV: kv });
     results.list_before_paid = await call("limit=50");
@@ -94,7 +110,18 @@ def _run(tmp_path, tenant):
 @pytest.mark.parametrize("tenant", sorted(TENANTS))
 def test_unpaid_or_forged_sessions_never_settle(tmp_path, tenant):
     res = _run(tmp_path, tenant)
-    for name in ("no_session", "cs_edge", "unpaid", "other_lead", "other_tenant", "unknown", "no_key"):
+    for name in (
+        "no_session",
+        "cs_edge",
+        "unpaid",
+        "other_lead",
+        "other_tenant",
+        "unknown",
+        "no_key",
+        "post_no_session",
+        "post_cs_edge",
+        "post_unpaid",
+    ):
         r = res[name]
         assert r["status"] == 402, (name, r)
         assert r["body"]["status"] == "payment_required"
@@ -181,3 +208,70 @@ def test_lead_classifier_and_revenue_summary_are_truthful():
     assert summ["unverified_settled_claims"] == 2
     assert summ["unverified_settled_claims_usd"] == 128.0
     assert summ["synthetic_probe_leads"] == 1
+
+
+def test_load_stripe_credentials_prefers_live_dotenv_key_over_cli_test_key(monkeypatch):
+    from pseofactory.partner_tracker import _load_stripe_credentials
+
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    creds = _load_stripe_credentials()
+    assert creds["secret_key"].startswith(("sk_live_", "rk_live_"))
+    assert creds["source"] == "workspace_dotenv"
+
+
+def test_gainhelm_post_lead_capture_dispatches_zoho_email_and_honest_partner_routes(tmp_path):
+    mod = tmp_path / "gainhelm_post.mjs"
+    mod.write_text(generate_edge_lead_capture_function("gainhelm"), encoding="utf-8")
+    script = textwrap.dedent(
+        f"""
+        const mod = await import({json.dumps(str(mod))});
+        globalThis.fetch = async (url) => {{
+          const u = String(url);
+          if (u.endsWith("/v1/checkout/sessions")) {{
+            return new Response(JSON.stringify({{ id: "cs_live_GH123", url: "https://checkout.stripe.com/c/pay/cs_live_GH123" }}), {{ status: 200 }});
+          }}
+          if (u.includes("api.nango.dev/connection")) {{
+            return new Response(JSON.stringify({{ credentials: {{ access_token: "zoho_oauth_tok" }} }}), {{ status: 200 }});
+          }}
+          if (u.includes("mail.zoho.com/api/accounts/")) {{
+            return new Response(JSON.stringify({{ status: {{ code: 200 }}, data: {{ messageId: "zoho_msg_gh_1" }} }}), {{ status: 200 }});
+          }}
+          return new Response("{{}}", {{ status: 500 }});
+        }};
+        const res = await mod.onRequestPost({{
+          request: new Request("https://gainhelm.com/api/lead-capture", {{
+            method: "POST",
+            headers: {{ "content-type": "application/json" }},
+            body: JSON.stringify({{
+              email: "arif.coskun@profithelm.com",
+              tool_slug: "soc-2-audit-cost-calculator",
+              partner_key: "vanta_security",
+              calculated_amount: 65000,
+              state: "DE",
+              partner_sharing_consent: true
+            }})
+          }}),
+          env: {{
+            STRIPE_SECRET_KEY: "sk_live_mock",
+            NANGO_SECRET_KEY: "nango_sec",
+            NANGO_CONNECTION_ID: "nango_conn"
+          }}
+        }});
+        const body = await res.json();
+        console.log(JSON.stringify({{ status: res.status, body }}));
+        """
+    )
+    runner = tmp_path / "run_gh_post.mjs"
+    runner.write_text(script, encoding="utf-8")
+    proc = subprocess.run(["node", str(runner)], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["status"] == 200
+    b = out["body"]
+    assert b["checkout_session_id"] == "cs_live_GH123"
+    assert b["checkout_mode"] == "stripe_live_session"
+    assert b["zeptomail_dispatched"] is True
+    assert b["zeptomail_status"] == "sent_edge_zoho_direct"
+    assert b["email_provider"] == "zoho_mail_oauth"
+    assert b["live_destination_url"].startswith("https://www.vanta.com/products/soc-2?")
+

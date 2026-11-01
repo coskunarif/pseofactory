@@ -2807,12 +2807,15 @@ const CORS_HEADERS = {
 };
 
 const PARTNER_ROUTES = {
-  vanta_security: "https://join.ramp.com/c/7932737/3981015/51436",
-  drata_compliance: "https://join.ramp.com/c/7932737/3981015/51436",
-  sprinto_compliance: "https://www.jdoqocy.com/click-101906407-16985242",
-  thoropass_audit: "https://xendoo.pxf.io/c/7932737/1357375/16354",
-  coalition_cyber_insurance: "https://www.jdoqocy.com/click-101906407-16985242",
-  cobalt_pentest: "https://join.ramp.com/c/7932737/3981015/51436",
+  vanta_security: "https://www.vanta.com/products/soc-2",
+  drata_compliance: "https://drata.com/",
+  sprinto_compliance: "https://sprinto.com/",
+  thoropass_audit: "https://www.thoropass.com/solutions",
+  coalition_cyber_insurance: "https://www.coalitioninc.com/cyber-insurance",
+  cobalt_pentest: "https://www.cobalt.io/",
+  ramp: "https://join.ramp.com/c/7932737/3981015/51436",
+  lawdepot: "https://www.jdoqocy.com/click-101906407-16985242",
+  xendoo: "https://xendoo.pxf.io/c/7932737/1357375/16354",
 };
 
 const GAINHELM_TOOLKIT_OFFERS = {
@@ -3560,6 +3563,209 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   };
 }
 
+function isSyntheticTestEmail(email) {
+  const e = String(email || "").toLowerCase();
+  const syntheticDomains = [
+    "@example.com",
+    "@example.org",
+    "@test.com",
+    "@localhost",
+    "@freightfleet-logistics.com",
+    "@pacific-industrial.com",
+    "@medcenter-cohort.org",
+    "@metro-health.org",
+  ];
+  return syntheticDomains.some((d) => e.endsWith(d));
+}
+
+async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = false) {
+  if (isSyntheticProbe) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "synthetic_test_suppressed",
+      zeptomail_request_id: null,
+      fulfillment_status: "synthetic_verified",
+    };
+  }
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+    : "";
+  const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
+  const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
+  if ((!zeptoToken && (!nangoSecretKey || !nangoConnId)) || typeof fetch !== "function") {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "queued_central_responder",
+      zeptomail_request_id: null,
+      fulfillment_status: "ready_for_dispatch",
+    };
+  }
+  const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
+  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
+  const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "GainHelm Research Desk";
+  const emailSubject = `[GainHelm Playbook] Your Enterprise GRC & Audit Readiness Worksheet (${record.tool_slug})`;
+  const rawGhCheckout = String(record.checkout_url || "");
+  const fullGhCheckoutUrl = rawGhCheckout.startsWith("http")
+    ? rawGhCheckout
+    : `https://gainhelm.com${rawGhCheckout}${rawGhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
+  const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+    `<h2>Your GainHelm Enterprise GRC &amp; Security Audit Worksheet</h2>` +
+    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
+    `<p>Modeled Scope: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "mid_market"}</strong></p>` +
+    `<p><a href="https://gainhelm.com${record.redirect_url}">Review Matched GRC &amp; Audit Platform (${record.partner_rep_desk || "Enterprise GRC & C3PAO / CPA Audit Desk"})</a></p>` +
+    `<p><a href="${fullGhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `</div>`;
+  let zeptoAttempted = false;
+  let zeptoHttpStatus = null;
+  let zeptoErrorCode = null;
+  let zeptoRequestId = null;
+  const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
+  if (zeptoToken && !zohoPrimary) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
+    }
+  }
+  if (nangoSecretKey && nangoConnId) {
+    try {
+      const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
+      const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
+      const nangoResp = await fetch(
+        `${nangoBase}/connection/${encodeURIComponent(nangoConnId)}?provider_config_key=${encodeURIComponent(nangoIntegration)}&refresh_token=true`,
+        { headers: { Authorization: `Bearer ${nangoSecretKey}`, Accept: "application/json" } }
+      );
+      const nangoData = await nangoResp.json().catch(() => ({}));
+      const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
+      if (accessToken) {
+        const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const deliveryRecipient = isSyntheticTestEmail(record.email)
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          : record.email;
+        const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            fromAddress: zohoFromEmail,
+            toAddress: deliveryRecipient,
+            subject: emailSubject,
+            content: htmlBody,
+            mailFormat: "html",
+            askReceipt: "no",
+            encoding: "UTF-8",
+          }),
+        });
+        const zohoJson = await zohoResp.json().catch(() => ({}));
+        const zohoMsg = (zohoJson && zohoJson.data) || {};
+        if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
+          const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          return {
+            zeptomail_dispatched: true,
+            zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
+            zeptomail_http_status: zeptoHttpStatus,
+            zeptomail_error_code: zeptoErrorCode,
+            zeptomail_request_id: zeptoRequestId,
+            email_provider: "zoho_mail_oauth",
+            email_message_id: msgId,
+            fulfillment_status: "dispatched",
+            lifecycle_stage: "fulfilled",
+          };
+        }
+      }
+    } catch (_) {}
+  }
+  if (zeptoToken && zohoPrimary) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
+    }
+  }
+  return {
+    zeptomail_dispatched: false,
+    zeptomail_status: "queued_central_responder",
+    zeptomail_http_status: zeptoHttpStatus,
+    zeptomail_error_code: zeptoErrorCode,
+    zeptomail_request_id: zeptoRequestId,
+    fulfillment_status: "ready_for_dispatch",
+  };
+}
+
 export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -3842,8 +4048,21 @@ export async function onRequestPost(context) {
     const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_gainhelm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
     if (isFulfillMode) {
-      const ffRecord = { lead_id: leadId, tool_slug: toolSlug, calculated_amount: calculatedAmount, state };
-      const ffBundle = buildGainHelmWorkpaperBundle(ffRecord, offer);
+      const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
+      const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      const storedRecord = await lookupEdgeLeadRecord(
+        env,
+        leadId,
+        toolSlug,
+        String(calculatedAmount),
+        state,
+        rawEmail || "ciso@gainhelm.com",
+        body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
+        body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
+      );
+      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
+      const ffBundle = buildGainHelmWorkpaperBundle(settledRecord, offer, "paid_toolkit");
       return new Response(
         JSON.stringify({
           ok: true,
@@ -3953,6 +4172,9 @@ export async function onRequestPost(context) {
     record.fulfillment_url = bundle.fulfillment_url;
     record.csv_fulfillment_url = bundle.csv_fulfillment_url;
     Object.assign(record, stripeOffer);
+
+    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSynth);
+    Object.assign(record, emailDispatch);
 
     if (!isSynth) {
       const buf = getMemoryBuffer();
@@ -5300,10 +5522,11 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    const body = await request.json();
-    const email = (body.email || "").trim().toLowerCase();
-    const state = String(body.state || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
-    const rawSlug = String(body.tool_slug || body.source_tool || body.source || "student-loan-refinance-break-even-calculator")
+    const reqUrl = new URL(request.url);
+    const body = await request.json().catch(() => ({}));
+    const email = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
+    const state = String(body.state || reqUrl.searchParams.get("state") || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
+    const rawSlug = String(body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "student-loan-refinance-break-even-calculator")
       .trim()
       .toLowerCase()
       .replace(/^\\/+|\\/+$/g, "")
@@ -5315,6 +5538,43 @@ export async function onRequestPost(context) {
       : "splash_financial";
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
+    const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
+    const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
+    if (isFulfillMode) {
+      const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct");
+      const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
+      const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      const storedRecord = await lookupEdgeLeadRecord(
+        env,
+        leadId,
+        toolSlug,
+        body.calculated_amount !== undefined ? String(body.calculated_amount) : reqUrl.searchParams.get("amount"),
+        state || "US",
+        email || "borrower@prexvo.com",
+        body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
+        body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
+      );
+      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
+      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, "paid_toolkit");
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSyntheticProbe,
+          status: "toolkit_fulfilled",
+          ...bundle,
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
 
     if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
       return new Response(
@@ -7122,19 +7382,57 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    const body = await request.json();
-    const email = (body.email || "").trim().toLowerCase();
-    const rawSlug = String(body.tool_slug || body.source_tool || body.source || "general")
+    const reqUrl = new URL(request.url);
+    const body = await request.json().catch(() => ({}));
+    const email = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
+    const rawSlug = String(body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "general")
       .trim()
       .toLowerCase()
       .replace(/^\\/+|\\/+$/g, "")
       .replace(/^tools\\//, "");
     const toolSlug = rawSlug || "general";
     const reqPartner = String(body.partner_key || "").trim().toLowerCase();
-    const reqSku = String(body.sku || body.offer_sku || "").trim().toLowerCase();
+    const reqSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const spec = resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku);
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
+    const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
+    const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
+    if (isFulfillMode) {
+      const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct");
+      const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
+      const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      const storedRecord = await lookupEdgeLeadRecord(
+        env,
+        leadId,
+        toolSlug,
+        body.calculated_amount !== undefined ? String(body.calculated_amount) : reqUrl.searchParams.get("amount"),
+        String(body.state || reqUrl.searchParams.get("state") || "US").trim().toUpperCase(),
+        email || "cfo@profithelm.com",
+        body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
+        body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
+      );
+      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
+      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, spec, "paid_toolkit");
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSyntheticProbe,
+          status: "toolkit_fulfilled",
+          ...bundle,
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
     const blueprintState = body.blueprint_state && typeof body.blueprint_state === "object" ? body.blueprint_state : {};
     const scenarioInputs =
       body.scenario_inputs && typeof body.scenario_inputs === "object"
