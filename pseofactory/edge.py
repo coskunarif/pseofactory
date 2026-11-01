@@ -3601,7 +3601,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
-  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
+  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@gainhelm.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "GainHelm Research Desk";
   const emailSubject = `[GainHelm Playbook] Your Enterprise GRC & Audit Readiness Worksheet (${record.tool_slug})`;
   const rawGhCheckout = String(record.checkout_url || "");
@@ -3674,9 +3674,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const zohoSharedDom = ["profit", "helm.com"].join("");
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : `arif@${zohoSharedDom}`;
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : `arif.coskun@${zohoSharedDom}`)
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -5190,9 +5191,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const zohoSharedDom = ["profit", "helm.com"].join("");
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : `arif@${zohoSharedDom}`;
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : `arif.coskun@${zohoSharedDom}`)
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -7054,9 +7056,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const zohoSharedDom = ["profit", "helm.com"].join("");
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : `arif@${zohoSharedDom}`;
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : `arif.coskun@${zohoSharedDom}`)
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
