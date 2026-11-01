@@ -1689,17 +1689,23 @@ class PartnerTrackingEngine:
                 incoming.extend(e for e in injected_events[prop_id] if isinstance(e, dict))
             elif fetch_live:
                 try:
-                    req = urllib.request.Request(
-                        endpoints[prop_id],
-                        headers={
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                            "Accept": "application/json",
-                        },
-                    )
-                    with urllib.request.urlopen(req, timeout=8) as resp:
-                        payload = json.loads(resp.read().decode("utf-8"))
-                        if isinstance(payload, dict) and isinstance(payload.get("events"), list):
-                            incoming.extend(e for e in payload["events"] if isinstance(e, dict))
+                    import socket
+                    _old_to = socket.getdefaulttimeout()
+                    socket.setdefaulttimeout(5.0)
+                    try:
+                        req = urllib.request.Request(
+                            endpoints[prop_id],
+                            headers={
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                "Accept": "application/json",
+                            },
+                        )
+                        with urllib.request.urlopen(req, timeout=5.0) as resp:
+                            payload = json.loads(resp.read().decode("utf-8"))
+                            if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+                                incoming.extend(e for e in payload["events"] if isinstance(e, dict))
+                    finally:
+                        socket.setdefaulttimeout(_old_to)
                 except Exception:
                     pass
 

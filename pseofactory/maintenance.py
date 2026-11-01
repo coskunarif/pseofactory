@@ -13459,6 +13459,52 @@ def reflect_and_recompile_all_assets(
                         pass
                     if ph_d_src != ph_d_orig:
                         ph_dyn_file.write_text(ph_d_src, encoding="utf-8")
+
+                ph_oracle_file = Path(adapter.repo_path) / "profithelm" / "oracle.py"
+                if ph_oracle_file.is_file():
+                    ph_o_src = ph_oracle_file.read_text(encoding="utf-8")
+                    ph_o_orig = ph_o_src
+                    old_cand_loop = (
+                        '            for page_path in candidate_pages:\n'
+                        '                page_html = page_path.read_text(encoding="utf-8")\n'
+                        '                rel_ctx = str(page_path.relative_to(self.dist_dir))'
+                    )
+                    new_cand_loop = (
+                        '            for page_path in candidate_pages:\n'
+                        '                if not page_path.is_file():\n'
+                        '                    continue\n'
+                        '                try:\n'
+                        '                    page_html = page_path.read_text(encoding="utf-8")\n'
+                        '                except (FileNotFoundError, OSError):\n'
+                        '                    continue\n'
+                        '                rel_ctx = str(page_path.relative_to(self.dist_dir))'
+                    )
+                    if old_cand_loop in ph_o_src:
+                        ph_o_src = ph_o_src.replace(old_cand_loop, new_cand_loop, 1)
+                    if ph_o_src != ph_o_orig:
+                        ph_oracle_file.write_text(ph_o_src, encoding="utf-8")
+
+                ph_test_bf = Path(adapter.repo_path) / "tests" / "test_boost_factory_fixes.py"
+                if ph_test_bf.is_file():
+                    ph_bf_src = ph_test_bf.read_text(encoding="utf-8")
+                    if "def test_factory_pipeline_synthesis_connection():" in ph_bf_src and "@pytest.mark.xdist_group" not in ph_bf_src:
+                        ph_bf_src = ph_bf_src.replace(
+                            "def test_factory_pipeline_synthesis_connection():",
+                            '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_factory_pipeline_synthesis_connection():',
+                            1,
+                        )
+                        ph_test_bf.write_text(ph_bf_src, encoding="utf-8")
+
+                ph_test_fp = Path(adapter.repo_path) / "tests" / "test_factory_pipeline.py"
+                if ph_test_fp.is_file():
+                    ph_fp_src = ph_test_fp.read_text(encoding="utf-8")
+                    if "def test_factory_pipeline_dry_run():" in ph_fp_src and "@pytest.mark.xdist_group" not in ph_fp_src:
+                        ph_fp_src = ph_fp_src.replace(
+                            "def test_factory_pipeline_dry_run():",
+                            '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_factory_pipeline_dry_run():',
+                            1,
+                        )
+                        ph_test_fp.write_text(ph_fp_src, encoding="utf-8")
             except Exception:
                 pass
 
