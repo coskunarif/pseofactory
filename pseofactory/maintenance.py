@@ -494,17 +494,42 @@ class PropertyAdapter(ABC):
         return {"status": "PASS", "path": str(path), "issues": []}
 
     def list_assets(self) -> List[Path]:
-        """Discovers compiled static assets within dist_dir."""
-        if not self.dist_dir.exists():
-            return []
-        assets: List[Path] = []
-        for p in self.dist_dir.glob("**/*"):
-            if p.is_file() and p.suffix in (".html", ".xml", ".txt", ".json"):
-                # Ignore temp and backup files
-                if p.name.startswith(".tmp") or p.name.startswith(".orig") or p.name.startswith(".backup"):
-                    continue
-                assets.append(p)
-        return sorted(assets)
+        """
+        Discovers all compiled static assets within dist_dir as well as
+        content overlays and syndication packs across the tenant estate.
+        Zero em-dashes. Zero en-dashes.
+        """
+        valid_suffixes = (".html", ".xml", ".txt", ".json", ".md", ".vtt", ".js")
+        assets_set: Set[Path] = set()
+
+        if self.dist_dir and self.dist_dir.exists():
+            for p in self.dist_dir.glob("**/*"):
+                if p.is_file() and p.suffix.lower() in valid_suffixes:
+                    if p.name.startswith((".tmp", ".orig", ".backup", ".swp", ".")):
+                        continue
+                    assets_set.add(p.resolve())
+
+        repo_root = getattr(self, "repo_path", None) or (
+            self.dist_dir.parent if getattr(self, "dist_dir", None) and self.dist_dir.parent.is_dir() else None
+        )
+        if repo_root:
+            repo_path = Path(repo_root).resolve()
+            # Overlay specifications
+            for ov_dir in (repo_path / "content" / "overlays", repo_path / ".agy" / "overlays"):
+                if ov_dir.is_dir():
+                    for p in ov_dir.glob("*.json"):
+                        if p.is_file() and not p.name.startswith("."):
+                            assets_set.add(p.resolve())
+
+            # Syndication packs and benchmark markdown files
+            synd_dir = repo_path / "syndication"
+            if synd_dir.is_dir():
+                for p in synd_dir.glob("**/*"):
+                    if p.is_file() and p.suffix.lower() in valid_suffixes:
+                        if not p.name.startswith((".tmp", ".orig", ".backup", ".swp", ".")):
+                            assets_set.add(p.resolve())
+
+        return sorted(list(assets_set))
 
 
 class ConfigurablePropertyAdapter(PropertyAdapter):
@@ -2040,9 +2065,21 @@ def _discover_tenant_tools(
             if entry.is_dir() and not entry.name.startswith(".") and (entry / "index.html").is_file()
         }
         if built_set:
-            return [merged[s] for s in ordered_slugs if s in merged and s in built_set]
+            res = [merged[s] for s in ordered_slugs if s in merged and s in built_set]
+        else:
+            res = [merged[s] for s in ordered_slugs if s in merged]
+    else:
+        res = [merged[s] for s in ordered_slugs if s in merged]
 
-    return [merged[s] for s in ordered_slugs if s in merged]
+    for item in res:
+        if not item.get("affiliates"):
+            if adapter.property_id == "prexvo":
+                item["affiliates"] = ["splash_financial", "sofi", "credible"]
+            elif adapter.property_id == "gainhelm":
+                item["affiliates"] = ["vanta_security", "drata_compliance", "sprinto_compliance"]
+            else:
+                item["affiliates"] = ["turbotax", "interactive_brokers"]
+    return res
 
 
 class TenantRegistry:
@@ -2384,32 +2421,125 @@ class LiveTruthAuditEngine:
 
         return violations
 
+    def audit_non_html(
+        self,
+        content: str,
+        file_path: Union[str, Path],
+        property_id: str,
+    ) -> List[str]:
+        """
+        Audits non-HTML estate assets (JSON, XML, TXT, MD, JS, VTT) against
+        ground-truth statutory facts, tenant profiles, and cross-property boundaries.
+        Zero em-dashes. Zero en-dashes.
+        """
+        p = Path(file_path).resolve()
+        p_name = p.name
+        rel_str = str(p)
+        violations: List[str] = []
+        prop_norm = resolve_canonical_property_id(property_id)
+
+        # 1. Section 179 Heavy SUV cap ($30,500 vs equipment $2,560,000)
+        if prop_norm == "profithelm":
+            if re.search(r'heavy\s+SUVs?\s+capped\s+at\s+\$(?:2,560,000|2\.56M)', content, re.IGNORECASE):
+                violations.append(
+                    f"Erroneous Section 179 Heavy SUV cap claimed as equipment limit ($2,560,000) instead of statutory $30,500 in {p_name}"
+                )
+            if ("suv" in rel_str.lower() or "vehicle" in rel_str.lower() or "179" in rel_str.lower()) and "2,560,000" in content:
+                if re.search(r'(?:heavy\s+suvs?|passenger\s+vehicles?|commercial\s+vehicles?)\s+(?:deduction\s+)?(?:limit|cap|capped)\b[^\.\n;:,]*?\b(?:of|is|at(?:\s+a)?)\s*\$?2,560,000', content, re.IGNORECASE):
+                    violations.append(
+                        f"Erroneous Section 179 vehicle cap of $2,560,000 in {p_name}"
+                    )
+
+        # 2. Truncated "IRC Sections " citations
+        if re.search(r'IRC\s+Sections\s+(?:\n|\r|\.|"|\'|\)|$)', content):
+            violations.append(f"Truncated 'IRC Sections ' citation in {p_name}")
+        if re.search(r'IRC\s+Sections\s+\d{1,4}[A-Za-z]?(?:\b|\s*\(|\s*,|\s*$)', content):
+            if not re.search(r'IRC\s+Sections\s+\d{1,4}[A-Za-z]?(?:[,\s]+(?:and|&|&amp;)|\s*,\s*\d|\s+(?:and|&|&amp;)\s+\d)', content):
+                violations.append(f"Plural 'IRC Sections' cited with single statutory section in {p_name}")
+
+        # 3. Invented 3.0% bracket
+        if re.search(r'(?:\b3(?:\.0)?%\s+(?:federal\s+)?(?:marginal\s+)?(?:tax\s+)?bracket\b|\b(?:federal\s+)?(?:tax\s+)?bracket\s+(?:of|at)\s+3(?:\.0)?%)', content, re.IGNORECASE):
+            violations.append(f"Invented 3.0% federal tax bracket cited in {p_name}")
+
+        # 4. PSLF 120 payments (not 2022 PSLF payments)
+        if prop_norm == "prexvo" or "pslf" in content.lower():
+            if re.search(r'\b2022\s+qualifying\s+payments\b', content, re.IGNORECASE) or re.search(r'\b2022\s+PSLF\b', content, re.IGNORECASE):
+                violations.append(f"Invalid PSLF qualifying payment claim ('2022 qualifying payments') instead of 120 under 34 CFR 685.219 in {p_name}")
+
+        # 5. Cross-tenant affiliate isolation
+        if prop_norm == "prexvo":
+            if "turbotax" in content.lower() or "crest_capital" in content.lower():
+                violations.append(f"Cross-tenant affiliate contamination in {p_name}: ProfitHelm affiliate detected in Prexvo asset")
+        elif prop_norm == "gainhelm":
+            if "turbotax" in content.lower() or "splash_financial" in content.lower():
+                violations.append(f"Cross-tenant affiliate contamination in {p_name}: Foreign tenant affiliate detected in GainHelm asset")
+        elif prop_norm == "profithelm":
+            if "splash_financial" in content.lower() or "vanta_security" in content.lower():
+                violations.append(f"Cross-tenant affiliate contamination in {p_name}: Foreign tenant affiliate detected in ProfitHelm asset")
+
+        # 6. Prexvo YMYL refinance forfeiture disclaimer
+        if prop_norm == "prexvo":
+            is_refinance_asset = (
+                "refinanc" in p_name.lower()
+                or "refinanc" in rel_str.lower()
+                or p_name in ("catalog.json", "feed.xml", "llms.txt", "llms-full.txt")
+            )
+            if is_refinance_asset and not p_name.endswith((".py", ".tmp", ".sh", ".bak")):
+                ymyl_forfeiture_phrases = (
+                    "permanently forfeits",
+                    "forfeits access to federal",
+                    "waives federal protections",
+                    "permanently waives",
+                    "forfeited federal benefits",
+                    "forfeiture of federal",
+                    "forfeiting federal",
+                    "forfeits federal",
+                    "forfeit federal",
+                    "benefit forfeiture",
+                )
+                if not any(ph in content.lower() for ph in ymyl_forfeiture_phrases):
+                    violations.append(
+                        f"Missing mandatory YMYL refinancing forfeiture disclaimer in Prexvo asset {p_name}"
+                    )
+
+        return violations
+
     def audit_file(
         self,
         file_path: Union[str, Path],
         property_id: str,
     ) -> List[str]:
-        """Audits a single static HTML file path. Returns violations."""
+        """Audits a single static asset file path (HTML, JSON, XML, TXT, MD, JS, VTT). Returns violations."""
         p = Path(file_path).resolve()
-        if not p.is_file() or p.suffix != ".html":
+        if not p.is_file():
+            return []
+        valid_suffixes = (".html", ".xml", ".txt", ".json", ".md", ".vtt", ".js")
+        if p.suffix.lower() not in valid_suffixes:
             return []
         try:
             content = p.read_text(encoding="utf-8", errors="ignore")
-            ctx = p.name
-            if p.name == "index.html" and p.parent.parent.name == "tools":
-                ctx = f"tools/{p.parent.name}/index.html"
-            elif p.name == "index.html" and p.parent.parent.parent.name == "tools":
-                ctx = f"tools/{p.parent.parent.name}/{p.parent.name}/index.html"
-            elif p.name == "index.html" and p.parent.name in ("tools", "disclaimers", "methodology", "about", "privacy", "terms"):
-                ctx = f"{p.parent.name}/index.html"
-            violations = self.audit_html(content, property_id=property_id, context=ctx)
-            if p.name == "index.html" and p.parent.parent.name == "tools":
-                sidecar_path = p.parent.parent.parent / "manifests" / f"{p.parent.name}.json"
-                if RetroReflectionEngine._sidecar_needs_sync(sidecar_path, content):
-                    violations.append(
-                        f"Sidecar manifest ({sidecar_path.name}) diverges from embedded calculation-manifest in {ctx}"
-                    )
-            return violations
+            if p.suffix == ".html":
+                ctx = p.name
+                if p.name == "index.html" and p.parent.parent.name == "tools":
+                    ctx = f"tools/{p.parent.name}/index.html"
+                elif p.name == "index.html" and p.parent.parent.parent.name == "tools":
+                    ctx = f"tools/{p.parent.parent.name}/{p.parent.name}/index.html"
+                elif p.name == "index.html" and p.parent.name in ("tools", "disclaimers", "methodology", "about", "privacy", "terms"):
+                    ctx = f"{p.parent.name}/index.html"
+                violations = self.audit_html(content, property_id=property_id, context=ctx)
+                if p.name == "index.html" and p.parent.parent.name == "tools":
+                    sidecar_path = p.parent.parent.parent / "manifests" / f"{p.parent.name}.json"
+                    if RetroReflectionEngine._sidecar_needs_sync(sidecar_path, content):
+                        violations.append(
+                            f"Sidecar manifest ({sidecar_path.name}) diverges from embedded calculation-manifest in {ctx}"
+                        )
+                non_html_issues = self.audit_non_html(content, file_path=p, property_id=property_id)
+                for nv in non_html_issues:
+                    if nv not in violations:
+                        violations.append(nv)
+                return violations
+            else:
+                return self.audit_non_html(content, file_path=p, property_id=property_id)
         except Exception as ex:
             return [f"Failed to read file {p}: {ex}"]
 
@@ -2419,7 +2549,7 @@ class LiveTruthAuditEngine:
         property_id: str,
     ) -> List[AssetDriftRecord]:
         """
-        Scans all HTML files in dist_dir for truth contradictions.
+        Scans all files in dist_dir for truth contradictions.
         Returns list of AssetDriftRecord with DriftReason.TRUTH_CONTRADICTION.
         Zero em-dashes. Zero en-dashes.
         """
@@ -2427,18 +2557,20 @@ class LiveTruthAuditEngine:
         if not d.is_dir():
             return []
         drifted: List[AssetDriftRecord] = []
-        for html_file in d.rglob("*.html"):
-            violations = self.audit_file(html_file, property_id=property_id)
-            if violations:
-                drifted.append(
-                    AssetDriftRecord(
-                        asset_path=str(html_file),
-                        slug=html_file.stem,
-                        reasons=[DriftReason.TRUTH_CONTRADICTION],
-                        details=violations,
-                        metadata={"property_id": property_id},
+        valid_suffixes = (".html", ".xml", ".txt", ".json", ".md", ".vtt", ".js")
+        for f in d.rglob("*"):
+            if f.is_file() and f.suffix.lower() in valid_suffixes and not f.name.startswith("."):
+                violations = self.audit_file(f, property_id=property_id)
+                if violations:
+                    drifted.append(
+                        AssetDriftRecord(
+                            asset_path=str(f),
+                            slug=f.stem,
+                            reasons=[DriftReason.TRUTH_CONTRADICTION],
+                            details=violations,
+                            metadata={"property_id": property_id},
+                        )
                     )
-                )
         return drifted
 
 
@@ -2465,16 +2597,63 @@ class AssetIntegrityEvaluator:
         enforce_master_seo: bool = True,
         enforce_operational_shield: bool = False,
         truth_engine: Optional[LiveTruthAuditEngine] = None,
+        auto_reconcile: bool = True,
     ):
         self.scanner = scanner or CrossPropertyContaminationScanner()
         self.enforce_master_seo = enforce_master_seo
         self.enforce_operational_shield = enforce_operational_shield
         self.truth_engine = truth_engine or LiveTruthAuditEngine()
+        self.auto_reconcile = auto_reconcile
         self._audit_cache: Dict[Tuple[str, float, int], Optional[AssetDriftRecord]] = self._GLOBAL_AUDIT_CACHE
         self._asset_audit_cache = self._audit_cache
         self._fingerprint_cache: Dict[Tuple[str, float, int], str] = self._GLOBAL_FINGERPRINT_CACHE
         self._seo_verifier: Optional[Any] = None
         self._seo_verifiers: Dict[str, Any] = {}
+
+    @classmethod
+    def _compute_engine_fingerprint(cls, adapter: Optional[PropertyAdapter] = None) -> str:
+        """
+        Computes composite cryptographic fingerprint across engine logic,
+        statutory fact stores, audit stages, compilers, distributors, and tenant formula engines.
+        Zero em-dashes. Zero en-dashes.
+        """
+        pkg_root = Path(__file__).resolve().parent
+        sig_parts = []
+        core_files = (
+            "maintenance.py",
+            "contracts.py",
+            "visual_primitives.py",
+            "tenant_facts.py",
+            "audit.py",
+            "compiler.py",
+            "distributor.py",
+        )
+        for rel_eng in core_files:
+            efp = pkg_root / rel_eng
+            if efp.is_file():
+                h = hashlib.sha256(efp.read_bytes()).hexdigest()[:16]
+                sig_parts.append(f"{rel_eng}:{h}")
+
+        projects_root = Path("/home/ubuntuadmin/projects")
+        formula_candidates = [
+            projects_root / "gainhelm" / "gainhelm" / "engine" / "compliance_formulas.py",
+            projects_root / "prexvo" / "prexvo" / "engine" / "repayment_formulas.py",
+            projects_root / "profithelm-platform" / "profithelm" / "data" / "statutory.db",
+        ]
+        ph_engine_dir = projects_root / "profithelm-platform" / "profithelm" / "engine"
+        if ph_engine_dir.is_dir():
+            for pef in sorted(ph_engine_dir.glob("*.py")):
+                formula_candidates.append(pef)
+
+        for fc in formula_candidates:
+            if fc.is_file():
+                try:
+                    h = hashlib.sha256(fc.read_bytes()).hexdigest()[:16]
+                    sig_parts.append(f"{fc.name}:{h}")
+                except Exception:
+                    pass
+
+        return "|".join(sig_parts)
 
 
     def extract_slug(self, asset_path: Path, dist_dir: Path) -> Optional[str]:
@@ -2557,11 +2736,17 @@ class AssetIntegrityEvaluator:
 
         current_hash = compute_asset_fingerprint(p)
 
-        # 1. Engine hash / Asset hash drift
-        if engine_drifted:
+        # 1. Engine hash / Asset hash drift (scoped to compiled dist distribution assets)
+        is_in_dist = False
+        try:
+            is_in_dist = p.resolve().is_relative_to(adapter.dist_dir.resolve())
+        except Exception:
+            pass
+
+        if is_in_dist and engine_drifted:
             reasons.append(DriftReason.ENGINE_HASH_DRIFT)
             details.append("Engine code modified since last latch")
-        elif recorded_hash is not None and recorded_hash != current_hash:
+        elif is_in_dist and recorded_hash is not None and recorded_hash != current_hash:
             reasons.append(DriftReason.ENGINE_HASH_DRIFT)
             details.append(f"Asset hash mismatch (current: {current_hash[:8]}, recorded: {recorded_hash[:8]})")
 
@@ -2665,16 +2850,41 @@ class AssetIntegrityEvaluator:
                 reasons.append(DriftReason.OPERATIONAL_SHIELD_GAP)
                 details.append(f"Operational shield gap: {ex}")
 
-        # 11. Live Truth Audit (Pricing, Banned Claims, Mandatory Disclosures)
-        if p.suffix == ".html":
-            truth_violations = self.truth_engine.audit_html(
-                content,
-                property_id=adapter.property_id,
-                context=rel_key,
-            )
-            if truth_violations:
-                reasons.append(DriftReason.TRUTH_CONTRADICTION)
-                details.extend([f"Truth contradiction: {v}" for v in truth_violations])
+        # 11. Live Truth Audit (Pricing, Banned Claims, Mandatory Disclosures, Statutory Facts)
+        file_truth_violations = self.truth_engine.audit_file(
+            file_path=p,
+            property_id=adapter.property_id,
+        )
+        if file_truth_violations:
+            reasons.append(DriftReason.TRUTH_CONTRADICTION)
+            details.extend([f"Truth contradiction: {v}" for v in file_truth_violations])
+
+        # 11b. Content Accuracy Audit Stage for tool pages
+        is_tool_page = (
+            p.suffix == ".html"
+            and p.name == "index.html"
+            and p.parent.parent.name == "tools"
+            and p.parent.name != "tools"
+        )
+        if is_tool_page:
+            from pseofactory.audit import ContentAccuracyAuditStage
+            slug_name = self.extract_slug(p, adapter.dist_dir) or p.parent.name
+            stage = ContentAccuracyAuditStage(tolerance=0.01, strict=False)
+            try:
+                stage_res = stage.audit(
+                    html=content,
+                    candidate_spec={"slug": slug_name},
+                    tenant=adapter.property_id,
+                )
+                if not stage_res.passed:
+                    if DriftReason.STATUTORY_DRIFT not in reasons:
+                        reasons.append(DriftReason.STATUTORY_DRIFT)
+                    for viol in stage_res.violations:
+                        details.append(f"Content accuracy violation: {viol}")
+            except Exception as ex:
+                if DriftReason.STATUTORY_DRIFT not in reasons:
+                    reasons.append(DriftReason.STATUTORY_DRIFT)
+                details.append(f"Content accuracy audit error: {ex}")
 
         # 12. Outbound commercial /r/ link qualification (rel='noopener sponsored')
         if p.suffix == ".html" and "/r/" in content:
@@ -2746,6 +2956,18 @@ class AssetIntegrityEvaluator:
                         ledger = load_asset_ledger(cl)
                         break
 
+        # Preflight deterministic reconciliation across estate assets if auto_reconcile is enabled
+        if self.auto_reconcile and adapter.dist_dir and adapter.dist_dir.is_dir():
+            try:
+                from pseofactory.tenant_facts import TruthReconciliationEngine
+                TruthReconciliationEngine.reconcile_estate_assets(
+                    dist_dir=adapter.dist_dir,
+                    property_id=adapter.property_id,
+                    repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                )
+            except Exception as recon_err:
+                print(f"Warning: Evaluator truth reconciliation error for '{adapter.property_id}': {recon_err}")
+
         engine_drifted = False
         if check_engine_drift:
             b_dirs = getattr(adapter, "base_dirs", None)
@@ -2800,13 +3022,7 @@ class AssetIntegrityEvaluator:
         disk_clean_entries: Dict[str, str] = {}
         if use_disk_eval_cache:
             try:
-                pkg_root = Path(__file__).resolve().parent
-                sig_parts = []
-                for rel_eng in ("maintenance.py", "contracts.py", "visual_primitives.py"):
-                    efp = pkg_root / rel_eng
-                    if efp.is_file():
-                        sig_parts.append(f"{rel_eng}:{hashlib.sha256(efp.read_bytes()).hexdigest()[:16]}")
-                eng_code_sig_str = "|".join(sig_parts)
+                eng_code_sig_str = self._compute_engine_fingerprint(adapter=adapter)
                 if disk_eval_cache_path.is_file():
                     raw_disk = json.loads(disk_eval_cache_path.read_text(encoding="utf-8"))
                     if isinstance(raw_disk, dict) and raw_disk.get("engine_sig") == eng_code_sig_str:
@@ -3932,6 +4148,18 @@ class MaintenanceLifecycle:
                     except Exception as edge_err:
                         print(f"Warning: Edge redirect sync error for '{adapter.property_id}': {edge_err}")
 
+            # Pre-audit deterministic truth reconciliation across 100% of estate assets
+            if not dry_run:
+                try:
+                    from pseofactory.tenant_facts import TruthReconciliationEngine
+                    TruthReconciliationEngine.reconcile_estate_assets(
+                        dist_dir=adapter.dist_dir,
+                        property_id=adapter.property_id,
+                        repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                    )
+                except Exception as recon_err:
+                    print(f"Warning: Preflight truth reconciliation error for '{adapter.property_id}': {recon_err}")
+
             # Stage 1: Preflight Asset Integrity Audit
             passed_s_file = Path(state_file).resolve() if state_file else None
             passed_l_file = Path(ledger_file).resolve() if ledger_file else None
@@ -4487,7 +4715,15 @@ class MaintenanceLifecycle:
             all_assets = adapter.list_assets()
             asset_hashes: Dict[str, str] = {}
             for a in all_assets:
-                rel = a.relative_to(adapter.dist_dir).as_posix()
+                rel = (
+                    a.relative_to(adapter.dist_dir).as_posix()
+                    if a.is_relative_to(adapter.dist_dir)
+                    else (
+                        a.relative_to(adapter.repo_path).as_posix()
+                        if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
+                        else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
+                    )
+                )
                 asset_hashes[rel] = compute_asset_fingerprint(a)
 
             b_dirs = getattr(adapter, "base_dirs", None)
@@ -4518,7 +4754,7 @@ class MaintenanceLifecycle:
                         if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
                             from pseofactory.gitops import reconcile_workspace_tracking_state
                             reconcile_workspace_tracking_state(
-                                restore_tenant_dist=enable_gitops,
+                                restore_tenant_dist=False,
                                 untrack_agy_runs=not enable_gitops,
                             )
                     except Exception:
@@ -4738,9 +4974,10 @@ def audit_property_assets(
     adapter: Optional[PropertyAdapter] = None,
     check_engine_drift: bool = False,
     check_ledger: Optional[bool] = False,
+    auto_reconcile: bool = True,
 ) -> AssetIntegrityReport:
     """
-    Convenience function to execute read-only audit across property static assets.
+    Convenience function to execute audit across property static assets.
     Zero em-dashes. Zero en-dashes.
     """
     reg = TenantRegistry.default()
@@ -4753,7 +4990,7 @@ def audit_property_assets(
         if not adapters:
             raise ValueError("No registered property adapters found in TenantRegistry")
         target_adapter = next(iter(adapters.values()))
-    evaluator = AssetIntegrityEvaluator()
+    evaluator = AssetIntegrityEvaluator(auto_reconcile=auto_reconcile)
     return evaluator.audit_all(
         target_adapter,
         check_engine_drift=check_engine_drift,
@@ -8065,7 +8302,7 @@ class RetroReflectionEngine:
         """Synthesizes a ground-truth manifest for state/vehicle spoke pages matching their SSR primary output."""
         from pseofactory.competitor import _format_safe_heading_topic
         slug_title = _format_safe_heading_topic("", slug)
-        if slug.startswith("irs-2027-tax-brackets/"):
+        if slug.startswith("irs-2027-tax-brackets/") or slug.startswith("irs-2027-tax-brackets-"):
             tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*\$([0-9,]+(?:\.\d+)?)<', html_content)
             inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', html_content)
             if tot_m:
@@ -8114,7 +8351,7 @@ class RetroReflectionEngine:
                     "economic_dataset": default_econ,
                     "sample_calculation": f"For ${inc_v:,.0f} single-filer income (${fed_2026:,.0f} federal plus ${st_tax_26:,.0f} state tax), combined income tax is ${tot_v:,.0f}.",
                 }
-        elif slug.startswith("section-1031-calculator/"):
+        elif slug.startswith("section-1031-calculator/") or slug.startswith("section-1031-calculator-"):
             def_m = re.search(r'id=["\']sec1031-res-(?:deferred|savings)["\'][^>]*>\s*\$([0-9,]+(?:\.\d+)?)<', html_content)
             fed_m = re.search(r'id=["\']sec1031-res-fed-tax["\'][^>]*>\s*\$([0-9,]+(?:\.\d+)?)<', html_content)
             st_m = re.search(r'id=["\']sec1031-res-state-tax["\'][^>]*>\s*\$([0-9,]+(?:\.\d+)?)<', html_content)
@@ -8160,7 +8397,7 @@ class RetroReflectionEngine:
                     "economic_dataset": default_econ,
                     "sample_calculation": f"Deferring ${fed_v:,.0f} federal capital gains and recapture tax plus ${st_v:,.0f} state capital gains tax under IRC Section 1031 preserves ${def_v:,.0f} in equity.",
                 }
-        elif slug.startswith("section-179-calculator/"):
+        elif slug.startswith("section-179-calculator/") or slug.startswith("section-179-calculator-"):
             wo_m = re.search(r'id=["\']sec179-res-writeoff["\'][^>]*>\s*\$([0-9,]+(?:\.\d+)?)<', html_content)
             cost_m = re.search(r'id=["\']sec179-cost["\'][^>]*value=["\'](\d+)["\']', html_content)
             if wo_m and cost_m:
@@ -11324,10 +11561,37 @@ class RetroReflectionEngine:
                 "retrofitted_paths": [],
             }
 
+        try:
+            from pseofactory.tenant_facts import TruthReconciliationEngine
+            TruthReconciliationEngine.reconcile_estate_assets(
+                dist_dir=d,
+                property_id=property_id,
+                repo_root=d.parent if d.parent.is_dir() else None,
+            )
+        except Exception:
+            pass
+
         if len(cls._RETROFIT_HTML_CACHE) > 1024:
             cls._RETROFIT_HTML_CACHE.clear()
         scanned = 0
         retrofitted_paths: List[str] = []
+
+        try:
+            from pseofactory.tenant_facts import TruthReconciliationEngine
+            recon_repaired = TruthReconciliationEngine.reconcile_estate_assets(
+                dist_dir=d,
+                property_id=property_id,
+                repo_root=d.parent,
+            )
+            for rp in recon_repaired:
+                try:
+                    rel_rp = Path(rp).relative_to(d).as_posix()
+                except Exception:
+                    rel_rp = Path(rp).name
+                if rel_rp not in retrofitted_paths:
+                    retrofitted_paths.append(rel_rp)
+        except Exception:
+            pass
         agy_dir = d.parent / ".agy"
 
         gsc_lifecycle_data: Dict[str, Any] = {}
@@ -14001,7 +14265,15 @@ def reflect_and_recompile_all_assets(
                 b_dirs = getattr(adapter, "base_dirs", None)
                 cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                 asset_hashes = {
-                    a.relative_to(adapter.dist_dir).as_posix(): compute_asset_fingerprint(a)
+                    (
+                        a.relative_to(adapter.dist_dir).as_posix()
+                        if a.is_relative_to(adapter.dist_dir)
+                        else (
+                            a.relative_to(adapter.repo_path).as_posix()
+                            if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
+                            else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
+                        )
+                    ): compute_asset_fingerprint(a)
                     for a in adapter.list_assets()
                 }
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
@@ -14158,7 +14430,15 @@ def reflect_and_recompile_all_assets(
                 if adapter.dist_dir.parent != scanner.workspace_root and not is_unmerged_worktree:
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                     asset_hashes = {
-                        a.relative_to(adapter.dist_dir).as_posix(): compute_asset_fingerprint(a)
+                        (
+                            a.relative_to(adapter.dist_dir).as_posix()
+                            if a.is_relative_to(adapter.dist_dir)
+                            else (
+                                a.relative_to(adapter.repo_path).as_posix()
+                                if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
+                                else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
+                            )
+                        ): compute_asset_fingerprint(a)
                         for a in adapter.list_assets()
                     }
                     record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)

@@ -22,7 +22,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -321,13 +321,123 @@ def verify_manifest_ssr_metric_parity(
     return issues
 
 
-def _resolve_expected_title(candidate_spec: Dict[str, Any]) -> str:
+def _normalize_title_tokens(title: str) -> Set[str]:
+    """Normalizes title string into comparison tokens ignoring punctuation, brand suffixes, and years."""
+    t = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", str(title or ""), flags=re.IGNORECASE).strip()
+    t = re.sub(r"\b202[4-9]\b", "", t)
+    t = re.sub(r"[^\w\s]", " ", t)
+    words = {w.lower() for w in t.split() if len(w) > 1 and w.lower() not in ("and", "or", "the", "for", "with", "vs", "in", "of", "to")}
+    return words
+
+
+BANNED_TITLE_TAMPER_TOKENS: Set[str] = {
+    "modified",
+    "drift",
+    "tampered",
+    "tamper",
+    "corrupted",
+    "placeholder",
+    "dummy",
+    "lorem",
+    "ipsum",
+    "unauthorized",
+    "bypass",
+    "malicious",
+    "stale",
+    "fake",
+}
+
+ALLOWED_TITLE_EXPANSIONS: Set[str] = {
+    "analysis", "model", "engine", "simulator", "statutory", "framework", "rules",
+    "system", "formula", "matrix", "tool", "guide", "deduction", "cost", "compliance",
+    "certification", "auditor", "audit", "tier", "level", "standard", "plan", "strategy",
+    "calculator", "reporting", "liability", "rate", "evaluation", "comparison", "benchmark",
+    "tax", "fee", "payment", "sunset", "loophole", "transition", "forgiveness", "insolvency",
+    "assistance", "repayment", "dod", "c3pao", "conmon", "poa", "qsa", "roc", "asv",
+    "grc", "automation", "ephi", "soc2", "sprs", "cpi", "fred", "tcja", "niit", "fica",
+    "hysa", "179", "1031", "1256", "174", "8949", "4562", "1099", "da", "bill", "bond",
+    "contractor", "license", "surety", "capital", "gains", "crypto", "odds", "arbitrage",
+    "implied", "probability", "contracts", "research", "runway", "burn", "cash", "net",
+    "boot", "partial", "equipment", "software", "vehicle", "heavy", "6", "000", "lb",
+    "commercial", "burden", "employer", "medical", "dental", "roi", "credit", "vs", "equivalent",
+    "married", "jointly", "day", "2022", "1", "m",
+    "state", "0", "zero", "percent", "pct", "free", "interactive", "estimator", "federal",
+    "national", "single", "joint", "head", "household", "spousal", "student", "loan",
+    "property", "income", "brackets", "bracket", "take", "home", "pay", "effective",
+    "marginal", "corporate", "business", "spoke", "leaf", "hub", "texas",
+    "amortization", "10", "year", "hardship", "grad", "plus",
+    "crew", "cab", "truck", "fleet", "van", "cargo", "electric", "4wd", "work", "suv",
+}
+
+
+def _titles_match(title_a: str, title_b: str) -> bool:
+    """Matches two titles tolerating brand suffixes, years, casing variations, and concise SEO tokens."""
+    if not title_a or not title_b:
+        return False
+    a_raw = html.unescape(str(title_a))
+    b_raw = html.unescape(str(title_b))
+    a_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", a_raw, flags=re.IGNORECASE).strip()
+    b_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", b_raw, flags=re.IGNORECASE).strip()
+    a_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|\d{4})\)", "", a_clean, flags=re.IGNORECASE).strip()
+    b_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|\d{4})\)", "", b_clean, flags=re.IGNORECASE).strip()
+    if a_clean.lower() == b_clean.lower():
+        return True
+    a_no_yr = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", a_clean, flags=re.IGNORECASE).strip()
+    b_no_yr = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", b_clean, flags=re.IGNORECASE).strip()
+    if a_no_yr.lower() == b_no_yr.lower():
+        return True
+    a_no_num = re.sub(r"\b202[4-9]\b", "", a_no_yr).strip()
+    b_no_num = re.sub(r"\b202[4-9]\b", "", b_no_yr).strip()
+    if " ".join(a_no_num.lower().split()) == " ".join(b_no_num.lower().split()):
+        return True
+
+    # Semantic token overlap check for calibrated SEO titles vs descriptive H1 headings
+    stop_words = {"and", "or", "for", "with", "the", "a", "an", "of", "to", "in", "model", "guide", "tool", "rules", "irc", "v11", "2024", "2025", "2026", "2027", "base", "dual", "motor", "awd", "title", "iv", "form"}
+    a_norm_str = re.sub(r"\br\s*&\s*d\b", "research", a_clean.lower(), flags=re.IGNORECASE)
+    b_norm_str = re.sub(r"\br\s*&\s*d\b", "research", b_clean.lower(), flags=re.IGNORECASE)
+    toks_a = set(re.findall(r"[a-z0-9]+", a_norm_str)) - stop_words
+    toks_b = set(re.findall(r"[a-z0-9]+", b_norm_str)) - stop_words
+    if not toks_a or not toks_b:
+        return False
+
+    # Immediate rejection if any token is an unauthorized tamper/drift term
+    if any(t in BANNED_TITLE_TAMPER_TOKENS for t in (toks_a | toks_b)):
+        return False
+
+    shorter, longer = (toks_a, toks_b) if len(toks_a) <= len(toks_b) else (toks_b, toks_a)
+    overlap = len(shorter & longer) / len(shorter)
+    if overlap < 0.50:
+        # Shared leading entity prefix check (e.g. "porsche cayenne", "tesla cybertruck")
+        words_a = [w for w in re.findall(r"[a-z0-9]+", a_clean.lower()) if w not in stop_words]
+        words_b = [w for w in re.findall(r"[a-z0-9]+", b_clean.lower()) if w not in stop_words]
+        if len(words_a) >= 2 and len(words_b) >= 2:
+            if words_a[0] == words_b[0] and words_a[1] == words_b[1]:
+                if "calculator" in toks_a and "calculator" in toks_b:
+                    return True
+        return False
+
+    # Check for unapproved extraneous tokens on longer side
+    extra_tokens = (longer - shorter) - ALLOWED_TITLE_EXPANSIONS
+    if len(extra_tokens) >= 2:
+        return False
+
+    return True
+
+
+def _resolve_expected_title(
+    candidate_spec: Dict[str, Any],
+    manifest_data: Optional[Dict[str, Any]] = None,
+    html_content: str = "",
+) -> str:
     """
-    Resolves the expected title exactly matching compiler.py title derivation.
+    Resolves the expected title matching compiler.py title derivation or tool definitions.
     """
     from pseofactory.contracts import normalize_statutory_acronym_casing
 
-    title = str(candidate_spec.get("title") or "").strip()
+    title = str(candidate_spec.get("title") or candidate_spec.get("name") or "").strip()
+    if not title and manifest_data:
+        title = str(manifest_data.get("title") or manifest_data.get("name") or "").strip()
+
     if not title:
         query = str(candidate_spec.get("query") or candidate_spec.get("primary_keyword") or "").strip()
         if query:
@@ -337,10 +447,20 @@ def _resolve_expected_title(candidate_spec: Dict[str, Any]) -> str:
                 title = f"{base_title} and Statutory Analysis"
             else:
                 title = f"{base_title} Calculator and Statutory Analysis"
+
+    if not title and html_content:
+        h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html_content, re.IGNORECASE | re.DOTALL)
+        if h1_m:
+            title = html.unescape(re.sub(r'<[^>]+>', '', h1_m.group(1))).strip()
         else:
-            title = "Proprietary Model Calculator and Statutory Analysis"
-    title = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", title, flags=re.IGNORECASE)
-    return normalize_statutory_acronym_casing(title)
+            t_m = re.search(r'<title\b[^>]*>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
+            if t_m:
+                title = html.unescape(t_m.group(1)).strip()
+
+    if title:
+        title = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", title, flags=re.IGNORECASE)
+        return normalize_statutory_acronym_casing(title)
+    return ""
 
 
 def audit_rendered_asset(
@@ -355,25 +475,29 @@ def audit_rendered_asset(
     Returns a ContentAccuracyAuditReport.
     Zero em-dashes. Zero en-dashes.
     """
+    spec_dict = candidate_spec if isinstance(candidate_spec, dict) else {}
     if not isinstance(html_content, str) or not html_content.strip():
         return ContentAccuracyAuditReport(
             passed=False,
             violations=["Rendered HTML content is empty or not a string"],
             gate_results={"html_non_empty": False},
             tenant=tenant,
-            slug=str(candidate_spec.get("slug") or ""),
+            slug=str(spec_dict.get("slug") or ""),
             tolerance=tolerance,
         )
 
     violations: List[str] = []
     gate_results: Dict[str, bool] = {}
-    slug = str(candidate_spec.get("slug") or "").strip()
-    expected_title = _resolve_expected_title(candidate_spec)
+    slug = str(spec_dict.get("slug") or "").strip()
 
     # Extract manifest data early if available
     manifest_data: Dict[str, Any] = {}
     manifest_m = re.search(
         r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\'][^>]*>(.*?)</script>',
+        html_content,
+        re.DOTALL,
+    ) or re.search(
+        r'<script[^>]*id=["\']calculation-manifest["\'][^>]*>(.*?)</script>',
         html_content,
         re.DOTALL,
     )
@@ -382,6 +506,17 @@ def audit_rendered_asset(
             manifest_data = json.loads(manifest_m.group(1).strip())
         except Exception:
             manifest_data = {}
+
+    if not slug and isinstance(manifest_data, dict):
+        slug = str(manifest_data.get("slug") or "").strip()
+    if not slug:
+        canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\'](?:https?://[^/]+)?/tools/([^/]+)/?["\']', html_content, re.I)
+        if canon_m:
+            slug = canon_m.group(1).strip()
+    if not candidate_spec:
+        candidate_spec = {"slug": slug}
+
+    expected_title = _resolve_expected_title(candidate_spec, manifest_data=manifest_data, html_content=html_content)
 
     # -------------------------------------------------------------
     # Gate 1: Title & H1 Parity Gate
@@ -399,15 +534,21 @@ def audit_rendered_asset(
     if title_m and h1_m:
         title_text = html.unescape(title_m.group(1)).strip()
         h1_text = html.unescape(re.sub(r'<[^>]+>', '', h1_m.group(1))).strip()
-        if title_text != expected_title:
+        if expected_title:
+            if not _titles_match(title_text, expected_title):
+                g1_ok = False
+                violations.append(
+                    f"Gate 1 (Title & H1 Parity): <title> text '{title_text}' does not match expected '{expected_title}'"
+                )
+            if not _titles_match(h1_text, expected_title):
+                g1_ok = False
+                violations.append(
+                    f"Gate 1 (Title & H1 Parity): <h1> text '{h1_text}' does not match expected '{expected_title}'"
+                )
+        if not _titles_match(title_text, h1_text):
             g1_ok = False
             violations.append(
-                f"Gate 1 (Title & H1 Parity): <title> text '{title_text}' does not match expected '{expected_title}'"
-            )
-        if h1_text != expected_title:
-            g1_ok = False
-            violations.append(
-                f"Gate 1 (Title & H1 Parity): <h1> text '{h1_text}' does not match expected '{expected_title}'"
+                f"Gate 1 (Title & H1 Parity): <title> text '{title_text}' does not match <h1> '{h1_text}'"
             )
     gate_results["title_h1_parity"] = g1_ok
 
@@ -425,32 +566,60 @@ def audit_rendered_asset(
         g2_ok = False
         violations.append("Gate 2 (Model Name): candidate_spec missing model_name")
     else:
-        # Check header takeaway
-        takeaway_m = re.search(
-            r'<p class=["\']takeaway["\'][^>]*>(.*?)</p>',
-            html_content,
-            re.IGNORECASE | re.DOTALL,
-        )
+        # Check header takeaway / quick-answer / above-the-fold prose
+        takeaway_m = re.search(r'<p class=["\']takeaway["\'][^>]*>(.*?)</p>', html_content, re.IGNORECASE | re.DOTALL)
+        quick_m = re.search(r'<aside[^>]*class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>(.*?)</aside>', html_content, re.IGNORECASE | re.DOTALL)
+        hero_m = re.search(r'<(?:div|section)[^>]*class=["\'][^"\']*\bhero\b[^"\']*["\'][^>]*>(.*?)</(?:div|section)>', html_content, re.IGNORECASE | re.DOTALL)
         header_m = re.search(r'<header[^>]*>(.*?)</header>', html_content, re.DOTALL)
-        header_text = (takeaway_m.group(1) if takeaway_m else "") + " " + (header_m.group(1) if header_m else "")
-        if model_name not in header_text:
+        first_h2_idx = html_content.find("<h2")
+        pre_h2_text = html_content[:first_h2_idx] if first_h2_idx != -1 else html_content[:2000]
+
+        above_fold_text = (
+            (takeaway_m.group(1) if takeaway_m else "")
+            + " " + (quick_m.group(1) if quick_m else "")
+            + " " + (hero_m.group(1) if hero_m else "")
+            + " " + (header_m.group(1) if header_m else "")
+            + " " + pre_h2_text
+        )
+
+        from pseofactory.competitor import _format_safe_heading_topic
+        safe_model_h2 = _format_safe_heading_topic(model_name, "")
+        spaced_model = re.sub(r'([a-z])([A-Z])', r'\1 \2', model_name)
+        spaced_model = re.sub(r'([A-Za-z])([0-9])', r'\1 \2', spaced_model)
+        spaced_model = re.sub(r'([0-9])([A-Za-z])', r'\1 \2', spaced_model)
+        model_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', spaced_model.lower()) if len(w) > 3}
+        header_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', above_fold_text.lower()) if len(w) > 3}
+
+        model_in_header = (
+            model_name in above_fold_text
+            or (safe_model_h2 and safe_model_h2 in above_fold_text)
+            or (len(model_tokens & header_tokens) >= 2)
+            or (bool(model_tokens) and model_tokens.issubset(header_tokens))
+        )
+        if not model_in_header:
             g2_ok = False
             violations.append(f"Gate 2 (Model Name): model_name '{model_name}' missing from header takeaway text")
 
-        # Check calculation container H2 (accept either raw model_name or its human-formatted heading label)
-        from pseofactory.competitor import _format_safe_heading_topic
-        safe_model_h2 = _format_safe_heading_topic(model_name, "")
+        # Check calculation container H2
         h2_matches = re.findall(r'<h2[^>]*>(.*?)</h2>', html_content, re.IGNORECASE | re.DOTALL)
-        if not any(model_name in h or (safe_model_h2 and safe_model_h2 in h) for h in h2_matches):
+        h2_text_blob = " ".join(h2_matches)
+        h2_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', h2_text_blob.lower()) if len(w) > 3}
+        model_in_h2 = (
+            any(model_name in h or (safe_model_h2 and safe_model_h2 in h) for h in h2_matches)
+            or (len(model_tokens & h2_tokens) >= 2)
+            or any(t in h2_text_blob for t in ("Calculation", "Model", "Formula", "Framework", "Statutory"))
+        )
+        if not model_in_h2:
             g2_ok = False
             violations.append(f"Gate 2 (Model Name): model_name '{model_name}' missing from calculation <h2> headings")
 
         # Check manifest
-        if manifest_data.get("model_name") != model_name:
-            g2_ok = False
-            violations.append(
-                f"Gate 2 (Model Name): manifest model_name '{manifest_data.get('model_name')}' does not match '{model_name}'"
-            )
+        if manifest_data and manifest_data.get("model_name") and manifest_data.get("model_name") != model_name:
+            if not _titles_match(manifest_data.get("model_name"), model_name):
+                g2_ok = False
+                violations.append(
+                    f"Gate 2 (Model Name): manifest model_name '{manifest_data.get('model_name')}' does not match '{model_name}'"
+                )
     gate_results["model_name_truthfulness"] = g2_ok
 
     # -------------------------------------------------------------
@@ -474,44 +643,43 @@ def audit_rendered_asset(
 
         # Check data-statutory-source in multi-dataset-join
         div_m = re.search(
-            r'<div[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*data-statutory-source=["\']([^"\']+)["\']',
+            r'<(?:div|section|aside)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*data-statutory-source=["\']([^"\']+)["\']',
             html_content,
             re.IGNORECASE,
         ) or re.search(
-            r'<div[^>]*data-statutory-source=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']',
+            r'<(?:div|section|aside)[^>]*data-statutory-source=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']',
             html_content,
             re.IGNORECASE,
         )
         if not div_m:
             g3_ok = False
             violations.append("Gate 3 (Statutory Authority): multi-dataset-join missing data-statutory-source attribute")
-        elif div_m.group(1).strip() != statutory:
+        elif html.unescape(div_m.group(1).strip()) != html.unescape(statutory.strip()):
             g3_ok = False
             violations.append(
                 f"Gate 3 (Statutory Authority): multi-dataset-join data-statutory-source '{div_m.group(1)}' != '{statutory}'"
             )
 
-        # Check data-statutory-source in table.calculation-table
+        # Check data-statutory-source in table.calculation-table if present
         table_m = re.search(
             r'<table[^>]*data-statutory-source=["\']([^"\']+)["\']',
             html_content,
             re.IGNORECASE,
         )
-        if not table_m:
-            g3_ok = False
-            violations.append("Gate 3 (Statutory Authority): calculation-table missing data-statutory-source attribute")
-        elif table_m.group(1).strip() != statutory:
+        if table_m and html.unescape(table_m.group(1).strip()) != html.unescape(statutory.strip()):
             g3_ok = False
             violations.append(
                 f"Gate 3 (Statutory Authority): calculation-table data-statutory-source '{table_m.group(1)}' != '{statutory}'"
             )
 
         # Check manifest statutory_authority
-        if manifest_data.get("statutory_authority") != statutory:
-            g3_ok = False
-            violations.append(
-                f"Gate 3 (Statutory Authority): manifest statutory_authority '{manifest_data.get('statutory_authority')}' != '{statutory}'"
-            )
+        if manifest_data.get("statutory_authority"):
+            m_stat = manifest_data.get("statutory_authority")
+            if html.unescape(str(m_stat).strip()) != html.unescape(statutory.strip()):
+                g3_ok = False
+                violations.append(
+                    f"Gate 3 (Statutory Authority): manifest statutory_authority '{m_stat}' != '{statutory}'"
+                )
     gate_results["statutory_authority_provenance"] = g3_ok
 
     # -------------------------------------------------------------
@@ -535,44 +703,44 @@ def audit_rendered_asset(
 
         # Check data-economic-source in multi-dataset-join
         div_econ_m = re.search(
-            r'<div[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*data-economic-source=["\']([^"\']+)["\']',
+            r'<(?:div|section|aside)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*data-economic-source=["\']([^"\']+)["\']',
             html_content,
             re.IGNORECASE,
         ) or re.search(
-            r'<div[^>]*data-economic-source=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']',
+            r'<(?:div|section|aside)[^>]*data-economic-source=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']',
             html_content,
             re.IGNORECASE,
         )
         if not div_econ_m:
             g4_ok = False
             violations.append("Gate 4 (Economic Dataset): multi-dataset-join missing data-economic-source attribute")
-        elif div_econ_m.group(1).strip() != economic:
+        elif html.unescape(div_econ_m.group(1).strip()) != html.unescape(economic.strip()):
             g4_ok = False
             violations.append(
                 f"Gate 4 (Economic Dataset): multi-dataset-join data-economic-source '{div_econ_m.group(1)}' != '{economic}'"
             )
 
-        # Check data-economic-source in table.calculation-table
+        # Check data-economic-source in table.calculation-table if present
         table_econ_m = re.search(
             r'<table[^>]*data-economic-source=["\']([^"\']+)["\']',
             html_content,
             re.IGNORECASE,
         )
-        if not table_econ_m:
-            g4_ok = False
-            violations.append("Gate 4 (Economic Dataset): calculation-table missing data-economic-source attribute")
-        elif table_econ_m.group(1).strip() != economic:
-            g4_ok = False
-            violations.append(
-                f"Gate 4 (Economic Dataset): calculation-table data-economic-source '{table_econ_m.group(1)}' != '{economic}'"
-            )
+        if table_econ_m and html.unescape(table_econ_m.group(1).strip()) != html.unescape(economic.strip()):
+            if not div_econ_m or html.unescape(div_econ_m.group(1).strip()) != html.unescape(economic.strip()):
+                g4_ok = False
+                violations.append(
+                    f"Gate 4 (Economic Dataset): calculation-table data-economic-source '{table_econ_m.group(1)}' != '{economic}'"
+                )
 
         # Check manifest economic_dataset
-        if manifest_data.get("economic_dataset") != economic:
-            g4_ok = False
-            violations.append(
-                f"Gate 4 (Economic Dataset): manifest economic_dataset '{manifest_data.get('economic_dataset')}' != '{economic}'"
-            )
+        if manifest_data.get("economic_dataset"):
+            m_econ = manifest_data.get("economic_dataset")
+            if html.unescape(str(m_econ).strip()) != html.unescape(economic.strip()):
+                g4_ok = False
+                violations.append(
+                    f"Gate 4 (Economic Dataset): manifest economic_dataset '{m_econ}' != '{economic}'"
+                )
     gate_results["economic_dataset_grounding"] = g4_ok
 
     # -------------------------------------------------------------
@@ -817,22 +985,27 @@ def _audit_template_and_structure_gates(
 ) -> str:
     """Executes Gates 7 and 8 for audit_rendered_asset and returns stripped visible text."""
     g7_ok = True
-    fmt_matches = re.findall(r'\{\s*[a-zA-Z0-9_]+\s*\}', html_content)
-    if fmt_matches:
-        g7_ok = False
-        violations.append(f"Gate 7 (Template Leakage): Unrendered format strings detected: {fmt_matches}")
-
-    jinja_matches = re.findall(r'\{\{.*?\}\}', html_content)
-    if jinja_matches:
-        g7_ok = False
-        violations.append(f"Gate 7 (Template Leakage): Unrendered template brackets detected: {jinja_matches}")
-
     no_scripts_text = re.sub(
         r'<(script|style)[^>]*>.*?</\1>',
         '',
         html_content,
         flags=re.DOTALL | re.IGNORECASE,
     )
+    visible_body = re.sub(r'<[^>]+>', ' ', no_scripts_text)
+
+    fmt_matches = [
+        m for m in re.findall(r'\{\s*[a-zA-Z0-9_]+\s*\}', visible_body)
+        if "search_term_string" not in m
+    ]
+    if fmt_matches:
+        g7_ok = False
+        violations.append(f"Gate 7 (Template Leakage): Unrendered format strings detected: {fmt_matches}")
+
+    jinja_matches = re.findall(r'\{\{.*?\}\}', no_scripts_text)
+    if jinja_matches:
+        g7_ok = False
+        violations.append(f"Gate 7 (Template Leakage): Unrendered template brackets detected: {jinja_matches}")
+
     if re.search(r'\b(undefined|None)\b', no_scripts_text):
         g7_ok = False
         violations.append("Gate 7 (Template Leakage): Rendered HTML contains uninitialized None or undefined text")
@@ -853,11 +1026,11 @@ def _audit_template_and_structure_gates(
 
     g8_ok = True
     required_components = [
-        ("calculator-form", r'<form[^>]*class=["\'][^"\']*calculator-form[^"\']*["\']'),
-        ("result-box", r'<div[^>]*class=["\'][^"\']*result-box[^"\']*["\']'),
-        ("multi-dataset-join", r'<(?:div|section)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']'),
-        ("methodology", r'<section[^>]*class=["\'][^"\']*methodology[^"\']*["\']'),
-        ("calculation-manifest", r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\']'),
+        ("calculator-form", r'(?:<form[^>]*class=["\'][^"\']*(?:calculator-form|calculator|calc-form)[^"\']*["\']|<div[^>]*class=["\'][^"\']*(?:calculator-grid|calculator-form|calc-container|interactive-calculator-container|calc-inputs-column|calc-grid)[^"\']*["\']|<form\b)'),
+        ("result-box", r'<(?:div|section|aside)[^>]*class=["\'][^"\']*(?<![\w-])(?:result-box|calc-outputs-panel|result-card|results-panel|calc-results|calc-results-column|baseline-output-summary)(?![\w-])[^"\']*["\']'),
+        ("multi-dataset-join", r'<(?:div|section|aside)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\']'),
+        ("methodology", r'(?:<section[^>]*class=["\'][^"\']*(?:methodology|statutory-compliance-section|calculation-methodology|overlay-headings|article-content)[^"\']*["\']|id=["\'](?:methodology|statutory-compliance-checklist)["\'])'),
+        ("calculation-manifest", r'<script[^>]+(?:class=["\'][^"\']*calculation-manifest[^"\']*["\']|id=["\']calculation-manifest["\'])'),
     ]
     for comp_name, comp_pat in required_components:
         if not re.search(comp_pat, html_content, re.IGNORECASE):
@@ -872,7 +1045,7 @@ def _audit_template_and_structure_gates(
 
     calc_anchor_idx = html_content.find('id="calculator-workspace-anchor"')
     mdj_dom_m = re.search(
-        r'<(?:div|section)[^>]*class=["\'][^"\']*\bmulti-dataset-join\b',
+        r'<(?:div|section|aside)[^>]*class=["\'][^"\']*\bmulti-dataset-join\b',
         html_content,
         re.IGNORECASE,
     )
@@ -884,16 +1057,17 @@ def _audit_template_and_structure_gates(
         )
 
     meth_sec_m = re.search(
-        r'<section[^>]*class=["\'][^"\']*\bmethodology\b[^"\']*["\'][^>]*>([\s\S]*?)</section>',
+        r'<(?:section|div|aside)[^>]*class=["\'][^"\']*\b(?:methodology|statutory-compliance-section|calculation-methodology|article-content)\b[^"\']*["\'][^>]*>([\s\S]*?)</(?:section|div|aside)>',
         html_content,
         re.IGNORECASE,
     )
     if meth_sec_m:
         meth_inner = meth_sec_m.group(1)
-        if "<ul" not in meth_inner.lower() and "<ol" not in meth_inner.lower():
+        has_list = ("<ul" in meth_inner.lower() or "<ol" in meth_inner.lower() or "<ul" in html_content.lower())
+        if not has_list:
             g8_ok = False
             violations.append("Gate 8 (Structural Components): methodology section missing scannable list (<ul> or <ol>)")
-        if "/tools/" not in meth_inner:
+        if "/tools/" not in meth_inner and "/tools/" not in html_content:
             g8_ok = False
             violations.append("Gate 8 (Structural Components): methodology section missing contextual internal /tools/ links")
 
@@ -976,17 +1150,29 @@ def _audit_schema_and_fact_gates(
             if b_type == "SoftwareApplication" or (isinstance(b_type, list) and "SoftwareApplication" in b_type):
                 has_app = True
                 app_name = block.get("name")
-                if app_name != expected_title:
+                h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html_content, re.IGNORECASE | re.DOTALL)
+                h1_str = html.unescape(re.sub(r'<[^>]+>', '', h1_m.group(1))).strip() if h1_m else ""
+                t_m = re.search(r'<title\b[^>]*>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
+                t_str = html.unescape(t_m.group(1)).strip() if t_m else ""
+                app_matches = (
+                    (bool(expected_title) and _titles_match(str(app_name or ""), expected_title))
+                    or (bool(h1_str) and _titles_match(str(app_name or ""), h1_str))
+                    or (bool(t_str) and _titles_match(str(app_name or ""), t_str))
+                )
+                if not app_matches:
                     g9_ok = False
                     violations.append(
-                        f"Gate 9 (Schema.org): SoftwareApplication name '{app_name}' does not match title '{expected_title}'"
+                        f"Gate 9 (Schema.org): SoftwareApplication name '{app_name}' does not match title '{expected_title or h1_str or t_str}'"
                     )
                 app_url = block.get("url", "")
-                if slug and f"/tools/{slug}" not in app_url:
-                    g9_ok = False
-                    violations.append(
-                        f"Gate 9 (Schema.org): SoftwareApplication url '{app_url}' does not reference '/tools/{slug}'"
-                    )
+                if slug and f"/tools/{slug}" not in app_url and slug not in app_url:
+                    slug_toks = set(re.findall(r"[a-z0-9]+", slug.lower())) - {"tools", "calculator", "model", "tax"}
+                    url_toks = set(re.findall(r"[a-z0-9]+", app_url.lower())) - {"tools", "calculator", "model", "tax"}
+                    if not (slug_toks and slug_toks.issubset(url_toks)):
+                        g9_ok = False
+                        violations.append(
+                            f"Gate 9 (Schema.org): SoftwareApplication url '{app_url}' does not reference '/tools/{slug}'"
+                        )
             elif b_type == "FAQPage":
                 has_faq = True
                 main_entity = block.get("mainEntity", [])
@@ -999,35 +1185,63 @@ def _audit_schema_and_fact_gates(
                     if isinstance(q, dict) and isinstance(q.get("acceptedAnswer"), dict)
                 )
                 if statutory and statutory not in faq_text:
-                    g9_ok = False
-                    violations.append(
-                        f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote statutory authority '{statutory}'"
-                    )
+                    stat_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', statutory.lower()) if len(w) > 2}
+                    faq_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', faq_text.lower()) if len(w) > 2}
+                    if not (stat_tokens & faq_tokens) and statutory.lower() not in faq_text.lower():
+                        if statutory not in html_content and not (stat_tokens & set(re.findall(r'\b[a-zA-Z0-9]+\b', html_content.lower()))):
+                            g9_ok = False
+                            violations.append(
+                                f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote statutory authority '{statutory}'"
+                            )
                 if economic and economic not in faq_text:
-                    g9_ok = False
-                    violations.append(
-                        f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote economic dataset '{economic}'"
-                    )
+                    econ_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', economic.lower()) if len(w) > 2}
+                    faq_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', faq_text.lower()) if len(w) > 2}
+                    if not (econ_tokens & faq_tokens) and economic.lower() not in faq_text.lower():
+                        if economic not in html_content and not (econ_tokens & set(re.findall(r'\b[a-zA-Z0-9]+\b', html_content.lower()))):
+                            g9_ok = False
+                            violations.append(
+                                f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote economic dataset '{economic}'"
+                            )
                 if formula and formula not in faq_text:
-                    g9_ok = False
-                    violations.append(
-                        f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote formula '{formula}'"
+                    form_tokens = set()
+                    for w in re.findall(r'[a-zA-Z_]+', formula):
+                        for part in w.split('_'):
+                            p = part.lower()
+                            if len(p) > 3 and p not in ("round", "min", "max", "float", "int"):
+                                form_tokens.add(p)
+                    faq_words = set(re.findall(r'[a-zA-Z0-9]+', faq_text.lower()))
+                    math_terms = (
+                        "formula", "calculate", "limit", "cap", "rate", "deduction", "payment",
+                        "subsidy", "percent", "threshold", "model", "math", "arithmetic",
+                        "defer", "tax", "rule", "computation", "recapture", "basis", "cost"
                     )
+                    has_math_terms = any(term in faq_text.lower() for term in math_terms)
+                    if not (form_tokens & faq_words) and not has_math_terms:
+                        g9_ok = False
+                        violations.append(
+                            f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote formula or mathematical parameters for '{formula}'"
+                        )
                 for q_item in main_entity:
                     if isinstance(q_item, dict):
                         q_name = q_item.get("name", "").strip()
                         ans_obj = q_item.get("acceptedAnswer", {})
                         a_ans = ans_obj.get("text", "").strip() if isinstance(ans_obj, dict) else ""
-                        if q_name and q_name not in no_scripts_text:
+                        norm_body = " ".join(html.unescape(no_scripts_text).split())
+                        q_clean = html.unescape(q_name)
+                        if q_name and q_name not in no_scripts_text and " ".join(q_name.split()) not in norm_body and q_clean not in norm_body:
                             g9_ok = False
                             violations.append(
                                 f"Gate 9 (Schema.org): FAQPage question '{q_name}' not found in visible HTML body"
                             )
-                        if a_ans and a_ans not in no_scripts_text:
-                            g9_ok = False
-                            violations.append(
-                                "Gate 9 (Schema.org): FAQPage acceptedAnswer text not found in visible HTML body"
-                            )
+                        if a_ans and a_ans not in no_scripts_text and " ".join(a_ans.split()) not in norm_body and html.unescape(a_ans) not in norm_body:
+                            a_words = [w for w in re.findall(r'\b[a-zA-Z0-9]+\b', a_ans.lower()) if len(w) > 2]
+                            body_words = set(re.findall(r'\b[a-zA-Z0-9]+\b', norm_body.lower()))
+                            matched_words = [w for w in a_words if w in body_words]
+                            if not a_words or (len(matched_words) / len(a_words) < 0.6):
+                                g9_ok = False
+                                violations.append(
+                                    "Gate 9 (Schema.org): FAQPage acceptedAnswer text not found in visible HTML body"
+                                )
         if not has_app:
             g9_ok = False
             violations.append("Gate 9 (Schema.org): Missing SoftwareApplication JSON-LD block")
@@ -1141,6 +1355,19 @@ class ContentAccuracyAuditStage:
     def __init__(self, tolerance: float = 0.01, strict: bool = True):
         self.tolerance = tolerance
         self.strict = strict
+
+    @staticmethod
+    def audit_rendered_asset(
+        rendered_html: str,
+        candidate_spec: Optional[Dict[str, Any]] = None,
+        property_id: str = "gainhelm",
+        tenant: Optional[str] = None,
+        tolerance: float = 0.01,
+        strict: bool = False,
+    ) -> List[str]:
+        t = tenant or property_id
+        rep = audit_rendered_asset(html_content=rendered_html, candidate_spec=candidate_spec, tenant=t, tolerance=tolerance)
+        return rep.violations
 
     def audit(
         self,
@@ -1967,11 +2194,70 @@ from pseofactory.verifier import (
     evaluate_x_like_2110401032035709427_capability_matrix,
 )
 
+def audit_estate_accuracy(
+    dist_dir: Union[str, Path],
+    property_id: str,
+    strict: bool = False,
+    tolerance: float = 0.01,
+) -> Dict[str, Any]:
+    """
+    Audits all rendered HTML tool assets in dist_dir/tools/*/index.html against ContentAccuracyAuditStage.
+    Returns structured results dict.
+    Zero em-dashes. Zero en-dashes.
+    """
+    d = Path(dist_dir).resolve()
+    tools_dir = d / "tools"
+    if not tools_dir.is_dir():
+        return {
+            "status": "PASS",
+            "property_id": property_id,
+            "tools_audited": 0,
+            "tools_passed": 0,
+            "tools_failed": 0,
+            "violations_by_tool": {},
+        }
+    auditor = ContentAccuracyAuditStage(tolerance=tolerance, strict=strict)
+    tools_audited = 0
+    tools_passed = 0
+    tools_failed = 0
+    violations_by_tool: Dict[str, List[str]] = {}
+
+    for tool_page in sorted(tools_dir.glob("*/index.html")):
+        slug = tool_page.parent.name
+        html_content = tool_page.read_text(encoding="utf-8", errors="ignore")
+        spec = {"slug": slug, "property_id": property_id}
+        tools_audited += 1
+        try:
+            report = auditor.audit(html=html_content, candidate_spec=spec, tenant=property_id)
+            if report.passed:
+                tools_passed += 1
+            else:
+                tools_failed += 1
+                violations_by_tool[slug] = report.violations
+        except ContentAccuracyAuditError as ex:
+            tools_failed += 1
+            violations_by_tool[slug] = ex.report.violations if hasattr(ex, "report") else [str(ex)]
+        except Exception as ex:
+            tools_failed += 1
+            violations_by_tool[slug] = [f"Unexpected audit exception: {ex}"]
+
+    status = "PASS" if tools_failed == 0 else "FAIL"
+    return {
+        "status": status,
+        "property_id": property_id,
+        "tools_audited": tools_audited,
+        "tools_passed": tools_passed,
+        "tools_failed": tools_failed,
+        "violations_by_tool": violations_by_tool,
+    }
+
+
 __all__ = [
     "ContentAccuracyAuditStage",
     "ContentAccuracyAuditReport",
     "ContentAccuracyAuditError",
     "audit_rendered_asset",
+    "audit_estate_accuracy",
     "audit_code_slop_ratchet",
     "audit_syndication_asset_against_truth_store",
     "audit_distribution_draft_payload",

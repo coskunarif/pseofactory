@@ -7552,12 +7552,15 @@ def _build_overlay_heading_guidance_html(
         b1 = "<li><strong>Threshold Verification:</strong> Compare baseline assumptions against adjacent rate tiers and phaseout boundaries.</li>"
         b2 = "<li><strong>Audit Documentation:</strong> Retain signed election schedules and source ledger records with the primary filing.</li>"
 
+    from pseofactory.contracts import PROCEDURAL_HEADING_PATTERN
+
+    list_tag = "ol" if bool(PROCEDURAL_HEADING_PATTERN.search(clean_h2)) else "ul"
     return (
         f'  <p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{p_text}</p>\n'
-        f'  <ul class="section-takeaways" style="margin: 0 0 1.5rem 1.25rem; color: var(--text-secondary, #475569); line-height: 1.6;">\n'
+        f'  <{list_tag} class="section-takeaways" style="margin: 0 0 1.5rem 1.25rem; color: var(--text-secondary, #475569); line-height: 1.6;">\n'
         f"    {b1}\n"
         f"    {b2}\n"
-        f"  </ul>"
+        f"  </{list_tag}>"
     )
 
 

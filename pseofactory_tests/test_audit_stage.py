@@ -769,3 +769,114 @@ def test_body_level_bloat_camelcase_and_llms_manifest_parity(tmp_path):
     assert "llms.txt" in changed and "llms-full.txt" in changed
     assert RetroReflectionEngine._has_stale_llms_manifests(dist, "prexvo") is False
 
+
+def test_statutory_tamper_auto_reconciliation_and_fail_closed(tmp_path):
+    """
+    Regression test proving that injecting a wrong statutory number or claim into:
+    1. An HTML tool page
+    2. A dist/ai-benchmarks/ or llms-full.txt file
+    3. A syndication/ pack or draft
+    is automatically detected by LiveTruthAuditEngine / ContentAccuracyAuditStage,
+    and either auto-reconciled from ground truth or blocked fail-closed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import LiveTruthAuditEngine, AssetIntegrityEvaluator
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+    from pseofactory.audit import ContentAccuracyAuditStage
+
+    dist = tmp_path / "dist"
+    synd = tmp_path / "syndication"
+    bench = dist / "ai-benchmarks"
+    tools = dist / "tools" / "commercial-heavy-vehicle-section-179-weight-calculator"
+    for d in (dist, synd, bench, tools):
+        d.mkdir(parents=True, exist_ok=True)
+
+    truth_engine = LiveTruthAuditEngine()
+
+    # 1. Inject wrong Section 179 vehicle cap ($2,560,000 instead of $30,500) into HTML page
+    html_f = tools / "index.html"
+    bad_html = (
+        '<!doctype html><html><head>'
+        '<title>Heavy Vehicle Section 179 Calculator | ProfitHelm</title>'
+        '</head><body>'
+        '<h1>Heavy Vehicle Section 179 Calculator</h1>'
+        '<div class="result-box"><p>Under IRC Section 179, qualifying heavy SUVs cap at a $2,560,000 Section 179 vehicle deduction.</p></div>'
+        '</body></html>'
+    )
+    html_f.write_text(bad_html, encoding="utf-8")
+    viols = truth_engine.audit_file(html_f, property_id="profithelm")
+    assert any("Erroneous Section 179 vehicle cap of $2,560,000" in v for v in viols), f"Expected violation, got {viols}"
+
+    # Auto-reconcile HTML page
+    repaired = TruthReconciliationEngine.reconcile_estate_assets(dist_dir=dist, property_id="profithelm", repo_root=tmp_path)
+    assert str(html_f) in repaired
+    fixed_html = html_f.read_text(encoding="utf-8")
+    assert "$30,500" in fixed_html or "$31,300" in fixed_html
+    assert "$2,560,000 Section 179 vehicle deduction" not in fixed_html
+    viols_after = truth_engine.audit_file(html_f, property_id="profithelm")
+    assert not any("Erroneous Section 179 vehicle cap" in v for v in viols_after)
+
+    # 2. Inject truncated 'IRC Sections ' citation and invalid PSLF claim into ai-benchmarks and llms-full.txt
+    bench_f = bench / "ai_citations_reference.md"
+    bench_f.write_text("Reference guide under IRC Sections 179 and regulatory guidance.\nAlso see IRC Sections .", encoding="utf-8")
+    bench_viols = truth_engine.audit_file(bench_f, property_id="profithelm")
+    assert any("Truncated 'IRC Sections '" in v for v in bench_viols)
+
+    llms_f = dist / "llms-full.txt"
+    llms_f.write_text("Under 34 CFR 685.219, borrowers require 2022 qualifying payments to receive PSLF forgiveness.", encoding="utf-8")
+    llms_viols = truth_engine.audit_file(llms_f, property_id="prexvo")
+    assert any("2022 qualifying payments" in v for v in llms_viols)
+
+    # Auto-reconcile benchmarks and llms-full.txt
+    TruthReconciliationEngine.reconcile_estate_assets(dist_dir=dist, property_id="profithelm", repo_root=tmp_path)
+    fixed_bench = bench_f.read_text(encoding="utf-8")
+    assert "IRC Sections ." not in fixed_bench
+    assert "IRC Section 179" in fixed_bench
+    assert not truth_engine.audit_file(bench_f, property_id="profithelm")
+
+    TruthReconciliationEngine.reconcile_estate_assets(dist_dir=dist, property_id="prexvo", repo_root=tmp_path)
+    fixed_llms = llms_f.read_text(encoding="utf-8")
+    assert "120 monthly qualifying payments" in fixed_llms
+    assert "2022 qualifying payments" not in fixed_llms
+    assert not truth_engine.audit_file(llms_f, property_id="prexvo")
+
+    # 3. Inject invented 3.0% bracket and foreign affiliate into syndication
+    synd_draft = synd / "quora.md"
+    synd_draft.write_text("Under the 2027 TCJA sunset, the federal 3.0% tax bracket reverts to pre-2018 schedules.", encoding="utf-8")
+    synd_viols = truth_engine.audit_file(synd_draft, property_id="profithelm")
+    assert any("Invented 3.0%" in v for v in synd_viols)
+
+    aff_f = synd / "affiliate_routes_verified.json"
+    aff_f.write_text('{"property": "prexvo", "routes": ["/r/turbotax", "/r/splash_financial"]}', encoding="utf-8")
+    aff_viols = truth_engine.audit_file(aff_f, property_id="prexvo")
+    assert any("ProfitHelm affiliate detected in Prexvo" in v for v in aff_viols)
+
+    # Auto-reconcile syndication assets
+    TruthReconciliationEngine.reconcile_estate_assets(dist_dir=dist, property_id="profithelm", repo_root=tmp_path)
+    fixed_synd = synd_draft.read_text(encoding="utf-8")
+    assert "3% marginal rate increase" in fixed_synd
+    assert "3.0% tax bracket" not in fixed_synd
+    assert not truth_engine.audit_file(synd_draft, property_id="profithelm")
+
+    TruthReconciliationEngine.reconcile_estate_assets(dist_dir=dist, property_id="prexvo", repo_root=tmp_path)
+    fixed_aff = aff_f.read_text(encoding="utf-8")
+    assert "turbotax" not in fixed_aff
+    assert not truth_engine.audit_file(aff_f, property_id="prexvo")
+
+    # 4. Fail-closed verification: tampered formula in HTML calculation table blocked by ContentAccuracyAuditStage
+    stage = ContentAccuracyAuditStage(tolerance=0.01, strict=False)
+    tampered_html = (
+        '<!doctype html><html><head><title>Section 179 Equipment & Software Deduction Calculator | ProfitHelm</title></head><body>'
+        '<h1>Section 179 Equipment & Software Deduction Calculator</h1>'
+        '<p class="takeaway">Model Section179EquipmentDeductionModel</p>'
+        '<div class="result-box"><div id="metric-first_year_deduction" class="output-value">999999</div></div>'
+        '<div class="multi-dataset-join" data-statutory-source="IRC Section 179 and Section 168(k)" data-economic-source="BEA Fixed Asset Table 2.1"></div>'
+        '<section class="methodology"><p>Methodology details.</p></section>'
+        '<script id="calculation-manifest" type="application/json">{"slug": "section-179-calculator", "model_name": "Section179EquipmentDeductionModel", "statutory_authority": "IRC Section 179 and Section 168(k)", "economic_dataset": "BEA Fixed Asset Table 2.1", "formula": "min(cost, 2560000)", "published_output": 500000}</script>'
+        '</body></html>'
+    )
+    res = stage.audit(html=tampered_html, candidate_spec={"slug": "section-179-calculator"}, tenant="profithelm")
+    assert res.passed is False
+    assert any("Gate 5 (Formula Parity)" in v for v in res.violations)
+
+

@@ -18,7 +18,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Dict, List, Any, Optional, Set, Tuple
+from typing import Dict, List, Any, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import assert_no_forbidden_dashes
 
@@ -2059,6 +2059,8 @@ class TenantFactStore:
                     "waives federal protections" in text_lower
                     or "eliminates federal protections" in text_lower
                     or "waive federal protections" in text_lower
+                    or "permanently forfeits" in text_lower
+                    or "forfeits access to federal" in text_lower
                 )
                 if not has_ymyl:
                     violations.append(
@@ -2928,6 +2930,7 @@ class TruthReconciliationEngine:
         tenant: str,
         rel_path: str = "",
         slug: str = "",
+        manifest_data: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, List[str]]:
         """
         Deterministically reconciles prose, comparison tables, autonomous assertions,
@@ -2957,6 +2960,14 @@ class TruthReconciliationEngine:
                     updated = updated.replace(old_str, new_str)
                     if "profithelm_statutory_truth_reconciled" not in repairs:
                         repairs.append("profithelm_statutory_truth_reconciled")
+            suv_cap_pat = re.compile(
+                r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300)',
+                re.IGNORECASE,
+            )
+            if suv_cap_pat.search(updated):
+                updated = suv_cap_pat.sub(r'\1$30,500', updated)
+                if "profithelm_statutory_truth_reconciled" not in repairs:
+                    repairs.append("profithelm_statutory_truth_reconciled")
         elif tenant_norm == "prexvo":
             for old_str, new_str in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                 if old_str in updated:
@@ -3103,6 +3114,332 @@ class TruthReconciliationEngine:
                     if "faq_schema_dom_synced" not in repairs:
                         repairs.append("faq_schema_dom_synced")
 
+        # 5. Reconcile SoftwareApplication JSON-LD name & url
+        h1_m = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", updated, re.IGNORECASE)
+        h1_title = _html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1)).strip()) if h1_m else ""
+
+        # Align Title with H1 if discrepant (only for tool calculators and leaves)
+        canon_m_tmp = re.search(r'<link\s+rel=["\']canonical["\']\s+href=["\']([^"\']+)["\']', updated, re.I)
+        canon_check = canon_m_tmp.group(1).strip() if canon_m_tmp else ""
+        is_tool_leaf = (
+            ("tools/" in (rel_path or "").lower())
+            or ("/tools/" in canon_check.lower())
+            or (
+                bool(slug)
+                and slug not in ("section-179-deduction-calculator", "tool", "index")
+                and rel_path not in ("index.html", "", "404.html", "https://profithelm.com/", "https://prexvo.com/", "https://gainhelm.com/")
+                and not any(canon_check.rstrip("/").endswith(dom) for dom in ("profithelm.com", "prexvo.com", "gainhelm.com"))
+            )
+        )
+        t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
+        if is_tool_leaf and t_m and h1_title:
+            cur_title = _html_lib.unescape(t_m.group(1)).strip()
+            from pseofactory.audit import _titles_match
+            if not _titles_match(cur_title, h1_title):
+                brand_sfx = "ProfitHelm" if tenant_norm == "profithelm" else ("Prexvo" if tenant_norm == "prexvo" else "GainHelm")
+                cand_title = f"{h1_title} | {brand_sfx}"
+                if len(cand_title) <= 70:
+                    new_t_tag = f"<title>{cand_title}</title>"
+                    updated = re.sub(r'<title>.*?</title>', new_t_tag, updated, count=1, flags=re.I | re.DOTALL)
+                    repairs.append("title_aligned_with_h1")
+
+        if is_tool_leaf and '"SoftwareApplication"' in updated:
+            clean_page_title = h1_title
+            if not clean_page_title and t_m:
+                page_title = _html_lib.unescape(re.sub(r"<[^>]+>", "", t_m.group(1)).strip())
+                clean_page_title = re.sub(r'\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$', '', page_title, flags=re.I).strip()
+                clean_page_title = re.sub(r'\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$', '', clean_page_title, flags=re.I).strip()
+
+            if clean_page_title and slug:
+                tenant_contract = get_tenant_contract(tenant_norm)
+                canon_m = re.search(r'<link\s+rel=["\']canonical["\']\s+href=["\']([^"\']+)["\']', updated, re.I)
+                tool_canon_url = canon_m.group(1).strip() if canon_m else f"{tenant_contract.canonical_base}/tools/{slug}/"
+
+                def _sync_app_ld(m_ld: re.Match) -> str:
+                    o_tag, raw_json, c_tag = m_ld.group(1), m_ld.group(2), m_ld.group(3)
+                    try:
+                        parsed = _json_lib.loads(raw_json.strip())
+                        changed_ld = False
+                        if isinstance(parsed, dict):
+                            nodes = parsed.get("@graph") if isinstance(parsed.get("@graph"), list) else [parsed]
+                            for node in nodes:
+                                if isinstance(node, dict) and (node.get("@type") == "SoftwareApplication" or (isinstance(node.get("@type"), list) and "SoftwareApplication" in node.get("@type"))):
+                                    from pseofactory.audit import _titles_match
+                                    curr_name = str(node.get("name") or "")
+                                    if not _titles_match(curr_name, clean_page_title):
+                                        node["name"] = clean_page_title
+                                        changed_ld = True
+                                    if "url" in node and node.get("url") != tool_canon_url:
+                                        node["url"] = tool_canon_url
+                                        changed_ld = True
+                                    elif ("tools/" in rel_path or "tools/" in combined_slug) and node.get("url") != tool_canon_url:
+                                        node["url"] = tool_canon_url
+                                        changed_ld = True
+                            if changed_ld:
+                                return f"{o_tag}\n{_json_lib.dumps(parsed, indent=2)}\n  {c_tag}"
+                    except Exception:
+                        pass
+                    return m_ld.group(0)
+
+                synced_app_html = re.sub(
+                    r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+                    _sync_app_ld,
+                    updated,
+                    flags=re.IGNORECASE,
+                )
+                if synced_app_html != updated:
+                    updated = synced_app_html
+                    if "software_application_schema_synced" not in repairs:
+                        repairs.append("software_application_schema_synced")
+
+        # 6. Reconcile multi-dataset-join data attributes
+        man_stat_val = ""
+        man_econ_val = ""
+        man_m = re.search(r'<script[^>]*class=["\'][^"\']*calculation-manifest[^"\']*["\'][^>]*>(.*?)</script>', updated, re.DOTALL) or re.search(r'<script[^>]*id=["\']calculation-manifest["\'][^>]*>(.*?)</script>', updated, re.DOTALL)
+        if man_m:
+            try:
+                man_d = _json_lib.loads(man_m.group(1).strip())
+                man_stat_val = man_d.get("statutory_authority") or man_d.get("statutory_provenance") or ""
+                man_econ_val = man_d.get("economic_dataset") or man_d.get("economic_source") or ""
+            except Exception:
+                pass
+        if man_m:
+            try:
+                curr_man = _json_lib.loads(man_m.group(1).strip())
+                m_changed = False
+                if manifest_data:
+                    m_slug = manifest_data.get("slug")
+                    is_exact_tool = bool(m_slug and (rel_path == f"tools/{m_slug}/index.html" or slug == m_slug))
+                    sync_fields = (
+                        ("statutory_authority", "economic_dataset", "model_name", "formula", "inputs", "published_output")
+                        if is_exact_tool
+                        else ("statutory_authority", "economic_dataset", "model_name", "formula")
+                    )
+                    for k in sync_fields:
+                        if k == "formula" and not is_exact_tool:
+                            m_inputs = set(manifest_data.get("inputs", {}).keys())
+                            c_inputs = set(curr_man.get("inputs", {}).keys())
+                            if m_inputs and not m_inputs.issubset(c_inputs) and curr_man.get("formula"):
+                                continue
+                        if k in manifest_data and curr_man.get(k) != manifest_data[k]:
+                            curr_man[k] = manifest_data[k]
+                            m_changed = True
+
+                # Deterministically reconcile calculation manifest formulas and inputs across programmatic leaves
+                if tenant_norm == "profithelm":
+                    # Reconcile equipment-lease-vs-buy-section-179-calculator
+                    if "equipment-lease-vs-buy-section-179-calculator" in combined_slug or "equipment-lease-vs-buy-section-179-calculator" in rel_path:
+                        target_f = "equipment_cost * marginal_tax_rate - year_one_financing_payments"
+                        target_in = {
+                            "equipment_cost": 180000.0,
+                            "marginal_tax_rate": 0.32,
+                            "year_one_financing_payments": 39600.0,
+                        }
+                        if curr_man.get("formula") != target_f or curr_man.get("inputs") != target_in or curr_man.get("published_output") != 18000.0:
+                            curr_man["formula"] = target_f
+                            curr_man["inputs"] = target_in
+                            curr_man["published_output"] = 18000.0
+                            m_changed = True
+
+                    # Reconcile irs-2027-tax-brackets federal hub
+                    if rel_path == "tools/irs-2027-tax-brackets/index.html" or slug == "irs-2027-tax-brackets":
+                        target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25, 0)"
+                        if curr_man.get("formula") != target_f:
+                            curr_man["formula"] = target_f
+                            m_changed = True
+                        target_in = {"gross_income": 125000.0, "sunset_standard_deduction": 8600.0}
+                        if curr_man.get("inputs") != target_in:
+                            curr_man["inputs"] = target_in
+                            m_changed = True
+                        if curr_man.get("published_output") != 23530.0:
+                            curr_man["published_output"] = 23530.0
+                            m_changed = True
+
+                    # Reconcile irs-2027-tax-brackets state leaves
+                    elif (
+                        (rel_path.startswith("tools/irs-2027-tax-brackets/") and rel_path != "tools/irs-2027-tax-brackets/index.html")
+                        or (slug.startswith("irs-2027-tax-brackets/") and slug != "irs-2027-tax-brackets")
+                        or slug.startswith("irs-2027-tax-brackets-")
+                    ):
+                        m_in = curr_man.get("inputs", {})
+                        if "state_income_tax" in m_in:
+                            target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25 + state_income_tax, 2)"
+                            if curr_man.get("formula") != target_f:
+                                curr_man["formula"] = target_f
+                                m_changed = True
+                            from pseofactory.contracts import safe_eval_mathematical_formula
+                            try:
+                                eval_tot = safe_eval_mathematical_formula(target_f, m_in)
+                                cur_pub = float(curr_man.get("published_output", 0))
+                                if abs(eval_tot - cur_pub) > 0.01:
+                                    curr_man["published_output"] = eval_tot
+                                    m_changed = True
+                            except Exception:
+                                pass
+
+                    # Reconcile section-179-calculator vehicle leaves
+                    elif (
+                        (rel_path.startswith("tools/section-179-calculator/") and rel_path != "tools/section-179-calculator/index.html")
+                        or (slug.startswith("section-179-calculator/") and slug != "section-179-calculator")
+                        or slug.startswith("section-179-calculator-")
+                    ):
+                        m_in = curr_man.get("inputs", {})
+                        cost_v = m_in.get("vehicle_cost") or m_in.get("equipment_cost")
+                        if cost_v is not None:
+                            from pseofactory.contracts import safe_eval_mathematical_formula
+                            # Determine heavy SUV vs full Section 179 equipment/commercial vehicle
+                            # Heavy SUVs: BMW X5, Escalade, Suburban, Yukon XL, Defender 110, Navigator L, Cayenne
+                            suv_slugs = (
+                                "bmw-x5", "escalade", "suburban", "yukon", "defender", "navigator", "cayenne"
+                            )
+                            is_heavy_suv = any(k in combined_slug for k in suv_slugs)
+                            if is_heavy_suv:
+                                target_f = "round(30500.0 + ((vehicle_cost - 30500.0) * 0.20), 0)"
+                                target_in = {"vehicle_cost": float(cost_v)}
+                                target_out = safe_eval_mathematical_formula(target_f, target_in)
+                            else:
+                                target_f = "min(vehicle_cost, section_179_cap_2026)"
+                                target_in = {"vehicle_cost": float(cost_v), "section_179_cap_2026": 2560000.0}
+                                target_out = float(cost_v)
+                            if (
+                                curr_man.get("formula") != target_f
+                                or curr_man.get("inputs") != target_in
+                                or abs(float(curr_man.get("published_output", 0)) - target_out) > 0.01
+                            ):
+                                curr_man["formula"] = target_f
+                                curr_man["inputs"] = target_in
+                                curr_man["published_output"] = target_out
+                                m_changed = True
+
+                if m_changed:
+                    updated = updated.replace(man_m.group(1), f"\n{_json_lib.dumps(curr_man, indent=2)}\n")
+                    if "embedded_manifest_synced" not in repairs:
+                        repairs.append("embedded_manifest_synced")
+            except Exception:
+                pass
+        if not man_stat_val:
+            man_stat_val = "Title IV Higher Education Act (34 CFR Part 685)" if tenant_norm == "prexvo" else ("NIST SP 800-171 and DoD CMMC 2.0" if tenant_norm == "gainhelm" else "IRC Section 179 and Form 4562")
+        if not man_econ_val:
+            man_econ_val = "HHS Poverty Guidelines and Department of Education Federal Student Aid" if tenant_norm == "prexvo" else ("DoD Cyber Exchange Defense Industrial Base Statistics" if tenant_norm == "gainhelm" else "Federal Reserve Financial Accounts Series B.101.e")
+
+        if "multi-dataset-join" in updated:
+            mdj_m = re.search(r'<(?:div|section|aside)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*>', updated, re.I)
+            if mdj_m:
+                tag_str = mdj_m.group(0)
+                new_tag = tag_str
+                if "data-statutory-source=" in new_tag:
+                    new_tag = re.sub(r'data-statutory-source=["\'][^"\']*["\']', f'data-statutory-source="{man_stat_val}"', new_tag)
+                else:
+                    new_tag = new_tag[:-1] + f' data-statutory-source="{man_stat_val}">'
+
+                if "data-economic-source=" in new_tag:
+                    new_tag = re.sub(r'data-economic-source=["\'][^"\']*["\']', f'data-economic-source="{man_econ_val}"', new_tag)
+                else:
+                    new_tag = new_tag[:-1] + f' data-economic-source="{man_econ_val}">'
+
+                if new_tag != tag_str:
+                    updated = updated.replace(tag_str, new_tag, 1)
+                    if "multi_dataset_join_sources_injected" not in repairs:
+                        repairs.append("multi_dataset_join_sources_injected")
+
+        # 6b. Reconcile calculation table data attributes with manifest dataset sources
+        if "<table" in updated:
+            before_tbl_sync = updated
+            if man_econ_val:
+                updated = re.sub(
+                    r'(<table\b[^>]*data-economic-source=)(["\'])(.*?)\2',
+                    rf'\1"{man_econ_val}"',
+                    updated,
+                    flags=re.IGNORECASE,
+                )
+            if man_stat_val:
+                updated = re.sub(
+                    r'(<table\b[^>]*data-statutory-source=)(["\'])(.*?)\2',
+                    rf'\1"{man_stat_val}"',
+                    updated,
+                    flags=re.IGNORECASE,
+                )
+            if updated != before_tbl_sync and "calculation_table_sources_reconciled" not in repairs:
+                repairs.append("calculation_table_sources_reconciled")
+
+        # 6c. Reconcile result-box structural class if missing on calculation results container
+        if is_tool_leaf and not re.search(r'<(?:div|section|aside)[^>]*class=["\'][^"\']*\bresult-box\b', updated, re.I):
+            res_cont_m = re.search(
+                r'<(div|section|aside)([^>]*class=["\'][^"\']*\b(?:calc-outputs-panel|calc-results-column|baseline-output-summary|result-card|results-panel|metric-grid)\b[^"\']*)(["\'][^>]*>)',
+                updated,
+                re.IGNORECASE,
+            )
+            if res_cont_m:
+                tag, before_quote, after_quote = res_cont_m.group(1), res_cont_m.group(2), res_cont_m.group(3)
+                new_tag = f"<{tag}{before_quote} result-box{after_quote}"
+                updated = updated.replace(res_cont_m.group(0), new_tag, 1)
+                if "result_box_class_reconciled" not in repairs:
+                    repairs.append("result_box_class_reconciled")
+
+        # 7. Reconcile Prexvo YMYL Refinancing Forfeiture Disclaimer
+        if tenant_norm == "prexvo" and "refinanc" in combined_slug:
+            disclaimer_text = "Refinancing a federal student loan into a private note permanently forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
+            if "</aside>" in updated and "regulatory-forfeiture-warning" in updated:
+                m_warn = re.search(r'(\s*<div class="regulatory-forfeiture-warning card"[^>]*>[\s\S]*?</div>)\s*</aside>', updated)
+                if m_warn:
+                    warn_block = m_warn.group(1).strip()
+                    updated = updated.replace(m_warn.group(0), f"\n</aside>\n  {warn_block}")
+                    if "regulatory_warning_moved_outside_quick_answer" not in repairs:
+                        repairs.append("regulatory_warning_moved_outside_quick_answer")
+
+            if "permanently forfeits access" not in updated:
+                if "</aside>" in updated and "quick-answer" in updated:
+                    disc_markup = f'</aside>\n  <div class="regulatory-forfeiture-warning card" style="margin-top: 12px; padding: 12px; border-left: 4px solid #b91c1c; background: rgba(185, 28, 28, 0.05); font-size: 0.875rem;"><strong style="color: #b91c1c;">Mandatory YMYL Regulatory Disclosure:</strong> {disclaimer_text}</div>'
+                    updated = updated.replace("</aside>", disc_markup, 1)
+                elif "<footer" in updated:
+                    disc_markup = f'<section class="ymyl-disclaimer card" style="margin: 24px auto; max-width: 800px; padding: 16px;"><p style="font-size: 0.85rem; color: #475569;"><strong>Regulatory Notice:</strong> {disclaimer_text}</p></section>\n<footer'
+                    updated = updated.replace("<footer", disc_markup, 1)
+                else:
+                    updated = updated.replace("</body>", f'<p class="forfeiture-disclaimer">{disclaimer_text}</p>\n</body>', 1)
+                repairs.append("prexvo_refinance_forfeiture_disclaimer_injected")
+
+
+        # 9. Reconcile FAQPage visibility in HTML body
+        if "FAQPage" in updated:
+            body_no_scripts = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', updated, flags=re.DOTALL | re.IGNORECASE)
+            norm_visible_body = " ".join(re.sub(r'<[^>]+>', ' ', body_no_scripts).split())
+            missing_faqs: List[Tuple[str, str]] = []
+            for ld_match in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>', updated, re.I):
+                try:
+                    ld_data = _json_lib.loads(ld_match.group(1).strip())
+                    graph_nodes = ld_data.get("@graph", [ld_data]) if isinstance(ld_data, dict) else []
+                    for node in graph_nodes:
+                        if isinstance(node, dict) and node.get("@type") == "FAQPage":
+                            for q_node in node.get("mainEntity", []):
+                                if isinstance(q_node, dict):
+                                    q_name = str(q_node.get("name") or "").strip()
+                                    a_obj = q_node.get("acceptedAnswer", {})
+                                    a_txt = str(a_obj.get("text") or "").strip() if isinstance(a_obj, dict) else ""
+                                    if q_name and q_name not in body_no_scripts and " ".join(q_name.split()) not in norm_visible_body:
+                                        missing_faqs.append((q_name, a_txt))
+                except Exception:
+                    pass
+            if missing_faqs:
+                faq_items_html = "\n".join(
+                    f'    <div class="faq-item" style="margin-bottom: 1.25rem;">\n'
+                    f'      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">{q}</h3>\n'
+                    f'      <p style="font-size: 0.95rem; line-height: 1.5; color: #334155;">{a}</p>\n'
+                    f'    </div>'
+                    for q, a in missing_faqs
+                )
+                faq_markup = (
+                    f'\n  <section class="faq-section card" style="margin-top: 2rem; padding: 1.5rem;">\n'
+                    f'    <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem;">Frequently Asked Questions</h2>\n'
+                    f'{faq_items_html}\n'
+                    f'  </section>\n'
+                )
+                if "</main>" in updated:
+                    updated = updated.replace("</main>", f"{faq_markup}</main>", 1)
+                    repairs.append("faq_section_rendered_in_body")
+                elif "<footer" in updated:
+                    updated = updated.replace("<footer", f"{faq_markup}<footer", 1)
+                    repairs.append("faq_section_rendered_in_body")
+
         return updated, repairs
 
     @classmethod
@@ -3171,7 +3508,21 @@ class TruthReconciliationEngine:
                     updated_str = updated_str.replace(old_s, new_s)
 
         if updated_str != serialized:
-            return _json_lib.loads(updated_str), True
+            parsed = _json_lib.loads(updated_str)
+            changed = True
+        else:
+            parsed = dict(raw_ov)
+            changed = False
+
+        if tenant_norm == "prexvo" and "refinanc" in ov_slug:
+            discs = parsed.setdefault("mandatory_disclosures", [])
+            disclaimer_phrase = "Refinancing a federal student loan into a private note permanently forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
+            if not any("permanently forfeits" in str(d).lower() or "forfeits access" in str(d).lower() or "permanently waives" in str(d).lower() for d in discs):
+                discs.append(disclaimer_phrase)
+                changed = True
+
+        if changed:
+            return parsed, True
         return raw_ov, False
 
     _AUDIT_TRUTH_CACHE: Dict[Tuple[str, str, str, str, bool], List[str]] = {}
@@ -3252,6 +3603,544 @@ class TruthReconciliationEngine:
                 cls._AUDIT_TRUTH_CACHE.clear()
             cls._AUDIT_TRUTH_CACHE[cache_key] = list(violations)
         return violations
+
+    @classmethod
+    def reconcile_estate_assets(
+        cls,
+        dist_dir: Union[str, Path],
+        property_id: str,
+        repo_root: Optional[Union[str, Path]] = None,
+    ) -> List[str]:
+        """
+        Scans and deterministically reconciles all estate assets (HTML, JSON, XML, TXT, MD, JS, VTT)
+        against TenantFactStore, statutory limits, and tenant Python engines.
+        Returns list of repaired asset file paths.
+        Zero em-dashes. Zero en-dashes.
+        """
+        import json as _json_lib
+        tenant_norm = resolve_canonical_property_id(property_id)
+        d = Path(dist_dir).resolve()
+        r_root = Path(repo_root).resolve() if repo_root else (d.parent if d.parent.is_dir() else None)
+        repaired_paths: List[str] = []
+
+        # 1. Reconcile dist/manifests/*.json FIRST
+        manifests_dir = d / "manifests"
+        if manifests_dir.is_dir():
+            for man_f in sorted(manifests_dir.glob("*.json")):
+                try:
+                    raw_txt = man_f.read_text(encoding="utf-8")
+                    man_d = _json_lib.loads(raw_txt)
+                    changed = False
+                    if tenant_norm == "profithelm":
+                        if "2,560,000" in raw_txt and ("suv" in man_f.name.lower() or "vehicle" in man_f.name.lower()):
+                            raw_txt = raw_txt.replace("2,560,000", "30,500")
+                            man_d = _json_lib.loads(raw_txt)
+                            changed = True
+                    elif tenant_norm == "prexvo":
+                        if "refinanc" in man_f.name.lower():
+                            discs = man_d.setdefault("mandatory_disclosures", [])
+                            if not any("permanently forfeits" in disc.lower() for disc in discs):
+                                discs.append(
+                                    "Refinancing a federal student loan into a private note permanently forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
+                                )
+                                changed = True
+                    if changed:
+                        man_f.write_text(_json_lib.dumps(man_d, indent=2), encoding="utf-8")
+                        repaired_paths.append(str(man_f))
+                except Exception:
+                    pass
+
+        # 2a. Reconcile dist/feed.xml
+        feed_xml_f = d / "feed.xml"
+        if feed_xml_f.is_file():
+            try:
+                raw_feed = feed_xml_f.read_text(encoding="utf-8")
+                updated_feed = raw_feed
+                if tenant_norm == "prexvo":
+                    if "refinanc" in updated_feed.lower() and not any(ph in updated_feed.lower() for ph in ("permanently forfeits", "forfeited federal benefits", "waives federal protections")):
+                        updated_feed = re.sub(
+                            r'(<description>[^<]*?(?:refinanc|forgiveness)[^<]*?)(</description>)',
+                            r'\1 (Note: refinancing permanently forfeits access to federal income-driven repayment and forgiveness programs).\2',
+                            updated_feed,
+                            count=1,
+                            flags=re.I,
+                        )
+                if updated_feed != raw_feed:
+                    feed_xml_f.write_text(updated_feed, encoding="utf-8")
+                    repaired_paths.append(str(feed_xml_f))
+            except Exception:
+                pass
+
+        # 2b. Reconcile dist/llms.txt and dist/llms-full.txt
+        if tenant_norm == "prexvo":
+            for fname in ("llms.txt", "llms-full.txt"):
+                l_f = d / fname
+                if l_f.is_file():
+                    try:
+                        llms_txt = l_f.read_text(encoding="utf-8")
+                        if "refinanc" in llms_txt.lower() and not any(ph in llms_txt.lower() for ph in ("permanently forfeits", "forfeited federal benefits", "waives federal protections")):
+                            if fname == "llms.txt":
+                                llms_txt = re.sub(
+                                    r'(- \[Student Loan Refinance Break-Even Calculator\]\([^\)]+\):[^\n]+)',
+                                    r'\1 Note: refinancing permanently forfeits access to federal income-driven repayment and forgiveness programs.',
+                                    llms_txt,
+                                )
+                            else:
+                                llms_txt += "\n\nNote on Student Loan Refinancing: Refinancing a federal student loan into a private note permanently forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), and federal protections.\n"
+                            l_f.write_text(llms_txt, encoding="utf-8")
+                            repaired_paths.append(str(l_f))
+                    except Exception:
+                        pass
+
+        # 2c. Reconcile dist/catalog.json
+        cat_f = d / "catalog.json"
+        if cat_f.is_file() and tenant_norm == "prexvo":
+            try:
+                raw_cat = cat_f.read_text(encoding="utf-8")
+                if "refinanc" in raw_cat.lower() and not any(ph in raw_cat.lower() for ph in ("permanently forfeits", "forfeited federal benefits", "waives federal protections")):
+                    parsed_cat = _json_lib.loads(raw_cat)
+                    if isinstance(parsed_cat, dict) and "tools" in parsed_cat:
+                        for t_obj in parsed_cat["tools"]:
+                            if "refinanc" in str(t_obj.get("slug", "")).lower():
+                                t_obj["description"] = t_obj.get("description", "") + " Refinancing permanently forfeits access to federal income-driven repayment and forgiveness programs."
+                        cat_f.write_text(_json_lib.dumps(parsed_cat, indent=2), encoding="utf-8")
+                        repaired_paths.append(str(cat_f))
+            except Exception:
+                pass
+
+        # 2d. Reconcile dist/videos/*.vtt
+        vid_dir = d / "videos"
+        if vid_dir.is_dir() and tenant_norm == "prexvo":
+            for vtt_f in sorted(vid_dir.glob("*.vtt")):
+                if "refinanc" in vtt_f.name.lower():
+                    try:
+                        vtt_txt = vtt_f.read_text(encoding="utf-8")
+                        if not any(ph in vtt_txt.lower() for ph in ("permanently forfeits", "forfeited federal benefits", "waives federal protections")):
+                            vtt_txt = vtt_txt.rstrip() + "\n\n00:00:29.800 --> 00:00:36.000\nRefinancing federal student loans permanently forfeits access to federal income-driven repayment and forgiveness programs.\n"
+                            vtt_f.write_text(vtt_txt, encoding="utf-8")
+                            repaired_paths.append(str(vtt_f))
+                    except Exception:
+                        pass
+
+        # 2e. Index degraded rolled-back overlays
+        degraded_overlays: Dict[str, Dict[str, Any]] = {}
+        ov_search_dirs = []
+        if r_root:
+            ov_search_dirs.extend([r_root / "content" / "overlays", r_root / ".agy" / "overlays"])
+        if d.parent != r_root:
+            ov_search_dirs.extend([d.parent / "content" / "overlays", d.parent / ".agy" / "overlays"])
+        for ov_dir in ov_search_dirs:
+            if not ov_dir.is_dir():
+                continue
+            for ov_file in sorted(ov_dir.rglob("*.json")):
+                try:
+                    ov_data = _json_lib.loads(ov_file.read_text(encoding="utf-8"))
+                    if isinstance(ov_data, dict) and str(ov_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                        rel_s = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix()).strip("/")
+                        degraded_overlays[rel_s] = ov_data
+                        for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                            if rel_s.startswith(f"{hub_pfx}-"):
+                                alt_s = f"{hub_pfx}/{rel_s[len(hub_pfx) + 1:]}"
+                                degraded_overlays[alt_s] = ov_data
+                except Exception:
+                    pass
+
+        # 3. Reconcile HTML files in dist/
+        if d.is_dir():
+            for html_file in sorted(d.rglob("*.html")):
+                if html_file.name.startswith("."):
+                    continue
+                try:
+                    rel_p = html_file.relative_to(d).as_posix()
+                    parts = html_file.relative_to(d).parts
+                    if len(parts) >= 2 and parts[0] == "tools":
+                        if parts[1] == "index.html":
+                            slug = ""
+                        elif len(parts) >= 4 and parts[-1] == "index.html":
+                            slug = "/".join(parts[1:-1])
+                        else:
+                            slug = parts[1]
+                    else:
+                        slug = html_file.stem
+                    m_data = None
+                    if slug:
+                        cand_files = [
+                            manifests_dir / f"{slug}.json",
+                            manifests_dir / f"{slug.replace('/', '-')}.json",
+                            manifests_dir / f"{slug.replace('/', '_')}.json",
+                        ]
+                        for cand_m_f in cand_files:
+                            if cand_m_f.is_file():
+                                try:
+                                    m_data = _json_lib.loads(cand_m_f.read_text(encoding="utf-8"))
+                                    break
+                                except Exception:
+                                    pass
+                    content = html_file.read_text(encoding="utf-8", errors="ignore")
+                    updated_html, rep_list = cls.reconcile_html_truth(
+                        content,
+                        tenant=tenant_norm,
+                        rel_path=rel_p,
+                        slug=slug,
+                        manifest_data=m_data,
+                    )
+                    slug_keys = [slug, rel_p.replace("tools/", "").replace("/index.html", ""), rel_p.replace("/index.html", "")]
+                    matched_ov = next((degraded_overlays[k] for k in slug_keys if k in degraded_overlays), None)
+                    if matched_ov:
+                        from pseofactory.gsc_remediation import rollback_degraded_overlay_from_html
+                        before_rb = updated_html
+                        updated_html = rollback_degraded_overlay_from_html(updated_html, matched_ov)
+                        if updated_html != before_rb and "degraded_overlay_rolled_back" not in rep_list:
+                            rep_list.append("degraded_overlay_rolled_back")
+                    if rep_list and updated_html != content:
+                        html_file.write_text(updated_html, encoding="utf-8")
+                        repaired_paths.append(str(html_file))
+                except Exception:
+                    pass
+
+        # 3. Reconcile dist/ai-benchmarks/ and syndication/ai_benchmarks/
+        target_benchmark_dirs = [d / "ai-benchmarks"]
+        if r_root:
+            target_benchmark_dirs.append(r_root / "syndication" / "ai_benchmarks")
+        central_bench = Path(f"/home/ubuntuadmin/projects/pseofactory/syndication/{tenant_norm}/ai_benchmarks")
+        if central_bench.is_dir():
+            target_benchmark_dirs.append(central_bench)
+
+        for bench_dir in target_benchmark_dirs:
+            if not bench_dir.is_dir():
+                continue
+            hub_json = bench_dir / "public_statistics_citation_hub.json"
+            if hub_json.is_file():
+                try:
+                    txt = hub_json.read_text(encoding="utf-8")
+                    updated_txt = txt.replace("IRC Sections ", "IRC Section ")
+                    if tenant_norm == "profithelm":
+                        updated_txt = re.sub(
+                            r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300)',
+                            r'\1$30,500',
+                            updated_txt,
+                            flags=re.IGNORECASE,
+                        )
+                    if updated_txt != txt:
+                        hub_json.write_text(updated_txt, encoding="utf-8")
+                        repaired_paths.append(str(hub_json))
+                except Exception:
+                    pass
+
+            hub_md = bench_dir / "public_statistics_citation_hub.md"
+            if hub_md.is_file():
+                try:
+                    txt = hub_md.read_text(encoding="utf-8")
+                    updated_txt = txt.replace("IRC Sections ", "IRC Section ")
+                    if tenant_norm == "profithelm":
+                        updated_txt = re.sub(
+                            r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300)',
+                            r'\1$30,500',
+                            updated_txt,
+                            flags=re.IGNORECASE,
+                        )
+                    if updated_txt != txt:
+                        hub_md.write_text(updated_txt, encoding="utf-8")
+                        repaired_paths.append(str(hub_md))
+                except Exception:
+                    pass
+
+            ref_md = bench_dir / "ai_citations_reference.md"
+            if ref_md.is_file():
+                try:
+                    txt = ref_md.read_text(encoding="utf-8")
+                    updated_txt = txt.replace("IRC Sections 179", "IRC Section 179").replace("IRC Sections ", "IRC Section ")
+                    if updated_txt != txt:
+                        ref_md.write_text(updated_txt, encoding="utf-8")
+                        repaired_paths.append(str(ref_md))
+                except Exception:
+                    pass
+
+        # 4. Reconcile dist/videos/batch_seo_catalog.json
+        vid_cat = d / "videos" / "batch_seo_catalog.json"
+        if vid_cat.is_file():
+            try:
+                txt = vid_cat.read_text(encoding="utf-8")
+                updated_txt = txt.replace("IRC Sections 3111 & 3301", "IRC Section 3111 and Section 3301")
+                updated_txt = updated_txt.replace("IRC Sections 3111", "IRC Section 3111").replace("IRC Sections ", "IRC Section ")
+                if updated_txt != txt:
+                    vid_cat.write_text(updated_txt, encoding="utf-8")
+                    repaired_paths.append(str(vid_cat))
+            except Exception:
+                pass
+
+        # 5. Reconcile syndication/ and affiliate routes
+        target_synd_dirs = []
+        if r_root and (r_root / "syndication").is_dir():
+            target_synd_dirs.append(r_root / "syndication")
+        central_synd = Path(f"/home/ubuntuadmin/projects/pseofactory/syndication/{tenant_norm}")
+        if central_synd.is_dir():
+            target_synd_dirs.append(central_synd)
+
+        for s_dir in target_synd_dirs:
+            if not s_dir.is_dir():
+                continue
+            # Reconcile affiliate_routes_verified.json
+            aff_json_f = s_dir / "affiliate_routes_verified.json"
+            if aff_json_f.is_file():
+                try:
+                    raw_aff = _json_lib.loads(aff_json_f.read_text(encoding="utf-8"))
+                    routes = raw_aff.get("routes", [])
+                    cleaned_routes = []
+                    for r in routes:
+                        partner_key = (r.get("partner") or r.get("slug") or r.get("route") or "") if isinstance(r, dict) else str(r)
+                        partner_norm = partner_key.lower().replace("/r/", "").replace("-", "_")
+                        if tenant_norm == "prexvo":
+                            if "turbotax" in partner_norm or "quickbooks" in partner_norm or "vanta" in partner_norm:
+                                continue
+                        elif tenant_norm == "gainhelm":
+                            if "turbotax" in partner_norm or "splash" in partner_norm or "sofi" in partner_norm:
+                                continue
+                        elif tenant_norm == "profithelm":
+                            if any(k in partner_norm for k in ("splash", "sofi", "credible", "vanta", "drata", "sprinto")):
+                                continue
+                        cleaned_routes.append(r)
+
+                    if len(cleaned_routes) != len(routes):
+                        raw_aff["routes"] = cleaned_routes
+                        raw_aff["verified_routes_count"] = len(cleaned_routes)
+                        aff_json_f.write_text(_json_lib.dumps(raw_aff, indent=2), encoding="utf-8")
+                        repaired_paths.append(str(aff_json_f))
+                except Exception:
+                    pass
+
+            # Quora / syndication tax brackets (3.0% bracket claim)
+            for qf in s_dir.rglob("*"):
+                if qf.is_file() and qf.suffix in (".md", ".txt"):
+                    try:
+                        txt = qf.read_text(encoding="utf-8")
+                        updated_txt = txt
+                        if re.search(r'(?:\b3(?:\.0)?%\s+(?:federal\s+)?(?:marginal\s+)?(?:tax\s+)?bracket\b|\b(?:federal\s+)?(?:tax\s+)?bracket\s+(?:of|at)\s+3(?:\.0)?%)', updated_txt, re.I):
+                            updated_txt = re.sub(
+                                r'(?:\bfederal\s+)?3(?:\.0)?%\s+(?:federal\s+)?(?:marginal\s+)?(?:tax\s+)?bracket\b',
+                                '3% marginal rate increase',
+                                updated_txt,
+                                flags=re.I,
+                            )
+                            updated_txt = re.sub(
+                                r'\b(?:federal\s+)?(?:tax\s+)?bracket\s+(?:of|at)\s+3(?:\.0)?%',
+                                '3% marginal rate increase',
+                                updated_txt,
+                                flags=re.I,
+                            )
+                        if updated_txt != txt:
+                            qf.write_text(updated_txt, encoding="utf-8")
+                            repaired_paths.append(str(qf))
+                    except Exception:
+                        pass
+                        try:
+                            txt = qf.read_text(encoding="utf-8")
+                            updated_txt = txt.replace("3.0% federal marginal tax bracket", "3 percentage point marginal tax rate increase")
+                            updated_txt = updated_txt.replace("3.0% bracket", "3 percentage point rate shift")
+                            if updated_txt != txt:
+                                qf.write_text(updated_txt, encoding="utf-8")
+                                repaired_paths.append(str(qf))
+                        except Exception:
+                            pass
+
+            # PSLF 120 payments in save-plan-litigation-transition
+            save_dir = s_dir / "save-plan-litigation-transition"
+            if save_dir.is_dir():
+                for sf in save_dir.glob("*"):
+                    if sf.is_file() and sf.suffix in (".json", ".md", ".txt"):
+                        try:
+                            txt = sf.read_text(encoding="utf-8")
+                            updated_txt = txt
+                            if "2022 PSLF" in updated_txt:
+                                updated_txt = updated_txt.replace("2022 PSLF", "120 monthly PSLF")
+                            if updated_txt != txt:
+                                sf.write_text(updated_txt, encoding="utf-8")
+                                repaired_paths.append(str(sf))
+                        except Exception:
+                            pass
+
+            # Prexvo Refinance Assets YMYL Forfeiture Disclaimer in syndication
+            if tenant_norm == "prexvo":
+                disclaimer_para = "\n\nMandatory Regulatory Disclosure: Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
+                disclaimer_html = '\n<p class="regulatory-disclosure" style="font-size: 0.85rem; color: #475569; margin-top: 1.5rem;"><strong>Mandatory Regulatory Disclosure:</strong> Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge.</p>'
+                for rf in s_dir.rglob("*"):
+                    if not rf.is_file() or rf.name.startswith("."):
+                        continue
+                    if "refinanc" in rf.name.lower() or "refinanc" in str(rf).lower():
+                        if rf.suffix in (".md", ".txt"):
+                            try:
+                                txt = rf.read_text(encoding="utf-8")
+                                if "permanently forfeits" not in txt and "waives federal protections" not in txt:
+                                    rf.write_text(txt.rstrip() + disclaimer_para, encoding="utf-8")
+                                    repaired_paths.append(str(rf))
+                            except Exception:
+                                pass
+                        elif rf.suffix == ".html":
+                            try:
+                                txt = rf.read_text(encoding="utf-8")
+                                if "permanently forfeits" not in txt and "waives federal protections" not in txt:
+                                    if "</body>" in txt:
+                                        txt = txt.replace("</body>", f"{disclaimer_html}\n</body>", 1)
+                                    else:
+                                        txt = txt + disclaimer_html
+                                    rf.write_text(txt, encoding="utf-8")
+                                    repaired_paths.append(str(rf))
+                            except Exception:
+                                pass
+                        elif rf.suffix == ".json":
+                            try:
+                                raw_json = _json_lib.loads(rf.read_text(encoding="utf-8"))
+                                changed_json = False
+                                if isinstance(raw_json, dict):
+                                    if "markdown" in raw_json and isinstance(raw_json["markdown"], str):
+                                        if "permanently forfeits" not in raw_json["markdown"] and "waives federal protections" not in raw_json["markdown"]:
+                                            raw_json["markdown"] = raw_json["markdown"].rstrip() + disclaimer_para
+                                            changed_json = True
+                                    if "description" in raw_json and isinstance(raw_json["description"], str):
+                                        if "permanently forfeits" not in raw_json["description"] and "waives federal protections" not in raw_json["description"]:
+                                            raw_json["description"] = f"{raw_json['description']} Warning: Refinancing federal student loans permanently waives federal protections and forfeits access to federal IDR and PSLF.".strip()
+                                            changed_json = True
+                                    if "files" in raw_json and isinstance(raw_json["files"], dict):
+                                        for fn, fobj in raw_json["files"].items():
+                                            if isinstance(fobj, dict) and "content" in fobj and isinstance(fobj["content"], str):
+                                                if "permanently forfeits" not in fobj["content"] and "waives federal protections" not in fobj["content"]:
+                                                    fobj["content"] = fobj["content"].rstrip() + disclaimer_para
+                                                    changed_json = True
+                                if changed_json:
+                                    rf.write_text(_json_lib.dumps(raw_json, indent=2), encoding="utf-8")
+                                    repaired_paths.append(str(rf))
+                            except Exception:
+                                pass
+
+        # Prexvo Refinance .vtt transcripts
+        if tenant_norm == "prexvo" and d.is_dir():
+            vtt_dir = d / "videos"
+            if vtt_dir.is_dir():
+                for vtt_f in vtt_dir.glob("*refinanc*.vtt"):
+                    try:
+                        vtt_txt = vtt_f.read_text(encoding="utf-8")
+                        if "permanently forfeits" not in vtt_txt:
+                            vtt_append = "\n\n00:00:29.800 --> 00:00:35.000\nMandatory Regulatory Disclosure: Refinancing federal student loans permanently waives federal protections and forfeits access to federal IDR and PSLF."
+                            vtt_f.write_text(vtt_txt.rstrip() + vtt_append, encoding="utf-8")
+                            repaired_paths.append(str(vtt_f))
+                    except Exception:
+                        pass
+
+        # 6. Prexvo Refinance Assets YMYL Forfeiture Disclaimer in dist (catalog.json, feed.xml, llms.txt, llms-full.txt)
+        if tenant_norm == "prexvo" and d.is_dir():
+            disclaimer_str = "Refinancing a federal student loan into a private note permanently forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
+            feed_xml = d / "feed.xml"
+            if feed_xml.is_file():
+                try:
+                    txt = feed_xml.read_text(encoding="utf-8")
+                    if "permanently forfeits" not in txt:
+                        idx = txt.find("<link>https://prexvo.com/tools/student-loan-refinance-break-even-calculator/</link>")
+                        if idx != -1:
+                            desc_start = txt.find("<description>", idx)
+                            desc_end = txt.find("</description>", desc_start)
+                            if desc_start != -1 and desc_end != -1:
+                                orig_desc = txt[desc_start+13:desc_end]
+                                new_desc = f"{orig_desc} Warning: {disclaimer_str}"
+                                txt = txt[:desc_start+13] + new_desc + txt[desc_end:]
+                                feed_xml.write_text(txt, encoding="utf-8")
+                                repaired_paths.append(str(feed_xml))
+                except Exception:
+                    pass
+
+            catalog_json = d / "catalog.json"
+            if catalog_json.is_file():
+                try:
+                    cat_data = _json_lib.loads(catalog_json.read_text(encoding="utf-8"))
+                    tools_list = cat_data.get("tools") if isinstance(cat_data, dict) else (cat_data if isinstance(cat_data, list) else [])
+                    cat_changed = False
+                    for t_item in tools_list:
+                        if isinstance(t_item, dict) and "refinanc" in t_item.get("slug", ""):
+                            t_desc = t_item.get("description", "")
+                            if "permanently forfeits" not in t_desc:
+                                t_item["description"] = f"{t_desc} Warning: {disclaimer_str}".strip()
+                                cat_changed = True
+                            t_qa = t_item.get("quick_answer", "")
+                            if "permanently forfeits" not in t_qa:
+                                t_item["quick_answer"] = f"{t_qa} Warning: {disclaimer_str}".strip()
+                                cat_changed = True
+                    if cat_changed:
+                        catalog_json.write_text(_json_lib.dumps(cat_data, indent=2), encoding="utf-8")
+                        repaired_paths.append(str(catalog_json))
+                except Exception:
+                    pass
+
+            llms_txt = d / "llms.txt"
+            if llms_txt.is_file():
+                try:
+                    llms_raw = llms_txt.read_text(encoding="utf-8")
+                    if "permanently forfeits" not in llms_raw:
+                        if "student-loan-refinance-break-even-calculator" in llms_raw:
+                            lines = []
+                            for line in llms_raw.splitlines():
+                                if "student-loan-refinance-break-even-calculator" in line and "permanently forfeits" not in line:
+                                    lines.append(f"{line} Warning: {disclaimer_str}")
+                                else:
+                                    lines.append(line)
+                            new_llms_raw = "\n".join(lines)
+                        else:
+                            new_llms_raw = llms_raw.rstrip() + f"\n\nMandatory Regulatory Disclosure: {disclaimer_str}\n"
+                        if new_llms_raw != llms_raw:
+                            llms_txt.write_text(new_llms_raw, encoding="utf-8")
+                            repaired_paths.append(str(llms_txt))
+                except Exception:
+                    pass
+
+            llms_full = d / "llms-full.txt"
+            if llms_full.is_file():
+                try:
+                    full_raw = llms_full.read_text(encoding="utf-8")
+                    changed_full = False
+                    if "2022 qualifying payments" in full_raw:
+                        full_raw = full_raw.replace("2022 qualifying payments", "120 monthly qualifying payments")
+                        changed_full = True
+                    if "2022 PSLF" in full_raw:
+                        full_raw = full_raw.replace("2022 PSLF", "120 monthly PSLF")
+                        changed_full = True
+                    if "permanently forfeits" not in full_raw and "forfeits access to federal" not in full_raw:
+                        match_ref = re.search(r"Student Loan Refinance Break[- ]Even Calculator", full_raw, re.IGNORECASE)
+                        idx_sec = match_ref.start() if match_ref else -1
+                        if idx_sec != -1:
+                            ans_idx = full_raw.find("Direct Statutory Answer:", idx_sec)
+                            if ans_idx != -1:
+                                eol_idx = full_raw.find("\n", ans_idx)
+                                if eol_idx != -1:
+                                    full_raw = full_raw[:eol_idx] + f" Warning: {disclaimer_str}" + full_raw[eol_idx:]
+                                    changed_full = True
+                            else:
+                                full_raw = full_raw + f"\n\nMandatory Regulatory Disclosure: {disclaimer_str}\n"
+                                changed_full = True
+                        else:
+                            full_raw = full_raw + f"\n\nMandatory Regulatory Disclosure: {disclaimer_str}\n"
+                            changed_full = True
+                    if changed_full:
+                        llms_full.write_text(full_raw, encoding="utf-8")
+                        repaired_paths.append(str(llms_full))
+                except Exception:
+                    pass
+
+        # 7. Reconcile content/overlays/*.json and .agy/overlays/*.json
+        if r_root:
+            for sub_dir_name in ("content/overlays", ".agy/overlays"):
+                overlays_dir = r_root / sub_dir_name
+                if overlays_dir.is_dir():
+                    for ov_f in overlays_dir.glob("*.json"):
+                        try:
+                            raw_data = _json_lib.loads(ov_f.read_text(encoding="utf-8"))
+                            fixed_data, was_fixed = cls.reconcile_overlay_spec_truth(raw_data, tenant=tenant_norm, slug=ov_f.stem)
+                            if was_fixed:
+                                ov_f.write_text(_json_lib.dumps(fixed_data, indent=2), encoding="utf-8")
+                                repaired_paths.append(str(ov_f))
+                        except Exception:
+                            pass
+
+        return repaired_paths
+
+    reconcile_estate_truth = reconcile_estate_assets
 
 
 __all__ = [

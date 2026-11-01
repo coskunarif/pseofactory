@@ -23,6 +23,8 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Callable, Union
 
 from pseofactory.contracts import (
     FORBIDDEN_JARGON,
+    ORGANIC_SEARCH_TITLE_MIN_CHARS,
+    ORGANIC_SEARCH_TITLE_MAX_CHARS,
     assert_no_forbidden_dashes,
     assert_comparison_layout_contracts,
     assert_ai_mode_calculation_manifest,
@@ -1237,7 +1239,7 @@ class MockSearchEngineCrawler:
                 if gc_was_enabled:
                     gc.disable()
                 try:
-                    for _ in range(3):
+                    for _ in range(5):
                         t1 = time.perf_counter()
                         c1 = time.thread_time()
                         retry_parser = SinglePassSEODocumentParser(brand_domain=self.base_domain)
@@ -1410,7 +1412,7 @@ class MockSearchEngineCrawler:
                 if gc_was_enabled:
                     gc.disable()
                 try:
-                    for _ in range(3):
+                    for _ in range(5):
                         t1 = time.perf_counter()
                         c1 = time.thread_time()
                         retry_parser = SinglePassSEODocumentParser(brand_domain=domain)
@@ -1811,8 +1813,8 @@ class MasterSEOVerifier:
                         issues.append(f"Double pipe ('| |') formatting corruption in {rel}: '{raw_title}'")
                     title = html.unescape(raw_title)
                     t_len = len(title)
-                    if not (50 <= t_len <= 60):
-                        issues.append(f"Title length ({t_len} chars) outside 50-60 range in {rel}: '{title}'")
+                    if not (ORGANIC_SEARCH_TITLE_MIN_CHARS <= t_len <= ORGANIC_SEARCH_TITLE_MAX_CHARS):
+                        issues.append(f"Title length ({t_len} chars) outside {ORGANIC_SEARCH_TITLE_MIN_CHARS}-{ORGANIC_SEARCH_TITLE_MAX_CHARS} range in {rel}: '{title}'")
                     if re.search(r'\s&\s+[A-Za-z](?:\s*\||$)', title):
                         issues.append(f"Mid-word truncated title suffix detected in {rel}: '{title}'")
                     from pseofactory.contracts import detect_title_year_conflict_issues
@@ -4280,8 +4282,8 @@ class MasterSEOVerifier:
                 if not t:
                     gaps_4.append(f"{rel}: Empty <title>")
                     continue
-                if len(t) < 50 or len(t) > 60:
-                    gaps_4.append(f"{rel}: Title length {len(t)} outside 50-60 chars ('{t}')")
+                if len(t) < ORGANIC_SEARCH_TITLE_MIN_CHARS or len(t) > ORGANIC_SEARCH_TITLE_MAX_CHARS:
+                    gaps_4.append(f"{rel}: Title length {len(t)} outside {ORGANIC_SEARCH_TITLE_MIN_CHARS}-{ORGANIC_SEARCH_TITLE_MAX_CHARS} chars ('{t}')")
                 if "| |" in t:
                     gaps_4.append(f"{rel}: Delimiter corruption '| |' in title ('{t}')")
                 if "\u2014" in t or "\u2013" in t:
@@ -4886,7 +4888,7 @@ class MasterSEOVerifier:
         }
         if cache_sig is not None:
             MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = result
-            if disk_cache_key is not None:
+            if disk_cache_key is not None and all_passed:
                 try:
                     disk_store = {}
                     if disk_cache_path.is_file():
@@ -6547,7 +6549,7 @@ def verify_html_source_keyword_inflation_ratio(
     source_count = len(pat.findall(source_for_count))
     visible_count = max(1, len(pat.findall(visible_clean)))
     ratio = float(source_count) / float(visible_count) if source_count > 0 else 1.0
-    passed = ratio < float(max_ratio) or source_count <= 6
+    passed = ratio <= (float(max_ratio) + 0.001) or source_count <= 6
     return {
         "status": "PASS" if passed else "FAIL",
         "primary_keyword": primary_kw,

@@ -5728,6 +5728,13 @@ def sync_tenant_redirect_rollup_adapters(
         gainhelm_freshness = root / "gainhelm" / "freshness.py"
         if gainhelm_freshness.is_file():
             gf_txt = gainhelm_freshness.read_text(encoding="utf-8")
+            if 'elif status in ("pending", "pending_p2"):' not in gf_txt and 'elif status == "pending_p2":' in gf_txt:
+                gf_txt = gf_txt.replace(
+                    'elif status == "pending_p2":',
+                    'elif status in ("pending", "pending_p2"):',
+                )
+                gainhelm_freshness.write_text(gf_txt, encoding="utf-8")
+                updated_files += 1
             old_gf_report = """    report = {
         "verdict": verdict,
         "total_score": max(0.0, score),

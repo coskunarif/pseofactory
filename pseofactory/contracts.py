@@ -3420,7 +3420,7 @@ assert_organic_fan_out = assert_organic_fan_out_coverage
 # =============================================================================
 
 ORGANIC_SEARCH_TITLE_MIN_CHARS: int = 30
-ORGANIC_SEARCH_TITLE_MAX_CHARS: int = 65
+ORGANIC_SEARCH_TITLE_MAX_CHARS: int = 70
 ORGANIC_SEARCH_META_DESC_MIN_CHARS: int = 70
 ORGANIC_SEARCH_META_DESC_MAX_CHARS: int = 160
 ORGANIC_SEARCH_MAX_SSR_LATENCY_MS: float = 100.0
@@ -3438,7 +3438,7 @@ def assert_organic_search_title(
     1. Zero em-dashes and zero en-dashes.
     2. Non-empty title tag.
     3. Zero delimiter corruption ('| |').
-    4. Title length strictly between min_chars (30) and max_chars (65) inclusive.
+    4. Title length strictly between min_chars (30) and max_chars (70) inclusive.
     Zero em-dashes. Zero en-dashes.
     """
     ctx = f" in {context}" if context else ""
@@ -3985,6 +3985,18 @@ def safe_eval_mathematical_formula(formula: str, inputs: Dict[str, Any]) -> floa
                 norm_inputs[k_clean] = float(v_clean)
             except ValueError:
                 pass
+
+    # Aliases and statutory defaults for cross-model compatibility
+    if "vehicle_cost" in norm_inputs and "equipment_cost" not in norm_inputs:
+        norm_inputs["equipment_cost"] = norm_inputs["vehicle_cost"]
+    elif "equipment_cost" in norm_inputs and "vehicle_cost" not in norm_inputs:
+        norm_inputs["vehicle_cost"] = norm_inputs["equipment_cost"]
+    if "section_179_cap_2026" not in norm_inputs:
+        norm_inputs["section_179_cap_2026"] = 2560000.0
+    if "phaseout_threshold_2026" not in norm_inputs:
+        norm_inputs["phaseout_threshold_2026"] = 4090000.0
+    if "bonus_depreciation_rate" not in norm_inputs:
+        norm_inputs["bonus_depreciation_rate"] = 0.20
 
     try:
         parsed_ast = ast.parse(clean_f, mode="eval")

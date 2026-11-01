@@ -464,6 +464,7 @@ from pseofactory.maintenance import (
 )
 from pseofactory.supervisor import (
     AutonomousLifecycleSupervisor,
+    SupervisorDaemon,
     AsyncFleetCoordinator,
     AtomicStateLedger,
     HeartbeatTracker,
@@ -1001,6 +1002,7 @@ __all__ = [
     "MaintenanceLifecycle",
     "FleetMaintenanceCoordinator",
     "AutonomousLifecycleSupervisor",
+    "SupervisorDaemon",
     "AsyncFleetCoordinator",
     "AtomicStateLedger",
     "HeartbeatTracker",

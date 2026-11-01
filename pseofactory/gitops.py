@@ -4354,6 +4354,20 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             except Exception:
                 pass
 
+        gh_freshness = repo / "gainhelm" / "freshness.py"
+        if gh_freshness.is_file():
+            try:
+                gf_txt = gh_freshness.read_text(encoding="utf-8")
+                if 'elif status in ("pending", "pending_p2"):' not in gf_txt and 'elif status == "pending_p2":' in gf_txt:
+                    gf_txt = gf_txt.replace(
+                        'elif status == "pending_p2":',
+                        'elif status in ("pending", "pending_p2"):',
+                    )
+                    gh_freshness.write_text(gf_txt, encoding="utf-8")
+                    updated_files.append(str(gh_freshness))
+            except Exception:
+                pass
+
     return {
         "status": "PASS",
         "repo_path": str(repo),

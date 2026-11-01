@@ -971,7 +971,7 @@ class DepartmentHandoffChainVerifier:
 
             assets = adapter.list_assets()
             tool_htmls = [
-                a for a in assets if a.suffix == ".html" and "tools/" in a.relative_to(dist_dir).as_posix()
+                a for a in assets if a.suffix == ".html" and a.is_relative_to(dist_dir) and "tools/" in a.relative_to(dist_dir).as_posix()
             ]
             compiled_assets_by_tenant[pid] = len(assets)
             if len(tool_htmls) < 1:
@@ -2792,7 +2792,15 @@ class AutonomousLifecycleSupervisor:
                         if adapter.dist_dir and adapter.dist_dir.is_dir():
                             t_hashes: Dict[str, str] = {}
                             for a in adapter.list_assets():
-                                rel = a.relative_to(adapter.dist_dir).as_posix()
+                                rel = (
+                                    a.relative_to(adapter.dist_dir).as_posix()
+                                    if a.is_relative_to(adapter.dist_dir)
+                                    else (
+                                        a.relative_to(adapter.repo_path).as_posix()
+                                        if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
+                                        else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
+                                    )
+                                )
                                 fp = compute_asset_fingerprint(a)
                                 all_asset_hashes[f"{pid}/{rel}"] = fp
                                 t_hashes[rel] = fp
@@ -3014,3 +3022,63 @@ class AutonomousLifecycleSupervisor:
             current_tenant=None,
             consecutive_failures=self.consecutive_failures,
         )
+
+
+class SupervisorDaemon:
+    """
+    Autonomous Lifecycle Supervisor Daemon runner.
+    Provides run_once interface for orchestrating estate-wide maintenance cycles.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    @classmethod
+    def run_once(
+        cls,
+        workspace_root: Optional[Union[str, Path]] = None,
+        property_ids: Optional[List[str]] = None,
+        force: bool = False,
+        dry_run: bool = False,
+        enable_gitops: bool = False,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Executes a single autonomous supervisor cycle across tenants fail-closed."""
+        if not dry_run:
+            try:
+                from pseofactory.maintenance import TenantRegistry
+                from pseofactory.tenant_facts import TruthReconciliationEngine
+                reg = TenantRegistry.default()
+                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm"]
+                for pid in target_ids:
+                    try:
+                        adp = reg.get_adapter(pid)
+                        if adp and adp.dist_dir and adp.dist_dir.is_dir():
+                            TruthReconciliationEngine.reconcile_estate_assets(
+                                dist_dir=adp.dist_dir,
+                                property_id=pid,
+                                repo_root=getattr(adp, "repo_path", None) or adp.dist_dir.parent,
+                            )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        supervisor = AutonomousLifecycleSupervisor(workspace_root=workspace_root)
+        return supervisor.run_cycle(
+            property_ids=property_ids,
+            force=force,
+            dry_run=dry_run,
+            enable_gitops=enable_gitops,
+            **kwargs,
+        )
+
+
+__all__ = [
+    "AtomicStateLedger",
+    "HeartbeatTracker",
+    "DepartmentContract",
+    "DepartmentPipelineStateMachine",
+    "DepartmentHandoffChainVerifier",
+    "SupervisorFailureStreak",
+    "AsyncFleetCoordinator",
+    "AutonomousLifecycleSupervisor",
+    "SupervisorDaemon",
+]

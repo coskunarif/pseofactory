@@ -733,7 +733,24 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
     default_slug = os.environ.get("FACTORY_DEFAULT_TOOL_SLUG", "irs-2027-tax-brackets")
     default_title = os.environ.get("FACTORY_DEFAULT_TOOL_TITLE", "IRS 2027 Federal Income Tax Brackets & TCJA Sunset Rates")
     default_category = os.environ.get("FACTORY_DEFAULT_TOOL_CATEGORY", "Tax Intelligence")
-    default_affiliates = ["turbotax", "interactive_brokers"]
+
+    t_slug = ""
+    if isinstance(tool_or_slug, dict):
+        t_slug = str(tool_or_slug.get("slug") or "")
+    elif isinstance(tool_or_slug, str):
+        t_slug = tool_or_slug.strip()
+
+    prop_env = os.environ.get("PROPERTY_ID") or os.environ.get("TENANT_ID") or ""
+    property_id = resolve_canonical_property_id(prop_env, default=prop_env).lower() if prop_env else ""
+    is_prexvo = (property_id == "prexvo") or any(t.get("slug") == t_slug for t in PREXVO_DEFAULT_TOOLS)
+    is_gainhelm = (property_id == "gainhelm") or any(t.get("slug") == t_slug for t in GAINHELM_DEFAULT_TOOLS)
+
+    if is_prexvo:
+        default_affiliates = ["splash_financial", "sofi", "credible"]
+    elif is_gainhelm:
+        default_affiliates = ["vanta_security", "drata_compliance", "sprinto_compliance"]
+    else:
+        default_affiliates = ["turbotax", "interactive_brokers"]
 
     if not tool_or_slug:
         if TOOLS:
@@ -748,7 +765,7 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
             "primary_keyword": clean_t.lower(),
             "quick_answer": f"The {clean_t} model provides deterministic projections and statutory analysis.",
             "category": default_category,
-            "affiliates": ["turbotax", "taxslayer"],
+            "affiliates": list(default_affiliates),
         }
 
     if isinstance(tool_or_slug, dict):

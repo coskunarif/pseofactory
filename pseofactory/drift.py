@@ -714,7 +714,15 @@ def trigger_drift_cascade(
         all_asset_hashes: Dict[str, str] = {}
         for adapter in adapters:
             for a in adapter.list_assets():
-                rel = a.relative_to(adapter.dist_dir).as_posix()
+                rel = (
+                    a.relative_to(adapter.dist_dir).as_posix()
+                    if a.is_relative_to(adapter.dist_dir)
+                    else (
+                        a.relative_to(adapter.repo_path).as_posix()
+                        if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
+                        else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
+                    )
+                )
                 all_asset_hashes[f"{adapter.property_id}/{rel}"] = compute_asset_fingerprint(a)
         record_asset_ledger(l_path, asset_hashes=all_asset_hashes, engine_hash=current_engine_hash)
 
