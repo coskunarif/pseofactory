@@ -3032,6 +3032,118 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
         assert "runner test suite mutated runner dist/" not in rel_txt
 
 
+def test_worktree_harness_and_pipeline_audit_guardrails(tmp_path):
+    """
+    Verifies root-cause audit fixes:
+    1. worktree_harness.sh sweep and merge hold stale (>120m) worktrees with untracked files or unmerged commits.
+    2. worktree_harness.sh conflict quarantine preserves quarantine branch and clones standalone valid repo.
+    3. release_pipeline.sh coordinates Stage 3b pre-cascade audit, Stage 3b post-cascade latch, and unconditional Stage 7.2/7.4.
+    """
+    import os
+    import shutil
+    import subprocess
+    import time
+    from pathlib import Path
+
+    harness_path = Path("/home/ubuntuadmin/projects/.agy/worktree_harness.sh")
+    pipeline_path = Path("/home/ubuntuadmin/projects/.agy/release_pipeline.sh")
+    assert harness_path.is_file(), "Missing worktree_harness.sh"
+    assert pipeline_path.is_file(), "Missing release_pipeline.sh"
+
+    # --- Part 1: Harness Sweep & Merge Safety Gates on >120m Worktrees ---
+    test_repo = tmp_path / "repo_sweep_test"
+    test_repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=test_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=test_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.local"], cwd=test_repo, check=True)
+    (test_repo / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=test_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=test_repo, check=True)
+
+    wt_base = tmp_path / "worktrees"
+    wt_base.mkdir()
+    env = os.environ.copy()
+    env["AGY_WORKTREES_BASE"] = str(wt_base)
+
+    # Create worktree run_untracked
+    subprocess.run(["bash", str(harness_path), "create", str(test_repo), "run_untracked"], env=env, check=True)
+    wt_untracked = wt_base / "run_untracked"
+    assert wt_untracked.is_dir()
+    # Add untracked file
+    (wt_untracked / "new_file.txt").write_text("untracked work\n", encoding="utf-8")
+    # Backdate directory to be >120m old
+    past_time = time.time() - 8000
+    os.utime(wt_untracked, (past_time, past_time))
+
+    # Run sweep
+    sweep_out = subprocess.run(["bash", str(harness_path), "sweep", str(test_repo)], env=env, capture_output=True, text=True)
+    assert wt_untracked.is_dir(), "Worktree with untracked files MUST NOT be reaped by sweep"
+    assert "Holding worktree with uncommitted WIP edits" in sweep_out.stdout
+
+    # Now test unmerged commit holding: commit the file in worktree
+    subprocess.run(["git", "add", "new_file.txt"], cwd=wt_untracked, check=True)
+    subprocess.run(["git", "commit", "-m", "commit in wt"], cwd=wt_untracked, check=True)
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=wt_untracked, capture_output=True, text=True).stdout.strip() == ""
+    # Re-backdate
+    os.utime(wt_untracked, (past_time, past_time))
+    sweep_out2 = subprocess.run(["bash", str(harness_path), "sweep", str(test_repo)], env=env, capture_output=True, text=True)
+    assert wt_untracked.is_dir(), "Worktree with unmerged commits MUST NOT be reaped by sweep"
+    assert "Holding worktree with unmerged commits" in sweep_out2.stdout
+
+    # Clean up worktree for next test
+    subprocess.run(["bash", str(harness_path), "abort", str(test_repo), "run_untracked"], env=env, check=True)
+
+    # --- Part 2: Conflict Quarantine Standalone Git Repo & Branch Ref Preservation ---
+    subprocess.run(["bash", str(harness_path), "create", str(test_repo), "run_conflict"], env=env, check=True)
+    wt_conflict = wt_base / "run_conflict"
+    (wt_conflict / "README.md").write_text("conflict branch edit\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-am", "branch edit"], cwd=wt_conflict, check=True)
+
+    # Parent mainline conflict edit
+    (test_repo / "README.md").write_text("parent mainline edit\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-am", "mainline edit"], cwd=test_repo, check=True)
+
+    # Also add an untracked dirty file in worktree to verify it is preserved in quarantine
+    (wt_conflict / "draft_note.txt").write_text("uncommitted workpaper\n", encoding="utf-8")
+
+    # Attempt merge (must fail and quarantine)
+    merge_proc = subprocess.run(["bash", str(harness_path), "merge", str(test_repo), "run_conflict"], env=env, capture_output=True, text=True)
+    assert merge_proc.returncode != 0, "Merge with conflict must exit non-zero"
+
+    # Verify quarantine directory was materialized
+    quarantines = list(wt_base.glob("quarantine_run_conflict_*"))
+    assert len(quarantines) == 1, f"Expected 1 quarantine directory, found {quarantines}"
+    q_dir = quarantines[0]
+
+    # Verify standalone valid git repo in quarantine
+    is_git_repo = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=q_dir, capture_output=True, text=True).stdout.strip()
+    assert is_git_repo == "true", "Quarantine directory MUST be a valid standalone git repository"
+    # Verify .git is a directory, NOT a severed worktree pointer file
+    assert (q_dir / ".git").is_dir(), "Quarantine directory .git MUST be a real directory, not a severed pointer file"
+
+    # Verify git log and status succeed in quarantine
+    log_out = subprocess.run(["git", "log", "-5", "--oneline"], cwd=q_dir, capture_output=True, text=True).stdout
+    assert "branch edit" in log_out or "auto-save modified tracked" in log_out
+    assert (q_dir / "draft_note.txt").is_file(), "Untracked workpaper file MUST be preserved in quarantine"
+
+    # Verify quarantine branch was created and retained in parent repo
+    q_branches = subprocess.run(["git", "branch", "--list", "quarantine/agy-wt-run_conflict-*"], cwd=test_repo, capture_output=True, text=True).stdout.strip()
+    assert q_branches != "", "Quarantine branch ref MUST be retained in parent repository"
+
+    # --- Part 3: release_pipeline.sh Stage 3b & Stage 7 Structural Guarantees ---
+    pipe_txt = pipeline_path.read_text(encoding="utf-8")
+    assert "[Stage 3b.1] Pre-Cascade Multi-Tenant Quality Audit" in pipe_txt
+    assert "[Stage 3b.2] Post-Cascade Workspace Tracking & Engine Drift Latch" in pipe_txt
+    assert "Stage 7.2" in pipe_txt
+    assert "Stage 7.4" in pipe_txt
+    # Stage 7.2 and 7.4 must not be trapped inside the ALREADY_SYNCED_HEAD -eq 0 block
+    stage7_idx = pipe_txt.index("=== [Stage 7] Locked Engine Maintenance, Quality Audit, Reflection & Tenant Deployment ===")
+    stage7_block = pipe_txt[stage7_idx:]
+    assert "Engine reflection and tenant compilation already verified and synchronized (ALREADY_SYNCED_HEAD=1)" in stage7_block
+    assert "Tenant release cascade already completed and synchronized (ALREADY_SYNCED_HEAD=1)" in stage7_block
+
+
+
 
 
 
