@@ -121,3 +121,22 @@ def test_profithelm_state_spoke_manifest_formula_parity():
     assert spoke["formula"].startswith("round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0)")
 
 
+def test_normalize_html_callout_injects_inline_cta_when_result_box_class_added():
+    from pseofactory.affiliates import normalize_html_callout_message_match
+
+    html = (
+        '<html><head><link rel="canonical" href="https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/"></head>'
+        '<body>'
+        '<div class="calc-results-column result-box" aria-live="polite">'
+        '<h3 class="calc-column-title">Deterministic Statutory &amp; Audit Outputs</h3>'
+        '<div id="res-total">$45,000</div>'
+        '</div>'
+        '<section class="refinance-partner-section affiliates-section"><a href="/r/vanta_security">Vanta</a></section>'
+        '</body></html>'
+    )
+    out = normalize_html_callout_message_match(html, property_id="gainhelm")
+    assert 'data-cta-slot="calculator_result_inline"' in out
+    assert 'class="calc-inline-cta"' in out
+
+
+

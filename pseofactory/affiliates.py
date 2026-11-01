@@ -6026,8 +6026,8 @@ def normalize_html_callout_message_match(
         for pat in (
             r'(<div\s+class=["\']card\s+result-card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
             r'(<div\s+class=["\']calculator-grid["\']>.*?<div\s+class=["\']card["\']>.*?<div\s+class=["\']card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
-            r'(<div\s+class=["\']calc-outputs-panel["\'][^>]*>\s*<div\s+class=["\']calc-panel-header["\'][^>]*>.*?</div>)',
-            r'(<div\s+class=["\']calc-results-column["\'][^>]*>\s*<h3\s+class=["\']calc-column-title["\'][^>]*>.*?</h3>)',
+            r'(<div\s+class=["\'][^"\']*calc-outputs-panel[^"\']*["\'][^>]*>\s*<div\s+class=["\']calc-panel-header["\'][^>]*>.*?</div>)',
+            r'(<div\s+class=["\'][^"\']*calc-results-column[^"\']*["\'][^>]*>\s*<h3\s+class=["\']calc-column-title["\'][^>]*>.*?</h3>)',
             r'(<div\s+class=["\']result-box["\'][^>]*>.*?)(</div>)',
         ):
             if re.search(pat, updated, re.S | re.I):
