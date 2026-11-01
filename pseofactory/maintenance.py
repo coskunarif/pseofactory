@@ -8971,7 +8971,17 @@ class RetroReflectionEngine:
                     or round(raw_pub, 4) != round(float(preset["published_output"]), 4)
                 ):
                     raw = dict(preset)
-            elif not is_prexvo and not is_gainhelm and "/" in slug:
+            elif not is_prexvo and not is_gainhelm and (
+                "/" in slug
+                or any(
+                    slug.startswith(pfx)
+                    for pfx in (
+                        "irs-2027-tax-brackets-",
+                        "section-1031-calculator-",
+                        "section-179-calculator-",
+                    )
+                )
+            ):
                 spoke_m = cls._extract_spoke_manifest_from_html(html_content, slug, default_stat, default_econ)
                 if spoke_m is not None:
                     raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0

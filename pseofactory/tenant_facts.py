@@ -3402,6 +3402,12 @@ class TruthReconciliationEngine:
 
         # 9. Reconcile FAQPage visibility in HTML body
         if "FAQPage" in updated:
+            updated = re.sub(
+                r'\s*<section class="faq-section card" style="margin-top: 2rem; padding: 1.5rem;">[\s\S]*?</section>',
+                '',
+                updated,
+                flags=re.IGNORECASE,
+            )
             body_no_scripts = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', updated, flags=re.DOTALL | re.IGNORECASE)
             norm_visible_body = " ".join(re.sub(r'<[^>]+>', ' ', body_no_scripts).split())
             missing_faqs: List[Tuple[str, str]] = []
@@ -3421,6 +3427,17 @@ class TruthReconciliationEngine:
                 except Exception:
                     pass
             if missing_faqs:
+                deduped_missing: List[Tuple[str, str]] = []
+                seen_q = set()
+                for q, a in missing_faqs:
+                    q_clean = " ".join(q.split())
+                    if q_clean not in seen_q:
+                        seen_q.add(q_clean)
+                        deduped_missing.append((q, a))
+                missing_faqs = deduped_missing
+
+                has_h2_faq = bool(re.search(r'<h2[^>]*>\s*Frequently Asked Questions\s*</h2>', updated, re.I))
+                heading_tag = "h3" if has_h2_faq else "h2"
                 faq_items_html = "\n".join(
                     f'    <div class="faq-item" style="margin-bottom: 1.25rem;">\n'
                     f'      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">{q}</h3>\n'
@@ -3430,7 +3447,7 @@ class TruthReconciliationEngine:
                 )
                 faq_markup = (
                     f'\n  <section class="faq-section card" style="margin-top: 2rem; padding: 1.5rem;">\n'
-                    f'    <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem;">Frequently Asked Questions</h2>\n'
+                    f'    <{heading_tag} style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem;">Frequently Asked Questions</{heading_tag}>\n'
                     f'{faq_items_html}\n'
                     f'  </section>\n'
                 )
