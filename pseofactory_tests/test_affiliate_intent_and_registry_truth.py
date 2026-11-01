@@ -175,5 +175,15 @@ def test_sync_prexvo_affiliate_status_compat(tmp_path):
     assert 'not in ("live", "pending", "declined")' in freshness.read_text(encoding="utf-8")
 
 
+def test_profithelm_factory_pipeline_test_sync_adds_top_level_pytest_import():
+    from pathlib import Path
+    import inspect
+    from pseofactory.maintenance import reflect_and_recompile_all_assets
+
+    src = inspect.getsource(reflect_and_recompile_all_assets)
+    assert 'not ph_fp_src.startswith("import pytest") and "\\nimport pytest" not in ph_fp_src' in src
+
+
+
 
 

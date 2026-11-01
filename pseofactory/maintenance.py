@@ -13511,12 +13511,16 @@ def reflect_and_recompile_all_assets(
                 ph_test_fp = Path(adapter.repo_path) / "tests" / "test_factory_pipeline.py"
                 if ph_test_fp.is_file():
                     ph_fp_src = ph_test_fp.read_text(encoding="utf-8")
+                    ph_fp_orig = ph_fp_src
                     if "def test_factory_pipeline_dry_run():" in ph_fp_src and "@pytest.mark.xdist_group" not in ph_fp_src:
                         ph_fp_src = ph_fp_src.replace(
                             "def test_factory_pipeline_dry_run():",
                             '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_factory_pipeline_dry_run():',
                             1,
                         )
+                    if "@pytest.mark.xdist_group" in ph_fp_src and not ph_fp_src.startswith("import pytest") and "\nimport pytest" not in ph_fp_src:
+                        ph_fp_src = "import pytest\n" + ph_fp_src
+                    if ph_fp_src != ph_fp_orig:
                         ph_test_fp.write_text(ph_fp_src, encoding="utf-8")
             except Exception:
                 pass
