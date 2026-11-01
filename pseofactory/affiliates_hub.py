@@ -19,6 +19,7 @@ from typing import Dict, Any, List, Optional, Set, Union
 from datetime import datetime, timezone
 import urllib.parse
 
+from pseofactory.affiliate_intent import filter_intent_matched_contracts
 from pseofactory.affiliates import (
     AffiliatePartner,
     AFFILIATE_REGISTRY,
@@ -752,17 +753,9 @@ class MonetizationHub:
                     "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
                 }
             )
-        elif target_prop == "gainhelm":
-            upgrades.update(
-                {
-                    "vanta_security": "https://join.ramp.com/c/7932737/3981015/51436",
-                    "drata_compliance": "https://join.ramp.com/c/7932737/3981015/51436",
-                    "sprinto_compliance": "https://www.jdoqocy.com/click-101906407-16985242",
-                    "thoropass_audit": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "coalition_cyber_insurance": "https://www.jdoqocy.com/click-101906407-16985242",
-                    "cobalt_pentest": "https://join.ramp.com/c/7932737/3981015/51436",
-                }
-            )
+        # GainHelm: no GRC partner (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt) has an
+        # approved affiliate contract. Unrelated approved B2B links (Ramp, LawDepot, Xendoo) must
+        # never be attached to GRC keys, so only vault-approved GRC tracking URLs flow through.
         prop_section = self.vault_data.get("properties", {}).get(target_prop, {})
         partners_dict = prop_section.get("partners", {}) if isinstance(prop_section, dict) else {}
         for p_key, p_meta in partners_dict.items():
@@ -785,7 +778,8 @@ class MonetizationHub:
             wh_cand = str(p_meta.get("cj_approved_wallethub_tracking_url") or "").strip()
             if wh_cand and validate_affiliate_url(wh_cand):
                 upgrades["wallethub"] = wh_cand
-        return upgrades
+        # Intent gate: a partner key may only resolve to its own approved tracking link.
+        return filter_intent_matched_contracts(upgrades)
 
     def _is_direct_profithelm_tool(self, tool_slug: str) -> bool:
         """Determines if a tool slug is explicitly mapped to a direct ProfitHelm partner."""
@@ -1403,6 +1397,7 @@ class MonetizationHub:
             "payouts_count": 0,
             "actions_count": 0,
             "total_revenue_usd": 0.0,
+            "api_verified": False,
         }
         sovrn_summary: Dict[str, Any] = {
             "account_id": str(
@@ -1412,6 +1407,7 @@ class MonetizationHub:
             ),
             "configured": bool(self.sovrn_domain_key and self.sovrn_api_key),
             "total_revenue_usd": 0.0,
+            "api_verified": False,
         }
 
         if use_live:
@@ -1431,6 +1427,9 @@ class MonetizationHub:
                     "User-Agent": "pseofactory/1.0",
                 }
                 p_resp = _fetch_json("https://api.partnerstack.com/api/v2/partnerships", ps_headers)
+                if isinstance(p_resp, dict) and isinstance(p_resp.get("data"), dict):
+                    # A well-formed authenticated response proves the live API poll worked.
+                    ps_summary["api_verified"] = True
                 if isinstance(p_resp, dict):
                     p_items = (p_resp.get("data") or {}).get("items")
                     if isinstance(p_items, list):
@@ -1494,6 +1493,7 @@ class MonetizationHub:
                 if isinstance(s_resp, dict) and s_resp.get("accountId"):
                     sovrn_summary["account_id"] = str(s_resp["accountId"])
                     sovrn_summary["configured"] = True
+                    sovrn_summary["api_verified"] = True
 
         from pseofactory.affiliates import GAINHELM_AFFILIATES
         live_links_verified: List[Dict[str, Any]] = []

@@ -2220,14 +2220,19 @@ def _render_runtime_sync_events_js() -> str:
         var qs = new URLSearchParams(rawSearch);
         var leadId = qs.get("lead_id") || "lead_verified";
         var sku = qs.get("sku") || "";
+        var sessionId = qs.get("session_id") || "";
         var slug = resolveCurrentToolSlug();
         var hostTarget = document.getElementById("partner-quote-intake-step") || document.getElementById("post-calculation-upgrade-drawer") || document.getElementById("lead-capture-form") || document.querySelector("main");
         if (!hostTarget) return;
         var upgDrawer = document.getElementById("post-calculation-upgrade-drawer");
-        if (upgDrawer) {
-          upgDrawer.setAttribute("data-checkout-status", "fulfilled");
+        if (!/^cs_live_[A-Za-z0-9_]+$/.test(sessionId)) {
+          if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
+          return;
         }
-        var fulfillBase = "/api/lead-capture?fulfill=1&lead_id=" + encodeURIComponent(leadId) + "&sku=" + encodeURIComponent(sku) + "&tool_slug=" + encodeURIComponent(slug);
+        if (upgDrawer) {
+          upgDrawer.setAttribute("data-checkout-status", "payment_verifying");
+        }
+        var fulfillBase = "/api/lead-capture?fulfill=1&lead_id=" + encodeURIComponent(leadId) + "&sku=" + encodeURIComponent(sku) + "&tool_slug=" + encodeURIComponent(slug) + "&session_id=" + encodeURIComponent(sessionId);
         renderPlaybookAndFulfillmentDrawer(hostTarget, {
           fulfillment_url: fulfillBase,
           csv_fulfillment_url: fulfillBase + "&format=csv",
@@ -2236,8 +2241,17 @@ def _render_runtime_sync_events_js() -> str:
         }, "checkout_fulfill");
         if (typeof fetch === "function") {
           fetch(fulfillBase, { headers: { "Accept": "application/json" } })
-            .then(function(res) { return res && res.ok ? res.json() : null; })
+            .then(function(res) {
+              if (res && res.status === 402) {
+                if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
+                return null;
+              }
+              return res && res.ok ? res.json() : null;
+            })
             .then(function(data) {
+              if (data && data.settlement_attribution && data.settlement_attribution.settlement_status === "settled" && upgDrawer) {
+                upgDrawer.setAttribute("data-checkout-status", "fulfilled");
+              }
               if (data && Array.isArray(data.reconciliation_schedule) && data.reconciliation_schedule.length > 0) {
                 renderPlaybookAndFulfillmentDrawer(hostTarget, {
                   fulfillment_url: data.fulfillment_url || fulfillBase,

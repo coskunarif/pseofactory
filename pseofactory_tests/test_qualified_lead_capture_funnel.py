@@ -32,6 +32,24 @@ from pseofactory.edge import (
 )
 
 
+
+# Mock of the Stripe Checkout Session lookup the edge performs before unlocking paid workpapers.
+# A session id of the form cs_live_PAIDFOR_<lead_id> resolves to a paid live session for that lead.
+STRIPE_PAID_MOCK_JS = r"""
+const __origFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const m = String(url).match(/api\.stripe\.com\/v1\/checkout\/sessions\/cs_live_PAIDFOR_([A-Za-z0-9_]+)$/);
+  if (m) {
+    const lead = m[1];
+    return new Response(JSON.stringify({
+      id: "cs_live_PAIDFOR_" + lead, livemode: true, payment_status: "paid", amount_total: 4900,
+      currency: "usd", client_reference_id: lead, metadata: { lead_id: lead }
+    }), { status: 200 });
+  }
+  return __origFetch ? __origFetch(url, init) : new Response("{}", { status: 500 });
+};
+"""
+
 def test_threshold_evaluation_across_verticals_and_frictionless_sub_threshold():
     # 1. 1031 Exchange: $100,000+ threshold
     sub_1031 = evaluate_lead_quote_threshold("profithelm", "section-1031-calculator", 75000)
@@ -545,7 +563,7 @@ def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
           const getData = await getRes.json();
 
           const checkoutReq = {{
-            url: "https://{prop_id}.com" + pbData.checkout_url,
+            url: "https://{prop_id}.com/api/lead-capture?checkout=1&lead_id=" + pbData.lead_id,
             headers: new Headers()
           }};
           const coRes = await mod.onRequestGet({{ request: checkoutReq, env: mockEnv }});
@@ -573,11 +591,14 @@ def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
         assert out["pbData"]["status"] == "playbook_subscribed"
         assert out["pbData"]["persisted"] is True
         assert out["pbData"]["lead_id"].startswith(f"lead_{prop_id}_")
-        assert "/api/lead-capture?checkout=1" in out["pbData"]["checkout_url"]
+        # No Stripe key in this mock env: the rail must be honestly unavailable, never a fake session.
+        assert out["pbData"]["checkout_url"] is None
+        assert out["pbData"]["checkout_mode"] == "checkout_unavailable"
+        assert out["pbData"]["checkout_session_id"] is None
         assert out["getCount"] == 1
         assert out["getSummary"]["playbook_subscriptions_count"] == 1
-        assert out["coStatus"] == 200
-        assert out["coData"]["status"] == "checkout_session_ready"
+        assert out["coStatus"] == 503
+        assert out["coData"]["status"] == "checkout_unavailable"
         assert out["coData"]["offer_sku"] == out["pbData"]["offer_sku"]
 
 
@@ -637,6 +658,7 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
           }};
 
           const mockEnv = {{
+            EMAIL_PRIMARY_RAIL: "zeptomail",
             ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_token",
             NANGO_SECRET_KEY: "mock_nango_secret",
             NANGO_CONNECTION_ID: "mock_nango_conn",
@@ -705,7 +727,8 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
         assert out["qData"]["stripe_called"] is True
         assert out["qData"]["stripe_http_status"] == 401
         assert out["qData"]["stripe_error_code"] == "api_key_expired"
-        assert out["qData"]["checkout_mode"] == "edge_checkout_rail"
+        assert out["qData"]["checkout_mode"] == "checkout_unavailable"
+        assert out["qData"]["checkout_session_id"] is None
         assert out["getSummary"]["zeptomail_dispatched_count"] == 1
         assert out["getSummary"]["fulfilled_count"] == 1
 
@@ -848,10 +871,10 @@ def test_edge_workers_synthetic_probe_isolation_zero_crm_billing_kv_spam(tmp_pat
         assert out["qData"]["persisted"] is False
         assert out["qData"]["synthetic_test"] is True
         assert out["qData"]["zeptomail_status"] == "synthetic_test_suppressed"
-        assert out["qData"]["checkout_mode"] == "edge_checkout_rail"
+        assert out["qData"]["checkout_mode"] == "checkout_unavailable"
         assert out["qData"]["stripe_called"] is False
-        assert out["coData"]["status"] == "checkout_session_ready"
-        assert out["coData"]["checkout_mode"] == "edge_checkout_rail"
+        assert out["coData"]["status"] == "checkout_unavailable"
+        assert out["coData"]["checkout_mode"] == "checkout_unavailable"
         assert out["coData"]["synthetic_test"] is True
         assert out["telHeader"] == "1"
         assert out["telData"]["status"] == "RECORDED"
@@ -1072,8 +1095,8 @@ def test_edge_lead_capture_playbook_and_fulfillment_value_ladder(tmp_path):
 
         runner = f"""
 import {{ onRequestPost, onRequestGet }} from {json.dumps(str(mod_path))};
-
-const env = {{}};
+{STRIPE_PAID_MOCK_JS}
+const env = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
 const pbReq = new Request("https://{prop_id}.com/api/lead-capture", {{
   method: "POST",
   headers: {{ "Content-Type": "application/json", "X-Pseofactory-Test": "1" }},
@@ -1102,14 +1125,14 @@ const playJsonReq = new Request("https://{prop_id}.com" + pbData.playbook_url + 
 const playJsonRes = await onRequestGet({{ request: playJsonReq, env }});
 const playJsonData = await playJsonRes.json();
 
-const fulfillHtmlReq = new Request("https://{prop_id}.com" + pbData.fulfillment_url + "&format=html&synthetic_test=1", {{
+const fulfillHtmlReq = new Request("https://{prop_id}.com" + pbData.fulfillment_url + "&session_id=cs_live_PAIDFOR_" + pbData.lead_id + "&format=html&synthetic_test=1", {{
   method: "GET",
   headers: {{ "X-Pseofactory-Test": "1" }}
 }});
 const fulfillHtmlRes = await onRequestGet({{ request: fulfillHtmlReq, env }});
 const fulfillHtmlText = await fulfillHtmlRes.text();
 
-const fulfillCsvReq = new Request("https://{prop_id}.com" + pbData.csv_fulfillment_url + "&synthetic_test=1", {{
+const fulfillCsvReq = new Request("https://{prop_id}.com" + pbData.csv_fulfillment_url + "&session_id=cs_live_PAIDFOR_" + pbData.lead_id + "&synthetic_test=1", {{
   method: "GET",
   headers: {{ "X-Pseofactory-Test": "1" }}
 }});
@@ -1245,7 +1268,8 @@ def test_trend_mined_statutory_timeseries_and_three_rail_monetization(tmp_path):
         mod_path.write_text(js_code, encoding="utf-8")
         runner = f"""
 import {{ onRequestGet }} from {json.dumps(str(mod_path))};
-const env = {{}};
+{STRIPE_PAID_MOCK_JS}
+const env = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
 const inputsParam = encodeURIComponent(JSON.stringify({{ custom_amount: 410000, custom_rate: 5.4 }}));
 const chkReq = new Request("https://{prop_id}.com/api/lead-capture?checkout=1&lead_id=lead_custom_1&tool_slug={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
   method: "GET",
@@ -1254,7 +1278,7 @@ const chkReq = new Request("https://{prop_id}.com/api/lead-capture?checkout=1&le
 const chkRes = await onRequestGet({{ request: chkReq, env }});
 const chkData = await chkRes.json();
 
-const ffReq = new Request("https://{prop_id}.com/api/lead-capture?fulfill=1&lead_id=lead_custom_1&source={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
+const ffReq = new Request("https://{prop_id}.com/api/lead-capture?fulfill=1&lead_id=lead_custom_1&session_id=cs_live_PAIDFOR_lead_custom_1&source={slug}&amount=410000&inputs_json=" + inputsParam + "&synthetic_test=1", {{
   method: "GET",
   headers: {{ "X-Pseofactory-Test": "1" }}
 }});
@@ -1266,13 +1290,14 @@ console.log(JSON.stringify({{ chkData, ffData }}));
         runner_path.write_text(runner, encoding="utf-8")
         proc = subprocess.run(["node", str(runner_path)], capture_output=True, text=True, check=True)
         out = json.loads(proc.stdout.strip().splitlines()[-1])
-        assert out["chkData"]["ok"] is True
+        # Synthetic probes never reach Stripe, so the rail is honestly unavailable (not "ready").
+        assert out["chkData"]["ok"] is False
+        assert out["chkData"]["status"] == "checkout_unavailable"
         assert out["chkData"]["stripe_account_id"] == "acct_1T6fSTIq0ckFsf5j"
         assert out["chkData"]["stripe_merchant_email"] == "arif.coskun@profithelm.com"
         assert out["chkData"]["reservation_captured"] is True
         assert out["chkData"]["reservation_id"] == "rsv_lead_custom_1"
         assert out["chkData"]["diagnostic_telemetry"]["merchant_email"] == "arif.coskun@profithelm.com"
-        assert out["chkData"]["diagnostic_telemetry"]["cli_key_expires_at"] == "2026-06-03"
         assert out["chkData"]["calculated_amount"] == 410000
         assert out["chkData"]["statutory_trend_series_count"] >= 3
         assert out["ffData"]["ok"] is True
@@ -1356,8 +1381,8 @@ def test_post_purchase_return_urls_direct_sku_routing_and_autonomous_audit(tmp_p
     runner = f"""
 import * as phMod from {json.dumps(str(ph_mod))};
 import * as pxMod from {json.dumps(str(px_mod))};
-
-const env = {{}};
+{STRIPE_PAID_MOCK_JS}
+const env = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
 const capChk = await (await phMod.onRequestGet({{
   request: new Request("https://profithelm.com/api/lead-capture?checkout=1&sku=ph_commercial_capital_audit_toolkit&synthetic_test=1"),
   env
@@ -1367,7 +1392,7 @@ const taxChk = await (await phMod.onRequestGet({{
   env
 }})).json();
 const capFf = await (await phMod.onRequestGet({{
-  request: new Request("https://profithelm.com/api/lead-capture?fulfill=1&sku=ph_commercial_capital_audit_toolkit&synthetic_test=1"),
+  request: new Request("https://profithelm.com/api/lead-capture?fulfill=1&lead_id=lead_sku_cap&session_id=cs_live_PAIDFOR_lead_sku_cap&sku=ph_commercial_capital_audit_toolkit&synthetic_test=1"),
   env
 }})).json();
 const pxChk = await (await pxMod.onRequestGet({{
@@ -1404,3 +1429,41 @@ console.log(JSON.stringify({{ capChk, taxChk, capFf, pxChk }}));
 
 
 
+
+
+def test_edge_email_defaults_to_verified_zoho_rail_without_zeptomail_roundtrip(tmp_path):
+    """ZeptoMail returns SM_111 (sender domain not verified in the agent) on every lead, so the
+    verified Zoho OAuth (Nango) rail is primary and ZeptoMail is never called on the hot path."""
+    import json
+    import subprocess
+
+    for prop_id, slug in (
+        ("profithelm", "section-1031-calculator"),
+        ("prexvo", "student-loan-refinance-break-even-calculator"),
+    ):
+        mod = tmp_path / f"email_primary_{prop_id}.mjs"
+        mod.write_text(generate_edge_lead_capture_function(prop_id), encoding="utf-8")
+        runner = f"""
+import {{ onRequestPost }} from {json.dumps(str(mod))};
+let zeptoCalls = 0;
+globalThis.fetch = async (url) => {{
+  const u = String(url);
+  if (u.includes("api.zeptomail.com")) {{ zeptoCalls += 1; return new Response("{{}}", {{ status: 401 }}); }}
+  if (u.includes("api.nango.dev/connection")) return new Response(JSON.stringify({{ credentials: {{ access_token: "tok" }} }}), {{ status: 200 }});
+  if (u.includes("mail.zoho.com/api/accounts")) return new Response(JSON.stringify({{ data: {{ messageId: "m1" }} }}), {{ status: 200 }});
+  return new Response("{{}}", {{ status: 500 }});
+}};
+const env = {{ ZEPTOMAIL_TOKEN: "t", NANGO_SECRET_KEY: "s", NANGO_CONNECTION_ID: "c" }};
+const res = await onRequestPost({{ request: new Request("https://{prop_id}.com/api/lead-capture", {{
+  method: "POST", headers: {{ "Content-Type": "application/json" }},
+  body: JSON.stringify({{ email: "jane.doe@acme-llc.com", tool_slug: {json.dumps(slug)} }}) }}), env }});
+const data = await res.json();
+console.log(JSON.stringify({{ status: data.zeptomail_status, provider: data.email_provider, zeptoCalls }}));
+"""
+        p = tmp_path / f"run_email_primary_{prop_id}.mjs"
+        p.write_text(runner, encoding="utf-8")
+        proc = subprocess.run(["node", str(p)], capture_output=True, text=True, check=True)
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert out["status"] == "sent_edge_zoho_direct"
+        assert out["provider"] == "zoho_mail_oauth"
+        assert out["zeptoCalls"] == 0

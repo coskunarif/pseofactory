@@ -8930,7 +8930,10 @@ def detect_asset_partner_roster_and_slot_issues(
             issues.append(
                 f"Page {rel_path}: Affiliate link '{href}' missing required target='_blank'"
             )
-        if 'data-status="pending"' in tag_open.lower():
+        reg_entry = registry.get(pk)
+        # A pending label is only stale when the registry says the partner is live; partners that
+        # are honestly pending/declined (no approved contract) legitimately render data-status=pending.
+        if 'data-status="pending"' in tag_open.lower() and reg_entry is not None and reg_entry.status == "live":
             issues.append(
                 f"Page {rel_path}: Affiliate link '{href}' has stale data-status='pending'"
             )

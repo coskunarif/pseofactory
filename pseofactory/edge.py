@@ -13,6 +13,12 @@ import urllib.parse
 from dataclasses import dataclass, field
 
 from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.lead_classification import edge_classifier_json
+from pseofactory.affiliate_intent import (
+    BLOCKED_SOVRN_FALLBACK_KEYS,
+    filter_intent_matched_contracts,
+    is_intent_matched,
+)
 
 
 class EdgeConfigStandards:
@@ -1015,14 +1021,8 @@ def generate_edge_redirect_function(
     active_hub = hub if hub is not None else MonetizationHub()
 
     if prop_clean == "gainhelm":
-        gh_direct_upgrades = {
-            "vanta_security": "https://join.ramp.com/c/7932737/3981015/51436",
-            "drata_compliance": "https://join.ramp.com/c/7932737/3981015/51436",
-            "sprinto_compliance": "https://www.jdoqocy.com/click-101906407-16985242",
-            "thoropass_audit": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-            "coalition_cyber_insurance": "https://www.jdoqocy.com/click-101906407-16985242",
-            "cobalt_pentest": "https://join.ramp.com/c/7932737/3981015/51436",
-        }
+        # No GRC partner has an approved affiliate contract: never swap in unrelated B2B links.
+        gh_direct_upgrades: Dict[str, str] = {}
         if hasattr(active_hub, "get_direct_contract_upgrades"):
             gh_direct_upgrades.update(active_hub.get_direct_contract_upgrades("gainhelm"))
         gainhelm_catalog_entries: List[str] = []
@@ -1102,6 +1102,23 @@ def generate_edge_redirect_function(
                     f'{gh_alias_extra}'
                     f'    envVar: "{alias_env}",\n'
                     f'    statusEnvVar: "{alias_status_env}",\n'
+                    f'    status: "live",\n'
+                    f'  }},'
+                )
+        # Honest, explicitly named non-GRC rails (corporate spend, legal documents, bookkeeping).
+        # These resolve to the brand they are named for, never to a GRC vendor key.
+        for hk, h_url, h_env in (
+            ("ramp", "https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL"),
+            ("lawdepot", "https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
+            ("xendoo", "https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_URL"),
+        ):
+            if hk not in GAINHELM_AFFILIATES:
+                gainhelm_catalog_entries.append(
+                    f'  {hk}: {{\n'
+                    f'    defaultUrl: "{h_url}",\n'
+                    f'    directContractUrl: "{h_url}",\n'
+                    f'    envVar: "{h_env}",\n'
+                    f'    statusEnvVar: "{h_env[:-4]}_STATUS",\n'
                     f'    status: "live",\n'
                     f'  }},'
                 )
@@ -1267,7 +1284,7 @@ export async function onRequest(context) {{
     ? "direct_env_override"
     : hasDirectContract
     ? "direct_contract_upgraded"
-    : "direct_grc_partner";
+    : "native_unmonetized_destination";
   if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
     return new Response(null, {{
       status: 302,
@@ -1397,9 +1414,6 @@ export async function onRequest(context) {{
             if hasattr(active_hub, "get_direct_contract_upgrades")
             else {}
         )
-        prexvo_checkout_fallback_url = (
-            "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1"
-        )
         prexvo_catalog_entries: List[str] = []
         for k, p_obj in PREXVO_AFFILIATES.items():
             status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
@@ -1410,7 +1424,6 @@ export async function onRequest(context) {{
                 f'  {k}: {{\n'
                 f'    defaultUrl: "{p_obj.default_url}",\n'
                 f'{px_extra}'
-                f'    directCheckoutUrl: "{prexvo_checkout_fallback_url}",\n'
                 f'    envVar: "{p_obj.env_var}",\n'
                 f'    statusEnvVar: "{status_env}",\n'
                 f'    status: "{status_val}",\n'
@@ -1468,7 +1481,6 @@ export async function onRequest(context) {{
                     f'  {alias_k}: {{\n'
                     f'    defaultUrl: "{alias_url}",\n'
                     f'{px_alias_extra}'
-                    f'    directCheckoutUrl: "{prexvo_checkout_fallback_url}",\n'
                     f'    envVar: "{alias_env}",\n'
                     f'    statusEnvVar: "{alias_status_env}",\n'
                     f'    status: "live",\n'
@@ -1482,9 +1494,11 @@ export async function onRequest(context) {{
  * Enforces Prexvo Standing Constraints:
  * 1. Strict Partner Whitelist: Only approved student loan lending marketplace partners (zero B2B contamination).
  * 2. Sub-Affiliate Aggregator Prohibition: Rejects Sovrn, VigLink, and Skimlinks redirect domains.
- * 3. Yield-Gated Routing: Routes live student loan callouts to verified approved affiliate contracts when
- *    configured, or fails closed onto first-party Prexvo direct checkout capture ($39 Decision Audit Kit)
- *    so zero production clicks leak to unapproved or declined external lenders.
+ * 3. Honest Routing: A lender click resolves to the approved affiliate contract when one exists,
+ *    otherwise to that lender's own site (unmonetized, no tracking contract). A lender click is NEVER
+ *    redirected into the paid $39 Decision Audit Kit checkout; that purchase requires explicit checkout
+ *    intent via /api/lead-capture?checkout=1. Set BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS=true to send
+ *    unapproved lender clicks to the free educational calculator instead.
  * 4. SSRF & Open Redirect Protection: Strictly validates schemes and blocks private/loopback CIDRs.
  *
  * Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
@@ -1495,7 +1509,6 @@ const PARTNER_CATALOG = {{
 }};
 
 const EDUCATIONAL_CALCULATOR_URL = "https://prexvo.com/tools/student-loan-repayment-calculator/";
-const YIELD_GATED_DIRECT_CHECKOUT_URL = "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1";
 
 const FORBIDDEN_AGGREGATOR_DOMAINS = [
   "sovrn.com",
@@ -1683,26 +1696,27 @@ export async function onRequest(context) {{
   const hasApprovedContract = Boolean(
     partnerConfig.directContractUrl && partnerConfig.directContractUrl.trim().length > 0
   );
-  const allowUnapprovedExternal = Boolean(
-    env && String(env.ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  const blockUnapproved = Boolean(
+    env && String(env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
   );
-  const isYieldGatedCheckout = !hasDirectConfig && !hasApprovedContract && !allowUnapprovedExternal;
+  if (!hasDirectConfig && !hasApprovedContract && blockUnapproved) {{
+    return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL, {{
+      "X-Edge-Partner": rawPartner,
+      "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+    }});
+  }}
   const rawTargetUrl = (
     hasDirectConfig
       ? envUrl
       : hasApprovedContract
       ? partnerConfig.directContractUrl
-      : isYieldGatedCheckout
-      ? partnerConfig.directCheckoutUrl || YIELD_GATED_DIRECT_CHECKOUT_URL
       : partnerConfig.defaultUrl
   ).trim();
   const contractTier = hasDirectConfig
     ? "direct_env_override"
     : hasApprovedContract
     ? "direct_contract_upgraded"
-    : isYieldGatedCheckout
-    ? "yield_gated_direct_checkout_capture"
-    : "direct_lending_marketplace";
+    : "unapproved_native_unmonetized";
 
   if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
     return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
@@ -1725,12 +1739,6 @@ export async function onRequest(context) {{
     normParams.get("subid") ||
     (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || "");
 
-  if (isYieldGatedCheckout) {{
-    targetObj.searchParams.set("partner_key", rawPartner);
-    if (sourceTool && !targetObj.searchParams.has("tool_slug")) {{
-      targetObj.searchParams.set("tool_slug", sourceTool);
-    }}
-  }}
   if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
     targetObj.searchParams.set("subid", effectiveSubid);
   }}
@@ -1889,6 +1897,8 @@ export async function onRequest(context) {{
     }
     if hasattr(active_hub, "get_direct_contract_upgrades"):
         direct_contract_upgrades.update(active_hub.get_direct_contract_upgrades("profithelm"))
+    # Intent gate: drop every cross-brand / cross-vertical swap (e.g. ipx1031 -> Xendoo bookkeeping).
+    direct_contract_upgrades = filter_intent_matched_contracts(direct_contract_upgrades)
     sovrn_fallback_upgrades = {
         "ipx1031": "https://dlpcapital.com/",
         "exeter1031": "https://dlpcapital.com/",
@@ -1904,6 +1914,10 @@ export async function onRequest(context) {{
         "simply_business": "https://www.simplybusiness.com/",
         "next_insurance_b2b": "https://www.nextinsurance.com/",
         "interactive_brokers": "https://www.zacks.com/",
+    }
+    # 1031 exchange partners must never be wrapped onto an unrelated lender's site.
+    sovrn_fallback_upgrades = {
+        k: v for k, v in sovrn_fallback_upgrades.items() if k not in BLOCKED_SOVRN_FALLBACK_KEYS
     }
 
     preferred_order = [
@@ -2047,6 +2061,8 @@ export async function onRequest(context) {{
     }
     for d_key, (d_url, d_env) in direct_network_aliases.items():
         if d_key not in ordered_keys:
+            if not is_intent_matched(d_key, d_url):
+                continue
             d_direct_contract = direct_contract_upgrades.get(d_key) or d_url
             catalog_entries.append(
                 f'  {d_key}: {{\n'
@@ -3021,7 +3037,7 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const grossPriceUsd = Number(offer.price_usd || 79);
   const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = mode === "paid_toolkit" || Boolean(record && record.settlement_status === "settled");
+  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
   const settlementAttribution = {
     settlement_id: (record && record.settlement_id) || `stl_gainhelm_${leadId}`,
     settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
@@ -3191,25 +3207,169 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   };
 }
 
-async function persistSettledEdgeLeadRecord(env, record, bundle, isSynth = false) {
+const EDGE_PROPERTY_ID = "gainhelm";
+const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
+
+function classifyEdgeLeadEmail(email) {
+  const value = String(email || "").trim().toLowerCase();
+  const at = value.lastIndexOf("@");
+  if (at < 1) return "synthetic";
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (!domain) return "synthetic";
+  for (const d of EDGE_CLASSIFIER.own_domains) {
+    if (domain === d || domain.endsWith("." + d)) return "synthetic";
+  }
+  if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
+  if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
+  if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
+  return "real";
+}
+
+function maskEdgeEmail(email) {
+  const s = String(email || "");
+  const at = s.indexOf("@");
+  if (at < 1) return "";
+  return s.slice(0, 1) + "***" + s.slice(at);
+}
+
+function isEdgeVerifiedPaidRecord(item) {
+  return Boolean(
+    item &&
+      item.stripe_payment_verified === true &&
+      item.stripe_payment_status === "paid" &&
+      item.settlement_status === "settled" &&
+      /^cs_live_[A-Za-z0-9_]+$/.test(String(item.stripe_checkout_session_id || ""))
+  );
+}
+
+async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+  const sid = String(sessionId || "").trim();
+  const out = {
+    verified: false,
+    reason: "",
+    session_id: sid,
+    payment_status: null,
+    amount_total_cents: null,
+    currency: null,
+    livemode: null,
+    stripe_http_status: null,
+  };
+  if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {
+    out.reason = "session_id_must_be_a_live_stripe_checkout_session";
+    return out;
+  }
+  const key = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  if (!key) {
+    out.reason = "stripe_secret_key_not_configured";
+    return out;
+  }
+  if (typeof fetch !== "function") {
+    out.reason = "fetch_unavailable";
+    return out;
+  }
+  try {
+    const resp = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(sid), {
+      method: "GET",
+      headers: { Authorization: "Bearer " + key },
+    });
+    out.stripe_http_status = resp.status;
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = (data && data.error) || {};
+      out.reason = "stripe_lookup_failed_" + (err.code || err.type || ("http_" + resp.status));
+      return out;
+    }
+    out.payment_status = data.payment_status || null;
+    out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
+    out.currency = data.currency || null;
+    out.livemode = data.livemode === true;
+    const meta = (data && data.metadata) || {};
+    const ref = String(data.client_reference_id || meta.lead_id || "");
+    if (data.id !== sid) out.reason = "session_id_mismatch";
+    else if (data.livemode !== true) out.reason = "session_not_livemode";
+    else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
+    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
+    else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
+    else out.verified = true;
+  } catch (_) {
+    out.reason = "stripe_lookup_network_error";
+  }
+  return out;
+}
+
+function buildEdgePaymentRequiredResponse(payment, leadId) {
+  const lid = String(leadId || "");
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      success: false,
+      status: "payment_required",
+      settled: false,
+      settlement_status: "unsettled",
+      attributed_revenue_usd: 0,
+      net_settled_revenue_usd: 0,
+      reason: (payment && payment.reason) || "payment_not_verified",
+      lead_id: lid,
+      checkout_url: "/api/lead-capture?checkout=1&lead_id=" + encodeURIComponent(lid) + "&redirect=1",
+      message: "Paid workpapers unlock only after a live Stripe Checkout session_id is verified as paid.",
+    }),
+    { status: 402, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS } }
+  );
+}
+
+function exposeEdgeLeads(request, env, leads) {
+  const adminToken = env && env.LEADS_ADMIN_TOKEN ? String(env.LEADS_ADMIN_TOKEN).trim() : "";
+  const auth = request && request.headers ? String(request.headers.get("authorization") || "") : "";
+  const isAdmin = Boolean(adminToken) && auth === "Bearer " + adminToken;
+  return (leads || []).map((l) => {
+    const item = l || {};
+    const origin = classifyEdgeLeadEmail(item.email) === "synthetic" ? "internal_probe" : "real";
+    const verified = isEdgeVerifiedPaidRecord(item);
+    if (isAdmin) {
+      return { ...item, lead_origin: origin, legacy_unverified_settlement: item.settlement_status === "settled" && !verified };
+    }
+    return {
+      lead_id: item.lead_id,
+      lead_type: item.lead_type || null,
+      lead_origin: origin,
+      property_id: item.property_id || EDGE_PROPERTY_ID,
+      tool_slug: item.tool_slug || null,
+      email: maskEdgeEmail(item.email),
+      captured_at: item.captured_at || null,
+      checkout_mode: item.checkout_mode || null,
+      lifecycle_stage: item.lifecycle_stage || null,
+      settlement_status: verified ? "settled" : "unsettled",
+      stripe_payment_verified: verified,
+      attributed_revenue_usd: verified ? Number(item.attributed_revenue_usd || 0) : 0,
+    };
+  });
+}
+
+async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
-  const stl = (bundle && bundle.settlement_attribution) || {};
+  if (!payment || payment.verified !== true) return record;
+  const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
+  const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
+  const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const settledRecord = {
     ...record,
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
-    offer_sku: (bundle && bundle.offer_sku) || record.offer_sku,
-    offer_title: (bundle && bundle.offer_title) || record.offer_title,
-    offer_price_usd: Number((bundle && bundle.offer_price_usd) || record.offer_price_usd || 79),
-    settlement_id: stl.settlement_id || `stl_gainhelm_${record.lead_id}`,
+    offer_price_usd: grossUsd,
+    settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: stl.settlement_rail || "stripe_direct_settlement_rail",
-    attributed_revenue_usd: Number(stl.attributed_revenue_usd || (bundle && bundle.offer_price_usd) || 79),
-    net_settled_revenue_usd: Number(stl.net_settled_revenue_usd || 76.41),
+    settlement_rail: "stripe_checkout_verified",
+    stripe_payment_verified: true,
+    stripe_payment_status: "paid",
+    stripe_checkout_session_id: payment.session_id,
+    stripe_verified_at: new Date().toISOString(),
+    attributed_revenue_usd: grossUsd,
+    net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
-    datapack_pack_id: stl.datapack_pack_id || `dp_${record.lead_id}`,
-    datapack_url: (bundle && bundle.datapack_url) || "",
-    settled_at: stl.settled_at || new Date().toISOString(),
+    datapack_pack_id: "dp_" + record.lead_id,
+    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -3258,7 +3418,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     const b = byCalc[slug];
     const price = Number(item.offer_price_usd || b.offer_price_usd || defaultPriceUsd);
     const fee = Math.round((price * 0.029 + 0.3) * 100) / 100;
-    const netRev = Number(item.net_settled_revenue_usd || Math.max(0, Math.round((price - fee) * 100) / 100));
+    const netRev = Number(item.net_settled_revenue_usd || 0);
     b.deliverable_requests_count += 1;
     if (item.lead_type === "qualified_quote" || Boolean(item.partner_sharing_consent)) {
       b.qualified_quote_requests_count += 1;
@@ -3267,17 +3427,11 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     }
     b.total_modeled_exposure_usd = Math.round((b.total_modeled_exposure_usd + Number(item.calculated_amount || 0)) * 100) / 100;
     b.checkout_pipeline_usd = Math.round((b.checkout_pipeline_usd + price) * 100) / 100;
-    const isSettled = Boolean(
-      item.lifecycle_stage === "fulfilled" ||
-      item.settlement_status === "settled" ||
-      item.datapack_delivered ||
-      item.zeptomail_dispatched ||
-      item.email_message_id
-    );
+    const isSettled = isEdgeVerifiedPaidRecord(item);
     if (isSettled) {
       b.settled_upgrades_count += 1;
       b.datapack_deliveries_count += 1;
-      b.attributed_revenue_usd = Math.round((b.attributed_revenue_usd + Number(item.attributed_revenue_usd || price)) * 100) / 100;
+      b.attributed_revenue_usd = Math.round((b.attributed_revenue_usd + Number(item.attributed_revenue_usd || 0)) * 100) / 100;
       b.net_settled_revenue_usd = Math.round((b.net_settled_revenue_usd + netRev) * 100) / 100;
     }
     b.deliverable_to_settled_conversion_rate =
@@ -3300,7 +3454,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/soc-2-audit-cost-calculator/";
-  const successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
+  const successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://gainhelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
@@ -3358,7 +3512,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
           datapack_url: datapackUrl,
           success_url: successUrl,
           cancel_url: cancelUrl,
-          checkout_session_id: data.id || `cs_live_${leadId}`,
+          checkout_session_id: data.id,
           checkout_mode: "stripe_live_session",
           stripe_account_id: stripeAccountId,
           stripe_merchant_email: stripeMerchantEmail,
@@ -3383,15 +3537,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
     statutory_authority: offer.statutory_authority,
     deliverables: offer.deliverables,
     billing_mode: "payment",
-    checkout_url: fallbackUrl,
+    checkout_url: null,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
     datapack_url: datapackUrl,
     success_url: successUrl,
     cancel_url: cancelUrl,
-    checkout_session_id: `cs_edge_${leadId}`,
-    checkout_mode: "edge_checkout_rail",
+    checkout_session_id: null,
+    checkout_mode: "checkout_unavailable",
     stripe_account_id: stripeAccountId,
     stripe_merchant_email: stripeMerchantEmail,
     stripe_display_name: stripeDisplayName,
@@ -3450,10 +3604,13 @@ export async function onRequestGet(context) {
       inputsJsonParam,
       outputsJsonParam
     );
-    const bundle = buildGainHelmWorkpaperBundle(record, offer, isFulfill ? "paid_toolkit" : "playbook");
+    let gatedRecord = record;
     if (isFulfill) {
-      await persistSettledEdgeLeadRecord(env, record, bundle, isSynth);
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, record, payment, isSynth);
     }
+    const bundle = buildGainHelmWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
@@ -3518,9 +3675,6 @@ export async function onRequestGet(context) {
       outputsJsonParam
     );
     const bundle = buildGainHelmWorkpaperBundle(record, offer, "paid_toolkit");
-    if (reqUrl.searchParams.get("settle") === "1") {
-      await persistSettledEdgeLeadRecord(env, record, bundle, isSynth);
-    }
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
@@ -3529,7 +3683,7 @@ export async function onRequestGet(context) {
     if (wantsBrowserRedirect) {
       const targetCheckoutLoc = String(stripeOffer.checkout_url || "").startsWith("https://checkout.stripe.com/")
         ? stripeOffer.checkout_url
-        : `https://gainhelm.com${stripeOffer.fulfillment_url || bundle.fulfillment_url}&format=html`;
+        : String(stripeOffer.cancel_url || "/").replace("checkout_status=cancelled", "checkout_status=unavailable");
       return new Response(null, {
         status: 302,
         headers: {
@@ -3543,17 +3697,17 @@ export async function onRequestGet(context) {
     }
     return new Response(
       JSON.stringify({
-        ok: true,
-        success: true,
+        ok: stripeOffer.checkout_mode === "stripe_live_session",
+        success: stripeOffer.checkout_mode === "stripe_live_session",
         synthetic_test: isSynth,
-        status: "checkout_session_ready",
+        status: stripeOffer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "gainhelm",
         lead_id: leadId,
         tool_slug: toolSlug,
         ...stripeOffer,
       }),
       {
-        status: 200,
+        status: (stripeOffer.checkout_mode === "stripe_live_session" ? 200 : 503),
         headers: {
           "Content-Type": "application/json",
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
@@ -3608,6 +3762,10 @@ export async function onRequestGet(context) {
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
+    settlement_policy: "stripe_verified_only",
+    real_leads_count: leads.filter((l) => classifyEdgeLeadEmail(l && l.email) === "real").length,
+    internal_probe_leads_count: leads.filter((l) => classifyEdgeLeadEmail(l && l.email) === "synthetic").length,
+    legacy_unverified_settled_claims_count: leads.filter((l) => l && l.settlement_status === "settled" && !isEdgeVerifiedPaidRecord(l)).length,
     datapack_deliveries_count: settledCount,
     attributed_revenue_usd: totalAttrRev,
     net_settled_revenue_usd: totalNetRev,
@@ -3623,7 +3781,7 @@ export async function onRequestGet(context) {
       property_id: "gainhelm",
       count: leads.length,
       summary,
-      leads,
+      leads: exposeEdgeLeads(request, env, leads),
     }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
@@ -3832,6 +3990,7 @@ export async function onRequestPost(context) {
   }
 }
 """
+        lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json("gainhelm"))
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(gainhelm)")
         return lead_js
 
@@ -4138,7 +4297,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   const grossPriceUsd = Number(PREXVO_TOOLKIT_OFFER.price_usd || 39);
   const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = mode === "paid_toolkit" || Boolean(record && record.settlement_status === "settled");
+  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
   const settlementAttribution = {
     settlement_id: (record && record.settlement_id) || `stl_prexvo_${leadId}`,
     settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
@@ -4210,25 +4369,169 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   };
 }
 
-async function persistSettledEdgeLeadRecord(env, record, bundle, isSynth = false) {
+const EDGE_PROPERTY_ID = "prexvo";
+const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
+
+function classifyEdgeLeadEmail(email) {
+  const value = String(email || "").trim().toLowerCase();
+  const at = value.lastIndexOf("@");
+  if (at < 1) return "synthetic";
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (!domain) return "synthetic";
+  for (const d of EDGE_CLASSIFIER.own_domains) {
+    if (domain === d || domain.endsWith("." + d)) return "synthetic";
+  }
+  if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
+  if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
+  if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
+  return "real";
+}
+
+function maskEdgeEmail(email) {
+  const s = String(email || "");
+  const at = s.indexOf("@");
+  if (at < 1) return "";
+  return s.slice(0, 1) + "***" + s.slice(at);
+}
+
+function isEdgeVerifiedPaidRecord(item) {
+  return Boolean(
+    item &&
+      item.stripe_payment_verified === true &&
+      item.stripe_payment_status === "paid" &&
+      item.settlement_status === "settled" &&
+      /^cs_live_[A-Za-z0-9_]+$/.test(String(item.stripe_checkout_session_id || ""))
+  );
+}
+
+async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+  const sid = String(sessionId || "").trim();
+  const out = {
+    verified: false,
+    reason: "",
+    session_id: sid,
+    payment_status: null,
+    amount_total_cents: null,
+    currency: null,
+    livemode: null,
+    stripe_http_status: null,
+  };
+  if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {
+    out.reason = "session_id_must_be_a_live_stripe_checkout_session";
+    return out;
+  }
+  const key = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  if (!key) {
+    out.reason = "stripe_secret_key_not_configured";
+    return out;
+  }
+  if (typeof fetch !== "function") {
+    out.reason = "fetch_unavailable";
+    return out;
+  }
+  try {
+    const resp = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(sid), {
+      method: "GET",
+      headers: { Authorization: "Bearer " + key },
+    });
+    out.stripe_http_status = resp.status;
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = (data && data.error) || {};
+      out.reason = "stripe_lookup_failed_" + (err.code || err.type || ("http_" + resp.status));
+      return out;
+    }
+    out.payment_status = data.payment_status || null;
+    out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
+    out.currency = data.currency || null;
+    out.livemode = data.livemode === true;
+    const meta = (data && data.metadata) || {};
+    const ref = String(data.client_reference_id || meta.lead_id || "");
+    if (data.id !== sid) out.reason = "session_id_mismatch";
+    else if (data.livemode !== true) out.reason = "session_not_livemode";
+    else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
+    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
+    else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
+    else out.verified = true;
+  } catch (_) {
+    out.reason = "stripe_lookup_network_error";
+  }
+  return out;
+}
+
+function buildEdgePaymentRequiredResponse(payment, leadId) {
+  const lid = String(leadId || "");
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      success: false,
+      status: "payment_required",
+      settled: false,
+      settlement_status: "unsettled",
+      attributed_revenue_usd: 0,
+      net_settled_revenue_usd: 0,
+      reason: (payment && payment.reason) || "payment_not_verified",
+      lead_id: lid,
+      checkout_url: "/api/lead-capture?checkout=1&lead_id=" + encodeURIComponent(lid) + "&redirect=1",
+      message: "Paid workpapers unlock only after a live Stripe Checkout session_id is verified as paid.",
+    }),
+    { status: 402, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS } }
+  );
+}
+
+function exposeEdgeLeads(request, env, leads) {
+  const adminToken = env && env.LEADS_ADMIN_TOKEN ? String(env.LEADS_ADMIN_TOKEN).trim() : "";
+  const auth = request && request.headers ? String(request.headers.get("authorization") || "") : "";
+  const isAdmin = Boolean(adminToken) && auth === "Bearer " + adminToken;
+  return (leads || []).map((l) => {
+    const item = l || {};
+    const origin = classifyEdgeLeadEmail(item.email) === "synthetic" ? "internal_probe" : "real";
+    const verified = isEdgeVerifiedPaidRecord(item);
+    if (isAdmin) {
+      return { ...item, lead_origin: origin, legacy_unverified_settlement: item.settlement_status === "settled" && !verified };
+    }
+    return {
+      lead_id: item.lead_id,
+      lead_type: item.lead_type || null,
+      lead_origin: origin,
+      property_id: item.property_id || EDGE_PROPERTY_ID,
+      tool_slug: item.tool_slug || null,
+      email: maskEdgeEmail(item.email),
+      captured_at: item.captured_at || null,
+      checkout_mode: item.checkout_mode || null,
+      lifecycle_stage: item.lifecycle_stage || null,
+      settlement_status: verified ? "settled" : "unsettled",
+      stripe_payment_verified: verified,
+      attributed_revenue_usd: verified ? Number(item.attributed_revenue_usd || 0) : 0,
+    };
+  });
+}
+
+async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
-  const stl = (bundle && bundle.settlement_attribution) || {};
+  if (!payment || payment.verified !== true) return record;
+  const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
+  const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
+  const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const settledRecord = {
     ...record,
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
-    offer_sku: (bundle && bundle.offer_sku) || record.offer_sku || PREXVO_TOOLKIT_OFFER.sku,
-    offer_title: (bundle && bundle.offer_title) || record.offer_title || PREXVO_TOOLKIT_OFFER.title,
-    offer_price_usd: Number((bundle && bundle.offer_price_usd) || record.offer_price_usd || 39),
-    settlement_id: stl.settlement_id || `stl_prexvo_${record.lead_id}`,
+    offer_price_usd: grossUsd,
+    settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: stl.settlement_rail || "stripe_direct_settlement_rail",
-    attributed_revenue_usd: Number(stl.attributed_revenue_usd || 39),
-    net_settled_revenue_usd: Number(stl.net_settled_revenue_usd || 37.57),
+    settlement_rail: "stripe_checkout_verified",
+    stripe_payment_verified: true,
+    stripe_payment_status: "paid",
+    stripe_checkout_session_id: payment.session_id,
+    stripe_verified_at: new Date().toISOString(),
+    attributed_revenue_usd: grossUsd,
+    net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
-    datapack_pack_id: stl.datapack_pack_id || `dp_${record.lead_id}`,
-    datapack_url: (bundle && bundle.datapack_url) || "",
-    settled_at: stl.settled_at || new Date().toISOString(),
+    datapack_pack_id: "dp_" + record.lead_id,
+    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -4277,7 +4580,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     const b = byCalc[slug];
     const price = Number(item.offer_price_usd || b.offer_price_usd || defaultPriceUsd);
     const fee = Math.round((price * 0.029 + 0.3) * 100) / 100;
-    const netRev = Number(item.net_settled_revenue_usd || Math.max(0, Math.round((price - fee) * 100) / 100));
+    const netRev = Number(item.net_settled_revenue_usd || 0);
     b.deliverable_requests_count += 1;
     if (item.lead_type === "qualified_quote" || Boolean(item.partner_sharing_consent)) {
       b.qualified_quote_requests_count += 1;
@@ -4286,17 +4589,11 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     }
     b.total_modeled_exposure_usd = Math.round((b.total_modeled_exposure_usd + Number(item.calculated_amount || 0)) * 100) / 100;
     b.checkout_pipeline_usd = Math.round((b.checkout_pipeline_usd + price) * 100) / 100;
-    const isSettled = Boolean(
-      item.lifecycle_stage === "fulfilled" ||
-      item.settlement_status === "settled" ||
-      item.datapack_delivered ||
-      item.zeptomail_dispatched ||
-      item.email_message_id
-    );
+    const isSettled = isEdgeVerifiedPaidRecord(item);
     if (isSettled) {
       b.settled_upgrades_count += 1;
       b.datapack_deliveries_count += 1;
-      b.attributed_revenue_usd = Math.round((b.attributed_revenue_usd + Number(item.attributed_revenue_usd || price)) * 100) / 100;
+      b.attributed_revenue_usd = Math.round((b.attributed_revenue_usd + Number(item.attributed_revenue_usd || 0)) * 100) / 100;
       b.net_settled_revenue_usd = Math.round((b.net_settled_revenue_usd + netRev) * 100) / 100;
     }
     b.deliverable_to_settled_conversion_rate =
@@ -4408,7 +4705,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/student-loan-refinance-break-even-calculator/";
-  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
+  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
@@ -4429,15 +4726,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
       statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
       deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
-      checkout_url: fallbackUrl,
+      checkout_url: null,
       playbook_url: playbookUrl,
       fulfillment_url: fulfillmentUrl,
       csv_fulfillment_url: csvFulfillmentUrl,
       datapack_url: datapackUrl,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      checkout_session_id: `cs_edge_${leadId}`,
-      checkout_mode: "edge_checkout_rail",
+      checkout_session_id: null,
+      checkout_mode: "checkout_unavailable",
       stripe_account_id: stripeAccountId,
       stripe_merchant_email: stripeMerchantEmail,
       stripe_display_name: stripeDisplayName,
@@ -4452,8 +4749,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         stripe_account_id: stripeAccountId,
         merchant_email: stripeMerchantEmail,
         display_name: stripeDisplayName,
-        device_name: "IN-PF4HYA85",
-        cli_key_expires_at: "2026-06-03",
         credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
         http_status: null,
         error_code: null,
@@ -4508,7 +4803,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         datapack_url: datapackUrl,
         success_url: successUrl,
         cancel_url: cancelUrl,
-        checkout_session_id: data.id || `cs_live_${leadId}`,
+        checkout_session_id: data.id,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
         stripe_merchant_email: stripeMerchantEmail,
@@ -4524,8 +4819,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
           stripe_account_id: stripeAccountId,
           merchant_email: stripeMerchantEmail,
           display_name: stripeDisplayName,
-          device_name: "IN-PF4HYA85",
-          cli_key_expires_at: "2026-06-03",
           credential_status: "active_ready",
           http_status: resp.status,
           error_code: null,
@@ -4545,15 +4838,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
     statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
     deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
-    checkout_url: fallbackUrl,
+    checkout_url: null,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
     datapack_url: datapackUrl,
     success_url: successUrl,
     cancel_url: cancelUrl,
-    checkout_session_id: `cs_edge_${leadId}`,
-    checkout_mode: "edge_checkout_rail",
+    checkout_session_id: null,
+    checkout_mode: "checkout_unavailable",
     stripe_account_id: stripeAccountId,
     stripe_merchant_email: stripeMerchantEmail,
     stripe_display_name: stripeDisplayName,
@@ -4568,8 +4861,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       stripe_account_id: stripeAccountId,
       merchant_email: stripeMerchantEmail,
       display_name: stripeDisplayName,
-      device_name: "IN-PF4HYA85",
-      cli_key_expires_at: "2026-06-03",
       credential_status: credStatus,
       http_status: stripeHttpStatus,
       error_code: stripeErrorCode,
@@ -4619,7 +4910,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   let zeptoHttpStatus = null;
   let zeptoErrorCode = null;
   let zeptoRequestId = null;
-  if (zeptoToken) {
+  // Zoho OAuth (Nango) is the verified-working rail in production; ZeptoMail returns SM_111
+  // (sender domain not verified in the ZeptoMail agent), so it is only a fallback unless
+  // EMAIL_PRIMARY_RAIL=zeptomail is set after the agent domain is verified.
+  const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
+  if (zeptoToken && !zohoPrimary) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -4713,6 +5008,48 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       }
     } catch (_) {}
   }
+  if (zeptoToken && zohoPrimary) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
+    }
+  }
   return {
     zeptomail_dispatched: false,
     zeptomail_status: "queued_central_responder",
@@ -4768,10 +5105,13 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("inputs_json"),
       reqUrl.searchParams.get("outputs_json")
     );
-    const bundle = buildEdgePersonalizedWorkpaperBundle(storedRecord, isFulfill ? "paid_toolkit" : "free_playbook");
+    let gatedRecord = storedRecord;
     if (isFulfill) {
-      await persistSettledEdgeLeadRecord(env, storedRecord, bundle, isSynth);
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
     }
+    const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, isFulfill ? "paid_toolkit" : "free_playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
@@ -4853,10 +5193,6 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("inputs_json"),
       reqUrl.searchParams.get("outputs_json")
     );
-    if (reqUrl.searchParams.get("settle") === "1") {
-      const settledBundle = buildEdgePersonalizedWorkpaperBundle(customRecord, "paid_toolkit");
-      await persistSettledEdgeLeadRecord(env, customRecord, settledBundle, isSynth);
-    }
     const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
@@ -4865,7 +5201,7 @@ export async function onRequestGet(context) {
     if (wantsBrowserRedirect) {
       const targetCheckoutLoc = String(offer.checkout_url || "").startsWith("https://checkout.stripe.com/")
         ? offer.checkout_url
-        : `https://prexvo.com${offer.fulfillment_url}&format=html`;
+        : String(offer.cancel_url || "/").replace("checkout_status=cancelled", "checkout_status=unavailable");
       return new Response(null, {
         status: 302,
         headers: {
@@ -4879,17 +5215,17 @@ export async function onRequestGet(context) {
     }
     return new Response(
       JSON.stringify({
-        ok: true,
-        success: true,
+        ok: offer.checkout_mode === "stripe_live_session",
+        success: offer.checkout_mode === "stripe_live_session",
         synthetic_test: isSynth,
-        status: "checkout_session_ready",
+        status: offer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "prexvo",
         lead_id: leadId,
         tool_slug: toolSlug,
         ...offer,
       }),
       {
-        status: 200,
+        status: (offer.checkout_mode === "stripe_live_session" ? 200 : 503),
         headers: {
           "Content-Type": "application/json",
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
@@ -4943,6 +5279,10 @@ export async function onRequestGet(context) {
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
+    settlement_policy: "stripe_verified_only",
+    real_leads_count: leads.filter((l) => classifyEdgeLeadEmail(l && l.email) === "real").length,
+    internal_probe_leads_count: leads.filter((l) => classifyEdgeLeadEmail(l && l.email) === "synthetic").length,
+    legacy_unverified_settled_claims_count: leads.filter((l) => l && l.settlement_status === "settled" && !isEdgeVerifiedPaidRecord(l)).length,
     datapack_deliveries_count: settledCount,
     attributed_revenue_usd: totalAttrRev,
     net_settled_revenue_usd: totalNetRev,
@@ -4952,7 +5292,7 @@ export async function onRequestGet(context) {
   };
 
   return new Response(
-    JSON.stringify({ ok: true, success: true, property_id: "prexvo", count: leads.length, summary, leads }),
+    JSON.stringify({ ok: true, success: true, property_id: "prexvo", count: leads.length, summary, leads: exposeEdgeLeads(request, env, leads) }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
 }
@@ -5782,7 +6122,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   const grossPriceUsd = Number(effSpec.offerPriceUsd || 49);
   const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = mode === "paid_toolkit" || Boolean(record && record.settlement_status === "settled");
+  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
   const settlementAttribution = {
     settlement_id: (record && record.settlement_id) || `stl_profithelm_${leadId}`,
     settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
@@ -5854,25 +6194,169 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   };
 }
 
-async function persistSettledEdgeLeadRecord(env, record, bundle, isSynth = false) {
+const EDGE_PROPERTY_ID = "profithelm";
+const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
+
+function classifyEdgeLeadEmail(email) {
+  const value = String(email || "").trim().toLowerCase();
+  const at = value.lastIndexOf("@");
+  if (at < 1) return "synthetic";
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (!domain) return "synthetic";
+  for (const d of EDGE_CLASSIFIER.own_domains) {
+    if (domain === d || domain.endsWith("." + d)) return "synthetic";
+  }
+  if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
+  if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
+  if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
+  return "real";
+}
+
+function maskEdgeEmail(email) {
+  const s = String(email || "");
+  const at = s.indexOf("@");
+  if (at < 1) return "";
+  return s.slice(0, 1) + "***" + s.slice(at);
+}
+
+function isEdgeVerifiedPaidRecord(item) {
+  return Boolean(
+    item &&
+      item.stripe_payment_verified === true &&
+      item.stripe_payment_status === "paid" &&
+      item.settlement_status === "settled" &&
+      /^cs_live_[A-Za-z0-9_]+$/.test(String(item.stripe_checkout_session_id || ""))
+  );
+}
+
+async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+  const sid = String(sessionId || "").trim();
+  const out = {
+    verified: false,
+    reason: "",
+    session_id: sid,
+    payment_status: null,
+    amount_total_cents: null,
+    currency: null,
+    livemode: null,
+    stripe_http_status: null,
+  };
+  if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {
+    out.reason = "session_id_must_be_a_live_stripe_checkout_session";
+    return out;
+  }
+  const key = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  if (!key) {
+    out.reason = "stripe_secret_key_not_configured";
+    return out;
+  }
+  if (typeof fetch !== "function") {
+    out.reason = "fetch_unavailable";
+    return out;
+  }
+  try {
+    const resp = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(sid), {
+      method: "GET",
+      headers: { Authorization: "Bearer " + key },
+    });
+    out.stripe_http_status = resp.status;
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = (data && data.error) || {};
+      out.reason = "stripe_lookup_failed_" + (err.code || err.type || ("http_" + resp.status));
+      return out;
+    }
+    out.payment_status = data.payment_status || null;
+    out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
+    out.currency = data.currency || null;
+    out.livemode = data.livemode === true;
+    const meta = (data && data.metadata) || {};
+    const ref = String(data.client_reference_id || meta.lead_id || "");
+    if (data.id !== sid) out.reason = "session_id_mismatch";
+    else if (data.livemode !== true) out.reason = "session_not_livemode";
+    else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
+    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
+    else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
+    else out.verified = true;
+  } catch (_) {
+    out.reason = "stripe_lookup_network_error";
+  }
+  return out;
+}
+
+function buildEdgePaymentRequiredResponse(payment, leadId) {
+  const lid = String(leadId || "");
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      success: false,
+      status: "payment_required",
+      settled: false,
+      settlement_status: "unsettled",
+      attributed_revenue_usd: 0,
+      net_settled_revenue_usd: 0,
+      reason: (payment && payment.reason) || "payment_not_verified",
+      lead_id: lid,
+      checkout_url: "/api/lead-capture?checkout=1&lead_id=" + encodeURIComponent(lid) + "&redirect=1",
+      message: "Paid workpapers unlock only after a live Stripe Checkout session_id is verified as paid.",
+    }),
+    { status: 402, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS } }
+  );
+}
+
+function exposeEdgeLeads(request, env, leads) {
+  const adminToken = env && env.LEADS_ADMIN_TOKEN ? String(env.LEADS_ADMIN_TOKEN).trim() : "";
+  const auth = request && request.headers ? String(request.headers.get("authorization") || "") : "";
+  const isAdmin = Boolean(adminToken) && auth === "Bearer " + adminToken;
+  return (leads || []).map((l) => {
+    const item = l || {};
+    const origin = classifyEdgeLeadEmail(item.email) === "synthetic" ? "internal_probe" : "real";
+    const verified = isEdgeVerifiedPaidRecord(item);
+    if (isAdmin) {
+      return { ...item, lead_origin: origin, legacy_unverified_settlement: item.settlement_status === "settled" && !verified };
+    }
+    return {
+      lead_id: item.lead_id,
+      lead_type: item.lead_type || null,
+      lead_origin: origin,
+      property_id: item.property_id || EDGE_PROPERTY_ID,
+      tool_slug: item.tool_slug || null,
+      email: maskEdgeEmail(item.email),
+      captured_at: item.captured_at || null,
+      checkout_mode: item.checkout_mode || null,
+      lifecycle_stage: item.lifecycle_stage || null,
+      settlement_status: verified ? "settled" : "unsettled",
+      stripe_payment_verified: verified,
+      attributed_revenue_usd: verified ? Number(item.attributed_revenue_usd || 0) : 0,
+    };
+  });
+}
+
+async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
-  const stl = (bundle && bundle.settlement_attribution) || {};
+  if (!payment || payment.verified !== true) return record;
+  const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
+  const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
+  const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const settledRecord = {
     ...record,
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
-    offer_sku: (bundle && bundle.offer_sku) || record.offer_sku || "ph_1031_boot_replacement_workpapers",
-    offer_title: (bundle && bundle.offer_title) || record.offer_title || "IRC Section 1031 Boot & Replacement Property Audit Workpapers",
-    offer_price_usd: Number((bundle && bundle.offer_price_usd) || record.offer_price_usd || 49),
-    settlement_id: stl.settlement_id || `stl_profithelm_${record.lead_id}`,
+    offer_price_usd: grossUsd,
+    settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: stl.settlement_rail || "stripe_direct_settlement_rail",
-    attributed_revenue_usd: Number(stl.attributed_revenue_usd || (bundle && bundle.offer_price_usd) || 49),
-    net_settled_revenue_usd: Number(stl.net_settled_revenue_usd || 47.28),
+    settlement_rail: "stripe_checkout_verified",
+    stripe_payment_verified: true,
+    stripe_payment_status: "paid",
+    stripe_checkout_session_id: payment.session_id,
+    stripe_verified_at: new Date().toISOString(),
+    attributed_revenue_usd: grossUsd,
+    net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
-    datapack_pack_id: stl.datapack_pack_id || `dp_${record.lead_id}`,
-    datapack_url: (bundle && bundle.datapack_url) || "",
-    settled_at: stl.settled_at || new Date().toISOString(),
+    datapack_pack_id: "dp_" + record.lead_id,
+    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -5922,7 +6406,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     const b = byCalc[slug];
     const price = Number(item.offer_price_usd || b.offer_price_usd || defaultPriceUsd);
     const fee = Math.round((price * 0.029 + 0.3) * 100) / 100;
-    const netRev = Number(item.net_settled_revenue_usd || Math.max(0, Math.round((price - fee) * 100) / 100));
+    const netRev = Number(item.net_settled_revenue_usd || 0);
     b.deliverable_requests_count += 1;
     if (item.lead_type === "qualified_quote" || Boolean(item.partner_sharing_consent)) {
       b.qualified_quote_requests_count += 1;
@@ -5931,17 +6415,11 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     }
     b.total_modeled_exposure_usd = Math.round((b.total_modeled_exposure_usd + Number(item.calculated_amount || 0)) * 100) / 100;
     b.checkout_pipeline_usd = Math.round((b.checkout_pipeline_usd + price) * 100) / 100;
-    const isSettled = Boolean(
-      item.lifecycle_stage === "fulfilled" ||
-      item.settlement_status === "settled" ||
-      item.datapack_delivered ||
-      item.zeptomail_dispatched ||
-      item.email_message_id
-    );
+    const isSettled = isEdgeVerifiedPaidRecord(item);
     if (isSettled) {
       b.settled_upgrades_count += 1;
       b.datapack_deliveries_count += 1;
-      b.attributed_revenue_usd = Math.round((b.attributed_revenue_usd + Number(item.attributed_revenue_usd || price)) * 100) / 100;
+      b.attributed_revenue_usd = Math.round((b.attributed_revenue_usd + Number(item.attributed_revenue_usd || 0)) * 100) / 100;
       b.net_settled_revenue_usd = Math.round((b.net_settled_revenue_usd + netRev) * 100) / 100;
     }
     b.deliverable_to_settled_conversion_rate =
@@ -6053,7 +6531,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/section-1031-calculator/";
-  const successUrl = `https://profithelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  const successUrl = `https://profithelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://profithelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
@@ -6074,15 +6552,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       offer_price_usd: spec.offerPriceUsd,
       statutory_authority: spec.statutoryAuthority,
       deliverables: spec.deliverables,
-      checkout_url: fallbackUrl,
+      checkout_url: null,
       playbook_url: playbookUrl,
       fulfillment_url: fulfillmentUrl,
       csv_fulfillment_url: csvFulfillmentUrl,
       datapack_url: datapackUrl,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      checkout_session_id: `cs_edge_${leadId}`,
-      checkout_mode: "edge_checkout_rail",
+      checkout_session_id: null,
+      checkout_mode: "checkout_unavailable",
       stripe_account_id: stripeAccountId,
       stripe_merchant_email: stripeMerchantEmail,
       stripe_display_name: stripeDisplayName,
@@ -6097,8 +6575,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         stripe_account_id: stripeAccountId,
         merchant_email: stripeMerchantEmail,
         display_name: stripeDisplayName,
-        device_name: "IN-PF4HYA85",
-        cli_key_expires_at: "2026-06-03",
         credential_status: stripeKey ? "configured_ready" : "secret_key_missing_rotation_required",
         http_status: null,
         error_code: null,
@@ -6153,7 +6629,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         datapack_url: datapackUrl,
         success_url: successUrl,
         cancel_url: cancelUrl,
-        checkout_session_id: data.id || `cs_live_${leadId}`,
+        checkout_session_id: data.id,
         checkout_mode: "stripe_live_session",
         stripe_account_id: stripeAccountId,
         stripe_merchant_email: stripeMerchantEmail,
@@ -6169,8 +6645,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
           stripe_account_id: stripeAccountId,
           merchant_email: stripeMerchantEmail,
           display_name: stripeDisplayName,
-          device_name: "IN-PF4HYA85",
-          cli_key_expires_at: "2026-06-03",
           credential_status: "active_ready",
           http_status: resp.status,
           error_code: null,
@@ -6190,15 +6664,15 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     offer_price_usd: spec.offerPriceUsd,
     statutory_authority: spec.statutoryAuthority,
     deliverables: spec.deliverables,
-    checkout_url: fallbackUrl,
+    checkout_url: null,
     playbook_url: playbookUrl,
     fulfillment_url: fulfillmentUrl,
     csv_fulfillment_url: csvFulfillmentUrl,
     datapack_url: datapackUrl,
     success_url: successUrl,
     cancel_url: cancelUrl,
-    checkout_session_id: `cs_edge_${leadId}`,
-    checkout_mode: "edge_checkout_rail",
+    checkout_session_id: null,
+    checkout_mode: "checkout_unavailable",
     stripe_account_id: stripeAccountId,
     stripe_merchant_email: stripeMerchantEmail,
     stripe_display_name: stripeDisplayName,
@@ -6213,8 +6687,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       stripe_account_id: stripeAccountId,
       merchant_email: stripeMerchantEmail,
       display_name: stripeDisplayName,
-      device_name: "IN-PF4HYA85",
-      cli_key_expires_at: "2026-06-03",
       credential_status: credStatus,
       http_status: stripeHttpStatus,
       error_code: stripeErrorCode,
@@ -6264,7 +6736,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   let zeptoHttpStatus = null;
   let zeptoErrorCode = null;
   let zeptoRequestId = null;
-  if (zeptoToken) {
+  // Zoho OAuth (Nango) is the verified-working rail in production; ZeptoMail returns SM_111
+  // (sender domain not verified in the ZeptoMail agent), so it is only a fallback unless
+  // EMAIL_PRIMARY_RAIL=zeptomail is set after the agent domain is verified.
+  const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
+  if (zeptoToken && !zohoPrimary) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -6358,6 +6834,48 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       }
     } catch (_) {}
   }
+  if (zeptoToken && zohoPrimary) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
+    }
+  }
   return {
     zeptomail_dispatched: false,
     zeptomail_status: "queued_central_responder",
@@ -6411,10 +6929,13 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("inputs_json"),
       reqUrl.searchParams.get("outputs_json")
     );
-    const bundle = buildEdgePersonalizedWorkpaperBundle(storedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook");
+    let gatedRecord = storedRecord;
     if (isFulfill) {
-      await persistSettledEdgeLeadRecord(env, storedRecord, bundle, isSynth);
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
     }
+    const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
@@ -6494,10 +7015,6 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("inputs_json"),
       reqUrl.searchParams.get("outputs_json")
     );
-    if (reqUrl.searchParams.get("settle") === "1") {
-      const settledBundle = buildEdgePersonalizedWorkpaperBundle(customRecord, spec, "paid_toolkit");
-      await persistSettledEdgeLeadRecord(env, customRecord, settledBundle, isSynth);
-    }
     const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSynth, customRecord);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
@@ -6506,7 +7023,7 @@ export async function onRequestGet(context) {
     if (wantsBrowserRedirect) {
       const targetCheckoutLoc = String(offer.checkout_url || "").startsWith("https://checkout.stripe.com/")
         ? offer.checkout_url
-        : `https://profithelm.com${offer.fulfillment_url}&format=html`;
+        : String(offer.cancel_url || "/").replace("checkout_status=cancelled", "checkout_status=unavailable");
       return new Response(null, {
         status: 302,
         headers: {
@@ -6520,17 +7037,17 @@ export async function onRequestGet(context) {
     }
     return new Response(
       JSON.stringify({
-        ok: true,
-        success: true,
+        ok: offer.checkout_mode === "stripe_live_session",
+        success: offer.checkout_mode === "stripe_live_session",
         synthetic_test: isSynth,
-        status: "checkout_session_ready",
+        status: offer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "profithelm",
         lead_id: leadId,
         tool_slug: toolSlug,
         ...offer,
       }),
       {
-        status: 200,
+        status: (offer.checkout_mode === "stripe_live_session" ? 200 : 503),
         headers: {
           "Content-Type": "application/json",
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
@@ -6584,6 +7101,10 @@ export async function onRequestGet(context) {
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
+    settlement_policy: "stripe_verified_only",
+    real_leads_count: leads.filter((l) => classifyEdgeLeadEmail(l && l.email) === "real").length,
+    internal_probe_leads_count: leads.filter((l) => classifyEdgeLeadEmail(l && l.email) === "synthetic").length,
+    legacy_unverified_settled_claims_count: leads.filter((l) => l && l.settlement_status === "settled" && !isEdgeVerifiedPaidRecord(l)).length,
     datapack_deliveries_count: settledCount,
     attributed_revenue_usd: totalAttrRev,
     net_settled_revenue_usd: totalNetRev,
@@ -6593,7 +7114,7 @@ export async function onRequestGet(context) {
   };
 
   return new Response(
-    JSON.stringify({ ok: true, success: true, property_id: "profithelm", count: leads.length, summary, leads }),
+    JSON.stringify({ ok: true, success: true, property_id: "profithelm", count: leads.length, summary, leads: exposeEdgeLeads(request, env, leads) }),
     { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
   );
 }
@@ -6848,6 +7369,7 @@ export async function onRequestPost(context) {
 }
 """
 
+    lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json(prop_clean))
     assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function")
     return lead_js
 

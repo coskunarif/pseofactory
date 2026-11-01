@@ -7329,6 +7329,40 @@ def _normalize_page_structure_and_geo_parity(
     return updated, changed
 
 
+def _has_stale_pending_status(content: str, property_id: str) -> bool:
+    """True only when a partner link is labeled data-status="pending" although the registry
+    says that partner is live. Partners that are honestly pending/declined (no approved affiliate
+    contract) legitimately render data-status="pending" and must not be flagged stale."""
+    if 'data-status="pending"' not in content:
+        return False
+    try:
+        from pseofactory.affiliates import (
+            GAINHELM_AFFILIATES,
+            PREXVO_AFFILIATES,
+            PROFITHELM_AFFILIATES,
+        )
+
+        prop = (property_id or "").strip().lower()
+        registry = (
+            PREXVO_AFFILIATES
+            if prop == "prexvo"
+            else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+        )
+    except Exception:
+        return True
+    for tag in re.finditer(r"<[a-z]+\b[^>]*data-status=\"pending\"[^>]*>", content, re.I):
+        pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', tag.group(0), re.I)
+        if not pk_m:
+            href_m = re.search(r'href=["\']/r/([a-z0-9_]+)', tag.group(0), re.I)
+            pk = href_m.group(1).lower() if href_m else ""
+        else:
+            pk = pk_m.group(1).lower()
+        entry = registry.get(pk)
+        if entry is None or entry.status == "live":
+            return True
+    return False
+
+
 class RetroReflectionEngine:
     """
     Autonomous Retro-Reflection Engine for pseofactory.
@@ -11002,7 +11036,7 @@ class RetroReflectionEngine:
                             include_fact_store=True,
                         )
                     )
-                    or 'data-status="pending"' in content
+                    or _has_stale_pending_status(content, property_id)
                     or "Calculate & File Taxes Online with TaxAct" in content
                     or ('href="/r/' in content and "source_tool=" not in content)
                     or any(
@@ -11021,7 +11055,7 @@ class RetroReflectionEngine:
                     if "calculation_manifest" not in missing:
                         missing.append("calculation_manifest")
             if (
-                'data-status="pending"' in content
+                _has_stale_pending_status(content, property_id)
                 or 'data-partner="sofi_refi"' in content
                 or ("1031" in rel and 'data-partner="ipx1031"' not in content and 'data-partner="lawdepot"' not in content)
                 or ('href="/r/' in content and "source_tool=" not in content)

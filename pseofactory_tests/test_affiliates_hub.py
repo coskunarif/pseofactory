@@ -94,7 +94,7 @@ def test_direct_high_bounty_partner_resolution():
     route_ramp = hub.get_route("profithelm", partner_key="ramp")
     assert route_ramp["property_id"] == "profithelm"
     assert route_ramp["partner"] == "ramp"
-    assert "mercury.com" in route_ramp["url"]
+    assert "ramp.com" in route_ramp["url"]
 
     # Prexvo direct partner via slug
     route_px = hub.get_route("prexvo", "student-loan-repayment-calculator")
@@ -610,7 +610,8 @@ def test_merchant_coverage_and_yield_audit():
     assert px_report["status"] == "PASS"
     assert px_report["non_paying_passthrough_count"] == 0
     assert px_report["internal_loop_count"] == 0
-    assert px_report["verified_paying_count"] == 5
+    # None of the 5 lenders has an approved affiliate contract (sofi/earnest declined, rest pending).
+    assert px_report["verified_paying_count"] == 0
 
     for pk, m_info in SOVRN_VERIFIED_PAYING_MERCHANTS.items():
         assert m_info["approved"] is True, f"Partner {pk} must be approved"
@@ -931,7 +932,8 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
     assert 'href="/r/splash_financial' in norm_px
     assert "source_tool=student-loan-repayment-calculator" in norm_px
     assert "subid=student-loan-repayment-calculator_overlay" in norm_px
-    assert 'data-status="live"' in norm_px
+    # Splash Financial has no approved contract yet (pending on Impact), so it is labeled pending.
+    assert 'data-status="pending"' in norm_px
     assert "utm_source=prexvo" not in norm_px
 
     # 3. Homepage standalone affiliate-cta-section replaces stale TaxAct button label with Xendoo and injects above-the-fold FTC disclosure banner
@@ -1059,11 +1061,11 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       }});
       if (pxRes.status !== 302) process.exit(40);
       const pxLoc = new URL(pxRes.headers.get("Location"));
-      if (pxLoc.hostname !== "prexvo.com" || pxLoc.pathname !== "/api/lead-capture") process.exit(41);
-      if (pxLoc.searchParams.get("checkout") !== "1" || pxLoc.searchParams.get("sku") !== "px_refi_amortization_decision_audit") process.exit(41);
+      // A lender click must resolve to the lender itself, never silently into the paid $39 Stripe checkout.
+      if (pxLoc.hostname === "prexvo.com" || pxLoc.pathname.includes("lead-capture") || pxLoc.searchParams.get("checkout")) process.exit(41);
+      if (pxLoc.hostname !== "www.splashfinancial.com") process.exit(41);
       if (pxLoc.searchParams.get("subid") !== "student-loan-repayment-calculator_calculator_result_inline") process.exit(42);
-      if (pxLoc.searchParams.get("ref") !== "prexvo") process.exit(43);
-      if (pxRes.headers.get("X-Edge-Contract-Tier") !== "yield_gated_direct_checkout_capture") process.exit(46);
+      if (pxRes.headers.get("X-Edge-Contract-Tier") !== "unapproved_native_unmonetized") process.exit(46);
 
       const beaconReq = new Request("https://prexvo.com/api/telemetry", {{
         method: "POST",
@@ -1190,28 +1192,24 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (sbLoc.hostname !== "www.jdoqocy.com" || !sbLoc.pathname.includes("click-101906407-16985242")) process.exit(40);
       if (sbLoc.searchParams.get("sid") !== "contractor-surety-bond-cost-calculator_partner_card_1") process.exit(41);
 
-      // 5. ipx1031 -> Impact Xendoo #16354 ($500 CPA) by default while Sovrn Commerce is Denied and Impact DLP Capital is pending
+      // 5. ipx1031 must stay on the 1031 qualified intermediary (never Xendoo bookkeeping)
       const ipxDirectRes = await phRedirect.onRequest({{
         request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
         env: {{}},
         params: {{ partner: "ipx1031" }}
       }});
       const ipxDirectLoc = new URL(ipxDirectRes.headers.get("Location"));
-      if (ipxDirectLoc.hostname !== "xendoo.pxf.io" || !ipxDirectLoc.pathname.includes("/16354")) process.exit(48);
-      if (ipxDirectLoc.searchParams.get("subId1") !== "1031-exchange-boot-calculator-california_inline") process.exit(49);
-      if (ipxDirectRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(54);
+      if (ipxDirectLoc.hostname === "xendoo.pxf.io" || !ipxDirectLoc.hostname.endsWith("ipx1031.com")) process.exit(48);
+      if (ipxDirectRes.headers.get("X-Edge-Contract-Tier") === "direct_contract_upgraded") process.exit(54);
 
-      // 6. ipx1031 -> Sovrn Commerce DLP Capital ($250/lead) when SOVRN_COMMERCE_APPROVED=true and env.AFFILIATE_IPX1031_URL is unset
+      // 6. Even with Sovrn approved, a 1031 click is not wrapped onto an unrelated lender (DLP Capital)
       const ipxRes = await phRedirect.onRequest({{
         request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
         env: {{ SOVRN_COMMERCE_APPROVED: "true" }},
         params: {{ partner: "ipx1031" }}
       }});
       const ipxLoc = new URL(ipxRes.headers.get("Location"));
-      if (ipxLoc.hostname !== "redirect.viglink.com") process.exit(50);
-      if (!ipxLoc.searchParams.get("u").startsWith("https://dlpcapital.com/")) process.exit(51);
-      if (ipxLoc.searchParams.get("cuid") !== "1031-exchange-boot-calculator-california_inline") process.exit(52);
-      if (ipxRes.headers.get("X-Edge-Contract-Tier") !== "sovrn_fallback") process.exit(53);
+      if (ipxLoc.hostname === "redirect.viglink.com" || !ipxLoc.hostname.endsWith("ipx1031.com")) process.exit(50);
 
       process.exit(0);
     }})().catch(err => {{ console.error(err); process.exit(99); }});

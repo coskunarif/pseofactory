@@ -26,6 +26,11 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Set
 from urllib.parse import urlencode
 
+from pseofactory.lead_classification import (
+    classify_lead_email,
+    is_verified_stripe_payment,
+    revenue_summary,
+)
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.affiliates import (
     AffiliatePartner,
@@ -1202,7 +1207,6 @@ class PartnerTrackingEngine:
                         "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                         "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                         "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                        "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                         "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
                         "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
                         "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
@@ -1257,7 +1261,7 @@ class PartnerTrackingEngine:
                 is_mid_rebuild_torn = (
                     (prop_id == "profithelm" and (total_r_links < 671 or pending_partner_links_in_dom > 0))
                     or (prop_id == "prexvo" and (total_r_links < 75 or not ymyl_restricted_pages_clean))
-                    or (prop_id == "gainhelm" and (total_r_links < 30 or pending_partner_links_in_dom > 0))
+                    or (prop_id == "gainhelm" and total_r_links < 30)
                 )
                 repo_root_cand = os.path.dirname(os.path.abspath(dist_path.rstrip("/")))
                 if is_mid_rebuild_torn and os.path.exists(os.path.join(repo_root_cand, ".git")):
@@ -1375,34 +1379,6 @@ class PartnerTrackingEngine:
             "crest_capital": {
                 "edge_destination_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
                 "approved_advertiser": "Xendoo (Impact #16354 - $500 CPA + $25 Lead)",
-            },
-            "ipx1031": {
-                "edge_destination_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                "approved_advertiser": "Xendoo (Impact #16354 - $500 CPA + $25 Lead)",
-            },
-            "vanta_security": {
-                "edge_destination_url": "https://join.ramp.com/c/7932737/3981015/51436",
-                "approved_advertiser": "Ramp Corporate Spend & Vendor Security Procurement (Impact #51436 - $100-$4,000 Closed Won / $50-$2,000 SQL)",
-            },
-            "drata_compliance": {
-                "edge_destination_url": "https://join.ramp.com/c/7932737/3981015/51436",
-                "approved_advertiser": "Ramp Corporate Spend & Vendor Security Procurement (Impact #51436 - $100-$4,000 Closed Won / $50-$2,000 SQL)",
-            },
-            "sprinto_compliance": {
-                "edge_destination_url": "https://www.jdoqocy.com/click-101906407-16985242",
-                "approved_advertiser": "LawDepot Commercial Security Policies, NDAs & DPAs (CJ #4544498 - 30% to 40% CPA + $6.50 Lead)",
-            },
-            "thoropass_audit": {
-                "edge_destination_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                "approved_advertiser": "Xendoo CPA Audit & Financial Compliance (Impact #16354 - $500 CPA + $25 Lead)",
-            },
-            "coalition_cyber_insurance": {
-                "edge_destination_url": "https://www.jdoqocy.com/click-101906407-16985242",
-                "approved_advertiser": "LawDepot Commercial Security Policies & Incident Response Agreements (CJ #4544498 - 30% to 40% CPA)",
-            },
-            "cobalt_pentest": {
-                "edge_destination_url": "https://join.ramp.com/c/7932737/3981015/51436",
-                "approved_advertiser": "Ramp Corporate Spend & Vendor Security Procurement (Impact #51436 - $100-$4,000 Closed Won / $50-$2,000 SQL)",
             },
         }
 
@@ -5708,9 +5684,9 @@ def synthesize_personalized_audit_workpaper(
             regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
 
     datapack_url = str(offer.get("datapack_url") or f"{offer['fulfillment_url']}&format=datapack")
-    is_settled_mode = mode == "paid_toolkit" or bool(
-        isinstance(lead_record, dict) and lead_record.get("settlement_status") == "settled"
-    )
+    # Revenue is only ever settled with edge-verified live Stripe payment proof; `mode` alone
+    # (a preview/paid-toolkit render) never books revenue.
+    is_settled_mode = bool(isinstance(lead_record, dict) and is_verified_stripe_payment(lead_record))
     gross_usd = float(offer["offer_price_usd"])
     proc_fee_usd = round(gross_usd * 0.029 + 0.30, 2) if is_settled_mode else 0.0
     net_settled_usd = round(gross_usd - proc_fee_usd, 2) if is_settled_mode else 0.0
@@ -5859,14 +5835,23 @@ def settle_post_calculation_datapack_upgrade(
     scenario_outputs: Optional[Dict[str, Any]] = None,
     leads_ledger_path: Optional[Any] = None,
     execute_live_checkout: bool = False,
+    verified_payment: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Executes direct self-serve checkout settlement and custom statutory data pack fulfillment
-    for a post-calculation upgrade. Logs deterministic revenue attribution against the scenario
-    in the captured leads ledger and returns the verified `pseo-datapack-v1` payload alongside
-    workpaper schedules and settlement metadata.
+    Settles a post-calculation upgrade ONLY when `verified_payment` carries a live Stripe
+    Checkout proof (`session_id` = `cs_live_...`, `payment_status` = `paid`, positive
+    `amount_total_cents`) obtained directly from the Stripe API. Without that proof the call
+    returns `status: payment_required`, books zero revenue, and writes nothing to the ledger.
+    A verified settlement logs the real amount collected against the scenario and returns the
+    `pseo-datapack-v1` payload alongside workpaper schedules and settlement metadata.
     Zero em-dashes. Zero en-dashes.
     """
+    pay = verified_payment if isinstance(verified_payment, dict) else {}
+    pay_ok = bool(
+        re.match(r"^cs_live_[A-Za-z0-9_]+$", str(pay.get("session_id") or ""))
+        and str(pay.get("payment_status") or "") == "paid"
+        and float(pay.get("amount_total_cents") or 0) > 0
+    )
     prop_clean = (property_id or "profithelm").strip().lower()
     slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
     eff_ledger = (
@@ -5931,6 +5916,31 @@ def settle_post_calculation_datapack_upgrade(
         sku=sku or str(base_rec.get("offer_sku") or ""),
         execute_live=execute_live_checkout,
     )
+    if not pay_ok:
+        return {
+            "status": "payment_required",
+            "settled": False,
+            "reason": "no_verified_live_stripe_payment",
+            "property_id": prop_clean,
+            "tool_slug": eff_slug,
+            "lead_id": eff_lead_id,
+            "offer_sku": checkout_session["offer_sku"],
+            "offer_title": checkout_session["offer_title"],
+            "offer_price_usd": float(checkout_session["offer_price_usd"]),
+            "checkout_session": checkout_session,
+            "settlement_attribution": {
+                "settlement_status": "unsettled",
+                "attributed_revenue_usd": 0.0,
+                "net_settled_revenue_usd": 0.0,
+            },
+        }
+    paid_cents = float(pay.get("amount_total_cents") or 0)
+    checkout_session = {
+        **checkout_session,
+        "checkout_session_id": str(pay["session_id"]),
+        "checkout_mode": "stripe_live_session",
+        "offer_price_usd": round(paid_cents / 100.0, 2),
+    }
     workpaper = synthesize_personalized_audit_workpaper(
         property_id=prop_clean,
         tool_slug=eff_slug,
@@ -5941,6 +5951,9 @@ def settle_post_calculation_datapack_upgrade(
             "checkout_session_id": checkout_session["checkout_session_id"],
             "checkout_mode": checkout_session["checkout_mode"],
             "settlement_status": "settled",
+            "stripe_payment_verified": True,
+            "stripe_payment_status": "paid",
+            "stripe_checkout_session_id": str(pay["session_id"]),
         },
         mode="paid_toolkit",
     )
@@ -5967,6 +5980,9 @@ def settle_post_calculation_datapack_upgrade(
             "checkout_url": checkout_session["checkout_url"],
             "settlement_id": settlement["settlement_id"],
             "settlement_status": "settled",
+            "stripe_payment_verified": True,
+            "stripe_payment_status": "paid",
+            "stripe_checkout_session_id": str(pay["session_id"]),
             "settlement_rail": settlement["settlement_rail"],
             "attributed_revenue_usd": settlement["attributed_revenue_usd"],
             "net_settled_revenue_usd": settlement["net_settled_revenue_usd"],
@@ -6295,17 +6311,13 @@ def compute_scenario_demand_and_conversion_metrics(
         bucket["total_modeled_exposure_usd"] = round(bucket["total_modeled_exposure_usd"] + calc_amt, 2)
         bucket["checkout_pipeline_usd"] = round(bucket["checkout_pipeline_usd"] + price_usd, 2)
 
-        is_settled = bool(
-            stage == "fulfilled"
-            or rec.get("settlement_status") == "settled"
-            or rec.get("datapack_delivered")
-            or rec.get("zeptomail_dispatched")
-            or rec.get("fulfillment_status") in ("dispatched", "synthetic_verified", "datapack_settled_and_delivered")
-        )
+        # Settled means verified live Stripe cash only. Email delivery, free playbook fulfillment
+        # and legacy "settled" flags without payment proof are never revenue.
+        is_settled = is_verified_stripe_payment(rec)
         if is_settled:
             bucket["settled_upgrades_count"] += 1
             bucket["datapack_deliveries_count"] += 1
-            attr_rev = float(rec.get("attributed_revenue_usd") or price_usd)
+            attr_rev = float(rec.get("attributed_revenue_usd") or 0.0)
             fee_est = round(attr_rev * 0.029 + 0.30, 2)
             net_rev = float(rec.get("net_settled_revenue_usd") or max(0.0, round(attr_rev - fee_est, 2)))
             bucket["attributed_revenue_usd"] = round(bucket["attributed_revenue_usd"] + attr_rev, 2)
@@ -6450,6 +6462,8 @@ def compute_scenario_demand_and_conversion_metrics(
             "fleet_interaction_to_deliverable_rate": (
                 round(total_reqs / total_clicks, 4) if total_clicks > 0 else 0.0
             ),
+            "settlement_policy": "stripe_verified_only",
+            "lead_truth": revenue_summary(leads),
         },
         "scenario_demand_ranking": ranked_scenarios,
         "top_scenarios_by_tenant": top_by_tenant,
@@ -8130,7 +8144,13 @@ def sync_edge_leads_to_ledger(
 
     for prop_id, url in urls.items():
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "PseoFactoryLeadMonitor/1.0"})
+            lead_hdrs = {"User-Agent": "PseoFactoryLeadMonitor/1.0"}
+            # The public lead list is PII-masked and carries no Stripe session ids. Full records
+            # (needed to prove verified payments) require the operator token set on the edge.
+            admin_tok = str(os.getenv("LEADS_ADMIN_TOKEN") or "").strip()
+            if admin_tok:
+                lead_hdrs["Authorization"] = f"Bearer {admin_tok}"
+            req = urllib.request.Request(url, headers=lead_hdrs)
             with urllib.request.urlopen(req, timeout=12) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
                 remote_leads = payload.get("leads", []) if isinstance(payload, dict) else []
@@ -8267,17 +8287,18 @@ def sync_edge_leads_to_ledger(
             rec["offer_title"] = off_r["offer_title"]
         if not rec.get("offer_price_usd") and off_r.get("offer_price_usd"):
             rec["offer_price_usd"] = float(off_r["offer_price_usd"])
-        if rec.get("lifecycle_stage") == "fulfilled":
-            gross_p = float(rec.get("offer_price_usd") or 49.0)
-            fee_p = round(gross_p * 0.029 + 0.30, 2)
-            rec["settlement_id"] = rec.get("settlement_id") or f"stl_{prop_r}_{lid_r}"
-            rec["settlement_status"] = rec.get("settlement_status") or "settled"
-            rec["attributed_revenue_usd"] = float(rec.get("attributed_revenue_usd") or gross_p)
-            rec["net_settled_revenue_usd"] = float(
-                rec.get("net_settled_revenue_usd") or max(0.0, round(gross_p - fee_p, 2))
-            )
-            rec["datapack_delivered"] = True
-            rec["datapack_pack_id"] = rec.get("datapack_pack_id") or f"dp_{lid_r}"
+        # Email/playbook delivery is fulfillment, never settlement. Legacy "settled" rows that lack
+        # verified Stripe payment proof are demoted (original claim preserved for audit).
+        if rec.get("settlement_status") == "settled" and not is_verified_stripe_payment(rec):
+            rec["legacy_unverified_settlement"] = True
+            rec["legacy_claimed_attributed_revenue_usd"] = float(rec.get("attributed_revenue_usd") or 0.0)
+            rec["settlement_status"] = "unsettled"
+            rec["attributed_revenue_usd"] = 0.0
+            rec["net_settled_revenue_usd"] = 0.0
+            rec["datapack_delivered"] = False
+        rec["lead_origin"] = (
+            "internal_probe" if classify_lead_email(rec.get("email")) == "synthetic" else "real"
+        )
 
     with open(eff_ledger, "w", encoding="utf-8") as fh:
         for rec in existing_records:
@@ -8780,10 +8801,26 @@ def audit_end_to_end_monetization_and_fulfillment(
             lead_id=f"lead_{prop_id}_direct_{sku_id[:8]}",
             sku=sku_id,
         )
-        wp = synthesize_personalized_audit_workpaper(
+        # Unpaid render: the paid-toolkit mode alone must NEVER book revenue.
+        wp_unpaid = synthesize_personalized_audit_workpaper(
             property_id=prop_id,
             tool_slug=canon_slug,
             lead_record={"lead_id": f"lead_{prop_id}_wp_{sku_id[:8]}", "offer_sku": sku_id},
+            mode="paid_toolkit",
+        )
+        # Capability fixture ONLY (never persisted, never counted as revenue): a record carrying
+        # verified-payment proof must render a fully settled bundle at the quoted price.
+        wp = synthesize_personalized_audit_workpaper(
+            property_id=prop_id,
+            tool_slug=canon_slug,
+            lead_record={
+                "lead_id": f"lead_{prop_id}_wp_{sku_id[:8]}",
+                "offer_sku": sku_id,
+                "stripe_payment_verified": True,
+                "stripe_payment_status": "paid",
+                "stripe_checkout_session_id": "cs_live_AUDITCAPABILITYFIXTURE",
+                "settlement_status": "settled",
+            },
             mode="paid_toolkit",
         )
         checkout_ok = (
@@ -8795,13 +8832,24 @@ def audit_end_to_end_monetization_and_fulfillment(
         )
         upgrade_spec = resolve_post_calculation_upgrade_spec(prop_id, canon_slug)
         dp_obj = wp.get("statutory_data_pack") if isinstance(wp.get("statutory_data_pack"), dict) else {}
-        stl_obj = wp.get("settlement_attribution") if isinstance(wp.get("settlement_attribution"), dict) else {}
+        stl_fixture = wp.get("settlement_attribution") if isinstance(wp.get("settlement_attribution"), dict) else {}
+        stl_obj = (
+            wp_unpaid.get("settlement_attribution")
+            if isinstance(wp_unpaid.get("settlement_attribution"), dict)
+            else {}
+        )
+        settlement_gate_enforced = (
+            stl_obj.get("settlement_status") != "settled"
+            and float(stl_obj.get("attributed_revenue_usd") or 0.0) == 0.0
+            and float(stl_obj.get("net_settled_revenue_usd") or 0.0) == 0.0
+        )
         settlement_ready = (
-            stl_obj.get("settlement_status") == "settled"
-            and bool(stl_obj.get("settlement_id"))
-            and float(stl_obj.get("attributed_revenue_usd") or 0.0) == expected_price
-            and float(stl_obj.get("net_settled_revenue_usd") or 0.0) > 0.0
-            and stl_obj.get("datapack_delivered") is True
+            settlement_gate_enforced
+            and stl_fixture.get("settlement_status") == "settled"
+            and bool(stl_fixture.get("settlement_id"))
+            and float(stl_fixture.get("attributed_revenue_usd") or 0.0) == expected_price
+            and float(stl_fixture.get("net_settled_revenue_usd") or 0.0) > 0.0
+            and stl_fixture.get("datapack_delivered") is True
         )
         fulfillment_ok = (
             wp["offer_sku"] == sku_id
@@ -8824,21 +8872,32 @@ def audit_end_to_end_monetization_and_fulfillment(
                 if prop_id == "prexvo"
                 else ("https://gainhelm.com" if prop_id == "gainhelm" else "https://profithelm.com")
             )
-            chk_url = f"{domain}/api/lead-capture?checkout=1&settle=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
+            chk_url = f"{domain}/api/lead-capture?checkout=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
             ff_url = f"{domain}/api/lead-capture?fulfill=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
+            import urllib.error
+
+            def _probe(url: str):
+                req_p = urllib.request.Request(url, headers={"User-Agent": "PseoFactoryAutonomousAudit/1.0"})
+                try:
+                    with urllib.request.urlopen(req_p, timeout=12) as resp_p:
+                        return resp_p.status, json.loads(resp_p.read().decode("utf-8"))
+                except urllib.error.HTTPError as http_err:
+                    try:
+                        return http_err.code, json.loads(http_err.read().decode("utf-8"))
+                    except Exception:
+                        return http_err.code, {}
+
             try:
-                req_c = urllib.request.Request(chk_url, headers={"User-Agent": "PseoFactoryAutonomousAudit/1.0"})
-                with urllib.request.urlopen(req_c, timeout=12) as rc:
-                    c_json = json.loads(rc.read().decode("utf-8"))
-                req_f = urllib.request.Request(ff_url, headers={"User-Agent": "PseoFactoryAutonomousAudit/1.0"})
-                with urllib.request.urlopen(req_f, timeout=12) as rf:
-                    f_json = json.loads(rf.read().decode("utf-8"))
+                c_status, c_json = _probe(chk_url)
+                f_status, f_json = _probe(ff_url)
                 live_edge_probe = {
-                    "checkout_http_status": rc.status,
+                    "checkout_http_status": c_status,
                     "checkout_mode": c_json.get("checkout_mode"),
                     "checkout_session_id": c_json.get("checkout_session_id"),
-                    "fulfill_http_status": rf.status,
+                    "fulfill_http_status": f_status,
                     "fulfill_status": f_json.get("status"),
+                    # Unpaid fulfillment MUST be refused with 402 payment_required.
+                    "fulfill_refuses_unpaid": f_status == 402 and f_json.get("status") == "payment_required",
                 }
             except Exception as exc:
                 live_edge_probe = {"error": str(exc)}
@@ -8853,6 +8912,7 @@ def audit_end_to_end_monetization_and_fulfillment(
             "fulfillment_ready": fulfillment_ok,
             "datapack_ready": dp_obj.get("schema_version") == "pseo-datapack-v1",
             "settlement_ready": settlement_ready,
+            "settlement_gate_enforced": settlement_gate_enforced,
             "settlement_attribution": stl_obj,
             "post_calc_upgrade_ready": isinstance(upgrade_spec, dict) and upgrade_spec.get("offer_sku") == sku_id,
             "success_url": offer["success_url"],
@@ -8908,10 +8968,8 @@ def audit_end_to_end_monetization_and_fulfillment(
             "live_direct_keys": sorted(live_direct),
             "fail_closed_fallback_count": len(fail_closed_fallback),
             "fail_closed_fallback_keys": sorted(fail_closed_fallback),
-            "verified_approved_contracts_count": 13 if prop_id == "profithelm" else (6 if prop_id == "gainhelm" else 0),
-            "yield_gated_checkout_or_contract_fallback_count": (
-                len(canonical_keys) if prop_id in ("prexvo", "gainhelm") else len(fail_closed_fallback)
-            ),
+            "verified_approved_contracts_count": len(live_direct),
+            "yield_gated_checkout_or_contract_fallback_count": len(fail_closed_fallback),
             "unapproved_external_leaks_count": 0,
             "dead_end_404_routes_count": 0,
         }

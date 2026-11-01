@@ -308,8 +308,9 @@ def test_partner_tracking_reconciliation_and_readiness(temp_bus_path, temp_email
 
     # Prexvo verification
     assert px.property_id == "prexvo"
-    assert px.active_partners_count == 5
-    assert px.monetization_readiness_score > 0.0
+    assert px.active_partners_count == 0  # no approved lender contract exists
+    # No lender has an approved contract, so partner monetization readiness is honestly zero.
+    assert px.monetization_readiness_score == 0.0
     assert px.property_isolation_verified is True
     assert px.sub_affiliate_redirects_prohibited is True
 
@@ -322,7 +323,8 @@ def test_partner_tracking_reconciliation_and_readiness(temp_bus_path, temp_email
     # Check that Splash Financial on Prexvo is live and routes externally
     splash_p = next(p for p in px.partners if p.key == "splash_financial")
     assert splash_p.property_id == "prexvo"
-    assert splash_p.is_live_link is True
+    # Splash is pending on Impact (no approved contract): it is a plain outbound link, not a live partner.
+    assert splash_p.is_live_link is False
     assert "splashfinancial.com" in splash_p.destination_url
 
 
@@ -1260,7 +1262,9 @@ def test_all_partners_have_verified_external_receipt_in_vault():
     assert vault["master_networks"]["partnerstack"]["verified_clicks"] >= 28
     assert vault["master_networks"]["cj_affiliate"]["company_cid"] == "7792582"
     assert vault["master_networks"]["cj_affiliate"]["publisher_id"] == "8101803"
-    assert vault["master_networks"]["cj_affiliate"]["promotional_property_id"] == "101725461"
+    # Legacy CJ PID 101725461 returns HTTP 400 and is purged; only the live PID remains.
+    assert "promotional_property_id" not in vault["master_networks"]["cj_affiliate"]
+    assert vault["master_networks"]["cj_affiliate"]["live_promotional_property_id"] == "101906407"
     assert vault["master_networks"]["cj_affiliate"]["onboarding_progress"] == "9_of_9_completed"
     assert vault["master_networks"]["cj_affiliate"]["account_status"] == "ACTIVE"
     assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 28
@@ -1522,11 +1526,11 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     ph_audit = audit["properties"]["profithelm"]
     px_audit = audit["properties"]["prexvo"]
     drift_keys = {d["partner_key"] for d in ph_audit["registry_status_drift"]}
-    assert drift_keys == {"crest_capital"}
+    assert drift_keys == set()  # crest_capital registry status reconciled with the live vault entry
     px_drift_keys = {d["partner_key"] for d in px_audit["registry_status_drift"]}
     assert px_drift_keys == set()
 
-    assert ph_audit["network_tracked_live_count"] == 7
+    assert ph_audit["network_tracked_live_count"] == 8
     assert set(ph_audit["network_tracked_partners"]) == {
         "coinledger",
         "koinly",
@@ -1535,16 +1539,12 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
         "kalshi",
         "crest_capital",
         "gusto",
+        "ramp",
     }
     assert ph_audit["utm_only_or_bare_live_partners"] == ["ipx1031"]
     assert px_audit["network_tracked_live_count"] == 0
-    assert set(px_audit["utm_only_or_bare_live_partners"]) == {
-        "splash_financial",
-        "sofi",
-        "credible",
-        "earnest",
-        "lendkey",
-    }
+    # Lenders are pending/declined, so none is a "live" partner at all.
+    assert set(px_audit["utm_only_or_bare_live_partners"]) == set()
 
     # 3. Verify unwired approved vault links are flagged automatically
     unwired_keys = {it["partner_key"] for it in ph_audit["unwired_vault_links"]}
@@ -1592,7 +1592,9 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     # 5. Verify compiled tenant placement parity across profithelm-platform and prexvo
     assert ph_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 671
     assert ph_audit["compiled_dom_parity"]["network_tracked_click_share_pct"] >= 75.0
-    assert ph_audit["compiled_dom_parity"]["edge_upgraded_click_share_pct"] == 100.0
+    # ipx1031 stays on its own qualified-intermediary site (never swapped to Xendoo), so it is no
+    # longer counted as an edge-upgraded click.
+    assert ph_audit["compiled_dom_parity"]["edge_upgraded_click_share_pct"] >= 80.0
     assert ph_audit["compiled_dom_parity"]["pending_partner_links_in_dom"] == 0
     assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 75
     assert px_audit["compiled_dom_parity"]["ymyl_restricted_pages_clean"] is True
@@ -1845,7 +1847,7 @@ def test_non_active_partnership_state_reconciliation_and_latest_inbox_sync(
 
     assert by_id["1588"].partner_key == "koinly"
     assert by_id["1588"].classification_type == "APPLICATION_APPROVED"
-    assert by_id["1588"].candidate_url == "https://koinly.io/?via=A4FABF09&utm_source=affiliate"
+    assert by_id["1588"].candidate_url == "https://koinly.io/?fpr=arif-4c0b88"
 
     assert by_id["1000"].partner_key == "turbotax"
     assert by_id["1000"].classification_type == "APPLICATION_APPROVED"
@@ -1870,8 +1872,8 @@ def test_non_active_partnership_state_reconciliation_and_latest_inbox_sync(
     assert ph_recon["total_canonical_partners"] == 22
     assert ph_recon["active_earning_count"] == 6
     assert ph_recon["non_active_count"] == 16
-    assert ph_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 5
-    assert ph_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 6
+    assert ph_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 4
+    assert ph_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 7
     assert ph_recon["counts_by_state"]["AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION"] == 3
     assert ph_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 2
 
@@ -2271,7 +2273,7 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
     (async () => {{
       const phRedirect = await import({json.dumps(ph_r.as_uri())});
 
-      // Default: Sovrn unapproved -> upgrades otr_solutions_factoring to active Ramp Impact contract (#51436)
+      // Factoring click must never be swapped into the Ramp corporate card contract (#51436)
       const otrDirectRes = await phRedirect.onRequest({{
         request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake"),
         env: {{}},
@@ -2279,9 +2281,8 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
       }});
       if (otrDirectRes.status !== 302) process.exit(10);
       const otrDirectLoc = new URL(otrDirectRes.headers.get("Location"));
-      if (otrDirectLoc.hostname !== "join.ramp.com" || !otrDirectLoc.pathname.includes("/51436")) process.exit(11);
-      if (otrDirectLoc.searchParams.get("subId1") !== "invoice-factoring-cost-apr-calculator_quote_intake") process.exit(12);
-      if (otrDirectRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(13);
+      if (otrDirectLoc.hostname === "join.ramp.com" || otrDirectLoc.pathname.includes("/51436")) process.exit(11);
+      if (otrDirectRes.headers.get("X-Edge-Contract-Tier") === "direct_contract_upgraded") process.exit(13);
 
       // When SOVRN_COMMERCE_APPROVED=true -> falls back to Sovrn VigLink wrapper
       const otrSovrnRes = await phRedirect.onRequest({{
@@ -2482,7 +2483,7 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
     assert by_partner["otr_solutions_factoring"]["is_stalled"] is False
     assert by_partner["sofi"]["lifecycle_state"] == "DECLINED_COVERED_BY_FIRST_PARTY_SKU_AND_FALLBACK"
     assert by_partner["next_insurance_b2b"]["lifecycle_state"] == "DECLINED_COVERED_BY_FIRST_PARTY_SKU_AND_FALLBACK"
-    assert by_partner["ramp"]["lifecycle_state"] == "APPROVED_EDGE_UPGRADED_LIVE"
+    assert by_partner["ramp"]["lifecycle_state"] == "APPROVED_NATIVE_LIVE"
 
     gaps_rep = sync_rep["cluster_monetization_gaps"]
     assert gaps_rep["uncovered_commercial_clusters_count"] == 0
@@ -2892,6 +2893,13 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
         "www.dpbolvw.net"
       ]);
 
+      const crossVerticalKeys = new Set([
+        "ipx1031", "exeter1031", "first_american", "first_american_1031", "avaliable_1031",
+        "madison_specs_cost_seg", "dlp_capital", "groundfloor", "national_funding", "national_funding_med",
+        "otr_solutions_factoring", "freightos_marketplace", "flexport", "alt_lending", "viva_finance", "invoice_simple"
+      ]);
+      const crossVerticalHosts = new Set(["xendoo.pxf.io", "join.ramp.com"]);
+
       const phKeys = [
         "coinledger", "koinly", "mercury", "stripe", "ramp", "rho", "gusto", "rippling",
         "crest_capital", "equipment_macrs", "ipx1031", "exeter1031", "first_american",
@@ -2904,9 +2912,19 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
         "stax_payments", "surepayroll", "xendoo", "capitalize", "valley_bank", "quontic_bank",
         "zacks", "moby", "efile", "efile_com", "file_com_tax", "taxact_business",
         "eztaxreturn_com", "lawdepot", "legalzoom", "xendoo_impact", "bench_accounting",
-        "collective_scorp", "avaliable_1031", "madison_specs_cost_seg", "bluevine_checking",
+        "collective_scorp", "bluevine_checking",
         "ramp_impact", "wallethub"
       ];
+
+      // avaliable_1031 / madison_specs_cost_seg existed only as cross-vertical Xendoo swaps and are retired (404).
+      for (const retired of ["avaliable_1031", "madison_specs_cost_seg"]) {{
+        const rr = await phRedirect.onRequest({{
+          request: new Request(`https://profithelm.com/r/${{retired}}?synthetic_test=1`),
+          env: {{}},
+          params: {{ partner: retired }}
+        }});
+        if (rr.status !== 404) {{ console.error("retired alias still resolves", retired, rr.status); process.exit(13); }}
+      }}
 
       for (const k of phKeys) {{
         const res = await phRedirect.onRequest({{
@@ -2919,7 +2937,16 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
           process.exit(10);
         }}
         const loc = new URL(res.headers.get("Location"));
-        if (!approvedProfitHelmHosts.has(loc.hostname)) {{
+        const finalHost = loc.hostname === "redirect.viglink.com"
+          ? new URL(loc.searchParams.get("u")).hostname
+          : loc.hostname;
+        if (crossVerticalKeys.has(k)) {{
+          // Intent-matched: a 1031 / factoring / freight click never lands on an unrelated vertical.
+          if (crossVerticalHosts.has(finalHost)) {{
+            console.error("Cross-vertical swap for", k, loc.toString());
+            process.exit(11);
+          }}
+        }} else if (!approvedProfitHelmHosts.has(loc.hostname)) {{
           console.error("Unapproved ProfitHelm destination for", k, loc.toString());
           process.exit(11);
         }}
@@ -2945,11 +2972,12 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
           process.exit(20);
         }}
         const loc = new URL(res.headers.get("Location"));
-        if (loc.hostname !== "prexvo.com" || loc.pathname !== "/api/lead-capture" || loc.searchParams.get("checkout") !== "1") {{
-          console.error("Unapproved Prexvo leak for", k, loc.toString());
+        // A lender click must never be silently hijacked into the paid Stripe checkout.
+        if (loc.hostname === "prexvo.com" || loc.pathname.includes("lead-capture") || loc.searchParams.get("checkout")) {{
+          console.error("Prexvo lender click hijacked into checkout for", k, loc.toString());
           process.exit(21);
         }}
-        if (res.headers.get("X-Edge-Contract-Tier") !== "yield_gated_direct_checkout_capture") {{
+        if (res.headers.get("X-Edge-Contract-Tier") !== "unapproved_native_unmonetized") {{
           console.error("Unexpected Prexvo contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
           process.exit(22);
         }}
@@ -2983,9 +3011,14 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
           process.exit(25);
         }}
         const loc = new URL(res.headers.get("Location"));
-        if (!approvedProfitHelmHosts.has(loc.hostname)) {{
-          console.error("Unapproved GainHelm destination for", k, loc.toString());
+        // GRC vendors have no approved contract: never swapped to Ramp/LawDepot/Xendoo/CJ links.
+        if (approvedProfitHelmHosts.has(loc.hostname)) {{
+          console.error("GRC click swapped into unrelated approved link for", k, loc.toString());
           process.exit(26);
+        }}
+        if (res.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") {{
+          console.error("Unexpected GainHelm contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+          process.exit(27);
         }}
       }}
 
@@ -3259,16 +3292,29 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
       const pxLead = await import({json.dumps(px_lc)});
       const ghLead = await import({json.dumps(gh_lc)});
 
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = async (url, init) => {{
+        const m = String(url).match(/api\\.stripe\\.com\\/v1\\/checkout\\/sessions\\/cs_live_PAIDFOR_([A-Za-z0-9_]+)$/);
+        if (m) {{
+          return new Response(JSON.stringify({{
+            id: "cs_live_PAIDFOR_" + m[1], livemode: true, payment_status: "paid", amount_total: 4900,
+            currency: "usd", client_reference_id: m[1], metadata: {{ lead_id: m[1] }}
+          }}), {{ status: 200 }});
+        }}
+        return origFetch(url, init);
+      }};
+      const stripeEnv = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
+
       const cases = [
-        [phLead, "https://profithelm.com/api/lead-capture?fulfill=1&sku=ph_1031_boot_replacement_workpapers&tool_slug=section-1031-calculator&amount=450000&format=datapack&synthetic_test=1", "profithelm"],
-        [pxLead, "https://prexvo.com/api/lead-capture?fulfill=1&sku=px_refi_amortization_decision_audit&tool_slug=student-loan-refinance-break-even-calculator&amount=85000&format=datapack&synthetic_test=1", "prexvo"],
-        [ghLead, "https://gainhelm.com/api/lead-capture?fulfill=1&sku=gh_soc2_cmmc_audit_workpapers&tool_slug=soc-2-audit-cost-calculator&amount=62000&format=datapack&synthetic_test=1", "gainhelm"],
+        [phLead, "https://profithelm.com/api/lead-capture?fulfill=1&sku=ph_1031_boot_replacement_workpapers&tool_slug=section-1031-calculator&amount=450000&lead_id=lead_dp_profithelm&session_id=cs_live_PAIDFOR_lead_dp_profithelm&format=datapack&synthetic_test=1", "profithelm"],
+        [pxLead, "https://prexvo.com/api/lead-capture?fulfill=1&sku=px_refi_amortization_decision_audit&tool_slug=student-loan-refinance-break-even-calculator&amount=85000&lead_id=lead_dp_prexvo&session_id=cs_live_PAIDFOR_lead_dp_prexvo&format=datapack&synthetic_test=1", "prexvo"],
+        [ghLead, "https://gainhelm.com/api/lead-capture?fulfill=1&sku=gh_soc2_cmmc_audit_workpapers&tool_slug=soc-2-audit-cost-calculator&amount=62000&lead_id=lead_dp_gainhelm&session_id=cs_live_PAIDFOR_lead_dp_gainhelm&format=datapack&synthetic_test=1", "gainhelm"],
       ];
 
       for (const [mod, url, prop] of cases) {{
         const res = await mod.onRequestGet({{
           request: new Request(url, {{ headers: {{ "x-pseofactory-test": "1" }} }}),
-          env: {{}}
+          env: stripeEnv
         }});
         if (res.status !== 200) {{
           console.error("Non-200 datapack for", prop, res.status);
@@ -3359,7 +3405,36 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         leads_ledger_path=ledger_path,
     )
 
-    # Settle upgrades across all 3 tenants
+    # Without verified live Stripe payment proof nothing settles and no revenue is booked.
+    unpaid = settle_post_calculation_datapack_upgrade(
+        property_id="profithelm",
+        tool_slug="section-1031-calculator",
+        lead_id=ph_lead["lead_id"],
+        calculated_amount=450000.0,
+        state="CA",
+        leads_ledger_path=ledger_path,
+    )
+    assert unpaid["status"] == "payment_required"
+    assert unpaid["settled"] is False
+    assert unpaid["settlement_attribution"]["attributed_revenue_usd"] == 0.0
+    forged = settle_post_calculation_datapack_upgrade(
+        property_id="profithelm",
+        tool_slug="section-1031-calculator",
+        lead_id=ph_lead["lead_id"],
+        calculated_amount=450000.0,
+        state="CA",
+        leads_ledger_path=ledger_path,
+        verified_payment={"session_id": "cs_edge_forged", "payment_status": "paid", "amount_total_cents": 7900},
+    )
+    assert forged["status"] == "payment_required"
+    assert compute_scenario_demand_and_conversion_metrics(leads_ledger_path=ledger_path)[
+        "fleet_conversion_totals"
+    ]["total_attributed_revenue_usd"] == 0.0
+
+    def _paid(prop, cents):
+        return {"session_id": f"cs_live_TEST_{prop}", "payment_status": "paid", "amount_total_cents": cents}
+
+    # Settle upgrades across all 3 tenants (verified live Stripe payment proof supplied)
     ph_settled = settle_post_calculation_datapack_upgrade(
         property_id="profithelm",
         tool_slug="section-1031-calculator",
@@ -3367,6 +3442,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         calculated_amount=450000.0,
         state="CA",
         leads_ledger_path=ledger_path,
+        verified_payment=_paid("profithelm", 7900),
     )
     px_settled = settle_post_calculation_datapack_upgrade(
         property_id="prexvo",
@@ -3375,6 +3451,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         calculated_amount=165000.0,
         state="NY",
         leads_ledger_path=ledger_path,
+        verified_payment=_paid("prexvo", 3900),
     )
     gh_settled = settle_post_calculation_datapack_upgrade(
         property_id="gainhelm",
@@ -3383,6 +3460,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         calculated_amount=58200.0,
         state="DE",
         leads_ledger_path=ledger_path,
+        verified_payment=_paid("gainhelm", 7900),
     )
 
     for res, exp_prop, exp_sku, exp_price in (
@@ -3425,7 +3503,10 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
     assert "scenario_demand_attribution" in audit_rep
     for sku_k, sku_v in audit_rep["catalog_skus"].items():
         assert sku_v["settlement_ready"] is True
-        assert sku_v["settlement_attribution"]["settlement_status"] == "settled"
+        # The audit never reports revenue: an unpaid paid-toolkit render stays unsettled at $0.
+        assert sku_v["settlement_gate_enforced"] is True
+        assert sku_v["settlement_attribution"]["settlement_status"] != "settled"
+        assert sku_v["settlement_attribution"]["attributed_revenue_usd"] == 0.0
 
     sync_js = render_runtime_synchronizer_script()
     assert "checkout-settlement-attribution-banner" in sync_js
@@ -3451,42 +3532,67 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
       const pxLead = await import({json.dumps(px_lc)});
       const ghLead = await import({json.dumps(gh_lc)});
 
+      const priceByLead = {{ lead_profithelm_stl_test: 7900, lead_prexvo_stl_test: 3900, lead_gainhelm_stl_test: 7900 }};
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = async (url, init) => {{
+        const m = String(url).match(/api\\.stripe\\.com\\/v1\\/checkout\\/sessions\\/cs_live_PAIDFOR_([A-Za-z0-9_]+)$/);
+        if (m && priceByLead[m[1]]) {{
+          return new Response(JSON.stringify({{
+            id: "cs_live_PAIDFOR_" + m[1], livemode: true, payment_status: "paid", amount_total: priceByLead[m[1]],
+            currency: "usd", client_reference_id: m[1], metadata: {{ lead_id: m[1] }}
+          }}), {{ status: 200 }});
+        }}
+        return origFetch(url, init);
+      }};
+      const stripeEnv = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
+
       const cases = [
-        [phLead, "https://profithelm.com/api/lead-capture?checkout=1&settle=1&sku=ph_1031_boot_replacement_workpapers&tool_slug=section-1031-calculator&lead_id=lead_profithelm_stl_test&amount=450000", "https://profithelm.com/api/lead-capture", "profithelm", 79],
-        [pxLead, "https://prexvo.com/api/lead-capture?checkout=1&settle=1&sku=px_refi_amortization_decision_audit&tool_slug=student-loan-refinance-break-even-calculator&lead_id=lead_prexvo_stl_test&amount=142000", "https://prexvo.com/api/lead-capture", "prexvo", 39],
-        [ghLead, "https://gainhelm.com/api/lead-capture?checkout=1&settle=1&sku=gh_soc2_cmmc_audit_workpapers&tool_slug=soc-2-audit-cost-calculator&lead_id=lead_gainhelm_stl_test&amount=58200", "https://gainhelm.com/api/lead-capture", "gainhelm", 79],
+        [phLead, "profithelm", "ph_1031_boot_replacement_workpapers", "section-1031-calculator", "lead_profithelm_stl_test", 450000, 79],
+        [pxLead, "prexvo", "px_refi_amortization_decision_audit", "student-loan-refinance-break-even-calculator", "lead_prexvo_stl_test", 142000, 39],
+        [ghLead, "gainhelm", "gh_soc2_cmmc_audit_workpapers", "soc-2-audit-cost-calculator", "lead_gainhelm_stl_test", 58200, 79],
       ];
 
-      for (const [mod, chkUrl, sumUrl, prop, expPrice] of cases) {{
+      for (const [mod, prop, sku, slug, leadId, amount, expPrice] of cases) {{
+        globalThis.__PSEOFACTORY_LEADS_BUFFER__ = []; // each tenant is its own isolate in production
+        const base = "https://" + prop + ".com/api/lead-capture";
+        // settle=1 is ignored: with no Stripe session the checkout rail is unavailable and books nothing
         const cRes = await mod.onRequestGet({{
-          request: new Request(chkUrl, {{ headers: {{ "Accept": "application/json" }} }}),
+          request: new Request(base + "?checkout=1&settle=1&sku=" + sku + "&tool_slug=" + slug + "&lead_id=" + leadId + "&amount=" + amount, {{ headers: {{ "Accept": "application/json" }} }}),
           env: {{}}
         }});
-        if (cRes.status !== 200) {{
-          console.error("Non-200 checkout settle for", prop, cRes.status);
-          process.exit(20);
-        }}
+        if (cRes.status !== 503) {{ console.error("settle=1 must not succeed for", prop, cRes.status); process.exit(20); }}
         const cJson = await cRes.json();
-        if (!cJson.settlement_attribution || cJson.settlement_attribution.settlement_status !== "settled") {{
-          console.error("Missing settlement_attribution on checkout for", prop, cJson);
-          process.exit(21);
+        if (cJson.status !== "checkout_unavailable") {{ console.error("expected checkout_unavailable", prop, cJson.status); process.exit(21); }}
+        const s0 = await (await mod.onRequestGet({{ request: new Request(base, {{ headers: {{ "Accept": "application/json" }} }}), env: {{}} }})).json();
+        if (s0.summary.settled_upgrades_count !== 0 || s0.summary.attributed_revenue_usd !== 0) {{
+          console.error("revenue booked without payment for", prop, s0.summary); process.exit(22);
         }}
-        if (Number(cJson.settlement_attribution.attributed_revenue_usd) !== expPrice) {{
-          console.error("Wrong attributed_revenue_usd for", prop, cJson.settlement_attribution);
-          process.exit(22);
-        }}
-        if (!cJson.statutory_data_pack || cJson.statutory_data_pack.schema_version !== "pseo-datapack-v1") {{
-          console.error("Missing statutory_data_pack on checkout for", prop);
-          process.exit(23);
-        }}
-        const sRes = await mod.onRequestGet({{
-          request: new Request(sumUrl, {{ headers: {{ "Accept": "application/json" }} }}),
-          env: {{}}
+        // Unpaid/forged fulfillment refused
+        const bad = await mod.onRequestGet({{
+          request: new Request(base + "?fulfill=1&sku=" + sku + "&tool_slug=" + slug + "&lead_id=" + leadId + "&amount=" + amount + "&session_id=cs_edge_" + leadId),
+          env: stripeEnv
         }});
+        if (bad.status !== 402) {{ console.error("forged session accepted for", prop, bad.status); process.exit(23); }}
+        // Verified paid session unlocks the datapack and books the real amount
+        const okRes = await mod.onRequestGet({{
+          request: new Request(base + "?fulfill=1&sku=" + sku + "&tool_slug=" + slug + "&lead_id=" + leadId + "&amount=" + amount + "&session_id=cs_live_PAIDFOR_" + leadId, {{ headers: {{ "Accept": "application/json" }} }}),
+          env: stripeEnv
+        }});
+        if (okRes.status !== 200) {{ console.error("paid fulfill failed for", prop, okRes.status); process.exit(24); }}
+        const fJson = await okRes.json();
+        if (!fJson.settlement_attribution || fJson.settlement_attribution.settlement_status !== "settled") {{
+          console.error("Missing settled attribution after verified payment for", prop, fJson.settlement_attribution); process.exit(25);
+        }}
+        if (Number(fJson.settlement_attribution.attributed_revenue_usd) !== expPrice) {{
+          console.error("Wrong attributed_revenue_usd for", prop, fJson.settlement_attribution); process.exit(26);
+        }}
+        if (!fJson.statutory_data_pack || fJson.statutory_data_pack.schema_version !== "pseo-datapack-v1") {{
+          console.error("Missing statutory_data_pack for", prop); process.exit(27);
+        }}
+        const sRes = await mod.onRequestGet({{ request: new Request(base, {{ headers: {{ "Accept": "application/json" }} }}), env: {{}} }});
         const sJson = await sRes.json();
         if (!sJson.summary || !Array.isArray(sJson.summary.per_calculator_metrics) || sJson.summary.settled_upgrades_count < 1) {{
-          console.error("Missing settled_upgrades_count / per_calculator_metrics in summary for", prop, sJson.summary);
-          process.exit(24);
+          console.error("Missing settled_upgrades_count / per_calculator_metrics in summary for", prop, sJson.summary); process.exit(28);
         }}
       }}
       process.exit(0);
@@ -3496,37 +3602,93 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
     assert proc_stl.returncode == 0, f"Edge settlement Node test failed (exit {proc_stl.returncode}): {proc_stl.stderr}"
 
 
-def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e() -> None:
+def _verified_paid_row(prop, slug, sku, price, n):
+    return {
+        "lead_id": f"lead_{prop}_verified_fixture_{n}",
+        "property_id": prop,
+        "tool_slug": slug,
+        "email": f"buyer{n}@acme-llc.com",
+        "lead_type": "playbook_subscription",
+        "lifecycle_stage": "fulfilled",
+        "offer_sku": sku,
+        "offer_price_usd": price,
+        "settlement_status": "settled",
+        "stripe_payment_verified": True,
+        "stripe_payment_status": "paid",
+        "stripe_checkout_session_id": f"cs_live_FIXTURE{n}",
+        "attributed_revenue_usd": price,
+        "net_settled_revenue_usd": round(price - (price * 0.029 + 0.30), 2),
+        "captured_at": "2026-10-30T00:00:00Z",
+    }
+
+
+def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e(tmp_path) -> None:
     """
-    Verifies that real settled revenue and deliverable conversion metrics across `profithelm`,
-    `prexvo`, and `gainhelm` deterministically steer autonomous topic selection
-    (`resolve_candidate_realized_revenue_signal`, `rank_revenue_weighted_expansion_queue`,
-    `JevEngine.compute_composite_yield`) and syndicate priority
-    (`prioritize_distribution_queue_by_referral_yield`), while keeping restricted public-service
-    pages on Prexvo (`pslf`, `save`, `ibr-hardship`) at $0.00 commercial revenue boost.
+    Only VERIFIED live Stripe cash (never email delivery or legacy "settled" flags) may steer
+    autonomous topic selection and syndication priority across `profithelm`, `prexvo`, and
+    `gainhelm`. With no verified payments every revenue signal is exactly $0.00; with verified
+    paid rows in a ledger the same signals light up. Restricted public-service pages on Prexvo
+    (`pslf`, `save`, `ibr-hardship`) always stay at $0.00 commercial revenue boost.
     """
+    import json as _json
     from pseofactory.partner_tracker import (
         resolve_candidate_realized_revenue_signal,
         rank_revenue_weighted_expansion_queue,
-        get_lead_monitoring_summary,
     )
     from pseofactory.distributor import prioritize_distribution_queue_by_referral_yield
     from pseofactory.trends.jev_engine import JevEngine
     from pseofactory.trends.models import TrendCandidate, TregDurabilityResult
 
-    # 1. Verify scenario and calculator revenue signal resolution + Prexvo YMYL isolation
-    soc2_sig = resolve_candidate_realized_revenue_signal("gainhelm", "soc-2-compliance-cost")
+    rows = []
+    n = 0
+    for _ in range(6):
+        n += 1
+        rows.append(_verified_paid_row("gainhelm", "soc-2-audit-cost-calculator", "gh_soc2_cmmc_audit_workpapers", 79.0, n))
+    n += 1
+    rows.append(_verified_paid_row("gainhelm", "cmmc-2-0-compliance-cost-calculator", "gh_soc2_cmmc_audit_workpapers", 79.0, n))
+    for _ in range(2):
+        n += 1
+        rows.append(_verified_paid_row("profithelm", "section-1031-calculator", "ph_1031_boot_replacement_workpapers", 79.0, n))
+    for _ in range(4):
+        n += 1
+        rows.append(_verified_paid_row("prexvo", "student-loan-refinance-break-even-calculator", "px_refi_amortization_decision_audit", 39.0, n))
+    verified_ledger = tmp_path / "verified_leads.jsonl"
+    verified_ledger.write_text("\n".join(_json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    empty_ledger = tmp_path / "unverified_leads.jsonl"
+    unverified = [
+        {**_verified_paid_row("gainhelm", "soc-2-audit-cost-calculator", "gh_soc2_cmmc_audit_workpapers", 79.0, 900 + i),
+         "stripe_payment_verified": False, "stripe_checkout_session_id": f"cs_edge_{i}"}
+        for i in range(6)
+    ]
+    empty_ledger.write_text("\n".join(_json.dumps(r) for r in unverified) + "\n", encoding="utf-8")
+
+    # 0. Legacy "settled" rows without Stripe proof are worth exactly $0.00.
+    zero_sig = resolve_candidate_realized_revenue_signal(
+        "gainhelm", "soc-2-compliance-cost", leads_ledger_path=empty_ledger
+    )
+    assert zero_sig["realized_calculator_revenue_usd"] == 0.0
+    assert zero_sig["settled_upgrades_count"] == 0
+    assert zero_sig["revenue_priority_bonus"] == 0.0
+
+    # 1. Verified paid rows produce the realized-revenue signal + Prexvo YMYL isolation
+    soc2_sig = resolve_candidate_realized_revenue_signal(
+        "gainhelm", "soc-2-compliance-cost", leads_ledger_path=verified_ledger
+    )
     assert soc2_sig["matched_calculator_slug"] == "soc-2-audit-cost-calculator"
     assert soc2_sig["realized_calculator_revenue_usd"] >= 474.0
     assert soc2_sig["settled_upgrades_count"] >= 6
     assert soc2_sig["revenue_priority_bonus"] >= 50.0
 
-    cmmc_sig = resolve_candidate_realized_revenue_signal("gainhelm", "cmmc-level-2-c3pao-audit-cost-calculator")
+    cmmc_sig = resolve_candidate_realized_revenue_signal(
+        "gainhelm", "cmmc-level-2-c3pao-audit-cost-calculator", leads_ledger_path=verified_ledger
+    )
     assert cmmc_sig["matched_calculator_slug"] == "cmmc-2-0-compliance-cost-calculator"
     assert cmmc_sig["realized_calculator_revenue_usd"] >= 79.0
     assert cmmc_sig["revenue_priority_bonus"] > 20.0
 
-    ph_1031_sig = resolve_candidate_realized_revenue_signal("profithelm", "partial-1031-exchange-boot-calculator")
+    ph_1031_sig = resolve_candidate_realized_revenue_signal(
+        "profithelm", "partial-1031-exchange-boot-calculator", leads_ledger_path=verified_ledger
+    )
     assert ph_1031_sig["matched_calculator_slug"] == "section-1031-calculator"
     assert ph_1031_sig["realized_calculator_revenue_usd"] >= 158.0
     assert ph_1031_sig["revenue_priority_bonus"] > 45.0
@@ -3534,6 +3696,7 @@ def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e()
     ph_zero_sig = resolve_candidate_realized_revenue_signal(
         "profithelm",
         "corporate-amt-camt-book-income-minimum-tax-calculator",
+        leads_ledger_path=verified_ledger,
     )
     assert ph_zero_sig["realized_calculator_revenue_usd"] == 0.0
     assert ph_zero_sig["revenue_priority_bonus"] == 0.0
@@ -3541,6 +3704,7 @@ def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e()
     px_refi_sig = resolve_candidate_realized_revenue_signal(
         "prexvo",
         "student-loan-refinance-break-even-calculator",
+        leads_ledger_path=verified_ledger,
     )
     assert px_refi_sig["realized_calculator_revenue_usd"] >= 156.0
     assert px_refi_sig["revenue_priority_bonus"] > 45.0
@@ -3548,29 +3712,22 @@ def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e()
     px_pslf_sig = resolve_candidate_realized_revenue_signal(
         "prexvo",
         "pslf-buyback-months-reconsideration-student-loan-calculator",
+        leads_ledger_path=verified_ledger,
     )
     assert px_pslf_sig["commercial_eligible"] is False
     assert px_pslf_sig["realized_calculator_revenue_usd"] == 0.0
     assert px_pslf_sig["revenue_priority_bonus"] == 0.0
 
-    # 2. Verify before-and-after expansion queue across ProfitHelm, Prexvo, and GainHelm
-    queue_res = rank_revenue_weighted_expansion_queue(persist_reweighted_queue=False)
-    assert queue_res["fleet_conversion_totals"]["total_attributed_revenue_usd"] >= 1239.0
-    assert len(queue_res["before_queue"]) == len(queue_res["after_queue"]) >= 25
-
-    ph_after = queue_res["per_tenant"]["profithelm"]["after_queue"]
-    assert ph_after[0]["slug"] == "partial-1031-exchange-boot-calculator"
-    assert ph_after[0]["realized_calculator_revenue_usd"] >= 158.0
-    assert ph_after[0]["tenant_rank_delta"] > 0
-
-    px_after = queue_res["per_tenant"]["prexvo"]["after_queue"]
-    assert px_after[0]["slug"] == "repayment-estimator-student-loans"
-    assert px_after[0]["realized_calculator_revenue_usd"] >= 39.0
-    assert px_after[0]["tenant_rank_delta"] > 0
-
-    gh_after = queue_res["per_tenant"]["gainhelm"]["after_queue"]
-    assert gh_after[0]["matched_calculator_slug"] == "soc-2-audit-cost-calculator"
-    assert gh_after[0]["realized_calculator_revenue_usd"] >= 474.0
+    # 2. Expansion queue: verified cash re-weights; unverified claims never do
+    queue_res = rank_revenue_weighted_expansion_queue(
+        persist_reweighted_queue=False, leads_ledger_path=verified_ledger
+    )
+    assert queue_res["fleet_conversion_totals"]["total_attributed_revenue_usd"] == 79.0 * 9 + 39.0 * 4
+    zero_queue = rank_revenue_weighted_expansion_queue(
+        persist_reweighted_queue=False, leads_ledger_path=empty_ledger
+    )
+    assert zero_queue["fleet_conversion_totals"]["total_attributed_revenue_usd"] == 0.0
+    assert zero_queue["fleet_conversion_totals"]["total_settled_upgrades"] == 0
 
     # 3. Verify JevEngine closed-loop realized revenue multiplier boost
     jev = JevEngine()
@@ -3625,35 +3782,8 @@ def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e()
     )
     assert y_rev > y_base
 
-    # 4. Verify syndication priority queue across ProfitHelm, Prexvo, and GainHelm
-    ph_synd = prioritize_distribution_queue_by_referral_yield(property_id="profithelm")
-    assert ph_synd[0]["slug"] == "section-1031-calculator"
-    assert ph_synd[0]["realized_revenue_usd"] >= 158.0
-    assert ph_synd[0]["rank_delta"] > 0
-
-    px_synd = prioritize_distribution_queue_by_referral_yield(property_id="prexvo")
-    assert px_synd[0]["slug"] == "student-loan-refinance-break-even-calculator"
-    assert px_synd[0]["realized_revenue_usd"] >= 156.0
-
-    gh_synd = prioritize_distribution_queue_by_referral_yield(property_id="gainhelm")
-    assert gh_synd[0]["slug"] == "soc-2-audit-cost-calculator"
-    assert gh_synd[0]["revenue_priority_score"] == 69.0
-    assert gh_synd[0]["realized_revenue_usd"] >= 474.0
-
-    mon = get_lead_monitoring_summary()
-    assert "revenue_weighted_expansion_queue" in mon
-    assert len(mon["revenue_weighted_expansion_queue"]["after_queue"]) >= 25
-    assert mon["monetization_e2e_audit"]["ui_ux_button_surface_audit"]["all_surfaces_and_handlers_passed"] is True
-    assert mon["monetization_e2e_audit"]["ui_ux_button_surface_audit"]["total_pages_audited"] >= 50
-    assert mon["monetization_e2e_audit"]["ui_ux_button_surface_audit"]["violations_count"] == 0
-
-
-
-
-
-
-
-
-
-
-
+    # 4. Syndication priority never credits unverified revenue (default ledger holds no Stripe proof)
+    for prop in ("profithelm", "prexvo", "gainhelm"):
+        synd = prioritize_distribution_queue_by_referral_yield(property_id=prop)
+        assert synd, prop
+        assert all(float(item.get("realized_revenue_usd") or 0.0) == 0.0 for item in synd)

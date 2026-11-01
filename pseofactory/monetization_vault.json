@@ -29,7 +29,6 @@
       "account_id": "acct_1T6fSTIq0ckFsf5j",
       "merchant_email": "arif.coskun@profithelm.com",
       "display_name": "CoachOS",
-      "device_name": "IN-PF4HYA85",
       "cli_key_expires_at": "2026-06-03",
       "enabled": true,
       "billing_mode": "payment",
@@ -50,7 +49,11 @@
           "price_cents": 7900,
           "currency": "usd",
           "statutory_authority": "IRC Section 1031 and IRS Form 8824",
-          "trend_timeseries_ids": ["fred_dgs10_yield", "fred_cpilfesl_inflation", "irs_sec199a_qbi"],
+          "trend_timeseries_ids": [
+            "fred_dgs10_yield",
+            "fred_cpilfesl_inflation",
+            "irs_sec199a_qbi"
+          ],
           "deliverables": [
             "Personalized IRS Form 8824 Lines 15-25 Boot & Basis Reconciliation Workpaper (HTML/PDF)",
             "45-Day Identification & 180-Day Closing Statutory Deadline Compliance Schedule (CSV)",
@@ -66,7 +69,13 @@
           "price_cents": 4900,
           "currency": "usd",
           "statutory_authority": "IRC Section 179, Form 4562, and UCC Article 9",
-          "trend_timeseries_ids": ["irs_sec179_cap", "irs_sec179_phaseout", "irs_sec168k_bonus", "cbp_sec301_tariff", "fred_dgs10_yield"],
+          "trend_timeseries_ids": [
+            "irs_sec179_cap",
+            "irs_sec179_phaseout",
+            "irs_sec168k_bonus",
+            "cbp_sec301_tariff",
+            "fred_dgs10_yield"
+          ],
           "deliverables": [
             "Personalized Section 179 / MACRS & Commercial APR Cost Reconciliation Workpaper (HTML/PDF)",
             "5-Point Cash-Flow Sensitivity & Debt Service Coverage Schedule (CSV)",
@@ -82,7 +91,12 @@
           "price_cents": 4900,
           "currency": "usd",
           "statutory_authority": "26 U.S.C. Section 1, IRC Section 199A, and IRS Rev. Proc. 2025-32",
-          "trend_timeseries_ids": ["irs_sec199a_qbi", "ssa_fica_wage_base", "irs_sec168k_bonus", "fred_cpilfesl_inflation"],
+          "trend_timeseries_ids": [
+            "irs_sec199a_qbi",
+            "ssa_fica_wage_base",
+            "irs_sec168k_bonus",
+            "fred_cpilfesl_inflation"
+          ],
           "deliverables": [
             "Personalized 2026-2027 TCJA Sunset Marginal Bracket & Entity Tax Workpaper (HTML/PDF)",
             "5-Point Statutory Exposure & Quarterly Safe-Harbor Reconciliation Schedule (CSV)",
@@ -98,7 +112,13 @@
           "price_cents": 3900,
           "currency": "usd",
           "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
-          "trend_timeseries_ids": ["ed_direct_undergrad_rate", "ed_idr_discretionary_levy", "ed_idr_fpl_multiplier", "hhs_fpl_single_base", "irs_sec108f_tax_free_forgiveness"],
+          "trend_timeseries_ids": [
+            "ed_direct_undergrad_rate",
+            "ed_idr_discretionary_levy",
+            "ed_idr_fpl_multiplier",
+            "hhs_fpl_single_base",
+            "irs_sec108f_tax_free_forgiveness"
+          ],
           "deliverables": [
             "Personalized Title IV RAP/IBR vs Private Refinance Break-Even Audit Report (HTML/PDF)",
             "120-Month Amortization & Federal Protection Forfeiture Sensitivity Schedule (CSV)",
@@ -114,7 +134,12 @@
           "price_cents": 7900,
           "currency": "usd",
           "statutory_authority": "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, and NIST SP 800-171 Rev 2",
-          "trend_timeseries_ids": ["dod_32cfr170_cmmc_controls", "nist_800_171_sprs_max", "hhs_ocr_hipaa_tier4_cap", "iso_27006_stage2_days"],
+          "trend_timeseries_ids": [
+            "dod_32cfr170_cmmc_controls",
+            "nist_800_171_sprs_max",
+            "hhs_ocr_hipaa_tier4_cap",
+            "iso_27006_stage2_days"
+          ],
           "deliverables": [
             "Personalized SOC 2 Trust Services Criteria & DoD CMMC 2.0 Level 2 Audit Budget Workpaper (HTML/PDF)",
             "110-Control NIST SP 800-171 Rev 2 SPRS Scoring & 180-Day POA&M Remediation Schedule (CSV)",
@@ -130,14 +155,20 @@
           "price_cents": 4900,
           "currency": "usd",
           "statutory_authority": "ISO/IEC 27006-1:2024, 45 CFR 160.404 (HITECH Act), and PCI DSS v4.0.1",
-          "trend_timeseries_ids": ["iso_27006_stage2_days", "hhs_ocr_hipaa_tier4_cap", "dod_32cfr170_cmmc_controls"],
+          "trend_timeseries_ids": [
+            "iso_27006_stage2_days",
+            "hhs_ocr_hipaa_tier4_cap",
+            "dod_32cfr170_cmmc_controls"
+          ],
           "deliverables": [
             "Personalized ISO/IEC 27006-1:2024 Auditor-Day & 45 CFR 160.404 Penalty Exposure Workpaper (HTML/PDF)",
             "5-Point Breach Notification, Forensics & Multi-Framework Control Overlap Schedule (CSV)",
             "Signed Enterprise Security Governance Audit Manifest (JSON)"
           ]
         }
-      }
+      },
+      "settlement_verification": "direct_checkout_session_lookup",
+      "webhook_url_status": "UNVERIFIED_SHARED_COACHOS_ENDPOINT: not used for settlement; edge verifies cs_live sessions directly via GET /v1/checkout/sessions/{id}"
     },
     "impact": {
       "name": "Impact.com",
@@ -219,7 +250,6 @@
       "name": "CJ Affiliate",
       "company_cid": "7792582",
       "publisher_id": "8101803",
-      "promotional_property_id": "101725461",
       "live_promotional_property_id": "101906407",
       "promotional_property_name": "ProfitHelmPrimary",
       "account_user": "Arif Coskun",
@@ -526,15 +556,15 @@
           "status": "live",
           "is_fallback_partner": true,
           "pipeline_tier": "live_revenue_ready",
-          "url": "https://koinly.io/?via=A4FABF09&utm_source=affiliate",
-          "direct_url": "https://koinly.io/?via=A4FABF09&utm_source=affiliate",
+          "url": "https://koinly.io/?fpr=arif-4c0b88",
+          "direct_url": "https://koinly.io/?fpr=arif-4c0b88",
           "edge_route": "/r/koinly",
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
           "bounty": "$40-$100",
           "firstpromoter_welcome_url": "https://koinly.io/?fpr=arif-4c0b88",
           "payout_method": "PayPal (arif.coskun@profithelm.com - verified and saved via HTTP 200 on app.koinly.io/affiliate)",
-          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?via=A4FABF09&utm_source=affiliate + FirstPromoter welcome link https://koinly.io/?fpr=arif-4c0b88 received in Newsletter #1588 & Inbox #1007 on 2026-10-20; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
+          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?fpr=arif-4c0b88 + FirstPromoter welcome link https://koinly.io/?fpr=arif-4c0b88 received in Newsletter #1588 & Inbox #1007 on 2026-10-20; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
         },
         "rippling": {
           "status": "live",
@@ -615,10 +645,10 @@
           "correspondence_status": "Approved & Live on Impact.com (Inbox #1003 & #1004 on 2026-10-19T19:14Z from noelle.hyra@gusto.com confirming approval to Gusto Campaign #15154 on Impact Account 7932737 / Branded Account 3161796 after Inbox #967 & Sent #271; Verified Insertion Order Payout: $200.00-$300.00 USD per Sale via https://gusto.pxf.io/c/7932737/1226287/15154; CJ Affiliate ADP #5275573 & Intuit Small Business #2271086 pending on CID 8101803 per Sent #265)"
         },
         "ramp": {
-          "status": "awaiting_response",
-          "pipeline_tier": "awaiting_vendor_response",
-          "url": "https://ramp.com/",
-          "direct_url": "https://ramp.com/",
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "url": "https://join.ramp.com/c/7932737/3981015/51436",
+          "direct_url": "https://join.ramp.com/c/7932737/3981015/51436",
           "impact_verified_tracking_url": "https://join.ramp.com/c/7932737/3981015/51436",
           "impact_ad_id": "3981015",
           "edge_route": "/r/ramp",
@@ -629,7 +659,8 @@
           "correspondence_status": "Impact Marketplace Application Approved in Newsletter #1591 on 2026-10-21T14:54:06Z & Live Tracking Link Extracted (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 Active since 2026-10-21 [$100-$4,000 Closed Won / $50-$2,000 SQL] via Ad #3981015 https://join.ramp.com/c/7932737/3981015/51436 wired at /r/ramp; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
           "active_fallback_merchant": "mercury",
           "active_fallback_url": "https://mercury.com/r/profithelm-llc",
-          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp"
+          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp",
+          "contract_status": "approved_impact_51436"
         },
         "crest_capital": {
           "status": "live",
@@ -850,8 +881,8 @@
       },
       "partners": {
         "splash_financial": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.splashfinancial.com/",
           "direct_url": "https://www.splashfinancial.com/",
           "edge_route": "/r/splash_financial",
@@ -861,11 +892,12 @@
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Splash-Financial.brand",
           "bounty": "$300",
           "gate_1_verified_payout": "$300.00 USD per SLR Closed Loan",
-          "correspondence_status": "Live Lending Marketplace & Impact Application Confirmed (Impact Campaign #9516 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 4 -> 5 + direct follow-up Sent #247 & #258 to contact@splashfinancial.com + publisher intro Sent #272 to pleimkuehler@splashfinancial.com; verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)"
+          "correspondence_status": "Live Lending Marketplace & Impact Application Confirmed (Impact Campaign #9516 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 4 -> 5 + direct follow-up Sent #247 & #258 to contact@splashfinancial.com + publisher intro Sent #272 to pleimkuehler@splashfinancial.com; verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)",
+          "contract_status": "pending_impact_review"
         },
         "sofi": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "declined",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.sofi.com/",
           "direct_url": "https://www.sofi.com/",
           "edge_route": "/r/sofi",
@@ -875,11 +907,12 @@
           "gate_1_verified_payout": "$120.00 USD per Funded Refinance Loan",
           "correspondence_status": "Live Lending Destination & Impact Correspondence Reconciled (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737 + publisher intro Sent #273 to cfels@lqdigital.com & Sent #275 to affiliates@sofi.com + Impact campaign request declined in Inbox #1031 on 2026-10-26T13:11:59Z; covered on Prexvo by first-party $39 Refinance & Amortization Decision Audit Stripe checkout plus pending Splash Financial #9516 and LendKey #3276 contracts; passes Gate 1 >= $45; active outbound route /r/sofi)",
           "campaign_id": "11190",
-          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/SoFi.brand"
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/SoFi.brand",
+          "contract_status": "declined_impact"
         },
         "credible": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.credible.com/",
           "direct_url": "https://www.credible.com/",
           "edge_route": "/r/credible",
@@ -890,11 +923,12 @@
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Credible.brand",
           "bounty": "$75-$150",
           "gate_1_verified_payout": "$75.00 USD per Closed Loan - Refinancing",
-          "correspondence_status": "Live Multi-Lender Marketplace & Impact Application Submitted (Impact Campaign #3874 IO #25024 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 5 -> 6; absent from Impact Sent Invites on 2026-10-20 and awaiting marketplace re-verification; verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)"
+          "correspondence_status": "Live Multi-Lender Marketplace & Impact Application Submitted (Impact Campaign #3874 IO #25024 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 5 -> 6; absent from Impact Sent Invites on 2026-10-20 and awaiting marketplace re-verification; verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)",
+          "contract_status": "pending_impact_review"
         },
         "earnest": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "declined",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.earnest.com/",
           "direct_url": "https://www.earnest.com/",
           "edge_route": "/r/earnest",
@@ -903,11 +937,12 @@
           "bounty": "$150-$200",
           "gate_1_verified_payout": "$150.00-$200.00 USD per Funded Refinance Loan",
           "correspondence_status": "Live Custom-Term Lending Marketplace & Direct Partner Application Submitted (Impact Campaign #11739 declined per Inbox #994 on 2026-10-17; completed https://www.earnest.com/partner-sign-up on 2026-10-16T22:50Z with \"Success - Form submitted successfully.\"; covered on Prexvo by primary Splash Financial #9516 / SoFi #11190 / LendKey #3276; passes Gate 1 >= $45; active outbound route /r/earnest)",
-          "direct_apply_url": "https://www.earnest.com/partner-sign-up"
+          "direct_apply_url": "https://www.earnest.com/partner-sign-up",
+          "contract_status": "declined_impact"
         },
         "lendkey": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.lendkey.com/",
           "direct_url": "https://www.lendkey.com/",
           "edge_route": "/r/lendkey",
@@ -918,7 +953,8 @@
           "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace & Impact Application Confirmed (Impact Campaign #3276 IO #20978 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 7 -> 8 + publisher intro Sent #274 to accounting@lendkey.com; passes Gate 1 >= $45; active outbound route /r/lendkey)",
           "campaign_id": "3276",
           "applied_io_id": "20978",
-          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/LendKey.brand"
+          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/LendKey.brand",
+          "contract_status": "pending_impact_review"
         }
       }
     },
@@ -965,70 +1001,76 @@
       },
       "partners": {
         "vanta_security": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.vanta.com/products/soc-2",
           "direct_url": "https://www.vanta.com/products/soc-2",
           "edge_route": "/r/vanta_security",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
           "bounty": "$350",
-          "correspondence_status": "Live Enterprise GRC Automation Destination (/r/vanta_security)"
+          "correspondence_status": "Live Enterprise GRC Automation Destination (/r/vanta_security)",
+          "contract_status": "no_approved_contract"
         },
         "drata_compliance": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://drata.com/",
           "direct_url": "https://drata.com/",
           "edge_route": "/r/drata_compliance",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
           "bounty": "$300",
-          "correspondence_status": "Live Continuous GRC & CMMC/SOC 2 Destination (/r/drata_compliance)"
+          "correspondence_status": "Live Continuous GRC & CMMC/SOC 2 Destination (/r/drata_compliance)",
+          "contract_status": "no_approved_contract"
         },
         "sprinto_compliance": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://sprinto.com/",
           "direct_url": "https://sprinto.com/",
           "edge_route": "/r/sprinto_compliance",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
           "bounty": "$225-$350",
-          "correspondence_status": "Live Cloud SaaS Compliance Automation Destination (/r/sprinto_compliance)"
+          "correspondence_status": "Live Cloud SaaS Compliance Automation Destination (/r/sprinto_compliance)",
+          "contract_status": "no_approved_contract"
         },
         "thoropass_audit": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.thoropass.com/solutions",
           "direct_url": "https://www.thoropass.com/solutions",
           "edge_route": "/r/thoropass_audit",
           "category": "BUNDLED_GRC_ATTESTATION",
           "network": "PartnerStack",
           "bounty": "$325",
-          "correspondence_status": "Live Integrated GRC + Licensed CPA/QSA Audit Destination (/r/thoropass_audit)"
+          "correspondence_status": "Live Integrated GRC + Licensed CPA/QSA Audit Destination (/r/thoropass_audit)",
+          "contract_status": "no_approved_contract"
         },
         "coalition_cyber_insurance": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.coalitioninc.com/cyber-insurance",
           "direct_url": "https://www.coalitioninc.com/cyber-insurance",
           "edge_route": "/r/coalition_cyber_insurance",
           "category": "CYBER_LIABILITY_AND_PENTEST",
           "network": "Impact.com",
           "bounty": "$250",
-          "correspondence_status": "Live Active Cyber Liability & Breach Response Destination (/r/coalition_cyber_insurance)"
+          "correspondence_status": "Live Active Cyber Liability & Breach Response Destination (/r/coalition_cyber_insurance)",
+          "contract_status": "no_approved_contract"
         },
         "cobalt_pentest": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
+          "status": "pending",
+          "pipeline_tier": "no_approved_contract",
           "url": "https://www.cobalt.io/",
           "direct_url": "https://www.cobalt.io/",
           "edge_route": "/r/cobalt_pentest",
           "category": "CYBER_LIABILITY_AND_PENTEST",
           "network": "PartnerStack",
           "bounty": "$275",
-          "correspondence_status": "Live CREST & OSCP Offensive Security PtaaS Destination (/r/cobalt_pentest)"
+          "correspondence_status": "Live CREST & OSCP Offensive Security PtaaS Destination (/r/cobalt_pentest)",
+          "contract_status": "no_approved_contract"
         }
       }
     }

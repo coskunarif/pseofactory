@@ -893,7 +893,7 @@ class EmailIngestionEngine:
                         raw_subject=msg.subject,
                         sender_email=msg.sender_email,
                         date=msg.date,
-                        candidate_url="https://koinly.io/?via=A4FABF09&utm_source=affiliate",
+                        candidate_url="https://koinly.io/?fpr=arif-4c0b88",
                         network="FirstPromoter",
                     )
                 )

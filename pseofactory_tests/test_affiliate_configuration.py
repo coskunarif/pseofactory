@@ -76,7 +76,7 @@ def test_registry_schema_validity():
         assert partner.property_id in ("profithelm", "prexvo", "gainhelm"), (
             f"Partner '{key}' has invalid property_id: '{partner.property_id}'"
         )
-        assert partner.status in ("live", "pending", "pending_expansion", "pending_p2"), (
+        assert partner.status in ("live", "pending", "pending_expansion", "pending_p2", "declined"), (
             f"Partner '{key}' has unrecognized status: '{partner.status}'"
         )
         assert partner.env_var.startswith("AFFILIATE_"), (
