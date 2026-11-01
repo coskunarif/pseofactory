@@ -192,39 +192,65 @@ def cmd_maintain(args: argparse.Namespace) -> int:
     property_id = (args.property or "prexvo").strip()
     auto_heal = getattr(args, "auto_heal", False)
     dry_run = getattr(args, "dry_run", False)
-    if property_id.lower() == "all":
-        results = run_fleet_maintenance(force=args.force or auto_heal, dry_run=dry_run)
-        all_ok = True
-        if args.json:
-            print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
-        else:
-            for p_id, r in results.items():
-                print(f"[{r.status}] Property: {p_id} | Audited: {r.assets_audited} | Drifted: {r.assets_drifted} | Refactored: {r.assets_refactored} | Failed: {r.assets_failed}")
-                if r.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
-                    all_ok = False
-        return 0 if all_ok else 1
+    lock_fd = None
+    lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+    if not dry_run:
+        if _ancestor_or_inherited_fd_holds_lock(lock_file):
+            os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+            os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
+        if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
+            try:
+                import fcntl
+                lock_fd = open(lock_file, "a+", encoding="utf-8")
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+                os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
+            except OSError:
+                if lock_fd is not None:
+                    lock_fd.close()
+                    lock_fd = None
+    try:
+        if property_id.lower() == "all":
+            results = run_fleet_maintenance(force=args.force or auto_heal, dry_run=dry_run)
+            all_ok = True
+            if args.json:
+                print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
+            else:
+                for p_id, r in results.items():
+                    print(f"[{r.status}] Property: {p_id} | Audited: {r.assets_audited} | Drifted: {r.assets_drifted} | Refactored: {r.assets_refactored} | Failed: {r.assets_failed}")
+                    if r.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
+                        all_ok = False
+            return 0 if all_ok else 1
 
-    if dry_run:
-        reg = TenantRegistry.default()
-        try:
-            adapter = reg.get_adapter(property_id)
-        except KeyError:
-            print(f"Error: Property '{property_id}' not found in registry", file=sys.stderr)
-            return 1
-        lifecycle = MaintenanceLifecycle(registry=reg)
-        res = lifecycle.run(adapter, force=args.force or auto_heal, dry_run=True, enable_gitops=False)
-    else:
-        res = run_maintenance_lifecycle(property_id=property_id, force=args.force or auto_heal)
-    if args.json:
-        print(json.dumps(res.to_dict(), indent=2))
-    else:
-        print(f"[{res.status}] Property: {res.property_id} | Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | Refactored: {res.assets_refactored} | Failed: {res.assets_failed}")
-        if res.engine_hash:
-            print(f"  Engine Hash: {res.engine_hash[:16]}...")
-        if res.failed_records:
-            for fr in res.failed_records:
-                print(f"  - Failed asset: {fr.get('asset_path')}")
-    return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN") else 1
+        if dry_run:
+            reg = TenantRegistry.default()
+            try:
+                adapter = reg.get_adapter(property_id)
+            except KeyError:
+                print(f"Error: Property '{property_id}' not found in registry", file=sys.stderr)
+                return 1
+            lifecycle = MaintenanceLifecycle(registry=reg)
+            res = lifecycle.run(adapter, force=args.force or auto_heal, dry_run=True, enable_gitops=False)
+        else:
+            res = run_maintenance_lifecycle(property_id=property_id, force=args.force or auto_heal)
+        if args.json:
+            print(json.dumps(res.to_dict(), indent=2))
+        else:
+            print(f"[{res.status}] Property: {res.property_id} | Audited: {res.assets_audited} | Drifted: {res.assets_drifted} | Refactored: {res.assets_refactored} | Failed: {res.assets_failed}")
+            if res.engine_hash:
+                print(f"  Engine Hash: {res.engine_hash[:16]}...")
+            if res.failed_records:
+                for fr in res.failed_records:
+                    print(f"  - Failed asset: {fr.get('asset_path')}")
+        return 0 if res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN") else 1
+    finally:
+        if lock_fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
 
 
 def _ancestor_or_inherited_fd_holds_lock(lock_file: Path) -> bool:
@@ -433,16 +459,42 @@ def cmd_fleet_maintain(args: argparse.Namespace) -> int:
     Executes sequential fleet maintenance across all registered properties.
     Zero em-dashes. Zero en-dashes.
     """
-    results = run_fleet_maintenance(force=args.force, dry_run=args.dry_run)
-    all_ok = True
-    if args.json:
-        print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
-    else:
-        for p_id, r in results.items():
-            print(f"[{r.status}] Property: {p_id} | Audited: {r.assets_audited} | Drifted: {r.assets_drifted} | Refactored: {r.assets_refactored} | Failed: {r.assets_failed}")
-            if r.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
-                all_ok = False
-    return 0 if all_ok else 1
+    lock_fd = None
+    lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+    if not getattr(args, "dry_run", False):
+        if _ancestor_or_inherited_fd_holds_lock(lock_file):
+            os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+            os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
+        if "PYTEST_CURRENT_TEST" not in os.environ and os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") != "1":
+            try:
+                import fcntl
+                lock_fd = open(lock_file, "a+", encoding="utf-8")
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                os.environ["PSEUFACTORY_SUPERVISOR_LOCK_HELD"] = "1"
+                os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
+            except OSError:
+                if lock_fd is not None:
+                    lock_fd.close()
+                    lock_fd = None
+    try:
+        results = run_fleet_maintenance(force=args.force, dry_run=args.dry_run)
+        all_ok = True
+        if args.json:
+            print(json.dumps({k: v.to_dict() for k, v in results.items()}, indent=2))
+        else:
+            for p_id, r in results.items():
+                print(f"[{r.status}] Property: {p_id} | Audited: {r.assets_audited} | Drifted: {r.assets_drifted} | Refactored: {r.assets_refactored} | Failed: {r.assets_failed}")
+                if r.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN"):
+                    all_ok = False
+        return 0 if all_ok else 1
+    finally:
+        if lock_fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
 
 
 def cmd_drift(args: argparse.Namespace) -> int:

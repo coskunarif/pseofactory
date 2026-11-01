@@ -10264,6 +10264,16 @@ class RetroReflectionEngine:
                     "Deterministic mathematical model and planning calculator for ",
                     "Deterministic statutory financial model and compliance calculator for ",
                 )
+            if property_id.lower() == "prexvo" and "refinanc" in td.name.lower():
+                refi_warn = (
+                    "Warning: Refinancing a federal student loan into a private note permanently forfeits access "
+                    "to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), "
+                    "administrative forbearance, and federal death or disability discharge."
+                )
+                if "permanently forfeits" not in desc_txt.lower():
+                    desc_txt = f"{desc_txt} {refi_warn}".strip()
+                if qa_txt and "permanently forfeits" not in qa_txt.lower():
+                    qa_txt = f"{qa_txt} {refi_warn}".strip()
             manifest_obj = cls._resolve_manifest_for_page(raw_h, property_id=property_id, slug=td.name, dist_dir=dist_dir)
             inputs_dict = manifest_obj.get("inputs") if isinstance(manifest_obj.get("inputs"), dict) else {}
             if property_id.lower() == "prexvo":
@@ -11903,6 +11913,25 @@ class RetroReflectionEngine:
                         )
             except Exception:
                 pass
+
+        try:
+            from pseofactory.tenant_facts import TruthReconciliationEngine
+            reconcile_post_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+            if callable(reconcile_post_fn):
+                post_repaired = reconcile_post_fn(
+                    dist_dir=d,
+                    property_id=property_id,
+                    repo_root=d.parent,
+                )
+                for rp in post_repaired or []:
+                    try:
+                        rel_rp = Path(rp).relative_to(d).as_posix()
+                    except Exception:
+                        rel_rp = Path(rp).name
+                    if rel_rp not in retrofitted_paths:
+                        retrofitted_paths.append(rel_rp)
+        except Exception:
+            pass
 
         agy_dir = d.parent / ".agy"
         if agy_dir.is_dir():
@@ -13854,6 +13883,19 @@ def reflect_and_recompile_all_assets(
                             retrofitted_count += 1
                     for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                         evaluator._audit_cache.pop(_ck, None)
+                try:
+                    from pseofactory.tenant_facts import TruthReconciliationEngine
+                    reconcile_ds_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+                    if callable(reconcile_ds_fn):
+                        reconcile_ds_fn(
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                        )
+                except Exception:
+                    pass
+                for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
+                    evaluator._audit_cache.pop(_ck, None)
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             except Exception as ds_err:
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}

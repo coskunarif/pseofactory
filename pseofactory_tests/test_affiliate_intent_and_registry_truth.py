@@ -77,3 +77,29 @@ def test_generated_redirects_have_no_checkout_hijack_or_grc_swaps():
     ph = generate_edge_redirect_function("profithelm")
     block = ph.split("  ipx1031: {", 1)[1].split("}", 1)[0]
     assert "xendoo.pxf.io" not in block
+
+
+def test_prexvo_llms_manifest_sync_preserves_ymyl_refinance_disclaimer(tmp_path):
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    dist = tmp_path / "dist"
+    tool_dir = dist / "tools" / "student-loan-refinance-break-even-calculator"
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "index.html").write_text(
+        "<html><head><title>Refi</title>"
+        '<meta name="description" content="Calculate student loan refinance APR savings.">'
+        "</head><body><h1>Student Loan Refinance Break-Even Calculator</h1></body></html>",
+        encoding="utf-8",
+    )
+    (dist / "llms.txt").write_text(
+        "# Prexvo\n- [Student Loan Refinance Break-Even Calculator]"
+        "(https://prexvo.com/tools/student-loan-refinance-break-even-calculator/): Old summary.\n",
+        encoding="utf-8",
+    )
+    (dist / "llms-full.txt").write_text("# Prexvo\n", encoding="utf-8")
+    (dist / "catalog.json").write_text("{}", encoding="utf-8")
+    RetroReflectionEngine.sync_tenant_llms_manifests(dist, "prexvo", canonical_base="https://prexvo.com")
+    assert "permanently forfeits" in (dist / "llms.txt").read_text(encoding="utf-8").lower()
+    assert "permanently forfeits" in (dist / "llms-full.txt").read_text(encoding="utf-8").lower()
+    assert "permanently forfeits" in (dist / "catalog.json").read_text(encoding="utf-8").lower()
+
