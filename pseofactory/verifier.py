@@ -7236,8 +7236,8 @@ def audit_estate_technical_seo_and_cannibalization(
             if t_m:
                 t_txt = html.unescape(t_m.group(1)).strip()
                 titles_map[t_txt].append(rel)
-                if len(t_txt) < 30 or len(t_txt) > 65:
-                    onpage_issues.append(f"{rel}: title length {len(t_txt)} outside [30, 65]")
+                if len(t_txt) < ORGANIC_SEARCH_TITLE_MIN_CHARS or len(t_txt) > ORGANIC_SEARCH_TITLE_MAX_CHARS:
+                    onpage_issues.append(f"{rel}: title length {len(t_txt)} outside [{ORGANIC_SEARCH_TITLE_MIN_CHARS}, {ORGANIC_SEARCH_TITLE_MAX_CHARS}]")
             else:
                 onpage_issues.append(f"{rel}: missing <title>")
 

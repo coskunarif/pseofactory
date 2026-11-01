@@ -11323,6 +11323,15 @@ class RetroReflectionEngine:
                         or "cobalt_pentest" not in content
                     )
                 )
+                or (
+                    'href="/r/' in content
+                    and 'data-restricted-public-service="true"' not in content
+                    and rel.startswith("tools/")
+                    and rel.endswith("/index.html")
+                    and rel.count("/") == 2
+                    and 'data-cta-slot="calculator_result_inline"' not in content
+                    and 'class="calc-inline-cta"' not in content
+                )
                 or any(
                     "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
                     for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)
@@ -11967,6 +11976,21 @@ class RetroReflectionEngine:
                         updated_html = norm_tool_html
                         if "callout_message_match" not in repaired:
                             repaired.append("callout_message_match")
+                except Exception:
+                    pass
+            if rel.startswith("tools/") and rel.endswith("/index.html") and rel.count("/") == 2:
+                try:
+                    from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
+                    tool_slug = rel.split("/")[1]
+                    repositioned_html, rep_report = reposition_affiliate_placements_from_gsc_signals(
+                        updated_html,
+                        property_id=property_id,
+                        slug=tool_slug,
+                    )
+                    if repositioned_html != updated_html:
+                        updated_html = repositioned_html
+                        if "conversion_slots_repositioned" not in repaired:
+                            repaired.append("conversion_slots_repositioned")
                 except Exception:
                     pass
             if (repaired or overlay_injected) and updated_html != content:

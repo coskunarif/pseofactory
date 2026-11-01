@@ -1987,7 +1987,11 @@ def _normalize_title_50_60(
         "tools",
     }
     _base_no_yr = re.sub(r"\b(202[4-9]|203\d)\b", "", base.lower()).strip(" |-:")
-    is_non_calc_title = _base_no_yr in _non_calc_exact and "calculator" not in raw_title.lower()
+    is_non_calc_title = (
+        _base_no_yr in _non_calc_exact
+        or any(_base_no_yr.startswith(x) for x in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "tools"))
+    ) and "calculator" not in raw_title.lower()
+    needs_calc = "calculator" in base.lower() or "calculator" in raw_title.lower() or not is_non_calc_title
 
     if "calculator" not in base.lower() and not is_non_calc_title:
         max_for_calc = max_base - len(" Calculator")
@@ -2056,11 +2060,18 @@ def _normalize_title_50_60(
                         break
 
     if len(base) > max_base:
-        b_words = base.split()
-        while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
-            b_words.pop()
-        base = " ".join(b_words).rstrip(" |-&:")
-        if "calculator" not in base.lower() and not is_non_calc_title and len(base) + len(" Calculator") <= max_base:
+        if needs_calc:
+            allowed_len = max_base - len(" Calculator")
+            clean_words = [w for w in base.split() if w.lower() != "calculator"]
+            while len(clean_words) > 1 and len(" ".join(clean_words)) > allowed_len:
+                clean_words.pop()
+            base = f"{' '.join(clean_words).rstrip(' |-&:')} Calculator"
+        else:
+            b_words = base.split()
+            while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
+                b_words.pop()
+            base = " ".join(b_words).rstrip(" |-&:")
+        if "calculator" not in base.lower() and needs_calc and len(base) + len(" Calculator") <= max_base:
             base = f"{base} Calculator"
 
     cand = f"{base}{suffix}"
@@ -2126,19 +2137,26 @@ def _normalize_title_50_60(
         cand = f"{base}{suffix}"
 
     if len(cand) > 60:
-        b_words = base.split()
-        while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
-            b_words.pop()
-        trimmed = " ".join(b_words).rstrip(" |-&:")
-        if len(trimmed) < min_base:
-            for short_tok in ("2026", "Tax", "Plan", "Rules", "Rate", "Cap"):
-                if _has_year(trimmed) and _has_year(short_tok):
-                    continue
-                if short_tok.lower() not in trimmed.lower() and min_base <= len(f"{trimmed} {short_tok}") <= max_base:
-                    trimmed = f"{trimmed} {short_tok}"
-                    break
-        if len(trimmed) > max_base or len(trimmed) < min_base:
-            trimmed = base[:max_base].rstrip(" |-&:")
+        if needs_calc:
+            allowed_len = max_base - len(" Calculator")
+            clean_words = [w for w in base.split() if w.lower() != "calculator"]
+            while len(clean_words) > 1 and len(" ".join(clean_words)) > allowed_len:
+                clean_words.pop()
+            trimmed = f"{' '.join(clean_words).rstrip(' |-&:')} Calculator"
+        else:
+            b_words = base.split()
+            while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
+                b_words.pop()
+            trimmed = " ".join(b_words).rstrip(" |-&:")
+            if len(trimmed) < min_base:
+                for short_tok in ("2026", "Tax", "Plan", "Rules", "Rate", "Cap"):
+                    if _has_year(trimmed) and _has_year(short_tok):
+                        continue
+                    if short_tok.lower() not in trimmed.lower() and min_base <= len(f"{trimmed} {short_tok}") <= max_base:
+                        trimmed = f"{trimmed} {short_tok}"
+                        break
+            if len(trimmed) > max_base or len(trimmed) < min_base:
+                trimmed = base[:max_base].rstrip(" |-&:")
         cand = f"{trimmed}{suffix}"
 
     cand = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", cand, flags=re.IGNORECASE)

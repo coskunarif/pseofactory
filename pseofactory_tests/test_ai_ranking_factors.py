@@ -3400,10 +3400,15 @@ def test_assert_organic_search_title_boundaries():
     title_65 = "X" * 65
     assert assert_organic_search_title(title_65) is True
 
-    # Over 65 chars (66 chars) fails
+    # Over 65 chars (66 chars) fails when max_chars=65
     title_66 = "X" * 66
     with pytest.raises(ValueError, match="exceeds 65-char threshold"):
-        assert_organic_search_title(title_66)
+        assert_organic_search_title(title_66, max_chars=65)
+
+    # Over default 70 chars (71 chars) fails
+    title_71 = "X" * 71
+    with pytest.raises(ValueError, match="exceeds 70-char threshold"):
+        assert_organic_search_title(title_71)
 
     # Extraction from HTML <title> tag
     html_title = f'<html><head><title>{"A" * 45}</title></head></html>'

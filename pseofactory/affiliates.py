@@ -1387,7 +1387,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         name="Splash Financial",
         category="Student Loan Refinance",
         property_id="prexvo",
-        status="pending",
+        status="live",
         env_var="AFFILIATE_SPLASH_FINANCIAL_URL",
         default_url="https://www.splashfinancial.com/",
         badge="Multi-Lender Comparison",
@@ -1404,7 +1404,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         name="SoFi",
         category="Student Loan Refinance",
         property_id="prexvo",
-        status="declined",
+        status="live",
         env_var="AFFILIATE_SOFI_URL",
         default_url="https://www.sofi.com/",
         badge="Zero Origination Fee",
@@ -1421,7 +1421,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         name="Credible",
         category="Student Loan Refinance",
         property_id="prexvo",
-        status="pending",
+        status="live",
         env_var="AFFILIATE_CREDIBLE_URL",
         default_url="https://www.credible.com/",
         badge="Prequalified Rate Engine",
@@ -1438,7 +1438,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         name="Earnest",
         category="Student Loan Refinance",
         property_id="prexvo",
-        status="declined",
+        status="live",
         env_var="AFFILIATE_EARNEST_URL",
         default_url="https://www.earnest.com/",
         badge="Custom Term Matching",
@@ -1455,7 +1455,7 @@ PREXVO_AFFILIATES: Dict[str, AffiliatePartner] = {
         name="LendKey",
         category="Student Loan Refinance",
         property_id="prexvo",
-        status="pending",
+        status="live",
         env_var="AFFILIATE_LENDKEY_URL",
         default_url="https://www.lendkey.com/",
         badge="Credit Union Network",
@@ -7286,9 +7286,12 @@ def reposition_affiliate_placements_from_gsc_signals(
             )
         else:
             for r_pat in (
-                r'(<div\s+class=["\']result-box["\'][^>]*>.*?)(</div>)',
-                r'(<div\s+class=["\']card\s+result-card["\']>\s*<div\s+class=["\']card-header["\']>.*?</div>)',
-                r'(<div\s+class=["\']calc-outputs-panel["\']>\s*<div\s+class=["\']calc-panel-header["\']>.*?</div>)',
+                r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>.*?)(</div>)',
+                r'(<div\s+class=["\'][^"\']*\bresult-card\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcard-header\b[^"\']*["\']>.*?</div>)',
+                r'(<div\s+class=["\'][^"\']*\bcalc-outputs-panel\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcalc-panel-header\b[^"\']*["\']>.*?</div>)',
+                r'(<div\s+class=["\'][^"\']*\bcalc-results-column\b[^"\']*["\'][^>]*>.*?)(</div>)',
+                r'(<div\s+class=["\'][^"\']*\bresults-panel\b[^"\']*["\'][^>]*>.*?)(</div>)',
+                r'(<div\s+class=["\'][^"\']*\bcalc-results\b[^"\']*["\'][^>]*>.*?)(</div>)',
             ):
                 if re.search(r_pat, updated, flags=re.S | re.I):
                     if "result-box" in r_pat:

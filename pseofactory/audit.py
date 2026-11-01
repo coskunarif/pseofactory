@@ -365,7 +365,7 @@ ALLOWED_TITLE_EXPANSIONS: Set[str] = {
     "national", "single", "joint", "head", "household", "spousal", "student", "loan",
     "property", "income", "brackets", "bracket", "take", "home", "pay", "effective",
     "marginal", "corporate", "business", "spoke", "leaf", "hub", "texas",
-    "amortization", "10", "year", "hardship", "grad", "plus",
+    "amortization", "10", "year", "hardship", "grad", "plus", "sec", "projection", "projections",
     "crew", "cab", "truck", "fleet", "van", "cargo", "electric", "4wd", "work", "suv",
 }
 

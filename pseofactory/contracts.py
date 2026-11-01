@@ -8984,11 +8984,15 @@ def detect_asset_partner_roster_and_slot_issues(
             )
 
     # Check conversion slot coverage on interactive calculators
+    is_leaf_route = "/" in slug.strip("/") or rel_path.count("/") >= 3
     has_calc = (
-        'class="calculator' in html_text
-        or 'class="interactive-calculator' in html_text
-        or 'class="result-box"' in html_text
-        or 'class="card result-card"' in html_text
+        not is_leaf_route
+        and (
+            'class="calculator' in html_text
+            or 'class="interactive-calculator' in html_text
+            or 'class="result-box"' in html_text
+            or 'class="card result-card"' in html_text
+        )
     )
     if has_calc and require_multi_company:
         if 'data-cta-slot="calculator_result_inline"' not in html_text and 'class="calc-inline-cta"' not in html_text:

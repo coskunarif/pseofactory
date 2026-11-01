@@ -3136,9 +3136,10 @@ class TruthReconciliationEngine:
             cur_title = _html_lib.unescape(t_m.group(1)).strip()
             from pseofactory.audit import _titles_match
             if not _titles_match(cur_title, h1_title):
+                from pseofactory.gsc_remediation import _normalize_title_50_60
                 brand_sfx = "ProfitHelm" if tenant_norm == "profithelm" else ("Prexvo" if tenant_norm == "prexvo" else "GainHelm")
-                cand_title = f"{h1_title} | {brand_sfx}"
-                if len(cand_title) <= 70:
+                cand_title = _normalize_title_50_60(h1_title, brand_sfx, tenant_norm)
+                if cand_title and cand_title != cur_title:
                     new_t_tag = f"<title>{cand_title}</title>"
                     updated = re.sub(r'<title>.*?</title>', new_t_tag, updated, count=1, flags=re.I | re.DOTALL)
                     repairs.append("title_aligned_with_h1")
