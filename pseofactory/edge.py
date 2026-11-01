@@ -3772,9 +3772,9 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const { request, env } = context;
-  const reqUrl = new URL(request.url);
+  const reqUrl = new URL((request && request.url) || "https://gainhelm.com/api/lead-capture");
   const isSynth =
-    request.headers.get("x-pseofactory-test") === "1" ||
+    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
     reqUrl.searchParams.get("synthetic_test") === "1";
   const toolSlug = (
     reqUrl.searchParams.get("tool_slug") ||
@@ -4011,7 +4011,7 @@ function isSyntheticProbeRequest(request, body, email) {
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    const reqUrl = new URL(request.url);
+    const reqUrl = new URL((request && request.url) || "https://gainhelm.com/api/lead-capture");
     const body = await request.json().catch(() => ({}));
     const rawEmail = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
     const state = String(body.state || reqUrl.searchParams.get("state") || "DE").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "DE";
@@ -5288,7 +5288,7 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const { request, env } = context;
-  const reqUrl = new URL(request.url);
+  const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
   if (
     reqUrl.searchParams.get("playbook") === "1" ||
@@ -5522,7 +5522,7 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    const reqUrl = new URL(request.url);
+    const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
     const body = await request.json().catch(() => ({}));
     const email = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
     const state = String(body.state || reqUrl.searchParams.get("state") || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
@@ -7152,7 +7152,7 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const { request, env } = context;
-  const reqUrl = new URL(request.url);
+  const reqUrl = new URL((request && request.url) || "https://profithelm.com/api/lead-capture");
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
   if (
     reqUrl.searchParams.get("playbook") === "1" ||
@@ -7382,7 +7382,7 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    const reqUrl = new URL(request.url);
+    const reqUrl = new URL((request && request.url) || "https://profithelm.com/api/lead-capture");
     const body = await request.json().catch(() => ({}));
     const email = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
     const rawSlug = String(body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "general")

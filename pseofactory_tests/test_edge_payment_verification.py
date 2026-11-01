@@ -297,3 +297,30 @@ def test_reconcile_html_truth_classifies_canonical_tools_url_as_tool_leaf():
     assert 'class="metric-grid result-box"' in updated
 
 
+@pytest.mark.parametrize("tenant", TENANTS)
+def test_on_request_post_accepts_mock_request_without_url_property(tmp_path, tenant):
+    mod = tmp_path / f"{tenant}_mock_req.mjs"
+    mod.write_text(generate_edge_lead_capture_function(tenant), encoding="utf-8")
+    script = textwrap.dedent(
+        f"""
+        const mod = await import({json.dumps(str(mod))});
+        const res = await mod.onRequestPost({{
+          request: {{
+            json: async () => ({{ email: "founder@startup.io", source: "section-179-calculator" }})
+          }},
+          env: {{}}
+        }});
+        const body = await res.json();
+        console.log(JSON.stringify({{ status: res.status, body }}));
+        """
+    )
+    runner = tmp_path / f"run_{tenant}_mock_req.mjs"
+    runner.write_text(script, encoding="utf-8")
+    proc = subprocess.run(["node", str(runner)], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["status"] == 200
+    assert out["body"]["ok"] is True
+
+
+
