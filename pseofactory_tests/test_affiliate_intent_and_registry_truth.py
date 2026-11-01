@@ -138,6 +138,20 @@ def test_normalize_html_callout_injects_inline_cta_when_result_box_class_added()
     assert 'data-cta-slot="calculator_result_inline"' in out
     assert 'class="calc-inline-cta"' in out
 
+    ph_html = (
+        '<html><head><link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/"></head>'
+        '<body>'
+        '<div class="card result-card result-box">'
+        '<div class="card-header"><h3>Outputs</h3></div>'
+        '<div id="res-total">$120,000</div>'
+        '</div>'
+        '<section class="affiliate-section affiliates-section" data-primary-partner="ipx1031" data-partner-roster="ipx1031" data-gsc-tier="baseline"><a href="/r/ipx1031">IPX1031</a></section>'
+        '</body></html>'
+    )
+    ph_out = normalize_html_callout_message_match(ph_html, property_id="profithelm")
+    assert 'data-cta-slot="calculator_result_inline"' in ph_out
+    assert 'class="calc-inline-cta"' in ph_out
+
 
 def test_sync_prexvo_affiliate_status_compat(tmp_path):
     from pseofactory import maintenance
