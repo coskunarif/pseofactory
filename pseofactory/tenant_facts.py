@@ -3125,7 +3125,8 @@ class TruthReconciliationEngine:
             (rel_path or "") in ("index.html", "", "404.html")
             or any((rel_path or "").lower().startswith(x) for x in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "static/signal", "signal"))
             or (slug or "").lower() in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "signal", "tools-directory", "index", "tools")
-            or any(f"/{x}/" in canon_check.lower() or canon_check.lower().rstrip("/").endswith(f"/{x}") for x in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "signal", "tools"))
+            or any(f"/{x}/" in canon_check.lower() or canon_check.lower().rstrip("/").endswith(f"/{x}") for x in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "signal"))
+            or canon_check.lower().rstrip("/").endswith("/tools")
             or (rel_path or "").rstrip("/") in ("tools/index.html", "tools")
         )
         is_tool_leaf = (not is_non_tool_page) and (

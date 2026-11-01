@@ -275,3 +275,25 @@ def test_gainhelm_post_lead_capture_dispatches_zoho_email_and_honest_partner_rou
     assert b["email_provider"] == "zoho_mail_oauth"
     assert b["live_destination_url"].startswith("https://www.vanta.com/products/soc-2?")
 
+
+def test_reconcile_html_truth_classifies_canonical_tools_url_as_tool_leaf():
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+
+    sample_html = (
+        '<!doctype html><html><head>'
+        '<link rel="canonical" href="https://profithelm.com/tools/prediction-market-tax/">'
+        '<title>Prediction Market Tax Calculator | ProfitHelm</title>'
+        '</head><body><h1>Prediction Market Tax Calculator</h1>'
+        '<div class="metric-grid"><div class="metric-box">$2,700</div></div>'
+        '</body></html>'
+    )
+    updated, repairs = TruthReconciliationEngine.reconcile_html_truth(
+        sample_html,
+        tenant="profithelm",
+        rel_path="tools/prediction-market-tax/index.html",
+        slug="prediction-market-tax",
+    )
+    assert "result_box_class_reconciled" in repairs
+    assert 'class="metric-grid result-box"' in updated
+
+
