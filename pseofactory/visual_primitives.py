@@ -668,6 +668,7 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       margin-top: 16px;
       margin-bottom: 16px;
       background-color: var(--card-bg);
+      box-sizing: border-box !important;
     }
     table, .calculation-table, .statutory-pitfalls-table, .scenario-table,
     .comparison-table, .overlay-comparison-table, .data-table, .calc-matrix-table {
@@ -929,12 +930,25 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
     }
     @media (max-width: 640px) {
       body {
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
       }
       main, main.container, .container {
         padding-left: 12px !important;
         padding-right: 12px !important;
+        box-sizing: border-box !important;
+      }
+      .calc-grid, .calculator-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      .calc-grid > *, .calculator-grid > *, .calc-inputs-column, .calc-results-column {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
       }
       main > .container {
         padding: 0 !important;
@@ -4050,7 +4064,7 @@ def _repair_html_tags_pass(updated: str) -> Tuple[str, set[str]]:
                     new_style,
                     flags=re.IGNORECASE,
                 )
-            if tag_name in ("div", "section", "article", "main", "form"):
+            if tag_name in ("div", "section", "article", "main", "form", "table"):
                 def _strip_wide_px(wm: re.Match) -> str:
                     if float(wm.group(1)) >= 400.0:
                         return ""

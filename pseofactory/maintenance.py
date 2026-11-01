@@ -11340,6 +11340,7 @@ class RetroReflectionEngine:
                     and rel.startswith("tools/")
                     and rel.endswith("/index.html")
                     and rel.count("/") == 2
+                    and re.search(r'class=["\'][^"\']*\b(result-box|result-card|calc-outputs-panel|calc-results-column|results-panel|calc-results|calculator-results)\b', content)
                     and 'data-cta-slot="calculator_result_inline"' not in content
                     and 'class="calc-inline-cta"' not in content
                 )
