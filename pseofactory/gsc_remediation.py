@@ -1988,10 +1988,15 @@ def _normalize_title_50_60(
     }
     _base_no_yr = re.sub(r"\b(202[4-9]|203\d)\b", "", base.lower()).strip(" |-:")
     is_non_calc_title = (
-        _base_no_yr in _non_calc_exact
+        secondary_modifier == "non_tool"
+        or _base_no_yr in _non_calc_exact
+        or any(k in _base_no_yr for k in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "directory", "audit cost"))
         or any(_base_no_yr.startswith(x) for x in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "tools"))
     ) and "calculator" not in raw_title.lower()
-    needs_calc = "calculator" in base.lower() or "calculator" in raw_title.lower() or not is_non_calc_title
+    needs_calc = (not is_non_calc_title) and (secondary_modifier != "non_tool")
+    if not needs_calc:
+        base = re.sub(r"\s+Calculator\b", "", base, flags=re.IGNORECASE).strip()
+        base = re.sub(r"\bCalculator\b", "", base, flags=re.IGNORECASE).strip()
 
     if "calculator" not in base.lower() and not is_non_calc_title:
         max_for_calc = max_base - len(" Calculator")
@@ -2029,6 +2034,8 @@ def _normalize_title_50_60(
 
     # Attempt parenthetical secondary modifier injection if requested or beneficial
     mod_clean = _strip_forbidden_dashes(str(secondary_modifier or "")).strip(" ()|-:")
+    if mod_clean.lower() == "non_tool":
+        mod_clean = ""
     if mod_clean and _has_year(base) and _has_year(mod_clean):
         mod_clean = re.sub(r"\b(202[4-9]|203\d)\b", "", mod_clean).strip(" ()|-:")
         mod_clean = re.sub(r"\s+", " ", mod_clean)

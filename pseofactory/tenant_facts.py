@@ -3121,15 +3121,16 @@ class TruthReconciliationEngine:
         # Align Title with H1 if discrepant (only for tool calculators and leaves)
         canon_m_tmp = re.search(r'<link\s+rel=["\']canonical["\']\s+href=["\']([^"\']+)["\']', updated, re.I)
         canon_check = canon_m_tmp.group(1).strip() if canon_m_tmp else ""
-        is_tool_leaf = (
-            ("tools/" in (rel_path or "").lower())
-            or ("/tools/" in canon_check.lower())
-            or (
-                bool(slug)
-                and slug not in ("section-179-deduction-calculator", "tool", "index")
-                and rel_path not in ("index.html", "", "404.html", "https://profithelm.com/", "https://prexvo.com/", "https://gainhelm.com/")
-                and not any(canon_check.rstrip("/").endswith(dom) for dom in ("profithelm.com", "prexvo.com", "gainhelm.com"))
-            )
+        is_non_tool_page = (
+            (rel_path or "") in ("index.html", "", "404.html")
+            or any((rel_path or "").lower().startswith(x) for x in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "static/signal", "signal"))
+            or (slug or "").lower() in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "signal", "tools-directory", "index", "tools")
+            or any(f"/{x}/" in canon_check.lower() or canon_check.lower().rstrip("/").endswith(f"/{x}") for x in ("privacy", "disclaimers", "disclaimer", "methodology", "about", "terms", "contact", "signal", "tools"))
+            or (rel_path or "").rstrip("/") in ("tools/index.html", "tools")
+        )
+        is_tool_leaf = (not is_non_tool_page) and (
+            (("tools/" in (rel_path or "").lower()) and (rel_path or "").rstrip("/") != "tools/index.html")
+            or ("/tools/" in canon_check.lower() and not canon_check.rstrip("/").endswith("/tools"))
         )
         t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
         if is_tool_leaf and t_m and h1_title:

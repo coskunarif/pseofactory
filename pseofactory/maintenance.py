@@ -6707,7 +6707,8 @@ def _normalize_page_structure_and_geo_parity(
                 clean_t_seed = re.sub(r"\s+Calculator\b", "", old_t_raw, flags=re.IGNORECASE).strip()
             else:
                 clean_t_seed = re.sub(r"\s*\(PSLF\)", "", old_t_raw, flags=re.IGNORECASE) if misplaced_pslf else old_t_raw
-            healed_t = _normalize_title_50_60(clean_t_seed, brand_label, property_id)
+            sec_mod = "non_tool" if is_non_tool_slug else None
+            healed_t = _normalize_title_50_60(clean_t_seed, brand_label, property_id, secondary_modifier=sec_mod)
             if healed_t and healed_t != old_t_raw:
                 updated = updated.replace(f"<title>{t_m.group(1)}</title>", f"<title>{healed_t}</title>", 1)
                 updated = updated.replace(f'content="{old_t_raw}"', f'content="{healed_t}"')
@@ -11792,6 +11793,18 @@ class RetroReflectionEngine:
                     if cleaned_nt != content:
                         html_file.write_text(cleaned_nt, encoding="utf-8")
                         content = cleaned_nt
+                        if rel not in retrofitted_paths:
+                            retrofitted_paths.append(rel)
+                if property_id.lower() == "gainhelm" and rel == "methodology/index.html":
+                    if "<title>Enterprise Cyber Compliance & Audit Calculator | GainHelm</title>" in content or "<title>Enterprise Cyber Compliance &amp; Audit Cost | GainHelm</title>" in content:
+                        content = content.replace(
+                            "<title>Enterprise Cyber Compliance & Audit Calculator | GainHelm</title>",
+                            "<title>Enterprise Cyber Compliance & Audit Cost | GainHelm</title>",
+                        ).replace(
+                            "<title>Enterprise Cyber Compliance &amp; Audit Cost | GainHelm</title>",
+                            "<title>Enterprise Cyber Compliance & Audit Cost | GainHelm</title>",
+                        )
+                        html_file.write_text(content, encoding="utf-8")
                         if rel not in retrofitted_paths:
                             retrofitted_paths.append(rel)
                 if property_id.lower() == "gainhelm" and rel == "methodology/index.html" and "<td>46 to 85 Employees</td>" in content:
