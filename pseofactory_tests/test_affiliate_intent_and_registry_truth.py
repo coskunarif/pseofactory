@@ -139,4 +139,27 @@ def test_normalize_html_callout_injects_inline_cta_when_result_box_class_added()
     assert 'class="calc-inline-cta"' in out
 
 
+def test_sync_prexvo_affiliate_status_compat(tmp_path):
+    from pseofactory import maintenance
+
+    sync_fn = getattr(maintenance, "_sync_prexvo_affiliate_status_compat", None)
+    assert callable(sync_fn)
+    px_dir = tmp_path / "prexvo"
+    px_dir.mkdir(parents=True)
+    builder = px_dir / "builder.py"
+    freshness = px_dir / "freshness.py"
+    builder.write_text(
+        'live_items = [x for x in c if p_info.get("status") == "live"]\nif status != "live":\n    pass\n',
+        encoding="utf-8",
+    )
+    freshness.write_text(
+        'if effective_status != "live":\n    pass\nif status == "live":\n    pass\nif getattr(p_data, "status", "") == "live":\n    pass\n',
+        encoding="utf-8",
+    )
+    assert sync_fn(tmp_path) is True
+    assert 'in ("live", "pending", "declined")' in builder.read_text(encoding="utf-8")
+    assert 'not in ("live", "pending", "declined")' in freshness.read_text(encoding="utf-8")
+
+
+
 

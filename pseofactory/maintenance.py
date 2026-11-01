@@ -13082,6 +13082,53 @@ def _execute_autonomous_downstream_chain(
     return summary
 
 
+def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
+    """
+    Synchronizes prexvo/builder.py and prexvo/freshness.py so honest-destination
+    lender routes with contract status 'pending' or 'declined' remain active
+    operational routes alongside 'live' (while 'pending_p2' stays suppressed).
+    Zero em-dashes. Zero en-dashes.
+    """
+    changed = False
+    px_builder = Path(repo_path) / "prexvo" / "builder.py"
+    if px_builder.is_file():
+        b_src = px_builder.read_text(encoding="utf-8")
+        b_orig = b_src
+        b_src = b_src.replace(
+            'if p_info.get("status") == "live"',
+            'if p_info.get("status") in ("live", "pending", "declined")',
+        )
+        b_src = b_src.replace(
+            'if status != "live":',
+            'if status not in ("live", "pending", "declined"):',
+        )
+        if b_src != b_orig:
+            px_builder.write_text(b_src, encoding="utf-8")
+            changed = True
+
+    px_freshness = Path(repo_path) / "prexvo" / "freshness.py"
+    if px_freshness.is_file():
+        f_src = px_freshness.read_text(encoding="utf-8")
+        f_orig = f_src
+        f_src = f_src.replace(
+            'if effective_status != "live":',
+            'if effective_status not in ("live", "pending", "declined"):',
+        )
+        f_src = f_src.replace(
+            'if status == "live":',
+            'if status in ("live", "pending", "declined"):',
+        )
+        f_src = f_src.replace(
+            'if getattr(p_data, "status", "") == "live":',
+            'if getattr(p_data, "status", "") in ("live", "pending", "declined"):',
+        )
+        if f_src != f_orig:
+            px_freshness.write_text(f_src, encoding="utf-8")
+            changed = True
+
+    return changed
+
+
 def reflect_and_recompile_all_assets(
     properties: Optional[List[str]] = None,
     force: bool = False,
@@ -13656,6 +13703,7 @@ def reflect_and_recompile_all_assets(
                     )
                     if old_o_keys in px_o_src and '"metric-tiered_payment"' not in px_o_src:
                         px_oracle.write_text(px_o_src.replace(old_o_keys, new_o_keys, 1), encoding="utf-8")
+                _sync_prexvo_affiliate_status_compat(Path(adapter.repo_path))
             except Exception:
                 pass
 
