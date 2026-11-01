@@ -1698,10 +1698,13 @@ class PartnerTrackingEngine:
                             headers={
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                                 "Accept": "application/json",
+                                "Connection": "close",
                             },
                         )
                         with urllib.request.urlopen(req, timeout=5.0) as resp:
-                            payload = json.loads(resp.read().decode("utf-8"))
+                            content_len = resp.headers.get("Content-Length")
+                            max_bytes = min(int(content_len), 1048576) if content_len and content_len.isdigit() else 65536
+                            payload = json.loads(resp.read(max_bytes).decode("utf-8"))
                             if isinstance(payload, dict) and isinstance(payload.get("events"), list):
                                 incoming.extend(e for e in payload["events"] if isinstance(e, dict))
                     finally:
@@ -6144,10 +6147,15 @@ def compute_scenario_demand_and_conversion_metrics(
             try:
                 req = urllib.request.Request(
                     f"{domain}/api/telemetry?limit=50",
-                    headers={"User-Agent": "PseoFactoryDemandTracker/1.0"},
+                    headers={
+                        "User-Agent": "PseoFactoryDemandTracker/1.0",
+                        "Connection": "close",
+                    },
                 )
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    t_data = json.loads(resp.read().decode("utf-8"))
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    content_len = resp.headers.get("Content-Length")
+                    max_bytes = min(int(content_len), 1048576) if content_len and content_len.isdigit() else 65536
+                    t_data = json.loads(resp.read(max_bytes).decode("utf-8"))
                     by_src = (
                         t_data.get("summary", {}).get("by_source", {})
                         if isinstance(t_data, dict)
