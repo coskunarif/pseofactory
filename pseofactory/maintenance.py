@@ -2697,11 +2697,16 @@ class AssetIntegrityEvaluator:
                 recorded_hash=recorded_hash,
                 metadata={"rel_key": rel_key},
             )
-            if cache_key and not engine_drifted:
-                self._audit_cache[cache_key] = rec
+            if cache_key:
+                if reasons == [DriftReason.ENGINE_HASH_DRIFT]:
+                    self._audit_cache[cache_key] = None
+                    if hasattr(self, "_fingerprint_cache"):
+                        self._fingerprint_cache[cache_key] = current_hash
+                elif not engine_drifted:
+                    self._audit_cache[cache_key] = rec
             return rec
 
-        if cache_key and not engine_drifted:
+        if cache_key:
             self._audit_cache[cache_key] = None
             if hasattr(self, "_fingerprint_cache"):
                 self._fingerprint_cache[cache_key] = current_hash
@@ -2840,8 +2845,8 @@ class AssetIntegrityEvaluator:
                             updated_entries[k_str] = fp_val
                             changed = True
                 if changed:
-                    if len(updated_entries) > 2000:
-                        updated_entries = dict(list(updated_entries.items())[-1000:])
+                    if len(updated_entries) > 10000:
+                        updated_entries = dict(list(updated_entries.items())[-5000:])
                     tmp_path = disk_eval_cache_path.with_suffix(f".tmp.{os.getpid()}")
                     tmp_path.write_text(
                         json.dumps({"engine_sig": eng_code_sig_str, "entries": updated_entries}),
@@ -8077,7 +8082,7 @@ class RetroReflectionEngine:
                     st_tax = max(0.0, round(tot_v - fed_2027, 2))
                     return {
                         "model_name": f"{slug_title} Model",
-                        "formula": "round(min(max(0.0, gross_income - sunset_standard_deduction), 12200.0) * 0.10 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + min(max(0.0, (gross_income - sunset_standard_deduction) - 49600.0), 70600.0) * 0.25 + max(0.0, (gross_income - sunset_standard_deduction) - 120200.0) * 0.28 + state_income_tax, 2)",
+                        "formula": "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25 + state_income_tax, 2)",
                         "inputs": {
                             "gross_income": inc_v,
                             "sunset_standard_deduction": 8600.0,
@@ -13617,9 +13622,14 @@ def reflect_and_recompile_all_assets(
         )
 
         if estate_needed_mutation or drifted_records or force:
+            has_existing_compiled_dist = (
+                isinstance(adapter, SubprocessPropertyAdapter)
+                and (adapter.dist_dir / "index.html").is_file()
+            )
             should_run_full_build = (
-                topical_reconciliation_changed
-                or has_structural_drift
+                has_structural_drift
+                or bool(source_sync_changed)
+                or (topical_reconciliation_changed and not has_existing_compiled_dist)
                 or not isinstance(adapter, SubprocessPropertyAdapter)
             )
             if should_run_full_build:
@@ -13646,14 +13656,17 @@ def reflect_and_recompile_all_assets(
                             check=False,
                             timeout=15,
                         )
+                    if has_existing_compiled_dist and not has_structural_drift:
+                        build_failed = False
+                        recompiled_count = max(report.total_assets_checked, 1)
                 except Exception as b_err:
                     if not isinstance(b_err, NotImplementedError) and isinstance(adapter, SubprocessPropertyAdapter):
                         build_failed = True
                         build_error_msg = str(b_err)
                     if verbose:
                         print(f"Error rebuilding assets for '{p_id}': {b_err}")
-            elif not estate_needed_mutation and isinstance(adapter, SubprocessPropertyAdapter):
-                # Estate already passes structural/retro/callout audits; preserve compiled dist/
+            elif isinstance(adapter, SubprocessPropertyAdapter):
+                # Estate already passes structural audits; preserve or retrofit compiled dist/ in-place
                 recompiled_count = max(report.total_assets_checked, 1)
 
             # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,

@@ -103,3 +103,21 @@ def test_prexvo_llms_manifest_sync_preserves_ymyl_refinance_disclaimer(tmp_path)
     assert "permanently forfeits" in (dist / "llms-full.txt").read_text(encoding="utf-8").lower()
     assert "permanently forfeits" in (dist / "catalog.json").read_text(encoding="utf-8").lower()
 
+
+def test_profithelm_state_spoke_manifest_formula_parity():
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    html = (
+        '<input id="tax-income" value="75000">'
+        '<div id="res-total-tax">$15,155</div>'
+    )
+    spoke = RetroReflectionEngine._extract_spoke_manifest_from_html(
+        html,
+        "irs-2027-tax-brackets/alabama",
+        "26 U.S.C. Section 1(j)",
+        "IRS SOI",
+    )
+    assert spoke is not None
+    assert spoke["formula"].startswith("round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0)")
+
+
