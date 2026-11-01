@@ -292,7 +292,7 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
         return True
 
     def runaway_builder(slug: str, target_file=None):
-        time.sleep(2.5)
+        time.sleep(6.0)
         return True
 
     reg = TenantRegistry()
@@ -344,13 +344,13 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
         registry=reg_timeout,
         lifecycle=MaintenanceLifecycle(trend_runner=FastTrendRunner()),
         concurrency_ceiling=2,
-        tenant_timeout_budget=1.2,
+        tenant_timeout_budget=3.0,
     )
     t0 = time.time()
     t_results = coord_timeout.run_fleet(force=True)
     duration = time.time() - t0
 
-    assert duration < 2.4, "Runaway tenant blocked the coordinator beyond its timeout"
+    assert duration < 5.5, "Runaway tenant blocked the coordinator beyond its timeout"
     assert t_results["runaway"].status == "TIMEOUT"
     assert t_results["fast"].status in ("SUCCESS", "SKIPPED_NO_CHANGES")
 

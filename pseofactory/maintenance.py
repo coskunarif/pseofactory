@@ -14494,7 +14494,7 @@ def reflect_and_recompile_all_assets(
                                 push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
                     except Exception:
                         pass
-                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm") and not is_unmerged_worktree:
+                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm") and not is_unmerged_worktree and not is_foreign_pytest:
                         try:
                             if adapter.property_id == "profithelm":
                                 import sqlite3
