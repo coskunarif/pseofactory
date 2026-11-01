@@ -4368,6 +4368,44 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             except Exception:
                 pass
 
+    test_fp_py = repo / "tests" / "test_factory_pipeline.py"
+    if test_fp_py.is_file():
+        try:
+            tfp_src = test_fp_py.read_text(encoding="utf-8")
+            tfp_new = tfp_src
+            if not re.search(r"^import pytest\b", tfp_new, re.MULTILINE):
+                tfp_new = "import pytest\n" + tfp_new
+            if "def test_factory_pipeline_dry_run():" in tfp_new and "@pytest.mark.xdist_group" not in tfp_new:
+                tfp_new = tfp_new.replace(
+                    "def test_factory_pipeline_dry_run():",
+                    '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_factory_pipeline_dry_run():',
+                    1,
+                )
+            if tfp_new != tfp_src:
+                test_fp_py.write_text(tfp_new, encoding="utf-8")
+                updated_files.append(str(test_fp_py))
+        except Exception:
+            pass
+
+    test_bf_py = repo / "tests" / "test_boost_factory_fixes.py"
+    if test_bf_py.is_file():
+        try:
+            tbf_src = test_bf_py.read_text(encoding="utf-8")
+            tbf_new = tbf_src
+            if not re.search(r"^import pytest\b", tbf_new, re.MULTILINE):
+                tbf_new = "import pytest\n" + tbf_new
+            if "def test_factory_pipeline_synthesis_connection():" in tbf_new and "@pytest.mark.xdist_group" not in tbf_new:
+                tbf_new = tbf_new.replace(
+                    "def test_factory_pipeline_synthesis_connection():",
+                    '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_factory_pipeline_synthesis_connection():',
+                    1,
+                )
+            if tbf_new != tbf_src:
+                test_bf_py.write_text(tbf_new, encoding="utf-8")
+                updated_files.append(str(test_bf_py))
+        except Exception:
+            pass
+
     return {
         "status": "PASS",
         "repo_path": str(repo),
