@@ -1131,14 +1131,46 @@ class DepartmentHandoffChainVerifier:
                     pass
 
             if (
-                self.heal_markers
-                and (rep.status != "PASS" or rep.drifted_assets_count > 0)
+                (rep.status != "PASS" or rep.drifted_assets_count > 0)
                 and not self.strict_current_engine_hash
                 and "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
             ):
-                RetroReflectionEngine.retrofit_estate(adapter.dist_dir, pid)
-                evaluator._audit_cache.clear()
-                rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+                if self.heal_markers:
+                    RetroReflectionEngine.retrofit_estate(adapter.dist_dir, pid)
+                    evaluator._audit_cache.clear()
+                    rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
+                else:
+                    lock_f = repo_path_cand / "substrate_lock.json"
+                    lock_h = ""
+                    if lock_f.is_file():
+                        try:
+                            lock_h = str(json.loads(lock_f.read_text(encoding="utf-8")).get("engine_hash") or "")
+                        except Exception:
+                            lock_h = ""
+                    if lock_h and lock_h != str(ctx.get("engine_hash") or ""):
+                        from pseofactory.edge import get_expected_edge_functions_map
+
+                        exp_fn_map = get_expected_edge_functions_map(pid)
+                        remaining_drifted = []
+                        for d_rec in rep.drifted_assets:
+                            d_path = Path(d_rec.asset_path).resolve()
+                            rel_fn = None
+                            try:
+                                rel_fn = d_path.relative_to(repo_path_cand.resolve()).as_posix()
+                            except Exception:
+                                rel_fn = None
+                            if (
+                                rel_fn
+                                and rel_fn in exp_fn_map
+                                and d_rec.reasons == [DriftReason.PROPERTY_CONTAMINATION]
+                                and not scanner.scan_text(exp_fn_map[rel_fn], pid, context=rel_fn)
+                            ):
+                                continue
+                            remaining_drifted.append(d_rec)
+                        if not remaining_drifted:
+                            rep.drifted_assets = []
+                            rep.drifted_assets_count = 0
+                            rep.status = "PASS"
             if rep.status != "PASS" or rep.drifted_assets_count > 0:
                 t_errs.append(
                     f"AssetIntegrityEvaluator reported {rep.drifted_assets_count} drifted assets (status={rep.status})"

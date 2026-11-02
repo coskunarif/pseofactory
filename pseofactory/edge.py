@@ -8,7 +8,7 @@ Zero em-dashes. Zero en-dashes.
 import json
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -3674,10 +3674,9 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoSharedDom = ["profit", "helm.com"].join("");
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : `arif@${zohoSharedDom}`;
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@gainhelm.com";
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : `arif.coskun@${zohoSharedDom}`)
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@gainhelm.com")
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -4923,7 +4922,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = "arif.coskun@profithelm.com";
+  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@prexvo.com";
   const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
@@ -5191,10 +5190,9 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoSharedDom = ["profit", "helm.com"].join("");
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : `arif@${zohoSharedDom}`;
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@prexvo.com";
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : `arif.coskun@${zohoSharedDom}`)
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@prexvo.com")
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -6788,7 +6786,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = "arif.coskun@profithelm.com";
+  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@profithelm.com";
   const stripeDisplayName = "CoachOS";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
@@ -7056,10 +7054,9 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoSharedDom = ["profit", "helm.com"].join("");
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : `arif@${zohoSharedDom}`;
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : `arif.coskun@${zohoSharedDom}`)
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -7910,6 +7907,104 @@ def sync_tenant_edge_redirect_function(
         "wrangler_path": str(wrangler_file),
         "live_direct_partners": live_direct_partners,
     }
+
+
+def get_expected_edge_functions_map(
+    property_id: str,
+    hub: Optional[Any] = None,
+) -> Dict[str, str]:
+    """
+    Returns a deterministic mapping of relative edge function paths to expected JS source
+    for a tenant property.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates_hub import MonetizationHub
+
+    prop_clean = (property_id or "").strip().lower()
+    active_hub = hub if hub is not None else MonetizationHub()
+    redirect_js = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
+    telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
+    lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
+    checkout_js = (
+        'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n\n'
+        "function withCheckoutFlag(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        '  if (!url.searchParams.has("checkout")) url.searchParams.set("checkout", "1");\n'
+        "  const req = new Request(url.toString(), context.request);\n"
+        "  return { ...context, request: req };\n"
+        "}\n\n"
+        "export async function onRequestGet(context) {\n"
+        "  return lcGet(withCheckoutFlag(context));\n"
+        "}\n\n"
+        "export async function onRequestPost(context) {\n"
+        "  return lcPost(withCheckoutFlag(context));\n"
+        "}\n\n"
+        "export async function onRequestOptions(context) {\n"
+        "  return lcOpt(context);\n"
+        "}\n"
+    )
+    fulfillment_js = (
+        'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n\n'
+        "function withFulfillFlag(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        '  if (!url.searchParams.has("fulfill")) url.searchParams.set("fulfill", "1");\n'
+        "  const req = new Request(url.toString(), context.request);\n"
+        "  return { ...context, request: req };\n"
+        "}\n\n"
+        "export async function onRequestGet(context) {\n"
+        "  return lcGet(withFulfillFlag(context));\n"
+        "}\n\n"
+        "export async function onRequestPost(context) {\n"
+        "  return lcPost(withFulfillFlag(context));\n"
+        "}\n\n"
+        "export async function onRequestOptions(context) {\n"
+        "  return lcOpt(context);\n"
+        "}\n"
+    )
+    return {
+        "functions/r/[partner].js": redirect_js,
+        "functions/api/telemetry.js": telemetry_js,
+        "functions/api/lead-capture.js": lead_capture_js,
+        "functions/api/checkout.js": checkout_js,
+        "functions/api/lead-fulfillment.js": fulfillment_js,
+    }
+
+
+def verify_tenant_edge_functions_parity(
+    repo_path: Union[str, Path],
+    property_id: str,
+    hub: Optional[Any] = None,
+) -> Tuple[bool, List[str]]:
+    """
+    Verifies that all 5 edge function files in repo_path/functions/ match pseofactory.edge
+    byte-for-byte. Returns (is_aligned, reasons).
+    Zero em-dashes. Zero en-dashes.
+    """
+    repo = Path(repo_path)
+    expected_map = get_expected_edge_functions_map(property_id, hub=hub)
+    reasons: List[str] = []
+    for rel_path, expected_src in expected_map.items():
+        fpath = repo / rel_path
+        if not fpath.is_file():
+            reasons.append(f"{property_id}: missing {rel_path}")
+            continue
+        try:
+            actual_src = fpath.read_text(encoding="utf-8")
+        except Exception as exc:
+            reasons.append(f"{property_id}: unreadable {rel_path} ({exc})")
+            continue
+        if actual_src != expected_src:
+            reasons.append(f"{property_id}: {rel_path} byte mismatch against pseofactory.edge")
+    return len(reasons) == 0, reasons
+
+
+def __getattr__(name: str) -> Any:
+    if name == "LiveEdgeVerifier":
+        from pseofactory.gitops import LiveEdgeVerifier
+
+        return LiveEdgeVerifier
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 
 

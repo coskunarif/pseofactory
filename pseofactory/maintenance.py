@@ -529,6 +529,13 @@ class PropertyAdapter(ABC):
                         if not p.name.startswith((".tmp", ".orig", ".backup", ".swp", ".")):
                             assets_set.add(p.resolve())
 
+            # Cloudflare Pages edge functions
+            func_dir = repo_path / "functions"
+            if func_dir.is_dir():
+                for p in func_dir.glob("**/*.js"):
+                    if p.is_file() and not p.name.startswith((".tmp", ".orig", ".backup", ".swp", ".")):
+                        assets_set.add(p.resolve())
+
         return sorted(list(assets_set))
 
 
@@ -13221,6 +13228,7 @@ def reflect_and_recompile_all_assets(
             and str(Path(adapter.dist_dir).resolve()).startswith("/home/ubuntuadmin/projects/")
         )
 
+        edge_functions_updated = False
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
@@ -13229,7 +13237,9 @@ def reflect_and_recompile_all_assets(
         ):
             try:
                 from pseofactory.edge import sync_tenant_edge_redirect_function
-                sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
+                edge_sync_res = sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
+                if isinstance(edge_sync_res, dict) and edge_sync_res.get("status") == "UPDATED":
+                    edge_functions_updated = True
             except Exception as edge_err:
                 if verbose:
                     print(f"Warning: Edge redirect sync error for '{p_id}': {edge_err}")
@@ -13944,7 +13954,7 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 pass
 
-        topical_reconciliation_changed = bool(source_sync_changed)
+        topical_reconciliation_changed = bool(source_sync_changed or edge_functions_updated)
         if getattr(adapter, "repo_path", None) and not is_foreign_pytest:
             try:
                 from pseofactory.qualification import reconcile_tenant_topical_authority_and_cannibalization

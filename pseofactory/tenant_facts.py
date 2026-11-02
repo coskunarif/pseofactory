@@ -503,7 +503,6 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "coinledger",
         "koinly",
         "mercury",
-        "stripe",
         "ramp",
         "rho",
         "gusto",

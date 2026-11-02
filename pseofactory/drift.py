@@ -308,6 +308,38 @@ def verify_all_tenants_aligned_for_latch(
             except Exception as exc:
                 reasons.append(f"{pid}: invalid substrate_lock.json ({exc})")
 
+        if (t_repo / "functions" / "r").is_dir() or is_prod_ws:
+            try:
+                from pseofactory.edge import verify_tenant_edge_functions_parity
+
+                edge_ok, edge_reasons = verify_tenant_edge_functions_parity(t_repo, pid)
+                if not edge_ok:
+                    reasons.extend(edge_reasons)
+            except Exception as exc:
+                reasons.append(f"{pid}: edge function parity check failed ({exc})")
+
+        try:
+            from pseofactory.maintenance import CrossPropertyContaminationScanner, RetroReflectionEngine
+
+            scanner = CrossPropertyContaminationScanner()
+            if dist_dir.is_dir():
+                dist_contam = scanner.scan_directory(dist_dir, pid)
+                if dist_contam:
+                    reasons.append(f"{pid}: cross-property contamination in dist/: {dist_contam}")
+            func_dir = t_repo / "functions"
+            if func_dir.is_dir():
+                func_contam = scanner.scan_directory(func_dir, pid)
+                if func_contam:
+                    reasons.append(f"{pid}: cross-property contamination in functions/: {func_contam}")
+            if dist_dir.is_dir() and ((dist_dir / "tools").is_dir() or is_prod_ws):
+                retro_rep = RetroReflectionEngine.audit_estate(dist_dir, pid)
+                if retro_rep.get("status") != "PASS" or retro_rep.get("stale_count", 0) != 0:
+                    reasons.append(
+                        f"{pid}: RetroReflectionEngine.audit_estate failed (stale_count={retro_rep.get('stale_count', 0)})"
+                    )
+        except Exception as exc:
+            reasons.append(f"{pid}: contamination or retro-reflection audit failed ({exc})")
+
         if require_git_clean_and_pushed and has_git:
             try:
                 st_res = subprocess.run(
