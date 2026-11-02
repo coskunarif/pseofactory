@@ -336,3 +336,38 @@ def test_sitemap_lastmod_uniformity_and_tier_child_sitemap_reconciliation(tmp_pa
     assert "sitemap-hubs.xml" in cov["by_child_sitemap"]
     assert cov["by_child_sitemap"]["sitemap-hubs.xml"]["explicitly_submitted"] is True
     assert "sitemap-products.xml" not in cov["by_child_sitemap"]
+
+
+def test_synthesized_1031_calculator_manifest_and_ssr_parity(tmp_path: Path) -> None:
+    """
+    Verifies that RetroReflectionEngine synthesizes a valid Section 1031 manifest
+    with published_output=348900.0 for synthesized 1031 slugs (such as
+    'section-1031-exchange-deferral-calculator') and passes Gate 5 SSR Metric Parity.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.audit import verify_manifest_ssr_metric_parity
+
+    slug = "section-1031-exchange-deferral-calculator"
+    html_in = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Section 1031 Exchange Deferral Calculator | ProfitHelm</title></head>
+<body>
+  <div id="val-realized_gain">$900,000</div>
+  <div id="val-recapture_tax">$75,000</div>
+  <div id="val-net_tax_deferred">$348,900</div>
+  <div id="val-replacement_basis">$1,100,000</div>
+</body>
+</html>"""
+    manifest = RetroReflectionEngine._resolve_manifest_for_page(
+        html_in,
+        property_id="profithelm",
+        slug=slug,
+    )
+    assert manifest["published_output"] == 348900.0
+    issues = verify_manifest_ssr_metric_parity(
+        html_in,
+        published_output=manifest["published_output"],
+        slug=slug,
+    )
+    assert issues == []
+

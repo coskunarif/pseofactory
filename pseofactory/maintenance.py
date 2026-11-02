@@ -9009,6 +9009,27 @@ class RetroReflectionEngine:
             elif is_gainhelm:
                 preset = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
                 raw = dict(preset)
+            elif any(k in slug.lower() for k in ("1031", "like-kind", "exchange")):
+                raw = {
+                    "model_name": f"{slug_title} Model",
+                    "formula": "round(((sale_price - adjusted_basis - depreciation_recapture) * 0.20) + (depreciation_recapture * 0.25) + ((sale_price - adjusted_basis) * (0.038 + state_capital_gains_rate)), 0)",
+                    "inputs": {
+                        "sale_price": 1500000.0,
+                        "adjusted_basis": 600000.0,
+                        "depreciation_recapture": 300000.0,
+                        "state_capital_gains_rate": 0.133,
+                    },
+                    "published_output": 348900.0,
+                    "statutory_authority": default_stat,
+                    "economic_dataset": default_econ,
+                    "sample_calculation": "On a $1,500,000 commercial real estate exchange ($600,000 adjusted basis, $300,000 Section 1250 depreciation), IRC Section 1031 defers $348,900.00 in combined federal, recapture, NIIT, and state taxes.",
+                }
+            elif any(k in slug.lower() for k in ("179", "equipment", "lease", "vehicle", "truck", "suv")):
+                preset = dict(cls.PROFITHELM_FALLBACK_MANIFESTS["section-179-vehicle-deduction"])
+                preset["model_name"] = f"{slug_title} Model"
+                preset["statutory_authority"] = default_stat
+                preset["economic_dataset"] = default_econ
+                raw = preset
             else:
                 raw = {
                     "model_name": f"{slug_title} Model",
