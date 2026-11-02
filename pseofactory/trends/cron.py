@@ -630,20 +630,26 @@ class TrendCronRunner:
                 if cannibal_info.get("is_cannibalizing"):
                     cann_score = 0.85
                     matching_tool = cannibal_info.get("parent_slug")
-                    if cannibal_info.get("ranking_position") is not None:
-                        pos = float(cannibal_info["ranking_position"])
-                    elif "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
-                        if "position" in cannibal_info["matched_tool"]:
-                            pos = float(cannibal_info["matched_tool"]["position"])
-                    subroute_str = str(cannibal_info.get("target_subroute") or "").strip("/")
-                    if subroute_str.startswith("tools/"):
-                        sub_key = subroute_str[len("tools/"):].strip("/").lower()
-                        sub_g_info = gsc_qp_by_prop_slug.get(assigned_property, {}).get(sub_key)
-                        if sub_g_info and cannibal_info.get("ranking_position") is None:
-                            if sub_g_info.get("best_striking_position", 100.0) < 100.0:
-                                pos = float(sub_g_info["best_striking_position"])
-                            elif sub_g_info.get("best_position", 100.0) < 100.0:
-                                pos = float(sub_g_info["best_position"])
+                    if str(matching_tool or "").strip().lower() in ("tools", "index", "index.html"):
+                        cann_score = 0.0
+                        matching_tool = None
+                    else:
+                        if cannibal_info.get("ranking_position") is not None:
+                            pos = float(cannibal_info["ranking_position"])
+                        elif "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
+                            if "position" in cannibal_info["matched_tool"]:
+                                pos = float(cannibal_info["matched_tool"]["position"])
+                        subroute_str = str(cannibal_info.get("target_subroute") or "").strip("/")
+                        if subroute_str.startswith("tools/"):
+                            sub_key = subroute_str[len("tools/"):].strip("/").lower()
+                            if "/" in sub_key:
+                                matching_tool = sub_key
+                            sub_g_info = gsc_qp_by_prop_slug.get(assigned_property, {}).get(sub_key)
+                            if sub_g_info and cannibal_info.get("ranking_position") is None:
+                                if sub_g_info.get("best_striking_position", 100.0) < 100.0:
+                                    pos = float(sub_g_info["best_striking_position"])
+                                elif sub_g_info.get("best_position", 100.0) < 100.0:
+                                    pos = float(sub_g_info["best_position"])
 
                 # Check if cannibalization context was pre-supplied (e.g. from evaluation fixtures)
                 if "cannibalization_context" in raw_meta:

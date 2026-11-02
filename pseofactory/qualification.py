@@ -471,11 +471,15 @@ def _match_gsc_ranking_cannibalization(
         p_path = urllib.parse.urlsplit(r_page).path if "://" in r_page else r_page
         norm_p = "/" + p_path.strip("/") + "/" if p_path.strip("/") else "/"
         p_parts = [pt for pt in norm_p.split("/") if pt]
-        if len(p_parts) >= 2 and p_parts[0] == "tools":
+        if len(p_parts) >= 3 and p_parts[0] == "tools" and q_state_gsc and p_parts[2].lower() == q_state_gsc:
+            p_slug = f"{p_parts[1].lower()}/{p_parts[2].lower()}"
+        elif len(p_parts) >= 2 and p_parts[0] == "tools":
             p_slug = p_parts[1].lower()
-        elif p_parts:
+        elif p_parts and p_parts[-1].lower() not in ("tools", "index", "index.html", "static", "signal"):
             p_slug = p_parts[-1].lower()
         else:
+            continue
+        if p_slug in ("tools", "index", "index.html"):
             continue
         if is_retired_or_consolidated_slug(p_slug):
             res_red = resolve_redirected_gsc_target(target_url=r_page, query=r_query)

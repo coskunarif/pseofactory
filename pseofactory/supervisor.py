@@ -2043,7 +2043,7 @@ class SupervisorFailureStreak:
         tenants: Dict[str, Any] = state["tenants"]
         for pid, res in (properties or {}).items():
             status = str((res or {}).get("status") or "")
-            if status not in ("FAILED", "TIMEOUT"):
+            if status not in ("FAILED", "TIMEOUT", "PARTIAL_SUCCESS", "DEGRADED"):
                 tenants.pop(pid, None)
                 continue
             reason = extract_failure_reason((res or {}).get("failed_records") or []) or status

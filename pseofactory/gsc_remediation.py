@@ -2228,6 +2228,14 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "pay as you earn",
                     "income based",
                     "income-based",
+                    "student loan repayment",
+                    "student-loan-repayment",
+                    "student loan payment",
+                    "student-loan-payment",
+                    "student loan login",
+                    "student-loan-login",
+                    "student loan news",
+                    "student-loan-news",
                     "tiered standard",
                     "tiered-standard",
                     "grad plus",
@@ -2381,7 +2389,25 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "statutory New and Old IBR monthly caps under Title IV 34 CFR Part 685.",
                     " Verified under OBBBA Title VIII and HEA Section 493C.",
                 )
-            if any(k in q_low for k in ("ibr", "hardship", "paye", "pay as you earn", "income based", "income-based")) and "rap" not in q_low:
+            if any(
+                k in q_low
+                for k in (
+                    "ibr",
+                    "hardship",
+                    "paye",
+                    "pay as you earn",
+                    "income based",
+                    "income-based",
+                    "student loan repayment",
+                    "student-loan-repayment",
+                    "student loan payment",
+                    "student-loan-payment",
+                    "student loan login",
+                    "student-loan-login",
+                    "student loan news",
+                    "student-loan-news",
+                )
+            ) and "rap" not in q_low:
                 return (
                     f"Calculate {lbl} under Title IV 34 CFR 685.209 using 150% HHS Poverty "
                     f"Guidelines ($23,475 single exemption), hardship caps, and forgiveness rules.",
@@ -7817,7 +7843,22 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             or re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", meta_desc, re.IGNORECASE)
             or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", meta_desc, re.IGNORECASE)
             or (
-                any(k in ov_slug_q.lower() for k in ("refinance", "icr", "income-contingent", "ibr-hardship", "hardship-cap"))
+                any(
+                    k in ov_slug_q.lower()
+                    for k in (
+                        "refinance",
+                        "icr",
+                        "income-contingent",
+                        "ibr-hardship",
+                        "hardship-cap",
+                        "paye-sunset",
+                        "parent-plus",
+                        "tiered-standard",
+                        "grad-plus",
+                        "student-loan-repayment-calculator",
+                        "married-filing-separately",
+                    )
+                )
                 and "225% hhs poverty" in meta_desc.lower()
             )
             or (

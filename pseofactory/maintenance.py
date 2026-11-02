@@ -3820,8 +3820,10 @@ class RefactorCascadeEngine:
                     cand_slugs.insert(1, spoke_slug.replace("/", "-"))
         except Exception:
             pass
-        for ov_dir in (Path(repo_root) / "content" / "overlays", Path(repo_root) / ".agy" / "overlays"):
+        for ov_dir in (Path(repo_root) / ".agy" / "overlays", Path(repo_root) / "content" / "overlays"):
             for cand_s in cand_slugs:
+                if cand_s.lower() in ("tools", "index", "index.html"):
+                    continue
                 cand_p = ov_dir / f"{cand_s}.json"
                 if cand_p.is_file():
                     overlay_path = cand_p
@@ -4339,8 +4341,16 @@ class MaintenanceLifecycle:
 
                     trend_status_val = trend_res.get("status", "SUCCESS") if isinstance(trend_res, dict) else "SUCCESS"
                     if isinstance(trend_res, dict):
-                        approved_build = trend_res.get("approved_build", [])
-                        refactor_pages = trend_res.get("refactor_pages", [])
+                        raw_approved = trend_res.get("approved_build", [])
+                        raw_refactor = trend_res.get("refactor_pages", [])
+                        approved_build = [
+                            it for it in raw_approved
+                            if not isinstance(it, dict) or not it.get("property_id") or it.get("property_id") == adapter.property_id
+                        ]
+                        refactor_pages = [
+                            it for it in raw_refactor
+                            if not isinstance(it, dict) or not it.get("property_id") or it.get("property_id") == adapter.property_id
+                        ]
                 else:
                     trend_status_val = "SKIPPED_TEST_ENV"
             except Exception as tr_err:
@@ -4378,24 +4388,41 @@ class MaintenanceLifecycle:
                     partner_readiness_status="EVALUATED",
                 )
 
-            def _resolve_existing_refactor_target(cand_slug: str) -> Optional[Path]:
+            def _resolve_existing_refactor_target(cand_slug: str, item_ctx: Optional[Dict[str, Any]] = None) -> Optional[Path]:
                 if not cand_slug:
                     return None
+                clean_cs = str(cand_slug).strip().strip("/")
+                if clean_cs.lower() in ("tools", "index", "index.html", "static", "signal"):
+                    return None
+                if isinstance(item_ctx, dict):
+                    try:
+                        from pseofactory.qualification import extract_state_subroute_from_query
+                        q_state_sub = extract_state_subroute_from_query(
+                            f"{item_ctx.get('query') or ''} {item_ctx.get('slug') or ''}"
+                        )
+                    except Exception:
+                        q_state_sub = None
+                    if q_state_sub and clean_cs in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                        spoke_html = adapter.dist_dir / "tools" / clean_cs / q_state_sub / "index.html"
+                        if spoke_html.exists():
+                            return spoke_html
                 for direct_p in (
-                    adapter.dist_dir / f"{cand_slug}.html",
-                    adapter.dist_dir / cand_slug / "index.html",
-                    adapter.dist_dir / "tools" / cand_slug / "index.html",
+                    adapter.dist_dir / f"{clean_cs}.html",
+                    adapter.dist_dir / clean_cs / "index.html",
+                    adapter.dist_dir / "tools" / clean_cs / "index.html",
                 ):
+                    if direct_p in (adapter.dist_dir / "index.html", adapter.dist_dir / "tools" / "index.html"):
+                        continue
                     if direct_p.exists():
                         return direct_p
                 for p_hub in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
-                    if cand_slug.startswith(f"{p_hub}-"):
-                        leaf_s = cand_slug[len(p_hub) + 1:]
+                    if clean_cs.startswith(f"{p_hub}-"):
+                        leaf_s = clean_cs[len(p_hub) + 1:]
                         cand_html = adapter.dist_dir / "tools" / p_hub / leaf_s / "index.html"
                         if cand_html.exists():
                             return cand_html
                 if adapter.property_id == "profithelm":
-                    cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / cand_slug / "index.html"
+                    cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / clean_cs / "index.html"
                     if cand_veh.exists():
                         return cand_veh
                 return None
@@ -4432,17 +4459,28 @@ class MaintenanceLifecycle:
             seen_overlay_targets = set()
             for item in refactor_pages:
                 r_slug = item.get("slug") if isinstance(item, dict) else str(item)
-                resolved_target = _resolve_existing_refactor_target(r_slug)
+                if str(r_slug or "").strip().lower() in ("tools", "index", "index.html"):
+                    continue
+                item_dict = item if isinstance(item, dict) else None
+                resolved_target = _resolve_existing_refactor_target(r_slug, item_dict)
                 if resolved_target is None and isinstance(item, dict):
                     cand_tool = (
                         item.get("matching_tool")
                         or (item.get("overlay_spec") or {}).get("slug")
                         or ""
                     ).strip()
-                    cand_resolved = _resolve_existing_refactor_target(cand_tool)
-                    if cand_resolved is not None:
-                        r_slug = cand_tool
-                        resolved_target = cand_resolved
+                    if cand_tool.lower() not in ("tools", "index", "index.html"):
+                        cand_resolved = _resolve_existing_refactor_target(cand_tool, item_dict)
+                        if cand_resolved is not None:
+                            try:
+                                rel_sp = cand_resolved.relative_to(adapter.dist_dir).as_posix().split("/")
+                                if len(rel_sp) >= 4 and rel_sp[0] == "tools" and rel_sp[-1] == "index.html":
+                                    r_slug = f"{rel_sp[1]}/{rel_sp[2]}"
+                                else:
+                                    r_slug = cand_tool
+                            except Exception:
+                                r_slug = cand_tool
+                            resolved_target = cand_resolved
                 if not dry_run:
                     try:
                         from pseofactory.gsc_remediation import (
@@ -4463,11 +4501,19 @@ class MaintenanceLifecycle:
                                 if v and k not in overlay_payload:
                                     overlay_payload[k] = v
                         overlay_payload["action"] = "REFACTOR_PAGE"
-                        for rel_ov_dir in (("content", "overlays"), (".agy", "overlays")):
-                            overlay_dir = base_dir.joinpath(*rel_ov_dir)
-                            overlay_dir.mkdir(parents=True, exist_ok=True)
-                            overlay_file = overlay_dir / f"{r_slug}.json"
-                            persist_overlay_respecting_lock(overlay_file, overlay_payload)
+                        file_slug = r_slug.replace("/", "-")
+                        agy_ov_dir = base_dir / ".agy" / "overlays"
+                        agy_ov_dir.mkdir(parents=True, exist_ok=True)
+                        agy_ov_file = agy_ov_dir / f"{file_slug}.json"
+                        eff_ov, _ = persist_overlay_respecting_lock(agy_ov_file, overlay_payload)
+                        is_canonical_prod_repo = bool(
+                            getattr(adapter, "repo_path", None)
+                            and Path(adapter.repo_path).name in ("profithelm-platform", "prexvo", "gainhelm")
+                        )
+                        if not is_canonical_prod_repo:
+                            content_ov_dir = base_dir / "content" / "overlays"
+                            content_ov_dir.mkdir(parents=True, exist_ok=True)
+                            persist_overlay_respecting_lock(content_ov_dir / f"{file_slug}.json", eff_ov)
                     except Exception as o_err:
                         print(f"Warning: Failed to persist overlay for slug '{r_slug}': {o_err}")
 
@@ -4739,7 +4785,11 @@ class MaintenanceLifecycle:
             if not dry_run:
                 current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
-                if substrate_lock_path is not None and substrate_lock_path.is_file():
+                if (
+                    not enable_gitops
+                    and substrate_lock_path is not None
+                    and substrate_lock_path.is_file()
+                ):
                     try:
                         from pseofactory.drift import compute_dist_lock_metrics
                         post_fp_hex, post_total_assets = compute_dist_lock_metrics(adapter.dist_dir)

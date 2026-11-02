@@ -520,6 +520,32 @@ def _load_upload_idempotency_map(
         except Exception:
             pass
 
+    tenant_uploaded_log = repo_root / "dist" / "videos" / "uploaded_log.json"
+    if tenant_uploaded_log.is_file():
+        try:
+            raw_t_up = json.loads(tenant_uploaded_log.read_text(encoding="utf-8"))
+            if isinstance(raw_t_up, list):
+                for u_item in raw_t_up:
+                    if not isinstance(u_item, dict):
+                        continue
+                    u_slug = str(u_item.get("slug") or "").strip()
+                    u_vid = str(u_item.get("video_id") or "").strip()
+                    if u_slug and u_vid and u_vid != "unknown" and u_slug not in records:
+                        records[u_slug] = {
+                            "property_id": prop,
+                            "slug": u_slug,
+                            "video_id": u_vid,
+                            "video_url": str(u_item.get("url") or u_item.get("video_url") or f"https://www.youtube.com/watch?v={u_vid}"),
+                            "title": str(u_item.get("title") or ""),
+                            "privacy": str(u_item.get("privacy") or "public"),
+                            "timestamp": str(u_item.get("uploaded_at") or u_item.get("timestamp") or ""),
+                            "has_captions": bool(u_item.get("caption_id") or u_item.get("has_captions")),
+                            "has_pinned_comment": bool(u_item.get("pinned_comment_id") or u_item.get("has_pinned_comment")),
+                            "source": "tenant_uploaded_log",
+                        }
+        except Exception:
+            pass
+
     eff_log = upload_log_path or (
         (Path(tempfile.gettempdir()) / "pseofactory_pytest_video_factory" / "upload_log.json")
         if _in_pytest()
@@ -3183,9 +3209,10 @@ def run_autonomous_video_pipeline(
 
     if synthesize_missing:
         for elig in eligible_items:
+            clean_elig_title = re.sub(r"(?:\s*\[[^\]]+\])+\s*$", "", str(elig.title or "")).strip() or elig.title
             if elig.already_rendered and not force_render:
                 syn_res = synthesize_tool_video_asset(
-                    tool={"slug": elig.slug, "title": elig.title},
+                    tool={"slug": elig.slug, "title": clean_elig_title},
                     property_id=prop,
                     dist_dir=eff_dist,
                     repo_root=eff_repo,
@@ -3210,7 +3237,7 @@ def run_autonomous_video_pipeline(
 
             try:
                 syn_res = synthesize_tool_video_asset(
-                    tool={"slug": elig.slug, "title": elig.title},
+                    tool={"slug": elig.slug, "title": clean_elig_title},
                     property_id=prop,
                     dist_dir=eff_dist,
                     repo_root=eff_repo,

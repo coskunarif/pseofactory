@@ -733,7 +733,7 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
                 from pseofactory.supervisor import extract_failure_reason
                 for p, p_res in res["properties"].items():
                     print(f"  - [{p}] status={p_res.get('status')}")
-                    if p_res.get("status") in ("FAILED", "TIMEOUT"):
+                    if p_res.get("status") in ("FAILED", "TIMEOUT", "PARTIAL_SUCCESS", "DEGRADED"):
                         reason = extract_failure_reason(p_res.get("failed_records") or [])
                         if reason:
                             print(f"    reason: {reason}")

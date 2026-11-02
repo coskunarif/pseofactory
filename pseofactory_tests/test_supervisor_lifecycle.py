@@ -1155,6 +1155,82 @@ def test_declarative_tenant_registration_contract_derives_all_downstream_loops(t
     assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm"}
 
 
+def test_spoke_overlay_routing_geo_meta_and_partial_success_streak(tmp_path):
+    """
+    Verifies:
+    1. _match_gsc_ranking_cannibalization never matches directory index '/tools/' as slug 'tools'
+       and preserves state spoke subroutes ('/tools/irs-2027-tax-brackets/california/').
+    2. _normalize_meta_120_155 for 'Student Loan Repayment Calculator' uses 150% HHS Poverty
+       Guidelines (34 CFR 685.209) instead of 225% HHS Poverty Guidelines.
+    3. generate_youtube_syndication and _clean_tool_title_and_short never duplicate
+       '[Title IV Walkthrough]' suffixes across repeated syndication/video runs.
+    4. SupervisorFailureStreak records PARTIAL_SUCCESS and DEGRADED tenant failures.
+    """
+    from pseofactory.qualification import _match_gsc_ranking_cannibalization
+    from pseofactory.gsc_remediation import _normalize_meta_120_155
+    from pseofactory.distributor import generate_youtube_syndication
+    from pseofactory.supervisor import SupervisorFailureStreak
+
+    tools_hit = _match_gsc_ranking_cannibalization(
+        clean_q="student loan deferment calculator",
+        eff_gsc_rows=[
+            {
+                "query": "student loan deferment calculator",
+                "page": "https://prexvo.com/tools/",
+                "position": 8.0,
+                "impressions": 50,
+            }
+        ],
+        q_state_top=None,
+    )
+    assert tools_hit is None
+
+    spoke_hit = _match_gsc_ranking_cannibalization(
+        clean_q="ca tax brackets",
+        eff_gsc_rows=[
+            {
+                "query": "ca tax brackets",
+                "page": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+                "position": 9.5,
+                "impressions": 120,
+            }
+        ],
+        q_state_top="california",
+    )
+    assert spoke_hit is not None
+    assert spoke_hit["parent_slug"] == "irs-2027-tax-brackets/california"
+
+    meta = _normalize_meta_120_155("", "prexvo", "Student Loan Repayment Calculator")
+    assert "225% hhs poverty" not in meta.lower()
+    assert "150% hhs poverty" in meta.lower()
+    assert 120 <= len(meta) <= 155
+
+    yt_pack = generate_youtube_syndication(
+        {
+            "slug": "how-do-you-calculate-student-loan-repayments",
+            "title": "How Do You Calculate Student Loan 2026 Calculator [Title IV Walkthrough]",
+        },
+        property_id="prexvo",
+    )
+    assert yt_pack["title"].count("[Title IV Walkthrough]") == 1
+
+    streak_ledger = SupervisorFailureStreak(tmp_path / "streak.json")
+    streak_ledger.record_cycle(
+        cycle_ok=False,
+        consecutive_failures=1,
+        properties={
+            "profithelm": {
+                "status": "PARTIAL_SUCCESS",
+                "failed_records": [{"error": "Gate 1 Title & H1 Parity violation"}],
+            }
+        },
+    )
+    loaded = streak_ledger.load()
+    assert "profithelm" in loaded["tenants"]
+    assert "Gate 1" in loaded["tenants"]["profithelm"]["reason"]
+
+
+
 
 
 

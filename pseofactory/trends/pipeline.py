@@ -278,6 +278,15 @@ class TrendPipeline:
             if cannibal_info.get("is_cannibalizing"):
                 cann_score = 0.85
                 matching_tool = cannibal_info.get("parent_slug")
+                if str(matching_tool or "").strip().lower() in ("tools", "index", "index.html"):
+                    cann_score = 0.0
+                    matching_tool = None
+                else:
+                    subroute_str = str(cannibal_info.get("target_subroute") or "").strip("/")
+                    if subroute_str.startswith("tools/"):
+                        sub_key = subroute_str[len("tools/"):].strip("/").lower()
+                        if "/" in sub_key:
+                            matching_tool = sub_key
                 if cannibal_info.get("ranking_position") is not None:
                     pos = float(cannibal_info["ranking_position"])
                 elif "matched_tool" in cannibal_info and isinstance(cannibal_info["matched_tool"], dict):
