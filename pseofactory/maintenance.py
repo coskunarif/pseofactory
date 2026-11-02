@@ -4739,6 +4739,22 @@ class MaintenanceLifecycle:
             if not dry_run:
                 current_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=current_engine_hash)
+                if substrate_lock_path is not None and substrate_lock_path.is_file():
+                    try:
+                        from pseofactory.drift import compute_dist_lock_metrics
+                        post_fp_hex, post_total_assets = compute_dist_lock_metrics(adapter.dist_dir)
+                        post_lock_payload = {
+                            "property_id": adapter.property_id,
+                            "engine_hash": current_engine_hash,
+                            "substrate_hash": current_engine_hash,
+                            "dist_fingerprint": post_fp_hex,
+                            "total_assets": post_total_assets,
+                        }
+                        post_lock_text = json.dumps(post_lock_payload, indent=2, sort_keys=True) + "\n"
+                        if substrate_lock_path.read_text(encoding="utf-8") != post_lock_text:
+                            substrate_lock_path.write_text(post_lock_text, encoding="utf-8")
+                    except Exception:
+                        pass
                 if getattr(adapter, "repo_path", None) and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/"):
                     ws_root = Path("/home/ubuntuadmin/projects")
                     from pseofactory.drift import verify_all_tenants_aligned_for_latch

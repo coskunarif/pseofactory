@@ -5410,6 +5410,15 @@ def reconcile_workspace_tracking_state(
                                     timeout=10,
                                 )
                                 healed_tenant_trees += 1
+                            if not lock_dirty:
+                                for stray_mf in ("404.html.json", "index.html.json"):
+                                    mf_cand = rp / "dist" / "manifests" / stray_mf
+                                    if mf_cand.is_file():
+                                        try:
+                                            mf_cand.unlink(missing_ok=True)
+                                            healed_tenant_trees += 1
+                                        except OSError:
+                                            pass
 
                             # Re-enforce any untracked DEGRADED_ROLLED_BACK overlay rollbacks on dist/
                             # so restoring dist/ from HEAD never re-activates rolled-back overlay markup

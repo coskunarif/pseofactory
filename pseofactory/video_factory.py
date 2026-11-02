@@ -2178,21 +2178,39 @@ def sync_video_catalog_and_metadata(
     cat_file = videos_dir / "batch_seo_catalog.json"
 
     catalog: List[Dict[str, Any]] = []
+    prior_entry: Optional[Dict[str, Any]] = None
+    raw_existing_cat = ""
     if cat_file.is_file():
         try:
-            loaded = json.loads(cat_file.read_text(encoding="utf-8"))
+            raw_existing_cat = cat_file.read_text(encoding="utf-8")
+            loaded = json.loads(raw_existing_cat)
             if isinstance(loaded, list):
-                catalog = [
-                    item
-                    for item in loaded
-                    if isinstance(item, dict) and item.get("slug") != slug
-                ]
+                for item in loaded:
+                    if isinstance(item, dict):
+                        if item.get("slug") == slug:
+                            prior_entry = item
+                        else:
+                            catalog.append(item)
         except Exception:
             catalog = []
 
     content_hash = hashlib.sha256(
         f"{prop}:{slug}:{youtube_pack.get('title', '')}:{spoken_script}".encode("utf-8")
     ).hexdigest()
+
+    entry_size_bytes = int(probe_info.get("size_bytes") or video_path.stat().st_size)
+    entry_duration_sec = float(probe_info.get("duration_seconds") or 15.0)
+    preserved_updated_at = None
+    if (
+        isinstance(prior_entry, dict)
+        and prior_entry.get("content_hash") == content_hash
+        and prior_entry.get("status") == upload_status
+        and prior_entry.get("video_id") == video_id
+        and prior_entry.get("youtube_url") == video_url
+        and int(prior_entry.get("size_bytes") or 0) == entry_size_bytes
+        and prior_entry.get("updated_at")
+    ):
+        preserved_updated_at = str(prior_entry["updated_at"])
 
     entry: Dict[str, Any] = {
         "slug": slug,
@@ -2205,8 +2223,8 @@ def sync_video_catalog_and_metadata(
         "video_file": str(video_path),
         "vtt_file": str(vtt_path),
         "thumbnail_file": str(thumbnail_path),
-        "size_bytes": int(probe_info.get("size_bytes") or video_path.stat().st_size),
-        "duration_seconds": float(probe_info.get("duration_seconds") or 15.0),
+        "size_bytes": entry_size_bytes,
+        "duration_seconds": entry_duration_sec,
         "spoken_script": spoken_script,
         "sentence_count": int(sentence_count),
         "word_count": int(word_count),
@@ -2215,14 +2233,16 @@ def sync_video_catalog_and_metadata(
         "status": upload_status,
         "video_id": video_id,
         "youtube_url": video_url,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": preserved_updated_at or datetime.now(timezone.utc).isoformat(),
     }
     catalog.append(entry)
     catalog.sort(key=lambda x: str(x.get("slug") or ""))
 
-    tmp_cat = cat_file.with_suffix(".tmp")
-    tmp_cat.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
-    tmp_cat.replace(cat_file)
+    new_cat_text = json.dumps(catalog, indent=2) + "\n"
+    if new_cat_text != raw_existing_cat:
+        tmp_cat = cat_file.with_suffix(".tmp")
+        tmp_cat.write_text(new_cat_text, encoding="utf-8")
+        tmp_cat.replace(cat_file)
 
     # Sync syndication/<slug>/youtube_metadata.json in tenant repo and central pseofactory syndication dir
     synd_dirs = [repo_root / "syndication" / slug]

@@ -2108,13 +2108,15 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     first_comment = f"Model your exact scenario live on {brand_label}: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
     teaser_content = _build_zero_link_teaser_content(text, platform="linkedin", brand=brand_label)
 
-    cid = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID")
+    cid = os.environ.get(f"FACTORY_{prop.upper()}_LINKEDIN_COMPANY_ID")
     if not cid:
         try:
             adapter = TenantRegistry.default().get_adapter(prop)
             cid = adapter.linkedin_company_id
         except Exception:
-            cid = DEFAULT_TENANT_LINKEDIN_IDS.get(prop, LINKEDIN_COMPANY_ID)
+            cid = None
+    if not cid:
+        cid = DEFAULT_TENANT_LINKEDIN_IDS.get(prop) or os.environ.get("FACTORY_LINKEDIN_COMPANY_ID") or LINKEDIN_COMPANY_ID
 
     assert_linkedin(text)
     assert_linkedin(teaser_content)
