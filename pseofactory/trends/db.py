@@ -2001,6 +2001,78 @@ class TrendHistoryDB:
             for r in rows
         ]
 
+    @staticmethod
+    def is_synthetic_or_invalid_inspection_record(
+        page_url: str,
+        last_crawl_time: str = "",
+        valid_norm_urls: Optional[Set[str]] = None,
+    ) -> bool:
+        """
+        Determines whether a GSC URL inspection record is a fake test fixture (calc-6..calc-10),
+        a non-HTML machine endpoint (feed.xml, llms.txt, robots.txt), a retired route missing from
+        valid_norm_urls, or a synthetic SIMULATED row.
+        """
+        import re
+
+        u_str = str(page_url or "").strip()
+        if not u_str:
+            return True
+        u_low = u_str.lower()
+        if any(
+            u_low.endswith(ext)
+            for ext in ("/feed.xml", "/llms.txt", "/llms-full.txt", "/robots.txt", ".xml", ".txt")
+        ):
+            return True
+        if re.search(r"/tools/calc-\d+/?$", u_low):
+            return True
+        norm_u = u_str.rstrip("/")
+        if valid_norm_urls and norm_u not in valid_norm_urls:
+            return True
+        lct = str(last_crawl_time or "").strip()
+        if lct:
+            if lct == "2026-10-27T08:00:00Z":
+                return True
+            if "T" in lct and not lct.endswith("Z") and "+" not in lct:
+                return True
+        return False
+
+    def sanitize_gsc_url_inspection_states(
+        self,
+        property_id: str,
+        valid_urls: Optional[List[str]] = None,
+    ) -> int:
+        """
+        Purges fake test routes (calc-6..calc-10), non-HTML endpoints, retired slugs not in
+        valid_urls, and synthetic SIMULATED rows from gsc_url_inspection_states.
+        Returns the number of deleted rows.
+        """
+        prop = str(property_id or "").strip()
+        valid_norm: Optional[Set[str]] = None
+        if valid_urls is not None:
+            valid_norm = {
+                str(u).strip().rstrip("/")
+                for u in valid_urls
+                if u and not str(u).strip().lower().endswith((".xml", ".txt"))
+            }
+        existing = self.get_gsc_url_inspection_states(prop)
+        to_delete: List[str] = []
+        for rec in existing:
+            if self.is_synthetic_or_invalid_inspection_record(
+                page_url=rec.page_url,
+                last_crawl_time=rec.last_crawl_time,
+                valid_norm_urls=valid_norm,
+            ):
+                to_delete.append(rec.page_url)
+        if not to_delete:
+            return 0
+        with self.transaction() as cur:
+            for p_u in to_delete:
+                cur.execute(
+                    "DELETE FROM gsc_url_inspection_states WHERE property_id = ? AND page_url = ?;",
+                    (prop, p_u),
+                )
+        return len(to_delete)
+
     # -------------------------------------------------------------------------
     # Longitudinal Statutory & Macroeconomic Time-Series Operations
     # -------------------------------------------------------------------------

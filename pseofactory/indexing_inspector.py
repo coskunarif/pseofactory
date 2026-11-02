@@ -434,8 +434,22 @@ class DailyIndexingInspector:
         baseline_denom = max(prev_rma7, curr_rma28, 1.0) if prev_rma7 < min_impressions_floor else prev_rma7
         pct_change = (curr_rma7 - baseline_denom) / baseline_denom
         rma28_pct_change = (curr_rma7 - curr_rma28) / max(1.0, curr_rma28)
-        drop_detected = (pct_change < -drop_threshold) or (
-            curr_rma28 >= min_impressions_floor and rma28_pct_change < -drop_threshold and pct_change < 0.0
+        sustained_28d_growth = bool(
+            len(timeline) >= 28
+            and prev_rma28 >= min_impressions_floor
+            and curr_rma28 > prev_rma28
+            and curr_rma7 >= curr_rma28
+        )
+        drop_detected = (
+            not sustained_28d_growth
+            and (
+                (pct_change < -drop_threshold)
+                or (
+                    curr_rma28 >= min_impressions_floor
+                    and rma28_pct_change < -drop_threshold
+                    and pct_change < 0.0
+                )
+            )
         )
         actual_drop_pct = round(max(0.0, -min(pct_change, rma28_pct_change) * 100.0), 2)
         decay_velocity_score = round(
@@ -987,7 +1001,11 @@ class DailyIndexingInspector:
                 counts[lm] = counts.get(lm, 0) + 1
             most_common_lastmod, most_common_count = max(counts.items(), key=lambda kv: kv[1])
         uniformity_ratio = round(most_common_count / float(max(1, total_lastmod)), 4) if total_lastmod > 0 else 0.0
-        lastmod_uniform_build_stamp = bool(total_lastmod >= 5 and uniformity_ratio >= lastmod_uniformity_threshold and len(set(lastmod_values)) == 1 and "T" in most_common_lastmod)
+        lastmod_uniform_build_stamp = bool(
+            total_lastmod >= 5
+            and uniformity_ratio >= lastmod_uniformity_threshold
+            and len(set(lastmod_values)) == 1
+        )
 
         # 3. Reverse-Orphan Check: Indexable dist/ HTML pages linked in internal graph but missing from sitemap.xml
         reverse_orphan_urls: List[str] = []

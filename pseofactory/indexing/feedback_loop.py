@@ -889,6 +889,7 @@ class SectionExclusionClassifier:
         (including date-bucketed article sitemaps), computing isolated
         'Submitted pages only' drop diagnostics.
         """
+        import urllib.parse
         from pseofactory.indexer import TEMPLATE_SITEMAP_SECTIONS, classify_url_template_section
 
         eff_tenant = str(tenant_id or "profithelm").strip().lower()
@@ -897,6 +898,15 @@ class SectionExclusionClassifier:
             (v.get("sitemap_name") if isinstance(v, dict) else str(k).split("/")[-1]): v
             for k, v in reg_map.items()
         }
+        uses_tier_child_sitemaps = bool(
+            reg_by_name
+            and any(k in reg_by_name for k in ("sitemap-hubs.xml", "sitemap-leaves.xml"))
+            and not any(
+                k in reg_by_name or k.startswith("sitemap-articles")
+                for k in ("sitemap-products.xml", "sitemap-categories.xml", "sitemap-guides.xml")
+            )
+        )
+        base_clean = (str(canonical_base or f"https://{eff_tenant}.com")).rstrip("/")
 
         sections_report: Dict[str, Dict[str, Any]] = {}
         for sec in TEMPLATE_SITEMAP_SECTIONS:
@@ -947,6 +957,13 @@ class SectionExclusionClassifier:
             sm_name = sec_info["child_sitemap"]
             sm_url = sec_info["child_sitemap_url"]
             d_bucket = sec_info.get("date_bucket")
+            if uses_tier_child_sitemaps:
+                parsed_u = urllib.parse.urlsplit(str(url))
+                u_parts = [p for p in (parsed_u.path or "").strip("/").split("/") if p]
+                is_leaf_tier = bool(len(u_parts) > 2 and "sitemap-leaves.xml" in reg_by_name)
+                sm_name = "sitemap-leaves.xml" if is_leaf_tier else "sitemap-hubs.xml"
+                sm_url = f"{base_clean}/{sm_name}"
+                d_bucket = None
             scope_str = f"Submitted pages only ({sm_name})"
 
             sec_bucket = sections_report.setdefault(
@@ -973,7 +990,7 @@ class SectionExclusionClassifier:
             sec_bucket["total_urls"] += 1
 
             reg_entry = reg_map.get(sm_url) or reg_by_name.get(sm_name)
-            explicitly_reg = bool(reg_entry.get("explicitly_submitted", True)) if isinstance(reg_entry, dict) else True
+            explicitly_reg = bool(reg_entry.get("explicitly_submitted", False)) if isinstance(reg_entry, dict) else False
 
             sm_bucket = by_child_sitemap.setdefault(
                 sm_name,

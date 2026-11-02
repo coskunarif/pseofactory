@@ -1051,8 +1051,32 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
     # 3. Load or enrich URL inspection records from .agy/indexing_health_report.json, .agy/indexing_audit_log.json, and TrendHistoryDB
     idx_report_file = root / ".agy" / "indexing_health_report.json"
     idx_audit_file = root / ".agy" / "indexing_audit_log.json"
+    valid_sitemap_norm: Set[str] = set()
+    sm_candidate = root / "dist" / "sitemap.xml"
+    if sm_candidate.is_file():
+        try:
+            sm_raw = sm_candidate.read_text(encoding="utf-8")
+            for loc_u in re.findall(r"<loc>(.*?)</loc>", sm_raw):
+                loc_clean = str(loc_u or "").strip()
+                if loc_clean and not loc_clean.lower().endswith((".xml", ".txt")):
+                    valid_sitemap_norm.add(loc_clean.rstrip("/"))
+        except Exception:
+            valid_sitemap_norm = set()
+
     if not inspection_records:
         raw_insp_items: List[Dict[str, Any]] = []
+        if live_gsc and "PYTEST_CURRENT_TEST" not in os.environ and target_db_path.is_file():
+            try:
+                with TrendHistoryDB(target_db_path) as tdb_pre:
+                    if valid_sitemap_norm:
+                        tdb_pre.sanitize_gsc_url_inspection_states(
+                            prop,
+                            valid_urls=[f"{u}/" for u in valid_sitemap_norm],
+                        )
+                    for db_rec in tdb_pre.get_gsc_url_inspection_states(prop):
+                        raw_insp_items.append(db_rec.to_dict())
+            except Exception:
+                pass
         if idx_report_file.is_file():
             try:
                 idx_data = json.loads(idx_report_file.read_text(encoding="utf-8"))
@@ -1069,14 +1093,10 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                             raw_insp_items.append(o_item)
             except Exception:
                 pass
-        if live_gsc and "PYTEST_CURRENT_TEST" not in os.environ and target_db_path.is_file():
-            try:
-                with TrendHistoryDB(target_db_path) as tdb_pre:
-                    for db_rec in tdb_pre.get_gsc_url_inspection_states(prop):
-                        raw_insp_items.append(db_rec.to_dict())
-            except Exception:
-                pass
-        if str(root).startswith("/home/ubuntuadmin/projects/") or (raw_insp_items and "PYTEST_CURRENT_TEST" not in os.environ):
+        if not raw_insp_items and (
+            str(root).startswith("/home/ubuntuadmin/projects/")
+            or "PYTEST_CURRENT_TEST" not in os.environ
+        ):
             raw_insp_items.extend(SEEDED_LIVE_GSC_URL_INSPECTIONS.get(prop, []))
         seen_insp_urls: Set[str] = set()
         expected_hosts = {f"{prop}.com", f"www.{prop}.com"}
@@ -1089,10 +1109,21 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
             p_host = urllib.parse.urlparse(p_url).netloc.split(":")[0].lower()
             if p_host and p_host not in expected_hosts:
                 continue
-            seen_insp_urls.add(p_url)
             raw_out = ((item.get("raw_output") or {}).get("inspectionResult") or {}) if isinstance(item.get("raw_output"), dict) else {}
             idx_res = raw_out.get("indexStatusResult") if isinstance(raw_out.get("indexStatusResult"), dict) else {}
             mob_res = raw_out.get("mobileUsabilityResult") if isinstance(raw_out.get("mobileUsabilityResult"), dict) else {}
+            lct_val = str(item.get("last_crawl_time") or idx_res.get("lastCrawlTime") or "")
+            if (
+                str(root).startswith("/home/ubuntuadmin/projects/")
+                and "PYTEST_CURRENT_TEST" not in os.environ
+                and TrendHistoryDB.is_synthetic_or_invalid_inspection_record(
+                    page_url=p_url,
+                    last_crawl_time=lct_val,
+                    valid_norm_urls=valid_sitemap_norm if valid_sitemap_norm else None,
+                )
+            ):
+                continue
+            seen_insp_urls.add(p_url)
             inspection_records.append(
                 GSCUrlInspectionRecord(
                     property_id=prop,
@@ -1104,7 +1135,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                     robots_txt_state=_clean_dashes(str(item.get("robots_txt_state") or idx_res.get("robotsTxtState") or "ALLOWED")),
                     user_canonical=_clean_dashes(str(item.get("user_canonical") or idx_res.get("userCanonical") or p_url)),
                     google_canonical=_clean_dashes(str(item.get("google_canonical") or idx_res.get("googleCanonical") or p_url)),
-                    last_crawl_time=str(item.get("last_crawl_time") or idx_res.get("lastCrawlTime") or ""),
+                    last_crawl_time=lct_val,
                     crawled_as=str(item.get("crawled_as") or idx_res.get("crawledAs") or "MOBILE"),
                     rich_results_verdict=str(item.get("rich_results_verdict") or "VERDICT_UNSPECIFIED"),
                     rich_results_types=list(item.get("rich_results_types") or item.get("rich_results_detected") or []),

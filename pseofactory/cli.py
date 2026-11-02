@@ -369,43 +369,47 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                 lock_fd.close()
             except Exception:
                 pass
-    if res.get("total_recompiled", 0) > 0 and not no_gitops:
+    if not no_gitops:
         from pseofactory.gitops import GitOpsCoordinator
         from pseofactory.indexer import PushIndexer
         reg = TenantRegistry.default()
         for p_id, r_info in res.get("property_reports", {}).items():
-            if r_info.get("recompiled", 0) > 0 and r_info.get("final_status") == "PASS":
-                try:
-                    adapter = reg.get_adapter(p_id)
-                    repo_path = adapter.repo_path or adapter.dist_dir.parent
+            if r_info.get("final_status") != "PASS":
+                continue
+            try:
+                adapter = reg.get_adapter(p_id)
+                repo_path = adapter.repo_path or adapter.dist_dir.parent
+                canon_base = str(getattr(adapter, "canonical_base", f"https://{adapter.domain}")).rstrip("/")
+                indexer = PushIndexer(
+                    domain=adapter.domain,
+                    canonical_base=canon_base,
+                    base_dir=repo_path,
+                    dist_dir=adapter.dist_dir,
+                    tenant_id=adapter.property_id,
+                )
+                has_unpushed_assets = bool(indexer.inspect_platform_assets().get("new_assets_count", 0) > 0)
+                if r_info.get("recompiled", 0) > 0 or has_unpushed_assets:
                     if (repo_path / ".git").exists():
-                        coordinator = GitOpsCoordinator(repo_path=repo_path, branch="main", dry_run=False)
-                        gitops_res = coordinator.dispatch_to_shipper(
-                            property_id=p_id,
-                            dry_run=False,
-                            commit_message=f"fix({p_id}): automated reflection and maintenance cycle",
-                            edge_url=getattr(adapter, "canonical_base", None),
-                            dist_dir=adapter.dist_dir,
-                        )
-                        r_info["gitops_status"] = gitops_res.status
-                        if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
-                            res["status"] = "FAIL"
-                        else:
-                            canon_base = str(getattr(adapter, "canonical_base", f"https://{adapter.domain}")).rstrip("/")
-                            indexer = PushIndexer(
-                                domain=adapter.domain,
-                                canonical_base=canon_base,
-                                base_dir=repo_path,
+                        if r_info.get("recompiled", 0) > 0:
+                            coordinator = GitOpsCoordinator(repo_path=repo_path, branch="main", dry_run=False)
+                            gitops_res = coordinator.dispatch_to_shipper(
+                                property_id=p_id,
+                                dry_run=False,
+                                commit_message=f"fix({p_id}): automated reflection and maintenance cycle",
+                                edge_url=getattr(adapter, "canonical_base", None),
                                 dist_dir=adapter.dist_dir,
-                                tenant_id=adapter.property_id,
                             )
-                            idx_res = indexer.dispatch_automated_indexing(urls=None, live=True)
-                            if isinstance(r_info.get("downstream"), dict):
-                                r_info["downstream"]["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
-                except Exception as g_err:
-                    res["status"] = "FAIL"
-                    if getattr(args, "verbose", False):
-                        print(f"Warning: GitOps auto-chain failed for '{p_id}': {g_err}")
+                            r_info["gitops_status"] = gitops_res.status
+                            if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
+                                res["status"] = "FAIL"
+                                continue
+                        idx_res = indexer.dispatch_automated_indexing(urls=None, live=True)
+                        if isinstance(r_info.get("downstream"), dict):
+                            r_info["downstream"]["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+            except Exception as g_err:
+                res["status"] = "FAIL"
+                if getattr(args, "verbose", False):
+                    print(f"Warning: GitOps auto-chain failed for '{p_id}': {g_err}")
 
     if getattr(args, "json", False):
         print(json.dumps(res, indent=2))

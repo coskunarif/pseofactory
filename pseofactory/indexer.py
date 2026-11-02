@@ -1129,25 +1129,49 @@ class ChildSitemapPushLedger:
             ledger_path or (DEFAULT_BASE_DIR / ".agy" / "child_sitemap_push_ledger.json")
         )
 
+    def _infer_isolated_ledger_tenant(self) -> Optional[str]:
+        path_str = str(self.ledger_path).replace("\\", "/")
+        for t_cand, folder in (
+            ("profithelm", "/profithelm-platform/.agy/"),
+            ("prexvo", "/prexvo/.agy/"),
+            ("gainhelm", "/gainhelm/.agy/"),
+        ):
+            if folder in path_str:
+                return t_cand
+        return None
+
     def _load_state(self) -> Dict[str, Any]:
+        isolated_t = self._infer_isolated_ledger_tenant()
+        data = None
         try:
             from pseofactory.supervisor import AtomicStateLedger
             if self.ledger_path.exists():
-                data = AtomicStateLedger.load_json(self.ledger_path)
-                if isinstance(data, dict) and "tenants" in data:
-                    return data
+                loaded = AtomicStateLedger.load_json(self.ledger_path)
+                if isinstance(loaded, dict) and "tenants" in loaded:
+                    data = loaded
         except Exception:
             pass
-        if self.ledger_path.exists():
+        if data is None and self.ledger_path.exists():
             try:
-                data = json.loads(self.ledger_path.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and "tenants" in data:
-                    return data
+                loaded = json.loads(self.ledger_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and "tenants" in loaded:
+                    data = loaded
             except Exception:
                 pass
-        return {"version": 1, "tenants": {}}
+        if not isinstance(data, dict) or not isinstance(data.get("tenants"), dict):
+            return {"version": 1, "tenants": {}}
+        if isolated_t:
+            data["tenants"] = {
+                k: v for k, v in data["tenants"].items() if str(k).strip().lower() == isolated_t
+            }
+        return data
 
     def _save_state(self, state: Dict[str, Any]) -> None:
+        isolated_t = self._infer_isolated_ledger_tenant()
+        if isolated_t and isinstance(state, dict) and isinstance(state.get("tenants"), dict):
+            state["tenants"] = {
+                k: v for k, v in state["tenants"].items() if str(k).strip().lower() == isolated_t
+            }
         try:
             from pseofactory.supervisor import AtomicStateLedger
             AtomicStateLedger.save_json(self.ledger_path, state)
@@ -2407,6 +2431,7 @@ class PushIndexer:
             "--url", target_url,
             "--feed", f"{self.canonical_base}/feed.xml",
             "--pingomatic",
+            "--skip-google",
         ]
         if dry_run:
             cmd.append("--dry-run")
@@ -2540,8 +2565,53 @@ class PushIndexer:
     GSC_DAILY_INSPECTION_QUOTA = 180
 
     def _get_gsc_quota_governor_path(self) -> Path:
+        explicit_gov = getattr(self, "quota_governor_path", None)
+        if explicit_gov:
+            return Path(explicit_gov)
         repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent))
+        if (
+            str(repo_root).startswith("/home/ubuntuadmin/projects/")
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        ):
+            return Path("/home/ubuntuadmin/projects/.agy/gsc_quota_governor.json")
         return repo_root / ".agy" / "gsc_quota_governor.json"
+
+    def trip_gsc_quota_breaker(self, bucket: str = "indexing", reason: str = "") -> Dict[str, Any]:
+        """
+        Immediately trips the shared daily GSC quota governor breaker when HTTP 429
+        is encountered so subsequent tenant or loop calls stop hammering the API.
+        """
+        gov_path = self._get_gsc_quota_governor_path()
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        state: Dict[str, Any] = {
+            "date": today_str,
+            "inspection_used": 0,
+            "indexing_used": 0,
+            "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
+            "indexing_quota_limit": GOOGLE_INDEXING_DAILY_QUOTA,
+        }
+        try:
+            if gov_path.is_file():
+                loaded = json.loads(gov_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and loaded.get("date") == today_str:
+                    state.update(loaded)
+        except Exception:
+            pass
+
+        key = "inspection_used" if bucket == "inspection" else "indexing_used"
+        limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
+        state[key] = max(int(state.get(key, 0) or 0), limit)
+        state["quota_exhausted"] = True
+        state["exhausted_bucket"] = bucket
+        state["last_429_at"] = datetime.now(timezone.utc).isoformat()
+        if reason:
+            state["last_429_reason"] = str(reason)[:500]
+        try:
+            gov_path.parent.mkdir(parents=True, exist_ok=True)
+            gov_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return state
 
     def check_and_consume_gsc_quota(self, units: int = 1, bucket: str = "inspection") -> Dict[str, Any]:
         """
@@ -2550,7 +2620,13 @@ class PushIndexer:
         """
         gov_path = self._get_gsc_quota_governor_path()
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        state: Dict[str, Any] = {"date": today_str, "inspection_used": 0, "indexing_used": 0, "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA}
+        state: Dict[str, Any] = {
+            "date": today_str,
+            "inspection_used": 0,
+            "indexing_used": 0,
+            "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
+            "indexing_quota_limit": GOOGLE_INDEXING_DAILY_QUOTA,
+        }
         try:
             if gov_path.is_file():
                 loaded = json.loads(gov_path.read_text(encoding="utf-8"))
@@ -2562,8 +2638,11 @@ class PushIndexer:
         key = "inspection_used" if bucket == "inspection" else "indexing_used"
         limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
         used = int(state.get(key, 0) or 0)
-        allowed = (used + units) <= limit
-        if allowed:
+        if state.get("quota_exhausted") and state.get("exhausted_bucket") == bucket:
+            used = max(used, limit)
+            state[key] = used
+        allowed = (used + max(0, units)) <= limit
+        if allowed and units > 0:
             state[key] = used + units
             try:
                 gov_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3787,11 +3866,12 @@ class PushIndexer:
 
         urls = self.prioritize_urls_for_indexing_allocation(urls)
         domain_health = self.evaluate_domain_health_pacing(urls)
-        paced_batch_cap = int(domain_health.get("paced_gsc_batch_cap", GOOGLE_INDEXING_DAILY_QUOTA) or GOOGLE_INDEXING_DAILY_QUOTA)
+        remaining_quota = int(domain_health.get("remaining_indexing_quota", GOOGLE_INDEXING_DAILY_QUOTA) or 0)
+        paced_batch_cap = int(domain_health.get("paced_gsc_batch_cap", GOOGLE_INDEXING_DAILY_QUOTA) or 0)
         effective_daily_cap = (
-            min(GOOGLE_INDEXING_DAILY_QUOTA, max(1, paced_batch_cap))
-            if int(domain_health.get("inspected_count", 0) or 0) > 0 and paced_batch_cap > 0
-            else GOOGLE_INDEXING_DAILY_QUOTA
+            min(GOOGLE_INDEXING_DAILY_QUOTA, remaining_quota, max(0, paced_batch_cap))
+            if int(domain_health.get("inspected_count", 0) or 0) > 0 or remaining_quota <= 0
+            else min(GOOGLE_INDEXING_DAILY_QUOTA, remaining_quota)
         )
         indexed_norm_set = {u.rstrip("/") for u in domain_health.get("indexed_urls", [])}
         unindexed_norm_set = {u.rstrip("/") for u in domain_health.get("unindexed_urls", [])}
@@ -3856,6 +3936,14 @@ class PushIndexer:
             accepted_urls = []
             failed_urls = []
             for idx, u in enumerate(to_push):
+                quota_chk = self.check_and_consume_gsc_quota(units=1, bucket="indexing")
+                if not quota_chk.get("allowed", True):
+                    for rem_u in to_push[idx:]:
+                        if rem_u.rstrip("/") not in indexed_norm_set:
+                            rollover_spillover.append(rem_u)
+                        elif rem_u not in skipped:
+                            skipped.append(rem_u)
+                    break
                 try:
                     cmd = [gsccli_bin, "index", "publish", u, "--type", "URL_UPDATED"]
                     gsc_env = {**os.environ, "GSCCLI_MAX_RETRIES": os.environ.get("GSCCLI_MAX_RETRIES", "0")}
@@ -3879,12 +3967,12 @@ class PushIndexer:
 
                     if status == "ACCEPTED":
                         accepted_urls.append(u)
-                        try:
-                            self.check_and_consume_gsc_quota(units=1, bucket="indexing")
-                        except Exception:
-                            pass
                     elif is_429:
                         interrupted = True
+                        try:
+                            self.trip_gsc_quota_breaker(bucket="indexing", reason=output_text)
+                        except Exception:
+                            pass
                         failed_urls.append(u)
                         remaining_untried = to_push[idx + 1:]
                         failed_urls.extend(remaining_untried)
@@ -4169,8 +4257,24 @@ class PushIndexer:
 
             curr_hash = self.get_url_content_hash(u)
             prev_entry = ledger.get(u)
+            prev_engines = (
+                prev_entry.get("engines")
+                if isinstance(prev_entry, dict) and isinstance(prev_entry.get("engines"), dict)
+                else {}
+            )
+            indexnow_eng = prev_engines.get("indexnow") if isinstance(prev_engines, dict) else None
+            per_engine_aligned = (
+                True
+                if not prev_engines
+                else (isinstance(indexnow_eng, dict) and indexnow_eng.get("hash") == curr_hash)
+            )
 
-            if prev_entry and prev_entry.get("hash") == curr_hash:
+            if (
+                prev_entry
+                and prev_entry.get("hash") == curr_hash
+                and per_engine_aligned
+                and not prev_entry.get("google_rollover_queued")
+            ):
                 is_new = False
                 status = "EXISTING"
                 push_count = prev_entry.get("push_count", 1)
@@ -4535,8 +4639,18 @@ class PushIndexer:
                 "audit_log_path": str(self.audit_log_path),
             }
             try:
-                self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-                self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+                should_write_q = bool(live)
+                if not should_write_q and self.audit_log_path.is_file():
+                    try:
+                        prev_q = json.loads(self.audit_log_path.read_text(encoding="utf-8"))
+                        should_write_q = not (isinstance(prev_q, dict) and prev_q.get("mode") == "LIVE")
+                    except Exception:
+                        should_write_q = True
+                elif not should_write_q:
+                    should_write_q = True
+                if should_write_q:
+                    self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
             except Exception as ex:
                 report["audit_log_error"] = str(ex)
             return report
@@ -4547,7 +4661,20 @@ class PushIndexer:
             pingomatic_res = self.ping_pingomatic(dry_run=not live)
             gsc_res = self.submit_gsc_indexing(urls=urls_to_submit, live=live, hubs_only=hubs_only, drain_rollover=False)
             indexmysite_res = self.submit_indexmysite(urls=urls_to_submit, live=live, hubs_only=hubs_only, commercial=commercial)
-            fast_idx_res = self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
+            fast_from_gsc = None
+            if isinstance(gsc_res, dict):
+                for r_it in gsc_res.get("results", []) or []:
+                    if isinstance(r_it, dict) and r_it.get("engine") == "fast-index":
+                        fast_from_gsc = {
+                            "engine": "fast-index",
+                            "domain": self.domain,
+                            "command": "",
+                            "status": r_it.get("status", "DISPATCHED" if live else "SIMULATED"),
+                            "actions": r_it.get("actions", []),
+                            "note": "",
+                        }
+                        break
+            fast_idx_res = fast_from_gsc or self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
             if live:
                 still_in_rollover = set(self.load_gsc_rollover_queue())
                 if indexnow_res.get("status") in ("DISPATCHED", "ACCEPTED", "SUCCESS", "IDEMPOTENT_NO_OP"):
@@ -4651,8 +4778,18 @@ class PushIndexer:
         }
 
         try:
-            self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-            self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            should_write_audit = bool(live)
+            if not should_write_audit and self.audit_log_path.is_file():
+                try:
+                    prev_aud = json.loads(self.audit_log_path.read_text(encoding="utf-8"))
+                    should_write_audit = not (isinstance(prev_aud, dict) and prev_aud.get("mode") == "LIVE")
+                except Exception:
+                    should_write_audit = True
+            elif not should_write_audit:
+                should_write_audit = True
+            if should_write_audit:
+                self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+                self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         except Exception as ex:
             report["audit_log_error"] = str(ex)
 

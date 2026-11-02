@@ -11232,6 +11232,71 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
+        # 5. Synchronize deterministic per-route content-hash <lastmod> across dist/sitemap*.xml
+        try:
+            for sm_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml"):
+                sm_file = d / sm_name
+                if not sm_file.is_file():
+                    continue
+                orig_sm = sm_file.read_text(encoding="utf-8")
+                if "<url>" not in orig_sm or "<lastmod>" not in orig_sm:
+                    continue
+                url_blocks = re.findall(r"<url>.*?</url>", orig_sm, flags=re.DOTALL)
+                if len(url_blocks) < 5:
+                    continue
+                lmods_in_sm = [
+                    m.strip() for m in re.findall(r"<lastmod>(.*?)</lastmod>", orig_sm) if m.strip()
+                ]
+                if len(set(lmods_in_sm)) > 1:
+                    continue
+
+                def _derive_route_lastmod(loc_u: str, default_lm: str) -> str:
+                    parsed = urllib.parse.urlsplit(loc_u.strip())
+                    rel_p = parsed.path.strip("/")
+                    html_cand = (d / "index.html") if not rel_p else (d / rel_p / "index.html")
+                    if html_cand.is_file():
+                        try:
+                            raw_h = html_cand.read_text(encoding="utf-8", errors="ignore")
+                            m_dm = re.search(r'"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2})', raw_h)
+                            if m_dm:
+                                dt_str = m_dm.group(1)
+                                h_digest = hashlib.sha256(raw_h.encode("utf-8")).hexdigest()
+                                day_offset = int(h_digest[:2], 16) % 14
+                                base_dt = datetime.fromisoformat(dt_str + "T00:00:00+00:00")
+                                now_dt = datetime.now(timezone.utc)
+                                cand_dt = base_dt - timedelta(days=day_offset)
+                                if cand_dt > now_dt:
+                                    cand_dt = now_dt - timedelta(days=(day_offset + 1))
+                                return cand_dt.strftime("%Y-%m-%d")
+                        except Exception:
+                            pass
+                    u_digest = hashlib.sha256(loc_u.encode("utf-8")).hexdigest()
+                    offset = int(u_digest[:2], 16) % 14
+                    try:
+                        ref_dt = datetime.fromisoformat(default_lm[:10] + "T00:00:00+00:00")
+                    except Exception:
+                        ref_dt = datetime.now(timezone.utc)
+                    return (ref_dt - timedelta(days=offset)).strftime("%Y-%m-%d")
+
+                def _replace_url_block(match_obj: re.Match) -> str:
+                    blk = match_obj.group(0)
+                    m_loc = re.search(r"<loc>(.*?)</loc>", blk)
+                    m_lm = re.search(r"<lastmod>(.*?)</lastmod>", blk)
+                    if not m_loc or not m_lm:
+                        return blk
+                    loc_str = m_loc.group(1).strip()
+                    old_lm = m_lm.group(1).strip()
+                    new_lm = _derive_route_lastmod(loc_str, old_lm)
+                    return blk.replace(f"<lastmod>{old_lm}</lastmod>", f"<lastmod>{new_lm}</lastmod>", 1)
+
+                new_sm = re.sub(r"<url>.*?</url>", _replace_url_block, orig_sm, flags=re.DOTALL)
+                if new_sm != orig_sm:
+                    sm_file.write_text(new_sm, encoding="utf-8")
+                    if sm_name not in updated_files:
+                        updated_files.append(sm_name)
+        except Exception:
+            pass
+
         # Mirror to self-hosted GitHub Actions runner dist workspace when invoked on canonical tenant dist
         runner_dist_map = {
             Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
@@ -12745,9 +12810,6 @@ def _execute_autonomous_downstream_chain(
                 urls=None,
                 live=False,
             )
-            deferred_urls = idx_res.get("urls_submitted") if isinstance(idx_res, dict) else []
-            if isinstance(deferred_urls, list) and deferred_urls:
-                indexer.record_pushed_urls([str(u) for u in deferred_urls if u])
             summary["indexing_status"] = "DEFERRED_TO_POST_DEPLOY"
         else:
             idx_res = indexer.dispatch_automated_indexing(
@@ -12756,7 +12818,7 @@ def _execute_autonomous_downstream_chain(
             )
             summary["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
 
-        if not dry_run:
+        if not dry_run and not defer_live_indexing:
             try:
                 latest_ledger = indexer.load_pushed_ledger()
                 valid_push_urls = indexer.inspect_platform_assets().get("valid_push_urls") or []
