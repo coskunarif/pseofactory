@@ -1956,8 +1956,10 @@ def _discover_tenant_tools(
         ext_source = PREXVO_EXTENDED_TOOLS
     elif adapter.property_id == "gainhelm":
         ext_source = GAINHELM_EXTENDED_TOOLS
-    else:
+    elif adapter.property_id == "profithelm":
         ext_source = PROFITHELM_EXTENDED_TOOLS
+    else:
+        ext_source = list(default_tools)
     extended_catalog = {
         t["slug"]: t
         for t in ext_source
@@ -9009,7 +9011,11 @@ class RetroReflectionEngine:
             elif is_gainhelm:
                 preset = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
                 raw = dict(preset)
-            elif any(k in slug.lower() for k in ("1031", "like-kind", "exchange")):
+            elif (
+                "/" not in slug
+                and not slug.startswith("section-1031-calculator-")
+                and any(k in slug.lower() for k in ("1031", "like-kind", "exchange"))
+            ):
                 raw = {
                     "model_name": f"{slug_title} Model",
                     "formula": "round(((sale_price - adjusted_basis - depreciation_recapture) * 0.20) + (depreciation_recapture * 0.25) + ((sale_price - adjusted_basis) * (0.038 + state_capital_gains_rate)), 0)",
@@ -9024,7 +9030,11 @@ class RetroReflectionEngine:
                     "economic_dataset": default_econ,
                     "sample_calculation": "On a $1,500,000 commercial real estate exchange ($600,000 adjusted basis, $300,000 Section 1250 depreciation), IRC Section 1031 defers $348,900.00 in combined federal, recapture, NIIT, and state taxes.",
                 }
-            elif any(k in slug.lower() for k in ("179", "equipment", "lease", "vehicle", "truck", "suv")):
+            elif (
+                "/" not in slug
+                and not slug.startswith("section-179-calculator-")
+                and any(k in slug.lower() for k in ("179", "equipment", "lease", "vehicle", "truck", "suv"))
+            ):
                 preset = dict(cls.PROFITHELM_FALLBACK_MANIFESTS["section-179-vehicle-deduction"])
                 preset["model_name"] = f"{slug_title} Model"
                 preset["statutory_authority"] = default_stat
@@ -12692,8 +12702,10 @@ def _execute_autonomous_downstream_chain(
         default_tools = PREXVO_DEFAULT_TOOLS
     elif adapter.property_id == "gainhelm":
         default_tools = GAINHELM_DEFAULT_TOOLS
-    else:
+    elif adapter.property_id == "profithelm":
         default_tools = PROFITHELM_DEFAULT_TOOLS
+    else:
+        default_tools = list(getattr(adapter, "tools", None) or [])
     discovered_tools = _discover_tenant_tools(adapter, default_tools)
     if hasattr(adapter, "_tools"):
         adapter._tools = list(discovered_tools)
