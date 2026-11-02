@@ -14402,6 +14402,17 @@ def reflect_and_recompile_all_assets(
                             html_f.write_text(norm_c, encoding="utf-8")
                 except Exception:
                     pass
+                try:
+                    from pseofactory.tenant_facts import TruthReconciliationEngine
+                    reconcile_pre_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+                    if callable(reconcile_pre_fn):
+                        reconcile_pre_fn(
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                        )
+                except Exception:
+                    pass
 
         if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
             # Evict failed drift entries from evaluator cache after rebuild/retrofit while preserving SHA-256-verified clean entries
@@ -14745,6 +14756,37 @@ def reflect_and_recompile_all_assets(
                         pass
 
                 if adapter.dist_dir.parent != scanner.workspace_root and not is_unmerged_worktree:
+                    try:
+                        from pseofactory.tenant_facts import TruthReconciliationEngine
+                        reconcile_latch_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+                        if callable(reconcile_latch_fn):
+                            reconcile_latch_fn(
+                                dist_dir=adapter.dist_dir,
+                                property_id=adapter.property_id,
+                                repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                            )
+                    except Exception:
+                        pass
+                    if getattr(adapter, "repo_path", None):
+                        t_repo_l = Path(adapter.repo_path)
+                        if (t_repo_l / ".git").exists() and t_repo_l.name in ("profithelm-platform", "prexvo", "gainhelm"):
+                            try:
+                                from pseofactory.drift import compute_dist_lock_metrics
+                                cur_sub_h = compute_engine_hash()
+                                exp_d_fp, exp_t_assets = compute_dist_lock_metrics(adapter.dist_dir)
+                                lock_pl = {
+                                    "property_id": adapter.property_id,
+                                    "engine_hash": cur_sub_h,
+                                    "substrate_hash": cur_sub_h,
+                                    "dist_fingerprint": exp_d_fp,
+                                    "total_assets": exp_t_assets,
+                                }
+                                lock_txt = json.dumps(lock_pl, indent=2, sort_keys=True) + "\n"
+                                lock_p = t_repo_l / "substrate_lock.json"
+                                if not lock_p.is_file() or lock_p.read_text(encoding="utf-8") != lock_txt:
+                                    lock_p.write_text(lock_txt, encoding="utf-8")
+                            except Exception:
+                                pass
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                     asset_hashes = {
                         (

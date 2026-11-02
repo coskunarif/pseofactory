@@ -1023,32 +1023,58 @@ class GitOpsCoordinator:
                     pass
                 try:
                     rebase_res = subprocess.run(
-                        ["git", "-C", str(self.repo_path), "rebase", f"origin/{tb}"],
+                        ["git", "-C", str(self.repo_path), "rebase", "-X", "theirs", f"origin/{tb}"],
                         env=self._get_git_env(),
                         capture_output=True,
                         text=True,
                         check=False,
                         timeout=30,
                     )
-                    if rebase_res.returncode != 0 and self.ast_merge_path.is_file():
-                        subprocess.run(
-                            [sys.executable, str(self.ast_merge_path), str(self.repo_path)],
-                            env=self._get_git_env(),
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=30,
-                        )
-                        subprocess.run(
-                            ["git", "-C", str(self.repo_path), "-c", "core.editor=true", "rebase", "--continue"],
-                            env=self._get_git_env(),
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=30,
-                        )
+                    if rebase_res.returncode != 0:
+                        if self.ast_merge_path.is_file():
+                            subprocess.run(
+                                [sys.executable, str(self.ast_merge_path), str(self.repo_path)],
+                                env=self._get_git_env(),
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=30,
+                            )
+                            cont_res = subprocess.run(
+                                ["git", "-C", str(self.repo_path), "-c", "core.editor=true", "rebase", "--continue"],
+                                env=self._get_git_env(),
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=30,
+                            )
+                            if cont_res.returncode != 0:
+                                subprocess.run(
+                                    ["git", "-C", str(self.repo_path), "rebase", "--abort"],
+                                    env=self._get_git_env(),
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=15,
+                                )
+                        else:
+                            subprocess.run(
+                                ["git", "-C", str(self.repo_path), "rebase", "--abort"],
+                                env=self._get_git_env(),
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=15,
+                            )
                 except subprocess.TimeoutExpired:
-                    pass
+                    subprocess.run(
+                        ["git", "-C", str(self.repo_path), "rebase", "--abort"],
+                        env=self._get_git_env(),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=15,
+                    )
                 time.sleep(backoffs[min(attempt - 1, len(backoffs) - 1)])
 
         return {
