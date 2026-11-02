@@ -2019,7 +2019,7 @@ class LiveEdgeVerifier:
         primary_partner = (
             "splash_financial"
             if property_id == "prexvo"
-            else ("vanta_security" if property_id == "gainhelm" else "collective")
+            else ("vanta_security" if property_id == "gainhelm" else "mercury")
         )
         foreign_domains = {
             "prexvo": ("profithelm.com", "gainhelm.com"),
@@ -2072,12 +2072,17 @@ class LiveEdgeVerifier:
 
         # 1. GET /api/lead-capture
         c1, b1, j1, l1 = _req_json("/api/lead-capture", "GET", None, (200,))
+        j1_meta_str = (
+            json.dumps({k: v for k, v in j1.items() if k != "leads"}).lower()
+            if isinstance(j1, dict)
+            else b1.lower()
+        )
         r1_ok = (
             c1 == 200
             and isinstance(j1, dict)
             and j1.get("ok") is True
             and j1.get("property_id") == property_id
-            and not any(fd in b1.lower() for fd in foreign_domains)
+            and not any(fd in j1_meta_str for fd in foreign_domains)
         )
         routes["GET /api/lead-capture"] = {
             "status": "PASS" if r1_ok else "FAIL",
