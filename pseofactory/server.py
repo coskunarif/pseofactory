@@ -17,42 +17,22 @@ from typing import Any, Dict, List, Optional, Union
 import urllib.parse
 
 
-_LOCAL_PARTNER_DESTINATIONS: Dict[str, str] = {
-    "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-    "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-    "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-    "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-    "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-    "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-    "mercury": "https://mercury.com/partner/profithelm",
-    "rippling": "https://try.rippling.com/mcfo1m09qiwt",
-    "coinledger": "https://coinledger.io/?fpr=arif79",
-    "koinly": "https://koinly.io/?via=C9AC2AD5&utm_source=affiliate",
-    "kalshi": "https://kalshi.com/sign-up/?referral=f003999f-7392-4be9-b6d4-376d7de7ae7c",
-    "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
-    "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
-    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
-    "efile": "https://www.jdoqocy.com/click-101906407-11917161",
-    "eztaxreturn": "https://www.dpbolvw.net/click-101906407-15704796",
-    "lawdepot": "https://www.jdoqocy.com/click-101906407-16985242",
-    "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
-    "otr_solutions_factoring": "https://www.otrsolutions.com/freight-factoring/",
-    "splash_financial": "https://www.splashfinancial.com/partner/prexvo",
-    "credible_student_loans": "https://www.credible.com/refinance-student-loans",
-    "sofi_student_refi": "https://www.sofi.com/refinance-student-loan/",
-    "sofi_refi": "https://www.sofi.com/refinance-student-loan/",
-    "earnest_student_refi": "https://www.earnest.com/refinance-student-loans",
-    "lendkey_student_refi": "https://www.lendkey.com/student-loan-refinancing/",
-    "laurel_road": "https://www.laurelroad.com/student-loan-refinancing/",
-    "juno": "https://joinjuno.com/student-loan-refinancing",
-    "wealthfront": "https://www.wealthfront.com/",
-    "fundrise": "https://fundrise.com/",
-    "stripe": "https://stripe.com/",
-    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
-    "rho": "https://www.rho.co/",
-    "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
-}
+from pseofactory.edge import (
+    build_canonical_partner_catalog,
+    resolve_canonical_partner_redirect,
+)
+
+
+def _build_local_partner_destinations() -> Dict[str, str]:
+    catalog = build_canonical_partner_catalog()
+    return {
+        k: str(v.get("effectiveUrl") or v.get("defaultUrl") or "")
+        for k, v in catalog.items()
+        if v.get("effectiveUrl") or v.get("defaultUrl")
+    }
+
+
+_LOCAL_PARTNER_DESTINATIONS: Dict[str, str] = _build_local_partner_destinations()
 
 
 def _sanitize_telemetry_dict(obj: Any) -> Any:
@@ -132,6 +112,10 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return False
 
     def _detect_property_id(self) -> str:
+        dist_srv = getattr(self, "dist_server", None)
+        explicit_prop = getattr(dist_srv, "property_id", None) if dist_srv is not None else None
+        if explicit_prop:
+            return str(explicit_prop).strip().lower()
         root_low = self.root_dir.lower()
         if "prexvo" in root_low:
             return "prexvo"
@@ -139,37 +123,80 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return "gainhelm"
         return "profithelm"
 
+    def _evaluate_redirects_file(self, clean_path: str, query_str: str = "") -> Optional[tuple]:
+        redirects_file = Path(self.root_dir) / "_redirects"
+        if not redirects_file.is_file():
+            return None
+        try:
+            raw_lines = redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            return None
+
+        req_norm = clean_path if clean_path.startswith("/") else f"/{clean_path}"
+        req_stripped = req_norm.rstrip("/") if req_norm != "/" else "/"
+
+        for line in raw_lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            tokens = stripped.split()
+            if len(tokens) < 2:
+                continue
+            src = tokens[0].strip()
+            dst = tokens[1].strip()
+            status_code = 301
+            if len(tokens) >= 3:
+                code_str = tokens[2].rstrip("!")
+                if code_str.isdigit():
+                    status_code = int(code_str)
+            # Skip internal 200 SPA fallback rewrites for /r/* and /api/* handled natively
+            if status_code == 200:
+                continue
+
+            matched_target: Optional[str] = None
+            if src.endswith("/*"):
+                prefix = src[:-1]  # e.g. "/vs/"
+                prefix_no_slash = prefix.rstrip("/")
+                if req_norm == prefix_no_slash or req_norm.startswith(prefix):
+                    splat_val = req_norm[len(prefix):] if req_norm.startswith(prefix) else ""
+                    matched_target = dst.replace(":splat", splat_val)
+            else:
+                src_stripped = src.rstrip("/") if src != "/" else "/"
+                if req_norm == src or req_stripped == src_stripped:
+                    matched_target = dst
+
+            if matched_target:
+                if query_str and "?" not in matched_target:
+                    matched_target = f"{matched_target}?{query_str}"
+                return (status_code, matched_target)
+        return None
+
     def _handle_affiliate_redirect(self, is_head: bool = False) -> None:
         parsed_url = urllib.parse.urlsplit(self.path)
         partner = parsed_url.path[len("/r/"):].strip("/").lower()
-        dest_base = _LOCAL_PARTNER_DESTINATIONS.get(partner)
-        if not dest_base:
-            try:
-                from pseofactory.affiliates import GAINHELM_AFFILIATES, PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
-                if partner in PROFITHELM_AFFILIATES:
-                    dest_base = PROFITHELM_AFFILIATES[partner].default_url
-                elif partner in PREXVO_AFFILIATES:
-                    dest_base = PREXVO_AFFILIATES[partner].default_url
-                elif partner in GAINHELM_AFFILIATES:
-                    dest_base = GAINHELM_AFFILIATES[partner].default_url
-            except Exception:
-                dest_base = None
-        if not dest_base:
+        in_qs_pairs = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=False)
+        flat_qs: Dict[str, str] = {}
+        for k, v in in_qs_pairs:
+            clean_k = re.sub(r"^(?:amp;)+", "", k, flags=re.IGNORECASE)
+            if clean_k and v and clean_k not in flat_qs:
+                flat_qs[clean_k] = v
+
+        prop_id = self._detect_property_id()
+        resolved = resolve_canonical_partner_redirect(
+            partner,
+            query_params=flat_qs,
+            property_id=prop_id,
+        )
+        if not resolved:
             self.send_error(404, "Partner not found")
             return
 
-        in_qs = urllib.parse.parse_qs(parsed_url.query, keep_blank_values=False)
-        dest_split = urllib.parse.urlsplit(dest_base)
-        out_qs = urllib.parse.parse_qs(dest_split.query, keep_blank_values=False)
-        for k in ("subid", "click_id", "utm_source", "utm_medium", "utm_campaign", "utm_content", "source_tool", "cta_slot", "ph_tier", "tier"):
-            if k in in_qs and in_qs[k]:
-                out_qs[k] = [in_qs[k][0]]
-        source_tool = in_qs.get("source_tool", ["direct"])[0]
-        cta_slot = in_qs.get("cta_slot", ["edge_redirect"])[0]
-        subid = in_qs.get("subid", [f"{source_tool}_{cta_slot}"])[0]
-        out_qs.setdefault("subid", [subid])
-        final_query = urllib.parse.urlencode(out_qs, doseq=True)
-        final_url = urllib.parse.urlunsplit((dest_split.scheme, dest_split.netloc, dest_split.path, final_query, dest_split.fragment))
+        final_url = resolved["location"]
+        source_tool = resolved["source_tool"]
+        cta_slot = resolved["cta_slot"]
+        subid = resolved["subid"]
+        contract_tier = resolved["contract_tier"]
+        native_dest = resolved["native_destination"]
 
         dist_srv = getattr(self, "dist_server", None)
         if dist_srv is not None:
@@ -178,6 +205,8 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "source_tool": source_tool,
                 "cta_slot": cta_slot,
                 "subid": subid,
+                "contract_tier": contract_tier,
+                "native_destination": native_dest,
                 "location": final_url,
             })
 
@@ -187,6 +216,8 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("X-Robots-Tag", "noindex, nofollow")
         self.send_header("X-Edge-Partner", partner)
         self.send_header("X-Edge-Subid", subid)
+        self.send_header("X-Edge-Contract-Tier", contract_tier)
+        self.send_header("X-Edge-Native-Destination", native_dest)
         self.send_header("X-Edge-Telemetry", "recorded")
         self.end_headers()
 
@@ -313,8 +344,11 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
                 )
                 tool_slug = qs.get("tool_slug", qs.get("slug", [default_slug]))[0]
-                offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id)
+                sku_param = qs.get("sku", qs.get("offer_sku", [""]))[0] or None
+                offer = resolve_lead_monetization_offer(prop_id, tool_slug, lead_id=lead_id, sku=sku_param)
                 eff_rec_chk: Dict[str, Any] = {"lead_id": lead_id, "property_id": prop_id, "tool_slug": tool_slug}
+                if sku_param:
+                    eff_rec_chk["offer_sku"] = sku_param
                 amt_raw = qs.get("amount", [""])[0]
                 if amt_raw:
                     try:
@@ -368,6 +402,22 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 }
                 if dist_srv is not None:
                     dist_srv.checkout_sessions.append(chk_record)
+                fmt_param = qs.get("format", [""])[0].strip().lower()
+                redirect_param = qs.get("redirect", [""])[0].strip().lower()
+                accept_hdr = str(self.headers.get("Accept") or "").lower()
+                if fmt_param != "json" and (redirect_param in ("1", "true") or "text/html" in accept_hdr):
+                    redir_loc = str(
+                        offer.get("checkout_url")
+                        or offer.get("success_url")
+                        or f"/tools/{tool_slug}/?checkout_status=ready"
+                    )
+                    self.send_response(302)
+                    self.send_header("Location", redir_loc)
+                    self.send_header("Cache-Control", "private, no-cache, no-store, must-revalidate")
+                    self.send_header("X-Edge-Checkout-Mode", "edge_checkout_rail")
+                    self.send_header("X-Edge-Offer-Sku", str(offer["offer_sku"]))
+                    self.end_headers()
+                    return
                 self._send_json(200, chk_record)
                 return
             leads = list(dist_srv.captured_leads) if dist_srv is not None else []
@@ -384,33 +434,14 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             events = list(dist_srv.telemetry_events) if dist_srv is not None else []
             self._send_json(200, {"ok": True, "count": len(events), "events": events})
             return
-        try:
-            fs_path = Path(self.translate_path(self.path))
-            if fs_path.is_dir():
-                fs_path = fs_path / "index.html"
-            if fs_path.is_file() and fs_path.suffix.lower() in (".html", ".htm"):
-                from pseofactory.visual_primitives import normalize_html_visual_primitives
-                raw_html = fs_path.read_text(encoding="utf-8", errors="ignore")
-                _fault_markers = (
-                    "--missing-canvas-bg",
-                    "tiny-tap-rule",
-                    "{corrupted_json",
-                    "font-size: 14px !important",
-                    "overflow-x: hidden; min-width: 980px",
-                )
-                if any(marker in raw_html for marker in _fault_markers):
-                    norm_html = raw_html
-                else:
-                    norm_html, _ = normalize_html_visual_primitives(raw_html)
-                payload = norm_html.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-                return
-        except Exception:
-            pass
+        redirect_rule = self._evaluate_redirects_file(clean_path, parsed_url.query)
+        if redirect_rule is not None:
+            r_status, r_location = redirect_rule
+            self.send_response(r_status)
+            self.send_header("Location", r_location)
+            self.send_header("Cache-Control", "private, no-cache, no-store, must-revalidate")
+            self.end_headers()
+            return
         super().do_GET()
 
     def do_HEAD(self) -> None:
@@ -420,6 +451,14 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlsplit(self.path)
         if parsed_url.path.startswith("/r/"):
             self._handle_affiliate_redirect(is_head=True)
+            return
+        redirect_rule = self._evaluate_redirects_file(parsed_url.path, parsed_url.query)
+        if redirect_rule is not None:
+            r_status, r_location = redirect_rule
+            self.send_response(r_status)
+            self.send_header("Location", r_location)
+            self.send_header("Cache-Control", "private, no-cache, no-store, must-revalidate")
+            self.end_headers()
             return
         super().do_HEAD()
 
@@ -589,10 +628,12 @@ class EphemeralDistServer:
         directory: Union[str, Path],
         host: str = "127.0.0.1",
         port: int = 0,
+        property_id: Optional[str] = None,
     ):
         self.directory = Path(directory).resolve()
         self.host = host
         self.port = port
+        self.property_id = property_id
         self.server: Optional[socketserver.TCPServer] = None
         self.thread: Optional[threading.Thread] = None
         self.captured_leads: List[Dict[str, Any]] = []

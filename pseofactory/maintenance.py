@@ -3688,18 +3688,27 @@ class RefactorCascadeEngine:
                     )
 
                     raw_html = target_path.read_text(encoding="utf-8", errors="ignore")
+                    try:
+                        rel_target = target_path.relative_to(adapter.dist_dir).as_posix()
+                    except Exception:
+                        rel_target = target_path.name
+                    rel_parts = rel_target.split("/")
+                    if len(rel_parts) >= 3 and rel_parts[0] == "tools" and rel_parts[-1] == "index.html":
+                        effective_slug = "/".join(rel_parts[1:-1])
+                    else:
+                        effective_slug = slug
                     is_tool_page = RetroReflectionEngine.is_tool_or_calculator_page(
                         target_path, adapter.dist_dir, raw_html
                     )
                     if (
-                        detect_visual_and_ux_contract_issues(raw_html, rel_path=target_path.name)
+                        detect_visual_and_ux_contract_issues(raw_html, rel_path=rel_target)
                         or (is_tool_page and _needs_page_structure_geo_normalization(raw_html))
                     ):
                         if is_tool_page:
                             retro_html, _ = RetroReflectionEngine.retrofit_html(
                                 raw_html,
                                 property_id=adapter.property_id,
-                                slug=slug,
+                                slug=effective_slug,
                                 dist_dir=adapter.dist_dir,
                             )
                             if retro_html != raw_html:
@@ -3712,8 +3721,8 @@ class RefactorCascadeEngine:
                     reconciled_html, recon_changes = TruthReconciliationEngine.reconcile_html_truth(
                         raw_html,
                         tenant=adapter.property_id,
-                        rel_path=target_path.name,
-                        slug=slug,
+                        rel_path=rel_target,
+                        slug=effective_slug,
                     )
                     if recon_changes and reconciled_html != raw_html:
                         target_path.write_text(reconciled_html, encoding="utf-8")

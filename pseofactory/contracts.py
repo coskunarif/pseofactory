@@ -4839,7 +4839,8 @@ VALID_FEDERAL_TAX_RATES: Set[float] = {
 
 ALL_OFFICIAL_STANDARD_DEDUCTIONS: Set[float] = {
     14600.0, 29200.0, 21900.0, 15000.0, 30000.0, 22500.0,
-    15350.0, 30700.0, 23050.0, 8600.0, 17200.0, 12900.0,
+    15350.0, 30700.0, 23050.0, 16100.0, 32200.0, 24150.0,
+    16500.0, 33000.0, 24750.0, 8600.0, 17200.0, 12900.0,
     1950.0, 1550.0, 2000.0, 1600.0, 2050.0, 1650.0,
 }
 
@@ -5005,16 +5006,16 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                         )
                     else:
                         if "single" in surrounding and "married" not in surrounding and "mfj" not in surrounding:
-                            if val not in {8600.0, 14600.0, 15000.0, 15350.0}:
+                            if val not in {8600.0, 14600.0, 15000.0, 15350.0, 16100.0, 16500.0}:
                                 issues.append(
                                     f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
-                                    f"official published Single standard deduction is $14,600 (2024), $15,000 (2025/2026), or $8,600 (post-TCJA)"
+                                    f"official published Single standard deduction is $14,600 (2024), $15,000 (2025/2026), $16,100 (2026 Rev. Proc. 2025-32), or $8,600 (post-TCJA)"
                                 )
                         elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
-                            if val not in {17200.0, 29200.0, 30000.0, 30700.0}:
+                            if val not in {17200.0, 29200.0, 30000.0, 30700.0, 32200.0, 33000.0}:
                                 issues.append(
                                     f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
-                                    f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025/2026), or $17,200 (post-TCJA)"
+                                    f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025/2026), $32,200 (2026 Rev. Proc. 2025-32), or $17,200 (post-TCJA)"
                                 )
             except Exception:
                 pass

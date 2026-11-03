@@ -2695,15 +2695,37 @@ def test_sovrn_inbox_1032_gainhelm_prerequisites_and_department_pipeline_handoff
     assert rc == 0
 
 
-def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand():
+def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand(tmp_path):
     """Verifies AssetIntegrityEvaluator audits GainHelm syndication youtube_metadata.json against brand 'GainHelm'."""
-    from pseofactory.maintenance import AssetIntegrityEvaluator, WorkspacePropertyScanner
+    import shutil
+    from pseofactory.maintenance import (
+        AssetIntegrityEvaluator,
+        ConfigurablePropertyAdapter,
+        RetroReflectionEngine,
+        WorkspacePropertyScanner,
+    )
 
     scanner = WorkspacePropertyScanner()
     by_id = {p.property_id: p for p in scanner.discover_properties()}
     assert "gainhelm" in by_id
+    src_adapter = by_id["gainhelm"]
+    gh_repo = tmp_path / "gainhelm"
+    gh_dist = gh_repo / "dist"
+    shutil.copytree(src_adapter.dist_dir, gh_dist)
+    src_synd = src_adapter.dist_dir.parent / "syndication"
+    if src_synd.is_dir():
+        shutil.copytree(src_synd, gh_repo / "syndication")
+    RetroReflectionEngine.retrofit_estate(gh_dist, property_id="gainhelm", canonical_base="https://gainhelm.com")
+    adapter = ConfigurablePropertyAdapter(
+        property_id="gainhelm",
+        brand_name="GainHelm",
+        domain="gainhelm.com",
+        canonical_base="https://gainhelm.com",
+        dist_dir=gh_dist,
+        repo_path=gh_repo,
+    )
     evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
-    rep = evaluator.audit_all(by_id["gainhelm"], check_engine_drift=False, check_ledger=False)
+    rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
     assert rep.status == "PASS", f"GainHelm audit_all failed: {[d.details for d in rep.drifted_assets]}"
     assert rep.drifted_assets_count == 0
 

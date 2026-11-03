@@ -75,20 +75,41 @@ def cmd_audit(args: argparse.Namespace) -> int:
             PrexvoBrowserAdapter,
             GainHelmBrowserAdapter,
         )
-        browser_adapter = None
         prop = (args.property or "").lower()
-        if prop == "profithelm":
-            browser_adapter = ProfitHelmBrowserAdapter()
-        elif prop == "prexvo":
-            browser_adapter = PrexvoBrowserAdapter()
-        elif prop == "gainhelm":
-            browser_adapter = GainHelmBrowserAdapter()
+        adapter_map = {
+            "profithelm": ProfitHelmBrowserAdapter,
+            "prexvo": PrexvoBrowserAdapter,
+            "gainhelm": GainHelmBrowserAdapter,
+        }
+        if prop == "all" and not args.dist_dir:
+            all_browser_ok = True
+            browser_reports = {}
+            for p_id, adp_cls in adapter_map.items():
+                auditor = UnifiedBrowserAuditor(
+                    adapter=adp_cls(),
+                    cdp_port=getattr(args, "cdp_port", 9222),
+                    fail_closed=getattr(args, "fail_closed", None),
+                )
+                rep = auditor.run_audit(sample_size=getattr(args, "sample", None))
+                browser_reports[p_id] = rep
+                if not args.json:
+                    status = rep.get("status", "UNKNOWN")
+                    print(
+                        f"[{status}] Browser CDP Audit for '{p_id}': "
+                        f"Total: {rep.get('total_routes', 0)} | Audited: {rep.get('routes_audited', 0)} | Failed: {rep.get('failed_count', 0)}"
+                    )
+                if rep.get("status") != "PASS":
+                    all_browser_ok = False
+            if args.json:
+                print(json.dumps({"status": "PASS" if all_browser_ok else "FAIL", "properties": browser_reports}, indent=2))
+            return 0 if all_browser_ok else 1
 
+        browser_adapter = adapter_map[prop]() if prop in adapter_map else None
         auditor = UnifiedBrowserAuditor(
             adapter=browser_adapter,
             dist_dir=args.dist_dir,
             cdp_port=getattr(args, "cdp_port", 9222),
-            fail_closed=getattr(args, "fail_closed", False),
+            fail_closed=getattr(args, "fail_closed", None),
         )
         report = auditor.run_audit(sample_size=getattr(args, "sample", None))
         if args.json:
@@ -106,6 +127,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     print(f"  - {route}: horizontal overflow detected")
                 if f.get("dashes"):
                     print(f"  - {route}: forbidden dashes detected")
+                if f.get("widget_failures"):
+                    print(f"  - {route}: {len(f['widget_failures'])} interactive/widget failures")
         return 0 if report.get("status") in ("PASS", "SKIPPED_CDP_OFFLINE") else 1
 
     reg = TenantRegistry.default()

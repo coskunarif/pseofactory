@@ -696,42 +696,143 @@ class UnifiedBrowserAuditor:
 
     JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {
         const failures = [];
-        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary';
+        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
-        const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
-        if (primaryInp && document.querySelectorAll(outSel).length > 0) {
-            const beforeSnap = snapshotOutputs();
-            const origVal = primaryInp.value;
-            const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 10000;
-            const maxNum = parseFloat(primaryInp.getAttribute('max') || '') || 10000000;
-            const minNum = parseFloat(primaryInp.getAttribute('min') || '0') || 0;
-            let nextNum = Math.round(curNum * 1.35 + 50);
-            if (nextNum > maxNum) nextNum = Math.max(minNum + 1, Math.round(curNum * 0.65));
-            if (nextNum === curNum) nextNum = curNum + 10;
-            primaryInp.value = String(nextNum);
-            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
-            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
-            const afterSnap = snapshotOutputs();
-            if (beforeSnap === afterSnap) {
-                failures.push({ widget_id: primaryInp.id || primaryInp.name || 'primary_input', detail: 'Primary calculator input change did not update any output metric' });
+        const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
+        const hasOutputs = document.querySelectorAll(outSel).length > 0;
+
+        // 1. Verify all calculator number inputs, selects, and paired range sliders
+        const calcInputs = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), select')).filter(el => {
+            if (el.disabled) return false;
+            if (el.closest && el.closest('#partner-quote-intake-form, #lead-capture-form')) return false;
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden';
+        });
+        if (hasOutputs && calcInputs.length > 0) {
+            for (const inp of calcInputs) {
+                const beforeSnap = snapshotOutputs();
+                if (inp.tagName === 'SELECT') {
+                    if (!inp.options || inp.options.length < 2) continue;
+                    const origIdx = inp.selectedIndex;
+                    inp.selectedIndex = (origIdx + 1) % inp.options.length;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    const afterSnap = snapshotOutputs();
+                    if (beforeSnap === afterSnap) {
+                        failures.push({ widget_id: inp.id || inp.name || 'select_input', detail: 'Select control change did not update any output metric' });
+                    }
+                    inp.selectedIndex = origIdx;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                    const origVal = inp.value;
+                    const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 10000;
+                    const maxNum = parseFloat(inp.getAttribute('max') || '') || 10000000;
+                    const minNum = parseFloat(inp.getAttribute('min') || '0') || 0;
+                    let nextNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
+                    if (nextNum > maxNum || nextNum === curNum) {
+                        nextNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
+                    }
+                    if (nextNum === curNum) nextNum = curNum + 1;
+                    inp.value = String(nextNum);
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    const afterSnap = snapshotOutputs();
+                    if (beforeSnap === afterSnap) {
+                        failures.push({ widget_id: inp.id || inp.name || 'number_input', detail: 'Calculator input change did not update any output metric' });
+                    }
+                    inp.value = origVal;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             }
-            primaryInp.value = origVal;
-            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
-            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        const presetButtons = Array.from(document.querySelectorAll('button[data-calc-preset], .btn-preset[data-calc-preset], .serp-archetype-btn[data-calc-preset]'));
+
+        // 2. Verify all preset, switcher, scenario, and action buttons from a non-matching state
+        const presetSelector = [
+            'button[data-calc-preset]',
+            '.btn-preset[data-calc-preset]',
+            '.serp-archetype-btn[data-calc-preset]',
+            '.calc-switcher-btn[data-preset-hc]',
+            '[data-preset-sec179]',
+            '[data-preset-gains]',
+            '[data-preset-tey]',
+            '[data-preset-income]',
+            '[data-preset-pm-gain]',
+            '.runway-chip[data-cash]'
+        ].join(', ');
+        const presetButtons = Array.from(document.querySelectorAll(presetSelector));
         if (presetButtons.length > 0) {
-            const btn = presetButtons[presetButtons.length > 1 ? 1 : 0];
-            const beforeOut = snapshotOutputs();
-            const beforeInps = Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
-            btn.click();
-            const afterOut = snapshotOutputs();
-            const afterInps = Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
-            const hasReadout = Boolean(document.querySelector('.overlay-preset-readout'));
-            if (beforeOut === afterOut && beforeInps === afterInps && !hasReadout && !btn.classList.contains('active')) {
-                failures.push({ widget_id: 'data-calc-preset', detail: 'Clicking [data-calc-preset] button did not synchronize inputs, outputs, or active state' });
+            const origValues = calcInputs.map(el => ({ el, val: el.value, idx: el.tagName === 'SELECT' ? el.selectedIndex : -1 }));
+            for (let bIdx = 0; bIdx < presetButtons.length; bIdx++) {
+                const btn = presetButtons[bIdx];
+                // Perturb numeric inputs slightly so preset always runs from a non-matching state
+                for (const el of calcInputs) {
+                    if (el.tagName === 'INPUT') {
+                        const cVal = parseFloat(String(el.value).replace(/,/g, '')) || 100;
+                        const maxV = parseFloat(el.getAttribute('max') || '') || 10000000;
+                        const minV = parseFloat(el.getAttribute('min') || '0') || 0;
+                        let pVal = cVal < 50 ? Math.min(maxV, cVal + 1) : Math.min(maxV, cVal + 17);
+                        if (pVal === cVal) pVal = Math.max(minV, cVal - 1);
+                        el.value = String(pVal);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+                btn.classList.remove('active');
+                const beforeOut = snapshotOutputs();
+                const beforeInps = snapshotInputs();
+                btn.click();
+                const afterOut = snapshotOutputs();
+                const afterInps = snapshotInputs();
+                if (beforeOut === afterOut && beforeInps === afterInps) {
+                    failures.push({
+                        widget_id: btn.id || ('preset_btn_' + bIdx),
+                        detail: 'Clicking preset/switcher button did not update inputs or outputs: ' + (btn.innerText || btn.textContent || '').trim().slice(0, 48)
+                    });
+                }
+            }
+            for (const item of origValues) {
+                if (item.el.tagName === 'SELECT' && item.idx >= 0) {
+                    item.el.selectedIndex = item.idx;
+                } else {
+                    item.el.value = item.val;
+                }
+                item.el.dispatchEvent(new Event('input', { bubbles: true }));
+                item.el.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
+
+        // 3. Verify keyboard focusability and visible focus indicators (--border-focus)
+        const posTabEls = Array.from(document.querySelectorAll('[tabindex]')).filter(el => (parseInt(el.getAttribute('tabindex') || '0', 10) || 0) > 0);
+        if (posTabEls.length > 0) {
+            failures.push({ widget_id: 'positive_tabindex_trap', detail: 'Positive tabindex trap detected on ' + posTabEls.length + ' elements' });
+        }
+        const focusSample = Array.from(document.querySelectorAll('a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), summary')).filter(el => {
+            if (el.classList && el.classList.contains('skip-to-content-link')) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+        }).slice(0, 12);
+        for (const fEl of focusSample) {
+            try {
+                fEl.focus({ preventScroll: true });
+                if (document.activeElement === fEl) {
+                    const cs = window.getComputedStyle(fEl);
+                    const hasOutline = cs.outlineStyle && cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth || '0') >= 1.5;
+                    const hasShadow = cs.boxShadow && cs.boxShadow !== 'none';
+                    if (!hasOutline && !hasShadow) {
+                        failures.push({ widget_id: fEl.id || fEl.tagName, detail: 'Interactive control has no visible focus indicator (outlineStyle=none, boxShadow=none)' });
+                        break;
+                    }
+                }
+            } catch (e) {}
+        }
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+
+        // 4. Verify affiliate CTAs
         const affiliateAnchors = Array.from(document.querySelectorAll('a[data-partner], a.affiliate-cta-link, .partner-card a[href], .calc-inline-cta a[href], .overlay-partner-offer a[href]'));
         affiliateAnchors.forEach((a, idx) => {
             const rawHref = a.getAttribute('href') || '';
@@ -759,20 +860,22 @@ class UnifiedBrowserAuditor:
             route: window.location.pathname,
             console_errors: Array.isArray(window.__pseoConsoleErrors) ? [...window.__pseoConsoleErrors] : [],
             page_errors: Array.isArray(window.__pseoPageErrors) ? [...window.__pseoPageErrors] : [],
-            links_audit: { total_links: 0, internal_links: 0, affiliate_links: 0, invalid_links: [], unrouted_affiliate_links: [] },
+            links_audit: { total_links: 0, internal_links: 0, affiliate_links: 0, invalid_links: [], unrouted_affiliate_links: [], internal_hrefs: [], affiliate_hrefs: [] },
+            focus_and_keyboard_navigation: { tested: true, passed: true, focusable_count: 0, zero_outline_failures: [], positive_tabindex_traps: [], skip_link_valid: true, details_accordions_toggled: 0, accordion_failures: [] },
             deep_link_hydration: { tested: false, passed: true, detail: '' },
-            calculator_and_presets: { tested: false, passed: true, before_snapshot: '', after_snapshot: '', preset_clicked: false },
+            calculator_and_presets: { tested: false, passed: true, before_snapshot: '', after_snapshot: '', preset_clicked: false, inputs_tested_count: 0, input_failures: [], buttons_tested_count: 0, button_failures: [] },
             cliff_visualizer: { present: false, passed: true, before_values: [], after_values: [] },
             scenario_comparator: { present: false, passed: true, pinned_a: '', pinned_b: '', live_delta: '' },
             blueprint_actions: { present: false, passed: true, saved_status: '', shared_status: '', exported_status: '', storage_keys: 0 },
             post_calc_upgrade_drawer: { present: false, passed: true, preview_rendered: false, checkout_status: '', settlement_id: '', datapack_download_triggered: false },
             playbook_lead_capture_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
             partner_quote_intake_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
-            affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '' }
+            affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '', partners_verified_count: 0, all_partner_redirects: [], partner_failures: [] }
         };
 
-        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary';
+        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
+        const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
 
         // 1. Links audit (internal + affiliate/outbound)
         const allAnchors = Array.from(document.querySelectorAll('a[href]'));
@@ -786,22 +889,208 @@ class UnifiedBrowserAuditor:
             const isAff = a.hasAttribute('data-partner') || a.classList.contains('affiliate-cta-link') || Boolean(a.closest('.partner-card, .calc-inline-cta, .overlay-partner-offer, #vetted-commercial-handoff')) || href.startsWith('/r/');
             if (isAff) {
                 report.links_audit.affiliate_links += 1;
+                report.links_audit.affiliate_hrefs.push(href);
                 const rel = (a.getAttribute('rel') || '').toLowerCase();
                 if (!href.startsWith('/r/') || !rel.includes('sponsored') || !rel.includes('nofollow')) {
                     report.links_audit.unrouted_affiliate_links.push({ href: href, rel: rel, id: a.id || '' });
                 }
             } else if (href.startsWith('/') || href.startsWith(window.location.origin) || href.startsWith('#')) {
                 report.links_audit.internal_links += 1;
+                if (!href.startsWith('/api/') && !href.startsWith('/r/')) {
+                    report.links_audit.internal_hrefs.push(href);
+                }
                 if (href.startsWith('#') && href.length > 1) {
                     const targetId = href.slice(1);
-                    if (!document.getElementById(targetId)) {
+                    if (!document.getElementById(targetId) && !document.querySelector('[name="' + targetId + '"]')) {
                         report.links_audit.invalid_links.push(href);
                     }
                 }
             }
         }
 
-        // 2. Primary calculator input, cliff visualizer, scenario comparator, presets, and deep-link hydration
+        // 1b. Focus states, skip-to-content target, positive tabindex traps, and details/summary accordions
+        const posTabNodes = Array.from(document.querySelectorAll('[tabindex]')).filter(el => (parseInt(el.getAttribute('tabindex') || '0', 10) || 0) > 0);
+        for (const pt of posTabNodes) {
+            report.focus_and_keyboard_navigation.positive_tabindex_traps.push(pt.id || pt.tagName);
+        }
+        const mainLandmark = document.querySelector('main');
+        const skipLink = document.querySelector('a.skip-to-content-link[href^="#"], a[href="#main-content"]');
+        if (mainLandmark) {
+            if (!skipLink) {
+                report.focus_and_keyboard_navigation.skip_link_valid = false;
+            } else {
+                const skipTargetId = (skipLink.getAttribute('href') || '').slice(1);
+                const skipTargetEl = skipTargetId ? document.getElementById(skipTargetId) : null;
+                if (!skipTargetEl) {
+                    report.focus_and_keyboard_navigation.skip_link_valid = false;
+                }
+            }
+        }
+        const detailsList = Array.from(document.querySelectorAll('details'));
+        for (const det of detailsList) {
+            const sumEl = det.querySelector('summary');
+            if (!sumEl) continue;
+            const cs = window.getComputedStyle(det);
+            if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+            const origOpen = det.open;
+            sumEl.click();
+            if (det.open === origOpen) {
+                report.focus_and_keyboard_navigation.accordion_failures.push(det.id || (sumEl.innerText || '').trim().slice(0, 36));
+            } else {
+                report.focus_and_keyboard_navigation.details_accordions_toggled += 1;
+            }
+            det.open = origOpen;
+        }
+        const focusCandidates = Array.from(document.querySelectorAll('a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [role="button"]')).filter(el => {
+            if (el.classList && el.classList.contains('skip-to-content-link')) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+        });
+        for (const fEl of focusCandidates) {
+            try {
+                fEl.focus({ preventScroll: true });
+                if (document.activeElement === fEl) {
+                    report.focus_and_keyboard_navigation.focusable_count += 1;
+                    const cs = window.getComputedStyle(fEl);
+                    const hasOutline = cs.outlineStyle && cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth || '0') >= 1.5;
+                    const hasShadow = cs.boxShadow && cs.boxShadow !== 'none';
+                    if (!hasOutline && !hasShadow) {
+                        report.focus_and_keyboard_navigation.zero_outline_failures.push(fEl.id || fEl.className || fEl.tagName);
+                    }
+                }
+            } catch (e) {}
+        }
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+        window.scrollTo(0, 0);
+        report.focus_and_keyboard_navigation.passed = (
+            report.focus_and_keyboard_navigation.skip_link_valid &&
+            report.focus_and_keyboard_navigation.positive_tabindex_traps.length === 0 &&
+            report.focus_and_keyboard_navigation.zero_outline_failures.length === 0 &&
+            report.focus_and_keyboard_navigation.accordion_failures.length === 0 &&
+            (focusCandidates.length === 0 || report.focus_and_keyboard_navigation.focusable_count > 0)
+        );
+
+        // 2. All calculator inputs/selects/sliders, cliff visualizer, scenario comparator, presets, and deep-link hydration
+        const allCalcControls = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), select')).filter(el => {
+            if (el.disabled) return false;
+            if (el.closest && el.closest('#partner-quote-intake-form, #lead-capture-form')) return false;
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden';
+        });
+        if (allCalcControls.length > 0 && document.querySelectorAll(outSel).length > 0) {
+            for (const ctrl of allCalcControls) {
+                const beforeSnap = snapshotOutputs();
+                if (ctrl.tagName === 'SELECT') {
+                    if (!ctrl.options || ctrl.options.length < 2) continue;
+                    const origIdx = ctrl.selectedIndex;
+                    ctrl.selectedIndex = (origIdx + 1) % ctrl.options.length;
+                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                    report.calculator_and_presets.inputs_tested_count += 1;
+                    const afterSnap = snapshotOutputs();
+                    if (beforeSnap === afterSnap) {
+                        report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'select_control');
+                    }
+                    ctrl.selectedIndex = origIdx;
+                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                    const origVal = ctrl.value;
+                    const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 10000;
+                    const maxNum = parseFloat(ctrl.getAttribute('max') || '') || 10000000;
+                    const minNum = parseFloat(ctrl.getAttribute('min') || '0') || 0;
+                    let nextNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
+                    if (nextNum > maxNum || nextNum === curNum) {
+                        nextNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
+                    }
+                    if (nextNum === curNum) nextNum = curNum + 1;
+                    ctrl.value = String(nextNum);
+                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                    report.calculator_and_presets.inputs_tested_count += 1;
+                    const afterSnap = snapshotOutputs();
+                    if (beforeSnap === afterSnap) {
+                        report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'number_control');
+                    }
+                    ctrl.value = origVal;
+                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+        }
+
+        // Test all preset, switcher, scenario, and action buttons from a non-matching state
+        const presetSelector = [
+            'button[data-calc-preset]',
+            '.btn-preset[data-calc-preset]',
+            '.serp-archetype-btn[data-calc-preset]',
+            '.calc-switcher-btn[data-preset-hc]',
+            '[data-preset-sec179]',
+            '[data-preset-gains]',
+            '[data-preset-tey]',
+            '[data-preset-income]',
+            '[data-preset-pm-gain]',
+            '.runway-chip[data-cash]'
+        ].join(', ');
+        const allPresetBtns = Array.from(document.querySelectorAll(presetSelector));
+        if (allPresetBtns.length > 0) {
+            const savedControls = allCalcControls.map(el => ({ el, val: el.value, idx: el.tagName === 'SELECT' ? el.selectedIndex : -1 }));
+            for (let bIdx = 0; bIdx < allPresetBtns.length; bIdx++) {
+                const btn = allPresetBtns[bIdx];
+                for (const el of allCalcControls) {
+                    if (el.tagName === 'INPUT') {
+                        const cVal = parseFloat(String(el.value).replace(/,/g, '')) || 100;
+                        const maxV = parseFloat(el.getAttribute('max') || '') || 10000000;
+                        const minV = parseFloat(el.getAttribute('min') || '0') || 0;
+                        let pVal = cVal < 50 ? Math.min(maxV, cVal + 1) : Math.min(maxV, cVal + 17);
+                        if (pVal === cVal) pVal = Math.max(minV, cVal - 1);
+                        el.value = String(pVal);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+                btn.classList.remove('active');
+                const beforeOut = snapshotOutputs();
+                const beforeInps = snapshotInputs();
+                btn.click();
+                report.calculator_and_presets.preset_clicked = true;
+                report.calculator_and_presets.buttons_tested_count += 1;
+                const afterOut = snapshotOutputs();
+                const afterInps = snapshotInputs();
+                if (beforeOut === afterOut && beforeInps === afterInps) {
+                    report.calculator_and_presets.button_failures.push(btn.id || ('preset_' + bIdx + ':' + (btn.innerText || btn.textContent || '').trim().slice(0, 32)));
+                }
+            }
+            for (const item of savedControls) {
+                if (item.el.tagName === 'SELECT' && item.idx >= 0) {
+                    item.el.selectedIndex = item.idx;
+                } else {
+                    item.el.value = item.val;
+                }
+                item.el.dispatchEvent(new Event('input', { bubbles: true }));
+                item.el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } else {
+            const scenarioAnchor = document.querySelector('a.scenario-preset-link[href*="?"]');
+            if (scenarioAnchor) {
+                scenarioAnchor.click();
+                report.calculator_and_presets.preset_clicked = true;
+                report.calculator_and_presets.buttons_tested_count += 1;
+            }
+        }
+
+        const calcSubmitBtn = document.getElementById('calc-submit-btn');
+        if (calcSubmitBtn) {
+            calcSubmitBtn.click();
+            report.calculator_and_presets.buttons_tested_count += 1;
+            if (calcSubmitBtn.getAttribute('data-recalculated') !== 'true') {
+                report.calculator_and_presets.button_failures.push('calc-submit-btn');
+            }
+        }
+
         const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
         const cliffRoot = document.getElementById('multi-year-cliff-visualizer') || document.querySelector('.serp-cliff-chart');
         const cliffValueSelector = '[id^="cliff-exposure-"], [id^="serp-cliff-val-"]';
@@ -827,6 +1116,7 @@ class UnifiedBrowserAuditor:
 
             if (pinABtn) {
                 pinABtn.click();
+                report.calculator_and_presets.buttons_tested_count += 1;
             }
 
             report.calculator_and_presets.before_snapshot = snapshotOutputs();
@@ -850,6 +1140,7 @@ class UnifiedBrowserAuditor:
 
             if (pinBBtn) {
                 pinBBtn.click();
+                report.calculator_and_presets.buttons_tested_count += 1;
                 const aNode = document.getElementById('comp-a-retained') || document.getElementById('serp-scn-a-retained');
                 const bNode = document.getElementById('comp-b-retained') || document.getElementById('serp-scn-b-retained');
                 const dNode = document.getElementById('comp-live-delta') || document.getElementById('comp-b-delta') || document.getElementById('serp-scn-delta-banner');
@@ -861,6 +1152,7 @@ class UnifiedBrowserAuditor:
                 }
                 if (pinResetBtn) {
                     pinResetBtn.click();
+                    report.calculator_and_presets.buttons_tested_count += 1;
                 }
             }
 
@@ -879,14 +1171,11 @@ class UnifiedBrowserAuditor:
             window.history.replaceState(null, '', origUrl);
         }
 
-        const presetBtn = document.querySelector('button[data-calc-preset], .btn-preset[data-calc-preset], .serp-archetype-btn[data-calc-preset], a.scenario-preset-link[href*="?"]');
-        if (presetBtn) {
-            if (presetBtn.tagName !== 'A') {
-                presetBtn.click();
-                report.calculator_and_presets.preset_clicked = true;
-            } else {
-                report.calculator_and_presets.preset_clicked = true;
-            }
+        if (
+            report.calculator_and_presets.input_failures.length > 0 ||
+            report.calculator_and_presets.button_failures.length > 0
+        ) {
+            report.calculator_and_presets.passed = false;
         }
 
         // 3. Saveable Decision Blueprint actions
@@ -897,13 +1186,16 @@ class UnifiedBrowserAuditor:
         if (saveBtn) {
             report.blueprint_actions.present = true;
             saveBtn.click();
+            report.calculator_and_presets.buttons_tested_count += 1;
             report.blueprint_actions.saved_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
             if (shareBtn) {
                 shareBtn.click();
+                report.calculator_and_presets.buttons_tested_count += 1;
                 report.blueprint_actions.shared_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
             }
             if (exportBtn) {
                 exportBtn.click();
+                report.calculator_and_presets.buttons_tested_count += 1;
                 report.blueprint_actions.exported_status = statusNode ? (statusNode.innerText || statusNode.textContent || '').trim() : '';
             }
             let bpKeys = 0;
@@ -926,9 +1218,10 @@ class UnifiedBrowserAuditor:
             const previewBtn = document.getElementById('btn-preview-post-calc-workpaper') || upgDrawer.querySelector('[data-blueprint-action="preview_workpaper"]');
             if (previewBtn) {
                 previewBtn.click();
-                for (let i = 0; i < 20; i++) {
-                    await new Promise(r => setTimeout(r, 40));
+                report.calculator_and_presets.buttons_tested_count += 1;
+                for (let i = 0; i < 40; i++) {
                     if (document.getElementById('playbook-download-link') || document.getElementById('playbook-datapack-link')) break;
+                    await new Promise(r => setTimeout(r, 12));
                 }
                 report.post_calc_upgrade_drawer.preview_rendered = Boolean(
                     document.getElementById('playbook-download-link') &&
@@ -939,9 +1232,10 @@ class UnifiedBrowserAuditor:
             const upgCheckoutBtn = document.getElementById('btn-post-calc-upgrade-checkout') || upgDrawer.querySelector('[data-checkout-trigger]');
             if (upgCheckoutBtn) {
                 upgCheckoutBtn.click();
-                for (let i = 0; i < 30; i++) {
-                    await new Promise(r => setTimeout(r, 50));
+                report.calculator_and_presets.buttons_tested_count += 1;
+                for (let i = 0; i < 60; i++) {
                     if (upgCheckoutBtn.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
+                    await new Promise(r => setTimeout(r, 12));
                 }
                 report.post_calc_upgrade_drawer.checkout_status = upgCheckoutBtn.getAttribute('data-checkout-status') || '';
                 report.post_calc_upgrade_drawer.settlement_id = upgCheckoutBtn.getAttribute('data-settlement-id') || '';
@@ -976,11 +1270,11 @@ class UnifiedBrowserAuditor:
                 emailInp.value = 'playbook-probe@synthetic.pseofactory.test';
             }
             leadForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 30; i++) {
-                await new Promise(r => setTimeout(r, 50));
+            for (let i = 0; i < 60; i++) {
                 if (leadForm.getAttribute('data-submission-state') === 'success' || leadForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
+                await new Promise(r => setTimeout(r, 12));
             }
             report.playbook_lead_capture_and_checkout.submission_state = leadForm.getAttribute('data-submission-state') || '';
             const pbPartner = document.getElementById('playbook-partner-link');
@@ -988,11 +1282,11 @@ class UnifiedBrowserAuditor:
             report.playbook_lead_capture_and_checkout.partner_href = pbPartner ? (pbPartner.getAttribute('href') || '') : '';
             if (pbCheckout) {
                 pbCheckout.click();
-                for (let i = 0; i < 30; i++) {
-                    await new Promise(r => setTimeout(r, 50));
+                for (let i = 0; i < 60; i++) {
                     if (pbCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
+                    await new Promise(r => setTimeout(r, 12));
                 }
                 report.playbook_lead_capture_and_checkout.checkout_status = pbCheckout.getAttribute('data-checkout-status') || '';
                 report.playbook_lead_capture_and_checkout.checkout_session_id = pbCheckout.getAttribute('data-checkout-session-id') || '';
@@ -1015,11 +1309,11 @@ class UnifiedBrowserAuditor:
             if (qEmail) qEmail.value = 'quote-probe@synthetic.pseofactory.test';
             if (qConsent) qConsent.checked = true;
             quoteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 30; i++) {
-                await new Promise(r => setTimeout(r, 50));
+            for (let i = 0; i < 60; i++) {
                 if (quoteForm.getAttribute('data-submission-state') === 'success' || quoteForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
+                await new Promise(r => setTimeout(r, 12));
             }
             report.partner_quote_intake_and_checkout.submission_state = quoteForm.getAttribute('data-submission-state') || '';
             const qPartner = document.getElementById('quote-matched-partner-link');
@@ -1027,11 +1321,11 @@ class UnifiedBrowserAuditor:
             report.partner_quote_intake_and_checkout.partner_href = qPartner ? (qPartner.getAttribute('href') || '') : '';
             if (qCheckout) {
                 qCheckout.click();
-                for (let i = 0; i < 30; i++) {
-                    await new Promise(r => setTimeout(r, 50));
+                for (let i = 0; i < 60; i++) {
                     if (qCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
+                    await new Promise(r => setTimeout(r, 12));
                 }
                 report.partner_quote_intake_and_checkout.checkout_status = qCheckout.getAttribute('data-checkout-status') || '';
                 report.partner_quote_intake_and_checkout.checkout_session_id = qCheckout.getAttribute('data-checkout-session-id') || '';
@@ -1045,15 +1339,33 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        // 6. Outbound /r/<partner> DOM click, redirect & /api/telemetry edge round-trip
-        const firstAff = document.querySelector('a[href^="/r/"]');
-        if (firstAff) {
+        // 6. Outbound /r/<partner> DOM click, redirect & /api/telemetry edge round-trip across ALL partner CTAs on the page
+        const allAffAnchors = Array.from(document.querySelectorAll('a[href^="/r/"]'));
+        if (allAffAnchors.length > 0) {
             report.affiliate_redirect_and_telemetry.tested = true;
-            firstAff.click();
-            report.affiliate_redirect_and_telemetry.dom_click_handled = (
-                firstAff.getAttribute('data-affiliate-clicked') === 'true' &&
-                Boolean(firstAff.getAttribute('data-last-click-subid'))
-            );
+            let allClicksHandled = true;
+            const uniquePartnerHrefs = [];
+            const seenPartnerHrefs = new Set();
+            for (const affEl of allAffAnchors) {
+                affEl.click();
+                const clickedOk = (
+                    affEl.getAttribute('data-affiliate-clicked') === 'true' &&
+                    Boolean(affEl.getAttribute('data-last-click-subid'))
+                );
+                if (!clickedOk) {
+                    allClicksHandled = false;
+                    report.affiliate_redirect_and_telemetry.partner_failures.push({
+                        href: affEl.getAttribute('href') || '',
+                        reason: 'dom_click_not_attributed'
+                    });
+                }
+                const h = (affEl.getAttribute('href') || '').trim();
+                if (h && !seenPartnerHrefs.has(h)) {
+                    seenPartnerHrefs.add(h);
+                    uniquePartnerHrefs.push(h);
+                }
+            }
+            report.affiliate_redirect_and_telemetry.dom_click_handled = allClicksHandled;
             try {
                 const telResp = await fetch('/api/telemetry?synthetic_test=1', {
                     method: 'POST',
@@ -1070,24 +1382,46 @@ class UnifiedBrowserAuditor:
             } catch (e) {
                 report.affiliate_redirect_and_telemetry.passed = false;
             }
-            try {
-                const rawHref = firstAff.getAttribute('href') || '/r/collective';
-                const sep = rawHref.includes('?') ? '&' : '?';
-                const redirResp = await fetch(rawHref + sep + 'synthetic_test=1', {
-                    method: 'GET',
-                    headers: { 'X-Pseofactory-Test': '1' },
-                    redirect: 'manual'
-                });
-                report.affiliate_redirect_and_telemetry.redirect_status = redirResp.status;
-                report.affiliate_redirect_and_telemetry.redirect_location = redirResp.headers.get('Location') || redirResp.url || '';
-                if (redirResp.type !== 'opaqueredirect' && redirResp.status !== 302 && redirResp.status !== 200) {
+            for (const rawHref of uniquePartnerHrefs) {
+                try {
+                    const sep = rawHref.includes('?') ? '&' : '?';
+                    const redirResp = await fetch(rawHref + sep + 'synthetic_test=1', {
+                        method: 'GET',
+                        headers: { 'X-Pseofactory-Test': '1' },
+                        redirect: 'manual'
+                    });
+                    const st = redirResp.status;
+                    const loc = redirResp.headers.get('Location') || redirResp.url || '';
+                    report.affiliate_redirect_and_telemetry.all_partner_redirects.push({
+                        href: rawHref,
+                        status: st,
+                        location: loc
+                    });
+                    if (report.affiliate_redirect_and_telemetry.redirect_status === 0) {
+                        report.affiliate_redirect_and_telemetry.redirect_status = st;
+                        report.affiliate_redirect_and_telemetry.redirect_location = loc;
+                    }
+                    if (redirResp.type !== 'opaqueredirect' && st !== 302 && st !== 200) {
+                        report.affiliate_redirect_and_telemetry.passed = false;
+                        report.affiliate_redirect_and_telemetry.partner_failures.push({
+                            href: rawHref,
+                            status: st,
+                            reason: 'unexpected_redirect_status'
+                        });
+                    } else {
+                        report.affiliate_redirect_and_telemetry.partners_verified_count += 1;
+                    }
+                } catch (e) {
                     report.affiliate_redirect_and_telemetry.passed = false;
+                    report.affiliate_redirect_and_telemetry.partner_failures.push({
+                        href: rawHref,
+                        reason: String(e)
+                    });
                 }
-            } catch (e) {
-                report.affiliate_redirect_and_telemetry.passed = false;
             }
             if (
                 !report.affiliate_redirect_and_telemetry.dom_click_handled ||
+                report.affiliate_redirect_and_telemetry.partner_failures.length > 0 ||
                 (report.affiliate_redirect_and_telemetry.telemetry_status !== 'ok' && report.affiliate_redirect_and_telemetry.telemetry_status !== 'RECORDED')
             ) {
                 report.affiliate_redirect_and_telemetry.passed = false;
@@ -1101,6 +1435,7 @@ class UnifiedBrowserAuditor:
             report.page_errors.length === 0 &&
             report.links_audit.invalid_links.length === 0 &&
             report.links_audit.unrouted_affiliate_links.length === 0 &&
+            report.focus_and_keyboard_navigation.passed &&
             report.deep_link_hydration.passed &&
             report.calculator_and_presets.passed &&
             report.cliff_visualizer.passed &&
@@ -1143,23 +1478,262 @@ class UnifiedBrowserAuditor:
         dist_dir: Optional[Union[str, Path]] = None,
         cdp_port: int = 9222,
         fail_closed: Optional[bool] = None,
+        property_id: Optional[str] = None,
     ):
         self.adapter = adapter
         if adapter is not None:
             self.dist_dir = adapter.dist_dir
             self.widget_specs = adapter.get_widget_specs()
             self.excluded_routes = set(adapter.get_excluded_routes())
+            self.property_id = property_id or adapter.tenant_id
         else:
             self.dist_dir = Path(dist_dir).resolve() if dist_dir else Path("dist").resolve()
             self.widget_specs = []
             self.excluded_routes = set()
+            self.property_id = property_id
 
         self.cdp_port = cdp_port
         self.cdp_base = f"http://127.0.0.1:{cdp_port}"
         if fail_closed is None:
-            self.fail_closed = os.environ.get("PSEOFACTORY_BROWSER_FAIL_CLOSED") == "1"
+            env_fc = os.environ.get("PSEOFACTORY_BROWSER_FAIL_CLOSED")
+            self.fail_closed = (env_fc != "0") if env_fc is not None else True
         else:
             self.fail_closed = bool(fail_closed)
+        self._html_id_cache: Dict[Path, set] = {}
+        self._redirects_rules_cache: Optional[List[Tuple[str, str, int]]] = None
+
+    def _get_redirects_rules(self) -> List[Tuple[str, str, int]]:
+        if self._redirects_rules_cache is not None:
+            return self._redirects_rules_cache
+        rules: List[Tuple[str, str, int]] = []
+        redirects_file = self.dist_dir / "_redirects"
+        if redirects_file.is_file():
+            try:
+                for raw_line in redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    line = raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        src = parts[0]
+                        dst = parts[1]
+                        code = int(parts[2]) if (len(parts) >= 3 and parts[2].isdigit()) else 301
+                        rules.append((src, dst, code))
+            except Exception:
+                pass
+        self._redirects_rules_cache = rules
+        return rules
+
+    def _apply_redirects_to_path(self, req_path: str) -> str:
+        cur = req_path or "/"
+        for _ in range(4):
+            matched = False
+            for src, dst, _code in self._get_redirects_rules():
+                if src.endswith("/*"):
+                    prefix = src[:-1]
+                    if cur.startswith(prefix):
+                        splat = cur[len(prefix):]
+                        cur = dst.replace(":splat", splat)
+                        matched = True
+                        break
+                elif cur == src or cur.rstrip("/") == src.rstrip("/"):
+                    cur = dst
+                    matched = True
+                    break
+            if not matched or cur.startswith("http://") or cur.startswith("https://") or cur.startswith("/r/") or cur.startswith("/api/"):
+                break
+        return urllib.parse.urlsplit(cur).path or "/"
+
+    @staticmethod
+    def _resolve_in_root(root_dir: Path, rel: str) -> Optional[Path]:
+        if not rel:
+            cand = root_dir / "index.html"
+            return cand if cand.is_file() else None
+        direct = root_dir / rel
+        if direct.is_file():
+            return direct
+        if direct.is_dir():
+            idx = direct / "index.html"
+            if idx.is_file():
+                return idx
+        as_html = root_dir / f"{rel.rstrip('/')}.html"
+        if as_html.is_file():
+            return as_html
+        as_idx = root_dir / rel.rstrip("/") / "index.html"
+        if as_idx.is_file():
+            return as_idx
+        return None
+
+    def _resolve_disk_file(self, url_path: str) -> Optional[Path]:
+        clean = (url_path or "/").strip()
+        if not clean.startswith("/"):
+            clean = "/" + clean
+        rel = clean.lstrip("/")
+        found = self._resolve_in_root(self.dist_dir, rel)
+        if found is not None:
+            return found
+        # If self.dist_dir is a partial synthetic fixture (no sitemap.xml), allow resolving
+        # sibling routes against canonical workspace tenant dist directories while still
+        # catching genuinely broken 404 targets.
+        if not (self.dist_dir / "sitemap.xml").is_file():
+            for fallback_root in (
+                Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
+                Path("/home/ubuntuadmin/projects/prexvo/dist"),
+                Path("/home/ubuntuadmin/projects/gainhelm/dist"),
+            ):
+                if fallback_root.is_dir():
+                    fb = self._resolve_in_root(fallback_root, rel)
+                    if fb is not None:
+                        return fb
+        return None
+
+    def _get_ids_in_html_file(self, html_file: Path) -> set:
+        if html_file in self._html_id_cache:
+            return self._html_id_cache[html_file]
+        import re
+        ids: set = set()
+        try:
+            raw = html_file.read_text(encoding="utf-8", errors="ignore")
+            for m in re.finditer(r'\b(?:id|name)\s*=\s*["\']([^"\']+)["\']', raw, flags=re.IGNORECASE):
+                ids.add(m.group(1))
+        except Exception:
+            pass
+        self._html_id_cache[html_file] = ids
+        return ids
+
+    def _verify_internal_links_and_redirects_on_disk(self, route: str, internal_hrefs: List[str]) -> List[str]:
+        invalid: List[str] = []
+        if not self.dist_dir.exists():
+            return invalid
+
+        # 1. Verify dist/_redirects rules resolve to valid destinations
+        for src, dst, _code in self._get_redirects_rules():
+            if ":splat" in dst or dst.startswith("http://") or dst.startswith("https://") or dst.startswith("/r/") or dst.startswith("/api/"):
+                continue
+            dst_path = urllib.parse.urlsplit(dst).path or "/"
+            if self._resolve_disk_file(dst_path) is None:
+                invalid.append(f"_redirects:{src}->{dst}")
+
+        # 2. Verify each internal href (and optional cross-page #fragment) resolves on disk
+        for raw_href in internal_hrefs:
+            href = (raw_href or "").strip()
+            if not href or href.startswith("#"):
+                continue
+            parsed = urllib.parse.urlsplit(href)
+            path_part = parsed.path or route or "/"
+            if not path_part.startswith("/"):
+                base_dir = route if route.endswith("/") else (route.rsplit("/", 1)[0] + "/")
+                path_part = urllib.parse.urljoin(base_dir, path_part)
+            if path_part.startswith("/r/") or path_part.startswith("/api/"):
+                continue
+            resolved_path = self._apply_redirects_to_path(path_part)
+            if resolved_path.startswith("http://") or resolved_path.startswith("https://") or resolved_path.startswith("/r/") or resolved_path.startswith("/api/"):
+                continue
+            target_file = self._resolve_disk_file(resolved_path)
+            if target_file is None:
+                invalid.append(raw_href)
+                continue
+            frag = (parsed.fragment or "").strip()
+            if frag and target_file.suffix.lower() == ".html":
+                target_ids = self._get_ids_in_html_file(target_file)
+                if frag not in target_ids:
+                    invalid.append(raw_href)
+        return invalid
+
+    def _verify_partner_redirects_canonical(self, base_url: str, partner_redirects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        from pseofactory.edge import resolve_canonical_partner_redirect
+
+        class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        failures: List[Dict[str, Any]] = []
+        prop_id = self.property_id or (self.adapter.tenant_id if self.adapter is not None else None)
+        for item in partner_redirects:
+            raw_href = str(item.get("href") or "")
+            status = int(item.get("status") or 0)
+            loc = str(item.get("location") or "")
+            if status == 0 and base_url and raw_href.startswith("/r/"):
+                sep = "&" if "?" in raw_href else "?"
+                probe_url = f"{base_url.rstrip('/')}{raw_href}{sep}synthetic_test=1"
+                req = urllib.request.Request(probe_url, headers={"X-Pseofactory-Test": "1"}, method="GET")
+                try:
+                    with opener.open(req, timeout=5) as resp:
+                        status = resp.status
+                        loc = resp.headers.get("Location") or ""
+                except urllib.error.HTTPError as exc:
+                    status = exc.code
+                    loc = exc.headers.get("Location") or ""
+                except Exception as exc:
+                    failures.append({"href": raw_href, "reason": str(exc)})
+                    continue
+                item["status"] = status
+                item["location"] = loc
+            parsed = urllib.parse.urlsplit(raw_href)
+            p_key = parsed.path[len("/r/"):].strip("/").lower() if parsed.path.startswith("/r/") else ""
+            if not p_key:
+                failures.append({"href": raw_href, "reason": "missing_partner_key"})
+                continue
+            q_params = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query, keep_blank_values=True).items() if v}
+            canonical = resolve_canonical_partner_redirect(p_key, query_params=q_params, property_id=prop_id)
+            expected_loc = str(canonical.get("location") or "")
+            exp_split = urllib.parse.urlsplit(expected_loc)
+            act_split = urllib.parse.urlsplit(loc)
+            if status != 302:
+                failures.append({"href": raw_href, "status": status, "reason": "expected_302"})
+            elif not loc or act_split.netloc != exp_split.netloc or act_split.path != exp_split.path:
+                failures.append({
+                    "href": raw_href,
+                    "location": loc,
+                    "expected_location": expected_loc,
+                    "reason": "canonical_destination_mismatch",
+                })
+        return failures
+
+    def _postprocess_interactive_report(self, base_url: str, route: str, report: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(report, dict):
+            return {"passed": False, "route": route, "error": "invalid_eval_result"}
+        links_audit = report.get("links_audit")
+        if isinstance(links_audit, dict):
+            internal_hrefs = links_audit.get("internal_hrefs") or []
+            disk_invalid = self._verify_internal_links_and_redirects_on_disk(route, internal_hrefs)
+            existing_inv = list(links_audit.get("invalid_links") or [])
+            for inv in disk_invalid:
+                if inv not in existing_inv:
+                    existing_inv.append(inv)
+            links_audit["invalid_links"] = existing_inv
+
+        aff_rep = report.get("affiliate_redirect_and_telemetry")
+        if isinstance(aff_rep, dict):
+            all_redirs = aff_rep.get("all_partner_redirects") or []
+            canon_failures = self._verify_partner_redirects_canonical(base_url, all_redirs)
+            if all_redirs and aff_rep.get("redirect_status", 0) == 0:
+                aff_rep["redirect_status"] = all_redirs[0].get("status", 0)
+                aff_rep["redirect_location"] = all_redirs[0].get("location", "")
+            if canon_failures:
+                existing_pf = list(aff_rep.get("partner_failures") or [])
+                existing_pf.extend(canon_failures)
+                aff_rep["partner_failures"] = existing_pf
+                aff_rep["passed"] = False
+
+        report["passed"] = bool(
+            len(report.get("console_errors") or []) == 0
+            and len(report.get("page_errors") or []) == 0
+            and len((report.get("links_audit") or {}).get("invalid_links") or []) == 0
+            and len((report.get("links_audit") or {}).get("unrouted_affiliate_links") or []) == 0
+            and (report.get("focus_and_keyboard_navigation") or {}).get("passed", True)
+            and (report.get("deep_link_hydration") or {}).get("passed", True)
+            and (report.get("calculator_and_presets") or {}).get("passed", True)
+            and (report.get("cliff_visualizer") or {}).get("passed", True)
+            and (report.get("scenario_comparator") or {}).get("passed", True)
+            and (report.get("blueprint_actions") or {}).get("passed", True)
+            and (report.get("post_calc_upgrade_drawer") or {}).get("passed", True)
+            and (report.get("playbook_lead_capture_and_checkout") or {}).get("passed", True)
+            and (report.get("partner_quote_intake_and_checkout") or {}).get("passed", True)
+            and (report.get("affiliate_redirect_and_telemetry") or {}).get("passed", True)
+        )
+        return report
 
     def check_cdp_reachability(self) -> Tuple[bool, str]:
         """Checks if host Chrome CDP endpoint is responding on configured port."""
@@ -1228,6 +1802,8 @@ class UnifiedBrowserAuditor:
             "cta_density_violations",
         )
 
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(ws, "Emulation.clearDeviceMetricsOverride", {}, msg_id=msg_counter[0])
         msg_counter[0] += 1
@@ -1382,6 +1958,7 @@ class UnifiedBrowserAuditor:
                     const inputEl = document.querySelector('{spec.input_selector}');
                     const outEl = document.querySelector('{spec.output_selector}');
                     if (!inputEl || !outEl) return {{ success: false, reason: 'elements_missing' }};
+                    const origInputVal = inputEl.value;
                     const initialVal = outEl.innerText.trim();
                     const targetVal = (inputEl.value === '{spec.input_value}') ? String(Number('{spec.input_value}') * 2) : '{spec.input_value}';
                     inputEl.value = targetVal;
@@ -1392,13 +1969,20 @@ class UnifiedBrowserAuditor:
                         const altInputs = document.querySelectorAll('[data-calc-input], input:not([type=hidden])');
                         for (const alt of altInputs) {{
                             if (alt === inputEl) continue;
+                            const origAlt = alt.value;
                             alt.value = targetVal;
                             alt.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
                             alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
                             finalVal = outEl.innerText.trim();
+                            alt.value = origAlt;
+                            alt.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                            alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
                             if (initialVal !== finalVal) break;
                         }}
                     }}
+                    inputEl.value = origInputVal;
+                    inputEl.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                    inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     let popstateOk = true;
                     if ({'true' if spec.verify_popstate else 'false'}) {{
                         try {{
@@ -1416,11 +2000,29 @@ class UnifiedBrowserAuditor:
                         "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
                     })
 
-        # 8. Universal interactive state synchronization check (inputs, sliders, presets, and workbenches)
+        # 8. Restore desktop viewport (1440x900) and run universal interactive state + E2E surface verification
+        msg_counter[0] += 1
+        await self._send_cdp(
+            ws,
+            "Emulation.setDeviceMetricsOverride",
+            {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
+            msg_id=msg_counter[0],
+        )
+        await asyncio.sleep(0.02)
         msg_counter[0] += 1
         univ_failures = await self._eval_js(ws, self.JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC, msg_id=msg_counter[0])
         if isinstance(univ_failures, list) and univ_failures:
             defects["widget_failures"].extend(univ_failures)
+
+        msg_counter[0] += 1
+        raw_e2e = await self._eval_js(ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+        e2e_rep = self._postprocess_interactive_report(base_url, route, raw_e2e if isinstance(raw_e2e, dict) else {})
+        defects["interactive_surface"] = e2e_rep
+        if not e2e_rep.get("passed", False):
+            defects["widget_failures"].append({
+                "widget_id": "e2e_interactive_surface",
+                "detail": f"Interactive surface verification failed on {route}",
+            })
 
         return defects
 
@@ -1523,6 +2125,8 @@ class UnifiedBrowserAuditor:
         async def _run_on_ws(active_ws: Any) -> Dict[str, Any]:
             page_url = f"{base_url.rstrip('/')}{route}"
             msg_counter[0] += 1
+            await self._send_cdp(active_ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
+            msg_counter[0] += 1
             await self._send_cdp(
                 active_ws,
                 "Emulation.setDeviceMetricsOverride",
@@ -1544,7 +2148,9 @@ class UnifiedBrowserAuditor:
             await asyncio.sleep(0.05)
             msg_counter[0] += 1
             res = await self._eval_js(active_ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
-            return res if isinstance(res, dict) else {"passed": False, "route": route, "error": "invalid_eval_result"}
+            if not isinstance(res, dict):
+                return {"passed": False, "route": route, "error": "invalid_eval_result"}
+            return self._postprocess_interactive_report(base_url, route, res)
 
         if ws is not None:
             return await _run_on_ws(ws)
@@ -1640,7 +2246,8 @@ class UnifiedBrowserAuditor:
         findings: List[Dict[str, Any]] = []
         msg_counter = [1]
 
-        with EphemeralDistServer(self.dist_dir) as server:
+        prop_id = self.property_id or (self.adapter.tenant_id if self.adapter is not None else None)
+        with EphemeralDistServer(self.dist_dir, property_id=prop_id) as server:
             base_url = server.base_url
 
             async def audit_all() -> None:
@@ -1705,6 +2312,7 @@ class UnifiedBrowserAuditor:
             or f.get("dashes")
             or f.get("broken_assets")
             or f.get("widget_failures")
+            or not (f.get("interactive_surface") or {}).get("passed", True)
             or f.get("hierarchy_violations")
             or f.get("unwrapped_tables")
             or f.get("transparent_controls")

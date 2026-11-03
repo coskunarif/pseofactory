@@ -982,6 +982,9 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             assert report["playbook_lead_capture_and_checkout"]["passed"] is True
             assert report["partner_quote_intake_and_checkout"]["present"] is True
             assert report["partner_quote_intake_and_checkout"]["passed"] is True
+            assert report["focus_and_keyboard_navigation"]["passed"] is True
+            assert report["focus_and_keyboard_navigation"]["skip_link_valid"] is True
+            assert report["focus_and_keyboard_navigation"]["zero_outline_failures"] == []
             assert report["affiliate_redirect_and_telemetry"]["tested"] is True
             assert report["affiliate_redirect_and_telemetry"]["passed"] is True
             assert report["affiliate_redirect_and_telemetry"]["dom_click_handled"] is True
@@ -990,6 +993,54 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             assert len(server.checkout_sessions) >= 2
             assert len(server.telemetry_events) >= 1
             assert len(server.redirect_events) >= 1
+
+    # Also verify real compiled tenant routes across profithelm-platform (156), prexvo (25), and gainhelm (15)
+    from pathlib import Path
+    from pseofactory.browser_verifier import RouteManifestExtractor
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    tenant_Matrix = [
+        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist"), 156, [
+            "index.html",
+            "tools/section-179-calculator/index.html",
+            "tools/crypto-tax-calculator/index.html",
+        ]),
+        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist"), 25, [
+            "index.html",
+            "tools/student-loan-repayment-calculator/index.html",
+        ]),
+        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist"), 15, [
+            "index.html",
+            "tools/soc-2-audit-cost-calculator/index.html",
+            "tools/cmmc-2-0-compliance-cost-calculator/index.html",
+        ]),
+    ]
+    for prop_id, real_dist, expected_min_routes, sample_rel_files in tenant_Matrix:
+        if not real_dist.is_dir():
+            continue
+        real_routes = RouteManifestExtractor(real_dist).extract_routes()
+        assert len(real_routes) >= expected_min_routes, f"{prop_id} expected >={expected_min_routes} routes, got {len(real_routes)}"
+        real_sample_dist = tmp_path / f"real_{prop_id}" / "dist"
+        real_sample_dist.mkdir(parents=True, exist_ok=True)
+        for rel_f in sample_rel_files:
+            src_f = real_dist / rel_f
+            if src_f.is_file():
+                dst_f = real_sample_dist / rel_f
+                dst_f.parent.mkdir(parents=True, exist_ok=True)
+                norm_h, _ = normalize_html_visual_primitives(src_f.read_text(encoding="utf-8"), is_tenant_porcelain=True)
+                dst_f.write_text(norm_h, encoding="utf-8")
+        real_auditor = UnifiedBrowserAuditor(dist_dir=real_dist, property_id=prop_id, fail_closed=True)
+        with EphemeralDistServer(real_sample_dist, property_id=prop_id) as real_srv:
+            for rel_f in sample_rel_files:
+                route_path = "/" if rel_f == "index.html" else "/" + rel_f[: -len("index.html")]
+                finding = real_auditor.audit_route(real_srv.base_url, route_path)
+                assert finding["cls_value"] == 0.0
+                assert finding["widget_failures"] == [], f"Widget failures on {prop_id} {route_path}: {finding['widget_failures']}"
+                assert finding["interactive_surface"]["passed"] is True, f"Interactive surface failed on {prop_id} {route_path}: {finding['interactive_surface']}"
+                assert finding["interactive_surface"]["focus_and_keyboard_navigation"]["passed"] is True
+                assert finding["interactive_surface"]["calculator_and_presets"]["button_failures"] == []
+                assert finding["interactive_surface"]["calculator_and_presets"]["input_failures"] == []
+                assert finding["interactive_surface"]["links_audit"]["invalid_links"] == []
 
 
 def test_personalized_audit_workpaper_synthesis_across_all_skus():
@@ -1468,3 +1519,148 @@ console.log(JSON.stringify({{ status: data.zeptomail_status, provider: data.emai
         assert out["status"] == "sent_edge_zoho_direct"
         assert out["provider"] == "zoho_mail_oauth"
         assert out["zeptoCalls"] == 0
+
+
+def test_ui_ux_e2e_repro_gate(tmp_path):
+    """
+    Deterministic reproduction gate for the 4 UI/UX verification and runtime defects:
+    1. EphemeralDistServer serves exact on-disk HTML bytes without in-memory normalization,
+       evaluates dist/_redirects, returns 302 on GET /api/lead-capture?checkout=1&redirect=1,
+       and derives /r/<partner> redirects from canonical affiliates.py / edge.py contracts.
+    2. Visual primitives apply --border-focus on :focus / :focus-visible, inject skip-to-content
+       #main-content target, and real Chrome CDP verifies visible focus rings on interactive elements.
+    3. Every preset/switcher/scenario/action button (including data-preset-crit on GainHelm and
+       data-preset-sec179 on ProfitHelm) and every calculator input/select/slider updates outputs
+       synchronously without SERP workbench scope clobbering.
+    4. UnifiedBrowserAuditor verifies all internal links, #fragment targets, _redirects, and
+       all /r/<partner> + /api/* destinations end-to-end.
+    """
+    import urllib.error
+    import urllib.request
+    from pseofactory.browser_verifier import UnifiedBrowserAuditor
+    from pseofactory.server import EphemeralDistServer
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1a. Verify EphemeralDistServer serves exact raw HTML bytes on disk without normalizing in memory
+    raw_unnormalized = "<!DOCTYPE html><html><head><title>Raw</title></head><body><h1>Raw Disk Bytes</h1></body></html>"
+    (dist_dir / "raw-check.html").write_text(raw_unnormalized, encoding="utf-8")
+    (dist_dir / "_redirects").write_text(
+        "/calculators/tax-brackets/ /tools/section-1031-calculator/ 301\n"
+        "/vs/* /tools/section-1031-calculator/ 301\n",
+        encoding="utf-8",
+    )
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirect)
+
+    with EphemeralDistServer(dist_dir) as server:
+        with urllib.request.urlopen(f"{server.base_url}/raw-check.html", timeout=5) as resp:
+            served_html = resp.read().decode("utf-8")
+        assert served_html == raw_unnormalized, "EphemeralDistServer must serve exact on-disk HTML bytes without in-memory normalization"
+
+        # 1b. Verify dist/_redirects exact and splat rules return 301 Location
+        for redir_path in ("/calculators/tax-brackets/", "/vs/legacy-competitor"):
+            try:
+                opener.open(f"{server.base_url}{redir_path}", timeout=5)
+                pytest.fail(f"Expected 301 redirect for {redir_path}")
+            except urllib.error.HTTPError as exc:
+                assert exc.code in (301, 302)
+                assert exc.headers.get("Location") == "/tools/section-1031-calculator/"
+
+        # 1c. Verify canonical partner redirects match affiliates.py / edge.py (zero hardcoded drift)
+        expected_partner_prefixes = {
+            "ipx1031": "https://www.ipx1031.com/start-an-exchange/",
+            "mercury": "https://mercury.com/r/profithelm-llc",
+            "kalshi": "https://kalshi.pxf.io/",
+            "coinledger": "https://coinledger.io/?fpr=arif-554004",
+            "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+        }
+        for p_key, expected_prefix in expected_partner_prefixes.items():
+            try:
+                opener.open(
+                    f"{server.base_url}/r/{p_key}?source_tool=section-1031-calculator&cta_slot=primary&subid=profithelm:section-1031-calculator:primary",
+                    timeout=5,
+                )
+                pytest.fail(f"Expected 302 redirect for /r/{p_key}")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 302
+                loc = exc.headers.get("Location") or ""
+                assert loc.startswith(expected_prefix), f"/r/{p_key} redirected to {loc!r}, expected prefix {expected_prefix!r}"
+                assert exc.headers.get("X-Edge-Partner") == p_key
+
+        # 1d. Verify GET /api/lead-capture?checkout=1&...&redirect=1 returns 302 redirect when not requesting format=json
+        try:
+            opener.open(
+                f"{server.base_url}/api/lead-capture?checkout=1&property_id=profithelm&tool_slug=section-1031-calculator&sku=ph_1031_boot_replacement_workpapers&redirect=1",
+                timeout=5,
+            )
+            pytest.fail("Expected 302 redirect on GET /api/lead-capture?checkout=1&...&redirect=1")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 302
+            assert exc.headers.get("Location"), "Expected Location header on 302 checkout redirect"
+
+    # 2 & 3 & 4. Real-browser CDP verification of focus states, skip links, all presets/switchers/inputs/sliders, and links
+    auditor = UnifiedBrowserAuditor(dist_dir=dist_dir)
+    reachable, msg = auditor.check_cdp_reachability()
+    assert reachable, f"Chrome CDP must be reachable for E2E verification: {msg}"
+
+    # Compile a GainHelm page with .calc-switcher-btn[data-preset-hc][data-preset-crit] and ProfitHelm page with [data-preset-sec179]
+    gh_spec = {
+        "slug": "soc-2-audit-cost-calculator",
+        "title": "SOC 2 Type II Audit Cost & GRC Readiness Calculator",
+        "model_name": "SOC 2 Audit Cost Model",
+        "property_id": "gainhelm",
+        "canonical_base": "https://gainhelm.com",
+        "formula": "gross_amount * (1.0 - effective_rate)",
+        "inputs": {"gross_amount": 65000.0, "effective_rate": 0.15},
+        "published_output": 55250.0,
+        "sample_calculation": "Evaluating $65,000 SOC 2 readiness scope at 15% automation savings factor yields $55,250.00 net audit cost.",
+        "statutory_authority": "32 CFR Part 170 and AICPA SSAE 18 (AT-C Section 205)",
+        "economic_dataset": "BLS Occupational Employment and Wages Series",
+    }
+    compiled_gh = compile_high_effort_page(gh_spec)["html"]
+    # Inject a GainHelm-style .calc-switcher-btn with data-preset-hc and data-preset-crit and secondary calc-input-headcount / calc-input-extra_criteria
+    gh_switcher_snippet = (
+        '<div class="calc-switcher" role="group" aria-label="Company Stage Presets">'
+        '<button type="button" class="calc-switcher-btn active" data-preset-hc="75" data-preset-crit="2">Series A (75 Emp / 3 TSC)</button>'
+        '<button type="button" class="calc-switcher-btn" data-preset-hc="250" data-preset-crit="4">Enterprise (250 Emp / 5 TSC)</button>'
+        '<input type="number" id="calc-input-headcount" data-calc-input="headcount" value="75">'
+        '<input type="number" id="calc-input-extra_criteria" data-calc-input="extra_criteria" value="2">'
+        '</div>'
+    )
+    compiled_gh = compiled_gh.replace("</main>", gh_switcher_snippet + "</main>", 1)
+    compiled_gh, _ = normalize_html_visual_primitives(compiled_gh, theme="porcelain")
+
+    gh_tool_dir = dist_dir / "tools" / "soc-2-audit-cost-calculator"
+    gh_tool_dir.mkdir(parents=True, exist_ok=True)
+    (gh_tool_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
+    sec1031_dir = dist_dir / "tools" / "section-1031-calculator"
+    sec1031_dir.mkdir(parents=True, exist_ok=True)
+    (sec1031_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
+    (dist_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
+
+    with EphemeralDistServer(dist_dir) as server:
+        gh_auditor = UnifiedBrowserAuditor(dist_dir=dist_dir)
+        rep = gh_auditor.audit_interactive_surface(server.base_url, "/tools/soc-2-audit-cost-calculator/")
+        assert rep["passed"] is True, f"Interactive surface audit failed: {rep}"
+        assert "focus_and_keyboard_navigation" in rep, "audit_interactive_surface must include focus_and_keyboard_navigation check"
+        focus_rep = rep["focus_and_keyboard_navigation"]
+        assert focus_rep["passed"] is True, f"Focus & keyboard audit failed: {focus_rep}"
+        assert focus_rep["skip_link_valid"] is True
+        assert focus_rep["positive_tabindex_traps"] == []
+        assert focus_rep["zero_outline_failures"] == []
+        assert focus_rep["focusable_count"] >= 5
+
+        calc_rep = rep["calculator_and_presets"]
+        assert calc_rep["passed"] is True, f"Calculator and presets audit failed: {calc_rep}"
+        assert calc_rep.get("buttons_tested_count", 0) >= 4
+        assert calc_rep.get("button_failures") == []
+        assert calc_rep.get("inputs_tested_count", 0) >= 2
+        assert calc_rep.get("input_failures") == []
+

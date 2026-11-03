@@ -1445,12 +1445,22 @@ export async function onRequest(context) {{
                 "AFFILIATE_EARNEST_URL",
                 "AFFILIATE_EARNEST_STATUS",
             ),
+            "earnest_refi": (
+                "https://www.earnest.com/student-loan-refinancing",
+                "AFFILIATE_EARNEST_URL",
+                "AFFILIATE_EARNEST_STATUS",
+            ),
             "lendkey_refi": (
                 "https://www.lendkey.com/student-loan-refinancing/",
                 "AFFILIATE_LENDKEY_URL",
                 "AFFILIATE_LENDKEY_STATUS",
             ),
             "credible_student_loans": (
+                "https://www.credible.com/refinance-student-loans",
+                "AFFILIATE_CREDIBLE_URL",
+                "AFFILIATE_CREDIBLE_STATUS",
+            ),
+            "credible_refi": (
                 "https://www.credible.com/refinance-student-loans",
                 "AFFILIATE_CREDIBLE_URL",
                 "AFFILIATE_CREDIBLE_STATUS",
@@ -2413,6 +2423,236 @@ export async function onRequest(context) {{
 """
     assert_no_forbidden_dashes(js_code, "generate_edge_redirect_function")
     return js_code
+
+
+_CANONICAL_PARTNER_CATALOG_CACHE: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+
+def build_canonical_partner_catalog(
+    property_id: Optional[str] = None,
+    hub: Optional[Any] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Extracts the canonical PARTNER_CATALOG entries directly from generate_edge_redirect_function
+    so local test servers (EphemeralDistServer) and E2E browser verifiers never drift from the
+    compiled functions/r/[partner].js edge handlers.
+    """
+    cache_key = (property_id or "__all__").strip().lower()
+    if hub is None and cache_key in _CANONICAL_PARTNER_CATALOG_CACHE:
+        return {k: dict(v) for k, v in _CANONICAL_PARTNER_CATALOG_CACHE[cache_key].items()}
+
+    if property_id:
+        props = [(property_id or "profithelm").strip().lower()]
+    else:
+        props = ["profithelm", "prexvo", "gainhelm"]
+
+    merged: Dict[str, Dict[str, Any]] = {}
+    block_re = re.compile(r"const\s+PARTNER_CATALOG\s*=\s*\{([\s\S]*?)\n\};")
+    entry_re = re.compile(r"^\s*([a-zA-Z0-9_]+)\s*:\s*\{([\s\S]*?)\n\s*\},?", re.MULTILINE)
+    str_field_re = re.compile(r'([a-zA-Z0-9_]+)\s*:\s*"([^"]*)"')
+    bool_field_re = re.compile(r"([a-zA-Z0-9_]+)\s*:\s*(true|false)")
+
+    for prop in props:
+        js_src = generate_edge_redirect_function(prop, hub=hub)
+        m_block = block_re.search(js_src)
+        if not m_block:
+            continue
+        body = m_block.group(1)
+        for m_entry in entry_re.finditer(body):
+            p_key = m_entry.group(1).strip().lower()
+            fields_blob = m_entry.group(2)
+            entry_dict: Dict[str, Any] = {"property_id": prop}
+            for fm in str_field_re.finditer(fields_blob):
+                entry_dict[fm.group(1)] = fm.group(2)
+            for bm in bool_field_re.finditer(fields_blob):
+                entry_dict[bm.group(1)] = bm.group(2) == "true"
+
+            direct_contract = str(entry_dict.get("directContractUrl") or "").strip()
+            sovrn_fallback = str(entry_dict.get("sovrnFallbackUrl") or "").strip()
+            default_url = str(entry_dict.get("defaultUrl") or "").strip()
+            has_direct_contract = bool(direct_contract)
+            effective_url = direct_contract if has_direct_contract else (sovrn_fallback or default_url)
+            entry_dict["effectiveUrl"] = effective_url
+            if p_key not in merged or prop == property_id:
+                merged[p_key] = entry_dict
+
+    if hub is None:
+        _CANONICAL_PARTNER_CATALOG_CACHE[cache_key] = {k: dict(v) for k, v in merged.items()}
+    return merged
+
+
+def resolve_canonical_partner_redirect(
+    partner_key: str,
+    query_params: Optional[Dict[str, str]] = None,
+    property_id: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
+    hub: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Executes the exact partner URL resolution and attribution parameter synthesis
+    used by Cloudflare Pages Functions functions/r/[partner].js.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    raw_partner = (partner_key or "").strip().lower()
+    if not raw_partner:
+        return None
+
+    catalog = build_canonical_partner_catalog(property_id=property_id, hub=hub)
+    partner_config = catalog.get(raw_partner)
+    if not partner_config and property_id:
+        catalog = build_canonical_partner_catalog(property_id=None, hub=hub)
+        partner_config = catalog.get(raw_partner)
+    if not partner_config:
+        return None
+
+    resolved_prop = str(property_id or partner_config.get("property_id") or "profithelm").strip().lower()
+    env_map = env or {}
+    norm_params: Dict[str, str] = {}
+    for raw_k, raw_v in (query_params or {}).items():
+        clean_k = re.sub(r"^(?:amp;)+", "", str(raw_k or ""), flags=re.IGNORECASE)
+        val_str = str(raw_v if raw_v is not None else "")
+        if clean_k and val_str != "" and clean_k not in norm_params:
+            norm_params[clean_k] = val_str
+
+    env_var_name = str(partner_config.get("envVar") or "")
+    env_url = str(env_map.get(env_var_name) or "").strip() if env_var_name else ""
+    has_direct_config = bool(env_url)
+    force_native = norm_params.get("mode") == "native"
+    sovrn_approved = str(env_map.get("SOVRN_COMMERCE_APPROVED") or "").lower() == "true"
+    direct_contract_url = str(partner_config.get("directContractUrl") or "").strip()
+    sovrn_fallback_url = str(partner_config.get("sovrnFallbackUrl") or "").strip()
+    default_url = str(partner_config.get("defaultUrl") or "").strip()
+
+    if resolved_prop in ("prexvo", "gainhelm"):
+        has_direct_contract = bool(not has_direct_config and not force_native and direct_contract_url)
+        raw_target_url = (
+            env_url
+            if has_direct_config
+            else (direct_contract_url if has_direct_contract else default_url)
+        )
+        contract_tier = (
+            "direct_env_override"
+            if has_direct_config
+            else (
+                "direct_contract_upgraded"
+                if has_direct_contract
+                else "native_unmonetized_destination"
+            )
+        )
+        is_direct = True
+    else:
+        has_direct_contract = bool(
+            not (sovrn_approved and sovrn_fallback_url) and direct_contract_url
+        )
+        is_direct = bool(
+            partner_config.get("isDirect", False) or has_direct_config or has_direct_contract
+        )
+        raw_target_url = (
+            env_url
+            if has_direct_config
+            else (
+                direct_contract_url
+                if has_direct_contract
+                else (sovrn_fallback_url or default_url)
+            )
+        )
+        contract_tier = (
+            "direct_env_override"
+            if has_direct_config
+            else (
+                "direct_contract_upgraded"
+                if has_direct_contract
+                else ("direct_default" if is_direct else "sovrn_fallback")
+            )
+        )
+
+    tracking_params = [
+        "subid",
+        "click_id",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "gclid",
+        "ph_tier",
+        "tier",
+        "source_tool",
+        "source",
+        "cta_slot",
+        "slot",
+    ]
+    cj_domains = ("jdoqocy.com", "dpbolvw.net", "anrdoezrs.net", "tkqlhce.com", "kqzyfj.com")
+    impact_domains = ("pxf.io", "ojrq.net", "evyy.net", "7eer.net", "join.ramp.com")
+
+    parts = urlsplit(raw_target_url)
+    target_path = parts.path if parts.path else "/"
+    q_dict: Dict[str, str] = {}
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        q_dict[k] = v
+
+    for param in tracking_params:
+        val = norm_params.get(param)
+        if val is not None and val != "":
+            q_dict[param] = val
+
+    source_tool = norm_params.get("source_tool") or norm_params.get("source") or ""
+    cta_slot = norm_params.get("cta_slot") or norm_params.get("slot") or ""
+    effective_subid = (
+        norm_params.get("subid")
+        or (f"{source_tool}_{cta_slot or 'cta'}" if source_tool else cta_slot or "")
+    )
+    if effective_subid and "subid" not in q_dict:
+        q_dict["subid"] = effective_subid
+
+    target_host = (parts.hostname or "").lower()
+    if effective_subid and any(target_host == d or target_host.endswith(f".{d}") for d in impact_domains):
+        if "subId1" not in q_dict:
+            q_dict["subId1"] = effective_subid
+        if source_tool and "sharedid" not in q_dict:
+            q_dict["sharedid"] = source_tool
+
+    if (
+        effective_subid
+        and any(target_host == d or target_host.endswith(f".{d}") for d in cj_domains)
+        and "sid" not in q_dict
+    ):
+        q_dict["sid"] = effective_subid
+
+    if (
+        effective_subid
+        and ("fpr" in q_dict or "fp_ref" in q_dict or "via" in q_dict)
+        and "fp_sid" not in q_dict
+    ):
+        fp_sid = re.sub(r"[^a-zA-Z0-9_-]", "", effective_subid)[:64]
+        if fp_sid:
+            q_dict["fp_sid"] = fp_sid
+
+    if source_tool or effective_subid or cta_slot:
+        if "utm_source" not in q_dict:
+            q_dict["utm_source"] = resolved_prop
+        if "utm_medium" not in q_dict:
+            q_dict["utm_medium"] = "affiliate"
+        if source_tool and "utm_campaign" not in q_dict:
+            q_dict["utm_campaign"] = source_tool
+        if (effective_subid or cta_slot) and "utm_content" not in q_dict:
+            q_dict["utm_content"] = effective_subid or cta_slot
+
+    new_query = urlencode(q_dict)
+    populated_target_url = urlunsplit((parts.scheme, parts.netloc, target_path, new_query, parts.fragment))
+
+    return {
+        "partner": raw_partner,
+        "location": populated_target_url,
+        "native_destination": default_url or raw_target_url,
+        "effective_base_url": raw_target_url,
+        "contract_tier": contract_tier,
+        "subid": effective_subid or "default",
+        "source_tool": source_tool or "direct",
+        "cta_slot": cta_slot or "default",
+        "property_id": resolved_prop,
+    }
 
 
 def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
