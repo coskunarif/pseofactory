@@ -464,6 +464,8 @@ WALQueue = ShipperQueue
 def recompute_and_amend_tenant_lock_and_ledger(
     repo_path: Union[str, Path],
     git_env: Optional[Dict[str, str]] = None,
+    property_id: Optional[str] = None,
+    amend: bool = True,
 ) -> bool:
     """
     Recomputes substrate_lock.json (dist_fingerprint, total_assets, engine_hash, substrate_hash)
@@ -487,6 +489,7 @@ def recompute_and_amend_tenant_lock_and_ledger(
             record_engine_hash,
         )
 
+        sync_tenant_test_isolation_guards(repo, property_id)
         cur_engine_hash = compute_engine_hash()
         dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(dist_dir)
         try:
@@ -497,7 +500,7 @@ def recompute_and_amend_tenant_lock_and_ledger(
             lock_data = {}
 
         if "property_id" not in lock_data and "property" not in lock_data:
-            lock_data["property_id"] = _normalize_property_id(repo.name)
+            lock_data["property_id"] = _normalize_property_id(property_id or repo.name)
         lock_data["engine_hash"] = cur_engine_hash
         lock_data["substrate_hash"] = cur_engine_hash
         lock_data["dist_fingerprint"] = dist_fp_hex
@@ -526,6 +529,8 @@ def recompute_and_amend_tenant_lock_and_ledger(
         eff_env = dict(git_env) if git_env is not None else os.environ.copy()
         eff_env.setdefault("GIT_TERMINAL_PROMPT", "0")
         files_to_stage = ["substrate_lock.json"]
+        if (repo / ".gitignore").is_file():
+            files_to_stage.append(".gitignore")
         for cand_rel in (".agy/asset_ledger.json", ".agy/engine_hash.json", "freshness_audit_report.json"):
             if (repo / cand_rel).is_file():
                 ls_res = subprocess.run(
@@ -548,13 +553,38 @@ def recompute_and_amend_tenant_lock_and_ledger(
             timeout=15,
         )
         subprocess.run(
-            ["git", "-C", str(repo), "-c", "core.editor=true", "commit", "--amend", "--no-edit", "--allow-empty"],
+            [
+                "git",
+                "-C",
+                str(repo),
+                "add",
+                "-f",
+                "--",
+                "dist",
+                ":!dist/syndication/*",
+                ":!dist/syndication",
+                ":!dist/**/*.tmp",
+                ":!dist/*.tmp",
+                ":!dist/**/*.orig",
+                ":!dist/*.orig",
+                ":!dist/**/*.backup",
+                ":!dist/*.backup",
+            ],
             env=eff_env,
             capture_output=True,
             text=True,
             check=False,
             timeout=20,
         )
+        if amend:
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "core.editor=true", "commit", "--amend", "--no-edit", "--allow-empty"],
+                env=eff_env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
         return True
     except Exception:
         return False
@@ -821,15 +851,18 @@ class GitOpsCoordinator:
         has_tracked_dist = False
         has_tracked_db = False
         if td.is_dir():
-            res = subprocess.run(
-                ["git", "-C", str(td), "ls-files", "dist"],
-                capture_output=True,
-                text=True,
-                env=self._get_git_env(),
-                check=False,
-            )
-            if res.returncode == 0 and res.stdout.strip():
+            if (td / "substrate_lock.json").is_file() or (td / ".pseofactory.json").is_file():
                 has_tracked_dist = True
+            else:
+                res = subprocess.run(
+                    ["git", "-C", str(td), "ls-files", "dist"],
+                    capture_output=True,
+                    text=True,
+                    env=self._get_git_env(),
+                    check=False,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    has_tracked_dist = True
 
             res_db = subprocess.run(
                 ["git", "-C", str(td), "ls-files", "*.db"],
@@ -858,8 +891,34 @@ class GitOpsCoordinator:
         """
         td = Path(target_dir).resolve() if target_dir else self.repo_path
         sync_tenant_test_isolation_guards(td)
-        cmd = ["git", "-C", str(td), "add", "-A", "--", "."] + self.get_negative_pathspecs(td)
+        neg_specs = self.get_negative_pathspecs(td)
+        cmd = ["git", "-C", str(td), "add", "-A", "--", "."] + neg_specs
         subprocess.run(cmd, env=self._get_git_env(), capture_output=True, text=True, check=False)
+
+        if (td / "dist").is_dir() and ":!dist" not in neg_specs:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(td),
+                    "add",
+                    "-f",
+                    "--",
+                    "dist",
+                    ":!dist/syndication/*",
+                    ":!dist/syndication",
+                    ":!dist/**/*.tmp",
+                    ":!dist/*.tmp",
+                    ":!dist/**/*.orig",
+                    ":!dist/*.orig",
+                    ":!dist/**/*.backup",
+                    ":!dist/*.backup",
+                ],
+                env=self._get_git_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
 
         tracked_agy_runs = subprocess.run(
             ["git", "-C", str(td), "ls-files", ".agy/runs"],
@@ -4197,9 +4256,77 @@ def sync_tenant_test_isolation_guards(
                     1,
                 )
 
+            old_gh_cd = 'cd "$PROJECT_DIR"\n\nTIMEOUT_VAL="${GAINHELM_TIMEOUT:-${FACTORY_TIMEOUT:-1800s}}"'
+            new_gh_cd = (
+                'cd "$PROJECT_DIR"\n'
+                'if [ -d "$PROJECT_DIR/.git" ]; then\n'
+                '    git -C "$PROJECT_DIR" fetch origin "${GAINHELM_TARGET_BRANCH}:refs/remotes/origin/${GAINHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                '    git -C "$PROJECT_DIR" merge --ff-only "origin/${GAINHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                'fi\n\n'
+                'TIMEOUT_VAL="${GAINHELM_TIMEOUT:-${FACTORY_TIMEOUT:-1800s}}"'
+            )
+            if old_gh_cd in rf_new:
+                rf_new = rf_new.replace(old_gh_cd, new_gh_cd, 1)
+
+            old_gh_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m gainhelm.factory "$@"\n'
+            new_gh_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m gainhelm.factory "$@" </dev/null 200>&- 201>&-\n'
+            if old_gh_exec in rf_new:
+                rf_new = rf_new.replace(old_gh_exec, new_gh_exec, 1)
+            elif 'python3 -m gainhelm.factory "$@" </dev/null 200>&-\n' in rf_new:
+                rf_new = rf_new.replace(
+                    'python3 -m gainhelm.factory "$@" </dev/null 200>&-\n',
+                    'python3 -m gainhelm.factory "$@" </dev/null 200>&- 201>&-\n',
+                    1,
+                )
+
             if rf_new != rf_src:
                 run_factory_sh.write_text(rf_new, encoding="utf-8")
                 updated_files.append(str(run_factory_sh))
+        except Exception:
+            pass
+
+    # 4b. Ensure compiled tenant .gitignore tracks dist/ (while ignoring dist/syndication/ and temp artifacts)
+    gitignore_path = repo / ".gitignore"
+    if gitignore_path.is_file() and (
+        (repo / ".pseofactory.json").is_file() or (repo / "substrate_lock.json").is_file()
+    ):
+        try:
+            gi_src = gitignore_path.read_text(encoding="utf-8")
+            gi_lines = gi_src.splitlines()
+            new_gi_lines: List[str] = []
+            removed_dist = False
+            for ln in gi_lines:
+                if ln.strip() in ("dist/", "dist", "/dist/", "/dist"):
+                    removed_dist = True
+                    continue
+                new_gi_lines.append(ln)
+            if removed_dist:
+                for extra_ignore in ("dist/syndication/", "dist/**/*.tmp", "dist/**/*.orig", "dist/**/*.backup"):
+                    if extra_ignore not in new_gi_lines:
+                        new_gi_lines.append(extra_ignore)
+                gi_new = "\n".join(new_gi_lines) + "\n"
+                if gi_new != gi_src:
+                    gitignore_path.write_text(gi_new, encoding="utf-8")
+                    updated_files.append(str(gitignore_path))
+        except Exception:
+            pass
+
+    # 4c. Preserve programmatic matrix spoke manifests in profithelm/builder.py during PROFITHELM_IN_TEST=1 runs
+    ph_builder_py = repo / "profithelm" / "builder.py"
+    if ph_builder_py.is_file():
+        try:
+            pb_src = ph_builder_py.read_text(encoding="utf-8")
+            old_orphan_cond = "    for existing_file in manifests_dir.glob(\"*.json\"):\n        if existing_file.stem not in active_manifest_slugs:"
+            new_orphan_cond = (
+                "    for existing_file in manifests_dir.glob(\"*.json\"):\n"
+                "        if (\n"
+                "            existing_file.stem not in active_manifest_slugs\n"
+                "            and not existing_file.stem.startswith((\"irs-2027-tax-brackets-\", \"section-1031-calculator-\", \"section-179-calculator-\"))\n"
+                "        ):"
+            )
+            if old_orphan_cond in pb_src:
+                ph_builder_py.write_text(pb_src.replace(old_orphan_cond, new_orphan_cond, 1), encoding="utf-8")
+                updated_files.append(str(ph_builder_py))
         except Exception:
             pass
 
@@ -5779,6 +5906,7 @@ def reconcile_workspace_tracking_state(
 
                         # Restore any uncommitted/staged mutations in read-only compiled dist/
                         # only when restore_tenant_dist=True and substrate_lock.json is not pending release
+                        # and dist/ does not match the committed substrate_lock.json fingerprint.
                         if restore_tenant_dist:
                             lock_st = subprocess.run(
                                 ["git", "-C", str(rp), "status", "--porcelain", "--", "substrate_lock.json"],
@@ -5788,6 +5916,20 @@ def reconcile_workspace_tracking_state(
                                 timeout=5,
                             )
                             lock_dirty = bool(lock_st.returncode == 0 and lock_st.stdout.strip())
+                            dist_matches_lock = False
+                            if (rp / "substrate_lock.json").is_file() and (rp / "dist").is_dir():
+                                try:
+                                    from pseofactory.drift import compute_dist_lock_metrics
+                                    cur_fp, cur_tot = compute_dist_lock_metrics(rp / "dist")
+                                    sl_obj = json.loads((rp / "substrate_lock.json").read_text(encoding="utf-8"))
+                                    if (
+                                        isinstance(sl_obj, dict)
+                                        and sl_obj.get("dist_fingerprint") == cur_fp
+                                        and sl_obj.get("total_assets") == cur_tot
+                                    ):
+                                        dist_matches_lock = True
+                                except Exception:
+                                    pass
                             dist_st = subprocess.run(
                                 ["git", "-C", str(rp), "status", "--porcelain", "--", "dist"],
                                 capture_output=True,
@@ -5795,7 +5937,7 @@ def reconcile_workspace_tracking_state(
                                 check=False,
                                 timeout=5,
                             )
-                            if not lock_dirty and dist_st.returncode == 0 and dist_st.stdout.strip():
+                            if not lock_dirty and not dist_matches_lock and dist_st.returncode == 0 and dist_st.stdout.strip():
                                 # Before restoring dist/ from HEAD, persist any newly recorded uploads from dist/videos/uploaded_log.json into .agy/youtube_upload_ledger.json
                                 t_up_log = rp / "dist" / "videos" / "uploaded_log.json"
                                 if t_up_log.is_file():

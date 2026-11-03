@@ -1635,6 +1635,33 @@ class DepartmentHandoffChainVerifier:
                     if st_res.returncode == 0 and st_res.stdout.strip():
                         first_dirty = st_res.stdout.strip().splitlines()[0].strip()
                         t_errs.append(f"uncommitted tracked changes in {repo_path.name}: {first_dirty}")
+                    ls_res = subprocess.run(
+                        ["git", "-C", str(repo_path), "ls-files", "dist"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if (
+                        (self.strict_current_engine_hash or lock_hash == current_engine_hash)
+                        and ls_res.returncode == 0
+                        and (ls_res.stdout.strip() or (repo_path / ".pseofactory.json").is_file())
+                    ):
+                        tracked_dist_set = {
+                            ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()
+                        }
+                        lock_assets = [
+                            f"dist/{p.relative_to(dist_dir).as_posix()}"
+                            for p in sorted(dist_dir.glob("**/*"))
+                            if p.is_file()
+                            and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+                            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+                        ]
+                        untracked_lock = [p for p in lock_assets if p not in tracked_dist_set]
+                        if untracked_lock:
+                            t_errs.append(
+                                f"{len(untracked_lock)} untracked lock asset(s) in {repo_path.name}/dist/ (first: {untracked_lock[0]})"
+                            )
                 except Exception as exc:
                     t_errs.append(f"git status check failed in {repo_path.name}: {exc}")
             substrate_locks_by_tenant[pid] = {

@@ -356,6 +356,46 @@ def verify_all_tenants_aligned_for_latch(
                     )
             except Exception:
                 pass
+            if dist_dir.is_dir():
+                try:
+                    ls_res = subprocess.run(
+                        ["git", "-C", str(t_repo), "ls-files", "dist"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if ls_res.returncode == 0:
+                        tracked_dist_set = {
+                            ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()
+                        }
+                        lock_assets = [
+                            f"dist/{p.relative_to(dist_dir).as_posix()}"
+                            for p in sorted(dist_dir.glob("**/*"))
+                            if p.is_file()
+                            and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+                            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+                        ]
+                        untracked_lock = [p for p in lock_assets if p not in tracked_dist_set]
+                        if untracked_lock:
+                            reasons.append(
+                                f"{pid}: {len(untracked_lock)} untracked lock asset(s) in dist/ (first: {untracked_lock[0]})"
+                            )
+                        else:
+                            all_dist_files = [
+                                f"dist/{p.relative_to(dist_dir).as_posix()}"
+                                for p in sorted(dist_dir.glob("**/*"))
+                                if p.is_file()
+                                and "syndication" not in p.relative_to(dist_dir).parts
+                                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+                            ]
+                            untracked_dist = [p for p in all_dist_files if p not in tracked_dist_set]
+                            if untracked_dist:
+                                reasons.append(
+                                    f"{pid}: {len(untracked_dist)} untracked asset(s) in dist/ (first: {untracked_dist[0]})"
+                                )
+                except Exception:
+                    pass
             try:
                 rem_res = subprocess.run(
                     ["git", "-C", str(t_repo), "remote", "get-url", "origin"],

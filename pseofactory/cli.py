@@ -361,36 +361,82 @@ def cmd_reflect(args: argparse.Namespace) -> int:
             latch_state=True,
             defer_live_indexing=True,
         )
-    finally:
-        if lock_fd is not None:
-            try:
-                import fcntl
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                lock_fd.close()
-            except Exception:
-                pass
-    if not no_gitops:
-        from pseofactory.gitops import GitOpsCoordinator
-        from pseofactory.indexer import PushIndexer
-        reg = TenantRegistry.default()
-        for p_id, r_info in res.get("property_reports", {}).items():
-            if r_info.get("final_status") != "PASS":
-                continue
-            try:
-                adapter = reg.get_adapter(p_id)
-                repo_path = adapter.repo_path or adapter.dist_dir.parent
-                canon_base = str(getattr(adapter, "canonical_base", f"https://{adapter.domain}")).rstrip("/")
-                indexer = PushIndexer(
-                    domain=adapter.domain,
-                    canonical_base=canon_base,
-                    base_dir=repo_path,
-                    dist_dir=adapter.dist_dir,
-                    tenant_id=adapter.property_id,
-                )
-                has_unpushed_assets = bool(indexer.inspect_platform_assets().get("new_assets_count", 0) > 0)
-                if r_info.get("recompiled", 0) > 0 or has_unpushed_assets:
+        if not no_gitops:
+            import subprocess
+            from pseofactory.drift import (
+                compute_engine_hash,
+                record_engine_hash,
+                verify_all_tenants_aligned_for_latch,
+            )
+            from pseofactory.gitops import GitOpsCoordinator, sync_tenant_test_isolation_guards
+            from pseofactory.indexer import PushIndexer
+
+            reg = TenantRegistry.default()
+            for p_id, r_info in res.get("property_reports", {}).items():
+                if r_info.get("final_status") != "PASS":
+                    continue
+                try:
+                    adapter = reg.get_adapter(p_id)
+                    repo_path = adapter.repo_path or adapter.dist_dir.parent
+                    canon_base = str(getattr(adapter, "canonical_base", f"https://{adapter.domain}")).rstrip("/")
+                    indexer = PushIndexer(
+                        domain=adapter.domain,
+                        canonical_base=canon_base,
+                        base_dir=repo_path,
+                        dist_dir=adapter.dist_dir,
+                        tenant_id=adapter.property_id,
+                    )
+                    has_unpushed_assets = bool(indexer.inspect_platform_assets().get("new_assets_count", 0) > 0)
+                    has_reflection_mutations = bool(
+                        int(r_info.get("recompiled", 0) or 0) > 0
+                        or int(r_info.get("retrofitted", 0) or 0) > 0
+                        or int(r_info.get("pre_retrofitted_count", 0) or 0) > 0
+                        or int(r_info.get("drifted", 0) or 0) > 0
+                    )
+                    repo_has_pending_gitops = False
                     if (repo_path / ".git").exists():
-                        if r_info.get("recompiled", 0) > 0:
+                        sync_tenant_test_isolation_guards(repo_path, p_id)
+                        st_res = subprocess.run(
+                            ["git", "-C", str(repo_path), "status", "--porcelain"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=5,
+                        )
+                        if st_res.returncode == 0 and st_res.stdout.strip():
+                            repo_has_pending_gitops = True
+                        if not repo_has_pending_gitops and adapter.dist_dir.is_dir():
+                            ls_res = subprocess.run(
+                                ["git", "-C", str(repo_path), "ls-files", "dist"],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            if ls_res.returncode == 0:
+                                tracked_set = {ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()}
+                                for p_dist in adapter.dist_dir.glob("**/*"):
+                                    if (
+                                        p_dist.is_file()
+                                        and "syndication" not in p_dist.relative_to(adapter.dist_dir).parts
+                                        and not any(p_dist.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+                                    ):
+                                        if f"dist/{p_dist.relative_to(adapter.dist_dir).as_posix()}" not in tracked_set:
+                                            repo_has_pending_gitops = True
+                                            break
+                        if not repo_has_pending_gitops:
+                            ahead_res = subprocess.run(
+                                ["git", "-C", str(repo_path), "rev-list", "--count", "origin/main..HEAD"],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5,
+                            )
+                            if ahead_res.returncode == 0 and int(ahead_res.stdout.strip() or "0") > 0:
+                                repo_has_pending_gitops = True
+
+                    if has_reflection_mutations or repo_has_pending_gitops or has_unpushed_assets:
+                        if (repo_path / ".git").exists() and (has_reflection_mutations or repo_has_pending_gitops):
                             coordinator = GitOpsCoordinator(repo_path=repo_path, branch="main", dry_run=False)
                             gitops_res = coordinator.dispatch_to_shipper(
                                 property_id=p_id,
@@ -400,16 +446,57 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                                 dist_dir=adapter.dist_dir,
                             )
                             r_info["gitops_status"] = gitops_res.status
-                            if gitops_res.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "SKIPPED_NOT_GIT_REPO", "SKIPPED_DRY_RUN", "DRY_RUN", "COMPLETED"):
+                            if gitops_res.status not in (
+                                "SUCCESS",
+                                "SKIPPED_NO_CHANGES",
+                                "SKIPPED_NOT_GIT_REPO",
+                                "SKIPPED_DRY_RUN",
+                                "DRY_RUN",
+                                "COMPLETED",
+                            ):
                                 res["status"] = "FAIL"
                                 continue
                         idx_res = indexer.dispatch_automated_indexing(urls=None, live=True)
                         if isinstance(r_info.get("downstream"), dict):
-                            r_info["downstream"]["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
-            except Exception as g_err:
-                res["status"] = "FAIL"
-                if getattr(args, "verbose", False):
-                    print(f"Warning: GitOps auto-chain failed for '{p_id}': {g_err}")
+                            r_info["downstream"]["indexing_status"] = (
+                                idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+                            )
+                except Exception as g_err:
+                    res["status"] = "FAIL"
+                    if getattr(args, "verbose", False):
+                        print(f"Warning: GitOps auto-chain failed for '{p_id}': {g_err}")
+
+            if res.get("status") == "PASS":
+                try:
+                    cur_hash = compute_engine_hash()
+                    all_aligned, align_reasons = verify_all_tenants_aligned_for_latch(
+                        expected_hash=cur_hash,
+                        require_git_clean_and_pushed=True,
+                    )
+                    res["all_tenants_aligned"] = all_aligned
+                    res["alignment_reasons"] = align_reasons
+                    if all_aligned:
+                        for eh_cand in (
+                            Path("/home/ubuntuadmin/projects/.agy/engine_hash.json"),
+                            Path("/home/ubuntuadmin/projects/pseofactory/.agy/engine_hash.json"),
+                        ):
+                            if eh_cand.parent.is_dir():
+                                record_engine_hash(
+                                    eh_cand,
+                                    hash_value=cur_hash,
+                                    aligned=True,
+                                    alignment_reasons=[],
+                                )
+                except Exception:
+                    pass
+    finally:
+        if lock_fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
 
     if getattr(args, "json", False):
         print(json.dumps(res, indent=2))

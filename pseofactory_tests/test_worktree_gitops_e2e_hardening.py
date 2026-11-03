@@ -599,3 +599,240 @@ def test_d_ahead_diverged_origin_main_reconciles_and_recomputes_substrate_lock(t
         ["git", "status", "--porcelain"], cwd=str(local_repo), text=True
     ).strip()
     assert dirty == ""
+
+
+def test_new_dist_assets_staged_and_verify_all_tenants_aligned_rejects_untracked_dist_files(
+    tmp_path: Path,
+) -> None:
+    """
+    Proves that:
+    1. When a compiled tenant has dist/ in .gitignore and reflection/build creates a brand-new
+       file in dist/ (e.g. dist/manifests/new-spoke.json or dist/tools/new-spoke/index.html),
+       verify_all_tenants_aligned_for_latch rejects the tenant because compute_dist_lock_metrics
+       includes untracked dist/ files.
+    2. GitOpsCoordinator.stage_tracked stages the newly created dist/ files without manual
+       git add -f and removes dist/ from .gitignore for compiled tenants.
+    3. Once committed, verify_all_tenants_aligned_for_latch passes and tracked lock assets equal
+       substrate_lock.json["total_assets"].
+    """
+    from pseofactory.drift import (
+        compute_dist_lock_metrics,
+        compute_engine_hash,
+        verify_all_tenants_aligned_for_latch,
+    )
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    ws = tmp_path / "ws"
+    eng_hash = compute_engine_hash()
+
+    for pid, repo_name in (
+        ("profithelm", "profithelm-platform"),
+        ("prexvo", "prexvo"),
+        ("gainhelm", "gainhelm"),
+    ):
+        rp = ws / repo_name
+        _init_git_repo(rp)
+        (rp / ".pseofactory.json").write_text(
+            json.dumps({"tenant": pid, "engine": "pseofactory"}) + "\n",
+            encoding="utf-8",
+        )
+        (rp / ".gitignore").write_text(".agy/\ndist/\nsyndication/\n", encoding="utf-8")
+        dist = rp / "dist"
+        dist.mkdir(parents=True, exist_ok=True)
+        (dist / "index.html").write_text(
+            f"<!DOCTYPE html><html><head><title>{pid}</title></head><body><h1>{pid}</h1></body></html>\n",
+            encoding="utf-8",
+        )
+        RetroReflectionEngine.retrofit_estate(dist, pid)
+        fp, tot = compute_dist_lock_metrics(dist)
+        (rp / "substrate_lock.json").write_text(
+            json.dumps(
+                {
+                    "property_id": pid,
+                    "engine_hash": eng_hash,
+                    "substrate_hash": eng_hash,
+                    "dist_fingerprint": fp,
+                    "total_assets": tot,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(rp), "add", ".gitignore", ".pseofactory.json", "substrate_lock.json"], check=True)
+        subprocess.run(["git", "-C", str(rp), "add", "-f", "dist/index.html"], check=True)
+        subprocess.run(
+            ["git", "-C", str(rp), "commit", "-m", "initial tenant state"],
+            check=True,
+            capture_output=True,
+        )
+
+    # Simulate reflection/build generating brand-new files in prexvo/dist/ and updating substrate_lock.json
+    px_repo = ws / "prexvo"
+    px_dist = px_repo / "dist"
+    (px_dist / "manifests").mkdir(parents=True, exist_ok=True)
+    (px_dist / "manifests" / "new-spoke.json").write_text('{"slug": "new-spoke"}\n', encoding="utf-8")
+    (px_dist / "tools" / "new-spoke").mkdir(parents=True, exist_ok=True)
+    (px_dist / "tools" / "new-spoke" / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>New Spoke</title></head><body><h1>New Spoke</h1></body></html>\n",
+        encoding="utf-8",
+    )
+    RetroReflectionEngine.retrofit_estate(px_dist, "prexvo")
+    new_fp, new_tot = compute_dist_lock_metrics(px_dist)
+    assert new_tot == 3
+    (px_repo / "substrate_lock.json").write_text(
+        json.dumps(
+            {
+                "property_id": "prexvo",
+                "engine_hash": eng_hash,
+                "substrate_hash": eng_hash,
+                "dist_fingerprint": new_fp,
+                "total_assets": new_tot,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # Even if substrate_lock.json itself was committed while dist/ files remained untracked (because dist/ was in .gitignore),
+    # verify_all_tenants_aligned_for_latch MUST fail closed!
+    subprocess.run(["git", "-C", str(px_repo), "add", "substrate_lock.json"], check=True)
+    subprocess.run(
+        ["git", "-C", str(px_repo), "commit", "-m", "commit lock without untracked dist files"],
+        check=True,
+        capture_output=True,
+    )
+
+    aligned_before, reasons_before = verify_all_tenants_aligned_for_latch(
+        workspace_root=ws,
+        expected_hash=eng_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert aligned_before is False, f"Expected latch to reject untracked dist lock assets, got reasons={reasons_before}"
+    assert any("prexvo" in r and "untracked" in r.lower() for r in reasons_before), (
+        f"Expected untracked dist asset failure reason for prexvo, got: {reasons_before}"
+    )
+
+    # Now run GitOpsCoordinator.stage_tracked(px_repo) WITHOUT manual git add -f
+    coord = GitOpsCoordinator(repo_path=px_repo, branch="main")
+    staged = coord.stage_tracked(px_repo)
+    assert "dist/manifests/new-spoke.json" in staged
+    assert "dist/tools/new-spoke/index.html" in staged
+    assert "dist/" not in (px_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    subprocess.run(
+        ["git", "-C", str(px_repo), "commit", "-m", "fix(prexvo): stage new dist assets"],
+        check=True,
+        capture_output=True,
+    )
+
+    aligned_after, reasons_after = verify_all_tenants_aligned_for_latch(
+        workspace_root=ws,
+        expected_hash=eng_hash,
+        require_git_clean_and_pushed=True,
+    )
+    assert aligned_after is True, f"Expected latch to pass after staging & committing dist assets, got: {reasons_after}"
+
+
+def test_cmd_reflect_dispatches_gitops_when_recompiled_zero_and_gainhelm_run_factory_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves that:
+    1. cmd_reflect dispatches GitOpsCoordinator.dispatch_to_shipper even when recompiled == 0
+       if retrofitted > 0 or the tenant repository has uncommitted/untracked dist changes.
+    2. sync_tenant_test_isolation_guards patches an existing gainhelm/scripts/run_factory.sh
+       with git fetch + merge --ff-only and 201>&- FD closure.
+    """
+    import argparse
+    from pseofactory import cli as cli_mod
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+    from pseofactory.maintenance import SubprocessPropertyAdapter
+
+    gh_repo = tmp_path / "gainhelm"
+    _init_git_repo(gh_repo)
+    (gh_repo / "gainhelm").mkdir(parents=True, exist_ok=True)
+    (gh_repo / "pyproject.toml").write_text('[project]\nname = "gainhelm"\n', encoding="utf-8")
+    scripts_dir = gh_repo / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    rf_sh = scripts_dir / "run_factory.sh"
+    rf_sh.write_text(
+        '#!/bin/bash\n'
+        'cd "$PROJECT_DIR"\n\n'
+        'TIMEOUT_VAL="${GAINHELM_TIMEOUT:-${FACTORY_TIMEOUT:-1800s}}"\n\n'
+        'mkdir -p dist .agy/runs\n\n'
+        'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m gainhelm.factory "$@" </dev/null 200>&-\n',
+        encoding="utf-8",
+    )
+    sync_tenant_test_isolation_guards(gh_repo, "gainhelm")
+    rf_updated = rf_sh.read_text(encoding="utf-8")
+    assert 'git -C "$PROJECT_DIR" fetch origin "${GAINHELM_TARGET_BRANCH}:refs/remotes/origin/${GAINHELM_TARGET_BRANCH}"' in rf_updated
+    assert 'git -C "$PROJECT_DIR" merge --ff-only "origin/${GAINHELM_TARGET_BRANCH}"' in rf_updated
+    assert '200>&- 201>&-' in rf_updated
+
+    # Create a new untracked dist file in gh_repo and verify cmd_reflect dispatches GitOps even when recompiled == 0
+    dist_dir = gh_repo / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text("<html><body>GainHelm</body></html>\n", encoding="utf-8")
+
+    dispatched_calls = []
+
+    class DummyGitOpsResult:
+        status = "SUCCESS"
+
+    def fake_reflect(**kwargs):
+        return {
+            "status": "PASS",
+            "properties_scanned": 1,
+            "total_assets_checked": 10,
+            "total_drifted": 0,
+            "total_recompiled": 0,
+            "total_retrofitted": 1,
+            "property_reports": {
+                "gainhelm": {
+                    "final_status": "PASS",
+                    "recompiled": 0,
+                    "retrofitted": 1,
+                    "downstream": {},
+                }
+            },
+        }
+
+    class DummyRegistry:
+        def get_adapter(self, pid):
+            return SubprocessPropertyAdapter(
+                property_id="gainhelm",
+                brand_name="GainHelm",
+                domain="gainhelm.com",
+                canonical_base="https://gainhelm.com",
+                dist_dir=dist_dir,
+                repo_path=gh_repo,
+            )
+
+    class DummyIndexer:
+        def __init__(self, **kwargs):
+            pass
+
+        def inspect_platform_assets(self):
+            return {"new_assets_count": 0}
+
+        def dispatch_automated_indexing(self, urls=None, live=True):
+            return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(cli_mod, "reflect_and_recompile_all_assets", fake_reflect)
+    monkeypatch.setattr(cli_mod.TenantRegistry, "default", classmethod(lambda cls: DummyRegistry()))
+    monkeypatch.setattr("pseofactory.indexer.PushIndexer", DummyIndexer)
+    monkeypatch.setattr(
+        "pseofactory.gitops.GitOpsCoordinator.dispatch_to_shipper",
+        lambda self, **kw: (dispatched_calls.append(kw) or DummyGitOpsResult()),
+    )
+
+    rc = cli_mod.cmd_reflect(
+        argparse.Namespace(property="gainhelm", force=True, verbose=False, no_gitops=False, json=True)
+    )
+    assert rc == 0
+    assert len(dispatched_calls) == 1
+    assert dispatched_calls[0]["property_id"] == "gainhelm"
+
