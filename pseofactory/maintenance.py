@@ -4101,37 +4101,25 @@ class MaintenanceLifecycle:
             else adapter.dist_dir.parent / ".agy" / default_ledger_name
         )
 
-        with adapter.scoped_environment():
-            if (
-                not dry_run
-                and getattr(adapter, "repo_path", None)
-                and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
-                and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
-                and "PYTEST_CURRENT_TEST" not in os.environ
-            ):
-                factory_lock_path = Path(f"/tmp/{adapter.property_id}_factory.lock")
-                lock_probe_fd = None
-                try:
-                    lock_probe_fd = open(factory_lock_path, "a+", encoding="utf-8")
-                    fcntl.flock(lock_probe_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    fcntl.flock(lock_probe_fd.fileno(), fcntl.LOCK_UN)
-                except OSError:
-                    return MaintenanceResult(
-                        property_id=adapter.property_id,
-                        status="DEFERRED",
-                        assets_audited=0,
-                        assets_drifted=0,
-                        assets_refactored=0,
-                        assets_failed=0,
-                        engine_hash=None,
-                        duration_seconds=time.time() - start_time,
-                    )
-                finally:
-                    if lock_probe_fd is not None:
-                        try:
-                            lock_probe_fd.close()
-                        except OSError:
-                            pass
+        from pseofactory.gitops import TenantFactoryLockGuard
+
+        with adapter.scoped_environment(), TenantFactoryLockGuard(
+            property_id=adapter.property_id,
+            repo_path=getattr(adapter, "repo_path", None),
+            dry_run=dry_run,
+            non_blocking=True,
+        ) as tenant_lock_guard:
+            if not tenant_lock_guard.acquired:
+                return MaintenanceResult(
+                    property_id=adapter.property_id,
+                    status="DEFERRED",
+                    assets_audited=0,
+                    assets_drifted=0,
+                    assets_refactored=0,
+                    assets_failed=0,
+                    engine_hash=None,
+                    duration_seconds=time.time() - start_time,
+                )
 
             if (
                 not dry_run
@@ -13389,6 +13377,15 @@ def reflect_and_recompile_all_assets(
             and str(Path(adapter.dist_dir).resolve()).startswith("/home/ubuntuadmin/projects/")
         )
 
+        from pseofactory.gitops import TenantFactoryLockGuard
+        reflect_lock_guard = TenantFactoryLockGuard(
+            property_id=adapter.property_id,
+            repo_path=getattr(adapter, "repo_path", None),
+            dry_run=(not latch_state) or is_foreign_pytest,
+            timeout=30.0,
+        )
+        reflect_lock_guard.__enter__()
+
         edge_functions_updated = False
         if (
             getattr(adapter, "repo_path", None)
@@ -14868,6 +14865,7 @@ def reflect_and_recompile_all_assets(
         results["property_reports"][p_id] = prop_rep_entry
         if prop_final_status != "PASS":
             results["status"] = "DRIFT"
+        reflect_lock_guard.__exit__(None, None, None)
 
     if latch_state and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
         try:

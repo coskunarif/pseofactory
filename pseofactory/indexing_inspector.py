@@ -1176,37 +1176,48 @@ class DailyIndexingInspector:
             overall_status in ("WARN", "FAIL") or coverage_records or has_pending_rollover or has_unindexed_gsc
         ):
             try:
+                from pseofactory.gitops import TenantFactoryLockGuard
                 from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
 
-                loop = IndexingFeedbackLoop(
+                with TenantFactoryLockGuard(
                     property_id=self.tenant_id,
-                    base_dir=self.base_dir,
-                    dist_dir=self.base_dir / "dist",
-                    inspector=self,
-                    telemetry_logger=self.telemetry_logger,
-                )
-                live_cycle = (not dry_run) and not bool(rollover_report.get("quota_exhausted"))
-                only_rollover = (
-                    overall_status == "PASS"
-                    and not coverage_records
-                    and not synthesized_unindexed
-                    and has_pending_rollover
-                )
-                try:
-                    auto_rem_res = loop.run_feedback_cycle(
-                        dry_run=dry_run,
-                        live=live_cycle,
-                        unindexed_urls=[] if only_rollover else (synthesized_unindexed if synthesized_unindexed else None),
-                        query_records=[] if only_rollover else None,
-                        skip_recompile=only_rollover,
+                    repo_path=self.base_dir,
+                    dry_run=dry_run,
+                    timeout=30.0,
+                ) as insp_lock_guard:
+                    if not insp_lock_guard.acquired:
+                        raise RuntimeError(
+                            f"Deferred indexing auto-remediation for '{self.tenant_id}': tenant factory lock held"
+                        )
+                    loop = IndexingFeedbackLoop(
+                        property_id=self.tenant_id,
+                        base_dir=self.base_dir,
+                        dist_dir=self.base_dir / "dist",
+                        inspector=self,
+                        telemetry_logger=self.telemetry_logger,
                     )
-                except TypeError:
-                    auto_rem_res = loop.run_feedback_cycle(
-                        dry_run=dry_run,
-                        live=live_cycle,
-                        unindexed_urls=[] if only_rollover else (synthesized_unindexed if synthesized_unindexed else None),
-                        skip_recompile=only_rollover,
+                    live_cycle = (not dry_run) and not bool(rollover_report.get("quota_exhausted"))
+                    only_rollover = (
+                        overall_status == "PASS"
+                        and not coverage_records
+                        and not synthesized_unindexed
+                        and has_pending_rollover
                     )
+                    try:
+                        auto_rem_res = loop.run_feedback_cycle(
+                            dry_run=dry_run,
+                            live=live_cycle,
+                            unindexed_urls=[] if only_rollover else (synthesized_unindexed if synthesized_unindexed else None),
+                            query_records=[] if only_rollover else None,
+                            skip_recompile=only_rollover,
+                        )
+                    except TypeError:
+                        auto_rem_res = loop.run_feedback_cycle(
+                            dry_run=dry_run,
+                            live=live_cycle,
+                            unindexed_urls=[] if only_rollover else (synthesized_unindexed if synthesized_unindexed else None),
+                            skip_recompile=only_rollover,
+                        )
 
                 # If child sitemaps and feedback loop pass in live mode, reconcile rollover URLs covered by child sitemaps
                 if (

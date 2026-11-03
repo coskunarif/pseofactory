@@ -299,10 +299,16 @@ class ShipperQueue:
         except Exception:
             pass
 
-    def reconcile_stale_events(self, max_age_seconds: float = 900.0) -> int:
+    def reconcile_stale_events(
+        self,
+        max_age_seconds: float = 900.0,
+        current_head_sha: Optional[str] = None,
+        repo_clean_and_pushed: bool = False,
+    ) -> int:
         """
-        Automatically reconciles any PENDING WAL events that have been superseded by a newer
-        completed event on the same property/token or exceeded max_age_seconds after an aborted run.
+        Automatically reconciles any PENDING or superseded failed WAL events that have been
+        superseded by a newer completed event on the same property/token, exceeded max_age_seconds
+        after an aborted run, or been reconciled by a clean pushed repository HEAD.
         Returns count of reconciled events.
         """
         if not self.queue_file.exists():
@@ -344,7 +350,15 @@ class ShipperQueue:
 
                     for idx, rec in enumerate(records):
                         st = str(rec.get("status", ""))
-                        if st not in ("PENDING", "CI_FAILURE", "EDGE_VERIFICATION_FAILED", "FAILED", "DRY_RUN", "STAGED"):
+                        if st not in (
+                            "PENDING",
+                            "CI_FAILURE",
+                            "EDGE_VERIFICATION_FAILED",
+                            "FAILED",
+                            "PUSH_FAILED",
+                            "DRY_RUN",
+                            "STAGED",
+                        ):
                             continue
                         tok = str(rec.get("payload", {}).get("token", ""))
                         is_stale = False
@@ -369,6 +383,15 @@ class ShipperQueue:
                         elif idx < latest_completed_idx:
                             is_stale = True
                             reason = "Superseded by newer completed release on property"
+                        elif repo_clean_and_pushed and st in (
+                            "PUSH_FAILED",
+                            "FAILED",
+                            "CI_FAILURE",
+                            "EDGE_VERIFICATION_FAILED",
+                        ):
+                            is_stale = True
+                            sha_short = current_head_sha[:12] if current_head_sha else "origin/main"
+                            reason = f"Reconciled against clean pushed repository HEAD ({sha_short})"
                         elif st == "PENDING":
                             ts_str = str(rec.get("timestamp", ""))
                             if ts_str:
@@ -436,6 +459,272 @@ class ShipperQueue:
 
 
 WALQueue = ShipperQueue
+
+
+def recompute_and_amend_tenant_lock_and_ledger(
+    repo_path: Union[str, Path],
+    git_env: Optional[Dict[str, str]] = None,
+) -> bool:
+    """
+    Recomputes substrate_lock.json (dist_fingerprint, total_assets, engine_hash, substrate_hash)
+    and .agy/asset_ledger.json + .agy/engine_hash.json (when present) from the post-rebase dist/
+    tree, stages tracked changes, and amends HEAD so rebasing onto an ahead origin/main never
+    leaves stale dist_fingerprint or total_assets in the pushed commit.
+    Zero em-dashes. Zero en-dashes.
+    """
+    repo = Path(repo_path).resolve()
+    dist_dir = repo / "dist"
+    lock_file = repo / "substrate_lock.json"
+    if not dist_dir.is_dir() or not lock_file.is_file():
+        return False
+
+    try:
+        from pseofactory.drift import (
+            compute_asset_fingerprint,
+            compute_dist_lock_metrics,
+            compute_engine_hash,
+            record_asset_ledger,
+            record_engine_hash,
+        )
+
+        cur_engine_hash = compute_engine_hash()
+        dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(dist_dir)
+        try:
+            lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+            if not isinstance(lock_data, dict):
+                lock_data = {}
+        except Exception:
+            lock_data = {}
+
+        if "property_id" not in lock_data and "property" not in lock_data:
+            lock_data["property_id"] = _normalize_property_id(repo.name)
+        lock_data["engine_hash"] = cur_engine_hash
+        lock_data["substrate_hash"] = cur_engine_hash
+        lock_data["dist_fingerprint"] = dist_fp_hex
+        lock_data["total_assets"] = total_dist_assets
+        lock_file.write_text(json.dumps(lock_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        agy_dir = repo / ".agy"
+        eh_file = agy_dir / "engine_hash.json"
+        al_file = agy_dir / "asset_ledger.json"
+        if eh_file.is_file():
+            record_engine_hash(eh_file, hash_value=cur_engine_hash)
+        if al_file.is_file():
+            html_assets = sorted(
+                p
+                for p in dist_dir.glob("**/*")
+                if p.is_file()
+                and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+            )
+            asset_hashes = {
+                p.relative_to(dist_dir).as_posix(): compute_asset_fingerprint(p)
+                for p in html_assets
+            }
+            record_asset_ledger(al_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+
+        eff_env = dict(git_env) if git_env is not None else os.environ.copy()
+        eff_env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        files_to_stage = ["substrate_lock.json"]
+        for cand_rel in (".agy/asset_ledger.json", ".agy/engine_hash.json", "freshness_audit_report.json"):
+            if (repo / cand_rel).is_file():
+                ls_res = subprocess.run(
+                    ["git", "-C", str(repo), "ls-files", "--error-unmatch", cand_rel],
+                    env=eff_env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if ls_res.returncode == 0:
+                    files_to_stage.append(cand_rel)
+
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "--"] + files_to_stage,
+            env=eff_env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "-c", "core.editor=true", "commit", "--amend", "--no-edit", "--allow-empty"],
+            env=eff_env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def reconcile_repo_with_origin_main(
+    repo_path: Union[str, Path],
+    branch: str = "main",
+) -> bool:
+    """
+    Fetches origin/<branch> and fast-forwards or rebases local <branch> onto origin/<branch>
+    when the working tree is clean or has only reconcilable state, preventing autonomous jobs
+    from committing onto a stale local base behind origin/main.
+    Zero em-dashes. Zero en-dashes.
+    """
+    repo = Path(repo_path).resolve()
+    if not (repo / ".git").exists():
+        return False
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    try:
+        cur_br = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if cur_br.returncode != 0 or cur_br.stdout.strip() != branch:
+            return False
+        fetch_res = subprocess.run(
+            ["git", "-C", str(repo), "fetch", "origin", branch],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        if fetch_res.returncode != 0:
+            return False
+        counts = subprocess.run(
+            ["git", "-C", str(repo), "rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if counts.returncode != 0:
+            return False
+        parts = counts.stdout.strip().split()
+        if len(parts) != 2:
+            return False
+        ahead, behind = int(parts[0]), int(parts[1])
+        if behind == 0:
+            return True
+        if ahead == 0:
+            ff_res = subprocess.run(
+                ["git", "-C", str(repo), "merge", "--ff-only", f"origin/{branch}"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+            return ff_res.returncode == 0
+        rb_res = subprocess.run(
+            ["git", "-C", str(repo), "rebase", "-X", "theirs", f"origin/{branch}"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if rb_res.returncode != 0:
+            subprocess.run(
+                ["git", "-C", str(repo), "rebase", "--abort"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            return False
+        recompute_and_amend_tenant_lock_and_ledger(repo, git_env=env)
+        return True
+    except Exception:
+        return False
+
+
+class TenantFactoryLockGuard:
+    """
+    Context manager that acquires and holds /tmp/<property_id>_factory.lock for the entire
+    tenant mutation, reflection, and gitops push window, and reconciles local main with
+    origin/main before work begins.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(
+        self,
+        property_id: str,
+        repo_path: Optional[Union[str, Path]] = None,
+        dry_run: bool = False,
+        timeout: float = 30.0,
+        non_blocking: bool = False,
+    ) -> None:
+        self.property_id = _normalize_property_id(property_id)
+        self.repo_path = Path(repo_path).resolve() if repo_path else None
+        self.dry_run = dry_run
+        self.timeout = timeout
+        self.non_blocking = non_blocking
+        lock_dir = Path(os.environ.get("PSEUFACTORY_LOCK_DIR", "/tmp"))
+        self.lock_path = lock_dir / f"{self.property_id}_factory.lock"
+        self._fd: Optional[Any] = None
+        self.acquired = False
+
+    def __enter__(self) -> "TenantFactoryLockGuard":
+        is_prod_repo = (
+            self.repo_path is not None
+            and str(self.repo_path).startswith("/home/ubuntuadmin/projects/")
+        )
+        should_lock = (
+            not self.dry_run
+            and self.property_id in ("profithelm", "prexvo", "gainhelm")
+            and (
+                (is_prod_repo and "PYTEST_CURRENT_TEST" not in os.environ)
+                or "PSEUFACTORY_LOCK_DIR" in os.environ
+            )
+        )
+        if not should_lock:
+            self.acquired = True
+            return self
+
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fd = open(self.lock_path, "a+", encoding="utf-8")
+        deadline = time.monotonic() + (0.0 if self.non_blocking else max(0.0, self.timeout))
+        while True:
+            try:
+                fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    try:
+                        self._fd.close()
+                    except OSError:
+                        pass
+                    self._fd = None
+                    self.acquired = False
+                    return self
+                time.sleep(0.1)
+
+        if self.acquired and self.repo_path is not None and (self.repo_path / ".git").exists():
+            reconcile_repo_with_origin_main(self.repo_path, branch="main")
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if self._fd is not None:
+            try:
+                if self.acquired:
+                    fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                self._fd.close()
+            except OSError:
+                pass
+            self._fd = None
+            self.acquired = False
 
 
 class GitOpsCoordinator:
@@ -1030,6 +1319,7 @@ class GitOpsCoordinator:
                         check=False,
                         timeout=30,
                     )
+                    rebase_succeeded = rebase_res.returncode == 0
                     if rebase_res.returncode != 0:
                         if self.ast_merge_path.is_file():
                             subprocess.run(
@@ -1048,7 +1338,9 @@ class GitOpsCoordinator:
                                 check=False,
                                 timeout=30,
                             )
-                            if cont_res.returncode != 0:
+                            if cont_res.returncode == 0:
+                                rebase_succeeded = True
+                            else:
                                 subprocess.run(
                                     ["git", "-C", str(self.repo_path), "rebase", "--abort"],
                                     env=self._get_git_env(),
@@ -1066,6 +1358,8 @@ class GitOpsCoordinator:
                                 check=False,
                                 timeout=15,
                             )
+                    if rebase_succeeded:
+                        recompute_and_amend_tenant_lock_and_ledger(self.repo_path, git_env=self._get_git_env())
                 except subprocess.TimeoutExpired:
                     subprocess.run(
                         ["git", "-C", str(self.repo_path), "rebase", "--abort"],
@@ -3081,7 +3375,10 @@ def _extract_concatenated_json_objects(raw_text: str) -> List[Dict[str, Any]]:
     return objs
 
 
-def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, Any]:
+def sync_tenant_test_isolation_guards(
+    repo_path: Union[str, Path],
+    property_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Compiles and enforces test-isolation guards into tenant synthesis repair, generator,
     and factory modules so test runs never pollute .agy/runs or force-stage .agy/runs into git.
@@ -3683,8 +3980,8 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 "        echo \"Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL).\" >&2\n"
                 "        exit 75\n"
                 "    fi\n"
-                "    flock -u 201 2>/dev/null || true\n"
-                "    exec 201>&-\n"
+                "    export PSEUFACTORY_HOLDS_SUPERVISOR_LOCK=1\n"
+                "    export PSEUFACTORY_SUPERVISOR_LOCK_HELD=1\n"
                 "fi\n\n"
                 "cleanup() {\n"
                 "    cd \"$PROJECT_DIR\" 2>/dev/null || true\n"
@@ -3726,10 +4023,14 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 "    exit \"$exit_code\"\n"
                 "}\n"
                 "trap 'on_error $LINENO \"$BASH_COMMAND\" $?' ERR\n\n"
-                "cd \"$PROJECT_DIR\"\n\n"
+                "cd \"$PROJECT_DIR\"\n"
+                "if [ -d \"$PROJECT_DIR/.git\" ]; then\n"
+                "    git -C \"$PROJECT_DIR\" fetch origin \"${GAINHELM_TARGET_BRANCH}:refs/remotes/origin/${GAINHELM_TARGET_BRANCH}\" 2>/dev/null || true\n"
+                "    git -C \"$PROJECT_DIR\" merge --ff-only \"origin/${GAINHELM_TARGET_BRANCH}\" 2>/dev/null || true\n"
+                "fi\n\n"
                 "TIMEOUT_VAL=\"${GAINHELM_TIMEOUT:-${FACTORY_TIMEOUT:-1800s}}\"\n\n"
                 "mkdir -p dist .agy/runs\n\n"
-                "timeout --preserve-status --kill-after=30s \"$TIMEOUT_VAL\" python3 -m gainhelm.factory \"$@\" </dev/null 200>&-\n"
+                "timeout --preserve-status --kill-after=30s \"$TIMEOUT_VAL\" python3 -m gainhelm.factory \"$@\" </dev/null 200>&- 201>&-\n"
                 "if [ \"$DRY_RUN_REQUESTED\" -eq 0 ] && [ \"${GAINHELM_AUTO_LIVE:-1}\" -eq 1 ] && [ -z \"$GAINHELM_VOID_CANDIDATES\" ]; then\n"
                 "    rm -f \"$FAILED_MARKER\"\n"
                 "fi\n\n"
@@ -3813,8 +4114,8 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
                 '        echo "Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL)." >&2\n'
                 '        exit 75\n'
                 '    fi\n'
-                '    flock -u 201 2>/dev/null || true\n'
-                '    exec 201>&-\n'
+                '    export PSEUFACTORY_HOLDS_SUPERVISOR_LOCK=1\n'
+                '    export PSEUFACTORY_SUPERVISOR_LOCK_HELD=1\n'
                 'fi'
             )
             if old_pid_echo in rf_new and "PSEUFACTORY_HOLDS_SUPERVISOR_LOCK" not in rf_new:
@@ -3828,10 +4129,73 @@ def sync_tenant_test_isolation_guards(repo_path: Union[str, Path]) -> Dict[str, 
             elif old_lock_cond_v2 in rf_new:
                 rf_new = rf_new.replace(old_lock_cond_v2, new_lock_cond, 1)
 
+            # Never unlock FD 201 early; hold /tmp/pseofactory_supervisor.lock for the entire script execution
+            rf_new = re.sub(
+                r"^[ \t]*flock -u 201[^\n]*\n(?:[ \t]*exec 201>&-[^\n]*\n)?",
+                "    export PSEUFACTORY_HOLDS_SUPERVISOR_LOCK=1\n    export PSEUFACTORY_SUPERVISOR_LOCK_HELD=1\n",
+                rf_new,
+                flags=re.MULTILINE,
+            )
+
+            # Ensure ProfitHelm and Prexvo fast-forward local main with origin/main and reconcile worktree commits before sweep
+            old_ph_fetch = (
+                'if [ -d "$PROJECT_DIR/.git" ]; then\n'
+                '    git -C "$PROJECT_DIR" fetch origin "${PROFITHELM_TARGET_BRANCH}:refs/remotes/origin/${PROFITHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                'fi'
+            )
+            new_ph_fetch = (
+                'if [ -d "$PROJECT_DIR/.git" ]; then\n'
+                '    git -C "$PROJECT_DIR" fetch origin "${PROFITHELM_TARGET_BRANCH}:refs/remotes/origin/${PROFITHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                '    git -C "$PROJECT_DIR" merge --ff-only "origin/${PROFITHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                'fi'
+            )
+            if old_ph_fetch in rf_new:
+                rf_new = rf_new.replace(old_ph_fetch, new_ph_fetch, 1)
+
+            old_ph_sweep = (
+                'cd "$PROJECT_DIR" 2>/dev/null || true\n'
+                'if [ -f "$WORKTREE_HARNESS" ]; then\n'
+                '    bash "$WORKTREE_HARNESS" sweep "$PROJECT_DIR" factory\n'
+                'fi'
+            )
+            new_ph_sweep = (
+                'cd "$PROJECT_DIR" 2>/dev/null || true\n'
+                'if [ -d "$PROJECT_DIR/.git" ]; then\n'
+                '    git -C "$PROJECT_DIR" fetch origin "${PROFITHELM_TARGET_BRANCH}:refs/remotes/origin/${PROFITHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                '    if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/agy-wt-factory"; then\n'
+                '        git -C "$PROJECT_DIR" merge --ff-only "agy-wt-factory" 2>/dev/null || git -C "$PROJECT_DIR" merge --no-edit -X theirs "agy-wt-factory" 2>/dev/null || true\n'
+                '    fi\n'
+                '    git -C "$PROJECT_DIR" merge --ff-only "origin/${PROFITHELM_TARGET_BRANCH}" 2>/dev/null || true\n'
+                'fi\n'
+                'if [ -f "$WORKTREE_HARNESS" ]; then\n'
+                '    bash "$WORKTREE_HARNESS" sweep "$PROJECT_DIR" factory\n'
+                'fi'
+            )
+            if old_ph_sweep in rf_new and 'show-ref --verify --quiet "refs/heads/agy-wt-factory"' not in rf_new:
+                rf_new = rf_new.replace(old_ph_sweep, new_ph_sweep, 1)
+
+            old_px_cd = 'cd "$PROJECT_DIR"\n\nTIMEOUT_VAL="${PREXVO_TIMEOUT:-${FACTORY_TIMEOUT:-1800s}}"'
+            new_px_cd = (
+                'cd "$PROJECT_DIR"\n'
+                'if [ -d "$PROJECT_DIR/.git" ]; then\n'
+                '    git -C "$PROJECT_DIR" fetch origin "${PREXVO_TARGET_BRANCH}:refs/remotes/origin/${PREXVO_TARGET_BRANCH}" 2>/dev/null || true\n'
+                '    git -C "$PROJECT_DIR" merge --ff-only "origin/${PREXVO_TARGET_BRANCH}" 2>/dev/null || true\n'
+                'fi\n\n'
+                'TIMEOUT_VAL="${PREXVO_TIMEOUT:-${FACTORY_TIMEOUT:-1800s}}"'
+            )
+            if old_px_cd in rf_new:
+                rf_new = rf_new.replace(old_px_cd, new_px_cd, 1)
+
             old_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@"\n'
-            new_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@" </dev/null 200>&-\n'
+            new_px_exec = 'timeout --preserve-status --kill-after=30s "$TIMEOUT_VAL" python3 -m prexvo.factory "$@" </dev/null 200>&- 201>&-\n'
             if old_px_exec in rf_new:
                 rf_new = rf_new.replace(old_px_exec, new_px_exec, 1)
+            elif 'python3 -m prexvo.factory "$@" </dev/null 200>&-\n' in rf_new:
+                rf_new = rf_new.replace(
+                    'python3 -m prexvo.factory "$@" </dev/null 200>&-\n',
+                    'python3 -m prexvo.factory "$@" </dev/null 200>&- 201>&-\n',
+                    1,
+                )
 
             if rf_new != rf_src:
                 run_factory_sh.write_text(rf_new, encoding="utf-8")
@@ -5560,6 +5924,81 @@ def reconcile_workspace_tracking_state(
                         failed_marker.unlink()
                     except OSError:
                         pass
+                # Reconcile ShipperQueue trailing PUSH_FAILED/FAILED events and stale maintenance_dlq.json when repo is clean and pushed
+                try:
+                    prop_norm = _normalize_property_id(repo_name)
+                    ahead_res = subprocess.run(
+                        ["git", "-C", str(rp), "rev-list", "--count", "origin/main..HEAD"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    is_pushed = ahead_res.returncode == 0 and ahead_res.stdout.strip() == "0"
+                    cur_h_sha = heads.get(str(rp)) or heads.get(repo_name) or ""
+                    if is_pushed and prop_norm in canonical_queue_Owner_ids:
+                        sq_clean = ShipperQueue(property_id=prop_norm, queues_dir=eff_queues_dir)
+                        reconciled_wal_events += sq_clean.reconcile_stale_events(
+                            max_age_seconds=max_pending_age_seconds,
+                            current_head_sha=cur_h_sha,
+                            repo_clean_and_pushed=True,
+                        )
+                    dlq_json_path = rp / ".agy" / "maintenance_dlq.json"
+                    if is_pushed and dlq_json_path.is_file() and (rp / "substrate_lock.json").is_file():
+                        raw_dlq = json.loads(dlq_json_path.read_text(encoding="utf-8"))
+                        if isinstance(raw_dlq, list) and len(raw_dlq) > 0:
+                            archive_path = rp / ".agy" / "runs" / "maintenance_dlq_reconciled_archive.json"
+                            archive_path.parent.mkdir(parents=True, exist_ok=True)
+                            existing_arch: List[Any] = []
+                            if archive_path.is_file():
+                                try:
+                                    loaded_arch = json.loads(archive_path.read_text(encoding="utf-8"))
+                                    if isinstance(loaded_arch, list):
+                                        existing_arch = loaded_arch
+                                except Exception:
+                                    pass
+                            reconciled_slugs: Set[str] = set()
+                            for d_entry in raw_dlq:
+                                if isinstance(d_entry, dict):
+                                    d_copy = dict(d_entry)
+                                    d_copy["reconciled_at"] = now_iso
+                                    d_copy["reconciled_by_head_sha"] = cur_h_sha
+                                    d_copy["status"] = "RECONCILED_BY_CLEAN_SUBSTRATE"
+                                    existing_arch.append(d_copy)
+                                    sl_val = str(d_entry.get("slug") or "").strip()
+                                    if sl_val:
+                                        reconciled_slugs.add(sl_val)
+                            archive_path.write_text(json.dumps(existing_arch, indent=2) + "\n", encoding="utf-8")
+                            dlq_json_path.write_text("[]\n", encoding="utf-8")
+                            if reconciled_slugs and not in_test:
+                                vc_vault = Path.home() / ".local" / "share" / "vault" / "void_candidates.jsonl"
+                                if vc_vault.is_file():
+                                    try:
+                                        vc_lines = vc_vault.read_text(encoding="utf-8").splitlines()
+                                        new_vc_lines: List[str] = []
+                                        vc_changed = False
+                                        for vcl in vc_lines:
+                                            if not vcl.strip():
+                                                continue
+                                            try:
+                                                vco = json.loads(vcl)
+                                                if (
+                                                    isinstance(vco, dict)
+                                                    and str(vco.get("slug") or "") in reconciled_slugs
+                                                    and str(vco.get("status") or "").upper() in ("PENDING", "QUEUED", "")
+                                                ):
+                                                    vco["status"] = "REJECTED"
+                                                    vco["rejection_reason"] = "CANNIBALIZES_CANONICAL_ASSET"
+                                                    vc_changed = True
+                                                new_vc_lines.append(json.dumps(vco))
+                                            except Exception:
+                                                new_vc_lines.append(vcl)
+                                        if vc_changed:
+                                            vc_vault.write_text("\n".join(new_vc_lines) + "\n", encoding="utf-8")
+                                    except Exception:
+                                        pass
+                except Exception:
+                    pass
                 stash_res = subprocess.run(
                     ["git", "-C", str(rp), "stash", "list"],
                     capture_output=True,

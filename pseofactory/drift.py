@@ -540,6 +540,7 @@ def record_asset_ledger(
         "engine_hash": engine_hash or substrate_hash,
         "substrate_hash": substrate_hash,
         "total_assets": len(asset_hashes),
+        "total_compiled_assets": len(asset_hashes),
         "assets": dict(sorted(asset_hashes.items())),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
