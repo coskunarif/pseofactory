@@ -153,6 +153,32 @@ def cmd_audit(args: argparse.Namespace) -> int:
         return 0 if report.status == "PASS" else 1
 
     property_id = (args.property or "prexvo").strip().lower()
+    run_default_browser = (
+        not getattr(args, "no_browser", False)
+        and "PYTEST_CURRENT_TEST" not in os.environ
+        and os.environ.get("PSEOFACTORY_SKIP_DEFAULT_BROWSER_AUDIT") != "1"
+    )
+    lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
+    in_pipeline = (
+        os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") == "1"
+        or _ancestor_or_inherited_fd_holds_lock(lock_file)
+    )
+    default_sample = getattr(args, "sample", None)
+    if default_sample is None and in_pipeline:
+        default_sample = 2
+
+    from pseofactory.browser_verifier import (
+        UnifiedBrowserAuditor as _DefaultBrowserAuditor,
+        ProfitHelmBrowserAdapter as _PHAdapter,
+        PrexvoBrowserAdapter as _PXAdapter,
+        GainHelmBrowserAdapter as _GHAdapter,
+    )
+    _default_adapter_map = {
+        "profithelm": _PHAdapter,
+        "prexvo": _PXAdapter,
+        "gainhelm": _GHAdapter,
+    }
+
     if property_id == "all":
         all_passed = True
         reports_dict: Dict[str, Any] = {}
@@ -163,7 +189,18 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 adapter=adp,
                 check_engine_drift=getattr(args, "check_engine_drift", False),
             )
-            reports_dict[p_id] = rep.to_dict()
+            rep_dict = rep.to_dict()
+            if run_default_browser and p_id in _default_adapter_map:
+                b_auditor = _DefaultBrowserAuditor(
+                    adapter=_default_adapter_map[p_id](),
+                    cdp_port=getattr(args, "cdp_port", 9222),
+                    fail_closed=getattr(args, "fail_closed", None),
+                )
+                b_rep = b_auditor.run_audit(sample_size=default_sample)
+                rep_dict["browser_audit"] = b_rep
+                if b_rep.get("status") != "PASS":
+                    all_passed = False
+            reports_dict[p_id] = rep_dict
             if not args.json:
                 print(
                     f"[{rep.status}] Property: {rep.property_id} | Total: {rep.total_assets_checked} "
@@ -173,6 +210,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     print(
                         f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} "
                         f"({'; '.join(d.details)})"
+                    )
+                if "browser_audit" in rep_dict:
+                    b_rep = rep_dict["browser_audit"]
+                    print(
+                        f"[{b_rep.get('status', 'UNKNOWN')}] Browser CDP Audit for '{p_id}': "
+                        f"Total: {b_rep.get('total_routes', 0)} | Audited: {b_rep.get('routes_audited', 0)} | Failed: {b_rep.get('failed_count', 0)}"
                     )
             if rep.status != "PASS":
                 all_passed = False
@@ -190,13 +233,30 @@ def cmd_audit(args: argparse.Namespace) -> int:
         adapter=adapter,
         check_engine_drift=getattr(args, "check_engine_drift", False),
     )
+    rep_dict = report.to_dict()
+    browser_ok = True
+    if run_default_browser and property_id in _default_adapter_map:
+        b_auditor = _DefaultBrowserAuditor(
+            adapter=_default_adapter_map[property_id](),
+            cdp_port=getattr(args, "cdp_port", 9222),
+            fail_closed=getattr(args, "fail_closed", None),
+        )
+        b_rep = b_auditor.run_audit(sample_size=default_sample)
+        rep_dict["browser_audit"] = b_rep
+        browser_ok = b_rep.get("status") == "PASS"
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2))
+        print(json.dumps(rep_dict, indent=2))
     else:
         print(f"[{report.status}] Property: {report.property_id} | Total: {report.total_assets_checked} | Compliant: {report.compliant_assets_count} | Drifted: {report.drifted_assets_count}")
         for d in report.drifted_assets:
             print(f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} ({'; '.join(d.details)})")
-    return 0 if report.status == "PASS" else 1
+        if "browser_audit" in rep_dict:
+            b_rep = rep_dict["browser_audit"]
+            print(
+                f"[{b_rep.get('status', 'UNKNOWN')}] Browser CDP Audit for '{property_id}': "
+                f"Total: {b_rep.get('total_routes', 0)} | Audited: {b_rep.get('routes_audited', 0)} | Failed: {b_rep.get('failed_count', 0)}"
+            )
+    return 0 if (report.status == "PASS" and browser_ok) else 1
 
 
 def cmd_maintain(args: argparse.Namespace) -> int:
@@ -2024,6 +2084,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_audit.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory to audit")
     p_audit.add_argument("--browser", action="store_true", help="Audit static distribution using live Chrome DevTools Protocol (CDP)")
+    p_audit.add_argument("--no-browser", action="store_true", help="Skip live Chrome DevTools Protocol (CDP) interactive audit during default audit")
     p_audit.add_argument("--sample", type=int, default=None, help="Sample N routes for fast browser audit")
     p_audit.add_argument("--cdp-port", type=int, default=9222, help="Chrome DevTools Protocol port (default: 9222)")
     p_audit.add_argument("--fail-closed", action="store_true", help="Fail closed if Chrome CDP port is unreachable")

@@ -196,30 +196,30 @@ class GainHelmBrowserAdapter(TenantBrowserAdapter):
             InteractiveWidgetSpec(
                 route="/tools/soc-2-audit-cost-calculator/",
                 widget_id="soc-2-audit-cost-calculator",
-                precondition_selector="#field-cpa_audit_fee, [data-calc-input]",
-                input_selector="#field-cpa_audit_fee, [data-calc-input]",
-                input_value="40000",
-                output_selector="#metric-total_compliance_tco, .output-value",
+                precondition_selector="#field-cpa_audit_fee, #calc-input-headcount, [data-calc-input]",
+                input_selector="#field-cpa_audit_fee, #calc-input-headcount, [data-calc-input]",
+                input_value="150",
+                output_selector="#metric-total_compliance_tco, #metric-soc2_total_cost, .calc-metric-value, .output-value",
                 trigger_event="input",
                 verify_popstate=True,
             ),
             InteractiveWidgetSpec(
                 route="/tools/cmmc-2-0-compliance-cost-calculator/",
                 widget_id="cmmc-2-0-compliance-cost-calculator",
-                precondition_selector="#field-c3pao_assessment_fee, [data-calc-input]",
-                input_selector="#field-c3pao_assessment_fee, [data-calc-input]",
-                input_value="65000",
-                output_selector="#metric-total_compliance_tco, .output-value",
+                precondition_selector="#field-c3pao_assessment_fee, #calc-input-headcount, [data-calc-input]",
+                input_selector="#field-c3pao_assessment_fee, #calc-input-headcount, [data-calc-input]",
+                input_value="150",
+                output_selector="#metric-total_compliance_tco, #metric-cmmc_total_cost, .calc-metric-value, .output-value",
                 trigger_event="input",
                 verify_popstate=False,
             ),
             InteractiveWidgetSpec(
                 route="/tools/nist-800-171-sprs-score-calculator/",
                 widget_id="nist-800-171-sprs-score-calculator",
-                precondition_selector="#field-unmet_5pt_controls, [data-calc-input]",
-                input_selector="#field-unmet_5pt_controls, [data-calc-input]",
+                precondition_selector="#field-unmet_5pt_controls, #calc-input-unimplemented_5pt, [data-calc-input]",
+                input_selector="#field-unmet_5pt_controls, #calc-input-unimplemented_5pt, [data-calc-input]",
                 input_value="4",
-                output_selector="#metric-sprs_score, .output-value",
+                output_selector="#metric-sprs_score, #metric-nist_sprs_score, .calc-metric-value, .output-value",
                 trigger_event="input",
                 verify_popstate=False,
             ),
@@ -1955,8 +1955,15 @@ class UnifiedBrowserAuditor:
             if spec.route == route:
                 msg_counter[0] += 1
                 js_widget = f"""(() => {{
-                    const inputEl = document.querySelector('{spec.input_selector}');
-                    const outEl = document.querySelector('{spec.output_selector}');
+                    const pickFirst = (selList) => {{
+                        for (const s of selList.split(',').map(x => x.trim()).filter(Boolean)) {{
+                            const el = document.querySelector(s);
+                            if (el) return el;
+                        }}
+                        return document.querySelector(selList);
+                    }};
+                    const inputEl = pickFirst('{spec.input_selector}');
+                    const outEl = pickFirst('{spec.output_selector}');
                     if (!inputEl || !outEl) return {{ success: false, reason: 'elements_missing' }};
                     const origInputVal = inputEl.value;
                     const initialVal = outEl.innerText.trim();
