@@ -2836,7 +2836,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         base_words = (
             f"Under IRC Section 1366, Section 3111, and Section 199A, {short_q} splits pass-through "
             f"operating profit between W-2 officer salary subject to 15.3 percent FICA payroll tax "
-            f"($176,100 Social Security wage base) and K-1 shareholder distributions exempt from "
+            f"($184,500 Social Security wage base) and K-1 shareholder distributions exempt from "
             f"self-employment tax while preserving the 20 percent Qualified Business Income deduction."
         ).split()
         filler_pool = [
@@ -3001,7 +3001,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         base_words = (
             f"Under IRC Section 1, Section 1(h), and Section 1411 statutory schedules, {short_q} "
             f"computes progressive federal and state marginal tax liabilities, standard deduction thresholds, "
-            f"and post-TCJA sunset rate reversions (10, 15, 25, 28, 33, 35, and 39.6 percent) alongside "
+            f"and permanent OBBBA (P.L. 119-21) marginal rate tiers (10, 12, 22, 24, 32, 35, and 37 percent) alongside "
             f"the 3.8 percent Net Investment Income Tax surtax."
         ).split()
         filler_pool = [
@@ -4000,11 +4000,11 @@ def build_zero_tax_state_spoke_copy(
         f"Calculate {st_name} 2027 take-home pay with 0% state income tax and IRC Section 1(j) "
         f"federal brackets: {tot_val} tax ({eff_val} rate), {th_val} net pay."
     )
-    quick_answer_title = f"Key Finding: {st_name} 0% State Income Tax & 2026-2027 Federal Take-Home Pay"
+    quick_answer_title = f"Key Finding: {st_name} 0% State Tax"
     quick_answer = (
-        f"{st_name} levies a 0% state individual income tax ($0 state tax), so a single filer earning "
-        f"the {inc_val} median wage benchmark owes {tot_val} in 2026-2027 federal tax ({eff_val} effective rate) "
-        f"and keeps {th_val} in net take-home pay. Under IRC Section 1(j) and OBBBA P.L. 119-21, only permanent "
+        f"{st_name} levies a 0% state individual income tax ($0 state tax), so a single filer on "
+        f"the {inc_val} median wage benchmark owes {tot_val} in federal tax ({eff_val} effective rate) "
+        f"and keeps {th_val} take-home pay. Under OBBBA IRC Section 1(j), permanent "
         f"federal brackets (10% to 37%) and standard deductions apply."
     )
     return {

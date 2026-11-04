@@ -2857,18 +2857,6 @@ class TruthReconciliationEngine:
             "or default to First-In, First-Out (FIFO) on Form 8949.",
             "or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
         ),
-        (
-            "var ltcg = g <= 48350 ? 0 : (g <= 533400 ? (g - 48350) * 0.15 : (485050 * 0.15) + ((g - 533400) * 0.20));",
-            "var ltcg = g <= 533400 ? (g * 0.15) : ((533400 * 0.15) + ((g - 533400) * 0.20));",
-        ),
-        (
-            "var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];\n        for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {\n          var barEl = document.getElementById(\"serp-cliff-bar-\" + String(cIdx));\n          var valEl = document.getElementById(\"serp-cliff-val-\" + String(cIdx));\n          var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;\n          var yrVal = Math.max(100, Math.round(taxVal - stdShift));\n          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, taxVal * 1.15)) * 70)));",
-            "var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];\n        var epochBase = taxVal > 0 ? taxVal : Math.max(100, Math.round(retainedVal * 0.15));\n        for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {\n          var barEl = document.getElementById(\"serp-cliff-bar-\" + String(cIdx));\n          var valEl = document.getElementById(\"serp-cliff-val-\" + String(cIdx));\n          var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;\n          var yrVal = Math.max(100, Math.round(epochBase - stdShift));\n          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 70)));",
-        ),
-        (
-            "var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, taxVal * 1.15)) * 90)));",
-            "var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 90)));",
-        ),
     )
 
     PREXVO_IBR_PAYE_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (

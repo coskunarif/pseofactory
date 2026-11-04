@@ -6092,7 +6092,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 )
                 changed = True
 
-        if slug.startswith("irs-2027-tax-brackets/"):
+        if slug.startswith(("irs-2027-tax-brackets/", "irs-2027-tax-brackets-")):
             from pseofactory.gsc_remediation import (
                 ZERO_INCOME_TAX_STATES,
                 build_zero_tax_state_spoke_copy,
@@ -6103,7 +6103,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
             th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', updated)
             inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', updated)
             if tot_m and eff_m and th_m:
-                st_slug = slug.split("/", 1)[1].strip("/").lower()
+                st_slug = slug[len("irs-2027-tax-brackets") + 1 :].strip("/").lower()
                 st_name = st_slug.replace("-", " ").title().replace("Of", "of")
                 inc_val = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
                 tot_val = tot_m.group(1).strip()
@@ -6222,12 +6222,12 @@ def _normalize_spoke_and_synthesized_body_bloat(
                         count=1,
                     )
                     changed = True
-        elif slug.startswith("section-1031-calculator/"):
+        elif slug.startswith(("section-1031-calculator/", "section-1031-calculator-")):
             def_m = re.search(r'id=["\']sec1031-res-deferred["\'][^>]*>\s*([^<]+)<', updated)
             fed_m = re.search(r'id=["\']sec1031-res-fed-tax["\'][^>]*>\s*([^<]+)<', updated)
             st_m = re.search(r'id=["\']sec1031-res-state-tax["\'][^>]*>\s*([^<]+)<', updated)
             if def_m and fed_m and st_m:
-                st_name = slug.split("/", 1)[1].replace("-", " ").title().replace("Of", "of")
+                st_name = slug[len("section-1031-calculator") + 1 :].replace("-", " ").title().replace("Of", "of")
                 def_val = def_m.group(1).strip()
                 fed_val = fed_m.group(1).strip()
                 st_val = st_m.group(1).strip()
@@ -6256,7 +6256,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
                         count=1,
                     )
                     changed = True
-        elif slug.startswith("section-179-calculator/"):
+        elif slug.startswith(("section-179-calculator/", "section-179-calculator-")):
             wo_m = re.search(r'id=["\']sec179-res-writeoff["\'][^>]*>\s*([^<]+)<', updated)
             sav_m = re.search(r'id=["\']sec179-res-savings["\'][^>]*>\s*([^<]+)<', updated)
             net_m = re.search(r'id=["\']sec179-res-netcost["\'][^>]*>\s*([^<]+)<', updated)
@@ -13812,7 +13812,11 @@ def reflect_and_recompile_all_assets(
                         ("use_post_sunset=True,", "use_post_sunset=False,"),
                         (
                             'qa_s2 = f"Under 2027 statutory reversion schedules, a median household earner (${median_income:,.0f} income) pays ${combined_tax:,.0f} in combined taxes, reflecting a {combined_effective_pct}% effective rate."',
+                            'qa_s2 = f"Under 2027 OBBBA statutory schedules, a median household earner (${median_income:,.0f} income) pays ${combined_tax:,.0f} in combined taxes, reflecting a {combined_effective_pct}% effective rate."',
+                        ),
+                        (
                             'qa_s2 = f"Under enacted OBBBA (P.L. 119-21) 2027 statutory schedules, a median household earner (${median_income:,.0f} income) pays ${combined_tax:,.0f} in combined taxes, reflecting a {combined_effective_pct}% effective rate."',
+                            'qa_s2 = f"Under 2027 OBBBA statutory schedules, a median household earner (${median_income:,.0f} income) pays ${combined_tax:,.0f} in combined taxes, reflecting a {combined_effective_pct}% effective rate."',
                         ),
                         (
                             'meta_desc = f"Calculate {name} state and federal income tax brackets for 2027 post-TCJA sunset. Median wage tax: ${combined_tax:,.0f} ({combined_effective_pct}% effective)."',
