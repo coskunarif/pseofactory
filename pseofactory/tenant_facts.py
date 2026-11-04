@@ -3362,9 +3362,31 @@ class TruthReconciliationEngine:
                 m_changed = False
                 if manifest_data:
                     m_slug = manifest_data.get("slug")
-                    is_exact_tool = bool(m_slug and (rel_path == f"tools/{m_slug}/index.html" or slug == m_slug))
+                    m_slug_norm = str(m_slug or "").replace("/", "-")
+                    slug_norm = str(slug or "").replace("/", "-")
+                    rel_tool_norm = (
+                        rel_path[len("tools/") : -len("/index.html")].replace("/", "-")
+                        if (rel_path.startswith("tools/") and rel_path.endswith("/index.html"))
+                        else ""
+                    )
+                    is_exact_tool = bool(
+                        m_slug
+                        and (
+                            rel_path == f"tools/{m_slug}/index.html"
+                            or slug == m_slug
+                            or m_slug_norm in (slug_norm, rel_tool_norm)
+                        )
+                    )
                     sync_fields = (
-                        ("statutory_authority", "economic_dataset", "model_name", "formula", "inputs", "published_output")
+                        (
+                            "statutory_authority",
+                            "economic_dataset",
+                            "model_name",
+                            "formula",
+                            "inputs",
+                            "published_output",
+                            "sample_calculation",
+                        )
                         if is_exact_tool
                         else ("statutory_authority", "economic_dataset", "model_name", "formula")
                     )
@@ -3426,7 +3448,28 @@ class TruthReconciliationEngine:
                         if "state_income_tax" in m_in:
                             inc_val_m = float(m_in.get("gross_income", 150000.0))
                             out_dom_m = re.search(r'data-baseline-output=["\']([0-9.]+)["\']', updated)
-                            cur_pub = float(out_dom_m.group(1)) if out_dom_m else float(curr_man.get("published_output", 0))
+                            dom_pub = float(out_dom_m.group(1)) if out_dom_m else 0.0
+                            man_pub = float(curr_man.get("published_output", 0))
+                            cur_pub = (
+                                man_pub
+                                if (dom_pub in (0.0, 76000.0) and man_pub > 0)
+                                else (dom_pub if dom_pub > 0 else man_pub)
+                            )
+                            if dom_pub == 76000.0 and cur_pub != 76000.0:
+                                updated = updated.replace(
+                                    'data-baseline-output="76000.0">76,000<',
+                                    f'data-baseline-output="{cur_pub:.1f}">{cur_pub:,.0f}<',
+                                )
+                                updated = updated.replace(
+                                    '<strong class="scenario-baseline">76,000</strong>',
+                                    f'<strong class="scenario-baseline">{cur_pub:,.0f}</strong>',
+                                )
+                                updated = updated.replace(
+                                    '<strong class="scenario-ast-eval" data-tier="baseline">76,000</strong>',
+                                    f'<strong class="scenario-ast-eval" data-tier="baseline">{cur_pub:,.0f}</strong>',
+                                )
+                                if "profithelm_statutory_truth_reconciled" not in repairs:
+                                    repairs.append("profithelm_statutory_truth_reconciled")
                             taxable_26 = max(0.0, inc_val_m - 16100.0)
                             fed_26 = (
                                 min(taxable_26, 12400.0) * 0.10

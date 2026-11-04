@@ -8913,6 +8913,8 @@ class RetroReflectionEngine:
             or "qThreshAmt" not in html_content
             or "evalProgressiveFederalTax" not in html_content
             or "_lastInteractionScope" not in html_content
+            or "epochBase" not in html_content
+            or "48350" in html_content
             or "data-preset-crit" not in html_content
             or "carryShield" not in html_content
             or "keepalive: true" in html_content

@@ -5062,6 +5062,8 @@ def normalize_html_visual_primitives(
                 or "data-download-triggered" not in sync_body
                 or "evalProgressiveFederalTax" not in sync_body
                 or "_lastInteractionScope" not in sync_body
+                or "epochBase" not in sync_body
+                or "48350" in sync_body
                 or "data-preset-crit" not in sync_body
                 or "carryShield" not in sync_body
                 or "keepalive: true" in sync_body
