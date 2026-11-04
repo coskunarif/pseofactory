@@ -782,58 +782,54 @@ def call_stateless_vertex_json(
     enable_google_search: bool = True,
 ) -> Any:
     """
-    Executes a strictly stateless Context-In -> Vertex AI -> JSON-Out call funded by
-    GCP promotional credits on profithelm-477200 without invoking local agent tools.
-    Explicitly mints user credentials via gcloud to bypass GOOGLE_APPLICATION_CREDENTIALS
-    service-account overrides in the workspace environment.
+    Executes a headless consumer Antigravity CLI (`agy` with AGY_ADC_AUTH unset — 0 GCP/Vertex credit burn)
+    Context-In -> JSON-Out call without invoking Vertex AI pay-as-you-go.
+    Fails closed when consumer `agy` quota is exhausted so callers fall back deterministically.
     Zero em-dashes. Zero en-dashes.
     """
     import json as _json
     import os as _os
     import subprocess as _subprocess
-    from google import genai
-    from google.genai import types
-    from google.oauth2.credentials import Credentials
 
-    token = _subprocess.check_output(
-        ["gcloud", "auth", "print-access-token", f"--account={account}"],
+    agy_bin = "/home/ubuntuadmin/.local/bin/agy"
+    if not (_os.path.isfile(agy_bin) and _os.access(agy_bin, _os.X_OK)):
+        raise RuntimeError("Headless consumer agy binary not found at /home/ubuntuadmin/.local/bin/agy.")
+
+    clean_env = {
+        k: v
+        for k, v in _os.environ.items()
+        if k
+        not in (
+            "AGY_ADC_AUTH",
+            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_CLOUD_QUOTA_PROJECT",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "AGY_AUTO_FOLLOWUP_ENABLED",
+        )
+    }
+    agy_model = model if model.startswith(("gemini-", "claude-")) else "gemini-3.8-flash"
+    proc = _subprocess.run(
+        [
+            agy_bin,
+            "-p",
+            prompt_context,
+            "--model",
+            agy_model,
+            "--effort",
+            "low",
+            "--print-timeout",
+            "35s",
+        ],
+        capture_output=True,
         text=True,
-        stderr=_subprocess.DEVNULL,
-        timeout=15,
-    ).strip()
-    if not token:
-        raise RuntimeError("Failed to obtain gcloud access token for stateless Vertex AI call.")
-
-    saved_gac = _os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
-    try:
-        creds = Credentials(token=token, quota_project_id=project)
-        client = genai.Client(
-            vertexai=True,
-            project=project,
-            location=location,
-            credentials=creds,
-        )
-        cfg_kwargs: Dict[str, Any] = {
-            "temperature": 0.2,
-            "max_output_tokens": 4096,
-        }
-        if enable_google_search:
-            cfg_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
-        else:
-            cfg_kwargs["response_mime_type"] = "application/json"
-
-        resp = client.models.generate_content(
-            model=model,
-            contents=prompt_context,
-            config=types.GenerateContentConfig(**cfg_kwargs),
-        )
-        raw_text = (resp.text or "").strip()
-    finally:
-        if saved_gac is not None:
-            _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = saved_gac
-
-    if not raw_text:
-        raise ValueError("Empty response from stateless Vertex AI call.")
+        env=clean_env,
+        stdin=_subprocess.DEVNULL,
+        timeout=40,
+        check=False,
+    )
+    raw_text = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not raw_text or "[agy] print timeout after" in raw_text or "RESOURCE_EXHAUSTED" in raw_text:
+        raise RuntimeError(f"Headless consumer agy call failed or quota exhausted (rc={proc.returncode}).")
 
     cleaned = raw_text
     if "```" in cleaned:
