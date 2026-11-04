@@ -2953,6 +2953,19 @@ class LiveEdgeVerifier:
                             rel_path="index.html",
                         )
                         if root_violations:
+                            try:
+                                cb_raw = _normalize_probe_res(self.verify_url(f"{ep}?_cb={int(time.time() * 1000)}"), ep)
+                                cb_body = str(cb_raw.pop("body", "") or "")
+                                if cb_raw.get("status") == "PASS" and cb_body:
+                                    root_violations = self.audit_live_versus_local_html(
+                                        live_html=cb_body,
+                                        local_html=local_index_txt,
+                                        property_id=property_id,
+                                        rel_path="index.html",
+                                    )
+                            except Exception:
+                                pass
+                        if root_violations:
                             res["status"] = "FAIL"
                             res["ground_truth_violations"] = root_violations
                             res["error"] = "; ".join(root_violations[:3])
@@ -3020,6 +3033,19 @@ class LiveEdgeVerifier:
                             property_id=property_id,
                             rel_path=str(exp.get("rel_path") or rel_ep.strip("/")),
                         )
+                        if tool_violations:
+                            try:
+                                cb_raw = _normalize_probe_res(self.verify_url(f"{ep}?_cb={int(time.time() * 1000)}"), ep)
+                                cb_body = str(cb_raw.pop("body", "") or "")
+                                if cb_raw.get("status") == "PASS" and cb_body:
+                                    tool_violations = self.audit_live_versus_local_html(
+                                        live_html=cb_body,
+                                        local_html=exp.get("local_html"),
+                                        property_id=property_id,
+                                        rel_path=str(exp.get("rel_path") or rel_ep.strip("/")),
+                                    )
+                            except Exception:
+                                pass
                         if tool_violations:
                             res["status"] = "FAIL"
                             res["ground_truth_violations"] = tool_violations
