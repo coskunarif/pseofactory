@@ -782,7 +782,7 @@ def call_stateless_vertex_json(
     enable_google_search: bool = True,
 ) -> Any:
     """
-    Executes a headless consumer Antigravity CLI (`agy` with AGY_ADC_AUTH unset — 0 GCP/Vertex credit burn)
+    Executes a headless consumer Antigravity CLI (`agy` with AGY_ADC_AUTH unset - 0 GCP/Vertex credit burn)
     Context-In -> JSON-Out call without invoking Vertex AI pay-as-you-go.
     Fails closed when consumer `agy` quota is exhausted so callers fall back deterministically.
     Zero em-dashes. Zero en-dashes.
@@ -801,6 +801,10 @@ def call_stateless_vertex_json(
         if k
         not in (
             "AGY_ADC_AUTH",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENAI_API_KEY",
+            "GOOGLE_GENAI_USE_VERTEXAI",
             "GOOGLE_CLOUD_PROJECT",
             "GOOGLE_CLOUD_QUOTA_PROJECT",
             "GOOGLE_APPLICATION_CREDENTIALS",

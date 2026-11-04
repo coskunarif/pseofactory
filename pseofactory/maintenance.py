@@ -992,6 +992,16 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         )
         try:
             env = os.environ.copy()
+            for _paid_env_var in (
+                "AGY_ADC_AUTH",
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "GOOGLE_GENAI_API_KEY",
+                "GOOGLE_GENAI_USE_VERTEXAI",
+                "GOOGLE_CLOUD_PROJECT",
+                "GOOGLE_CLOUD_QUOTA_PROJECT",
+            ):
+                env.pop(_paid_env_var, None)
             env["FACTORY_CANONICAL_BASE"] = self.canonical_base
             env["FACTORY_DOMAIN"] = self.domain
             env["FACTORY_BRAND_NAME"] = self.brand_name

@@ -18,6 +18,17 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+for _paid_env_var in (
+    "AGY_ADC_AUTH",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_QUOTA_PROJECT",
+):
+    os.environ.pop(_paid_env_var, None)
+
 from pseofactory.maintenance import (
     TenantRegistry,
     ConfigurablePropertyAdapter,
