@@ -8866,8 +8866,10 @@ class RetroReflectionEngine:
             or "2027 Post-Sunset Statutory Rate" in html_content
             or "0% (Expired Dec 31, 2025)" in html_content
             or "14.4% (13.3% + 1.1% SDI)" in html_content
-            or "$23,530" in html_content
-            or "+$4,349" in html_content
+            or (
+                ("$23,530" in html_content or "+$4,349" in html_content)
+                and "repealed pre-obbba" not in html_content.lower()
+            )
             or "$19,941" in html_content
             or "$28,000 CPA" in html_content
             or "2,500 ePHI records" in html_content
