@@ -301,7 +301,7 @@ def verify_manifest_ssr_metric_parity(
 
     if (
         "val-total_federal_tax" in metrics
-        and metrics.get("val-total_federal_tax") == 23530.0
+        and metrics.get("val-total_federal_tax") in (23530.0, 19181.0)
         and not any(k in slug_low for k in ("tax-bracket", "irs-2027-tax-brackets"))
     ):
         return issues

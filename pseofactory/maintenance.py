@@ -14160,8 +14160,8 @@ def reflect_and_recompile_all_assets(
             isinstance(adapter, SubprocessPropertyAdapter)
             and (adapter.dist_dir / "index.html").is_file()
             and not is_foreign_pytest
-            and not topical_reconciliation_changed
-            and (stale_mechanic_count > 0 or callout_mismatch_count > 0)
+            and not source_sync_changed
+            and (stale_mechanic_count > 0 or callout_mismatch_count > 0 or edge_functions_updated)
         ):
             try:
                 pre_retro_res = RetroReflectionEngine.retrofit_estate(
@@ -14180,6 +14180,17 @@ def reflect_and_recompile_all_assets(
                         if norm_c != raw_c:
                             html_f.write_text(norm_c, encoding="utf-8")
                             pre_retrofitted_count += 1
+                try:
+                    from pseofactory.tenant_facts import TruthReconciliationEngine
+                    reconcile_pre_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+                    if callable(reconcile_pre_fn):
+                        reconcile_pre_fn(
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                        )
+                except Exception:
+                    pass
                 for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                     evaluator._audit_cache.pop(_ck, None)
             except Exception:
