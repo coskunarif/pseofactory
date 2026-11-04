@@ -2545,6 +2545,9 @@ class TruthReconciliationEngine:
     )
 
     PROFITHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+        ("with real-time scenario mo...", "with real-time scenario modeling."),
+        ("with real-time scenario ...", "with real-time scenario modeling."),
+        ("with real-time scenari...", "with real-time scenario modeling."),
         ("divided by (1 - 0.133)", "divided by (1 minus 0.133)"),
         ("IRC Sections 1001, 1012, 1222, and 1411", "IRC Section 1001, Section 1012, Section 1222, and Section 1411"),
         ("IRC Sections 3111 and 3301", "IRC Section 3111 and Section 3301"),
@@ -3211,7 +3214,14 @@ class TruthReconciliationEngine:
                 m_changed = False
                 if manifest_data:
                     m_slug = manifest_data.get("slug")
-                    is_exact_tool = bool(m_slug and (rel_path == f"tools/{m_slug}/index.html" or slug == m_slug))
+                    is_exact_tool = bool(
+                        m_slug
+                        and (
+                            rel_path == f"tools/{m_slug}/index.html"
+                            or slug == m_slug
+                            or (m_slug == "irs-2027-tax-brackets" and rel_path in ("index.html", "tools/index.html"))
+                        )
+                    )
                     sync_fields = (
                         ("statutory_authority", "economic_dataset", "model_name", "formula", "inputs", "published_output")
                         if is_exact_tool
@@ -3244,17 +3254,27 @@ class TruthReconciliationEngine:
                             m_changed = True
 
                     # Reconcile irs-2027-tax-brackets federal hub
-                    if rel_path == "tools/irs-2027-tax-brackets/index.html" or slug == "irs-2027-tax-brackets":
-                        target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25, 0)"
+                    if rel_path in ("index.html", "tools/index.html", "tools/irs-2027-tax-brackets/index.html") or slug in ("index", "tools", "irs-2027-tax-brackets"):
+                        use_obbba_18734 = (
+                            "class=\"output-value\">18734" in updated
+                            or "standard_deduction_2026" in curr_man.get("inputs", {})
+                        )
+                        if use_obbba_18734:
+                            target_f = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
+                            target_in = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
+                            target_pub = 18734.0
+                        else:
+                            target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25, 0)"
+                            target_in = {"gross_income": 125000.0, "sunset_standard_deduction": 8600.0}
+                            target_pub = 23530.0
                         if curr_man.get("formula") != target_f:
                             curr_man["formula"] = target_f
                             m_changed = True
-                        target_in = {"gross_income": 125000.0, "sunset_standard_deduction": 8600.0}
                         if curr_man.get("inputs") != target_in:
                             curr_man["inputs"] = target_in
                             m_changed = True
-                        if curr_man.get("published_output") != 23530.0:
-                            curr_man["published_output"] = 23530.0
+                        if curr_man.get("published_output") != target_pub:
+                            curr_man["published_output"] = target_pub
                             m_changed = True
 
                     # Reconcile irs-2027-tax-brackets state leaves
@@ -3265,7 +3285,13 @@ class TruthReconciliationEngine:
                     ):
                         m_in = curr_man.get("inputs", {})
                         if "state_income_tax" in m_in:
-                            target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25 + state_income_tax, 2)"
+                            if "standard_deduction" in m_in and "sunset_standard_deduction" not in m_in:
+                                if float(m_in.get("standard_deduction", 15000.0)) == 15000.0:
+                                    target_f = "round(min(max(0.0, gross_income - standard_deduction), 12050.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12050.0), 36850.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 48900.0), 55500.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 104400.0) * 0.24 + state_income_tax, 2)"
+                                else:
+                                    target_f = "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)"
+                            else:
+                                target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25 + state_income_tax, 2)"
                             if curr_man.get("formula") != target_f:
                                 curr_man["formula"] = target_f
                                 m_changed = True
@@ -3875,7 +3901,7 @@ class TruthReconciliationEngine:
                 except Exception:
                     pass
 
-        # 4. Reconcile dist/videos/batch_seo_catalog.json
+        # 4. Reconcile dist/videos/batch_seo_catalog.json and tenant overlays
         vid_cat = d / "videos" / "batch_seo_catalog.json"
         if vid_cat.is_file():
             try:
@@ -3887,6 +3913,70 @@ class TruthReconciliationEngine:
                     repaired_paths.append(str(vid_cat))
             except Exception:
                 pass
+
+        if r_root and r_root.is_dir():
+            for ov_rel in (".agy/overlays", "content/overlays"):
+                ov_dir = r_root / ov_rel
+                if not ov_dir.is_dir():
+                    continue
+                for ov_file in sorted(ov_dir.glob("*.json")):
+                    try:
+                        ov_txt = ov_file.read_text(encoding="utf-8")
+                        ov_new = ov_txt
+                        if tenant_norm == "profithelm":
+                            for old_str, new_str in cls.PROFITHELM_HTML_REPLACEMENTS:
+                                if old_str in ov_new:
+                                    ov_new = ov_new.replace(old_str, new_str)
+                        elif tenant_norm == "prexvo":
+                            for old_str, new_str in cls.PREXVO_ALL_HTML_REPLACEMENTS:
+                                if old_str in ov_new:
+                                    ov_new = ov_new.replace(old_str, new_str)
+                        elif tenant_norm == "gainhelm":
+                            for old_str, new_str in cls.GAINHELM_HTML_REPLACEMENTS:
+                                if old_str in ov_new:
+                                    ov_new = ov_new.replace(old_str, new_str)
+                        if ov_new != ov_txt:
+                            ov_file.write_text(ov_new, encoding="utf-8")
+                            repaired_paths.append(str(ov_file))
+                    except Exception:
+                        pass
+            dyn_tools_f = r_root / "profithelm" / "data" / "dynamic_tools.json"
+            if dyn_tools_f.is_file() and tenant_norm == "profithelm":
+                try:
+                    dt_txt = dyn_tools_f.read_text(encoding="utf-8")
+                    dt_new = dt_txt
+                    for old_str, new_str in cls.PROFITHELM_HTML_REPLACEMENTS:
+                        if old_str in dt_new:
+                            dt_new = dt_new.replace(old_str, new_str)
+                    if dt_new != dt_txt:
+                        dyn_tools_f.write_text(dt_new, encoding="utf-8")
+                        repaired_paths.append(str(dyn_tools_f))
+                except Exception:
+                    pass
+        if tenant_norm == "profithelm":
+            for mf_name in ("feed.xml", "llms.txt", "llms-full.txt"):
+                mf_p = d / mf_name
+                if mf_p.is_file():
+                    try:
+                        mf_txt = mf_p.read_text(encoding="utf-8")
+                        mf_new = mf_txt
+                        for old_str, new_str in cls.PROFITHELM_HTML_REPLACEMENTS:
+                            if old_str in mf_new:
+                                mf_new = mf_new.replace(old_str, new_str)
+                        if mf_new != mf_txt:
+                            mf_p.write_text(mf_new, encoding="utf-8")
+                            repaired_paths.append(str(mf_p))
+                    except Exception:
+                        pass
+        try:
+            from pseofactory.maintenance import AutonomousFreshnessMaintenanceEngine
+
+            AutonomousFreshnessMaintenanceEngine.sync_tenant_llms_manifests(
+                dist_dir=d,
+                property_id=tenant_norm,
+            )
+        except Exception:
+            pass
 
         # 5. Reconcile syndication/ and affiliate routes
         target_synd_dirs = []

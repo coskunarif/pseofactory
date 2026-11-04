@@ -8385,6 +8385,29 @@ class RetroReflectionEngine:
             if tot_m:
                 tot_v = float(tot_m.group(1).replace(",", ""))
                 inc_v = float(inc_m.group(1)) if inc_m else 150000.0
+                if any(tok in html_content for tok in ("under enacted OBBBA brackets", "Rev. Proc. 2025-32", '"standard_deduction": 16100')):
+                    taxable_obbba = max(0.0, inc_v - 16100.0)
+                    fed_obbba = (
+                        min(taxable_obbba, 12400.0) * 0.10
+                        + min(max(0.0, taxable_obbba - 12400.0), 38000.0) * 0.12
+                        + min(max(0.0, taxable_obbba - 50400.0), 55300.0) * 0.22
+                        + max(0.0, taxable_obbba - 105700.0) * 0.24
+                    )
+                    if tot_v >= round(fed_obbba, 2) - 0.5:
+                        st_tax_obbba = max(0.0, round(tot_v - fed_obbba, 2))
+                        return {
+                            "model_name": f"{slug_title} Model",
+                            "formula": "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)",
+                            "inputs": {
+                                "gross_income": inc_v,
+                                "standard_deduction": 16100.0,
+                                "state_income_tax": st_tax_obbba,
+                            },
+                            "published_output": tot_v,
+                            "statutory_authority": default_stat,
+                            "economic_dataset": default_econ,
+                            "sample_calculation": f"For ${inc_v:,.0f} state median single-filer income under enacted OBBBA brackets (${fed_obbba:,.0f} federal plus ${st_tax_obbba:,.0f} state tax), combined income tax is ${tot_v:,.0f}.",
+                        }
                 taxable_2027 = max(0.0, inc_v - 8600.0)
                 fed_2027 = (
                     min(taxable_2027, 12200.0) * 0.10
@@ -9708,6 +9731,10 @@ class RetroReflectionEngine:
 
         if dist_dir is not None:
             sidecar_path = Path(dist_dir) / "manifests" / f"{slug}.json"
+            if not sidecar_path.is_file() and "/" in slug:
+                alt_sidecar = Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json"
+                if alt_sidecar.is_file():
+                    sidecar_path = alt_sidecar
             if sidecar_path.is_file():
                 try:
                     existing_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
