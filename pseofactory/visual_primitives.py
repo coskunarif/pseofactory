@@ -1467,16 +1467,66 @@ def _render_runtime_sync_workbench_js() -> str:
       } catch (e) {}
     }
 
+    function evalProgressiveFederalTax(taxableIncome, regime) {
+      var inc = Math.max(0, taxableIncome);
+      var tiers = regime === "2027_obbba" ? [
+        [12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [640600, 0.35], [1e12, 0.37]
+      ] : [
+        [12050, 0.10], [48900, 0.12], [104400, 0.22], [199300, 0.24], [253000, 0.32], [632700, 0.35], [1e12, 0.37]
+      ];
+      var tax = 0;
+      var prev = 0;
+      for (var i = 0; i < tiers.length; i++) {
+        var lim = tiers[i][0];
+        var rate = tiers[i][1];
+        if (inc <= prev) break;
+        var slice = Math.min(inc, lim) - prev;
+        if (slice > 0) tax += slice * rate;
+        prev = lim;
+      }
+      return Math.round(tax);
+    }
+
+    function evalProgressiveCaTax(taxableIncome, grossWages) {
+      var inc = Math.max(0, taxableIncome);
+      var caTiers = [
+        [10756, 0.01], [25499, 0.02], [40245, 0.04], [55866, 0.06],
+        [70606, 0.08], [360659, 0.093], [432787, 0.103], [721314, 0.113],
+        [1000000, 0.123], [1e12, 0.133]
+      ];
+      var tax = 0;
+      var prev = 0;
+      for (var i = 0; i < caTiers.length; i++) {
+        var lim = caTiers[i][0];
+        var rate = caTiers[i][1];
+        if (inc <= prev) break;
+        var slice = Math.min(inc, lim) - prev;
+        if (slice > 0) tax += slice * rate;
+        prev = lim;
+      }
+      var sdi = Math.max(0, grossWages || 0) * 0.013;
+      return Math.round(tax + sdi);
+    }
+
+    function evalCapitalGainsAndNiitTax(gainAmount) {
+      var g = Math.max(0, gainAmount);
+      var ltcg = g <= 533400 ? (g * 0.15) : ((533400 * 0.15) + ((g - 533400) * 0.20));
+      var niit = g > 200000 ? (g - 200000) * 0.038 : 0;
+      return Math.round(ltcg + niit);
+    }
+
     function updateInteractiveCliffAndComparator(retainedVal, taxVal) {
       try {
         var total = Math.max(1, retainedVal + taxVal);
-        var cliffMults = [0.74, 0.80, 0.88, 0.96, 1.04, 1.12];
-        var cliffYears = [2024, 2025, 2026, 2027, 2028];
-        for (var cIdx = 0; cIdx < cliffMults.length; cIdx++) {
+        var cliffYears = [2024, 2025, 2026, 2027, 2028, 2030];
+        var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];
+        var epochBase = taxVal > 0 ? taxVal : Math.max(100, Math.round(retainedVal * 0.15));
+        for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {
           var barEl = document.getElementById("serp-cliff-bar-" + String(cIdx));
           var valEl = document.getElementById("serp-cliff-val-" + String(cIdx));
-          var yrVal = Math.max(100, Math.round(taxVal * cliffMults[cIdx]));
-          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, taxVal * 1.18)) * 70)));
+          var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;
+          var yrVal = Math.max(100, Math.round(epochBase - stdShift));
+          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 70)));
           var barY = 90-barH;
           if (barEl) {
             barEl.setAttribute("y", String(barY));
@@ -1486,16 +1536,16 @@ def _render_runtime_sync_workbench_js() -> str:
             valEl.setAttribute("y", String(barY-5));
             valEl.textContent = yrVal >= 1000 ? ("$" + (Math.round((yrVal / 100)) / 10).toFixed(1) + "k") : fmtUsd(yrVal);
           }
-          if (cIdx < cliffYears.length) {
+          if (cIdx < 5) {
             var yrKey = String(cliffYears[cIdx]);
             var domBar = document.getElementById("cliff-bar-" + yrKey);
             var domExp = document.getElementById("cliff-exposure-" + yrKey);
-            var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, taxVal * 1.18)) * 90)));
+            var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 90)));
             if (domBar) {
               domBar.style.height = String(pctH) + "%";
               domBar.setAttribute("data-exposure-usd", String(yrVal));
             }
-            if (domExp) {
+            if (domExp && _userInteracted) {
               domExp.textContent = fmtUsd(yrVal);
             }
           }
@@ -1510,9 +1560,10 @@ def _render_runtime_sync_workbench_js() -> str:
           var aInput = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-input") || "0") || total) : total;
           var a1 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-primary") || "0") || retainedVal) : retainedVal;
           var a2 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-secondary") || "0") || taxVal) : taxVal;
-          var bInput = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-input") || "0") || Math.round(total * 1.25)) : Math.round(total * 1.25);
-          var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || Math.round(retainedVal * 1.12)) : Math.round(retainedVal * 1.12);
-          var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || Math.round(taxVal * 0.82)) : Math.round(taxVal * 0.82);
+          var bInput = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-input") || "0") || total) : total;
+          var unshieldedTax = evalProgressiveFederalTax(Math.max(0, total - 16100), "2026_active");
+          var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || Math.max(taxVal, unshieldedTax)) : Math.max(taxVal, unshieldedTax);
+          var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || Math.max(0, bInput - b2)) : Math.max(0, bInput - b2);
           var elA1 = document.getElementById("serp-scn-a-primary");
           var elA2 = document.getElementById("serp-scn-a-secondary");
           var elB1 = document.getElementById("serp-scn-b-primary");
@@ -1541,18 +1592,20 @@ def _render_runtime_sync_workbench_js() -> str:
           var cLRet = document.getElementById("comp-live-retained");
           var cLTax = document.getElementById("comp-live-tax");
           var cLDel = document.getElementById("comp-live-delta");
-          if (cAIn) cAIn.textContent = fmtUsd(aInput);
-          if (cARet) cARet.textContent = fmtUsd(a1);
-          if (cATax) cATax.textContent = fmtUsd(a2);
-          if (cADel) cADel.textContent = pinnedA ? "Pinned Baseline" : "$0 (Baseline)";
-          if (cBIn) cBIn.textContent = fmtUsd(bInput);
-          if (cBRet) cBRet.textContent = fmtUsd(b1);
-          if (cBTax) cBTax.textContent = fmtUsd(b2);
-          if (cBDel) cBDel.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
-          if (cLIn) cLIn.textContent = (dInput >= 0 ? "+" : "-") + fmtUsd(Math.abs(dInput));
-          if (cLRet) cLRet.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
-          if (cLTax) cLTax.textContent = (dTax >= 0 ? "+" : "-") + fmtUsd(Math.abs(dTax));
-          if (cLDel) cLDel.textContent = (d2 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d2)) + " Advantage";
+          if (_userInteracted || pinnedA || pinnedB) {
+            if (cAIn) cAIn.textContent = fmtUsd(aInput);
+            if (cARet) cARet.textContent = fmtUsd(a1);
+            if (cATax) cATax.textContent = fmtUsd(a2);
+            if (cADel) cADel.textContent = pinnedA ? "Pinned Baseline" : "$0 (Baseline)";
+            if (cBIn) cBIn.textContent = fmtUsd(bInput);
+            if (cBRet) cBRet.textContent = fmtUsd(b1);
+            if (cBTax) cBTax.textContent = fmtUsd(b2);
+            if (cBDel) cBDel.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
+            if (cLIn) cLIn.textContent = (dInput >= 0 ? "+" : "-") + fmtUsd(Math.abs(dInput));
+            if (cLRet) cLRet.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
+            if (cLTax) cLTax.textContent = (dTax >= 0 ? "+" : "-") + fmtUsd(Math.abs(dTax));
+            if (cLDel) cLDel.textContent = (d2 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d2)) + " Advantage";
+          }
         }
       } catch (err) {}
     }
@@ -1600,9 +1653,9 @@ def _render_runtime_sync_workbench_js() -> str:
           var effOffsets = totalOffsets >= proc * 0.85 ? Math.round(proc * 0.55) : totalOffsets;
           var rawGain = Math.max(500, proc-effOffsets);
           var adjGain = Math.round(rawGain * methodMult);
-          var estTax = Math.round(adjGain * 0.238);
-          var fifoTax = Math.round(rawGain * 1.18 * 0.238);
-          var lotAlpha = Math.max(0, fifoTax-estTax + Math.round((fees + losses) * 0.238));
+          var estTax = evalCapitalGainsAndNiitTax(adjGain);
+          var fifoTax = evalCapitalGainsAndNiitTax(Math.round(rawGain * 1.18));
+          var lotAlpha = Math.max(0, fifoTax-estTax + evalCapitalGainsAndNiitTax(fees + losses));
           var netRetained = Math.max(0, proc-fees-estTax);
           if (out1) out1.textContent = fmtUsd(adjGain);
           if (out2) out2.textContent = fmtUsd(estTax);
@@ -1613,21 +1666,27 @@ def _render_runtime_sync_workbench_js() -> str:
           updateSerpSvgChart(netRetained, estTax, "Net Retained Proceeds", "Estimated Tax Exposure");
         } else if (mode === "tax_brackets") {
           var gross = parseFloat((document.getElementById("serp-tax-gross") || {}).value || "185000") || 0;
-          var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {}).value || "31000") || 0;
+          var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {}).value || "32500") || 0;
           var ptet = parseFloat((document.getElementById("serp-tax-ptet") || {}).value || "15400") || 0;
           var regime = ((document.getElementById("serp-tax-regime") || {}).value || "2026_active").toLowerCase();
-          var effRate = regime === "2027_sunset" ? 0.285 : (regime === "ptet_shield" ? 0.235 : 0.252);
+          var stdDed = regime === "2027_obbba" ? 16500 : 16100;
           var adjTaxable = Math.max(0, gross-pretax-ptet);
-          var combTax = Math.round(adjTaxable * effRate);
-          var shieldSaved = Math.round((pretax + ptet) * (effRate + 0.068));
+          var fedTax = evalProgressiveFederalTax(Math.max(0, adjTaxable-stdDed), regime);
+          var stateTax = ptet > 0 ? evalProgressiveCaTax(Math.max(0, adjTaxable-5540), gross) : 0;
+          var combTax = fedTax + stateTax;
+          var unshieldedFed = evalProgressiveFederalTax(Math.max(0, gross-stdDed), regime);
+          var unshieldedState = ptet > 0 ? evalProgressiveCaTax(Math.max(0, gross-5540), gross) : 0;
+          var shieldSaved = Math.max(0, (unshieldedFed + unshieldedState) - combTax);
           var takeHome = Math.max(0, gross-combTax);
-          if (out1) out1.textContent = fmtUsd(adjTaxable);
-          if (out2) out2.textContent = fmtUsd(combTax);
-          if (out3) out3.textContent = fmtUsd(shieldSaved);
-          if (out4) out4.textContent = fmtUsd(takeHome);
-          if (ban1) ban1.textContent = fmtUsd(adjTaxable);
-          if (ban2) ban2.textContent = fmtUsd(shieldSaved);
-          updateSerpSvgChart(takeHome, combTax, "Net Take-Home Cash Flow", "Combined Tax Liability");
+          if (_userInteracted) {
+            if (out1) out1.textContent = fmtUsd(adjTaxable);
+            if (out2) out2.textContent = fmtUsd(combTax);
+            if (out3) out3.textContent = fmtUsd(shieldSaved);
+            if (out4) out4.textContent = fmtUsd(takeHome);
+            if (ban1) ban1.textContent = fmtUsd(adjTaxable);
+            if (ban2) ban2.textContent = fmtUsd(shieldSaved);
+            updateSerpSvgChart(takeHome, combTax, "Net Take-Home Cash Flow", "Combined Tax Liability");
+          }
         } else if (mode === "sec179") {
           var cost = parseFloat((document.getElementById("serp-179-cost") || {}).value || "145000") || 0;
           var incCap = parseFloat((document.getElementById("serp-179-income") || {}).value || "320000") || 0;
@@ -1669,7 +1728,7 @@ def _render_runtime_sync_workbench_js() -> str:
           var depr = parseFloat((document.getElementById("serp-1031-depr") || {}).value || "380000") || 0;
           var elapsed = parseFloat((document.getElementById("serp-1031-close-days") || {}).value || "15") || 0;
           var netBoot = Math.max(0, relDebt-repDebt-qiCosts);
-          var defTax = Math.round(depr * 0.25 + Math.max(0, (relDebt + 600000-qiCosts) * 0.238));
+          var defTax = Math.round(depr * 0.25 + evalCapitalGainsAndNiitTax(Math.max(0, relDebt + 600000-qiCosts)));
           var carryBasis = Math.max(0, repDebt + 370000-qiCosts);
           var remId = Math.max(0, Math.round(45-elapsed));
           var remClose = Math.max(0, Math.round(180-elapsed));
@@ -4901,6 +4960,14 @@ def normalize_html_visual_primitives(
         repaired.append("post_calculation_workpaper_upgrade")
 
     # 5i. Surface above-the-fold scenario preset chips (<=680px viewport salience) when buried below fold
+    if 'data-above-fold-presets="true"' in updated and "2027_sunset" in updated:
+        updated = re.sub(
+            r'\s*<div[^>]*data-above-fold-presets=["\']true["\'][^>]*>[\s\S]*?</div>\n?',
+            "\n",
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
     if 'data-above-fold-presets="true"' not in updated and "data-calc-preset" in updated:
         main_pos = updated.find("<main")
         first_preset_pos = updated.find("data-calc-preset")
@@ -4948,6 +5015,8 @@ def normalize_html_visual_primitives(
             "output-value",
             'href="/r/',
             "href='/r/",
+            'id="pseo-runtime-sync"',
+            "id='pseo-runtime-sync'",
         )
     )
     if has_interactive_controls:
@@ -4991,10 +5060,15 @@ def normalize_html_visual_primitives(
                 or "data-affiliate-clicked" not in sync_body
                 or "data-blueprint-exported" not in sync_body
                 or "data-download-triggered" not in sync_body
+                or "evalProgressiveFederalTax" not in sync_body
                 or "_lastInteractionScope" not in sync_body
                 or "data-preset-crit" not in sync_body
                 or "carryShield" not in sync_body
                 or "keepalive: true" in sync_body
+                or "0.285" in sync_body
+                or "0.235 : 0.252" in sync_body
+                or "adjGain * 0.238" in sync_body
+                or "cliffMults" in sync_body
                 or "kalshi_price" in sync_body
                 or "val-tcja" in sync_body
                 or "remBasis * 0.80" in sync_body

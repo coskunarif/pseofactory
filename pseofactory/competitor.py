@@ -345,28 +345,29 @@ class CompetitorGapEngine:
                 statutory_authority = "45 CFR 160.404, 45 CFR Part 164 & 42 U.S.C. 1320d-5"
                 economic_dataset = "HHS OCR Penalty Inflation Schedule & IBM Cost of a Data Breach Report"
                 model_name = "HIPAA / HITECH Breach Notification & OCR Civil Penalty Exposure Model"
-                formula = "(compromised_records * per_record_forensic_cost) + ocr_tier_penalty_estimate"
+                formula = "round((compromised_records * per_record_forensic_cost) + legal_and_credit_monitoring_cost + ocr_tier_penalty_estimate, 2)"
                 inputs = {
-                    "compromised_records": 2500,
-                    "per_record_forensic_cost": 165,
-                    "ocr_tier_penalty_estimate": 75500,
+                    "compromised_records": 1500,
+                    "per_record_forensic_cost": 175,
+                    "legal_and_credit_monitoring_cost": 125000,
+                    "ocr_tier_penalty_estimate": 2067813,
                 }
-                published_output = 488000.0
-                sample_calculation = "2,500 records at $165/record plus $75,500 OCR Tier 2 penalty yields $488,000 total breach exposure"
+                published_output = 2455313.0
+                sample_calculation = "1,500 ePHI records at $175/record ($262,500) plus $125,000 legal/credit monitoring ($387,500 response) plus $2,067,813 45 CFR 160.404 Tier 3 penalty cap yields $2,455,313.00 total HIPAA breach exposure"
             else:
                 statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
                 economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
                 model_name = "SOC 2 Type II Audit & Readiness TCO Model"
                 formula = "round(cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate) + pentest_and_legal_cost, 2)"
                 inputs = {
-                    "cpa_audit_fee": 28000,
+                    "cpa_audit_fee": 37000,
                     "grc_platform_annual_cost": 15000,
                     "readiness_hours": 120,
                     "eng_hourly_rate": 121.67,
-                    "pentest_and_legal_cost": 20500,
+                    "pentest_and_legal_cost": 11500,
                 }
                 published_output = 78100.4
-                sample_calculation = "CPA audit fee $28,000 plus $15,000 GRC platform plus 120 hours at $121.67/hr plus $20,500 pentest/legal yields $78,100.40 total SOC 2 Type II TCO"
+                sample_calculation = "CPA audit fee $37,000.00 plus $15,000.00 GRC platform plus 120 hours at $121.67/hr ($14,600.40) plus $11,500.00 pentest yields $78,100.40 total SOC 2 Type II TCO"
             disclosures = [
                 GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
                 GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
@@ -702,17 +703,17 @@ class CompetitorGapEngine:
             spec.setdefault(
                 "inputs",
                 {
-                    "cpa_audit_fee": 28000,
+                    "cpa_audit_fee": 37000,
                     "grc_platform_annual_cost": 15000,
                     "readiness_hours": 120,
                     "eng_hourly_rate": 121.67,
-                    "pentest_and_legal_cost": 20500,
+                    "pentest_and_legal_cost": 11500,
                 },
             )
             spec.setdefault("published_output", 78100.4)
             spec.setdefault(
                 "sample_calculation",
-                "CPA audit fee $28,000 plus $15,000 GRC platform plus 120 hours at $121.67/hr plus $20,500 pentest/legal yields $78,100.40 total SOC 2 Type II TCO",
+                "CPA audit fee $37,000.00 plus $15,000.00 GRC platform plus 120 hours at $121.67/hr ($14,600.40) plus $11,500.00 pentest yields $78,100.40 total SOC 2 Type II TCO",
             )
             spec.setdefault(
                 "mandatory_disclosures",
@@ -3557,32 +3558,32 @@ def _build_tax_brackets_depth_spec(
             topic_label=topic_label,
             statutory_authority=statutory_authority,
         )
-    state_focus_lbl = "California FTB Form 540 (1.0% to 13.3% + 1.1% SDI)"
+    state_focus_lbl = "California FTB Form 540 (1.0% to 13.3% + 1.3% SDI)"
     return {
         "workbench_mode": "tax_brackets",
         "workbench_h2": f"Interactive 401(k)/HSA Pre-Tax Shield, PTET Election &amp; {state_focus_lbl} Sub-Ledger: {topic_label}",
         "workbench_intro": (
             f"Competitor tax calculators rank by combining top-line bracket lookups with above-the-line "
-            f"retirement/health deductions (IRC Section 401(k) $23,500 limit and IRC Section 223 HSA), "
+            f"retirement/health deductions (IRC Section 401(k) $24,500 limit under IRS Notice 2025-67 and IRC Section 223 HSA), "
             f"Pass-Through Entity Tax (PTET Notice 2020-75 / CA AB 150) SALT cap workarounds, and complete "
             f"federal plus state marginal schedules under <strong>{statutory_authority}</strong>:"
         ),
         "presets": [
             (
-                "Median Professional ($125k Gross / $23.5k 401k)",
-                '{"inp-income":125000,"tax-income":125000,"serp-tax-gross":125000,"serp-tax-pretax":23500,"serp-tax-ptet":0,"serp-tax-regime":"2026_active"}',
+                "Median Professional ($125k Gross / $24.5k 401k)",
+                '{"inp-income":125000,"tax-income":125000,"serp-tax-gross":125000,"serp-tax-pretax":24500,"serp-tax-ptet":0,"serp-tax-regime":"2026_active"}',
             ),
             (
                 "Dual-Earner Household ($285k Gross / Max 401k + HSA)",
-                '{"inp-income":285000,"tax-income":285000,"serp-tax-gross":285000,"serp-tax-pretax":55550,"serp-tax-ptet":12000,"serp-tax-regime":"2026_active"}',
+                '{"inp-income":285000,"tax-income":285000,"serp-tax-gross":285000,"serp-tax-pretax":57750,"serp-tax-ptet":12000,"serp-tax-regime":"2026_active"}',
             ),
             (
                 "S-Corp Owner PTET Shield ($450k Gross / 9.3% AB 150)",
-                '{"inp-income":450000,"tax-income":450000,"serp-tax-gross":450000,"serp-tax-pretax":69000,"serp-tax-ptet":35400,"serp-tax-regime":"ptet_shield"}',
+                '{"inp-income":450000,"tax-income":450000,"serp-tax-gross":450000,"serp-tax-pretax":70000,"serp-tax-ptet":35400,"serp-tax-regime":"ptet_shield"}',
             ),
             (
-                "2027 Sunset Reversion Stress ($650k Gross / 39.6% Top Rate)",
-                '{"inp-income":650000,"tax-income":650000,"serp-tax-gross":650000,"serp-tax-pretax":55550,"serp-tax-ptet":18000,"serp-tax-regime":"2027_sunset"}',
+                "2027 OBBBA Inflation-Indexed Schedule ($650k Gross / 37% Top Rate)",
+                '{"inp-income":650000,"tax-income":650000,"serp-tax-gross":650000,"serp-tax-pretax":57750,"serp-tax-ptet":18000,"serp-tax-regime":"2027_obbba"}',
             ),
         ],
         "inputs_html": (
@@ -3592,7 +3593,7 @@ def _build_tax_brackets_depth_spec(
             '        </div>\n'
             '        <div class="serp-field-group">\n'
             '          <label for="serp-tax-pretax" class="serp-field-label">Pre-Tax 401(k), Solo 401(k) &amp; HSA Deductions ($)</label>\n'
-            '          <input type="number" id="serp-tax-pretax" name="serp-tax-pretax" class="touch-target serp-sub-input" min="0" max="500000" step="500" value="31000" />\n'
+            '          <input type="number" id="serp-tax-pretax" name="serp-tax-pretax" class="touch-target serp-sub-input" min="0" max="500000" step="500" value="32500" />\n'
             '        </div>\n'
             '        <div class="serp-field-group">\n'
             '          <label for="serp-tax-ptet" class="serp-field-label">PTET (AB 150) / Itemized SALT Deduction ($)</label>\n'
@@ -3601,23 +3602,23 @@ def _build_tax_brackets_depth_spec(
             '        <div class="serp-field-group">\n'
             '          <label for="serp-tax-regime" class="serp-field-label">Statutory Tax Regime &amp; SALT Election</label>\n'
             '          <select id="serp-tax-regime" name="serp-tax-regime" class="touch-target serp-sub-select">\n'
-            '            <option value="2026_active" selected="selected">2026 Current Law (10% to 37% Federal + State Schedule)</option>\n'
-            '            <option value="2027_sunset">2027 Post-Sunset Reversion (10% to 39.6% Federal + State)</option>\n'
+            '            <option value="2026_active" selected="selected">2026 Rev. Proc. 2025-32 (10% to 37% Federal + State Schedule)</option>\n'
+            '            <option value="2027_obbba">2027 OBBBA Inflation-Indexed Schedule (10% to 37% Federal + State)</option>\n'
             '            <option value="ptet_shield">S-Corp / LLC PTET Election (Notice 2020-75 / CA AB 150 Shield)</option>\n'
             '          </select>\n'
             '        </div>'
         ),
         "metrics_meta": [
-            ("serp-out-primary", "Adjusted Taxable Income Base", "$138,600"),
-            ("serp-out-secondary", "Combined Federal + State/SDI Tax", "$34,927"),
-            ("serp-out-tertiary", "401(k)/HSA &amp; PTET Tax Saved", "$14,848"),
-            ("serp-out-quaternary", "Net After-Tax Cash Retained", "$150,073"),
+            ("serp-out-primary", "Adjusted Taxable Income Base", "$137,100"),
+            ("serp-out-secondary", "Combined Federal + State/SDI Tax", "$32,724"),
+            ("serp-out-tertiary", "401(k)/HSA &amp; PTET Tax Saved", "$15,951"),
+            ("serp-out-quaternary", "Net After-Tax Cash Retained", "$152,276"),
         ],
-        "svg_left_label": "Net Take-Home Cash Flow: $150,073 (81.1%)",
-        "svg_right_label": "Combined Tax Liability: $34,927 (18.9%)",
-        "svg_left_width": "487",
-        "svg_right_x": "487",
-        "svg_right_width": "113",
+        "svg_left_label": "Net Take-Home Cash Flow: $152,276 (82.3%)",
+        "svg_right_label": "Combined Tax Liability: $32,724 (17.7%)",
+        "svg_left_width": "494",
+        "svg_right_x": "494",
+        "svg_right_width": "106",
         "table_h3": f"Statutory Reference Schedule: {topic_label} Complete 10-Tier California FTB 540 &amp; Federal Rate Matrix",
         "table_headers": [
             "California State Bracket &amp; Federal Tier",
@@ -3630,7 +3631,7 @@ def _build_tax_brackets_depth_spec(
                 "CA State Tier 1: 1.0% State Rate (10% Fed)",
                 "$0 to $10,756 Single",
                 "$0 to $21,512 Married Jointly",
-                "$0 to $21,527 Head of Household; Federal standard deduction of $15,000 Single / $30,000 MFJ",
+                "$0 to $21,527 Head of Household; Federal standard deduction of $16,100 Single / $32,200 MFJ (2026 Rev. Proc. 2025-32)",
             ),
             (
                 "CA State Tier 2: 2.0% State Rate (12% Fed)",
@@ -3648,13 +3649,13 @@ def _build_tax_brackets_depth_spec(
                 "CA State Tier 4: 6.0% State Rate (22% Fed)",
                 "$40,246 to $55,866 Single",
                 "$80,491 to $111,732 Married Jointly",
-                "$65,745 to $81,364 HOH; CA SDI payroll withholding of 1.1% on all wages (no wage cap)",
+                "$65,745 to $81,364 HOH; CA SDI payroll withholding of 1.3% on all wages (no wage cap)",
             ),
             (
                 "CA State Tier 5: 8.0% State Rate (22%/24% Fed)",
                 "$55,867 to $70,606 Single",
                 "$111,733 to $141,212 Married Jointly",
-                "$81,365 to $96,107 HOH; Pre-tax 401(k) ($23,500 limit) reduces both Federal &amp; CA AGI",
+                "$81,365 to $96,107 HOH; Pre-tax 401(k) ($24,500 limit under IRS Notice 2025-67) reduces both Federal &amp; CA AGI",
             ),
             (
                 "CA State Tier 6: 9.3% Core Professional State Rate",
@@ -3678,7 +3679,7 @@ def _build_tax_brackets_depth_spec(
         "banner_html": (
             '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="tax_brackets">\n'
             '        <div class="serp-intent-banner-text">\n'
-            '          <strong>Live Payroll &amp; Entity Tax Shield Signal:</strong> Deducting pre-tax 401(k)/HSA and PTET lowers your taxable base to <span id="serp-banner-metric-primary">$138,600</span> and saves <span id="serp-banner-metric-secondary">$14,848</span> in combined federal and state income tax. Automate S-Corp payroll and tax books to lock in full deduction compliance.\n'
+            '          <strong>Live Payroll &amp; Entity Tax Shield Signal:</strong> Deducting pre-tax 401(k)/HSA and PTET lowers your taxable base to <span id="serp-banner-metric-primary">$137,100</span> and saves <span id="serp-banner-metric-secondary">$15,951</span> in combined federal and state income tax. Automate S-Corp payroll and tax books to lock in full deduction compliance.\n'
             '        </div>\n'
             '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Compare Vetted Payroll, PTET &amp; Tax Accounting Platforms</a>\n'
             '      </div>'

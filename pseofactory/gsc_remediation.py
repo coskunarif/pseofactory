@@ -3980,9 +3980,9 @@ ZERO_INCOME_TAX_STATES: Tuple[str, ...] = (
 def build_zero_tax_state_spoke_copy(
     state_slug: str,
     inc_val: str = "$75,000",
-    tot_val: str = "$10,539",
-    eff_val: str = "14.4%",
-    th_val: str = "$62,496",
+    tot_val: str = "$7,565",
+    eff_val: str = "10.1%",
+    th_val: str = "$67,435",
 ) -> Dict[str, str]:
     """
     Builds re-angled title (55-59 chars), meta_description (141-147 chars),
@@ -4003,9 +4003,9 @@ def build_zero_tax_state_spoke_copy(
     quick_answer_title = f"Key Finding: {st_name} 0% State Income Tax & 2026-2027 Federal Take-Home Pay"
     quick_answer = (
         f"{st_name} levies a 0% state individual income tax ($0 state tax), so a single filer earning "
-        f"the {inc_val} median wage benchmark owes {tot_val} in 2027 post-sunset federal tax ({eff_val} effective rate) "
-        f"and keeps {th_val} in net take-home pay. Under IRC Section 1(j) sunset rules, only federal brackets "
-        f"(10% to 39.6%) and standard deductions apply."
+        f"the {inc_val} median wage benchmark owes {tot_val} in 2026-2027 federal tax ({eff_val} effective rate) "
+        f"and keeps {th_val} in net take-home pay. Under IRC Section 1(j) and OBBBA P.L. 119-21, only permanent "
+        f"federal brackets (10% to 37%) and standard deductions apply."
     )
     return {
         "state_slug": st_leaf,
@@ -5311,15 +5311,15 @@ def _build_autonomous_citation_assertions_and_matrix(
         elif "s-corp" in low or "s corp" in low or "1120-s" in low or "salary" in low:
             assertions = [
                 f"In 2026, {heading_label} eliminates the 15.3% self-employment tax (IRC Section 1401) on net business profits distributed above a reasonable W-2 officer salary reported on IRS Form 1120-S Line 7.",
-                "For tax year 2026, the 12.4% OASDI Social Security payroll tax applies up to the $176,100 statutory wage base under IRC Section 3121, while the 2.9% Medicare tax and 0.9% Additional Medicare Tax (above $200,000 single) apply to all W-2 wages.",
+                "For tax year 2026, the 12.4% OASDI Social Security payroll tax applies up to the $184,500 statutory wage base under IRC Section 3121, while the 2.9% Medicare tax and 0.9% Additional Medicare Tax (above $200,000 single) apply to all W-2 wages.",
                 "Under IRC Section 199A, 2026 S-Corp K-1 pass-through distributions qualify for up to a 20% Qualified Business Income (QBI) deduction subject to the greater of 50% of W-2 wages or 25% of W-2 wages plus 2.5% UBIA.",
             ]
             matrix = [
                 {
-                    "profile": "Solo Service Operator ($185k Net Profit, Single Filer)",
-                    "statutory_threshold": "40% Reasonable Compensation Safe-Harbor Benchmark ($74k W-2)",
+                    "profile": "Solo Service Operator ($175k Net Profit, Single Filer)",
+                    "statutory_threshold": "48.57% Reasonable Compensation Safe-Harbor Benchmark ($85k W-2)",
                     "optimal_path": "S-Corp Election (Form 2553) + Automated Officer Payroll",
-                    "net_dollar_impact": "$15,240 Annual Payroll Tax Savings vs Sole Proprietorship",
+                    "net_dollar_impact": "$13,193 Annual Payroll Tax Savings vs Sole Proprietorship",
                     "next_action": "Configure Reasonable W-2 Salary & K-1 Split",
                 },
                 {
@@ -5433,17 +5433,17 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
         elif any(k in low for k in ("tax-bracket", "tax bracket", "2027", "tcja", "capital-gains", "capital gains")):
             assertions = [
-                f"In 2026 and 2027, {heading_label} compares current TCJA tax schedules against post-sunset statutory reversion under IRC Section 1(j) and IRC Section 1(h) (0%, 15%, and 20% long-term capital gains tiers plus the 3.8% IRC Section 1411 NIIT).",
-                "Under IRC Section 1(j), expiration of the Tax Cuts and Jobs Act reverts ordinary federal marginal rates to 10%, 15%, 25%, 28%, 33%, 35%, and 39.6% while contracting the single standard deduction from $16,100 (2026) to $13,600 (2027 post-sunset).",
-                "For a single filer earning $125,000 gross income, reverting from 2026 TCJA brackets ($19,181 federal tax) to 2027 post-sunset brackets ($23,530 federal tax) increases annual federal income tax liability by +$4,349.",
+                f"In 2026 and 2027, {heading_label} evaluates permanent OBBBA (P.L. 119-21) tax schedules under IRC Section 1(j) and IRC Section 1(h) (0%, 15%, and 20% long-term capital gains tiers plus the 3.8% IRC Section 1411 NIIT).",
+                "Under P.L. 119-21 (OBBBA) and IRS Rev. Proc. 2025-32, ordinary federal marginal rates are permanently anchored at 10%, 12%, 22%, 24%, 32%, 35%, and 37% with an inflation-indexed single standard deduction of $16,100 (2026) and $16,500 (2027).",
+                "For a single filer earning $125,000 gross income, enacted OBBBA 10%-37% brackets ($18,734 federal tax in 2026; $18,638 in 2027) prevent the repealed pre-OBBBA sunset tax spike, saving $4,796 to $4,892 annually.",
             ]
             matrix = [
                 {
                     "profile": "Single Earner ($125,000 Gross Income, Standard Deduction)",
-                    "statutory_threshold": "IRC Section 1(j) TCJA Sunset ($16,100 -> $13,600 Standard Deduction)",
+                    "statutory_threshold": "IRC Section 1(j) & P.L. 119-21 ($16,100 2026 -> $16,500 2027 Standard Deduction)",
                     "optimal_path": "Accelerate Roth Conversions & Bonus Recognition Into 22%/24% Brackets",
-                    "net_dollar_impact": "+$4,349 Annual Sunset Tax Increase ($19,181 TCJA vs $23,530 Post-Sunset)",
-                    "next_action": "Compare 2026 TCJA vs 2027 Post-Sunset Marginal Brackets",
+                    "net_dollar_impact": "$18,734 Federal Tax Liability ($4,796 Annual OBBBA Tax Savings)",
+                    "next_action": "Compare 2026 and 2027 Enacted OBBBA Marginal Brackets",
                 },
                 {
                     "profile": "High-Income Investor Realizing $250,000 Long-Term Capital Gain",

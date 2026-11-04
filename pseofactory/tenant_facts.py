@@ -222,19 +222,34 @@ def _build_profithelm_profile() -> TenantTruthProfile:
             "section_1202_qsbs_holding_period_years": 5,
             "retirement_401k_elective_deferral_2024": 23000.0,
             "retirement_401k_elective_deferral_2025": 23500.0,
+            "retirement_401k_elective_deferral_2026": 24500.0,
             "hsa_single_2024": 4150.0,
             "hsa_single_2025": 4300.0,
+            "hsa_single_2026": 4400.0,
             "hsa_family_2024": 8300.0,
             "hsa_family_2025": 8550.0,
-            "standard_deduction_2026_single": 15000.0,
-            "standard_deduction_2026_mfj": 30000.0,
-            "standard_deduction_2026_hoh": 22500.0,
+            "hsa_family_2026": 8750.0,
+            "standard_deduction_2025_single": 15000.0,
+            "standard_deduction_2025_mfj": 30000.0,
+            "standard_deduction_2025_hoh": 22500.0,
+            "standard_deduction_2026_single": 16100.0,
+            "standard_deduction_2026_mfj": 32200.0,
+            "standard_deduction_2026_hoh": 24150.0,
+            "standard_deduction_2027_obbba_single": 16500.0,
+            "standard_deduction_2027_obbba_mfj": 33000.0,
+            "standard_deduction_2027_obbba_hoh": 24750.0,
             "standard_deduction_2027_sunset_single": 8600.0,
             "standard_deduction_2027_sunset_mfj": 17200.0,
             "standard_deduction_2027_sunset_hoh": 12900.0,
             "tcja_vs_sunset_single_125k_tcja_tax": 19181.0,
             "tcja_vs_sunset_single_125k_sunset_tax": 23530.0,
             "tcja_vs_sunset_single_125k_delta": 4349.0,
+            "obbba_2026_single_125k_fed_tax": 18918.0,
+            "obbba_2027_single_125k_fed_tax": 18734.0,
+            "ca_sdi_rate_2026_pct": 1.3,
+            "ca_top_marginal_rate_2026_pct": 14.6,
+            "ssa_oasdi_wage_base_2025": 176100.0,
+            "ssa_oasdi_wage_base_2026": 184500.0,
             "saas_runway_baseline_monthly_revenue": 33000.0,
             "saas_runway_baseline_monthly_burn": 45000.0,
             "saas_runway_baseline_net_monthly_burn": 12000.0,
@@ -2053,7 +2068,12 @@ class TenantFactStore:
                         "Missing mandatory Circular 230 regulatory disclosure: 'Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.'"
                     )
         elif tenant_norm == "prexvo":
-            if "refinance" in text_lower or "refinancing" in text_lower:
+            is_route_or_index_registry = (
+                "verified_routes_count" in text_lower
+                or "autonomous facebook group discovery & topic routing matrix" in text_lower
+                or "github seed discovery & authority architecture" in text_lower
+            )
+            if ("refinance" in text_lower or "refinancing" in text_lower) and not is_route_or_index_registry:
                 has_ymyl = (
                     "waives federal protections" in text_lower
                     or "eliminates federal protections" in text_lower
@@ -2091,6 +2111,20 @@ class TenantFactStore:
                     )
 
         # 5. Statutory threshold limit boundaries & ground-truth benchmark figures
+        proxy_js_patterns = (
+            'regime === "2027_sunset" ? 0.285',
+            "0.235 : 0.252",
+            "Math.round(adjGain * 0.238)",
+            "cliffMults = [0.74, 0.80",
+            "Math.round(retainedVal * 1.12)",
+            "Math.round(taxVal * 0.82)",
+        )
+        for p_js in proxy_js_patterns:
+            if p_js in text:
+                violations.append(
+                    f"Client-side JS flat proxy multiplier '{p_js}' detected: embedded calculators and sensitivity tables must evaluate progressive statutory brackets and non-linear AST formulas"
+                )
+
         if tenant_norm == "profithelm":
             prose_scan_text = (
                 re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
@@ -2115,7 +2149,16 @@ class TenantFactStore:
                         val = float(raw_val.replace(",", ""))
                         has_2025_qual = "2025" in window_low and "in 2026" not in clause_low
                         suv_cap = 31300.0 if has_2025_qual else 30500.0
-                        if val > suv_cap:
+                        is_general_s179_contrast = (
+                            val in (1220000.0, 1250000.0, 2560000.0)
+                            and (
+                                "30,500" in window_low
+                                or "31,300" in window_low
+                                or "qualifying equipment" in clause_low
+                                or "179(b)(1)" in clause_low
+                            )
+                        )
+                        if val > suv_cap and not is_general_s179_contrast:
                             violations.append(
                                 f"Section 179 heavy vehicle/SUV limit contradiction: claimed ${val:,.0f} exceeds statutory cap of $30,500 for 2024/2026 ($31,300 for 2025)"
                             )
@@ -2251,10 +2294,78 @@ class TenantFactStore:
                 )
 
             # Zero-income-tax state year-label contradiction ($10,539 post-sunset 2027 tax labeled as 2026 federal tax)
-            if "$10,539 in 2026 federal tax" in text_lower:
+            if "$10,539 in 2026 federal tax" in text_lower or "$10,539 in 2027 post-sunset federal tax" in text_lower:
                 violations.append(
-                    "Zero-income-tax state year-label contradiction: '$10,539 in 2026 federal tax' mislabels the 2027 post-sunset federal tax ($10,539 at $13,600 deduction and 10%/15%/25% brackets) as 2026 federal tax ($7,961.50 under 2026 TCJA)"
+                    "Zero-income-tax state year-label or 2027 post-sunset contradiction: '$10,539' uses repealed 2027 post-sunset brackets (10%/15%/25%) instead of enacted OBBBA (P.L. 119-21) permanent 10%-37% brackets"
                 )
+
+            # Year- and status-bound OBBBA (P.L. 119-21) & IRS Rev. Proc. 2025-32 / Notice 2025-67 enforcement
+            repealed_sunset_claims = (
+                "under irc section 1(j) sunset reversion",
+                "tcja sunset: federal marginal rates revert to 10%-39.6% on december 31, 2025",
+                '"sunset_standard_deduction": 8600',
+                '"sunset_standard_deduction":8600',
+                "0% (expired dec 31, 2025)",
+                "0.0 (expired dec 31, 2025)",
+                "20% -> 0%",
+                "$15,000 -> $8,600",
+                "$30,000 -> $17,200",
+                "2027 post-sunset (irc §1(j) reversion)",
+                "2027 post-sunset statutory rate",
+                'value="2027_sunset"',
+                "sunset reversion ($8,600 single",
+                "39.6% top marginal bracket and $8,600",
+                "reverts from 37% to 39.6%",
+            )
+            for r_claim in repealed_sunset_claims:
+                if r_claim in text_lower:
+                    violations.append(
+                        f"Repealed pre-OBBBA TCJA sunset claim '{r_claim}' presented as active 2026/2027 law: OBBBA (P.L. 119-21) permanently extended the 10%-37% brackets, 20% Section 199A QBI deduction, and enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027)"
+                    )
+
+            # In HTML/table/manifest contexts, reject pre-OBBBA $23,530 / +$4,349 / $19,941 sunset calculations
+            # unless $23,530 / +$4,349 is explicitly labeled as a "Repealed Pre-OBBBA" comparison counterfactual on the federal hub
+            is_state_spoke_ctx = bool(
+                (context and re.search(r"irs-2027-tax-brackets/(?!index\.html)[a-z-]+", str(context).lower()))
+                or re.search(
+                    r'rel=["\']canonical["\'][^>]*href=["\'][^"\']*?/tools/irs-2027-tax-brackets/[a-z-]+/?["\']',
+                    text_lower,
+                )
+            )
+            has_unlabeled_sunset_output = (
+                '"published_output": 23530' in text
+                or '"published_output": 19941' in text
+                or "$19,941" in text
+                or (
+                    ("$23,530" in text or "+$4,349" in text)
+                    and (is_state_spoke_ctx or "repealed pre-obbba" not in text_lower)
+                )
+            )
+            if (
+                "<html" in text_lower
+                or "<table" in text_lower
+                or "calculation-manifest" in text_lower
+                or (context and "irs-2027-tax-brackets" in str(context).lower())
+            ) and has_unlabeled_sunset_output:
+                violations.append(
+                    "Repealed pre-OBBBA sunset calculation output ($23,530 / +$4,349 / $19,941) detected in active page/manifest: must evaluate enacted OBBBA (P.L. 119-21) 10%-37% progressive brackets and Rev. Proc. 2025-32 standard deductions"
+                )
+
+            # 2025 limits masquerading as 2026/2027 schedules
+            stale_2025_in_2026_tokens = (
+                "$15,000 single / $30,000 mfj",
+                "<td>$15,000 (single) / $30,000 (mfj)</td>",
+                "$23,500 (irc §402(g) cap)",
+                "$23,500 (irc section 402(g) cap)",
+                "14.4% (13.3% + 1.1% sdi)",
+                "1.1% sdi)",
+                "$15,240 ($12,103.00 social security + $3,136.93 medicare)",
+            )
+            for st_25 in stale_2025_in_2026_tokens:
+                if st_25 in text_lower:
+                    violations.append(
+                        f"Stale 2025 or contradictory statutory limit '{st_25}' presented in 2026/2027 schedule: 2026 law requires $16,100 Single / $32,200 MFJ standard deduction (Rev. Proc. 2025-32), $24,500 401(k) cap (Notice 2025-67), 1.3% CA SDI (14.6% top CA rate), 20% Section 168(k) bonus depreciation, and $13,193 S-Corp FICA savings"
+                    )
 
             # Equipment Lease vs Section 179 capital expensing misattribution
             ctx_low_ph = f"{context or ''} {text_lower[:1200]}".lower()
@@ -2294,7 +2405,7 @@ class TenantFactStore:
                         "PSLF payment requirement contradiction: claiming '120 to 240 certified monthly payments' for PSLF contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
                     )
                 pslf_matches = re.finditer(
-                    r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]{0,140}?(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?|(\d+)\s*(?:qualifying\s*)?(?:monthly\s*)?payments?[^\.\n]{0,140}?(?:pslf|public\s+service\s+loan\s+forgiveness))',
+                    r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]{0,140}?(?<![a-zA-Z0-9_\\])(\d+)\s+(?:qualifying\s+)?(?:monthly\s+)?payments?|(?<![a-zA-Z0-9_\\])(\d+)\s+(?:qualifying\s+)?(?:monthly\s+)?payments?[^\.\n]{0,140}?(?:pslf|public\s+service\s+loan\s+forgiveness))',
                     text,
                     re.IGNORECASE,
                 )
@@ -2334,6 +2445,14 @@ class TenantFactStore:
             if "48212.5" in text:
                 violations.append(
                     "Invalid 225% FPL poverty exemption '48212.50' detected: ground-truth 2026 HHS 225% exemption is $35,212.50 (single) or $47,587.50 (family size 2)"
+                )
+            if "family size 2 ($47,587.50" in text_lower and ("$248.23" in text or "$223.23" in text):
+                violations.append(
+                    "Prexvo RAP family-size contradiction: pairs 'family size 2 ($47,587.50 RAP exemption)' with single-filer ($35,212.50 exemption) $248.23/mo or $223.23/mo RAP payment"
+                )
+            if "$164.90/mo" in text and "$65,000" in text:
+                violations.append(
+                    "Prexvo RAP AGI contradiction: $164.90/mo RAP payment corresponds to $55,000 AGI (($55,000 - $35,212.50) * 0.10 / 12), not $65,000 AGI ($248.23/mo)"
                 )
 
             # Unhydrated SSR calculator metric placeholders ($0.00 in primary repayment metrics)
@@ -2454,9 +2573,22 @@ class TenantFactStore:
                 or "includes $28,500.00 in cpa attestation fees" in text_lower
                 or ("$14,600.40" in text and "totals $78,100.00" in text_lower)
                 or '"published_output": 78100.0' in text
+                or "$28,000 cpa audit" in text_lower
+                or "$20,500 ($121.67/hr bls" in text_lower
             ):
                 violations.append(
                     "SOC 2 AICPA SSAE 18 component/sum contradiction: baseline 75-employee 3-TSC Type II cost is $78,100.40 ($37,000.00 CPA + $15,000.00 GRC + $11,500.00 pentest + $14,600.40 labor)"
+                )
+            if (
+                "2,500 compromised ephi records" in text_lower
+                or "2,500 ephi records" in text_lower
+                or "2,500-record ephi breach" in text_lower
+                or "$525,500 (" in text_lower
+                or "$512,500 total hipaa" in text_lower
+                or "2,500 records *" in text_lower
+            ):
+                violations.append(
+                    "HIPAA 45 CFR 160.404 benchmark contradiction: canonical Tier 3 baseline uses 1,500 ePHI records ($387,500.00 remediation + $2,067,813.00 Tier 3 cap = $2,455,313.00), not 2,500 records ($512,500 / $525,500)"
                 )
             if (
                 "c3pao fee ($47,000)" in text_lower
@@ -2712,14 +2844,30 @@ class TruthReconciliationEngine:
             "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
             "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
         ),
-        # Zero-income-tax state spoke quick-answer 2027 post-sunset federal tax label reconciliation
+        # Zero-income-tax state spoke quick-answer federal tax label reconciliation
         (
             "owes $10,539 in 2026 federal tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
+            "owes $10,539 in federal income tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
+        ),
+        (
             "owes $10,539 in 2027 post-sunset federal tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j) sunset rules, only federal brackets (10% to 39.6%) and standard deductions apply.",
+            "owes $10,539 in federal income tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
         ),
         (
             "or default to First-In, First-Out (FIFO) on Form 8949.",
             "or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
+        ),
+        (
+            "var ltcg = g <= 48350 ? 0 : (g <= 533400 ? (g - 48350) * 0.15 : (485050 * 0.15) + ((g - 533400) * 0.20));",
+            "var ltcg = g <= 533400 ? (g * 0.15) : ((533400 * 0.15) + ((g - 533400) * 0.20));",
+        ),
+        (
+            "var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];\n        for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {\n          var barEl = document.getElementById(\"serp-cliff-bar-\" + String(cIdx));\n          var valEl = document.getElementById(\"serp-cliff-val-\" + String(cIdx));\n          var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;\n          var yrVal = Math.max(100, Math.round(taxVal - stdShift));\n          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, taxVal * 1.15)) * 70)));",
+            "var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];\n        var epochBase = taxVal > 0 ? taxVal : Math.max(100, Math.round(retainedVal * 0.15));\n        for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {\n          var barEl = document.getElementById(\"serp-cliff-bar-\" + String(cIdx));\n          var valEl = document.getElementById(\"serp-cliff-val-\" + String(cIdx));\n          var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;\n          var yrVal = Math.max(100, Math.round(epochBase - stdShift));\n          var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 70)));",
+        ),
+        (
+            "var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, taxVal * 1.15)) * 90)));",
+            "var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 90)));",
         ),
     )
 
@@ -3214,25 +3362,26 @@ class TruthReconciliationEngine:
                 m_changed = False
                 if manifest_data:
                     m_slug = manifest_data.get("slug")
-                    is_exact_tool = bool(
-                        m_slug
-                        and (
-                            rel_path == f"tools/{m_slug}/index.html"
-                            or slug == m_slug
-                            or (m_slug == "irs-2027-tax-brackets" and rel_path in ("index.html", "tools/index.html"))
-                        )
-                    )
+                    is_exact_tool = bool(m_slug and (rel_path == f"tools/{m_slug}/index.html" or slug == m_slug))
                     sync_fields = (
                         ("statutory_authority", "economic_dataset", "model_name", "formula", "inputs", "published_output")
                         if is_exact_tool
                         else ("statutory_authority", "economic_dataset", "model_name", "formula")
                     )
+                    is_stale_sunset_manifest = (
+                        "sunset_standard_deduction" in str(manifest_data.get("formula", ""))
+                        or "sunset_standard_deduction" in str(manifest_data.get("inputs", ""))
+                        or "post-sunset" in str(manifest_data.get("sample_calculation", "")).lower()
+                    )
                     for k in sync_fields:
-                        if k == "formula" and not is_exact_tool:
-                            m_inputs = set(manifest_data.get("inputs", {}).keys())
-                            c_inputs = set(curr_man.get("inputs", {}).keys())
-                            if m_inputs and not m_inputs.issubset(c_inputs) and curr_man.get("formula"):
-                                continue
+                        if is_stale_sunset_manifest and k in ("formula", "inputs", "published_output", "sample_calculation"):
+                            continue
+                        if k == "formula":
+                            if not is_exact_tool:
+                                m_inputs = set(manifest_data.get("inputs", {}).keys())
+                                c_inputs = set(curr_man.get("inputs", {}).keys())
+                                if m_inputs and not m_inputs.issubset(c_inputs) and curr_man.get("formula"):
+                                    continue
                         if k in manifest_data and curr_man.get(k) != manifest_data[k]:
                             curr_man[k] = manifest_data[k]
                             m_changed = True
@@ -3254,27 +3403,17 @@ class TruthReconciliationEngine:
                             m_changed = True
 
                     # Reconcile irs-2027-tax-brackets federal hub
-                    if rel_path in ("index.html", "tools/index.html", "tools/irs-2027-tax-brackets/index.html") or slug in ("index", "tools", "irs-2027-tax-brackets"):
-                        use_obbba_18734 = (
-                            "class=\"output-value\">18734" in updated
-                            or "standard_deduction_2026" in curr_man.get("inputs", {})
-                        )
-                        if use_obbba_18734:
-                            target_f = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
-                            target_in = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
-                            target_pub = 18734.0
-                        else:
-                            target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25, 0)"
-                            target_in = {"gross_income": 125000.0, "sunset_standard_deduction": 8600.0}
-                            target_pub = 23530.0
+                    if rel_path == "tools/irs-2027-tax-brackets/index.html" or slug == "irs-2027-tax-brackets":
+                        target_f = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
                         if curr_man.get("formula") != target_f:
                             curr_man["formula"] = target_f
                             m_changed = True
+                        target_in = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
                         if curr_man.get("inputs") != target_in:
                             curr_man["inputs"] = target_in
                             m_changed = True
-                        if curr_man.get("published_output") != target_pub:
-                            curr_man["published_output"] = target_pub
+                        if curr_man.get("published_output") != 18734.0:
+                            curr_man["published_output"] = 18734.0
                             m_changed = True
 
                     # Reconcile irs-2027-tax-brackets state leaves
@@ -3285,21 +3424,37 @@ class TruthReconciliationEngine:
                     ):
                         m_in = curr_man.get("inputs", {})
                         if "state_income_tax" in m_in:
-                            if "standard_deduction" in m_in and "sunset_standard_deduction" not in m_in:
-                                if float(m_in.get("standard_deduction", 15000.0)) == 15000.0:
-                                    target_f = "round(min(max(0.0, gross_income - standard_deduction), 12050.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12050.0), 36850.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 48900.0), 55500.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 104400.0) * 0.24 + state_income_tax, 2)"
-                                else:
-                                    target_f = "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)"
-                            else:
-                                target_f = "round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0), 37400.0) * 0.15 + max(0.0, (gross_income - sunset_standard_deduction) - 49600.0) * 0.25 + state_income_tax, 2)"
-                            if curr_man.get("formula") != target_f:
+                            inc_val_m = float(m_in.get("gross_income", 150000.0))
+                            out_dom_m = re.search(r'data-baseline-output=["\']([0-9.]+)["\']', updated)
+                            cur_pub = float(out_dom_m.group(1)) if out_dom_m else float(curr_man.get("published_output", 0))
+                            taxable_26 = max(0.0, inc_val_m - 16100.0)
+                            fed_26 = (
+                                min(taxable_26, 12400.0) * 0.10
+                                + min(max(0.0, taxable_26 - 12400.0), 38000.0) * 0.12
+                                + min(max(0.0, taxable_26 - 50400.0), 55300.0) * 0.22
+                                + max(0.0, taxable_26 - 105700.0) * 0.24
+                            )
+                            st_tax_m = max(0.0, round(cur_pub - fed_26, 2))
+                            target_f = "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)"
+                            target_in = {
+                                "gross_income": inc_val_m,
+                                "standard_deduction": 16100.0,
+                                "state_income_tax": st_tax_m,
+                            }
+                            target_sc = f"For ${inc_val_m:,.0f} state median single-filer income under enacted OBBBA brackets (${fed_26:,.0f} federal plus ${st_tax_m:,.0f} state tax), combined income tax is ${cur_pub:,.0f}."
+                            if (
+                                curr_man.get("formula") != target_f
+                                or curr_man.get("inputs") != target_in
+                                or "post-sunset" in str(curr_man.get("sample_calculation") or "").lower()
+                            ):
                                 curr_man["formula"] = target_f
+                                curr_man["inputs"] = target_in
+                                curr_man["sample_calculation"] = target_sc
                                 m_changed = True
                             from pseofactory.contracts import safe_eval_mathematical_formula
                             try:
-                                eval_tot = safe_eval_mathematical_formula(target_f, m_in)
-                                cur_pub = float(curr_man.get("published_output", 0))
-                                if abs(eval_tot - cur_pub) > 0.01:
+                                eval_tot = safe_eval_mathematical_formula(target_f, target_in)
+                                if abs(eval_tot - float(curr_man.get("published_output", 0))) > 0.01:
                                     curr_man["published_output"] = eval_tot
                                     m_changed = True
                             except Exception:
@@ -3536,6 +3691,26 @@ class TruthReconciliationEngine:
                     "or default to First-In, First-Out (FIFO) on Form 8949.",
                     "or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
                 ),
+                (
+                    "Under IRC Section 1(j), expiration of the Tax Cuts and Jobs Act reverts ordinary federal marginal rates to 10%, 15%, 25%, 28%, 33%, 35%, and 39.6% while contracting the single standard deduction from $16,100 (2026) to $13,600 (2027 post-sunset).",
+                    "Under OBBBA (P.L. 119-21) and IRC Section 1(j), the 10%, 12%, 22%, 24%, 32%, 35%, and 37% federal marginal rates and 20% Section 199A QBI deduction are permanently extended, with single standard deductions of $16,100 (2026 Rev. Proc. 2025-32) and $16,500 (2027).",
+                ),
+                (
+                    "For a single filer earning $125,000 gross income, reverting from 2026 TCJA brackets ($19,181 federal tax) to 2027 post-sunset brackets ($23,530 federal tax) increases annual federal income tax liability by +$4,349.",
+                    "For a single filer earning $125,000 gross income in California, 2026 combined federal, California FTB, and FICA/CA SDI tax liability is $38,767 ($18,734 federal tax with the $16,100 standard deduction, $8,833 CA FTB tax, and $11,200 FICA + 1.3% CA SDI), leaving $86,233 net take-home pay.",
+                ),
+                (
+                    "IRC Section 1(j) TCJA Sunset ($16,100 -> $13,600 Standard Deduction)",
+                    "OBBBA (P.L. 119-21) & Rev. Proc. 2025-32 ($16,100 -> $16,500 Standard Deduction)",
+                ),
+                (
+                    "+$4,349 Annual Sunset Tax Increase ($19,181 TCJA vs $23,530 Post-Sunset)",
+                    "$38,767 Combined 2026 Tax ($18,734 Federal + $8,833 CA FTB + $11,200 Payroll)",
+                ),
+                (
+                    "Compare 2026 TCJA vs 2027 Post-Sunset Marginal Brackets",
+                    "Compare 2026 Rev. Proc. 2025-32 vs 2027 Enacted OBBBA Marginal Brackets",
+                ),
             ):
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)
@@ -3680,6 +3855,34 @@ class TruthReconciliationEngine:
                         if "2,560,000" in raw_txt and ("suv" in man_f.name.lower() or "vehicle" in man_f.name.lower()):
                             raw_txt = raw_txt.replace("2,560,000", "30,500")
                             man_d = _json_lib.loads(raw_txt)
+                            changed = True
+                        if man_f.name == "irs-2027-tax-brackets.json" and (
+                            "sunset_standard_deduction" in raw_txt or man_d.get("published_output") == 23530.0
+                        ):
+                            man_d["model_name"] = "IRS 2027 Tax Brackets and OBBBA Permanent Rate Calculator Model"
+                            man_d["formula"] = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
+                            man_d["inputs"] = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
+                            man_d["published_output"] = 18734.0
+                            man_d["statutory_authority"] = "26 U.S.C. Section 1(j); OBBBA (P.L. 119-21); IRS Rev. Proc. 2025-32"
+                            man_d["sample_calculation"] = "For a $125,000 Single filer in 2026-2027 under permanent OBBBA (P.L. 119-21) brackets ($16,100 standard deduction under Rev. Proc. 2025-32), federal income tax is $18,734.00 (saving $4,796 vs repealed pre-OBBBA sunset)."
+                            changed = True
+                        elif man_f.name.startswith("irs-2027-tax-brackets-") and (
+                            "sunset_standard_deduction" in raw_txt or "post-sunset" in raw_txt.lower()
+                        ):
+                            m_in = man_d.get("inputs", {})
+                            inc_v = float(m_in.get("gross_income", 150000.0))
+                            cur_pub = float(man_d.get("published_output", 0.0))
+                            taxable_26 = max(0.0, inc_v - 16100.0)
+                            fed_26 = (
+                                min(taxable_26, 12400.0) * 0.10
+                                + min(max(0.0, taxable_26 - 12400.0), 38000.0) * 0.12
+                                + min(max(0.0, taxable_26 - 50400.0), 55300.0) * 0.22
+                                + max(0.0, taxable_26 - 105700.0) * 0.24
+                            )
+                            st_tax_m = max(0.0, round(cur_pub - fed_26, 2))
+                            man_d["formula"] = "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)"
+                            man_d["inputs"] = {"gross_income": inc_v, "standard_deduction": 16100.0, "state_income_tax": st_tax_m}
+                            man_d["sample_calculation"] = f"For ${inc_v:,.0f} state median single-filer income under enacted OBBBA brackets (${fed_26:,.0f} federal plus ${st_tax_m:,.0f} state tax), combined income tax is ${cur_pub:,.0f}."
                             changed = True
                     elif tenant_norm == "prexvo":
                         if "refinanc" in man_f.name.lower():
@@ -4134,6 +4337,50 @@ class TruthReconciliationEngine:
                             repaired_paths.append(str(vtt_f))
                     except Exception:
                         pass
+
+        # GainHelm HIPAA 45 CFR 160.404 Tier 3 benchmark parity across syndication, ai-benchmarks, and video catalog
+        if tenant_norm == "gainhelm" and repo_root.is_dir():
+            gh_repls = [
+                (
+                    "(2,500 ePHI records * $165 forensic/notification cost) + $100,000 45 CFR 160.404 Tier 2 reasonable cause penalty = $512,500 total HIPAA breach exposure",
+                    "(1,500 ePHI records * $165 forensic/notification cost) + $140,000 legal/PR crisis defense + $2,067,813 45 CFR 160.404 Tier 3 penalty cap = $2,455,313 total HIPAA breach exposure",
+                ),
+                (
+                    "(2,500 ePHI records * $165 per-record forensic/notification cost) + $113,000 45 CFR 160.404 Tier 2 penalty = $525,500 total HIPAA breach exposure",
+                    "(1,500 ePHI records * $165 per-record forensic/notification cost) + $140,000 legal/PR crisis defense + $2,067,813 45 CFR 160.404 Tier 3 penalty cap = $2,455,313 total HIPAA breach exposure",
+                ),
+                ("2,500 ePHI records", "1,500 ePHI records"),
+                ("$512,500 total HIPAA breach exposure", "$2,455,313 total HIPAA breach exposure"),
+                ("$525,500 total HIPAA breach exposure", "$2,455,313 total HIPAA breach exposure"),
+                ("$512,500.00", "$2,455,313.00"),
+                ("$525,500.00", "$2,455,313.00"),
+                ("$512,500", "$2,455,313"),
+                ("$525,500", "$2,455,313"),
+                ("512500.0", "2455313.0"),
+                ("525500.0", "2455313.0"),
+                ("512500", "2455313"),
+                ("525500", "2455313"),
+            ]
+            gh_targets: List[Path] = []
+            for sub_rel in ("syndication", "ai-benchmarks", "dist/ai-benchmarks", "dist/videos"):
+                sub_p = repo_root / sub_rel
+                if sub_p.is_dir():
+                    for ext in ("*.html", "*.md", "*.txt", "*.json", "*.jsonl"):
+                        gh_targets.extend(sub_p.rglob(ext))
+            for gf in gh_targets:
+                if "hipaa" not in gf.as_posix().lower() and gf.name != "batch_seo_catalog.json" and "benchmark" not in gf.name.lower():
+                    continue
+                try:
+                    g_orig = gf.read_text(encoding="utf-8")
+                    g_txt = g_orig
+                    for old_s, new_s in gh_repls:
+                        if old_s in g_txt:
+                            g_txt = g_txt.replace(old_s, new_s)
+                    if g_txt != g_orig:
+                        gf.write_text(g_txt, encoding="utf-8")
+                        repaired_paths.append(str(gf))
+                except Exception:
+                    pass
 
         # 6. Prexvo Refinance Assets YMYL Forfeiture Disclaimer in dist (catalog.json, feed.xml, llms.txt, llms-full.txt)
         if tenant_norm == "prexvo" and d.is_dir():

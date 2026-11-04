@@ -4742,17 +4742,28 @@ STATUTORY_STANDARD_DEDUCTIONS: Dict[int, Dict[str, float]] = {
         "additional_65_or_blind_married": 1600.0,
     },
     2026: {
-        "single": 15000.0,
+        "single": 16100.0,
+        "single_tcja_2025": 15000.0,
         "single_projected": 15350.0,
-        "married_filing_jointly": 30000.0,
-        "mfj": 30000.0,
+        "married_filing_jointly": 32200.0,
+        "mfj": 32200.0,
+        "mfj_tcja_2025": 30000.0,
         "mfj_projected": 30700.0,
-        "head_of_household": 22500.0,
-        "hoh": 22500.0,
-        "married_filing_separately": 15000.0,
-        "mfs": 15000.0,
-        "additional_65_or_blind_single": 2000.0,
-        "additional_65_or_blind_married": 1600.0,
+        "head_of_household": 24150.0,
+        "hoh": 24150.0,
+        "married_filing_separately": 16100.0,
+        "mfs": 16100.0,
+        "additional_65_or_blind_single": 2050.0,
+        "additional_65_or_blind_married": 1650.0,
+    },
+    "2027_obbba": {
+        "single": 16500.0,
+        "married_filing_jointly": 33000.0,
+        "mfj": 33000.0,
+        "head_of_household": 24750.0,
+        "hoh": 24750.0,
+        "married_filing_separately": 16500.0,
+        "mfs": 16500.0,
     },
     2027: {
         "single": 8600.0,
@@ -4771,6 +4782,7 @@ STATUTORY_LIMITS: Dict[str, Any] = {
         2024: 1220000.0,
         2025: 1250000.0,
         2026: 2560000.0,
+        2027: 2620000.0,
         "2026_obbba": 2560000.0,
         "2026_projected": 1290000.0,
     },
@@ -4778,6 +4790,7 @@ STATUTORY_LIMITS: Dict[str, Any] = {
         2024: 3050000.0,
         2025: 3130000.0,
         2026: 4090000.0,
+        2027: 4190000.0,
         "2026_obbba": 4090000.0,
         "2026_projected": 3220000.0,
     },
@@ -4796,35 +4809,35 @@ STATUTORY_LIMITS: Dict[str, Any] = {
     "retirement_401k_elective_deferral": {
         2024: 23000.0,
         2025: 23500.0,
-        2026: 23500.0,
+        2026: 24500.0,
         "2026_projected": 24000.0,
     },
     "retirement_401k_catchup": {
         2024: 7500.0,
         2025: 7500.0,
-        2026: 7500.0,
+        2026: 8000.0,
         "super_catchup_60_63_2025": 11250.0,
     },
     "retirement_ira_contribution": {
         2024: 7000.0,
         2025: 7000.0,
-        2026: 7000.0,
-        "catchup": 1000.0,
+        2026: 7500.0,
+        "catchup": 1100.0,
     },
     "hsa_contribution_limit": {
         2024: {"individual": 4150.0, "family": 8300.0, "catchup": 1000.0},
         2025: {"individual": 4300.0, "family": 8550.0, "catchup": 1000.0},
-        2026: {"individual": 4450.0, "family": 8900.0, "catchup": 1000.0},
+        2026: {"individual": 4400.0, "family": 8750.0, "catchup": 1000.0},
     },
     "section_199a_qbi_threshold": {
         2024: {"single": 191950.0, "mfj": 383900.0},
         2025: {"single": 197300.0, "mfj": 394600.0},
-        2026: {"single": 197300.0, "mfj": 394600.0},
+        2026: {"single": 203000.0, "mfj": 406000.0},
     },
     "social_security_wage_base": {
         2024: 168600.0,
         2025: 176100.0,
-        2026: 176100.0,
+        2026: 184500.0,
     },
     "gift_tax_annual_exclusion": {
         2024: 18000.0,
@@ -4835,6 +4848,15 @@ STATUTORY_LIMITS: Dict[str, Any] = {
 
 VALID_FEDERAL_TAX_RATES: Set[float] = {
     10.0, 12.0, 15.0, 22.0, 24.0, 25.0, 28.0, 32.0, 33.0, 35.0, 37.0, 39.6
+}
+
+# Year- and status-bound official standard deductions (never treat 2024/2025 or repealed sunset as active 2026/2027 law)
+YEAR_BOUND_STANDARD_DEDUCTIONS: Dict[str, Dict[str, Set[float]]] = {
+    "2024": {"single": {14600.0}, "mfj": {29200.0}, "hoh": {21900.0}},
+    "2025": {"single": {15000.0}, "mfj": {30000.0}, "hoh": {22500.0}},
+    "2026": {"single": {16100.0, 15350.0}, "mfj": {32200.0, 30700.0}, "hoh": {24150.0, 23050.0}},
+    "2027": {"single": {16500.0, 16100.0}, "mfj": {33000.0, 32200.0}, "hoh": {24750.0, 24150.0}},
+    "repealed_pre_obbba_sunset": {"single": {8600.0}, "mfj": {17200.0}, "hoh": {12900.0}},
 }
 
 ALL_OFFICIAL_STANDARD_DEDUCTIONS: Set[float] = {
@@ -5009,14 +5031,39 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                             if val not in {8600.0, 14600.0, 15000.0, 15350.0, 16100.0, 16500.0}:
                                 issues.append(
                                     f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
-                                    f"official published Single standard deduction is $14,600 (2024), $15,000 (2025/2026), $16,100 (2026 Rev. Proc. 2025-32), or $8,600 (post-TCJA)"
+                                    f"official published Single standard deduction is $14,600 (2024), $15,000 (2025), $16,100 (2026 Rev. Proc. 2025-32), or $16,500 (2027 OBBBA)"
                                 )
                         elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
                             if val not in {17200.0, 29200.0, 30000.0, 30700.0, 32200.0, 33000.0}:
                                 issues.append(
                                     f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
-                                    f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025/2026), $32,200 (2026 Rev. Proc. 2025-32), or $17,200 (post-TCJA)"
+                                    f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025), $32,200 (2026 Rev. Proc. 2025-32), or $33,000 (2027 OBBBA)"
                                 )
+                        # Year- and legal-status bound enforcement:
+                        # 1) 2024/2025 standard deductions ($14,600/$29,200 or $15,000/$30,000) presented as active 2026/2027 law
+                        has_hist_qual = any(
+                            q in surrounding
+                            for q in ("2024", "2025", "prior", "historical", "moved from", "moving from", "up from", "increased from")
+                        )
+                        if val in {14600.0, 29200.0, 21900.0, 15000.0, 30000.0, 22500.0} and (
+                            "2026" in surrounding or "2027" in surrounding
+                        ) and not has_hist_qual:
+                            issues.append(
+                                f"Page {rel_path}: Year-bound standard deduction violation '${val:,.0f}': "
+                                f"2024/2025 standard deduction presented as active 2026/2027 law instead of IRS Rev. Proc. 2025-32 ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027 OBBBA)"
+                            )
+                        # 2) Repealed pre-OBBBA TCJA sunset standard deductions ($8,600 / $17,200 / $12,900) presented as enacted 2026/2027 law
+                        has_repealed_qual = any(
+                            q in surrounding
+                            for q in ("repealed", "pre-obbba", "prevented", "avoided", "hypothetical", "prior to obbba", "without obbba", "post-tcja")
+                        )
+                        if val in {8600.0, 17200.0, 12900.0} and (
+                            "2026" in surrounding or "2027" in surrounding or "sunset" in surrounding
+                        ) and not has_repealed_qual:
+                            issues.append(
+                                f"Page {rel_path}: Repealed TCJA sunset standard deduction '${val:,.0f}' presented as active 2026/2027 law: "
+                                f"OBBBA (P.L. 119-21) permanently extended the enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027)"
+                            )
             except Exception:
                 pass
 
@@ -5031,7 +5078,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
             raw_val = m.group(1).replace(",", "")
             try:
                 val = float(raw_val)
-                if val not in {1220000.0, 1250000.0, 1290000.0, 2560000.0}:
+                if val not in {1220000.0, 1250000.0, 1290000.0, 2560000.0, 2620000.0}:
                     issues.append(
                         f"Page {rel_path}: Mismatched Section 179 expensing limit '${val:,.0f}': "
                         f"does not match official published schedule ($1,220,000 for 2024, $1,250,000 for 2025, $2,560,000 for 2026 OBBBA)"
@@ -5049,7 +5096,7 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                 raw_val = m.group(1).replace(",", "")
                 try:
                     val = float(raw_val)
-                    if val not in {3050000.0, 3130000.0, 3220000.0, 4090000.0}:
+                    if val not in {3050000.0, 3130000.0, 3220000.0, 4090000.0, 4190000.0}:
                         issues.append(
                             f"Page {rel_path}: Mismatched Section 179 phaseout threshold '${val:,.0f}': "
                             f"does not match official published schedule ($3,050,000 for 2024, $3,130,000 for 2025, $4,090,000 for 2026 OBBBA)"
@@ -5104,11 +5151,22 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
             raw_val = m.group(1).replace(",", "")
             try:
                 val = float(raw_val)
-                if val not in {23000.0, 23500.0, 24000.0}:
+                if val not in {23000.0, 23500.0, 24000.0, 24500.0}:
                     issues.append(
                         f"Page {rel_path}: Mismatched 401(k) deferral limit '${val:,.0f}': "
-                        f"does not match official published IRS schedule ($23,000 for 2024, $23,500 for 2025, $24,000 for 2026)"
+                        f"does not match official published IRS schedule ($23,000 for 2024, $23,500 for 2025, $24,500 for 2026)"
                     )
+                else:
+                    s_start = max(0, m.start() - 100)
+                    s_end = min(len(clean_text), m.end() + 100)
+                    s_ctx = clean_text[s_start:s_end].lower()
+                    if val in {23000.0, 23500.0} and ("2026" in s_ctx or "2027" in s_ctx) and not any(
+                        q in s_ctx for q in ("2024", "2025", "prior", "historical", "up from", "increased from")
+                    ):
+                        issues.append(
+                            f"Page {rel_path}: Year-bound 401(k) deferral limit violation '${val:,.0f}': "
+                            f"2024/2025 limit presented as active 2026/2027 law instead of IRS Notice 2025-67 ($24,500 for 2026)"
+                        )
             except Exception:
                 pass
 

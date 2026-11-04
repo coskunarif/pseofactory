@@ -946,10 +946,10 @@ DEFAULT_TOOL_DEEP_LINK_PARAMS: Dict[str, Dict[str, Any]] = {
 
 CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     "irs-2027-tax-brackets": {
-        "formula": "post_tcja_tax - current_tax",
-        "inputs": {"post_tcja_tax": 23530.0, "current_tax": 19181.0},
-        "published_output": 4349.0,
-        "sample_calculation": "$23,530 post-sunset federal tax minus $19,181 baseline tax = $4,349 (+22.7%) tax increase on $125,000 single income",
+        "formula": "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)",
+        "inputs": {"gross_income": 125000.0, "standard_deduction_2026": 16100.0},
+        "published_output": 18734.0,
+        "sample_calculation": "$18,734 federal income tax on $125,000 single income under OBBBA P.L. 119-21 permanent 10%-37% brackets ($16,100 2026 standard deduction), saving $4,796 vs repealed pre-OBBBA sunset",
         "statutory_claim_key": "standard_deduction_2026_single",
         "statutory_claim_value": 16100,
         "query_params": {"income": 125000, "status": "single", "state": "CA"},
@@ -1147,10 +1147,10 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
         "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
         "published_output": 248.23,
-        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (family of 2), 2026 RAP sets payment at $248.23/month with $76.77/month unpaid interest waived",
+        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $248.23/month with $76.77/month unpaid interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
-        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1},
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "rap-vs-ibr-calculator": {
         "formula": "round(((agi - fpl_225) * 0.10) / 12 + base_adjustment, 2)",
@@ -1192,19 +1192,19 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
         "inputs": {"monthly_interest": 284.17, "interest_subsidy": 60.94},
         "published_output": 223.23,
-        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (family of 2), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
+        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
-        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 1},
+        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 0},
     },
     "save-plan-litigation-transition": {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
         "inputs": {"monthly_interest": 284.17, "interest_subsidy": 60.94},
         "published_output": 223.23,
-        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (family of 2), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
+        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
-        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 1},
+        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 0},
     },
     "pslf-qualifying-payment-and-buyback-calculator": {
         "formula": "pslf_required_years * 12",
@@ -1255,7 +1255,7 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "round(federal_total_interest - private_total_interest, 0)",
         "inputs": {"federal_total_interest": 30260.0, "private_total_interest": 21120.0},
         "published_output": 9140.0,
-        "sample_calculation": "$30,260 10-year 7.2% federal interest minus $21,120 5.2% private refinance interest = $9,140 gross interest savings before pricing forfeited Title IV subsidies",
+        "sample_calculation": "$30,260 10-year 7.2% federal interest minus $21,120 5.2% private refinance interest = $9,140 gross interest savings; refinancing federal student loans permanently waives federal protections including IDR subsidies and PSLF",
         "statutory_claim_key": "pslf_qualifying_payments",
         "statutory_claim_value": 120,
         "query_params": {"balance": 75000, "agi": 110000, "rate": 7.2, "deps": 0},
@@ -1264,10 +1264,10 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
         "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
         "published_output": 248.23,
-        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (family of 2), 2026 RAP sets payment at $248.23/month with $76.77/month interest waived",
+        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $248.23/month with $76.77/month interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
-        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1},
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "grad-plus-borrowing-cap-calculator": {
         "formula": "annual_unsubsidized_cap * 1.0",
@@ -1297,10 +1297,10 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"balance": 65000, "agi": 95000, "rate": 6.5, "deps": 0},
     },
     "soc-2-audit-cost-calculator": {
-        "formula": "round(cpa_fee + grc_cost + (eng_hours * hourly_rate) + pentest_and_legal_cost, 2)",
-        "inputs": {"cpa_fee": 28000.0, "grc_cost": 15000.0, "eng_hours": 120.0, "hourly_rate": 121.67, "pentest_and_legal_cost": 20500.0},
+        "formula": "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)",
+        "inputs": {"cpa_base_fee": 28000.0, "extra_tsc_count": 2.0, "fee_per_extra_tsc": 4500.0, "grc_platform_annual": 15000.0, "pentest_fee": 11500.0, "remediation_hours": 120.0, "engineering_hourly_rate": 121.67},
         "published_output": 78100.4,
-        "sample_calculation": "$28,000 CPA attestation fee + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $20,500 pentest/legal = $78,100.40 total Year-1 SOC 2 Type II audit cost",
+        "sample_calculation": "$37,000 CPA attestation fee ($28,000 base + 2 extra TSC at $4,500) + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $11,500 pentest = $78,100.40 total Year-1 SOC 2 Type II audit cost",
         "statutory_claim_key": "sprs_max_score",
         "statutory_claim_value": 110,
         "query_params": {"headcount": 75, "grc_tier": 1, "audit_type": 2},
@@ -1324,22 +1324,28 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"missing_5": 0, "missing_3": 4, "missing_1": 6},
     },
     "iso-27001-certification-cost-calculator": {
-        "formula": "round((initial_days + surveillance_days) * auditor_day_rate + isms_tooling, 2)",
-        "inputs": {"initial_days": 9.0, "surveillance_days": 6.0, "auditor_day_rate": 2200.0, "isms_tooling": 24000.0},
-        "published_output": 57000.0,
-        "sample_calculation": "(9 Stage 1/2 registrar days + 6 surveillance days under ISO/IEC 27006-1:2024) * $2,200/day + $24,000 ISMS tooling = $57,000 3-year ISO 27001 certification TCO",
+        "formula": "round((auditor_days * daily_auditor_rate) + isms_platform_cost + internal_audit_fee + (remediation_hours * engineering_hourly_rate), 2)",
+        "inputs": {"auditor_days": 11.0, "daily_auditor_rate": 1950.0, "isms_platform_cost": 14500.0, "internal_audit_fee": 8500.0, "remediation_hours": 180.0, "engineering_hourly_rate": 125.28},
+        "published_output": 67000.4,
+        "sample_calculation": "(11.0 Stage 1 and Stage 2 registrar days under ISO/IEC 27006-1:2024 * $1,950/day = $21,450) + $14,500 ISMS platform + $8,500 Clause 9.2 internal audit + (180 hrs * $125.28/hr = $22,550.40) = $67,000.40 Year-1 ISO 27001:2022 TCO",
         "statutory_claim_key": "sprs_max_score",
         "statutory_claim_value": 110,
         "query_params": {"employees": 85, "sites": 1, "cycle_years": 3},
     },
     "hipaa-violation-penalty-breach-cost-calculator": {
-        "formula": "round((records_exposed * per_record_forensics) + ocr_tier_penalty, 2)",
-        "inputs": {"records_exposed": 2500.0, "per_record_forensics": 165.0, "ocr_tier_penalty": 100000.0},
-        "published_output": 512500.0,
-        "sample_calculation": "(2,500 ePHI records * $165 forensic/notification cost) + $100,000 45 CFR 160.404 Tier 2 reasonable cause penalty = $512,500 total HIPAA breach exposure",
+        "formula": "round(min(compromised_records * tier_penalty_per_record, statutory_annual_cap) + forensic_legal_retainer + (compromised_records * notification_cost_per_record), 2)",
+        "inputs": {
+            "compromised_records": 1500.0,
+            "tier_penalty_per_record": 13795.0,
+            "statutory_annual_cap": 2067813.0,
+            "forensic_legal_retainer": 95000.0,
+            "notification_cost_per_record": 195.0,
+        },
+        "published_output": 2455313.0,
+        "sample_calculation": "For a 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,067,813.00 annual penalty cap) + $95,000 forensic/legal retainer + (1,500 records * $195 notification cost = $292,500) = $2,455,313.00 total HIPAA breach exposure",
         "statutory_claim_key": "hipaa_ocr_breach_portal_threshold_records",
         "statutory_claim_value": 500,
-        "query_params": {"records": 2500, "tier": 2, "encrypted": 0},
+        "query_params": {"records": 1500, "tier": 3, "encrypted": 0},
     },
     "pci-dss-4-0-compliance-cost-calculator": {
         "formula": "round(qsa_assessment_fee + (quarterly_asv_scan_fee * 4.0) + cde_pentest_fee + remediation_and_tokenization_cost, 2)",
@@ -1483,10 +1489,10 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         claim_val = 2.25
         q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1}
     elif norm_prop == "gainhelm":
-        formula = "round(cpa_fee + grc_cost + (eng_hours * hourly_rate) + pentest_and_legal_cost, 2)"
-        inputs = {"cpa_fee": 28000.0, "grc_cost": 15000.0, "eng_hours": 120.0, "hourly_rate": 121.67, "pentest_and_legal_cost": 20500.0}
+        formula = "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)"
+        inputs = {"cpa_base_fee": 28000.0, "extra_tsc_count": 2.0, "fee_per_extra_tsc": 4500.0, "grc_platform_annual": 15000.0, "pentest_fee": 11500.0, "remediation_hours": 120.0, "engineering_hourly_rate": 121.67}
         published_output = 78100.4
-        sample_calc = "$28,000 CPA attestation fee + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $20,500 pentest/legal = $78,100.40 total Year-1 audit cost"
+        sample_calc = "$37,000 CPA attestation fee ($28,000 base + 2 extra TSC at $4,500) + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $11,500 pentest = $78,100.40 total Year-1 audit cost"
         claim_key = "sprs_max_score"
         claim_val = 110
         q_params = {"headcount": 75, "grc_tier": 1, "audit_type": 2}
@@ -1551,10 +1557,10 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
             claim_val = 16100
             q_params = {"cash": 1200000, "burn": 65000, "rev": 25000, "growth": 5}
         else:
-            formula = "post_tcja_tax - current_tax"
-            inputs = {"post_tcja_tax": 23530.0, "current_tax": 19181.0}
-            published_output = 4349.0
-            sample_calc = "$23,530 projected tax minus $19,181 baseline tax = $4,349 deterministic tax variance on $125,000 single filer income"
+            formula = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2027) - 12400.0), 38000.0) * 0.12 + max(0.0, (gross_income - standard_deduction_2027) - 50400.0) * 0.22, 0)"
+            inputs = {"gross_income": 125000.0, "standard_deduction_2027": 16500.0}
+            published_output = 18734.0
+            sample_calc = "$18,734 federal income tax on $125,000 single income under OBBBA P.L. 119-21 permanent 10%-37% brackets ($16,500 standard deduction)"
             claim_key = "standard_deduction_2026_single"
             claim_val = 16100
             q_params = {"income": 125000, "status": "single", "state": "CA"}
@@ -1819,16 +1825,15 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=linkedin&utm_medium=social&utm_campaign=irs-2027-tax-brackets&utm_content=company_post"
         text = (
-            f"Single filers earning $125,000 face an immediate +$4,349 (+22.7%) increase in federal tax liability on January 1, 2026.\n\n"
-            f"On December 31, 2025, individual income tax reductions enacted under P.L. 115-97 expire by statute. "
-            f"Unless extended, individual rates revert to the pre-2018 schedule (10%, 15%, 25%, 28%, 33%, 35%, and 39.6%).\n\n"
+            f"Single filers earning $125,000 owe $18,734 in 2027 federal income tax (14.99% effective rate) under permanently enacted OBBBA P.L. 119-21 brackets, saving $4,796 annually compared to the repealed pre-OBBBA sunset.\n\n"
+            f"Under P.L. 119-21 and IRS Rev. Proc. 2025-32, Congress permanently extended the 10%, 12%, 22%, 24%, 32%, 35%, and 37% individual brackets alongside the enhanced standard deduction and 20% Section 199A QBI deduction.\n\n"
             f"Key findings from our quantitative modeling engine:\n"
-            f"• Projected liability reaches $23,530 (18.82% effective tax rate) for a $125k W-2 earner under IRC Section 1.\n"
-            f"• Standard deductions drop ~45-50% ($8,600 Single / $17,200 MFJ baseline), accelerating bracket creep.\n"
-            f"• The 24% marginal bracket jumps to 28%, significantly compressing professional take-home pay.\n\n"
-            f"Model your exact bracket migration and effective tax change across all 50 states:\n"
+            f"• Projected 2027 federal liability is $18,734 (14.99% effective tax rate) for a $125k W-2 earner under IRC Section 1(j).\n"
+            f"• Standard deductions reach $16,100 Single / $32,200 MFJ in 2026 and $16,500 Single / $33,000 MFJ in 2027.\n"
+            f"• The 22% marginal bracket applies up to $105,700 taxable income ($122,200 gross Single), preventing the repealed 25%/28% rate jump.\n\n"
+            f"Model your exact bracket thresholds and effective tax rate across all 50 states:\n"
             f"{url}\n\n"
-            f"#TaxPlanning #TCJASunset #WealthManagement #QuantitativeFinance #FinancialPlanning"
+            f"#TaxPlanning #OBBBA #WealthManagement #QuantitativeFinance #FinancialPlanning"
         )
     elif slug == "crypto-tax-calculator":
         url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&staking=5000&ordinary=85000&status=single&state=CA&utm_source=linkedin&utm_medium=social&utm_campaign=crypto-tax-calculator&utm_content=company_post"
@@ -2161,7 +2166,7 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"a $125k single filer in CA faces a +$4,349 (+22.7%) federal tax jump as brackets revert.\n\n"
+            f"a $125k single filer in CA owes $18,734 in 2027 federal tax (saving $4,796 vs repealed sunset).\n\n"
             f"run your 2027 numbers:\n{url}"
         )
     elif slug == "crypto-tax-calculator":
@@ -2319,8 +2324,8 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"A single filer earning $125,000 in California faces an extra $4,349 (+22.7%) in federal income tax once the 24% marginal bracket reverts to 28% and standard deductions compress.\n\n"
-            f"We mapped the exact 2026 vs 2027 bracket thresholds across all 50 states so you can see where your marginal dollar lands: {url}"
+            f"A single filer earning $125,000 in California owes $18,734 in 2027 federal income tax ($16,500 standard deduction) under permanently enacted OBBBA P.L. 119-21 10%-37% brackets, saving $4,796 compared to the repealed pre-OBBBA sunset.\n\n"
+            f"We mapped the exact 2026 and 2027 bracket thresholds across all 50 states so you can see where your marginal dollar lands: {url}"
         )
     elif slug == "crypto-tax-calculator":
         url = f"{POST_URL_BASE}/tools/crypto-tax-calculator/?short=15000&long=45000&staking=5000&ordinary=85000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=crypto-tax-calculator"
@@ -2537,15 +2542,15 @@ def generate_parasite_google_sites_html(tool_or_slug: Any) -> str:
         ctrl_label_2 = "Statutory Tax Year Horizon"
         ctrl_input_2 = (
             '<select id="tax_year">\n'
-            '          <option value="2026">Tax Year 2026 (Pre-Sunset)</option>\n'
-            '          <option value="2027" selected>Tax Year 2027 (Post-TCJA Sunset)</option>\n'
+            '          <option value="2026">Tax Year 2026 (Rev. Proc. 2025-32)</option>\n'
+            '          <option value="2027" selected>Tax Year 2027 (OBBBA P.L. 119-21)</option>\n'
             '        </select>'
         )
-        metric_1_label = "Estimated Statutory Differential"
-        metric_1_val = "$4,349"
+        metric_1_label = "Projected 2027 Federal Tax"
+        metric_1_val = "$18,734"
         metric_1_sub = f"Grounded in {stat_cite}"
-        metric_2_label = "Effective Rate Adjustment"
-        metric_2_val = "+3.48%"
+        metric_2_label = "Effective Federal Tax Rate"
+        metric_2_val = "14.99%"
         metric_2_sub = f"Benchmark: {econ_cite}"
 
     escaped_title = html.escape(title, quote=True)
@@ -3717,23 +3722,23 @@ def generate_reddit_community_teardown(tool_slug: str) -> Dict[str, Any]:
 
     if tool_slug == "irs-2027-tax-brackets":
         subreddit = "r/tax"
-        post_title = "Analysis: Projected 2027 IRS tax brackets if TCJA individual cuts expire as scheduled"
+        post_title = "Analysis: Enacted 2026-2027 IRS tax brackets under OBBBA P.L. 119-21 and Rev. Proc. 2025-32"
         content = (
-            f"Compiled the statutory changes for individual brackets post-December 31, 2025. "
-            f"Under current law (P.L. 115-97 sunset), individual rates revert to pre-2018 brackets.\n\n"
-            f"Key changes for single filers:\n"
-            f"- 10% bracket: $0 to $12,200\n"
-            f"- 15% bracket (replaces 12%): $12,200 to $49,600 (+3% increase)\n"
-            f"- 25% bracket (replaces 22%): $49,600 to $120,200 (+3% increase)\n"
-            f"- 28% bracket (replaces 24%): $120,200 to $250,800 (+4% increase)\n"
-            f"- 33% bracket (replaces 32%): $250,800 to $447,900 (+1% increase)\n"
-            f"- 35% bracket: $447,900 to $506,200 (unchanged)\n"
-            f"- 39.6% bracket (replaces 37%): Above $506,200 (+2.6% increase)\n\n"
-            f"Standard deductions drop to $8,600 single and $17,200 MFJ.\n\n"
+            f"Compiled the statutory 2026 and 2027 individual brackets under OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32. "
+            f"Congress permanently extended the 10% to 37% individual brackets, preventing the repealed pre-OBBBA sunset.\n\n"
+            f"Key 2027 brackets for single filers:\n"
+            f"- 10% bracket: $0 to $12,400\n"
+            f"- 12% bracket: $12,400 to $50,400\n"
+            f"- 22% bracket: $50,400 to $105,700\n"
+            f"- 24% bracket: $105,700 to $201,775\n"
+            f"- 32% bracket: $201,775 to $256,225\n"
+            f"- 35% bracket: $256,225 to $640,600\n"
+            f"- 37% bracket: Above $640,600\n\n"
+            f"Standard deductions are $16,100 single / $32,200 MFJ in 2026 and $16,500 single / $33,000 MFJ in 2027.\n\n"
             f"Execution Steps and Takeaways:\n"
-            f"1. Model your baseline taxable income under both 2025 and 2027 bracket thresholds.\n"
-            f"2. Accelerate discretionary income or capital gains into 2025 if your marginal rate jumps.\n"
-            f"3. Maximize above-the-line retirement contributions (401k, HSA) to compress AGI prior to rate resets."
+            f"1. Model your baseline taxable income under 2026 and 2027 statutory bracket thresholds.\n"
+            f"2. Coordinate capital gains realization with the 22% and 24% ordinary bracket ceilings.\n"
+            f"3. Maximize above-the-line retirement contributions ($24,500 401k limit, HSA) to compress AGI."
         )
     elif tool_slug == "crypto-tax-calculator":
         subreddit = "r/CryptoCurrency"
@@ -3817,27 +3822,27 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
 
     if tool_slug == "irs-2027-tax-brackets":
         target_topic = "Personal Finance & Income Tax Law"
-        question_thread = "How will the expiration of the TCJA individual tax cuts in 2027 affect middle-class and high-income taxpayers?"
+        question_thread = "How do the permanent OBBBA (P.L. 119-21) 2026-2027 federal tax brackets and standard deductions affect middle-class and high-income taxpayers?"
         extractable_steps = [
-            "Model baseline taxable income under both 2025 and 2027 statutory bracket thresholds.",
-            "Accelerate discretionary income or capital asset liquidations into tax years with lower marginal rates.",
-            "Maximize pretax retirement plan contributions (401k, 403b, HSA) to compress adjusted gross income.",
-            "Audit itemized deductions against the reduced standard deduction ($8,600 Single / $17,200 MFJ).",
+            "Model baseline taxable income under 2026 ($16,100 Single / $32,200 MFJ) and 2027 ($16,500 Single / $33,000 MFJ) standard deductions.",
+            "Coordinate discretionary income and capital asset liquidations with the 22% and 24% statutory bracket thresholds.",
+            "Maximize pretax retirement plan contributions ($24,500 401k limit, 403b, HSA) to compress adjusted gross income.",
+            "Compare itemized deductions against the enhanced Rev. Proc. 2025-32 standard deduction ($16,100 Single / $32,200 MFJ).",
         ]
         steps_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(extractable_steps))
         answer_markdown = (
-            f"Under current federal law (P.L. 115-97 sunset), the individual income tax provisions of the 2017 Tax Cuts and Jobs Act "
-            f"expire on December 31, 2025. Starting in tax year 2026 and filing year 2027, statutory tax brackets revert to pre-2018 rates.\n\n"
-            f"### Statutory Rate Schedule Comparison\n"
-            f"The major rate shifts for individual filers include:\n"
-            f"- 10% bracket covers $0 to $12,200.\n"
-            f"- 15% bracket replaces the current 12% rate ($12,200 to $49,600), representing a 3% marginal rate increase.\n"
-            f"- 25% bracket replaces the 22% rate ($49,600 to $120,200), adding 3% across middle-income earners.\n"
-            f"- 28% bracket replaces the 24% rate ($120,200 to $250,800), adding 4% on upper-middle filers.\n"
-            f"- 33% bracket replaces the 32% rate ($250,800 to $447,900).\n"
-            f"- 39.6% top bracket replaces the 37% rate above $506,200.\n\n"
-            f"In addition to higher statutory marginal rates, the standard deduction is cut roughly in half ($8,600 for Single filers "
-            f"and $17,200 for Married Filing Jointly, adjusted for chained CPI-U), while personal exemptions return.\n\n"
+            f"Under the One Big Beautiful Bill Act (OBBBA, P.L. 119-21) and IRS Rev. Proc. 2025-32, Congress permanently extended the "
+            f"10% to 37% individual income tax brackets and enhanced standard deductions for tax years 2026 and 2027, preventing the repealed pre-OBBBA sunset.\n\n"
+            f"### Statutory Rate Schedule (2027 Single Filers)\n"
+            f"The enacted statutory rate tiers for single filers include:\n"
+            f"- 10% bracket covers $0 to $12,400.\n"
+            f"- 12% bracket covers $12,400 to $50,400 (preventing the repealed 15% sunset rate).\n"
+            f"- 22% bracket covers $50,400 to $105,700 (preventing the repealed 25% sunset rate).\n"
+            f"- 24% bracket covers $105,700 to $201,775 (preventing the repealed 28% sunset rate).\n"
+            f"- 32% bracket covers $201,775 to $256,225.\n"
+            f"- 35% bracket covers $256,225 to $640,600.\n"
+            f"- 37% top bracket applies above $640,600 (preventing the repealed 39.6% rate).\n\n"
+            f"In addition to permanent 10%-37% marginal rates, the standard deduction is indexed to $16,100 for Single filers and $32,200 for Married Filing Jointly in 2026 ($16,500 Single and $33,000 MFJ in 2027), alongside the permanent 20% Section 199A QBI deduction.\n\n"
             f"### Actionable Tax Planning Steps\n"
             f"{steps_md}\n\n"
             f"### Primary Sources and Authorities\n"
@@ -4513,7 +4518,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&state=CA&utm_source=x&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert.\n\n"
+            f"a $125k single filer in CA owes $18,734 in 2027 federal tax (saving $4,796 vs repealed sunset).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -4709,28 +4714,28 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
 
 TOOL_YOUTUBE_METADATA = {
     "irs-2027-tax-brackets": {
-        "title": "IRS 2027 Tax Brackets & TCJA Sunset [Post-2025 Rates]",
+        "title": "IRS 2027 Tax Brackets & OBBBA Rates [P.L. 119-21 Schedule]",
         "preset_query": "income=125000&status=single&state=CA",
         "chapters": [
-            "IRC Section 1 Post-TCJA Sunset Bracket Reversion",
-            "Standard Deduction Halving & Marginal Rate Jumps",
+            "IRC Section 1(j) & OBBBA P.L. 119-21 Permanent 10%-37% Brackets",
+            "Rev. Proc. 2025-32 Standard Deductions & Marginal Rate Thresholds",
             "State Tax Overlays & Effective Rate Comparison",
             "Interactive 2027 Tax Bracket Walkthrough",
         ],
         "pinned_comment": (
             "📌 CALCULATE YOUR 2027 TAX BRACKET:\n"
-            "A single filer earning $125k faces an immediate +$4,349 (+22.7%) increase in federal tax liability as marginal rates revert to pre-2018 schedules.\n\n"
+            "A single filer earning $125k owes $18,734 in 2027 federal income tax under OBBBA P.L. 119-21 permanent 10%-37% brackets, saving $4,796 vs the repealed pre-OBBBA sunset.\n\n"
             "👉 Run your exact income through our deterministic 2027 model (free, zero login):\n"
             f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=youtube&utm_medium=video&utm_campaign=irs-2027-tax-brackets-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under P.L. 115-97 (TCJA Sunset) and IRS Statistics of Income (SOI) baseline data."
+            "Statutory Basis: Computed under OBBBA P.L. 119-21 (IRC Section 1(j)) and IRS Statistics of Income (SOI) baseline data."
         ),
         "tags": [
             "irs 2027 tax brackets",
-            "tcja sunset calculator",
-            "post 2025 tax bracket changes",
+            "obbba tax calculator",
+            "2026 2027 tax bracket thresholds",
             "marginal tax rate 2027",
             "irs tax calculator 2027",
-            "tcja expiration tax increase",
+            "federal income tax brackets",
             "tax planning 2026 2027",
             "profithelm",
             "profithelm tools",
@@ -5505,7 +5510,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "rap-payment-calculator": {
         "title": "2026 Repayment Assistance Plan (RAP) Calculator [225% FPL]",
-        "preset_query": "balance=60000&agi=65000&rate=6.5&deps=1",
+        "preset_query": "balance=60000&agi=65000&rate=6.5&deps=0",
         "chapters": [
             "2026 Repayment Assistance Plan (RAP) Statutory Formula",
             "225% HHS Poverty Line Deduction by Household Size",
@@ -5514,9 +5519,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR 2026 RAP PAYMENT & INTEREST SUBSIDY:\n"
-            "Under the 2026 Repayment Assistance Plan, a 2-person household at $65,000 AGI deducts $47,587.50 (225% FPL) and pays $145.10 to $248.23/mo with 100% unpaid interest waived.\n\n"
+            "Under the 2026 Repayment Assistance Plan, a single borrower at $65,000 AGI deducts $35,212.50 (225% FPL) and pays $248.23/mo with 100% unpaid interest waived ($76.77/mo subsidy on $60k at 6.5%).\n\n"
             "Calculate your exact 2026 RAP obligation live on Prexvo:\n"
-            "https://prexvo.com/tools/rap-payment-calculator/?balance=60000&agi=65000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=rap-payment-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://prexvo.com/tools/rap-payment-calculator/?balance=60000&agi=65000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=rap-payment-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under Title IV 34 CFR Part 685 and 2026 HHS Poverty Guidelines."
         ),
         "tags": [
@@ -5618,7 +5623,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR SOC 2 TYPE II TOTAL COST OF OWNERSHIP:\n"
-            "A 75-person B2B SaaS team faces a $78,100.40 Year-1 SOC 2 Type II audit budget ($28,000 CPA attestation fee + $15,000 GRC automation + 120 engineering hours at $121.67/hr + $20,500 pentest/legal).\n\n"
+            "A 75-person B2B SaaS team faces a $78,100.40 Year-1 SOC 2 Type II audit budget ($37,000 CPA attestation fee [$28,000 base + 2 extra TSC] + $15,000 GRC automation + 120 engineering hours at $121.67/hr + $11,500 pentest).\n\n"
             "Model your exact SOC 2 CPA fees and GRC automation ROI live on GainHelm:\n"
             "https://gainhelm.com/tools/soc-2-audit-cost-calculator/?cpa_audit_fee=28000&grc_platform_annual=15000&remediation_hours=120&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=soc-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under AICPA SSAE 18 (AT-C Section 205) and BLS OEWS SOC 15-1212 ($121.67/hr)."
@@ -5713,7 +5718,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "hipaa-violation-penalty-and-breach-cost-calculator": {
         "title": "HIPAA Civil Monetary Penalty & ePHI Breach Cost Calculator",
-        "preset_query": "breached_records=2500&forensic_cost_per_record=165&ocr_civil_penalty=68000&legal_response_fixed=45000",
+        "preset_query": "records=1500&tier=3&encrypted=0",
         "chapters": [
             "45 CFR 160.404 HHS OCR Four-Tier Civil Monetary Penalty Schedule",
             "45 CFR 164.404 Breach Notification & 500-Record Media Threshold",
@@ -5722,9 +5727,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR HIPAA BREACH & HHS OCR PENALTY EXPOSURE:\n"
-            "A 2,500-record ePHI breach at $165/record forensic/notification cost plus $68,000 OCR penalty and $45,000 legal response reaches $525,500 in total financial exposure.\n\n"
+            "A 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,067,813.00 annual penalty cap) plus $95,000 forensic/legal retainer and $292,500 notification cost ($195/record) reaches $2,455,313.00 in total financial exposure.\n\n"
             "Model your 45 CFR 160.404 penalty tier and ePHI breach liability live on GainHelm:\n"
-            "https://gainhelm.com/tools/hipaa-violation-penalty-and-breach-cost-calculator/?breached_records=2500&forensic_cost_per_record=165&ocr_civil_penalty=68000&legal_response_fixed=45000&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-and-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/hipaa-violation-penalty-and-breach-cost-calculator/?records=1500&tier=3&encrypted=0&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-and-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under 45 CFR 160.404, 42 U.S.C. 1320d-5, and 45 CFR Part 164."
         ),
         "tags": [
@@ -5895,7 +5900,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "hipaa-violation-penalty-breach-cost-calculator": {
         "title": "HIPAA Civil Monetary Penalty & ePHI Breach Cost Calculator",
-        "preset_query": "records=2500&tier=2&encrypted=0",
+        "preset_query": "records=1500&tier=3&encrypted=0",
         "chapters": [
             "45 CFR 160.404 HHS OCR Four-Tier Civil Monetary Penalty Schedule",
             "45 CFR 164.404 Breach Notification & 500-Record Media Threshold",
@@ -5904,9 +5909,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR HIPAA BREACH & HHS OCR PENALTY EXPOSURE:\n"
-            "A 2,500-record ePHI breach at $165/record forensic/notification cost plus $100,000 45 CFR 160.404 Tier 2 penalty reaches $512,500 in total HIPAA breach exposure.\n\n"
+            "A 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,067,813.00 annual penalty cap) plus $95,000 forensic/legal retainer and $292,500 notification cost ($195/record) reaches $2,455,313.00 in total HIPAA breach exposure.\n\n"
             "Model your 45 CFR 160.404 penalty tier and ePHI breach liability live on GainHelm:\n"
-            "https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/?records=2500&tier=2&encrypted=0&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/?records=1500&tier=3&encrypted=0&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under 45 CFR 160.404, 42 U.S.C. 1320d-5, and 45 CFR Part 164."
         ),
         "tags": [
@@ -7047,7 +7052,7 @@ Under 34 CFR Part 685 and Higher Education Act Section 493C, federal student loa
 | Unpaid Interest | 100% monthly subsidy | Subsidized 3 years only | Capitalizes on exit | 34 CFR 685.209(b) |
 | Payment Cap | Uncapped by standard | 10-year Standard cap | 10-year Standard cap | 34 CFR 685.221 |
 
-On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (family size 2), RAP yields a $248.23 monthly payment with a $76.77 monthly unpaid interest subsidy, compared to $346.04 under new IBR."""
+On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (single filer, $35,212.50 225% FPL exemption), RAP yields a $248.23 monthly payment with a $76.77 monthly unpaid interest subsidy, compared to $346.04 under new IBR."""
 
         rap_ibr_json = {
             "topic": "Title IV RAP vs IBR Student Loan Repayment",
@@ -7378,37 +7383,39 @@ Exclusions require original stock issuance from a domestic C-corporation in qual
         "gain_exclusion_cap_usd": 10000000,
     }
 
-    tax_brackets_md = f"""# IRS 2026-2027 Marginal Tax Bracket Reversion Benchmarks
+    tax_brackets_md = f"""# IRS 2026-2027 Marginal Tax Bracket Benchmarks (OBBBA P.L. 119-21)
 
-Canonical Authority: IRC Section 1, Public Law 115-97 (Tax Cuts and Jobs Act)
+Canonical Authority: IRC Section 1(j), Public Law 119-21 (One Big Beautiful Bill Act), IRS Rev. Proc. 2025-32
 Reference URL: {CANONICAL_BASE}/tools/irs-2027-tax-brackets/
 
-| Tax Bracket Tier | Current 2026 Rate | Projected 2027 Rate (Post-TCJA) | Single Filer Income Threshold (2026) | Married Filing Jointly Threshold (2026) |
+| Tax Bracket Tier | Enacted 2026 Rate | Enacted 2027 Rate (OBBBA P.L. 119-21) | Single Filer Income Threshold (2026) | Married Filing Jointly Threshold (2026) |
 | :--- | :--- | :--- | :--- | :--- |
-| Tier 1 | 10.0% | 10.0% | Up to $12,400 | Up to $24,800 |
-| Tier 2 | 12.0% | 15.0% | $12,401 - $50,400 | $24,801 - $100,800 |
-| Tier 3 | 22.0% | 25.0% | $50,401 - $105,700 | $100,801 - $211,400 |
-| Tier 4 | 24.0% | 28.0% | $105,701 - $201,775 | $211,401 - $403,550 |
-| Tier 5 | 32.0% | 33.0% | $201,776 - $256,225 | $403,551 - $512,450 |
-| Tier 6 | 35.0% | 35.0% | $256,226 - $640,600 | $512,451 - $768,700 |
-| Top Tier | 37.0% | 39.6% | Over $640,600 | Over $768,700 |
+| Tier 1 | 10.0% | 10.0% | Up to $12,050 | Up to $24,100 |
+| Tier 2 | 12.0% | 12.0% | $12,051 - $48,900 | $24,101 - $97,800 |
+| Tier 3 | 22.0% | 22.0% | $48,901 - $104,400 | $97,801 - $208,800 |
+| Tier 4 | 24.0% | 24.0% | $104,401 - $199,300 | $208,801 - $398,600 |
+| Tier 5 | 32.0% | 32.0% | $199,301 - $253,150 | $398,601 - $506,300 |
+| Tier 6 | 35.0% | 35.0% | $253,151 - $633,100 | $506,301 - $759,600 |
+| Top Tier | 37.0% | 37.0% | Over $633,100 | Over $759,600 |
 
-## Statutory Reversion Summary
-Following the scheduled expiration of the TCJA individual provisions, marginal tax rates revert to pre-2018 statutory schedules, increasing rates by 2.6% to 4.0% across middle and high income tiers.
+## Statutory Permanence Summary
+Under the One Big Beautiful Bill Act (OBBBA, P.L. 119-21) and IRS Rev. Proc. 2025-32, Congress permanently extended the 10% to 37% individual marginal tax brackets, the 20% Section 199A QBI deduction, and the enhanced standard deduction ($16,100 Single / $32,200 MFJ in 2026; $16,500 Single / $33,000 MFJ in 2027).
 """
 
     tax_brackets_json = {
         "topic": "IRS Tax Bracket Projections",
         "tax_years": ["2026", "2027"],
-        "statutory_authority": ["IRC Section 1", "Public Law 115-97"],
+        "statutory_authority": ["IRC Section 1(j)", "Public Law 119-21", "IRS Rev. Proc. 2025-32"],
+        "standard_deduction_2026": {"single": 16100, "mfj": 32200, "hoh": 24150},
+        "standard_deduction_2027": {"single": 16500, "mfj": 33000, "hoh": 24750},
         "brackets": [
-            {"current_rate": 10.0, "sunset_rate": 10.0, "single_max": 12400, "mfj_max": 24800},
-            {"current_rate": 12.0, "sunset_rate": 15.0, "single_max": 50400, "mfj_max": 100800},
-            {"current_rate": 22.0, "sunset_rate": 25.0, "single_max": 105700, "mfj_max": 211400},
-            {"current_rate": 24.0, "sunset_rate": 28.0, "single_max": 201775, "mfj_max": 403550},
-            {"current_rate": 32.0, "sunset_rate": 33.0, "single_max": 256225, "mfj_max": 512450},
-            {"current_rate": 35.0, "sunset_rate": 35.0, "single_max": 640600, "mfj_max": 768700},
-            {"current_rate": 37.0, "sunset_rate": 39.6, "single_max": 999999999, "mfj_max": 999999999},
+            {"rate_2026": 10.0, "rate_2027": 10.0, "single_max_2026": 12050, "mfj_max_2026": 24100, "single_max_2027": 12400, "mfj_max_2027": 24800},
+            {"rate_2026": 12.0, "rate_2027": 12.0, "single_max_2026": 48900, "mfj_max_2026": 97800, "single_max_2027": 50400, "mfj_max_2027": 100800},
+            {"rate_2026": 22.0, "rate_2027": 22.0, "single_max_2026": 104400, "mfj_max_2026": 208800, "single_max_2027": 105700, "mfj_max_2027": 211400},
+            {"rate_2026": 24.0, "rate_2027": 24.0, "single_max_2026": 199300, "mfj_max_2026": 398600, "single_max_2027": 201775, "mfj_max_2027": 403550},
+            {"rate_2026": 32.0, "rate_2027": 32.0, "single_max_2026": 253150, "mfj_max_2026": 506300, "single_max_2027": 256225, "mfj_max_2027": 512450},
+            {"rate_2026": 35.0, "rate_2027": 35.0, "single_max_2026": 633100, "mfj_max_2026": 759600, "single_max_2027": 640600, "mfj_max_2027": 768700},
+            {"rate_2026": 37.0, "rate_2027": 37.0, "single_max_2026": 999999999, "mfj_max_2026": 999999999, "single_max_2027": 999999999, "mfj_max_2027": 999999999},
         ],
     }
 
@@ -7553,7 +7560,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
             },
             {
                 "id": "stat-hipaa-ephi-breach-exposure",
-                "headline_stat": "Under 45 CFR 160.404 and 45 CFR 164.404, a 2,500-record ePHI breach triggers mandatory HHS OCR media notification and $525,500 in combined forensic, notification ($165/record), legal response, and civil monetary penalty exposure.",
+                "headline_stat": "Under 45 CFR 160.404 and 45 CFR 164.404, a 1,500-record ePHI breach under Tier 3 Willful Neglect Corrected triggers mandatory HHS OCR media notification and $2,455,313.00 in combined statutory civil monetary penalty ($2,067,813.00 annual cap), forensic/legal retainer ($95,000), and patient notification ($195/record = $292,500) exposure.",
                 "statutory_authority": "45 CFR 160.404, 45 CFR 164.404, 42 U.S.C. 1320d-5",
                 "canonical_calculator_url": f"{base_url}/tools/hipaa-violation-penalty-and-breach-cost-calculator/",
             },
@@ -7564,7 +7571,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
         citables = [
             {
                 "id": "stat-scorp-fica-shield",
-                "headline_stat": "In 2026, an S-Corporation earning $185,000 in net operating profit that pays a 40% reasonable officer salary ($74,000 W-2) saves $15,240 annually in federal self-employment taxes under IRC Section 1401 and IRS Form 1120-S.",
+                "headline_stat": "In 2026, an S-Corporation earning $220,000 in net operating profit ($203,170 Schedule SE base) that pays a $95,000 reasonable officer salary saves $13,193 annually in federal FICA self-employment taxes under IRC Section 1366 and IRS Form 1120-S.",
                 "statutory_authority": "IRC Section 1401, IRC Section 3121, IRS Form 1120-S",
                 "canonical_calculator_url": f"{base_url}/tools/s-corp-tax-calculator/",
             },
@@ -7699,17 +7706,17 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
 
 PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     "student-loan-repayment-calculator": {
-        "query": "balance=60000&agi=65000&rate=6.5&deps=1",
-        "x_hook": "on $60k student debt at $65k AGI (1 dep), 2026 RAP cuts payments to $248.23/mo (+$76.77 interest subsidy) vs $346.04 on IBR.",
+        "query": "balance=60000&agi=65000&rate=6.5&deps=0",
+        "x_hook": "on $60k student debt at $65k AGI (single), 2026 RAP cuts payments to $248.23/mo (+$76.77 interest subsidy) vs $346.04 on IBR.",
         "li_hook": "On $60,000 in federal student debt at $65,000 AGI, the 2026 RAP formula cuts monthly payments to $248.23 while subsidizing $76.77/month in unpaid interest.",
         "li_body": (
             "Borrowers comparing Title IV repayment options under 34 CFR Part 685 face two distinct statutory formulas:\n\n"
-            "• 225% Poverty Exemption (RAP): Protects $47,587.50 of income for a 2-person household, assessing 10% on remaining discretionary income ($248.23/month).\n"
+            "• 225% Poverty Exemption (RAP): Protects $35,212.50 of income for a single borrower ($47,587.50 for a 2-person household), assessing 10% on remaining discretionary income ($248.23/month at $65k single AGI).\n"
             "• 100% Unpaid Interest Subsidy: When $248.23 falls short of the $325.00 monthly interest accrual at 6.5%, the Department of Education waives the $76.77 difference every month.\n"
             "• IBR Standard Ceiling: Under HEA Section 493C, IBR charges $346.04/month at $65k AGI but caps payments at the 10-year Standard schedule if income rises above $115,000."
         ),
         "fb_body": (
-            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (family size 2), the 2026 Repayment Assistance Plan (RAP) calculates a $248.23 monthly payment compared to $346.04 under new IBR.\n\n"
+            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (single filer, $35,212.50 225% FPL exemption), the 2026 Repayment Assistance Plan (RAP) calculates a $248.23 monthly payment compared to $346.04 under new IBR.\n\n"
             "Because $60,000 at 6.5% accrues $325.00 in interest each month, RAP's 100% unpaid interest subsidy waives the remaining $76.77 every month so your principal never grows. Grounded in statutory Title IV 34 CFR Part 685 rules and HHS Poverty Guidelines."
         ),
     },
@@ -7774,33 +7781,33 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         ),
     },
     "save-plan-transition-to-rap-repayment-calculator": {
-        "query": "balance=55000&agi=62000&rate=6.2&deps=1",
+        "query": "balance=55000&agi=62000&rate=6.2&deps=0",
         "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $223.23/mo with 100% interest subsidy.",
         "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
         "li_body": (
             "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
             "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
-            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a borrower at $62,000 AGI (family of 2) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
-            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and PSLF forgiveness horizons."
+            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,212.50 225% FPL exemption) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
+            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and 120-payment PSLF forgiveness horizons."
         ),
         "fb_body": (
             "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
-            "For a borrower with $55,000 in loans at 6.2% and $62,000 AGI (family size 2), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,212.50 225% FPL exemption), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
         ),
     },
     "save-plan-litigation-transition": {
-        "query": "balance=55000&agi=62000&rate=6.2&deps=1",
+        "query": "balance=55000&agi=62000&rate=6.2&deps=0",
         "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $223.23/mo with 100% interest subsidy.",
         "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
         "li_body": (
             "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
             "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
-            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a borrower at $62,000 AGI (family of 2) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
-            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and PSLF forgiveness horizons."
+            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,212.50 225% FPL exemption) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
+            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and 120-payment PSLF forgiveness horizons."
         ),
         "fb_body": (
             "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
-            "For a borrower with $55,000 in loans at 6.2% and $62,000 AGI (family size 2), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,212.50 225% FPL exemption), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
         ),
     },
     "pslf-qualifying-payment-and-buyback-calculator": {
@@ -7880,7 +7887,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "student-loan-refinance-break-even-calculator": {
         "query": "balance=75000&agi=110000&rate=7.2&deps=0",
-        "x_hook": "refinancing $75k in 7.2% federal loans to 5.2% private saves $9,140 only if Title IV IDR subsidies and PSLF value equal $0.",
+        "x_hook": "refinancing $75k in 7.2% federal loans to 5.2% private saves $9,140 only at $0 IDR/PSLF value (waives federal protections).",
         "li_hook": "Refinancing $75,000 in 7.2% Direct Loans into a 5.2% private note saves $9,140 in interest only when your AGI exceeds the Title IV subsidy threshold, because refinancing federal student loans permanently waives federal protections.",
         "li_body": (
             "Evaluating a federal-to-private student loan refinance under Title IV (34 CFR Part 685) and Truth in Lending (12 CFR Part 1026) requires pricing three statutory forfeitures:\n\n"
@@ -7894,18 +7901,18 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         ),
     },
     "rap-payment-calculator": {
-        "query": "balance=60000&agi=65000&rate=6.5&deps=1",
-        "x_hook": "under 2026 RAP (225% FPL), a 2-person household at $65k AGI on $60k debt pays $248.23/mo with $76.77/mo interest waived.",
-        "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a 2-person household at $65,000 AGI deducts $47,587.50 (225% FPL) and receives a 100% unpaid interest waiver.",
+        "query": "balance=60000&agi=65000&rate=6.5&deps=0",
+        "x_hook": "under 2026 RAP (225% FPL), a single borrower at $65k AGI on $60k debt pays $248.23/mo with $76.77/mo interest waived.",
+        "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a single borrower at $65,000 AGI deducts $35,212.50 (225% FPL) and receives a 100% unpaid interest waiver.",
         "li_body": (
             "The 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685 restructures Title IV discretionary income math around three core rules:\n\n"
             "• 225% HHS Poverty Exemption: Shields $35,212.50 for a single filer and $47,587.50 for a 2-person household before assessing discretionary income.\n"
-            "• 100% Unpaid Interest Subsidy: When your required RAP payment ($248.23/mo) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $76.77/mo is waived.\n"
+            "• 100% Unpaid Interest Subsidy: When your required RAP payment ($248.23/mo for a single borrower at $65k AGI) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $76.77/mo is waived.\n"
             "• Principal Balance Protection: Zero negative amortization ensures your loan balance never increases while making on-time RAP payments."
         ),
         "fb_body": (
-            "The 2026 Repayment Assistance Plan (RAP) protects 225% of the HHS Federal Poverty Guideline ($47,587.50 for a family of 2) before calculating your monthly student loan bill.\n\n"
-            "On a $60,000 balance at 6.5% interest and $65,000 AGI, RAP sets your monthly payment at $248.23 and waives the remaining $76.77 in monthly interest under 34 CFR Part 685. Grounded in statutory Title IV and HHS Poverty Guidelines."
+            "The 2026 Repayment Assistance Plan (RAP) protects 225% of the HHS Federal Poverty Guideline ($35,212.50 for a single filer) before calculating your monthly student loan bill.\n\n"
+            "On a $60,000 balance at 6.5% interest and $65,000 single AGI, RAP sets your monthly payment at $248.23 and waives the remaining $76.77 in monthly interest under 34 CFR Part 685. Grounded in statutory Title IV and HHS Poverty Guidelines."
         ),
     },
     "grad-plus-borrowing-cap-calculator": {
@@ -10563,9 +10570,9 @@ def dispatch_to_distribution_lead(
         if property_id == "prexvo":
             sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
         elif property_id == "gainhelm":
-            sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO hits $78,100.40 ($28k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS rate + $20.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
+            sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO hits $78,100.40 ($37k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS rate + $11.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
         else:
-            sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA pays +$4,349 (+22.7%) more federal tax as brackets revert: https://profithelm.com/tools/irs-2027-tax-brackets/"
+            sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA owes $18,734 in 2027 federal tax under OBBBA P.L. 119-21: https://profithelm.com/tools/irs-2027-tax-brackets/"
         voice_ok = False
         voice_violations: List[str] = []
         in_pytest_voice = bool("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)

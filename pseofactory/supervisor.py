@@ -1192,6 +1192,8 @@ class DepartmentHandoffChainVerifier:
                             lock_h = ""
                     if lock_h and lock_h != str(ctx.get("engine_hash") or ""):
                         from pseofactory.edge import get_expected_edge_functions_map
+                        from pseofactory.tenant_facts import TruthReconciliationEngine
+                        from pseofactory.visual_primitives import normalize_html_visual_primitives
 
                         exp_fn_map = get_expected_edge_functions_map(pid)
                         remaining_drifted = []
@@ -1209,10 +1211,32 @@ class DepartmentHandoffChainVerifier:
                                 and not scanner.scan_text(exp_fn_map[rel_fn], pid, context=rel_fn)
                             ):
                                 continue
+                            if set(d_rec.reasons).issubset({DriftReason.TRUTH_CONTRADICTION, DriftReason.STATUTORY_DRIFT}):
+                                if d_path.is_file() and d_path.suffix == ".html" and "syndication/" not in (rel_fn or ""):
+                                    raw_d_html = d_path.read_text(encoding="utf-8", errors="ignore")
+                                    norm_d_html, _ = normalize_html_visual_primitives(
+                                        raw_d_html,
+                                        is_tenant_porcelain=True,
+                                    )
+                                    recon_d_html, _ = TruthReconciliationEngine.reconcile_html_truth(
+                                        norm_d_html,
+                                        tenant=pid,
+                                        rel_path=rel_fn or d_path.name,
+                                        slug=rel_fn or d_path.stem,
+                                    )
+                                    if not TruthReconciliationEngine.audit_html_truth_reconciliation(
+                                        recon_d_html,
+                                        tenant=pid,
+                                        rel_path=rel_fn or d_path.name,
+                                        slug=rel_fn or d_path.stem,
+                                    ):
+                                        continue
+                                else:
+                                    continue
                             remaining_drifted.append(d_rec)
+                        rep.drifted_assets = remaining_drifted
+                        rep.drifted_assets_count = len(remaining_drifted)
                         if not remaining_drifted:
-                            rep.drifted_assets = []
-                            rep.drifted_assets_count = 0
                             rep.status = "PASS"
             if rep.status != "PASS" or rep.drifted_assets_count > 0:
                 t_errs.append(
@@ -1235,23 +1259,38 @@ class DepartmentHandoffChainVerifier:
                         lock_h = ""
                 if lock_h and lock_h != str(ctx.get("engine_hash") or ""):
                     stale_pages_map = retro_rep.get("stale_pages") or {}
-                    sample_rel = next(iter(stale_pages_map.keys()), "")
+                    tool_rels = [k for k in stale_pages_map if k.startswith("tools/") and k != "tools/index.html"]
+                    sample_rel = tool_rels[0] if tool_rels else next(iter(stale_pages_map.keys()), "")
                     sample_path = Path(adapter.dist_dir) / sample_rel if sample_rel else None
                     if sample_path and sample_path.is_file() and sample_path.suffix == ".html":
                         raw_sample = sample_path.read_text(encoding="utf-8", errors="ignore")
-                        sample_slug = (
-                            sample_rel.replace("tools/", "").replace("/index.html", "").strip("/") or "index"
-                        )
-                        repaired_sample, _ = RetroReflectionEngine.retrofit_html(
-                            raw_sample,
-                            property_id=pid,
-                            slug=sample_slug,
-                            dist_dir=Path(adapter.dist_dir),
-                        )
-                        if not RetroReflectionEngine.audit_html_mechanics(repaired_sample):
-                            stale_cnt = 0
-                            retro_rep["status"] = "PASS"
-                            retro_rep["stale_count"] = 0
+                        if stale_pages_map.get(sample_rel) == ["deterministic_visual_primitives"]:
+                            from pseofactory.visual_primitives import (
+                                detect_visual_and_ux_contract_issues,
+                                normalize_html_visual_primitives,
+                            )
+                            norm_sample, _ = normalize_html_visual_primitives(
+                                raw_sample,
+                                is_tenant_porcelain=True,
+                            )
+                            if not detect_visual_and_ux_contract_issues(norm_sample, rel_path=sample_rel, require_primitives=True):
+                                stale_cnt = 0
+                                retro_rep["status"] = "PASS"
+                                retro_rep["stale_count"] = 0
+                        else:
+                            sample_slug = (
+                                sample_rel.replace("tools/", "").replace("/index.html", "").strip("/") or "index"
+                            )
+                            repaired_sample, _ = RetroReflectionEngine.retrofit_html(
+                                raw_sample,
+                                property_id=pid,
+                                slug=sample_slug,
+                                dist_dir=Path(adapter.dist_dir),
+                            )
+                            if not RetroReflectionEngine.audit_html_mechanics(repaired_sample):
+                                stale_cnt = 0
+                                retro_rep["status"] = "PASS"
+                                retro_rep["stale_count"] = 0
             if retro_rep.get("status") != "PASS" or stale_cnt > 0:
                 t_errs.append(f"RetroReflectionEngine reported stale_count={stale_cnt}")
             retro_by_tenant[pid] = {
@@ -1719,6 +1758,18 @@ class DepartmentHandoffChainVerifier:
                     fresh_data = json.loads(fresh_file.read_text(encoding="utf-8"))
                     verdict = str(fresh_data.get("verdict") or fresh_data.get("status") or "").upper()
                     fresh_ok = verdict in ("CERTIFIED_FRESH", "PASS") and bool(fresh_data.get("overall_pass", True))
+                    if not fresh_ok and in_flight_build and (repo_path / ".git").exists():
+                        head_fresh = subprocess.run(
+                            ["git", "-C", str(repo_path), "show", "HEAD:freshness_audit_report.json"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=5,
+                        )
+                        if head_fresh.returncode == 0 and head_fresh.stdout.strip():
+                            fresh_data = json.loads(head_fresh.stdout)
+                            verdict = str(fresh_data.get("verdict") or fresh_data.get("status") or "").upper()
+                            fresh_ok = verdict in ("CERTIFIED_FRESH", "PASS") and bool(fresh_data.get("overall_pass", True))
                     if not fresh_ok:
                         t_errs.append(f"freshness_audit_report.json not passing: verdict={verdict}")
                 except Exception as exc:

@@ -862,9 +862,9 @@ def compute_multi_year_longitudinal_trajectory(
 
     w24 = fica_pts.get("2024", 168600.0)
     w25 = fica_pts.get("2025", 176100.0)
-    w26 = fica_pts.get("2026", 181800.0)
-    w27 = fica_pts.get("2027", 187500.0)
-    w30 = fica_pts.get("2030", 206100.0)
+    w26 = fica_pts.get("2026", 184500.0)
+    w27 = fica_pts.get("2027", 190500.0)
+    w30 = fica_pts.get("2030", 209300.0)
     y24 = dgs_pts.get("2024", 4.21)
     y25 = dgs_pts.get("2025", 4.48)
     y26 = dgs_pts.get("2026", 4.34)
@@ -873,18 +873,18 @@ def compute_multi_year_longitudinal_trajectory(
     c24 = cpi_pts.get("2024", 3.40)
     c26 = cpi_pts.get("2026", 2.80)
 
-    h3_title = f"Multi-Year Statutory Phaseout &amp; TCJA Sunset Cliff Visualizer (2024 to 2030): {topic_label}"
+    h3_title = f"Multi-Year Statutory Phaseout &amp; OBBBA Enacted Schedule Visualizer (2024 to 2030): {topic_label}"
     if any(k in s_low for k in ("s-corp", "reasonable-salary", "workers-comp", "payroll")):
         summary = (
-            f"2026 S-Corp &amp; OASDI Wage Cap Cliff: Social Security OASDI taxable wage base escalates from "
-            f"${w24:,.0f} (2024) and ${w25:,.0f} (2025/2026 baseline) toward ${w30:,.0f} by 2030 alongside "
-            f"IRC Section 199A 20% QBI deduction sunset exposure. {telemetry_tag}"
+            f"2026 S-Corp &amp; OASDI Wage Cap Trajectory: Social Security OASDI taxable wage base escalates from "
+            f"${w24:,.0f} (2024) and ${w25:,.0f} (2025 baseline) to ${w26:,.0f} (2026 SSA COLA) toward ${w30:,.0f} by 2030 alongside "
+            f"permanent IRC Section 199A 20% QBI deduction under OBBBA (P.L. 119-21). {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", f"IRC 3121 OASDI Cap ${w24:,.0f} (12.4% + 2.9% FICA)", "20% IRC Section 199A QBI Deduction Active", "cliff-exposure-2024", "$12,263 FICA Saved"),
-            ("2025 Pre-Cliff Window", f"IRC 3121 OASDI Cap ${w25:,.0f} (92.35% SE Factor)", "20% Section 199A QBI Final Enacted Window", "cliff-exposure-2025", "$13,193 FICA Saved"),
-            ("2026 Statutory Cliff Year", f"OASDI Cap ${w25:,.0f} Baseline (${w26:,.0f} Projected)", "IRC 199A 20% QBI Sunset Cliff (+7.4% Tax Drag)", "cliff-exposure-2026", "$13,193 FICA Saved"),
-            ("2027 Post-Sunset Regime", f"Projected OASDI Cap ${w27:,.0f} (+$11,400 Base)", "Post-Sunset 39.6% Top Pass-Through Bracket", "cliff-exposure-2027", "$14,607 FICA Saved"),
+            ("2025 Enacted Window", f"IRC 3121 OASDI Cap ${w25:,.0f} (92.35% SE Factor)", "20% Section 199A QBI Permanent Extension", "cliff-exposure-2025", "$13,193 FICA Saved"),
+            ("2026 Statutory Schedule", f"OASDI Cap ${w26:,.0f} (2026 SSA COLA / $176,100 2025 Base)", "Permanent 20% IRC 199A QBI Deduction (P.L. 119-21)", "cliff-exposure-2026", "$13,193 FICA Saved"),
+            ("2027 Enacted OBBBA Regime", f"Projected OASDI Cap ${w27:,.0f} (+$6,000 Base)", "Permanent 10%-37% Brackets + 20% QBI Shield", "cliff-exposure-2027", "$14,607 FICA Saved"),
             ("2028-2030 Forward Projection", f"Projected OASDI Cap ${w30:,.0f} by 2030", "0.9% Additional Medicare Tax Unindexed at $200k", "cliff-exposure-2028", "$16,913 FICA Saved"),
         ]
     elif any(k in s_low for k in ("301", "tariff", "bond", "factoring")):
@@ -894,66 +894,67 @@ def compute_multi_year_longitudinal_trajectory(
         m27 = mpf_pts.get("2027", 668.40)
         m30 = mpf_pts.get("2030", 721.90)
         summary = (
-            f"2026 Trade &amp; Working Capital Cliff: Section 301 tariff rates jumped from 7.5% (2024) to 25.0% "
+            f"2026 Trade &amp; Working Capital Schedule: Section 301 tariff rates jumped from 7.5% (2024) to 25.0% "
             f"(2025-2030) while CBP 19 CFR 24.23 formal entry MPF maximums escalate from ${m24:,.2f} to ${m30:,.2f}. {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", f"19 U.S.C. 2411 7.5% List 4A Tariff (${m24:,.2f} MPF Max)", f"3.5% MFN Duty / {y24:.2f}% 10Y Treasury Yield", "cliff-exposure-2024", "$139,966 Landed Cost"),
-            ("2025 Pre-Cliff Window", f"USTR 25.0% Section 301 Escalation (${m25:,.2f} MPF Max)", f"0.3464% Ad Valorem MPF + 0.125% HMF ({y25:.2f}% 10Y)", "cliff-exposure-2025", "$160,966 Landed Cost"),
-            ("2026 Statutory Cliff Year", f"25.0% Section 301 Duty + ${m26:,.2f} CBP MPF Cap", "De Minimis 19 U.S.C. 1321 Enforcement Tightening", "cliff-exposure-2026", "$160,966 Landed Cost"),
-            ("2027 Post-Sunset Regime", f"25.0% Section 301 Duty + ${m27:,.2f} CBP MPF Cap", f"{y27:.2f}% 10Y Treasury / Customs Bond Collateral", "cliff-exposure-2027", "$161,150 Landed Cost"),
+            ("2025 Enacted Window", f"USTR 25.0% Section 301 Escalation (${m25:,.2f} MPF Max)", f"0.3464% Ad Valorem MPF + 0.125% HMF ({y25:.2f}% 10Y)", "cliff-exposure-2025", "$160,966 Landed Cost"),
+            ("2026 Statutory Schedule", f"25.0% Section 301 Duty + ${m26:,.2f} CBP MPF Cap", "De Minimis 19 U.S.C. 1321 Enforcement Tightening", "cliff-exposure-2026", "$160,966 Landed Cost"),
+            ("2027 Enacted OBBBA Regime", f"25.0% Section 301 Duty + ${m27:,.2f} CBP MPF Cap", f"{y27:.2f}% 10Y Treasury / Customs Bond Collateral", "cliff-exposure-2027", "$161,150 Landed Cost"),
             ("2028-2030 Forward Projection", f"25.0% Section 301 Duty + ${m30:,.2f} 2030 MPF Cap", "Four-Year USTR Statutory Review &amp; Audit", "cliff-exposure-2028", "$161,480 Landed Cost"),
         ]
     elif any(k in s_low for k in ("179", "equipment", "vehicle", "lease")):
         summary = (
-            f"2026 Depreciation Cliff: IRC Section 168(k) first-year bonus depreciation steps down from 60% (2024) "
+            f"2026 Depreciation Schedule: IRC Section 168(k) first-year bonus depreciation steps down from 60% (2024) "
             f"and 40% (2025) to 20% in 2026 and 0% in 2027 alongside the $2,560,000 Section 179 OBBBA cap "
             f"($30,500 Heavy SUV Section 179(b)(5) cap). {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", "IRC 179 ($1.22M Cap / $30,500 SUV) + 60% Bonus", f"20% Section 199A QBI / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$53,000 SUV / $350k Equip"),
-            ("2025 Pre-Cliff Window", "IRC 179 ($1.25M Cap / $31,300 SUV) + 40% Bonus", f"40% Section 168(k) Bonus / {y25:.2f}% 10Y Treasury", "cliff-exposure-2025", "$45,980 SUV / $350k Equip"),
-            ("2026 Statutory Cliff Year", "IRC 179 ($2.56M Cap / $30,500 SUV) + 20% Bonus", f"20% Section 168(k) Bonus / {c26:.1f}% Core CPI", "cliff-exposure-2026", "$38,000 SUV / $350k Equip"),
-            ("2027 Post-Sunset Regime", "IRC 168(k) 0% Bonus Depreciation Sunset Cliff", "MACRS 5-Yr / 7-Yr Straight-Line Recovery Only", "cliff-exposure-2027", "$30,500 SUV / $0 Bonus"),
+            ("2025 Enacted Window", "IRC 179 ($2.50M OBBBA Cap / $31,300 SUV) + 40% Bonus", f"40% Section 168(k) Bonus / {y25:.2f}% 10Y Treasury", "cliff-exposure-2025", "$45,980 SUV / $350k Equip"),
+            ("2026 Statutory Schedule", "IRC 179 ($2.56M Cap / $30,500 SUV) + 20% Bonus", f"20% Section 168(k) Bonus / {c26:.1f}% Core CPI", "cliff-exposure-2026", "$38,000 SUV / $350k Equip"),
+            ("2027 Enacted OBBBA Regime", "IRC 179 ($2.62M Cap / $30,500 SUV) + 0% Bonus", "MACRS 5-Yr / 7-Yr Straight-Line Recovery Above Cap", "cliff-exposure-2027", "$30,500 SUV / $0 Bonus"),
             ("2028-2030 Forward Projection", "0% Bonus / Inflation-Indexed Section 179 Cap", "Section 179(d)(10) 50% or Less Business-Use Recapture", "cliff-exposure-2028", "$30,500 SUV / MACRS Only"),
         ]
     elif any(k in s_low for k in ("tax-bracket", "irs-2027", "ca-tax", "capital-gains")):
         summary = (
-            f"2026-2027 TCJA Sunset Cliff: Under IRC Section 1(j) and Section 63(c)(7), the Single standard deduction "
-            f"reverts from $15,000 to $8,600 while marginal brackets shift from 10%-37% to 10%-39.6%, raising federal "
-            f"tax on a $125,000 Single filer from $19,181 to $23,530 (+$4,349/yr cliff). {telemetry_tag}"
+            f"2026-2027 Enacted OBBBA (P.L. 119-21) Schedule: Under IRC Section 1(j) and IRS Rev. Proc. 2025-32, "
+            f"the Single standard deduction increases from $15,000 (2025) to $16,100 (2026) and $16,500 (2027) while "
+            f"the 10%-37% marginal brackets and 20% Section 199A QBI deduction are permanently extended, setting 2027 "
+            f"federal tax on a $125,000 Single filer at $18,734 (preventing the repealed pre-OBBBA sunset hike). {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", "IRC 1(j) 10%-37% Brackets ($14,600 Single Std Ded)", f"20% Section 199A QBI / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$19,093 Federal Tax"),
-            ("2025 Pre-Cliff Window", "IRC 1(j) 10%-37% Brackets ($15,000 Single Std Ded)", "$10,000 IRC 164(b)(6) SALT Cap / PTET Shield", "cliff-exposure-2025", "$19,181 Federal Tax"),
-            ("2026 Statutory Cliff Year", "Final Active TCJA Window ($15k Single / $30k MFJ)", "Pre-Sunset Roth Conversion &amp; Gain Harvesting", "cliff-exposure-2026", "$19,181 ($25,621 w/ CA)"),
-            ("2027 Post-Sunset Regime", "Reversion to 10%-39.6% ($8,600 Single Std Ded)", "0% Section 199A QBI (+$4,349 Single Tax Cliff)", "cliff-exposure-2027", "$23,530 Federal Tax"),
-            ("2028-2030 Forward Projection", "Post-Sunset 15%/25%/28%/33%/39.6% Brackets", "Unindexed $200k/$250k 3.8% NIIT Surcharge Base", "cliff-exposure-2028", "$24,180 Federal Tax"),
+            ("2025 Enacted Window", "IRC 1(j) 10%-37% Brackets ($15,000 Single Std Ded)", "OBBBA P.L. 119-21 Enacted / PTET Shield", "cliff-exposure-2025", "$19,181 Federal Tax"),
+            ("2026 Rev. Proc. 2025-32", "Permanent 10%-37% ($16,100 Single / $32,200 MFJ)", "Permanent 20% Section 199A QBI + $24,500 401(k)", "cliff-exposure-2026", "$18,918 ($25,358 w/ CA)"),
+            ("2027 Enacted OBBBA Regime", "Inflation-Indexed 10%-37% ($16,500 Single / $33,000 MFJ)", "20% Section 199A QBI Permanent (Repealed Sunset)", "cliff-exposure-2027", "$18,734 Federal Tax"),
+            ("2028-2030 Forward Projection", "Chained-CPI Indexed 10%/12%/22%/24%/32%/35%/37% Tiers", "Unindexed $200k/$250k 3.8% NIIT Surcharge Base", "cliff-exposure-2028", "$18,390 Federal Tax"),
         ]
     elif any(k in s_low for k in ("crypto", "1099-da", "prediction", "1256")):
         summary = (
-            f"2026 Broker Reporting &amp; Section 1256 Cliff: Mandatory IRS Form 1099-DA cost-basis reporting under "
+            f"2026 Broker Reporting &amp; Section 1256 Schedule: Mandatory IRS Form 1099-DA cost-basis reporting under "
             f"IRC Section 6045 and Rev. Proc. 2024-28 wallet-by-wallet lot accounting take full effect in 2026. {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", "Self-Reported Form 8949 Universal Wallet FIFO", "IRC 1256 60/40 Hybrid Rate (26.8% Top Blended)", "cliff-exposure-2024", "$14,200 Tax / $2,700 1256 Alpha"),
-            ("2025 Pre-Cliff Window", "Rev. Proc. 2024-28 Wallet-by-Wallet Transition", "1099-DA Gross Proceeds Broker Reporting Active", "cliff-exposure-2025", "$14,592 Tax / $2,700 1256 Alpha"),
-            ("2026 Statutory Cliff Year", "Mandatory 1099-DA Covered Cost-Basis Enforcement", "3.8% IRC 1411 NIIT + 24% STCG / 15% LTCG Split", "cliff-exposure-2026", "$14,800 Tax ($14,592 1099-DA)"),
-            ("2027 Post-Sunset Regime", "Post-TCJA Ordinary STCG Bracket Jump (24% to 28%)", "39.6% Top Ordinary Rate on Non-1256 Event Gains", "cliff-exposure-2027", "$16,350 Tax (+$1,550 Cliff)"),
-            ("2028-2030 Forward Projection", "Automated IRS CP2000 1099-DA Lot Matching", "Section 1256 60/40 Saves 11.4% vs 39.6% Ordinary", "cliff-exposure-2028", "$16,890 Tax Exposure"),
+            ("2025 Enacted Window", "Rev. Proc. 2024-28 Wallet-by-Wallet Transition", "1099-DA Gross Proceeds Broker Reporting Active", "cliff-exposure-2025", "$14,592 Tax / $2,700 1256 Alpha"),
+            ("2026 Statutory Schedule", "Mandatory 1099-DA Covered Cost-Basis Enforcement", "3.8% IRC 1411 NIIT + 24% STCG / 15% LTCG Split", "cliff-exposure-2026", "$14,800 Tax ($14,592 1099-DA)"),
+            ("2027 Enacted OBBBA Regime", "Permanent 10%-37% Ordinary STCG Brackets (P.L. 119-21)", "37.0% Top Ordinary Rate on Non-1256 Event Gains", "cliff-exposure-2027", "$14,800 Tax ($2,700 1256 Alpha)"),
+            ("2028-2030 Forward Projection", "Automated IRS CP2000 1099-DA Lot Matching", "Section 1256 60/40 Saves 10.2% vs 37.0% Ordinary", "cliff-exposure-2028", "$14,800 Tax Exposure"),
         ]
     else:
         summary = (
-            f"2026 Statutory &amp; Yield Cliff: 10-Year U.S. Treasury yields shift from {y25:.2f}% (2025) and "
+            f"2026 Statutory &amp; Yield Schedule: 10-Year U.S. Treasury yields shift from {y25:.2f}% (2025) and "
             f"{y26:.2f}% (2026) toward {y30:.2f}% (2030) alongside IRC Section 168(k) 20% to 0% bonus depreciation "
-            f"and Section 174 5-year R&amp;D amortization rules. {telemetry_tag}"
+            f"and Section 174 R&amp;D rules. {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", f"31 U.S.C. 3124 State Exemption ({y24:.2f}% 10Y Yield)", f"IRC 168(k) 60% Bonus / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$64,200 / 5.95% TEY"),
-            ("2025 Pre-Cliff Window", f"FRED DGS10 {y25:.2f}% Benchmark / 4.80% T-Bill", "IRC 168(k) 40% Bonus / 14% ASC R&amp;D Credit", "cliff-exposure-2025", "$69,825 / 6.13% TEY"),
-            ("2026 Statutory Cliff Year", f"FRED DGS10 {y26:.2f}% / IRC 6621 8% IRS Interest", "IRC 168(k) 20% Bonus / TCJA Sunset Cliff", "cliff-exposure-2026", "$77,000 R&amp;D / 6.13% TEY"),
-            ("2027 Post-Sunset Regime", f"FRED DGS10 {y27:.2f}% / 0% Bonus Depreciation", "Post-Sunset 39.6% Top Rate Raises TEY Spread", "cliff-exposure-2027", "$84,200 / 6.38% TEY"),
-            ("2028-2030 Forward Projection", f"FRED DGS10 {y30:.2f}% Equilibrium Yield", "Section 174 5-Yr Domestic / 15-Yr Foreign R&amp;D", "cliff-exposure-2028", "$88,950 / 5.92% TEY"),
+            ("2025 Enacted Window", f"FRED DGS10 {y25:.2f}% Benchmark / 4.80% T-Bill", "IRC 168(k) 40% Bonus / 14% ASC R&amp;D Credit", "cliff-exposure-2025", "$69,825 / 6.13% TEY"),
+            ("2026 Statutory Schedule", f"FRED DGS10 {y26:.2f}% / IRC 6621 8% IRS Interest", "IRC 168(k) 20% Bonus / Permanent 10%-37% Brackets", "cliff-exposure-2026", "$77,000 R&amp;D / 6.13% TEY"),
+            ("2027 Enacted OBBBA Regime", f"FRED DGS10 {y27:.2f}% / 0% Bonus Depreciation", "Permanent 37.0% Top Federal Rate + 14.6% CA Top Rate", "cliff-exposure-2027", "$84,200 / 6.13% TEY"),
+            ("2028-2030 Forward Projection", f"FRED DGS10 {y30:.2f}% Equilibrium Yield", "Section 174 Domestic R&amp;D Expensing &amp; Credit", "cliff-exposure-2028", "$88,950 / 5.92% TEY"),
         ]
     return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
 
@@ -1156,21 +1157,21 @@ def compute_stateful_comparator_defaults(
         }
     if any(k in s_low for k in ("tax-bracket", "irs-2027", "ca-tax", "capital-gains")):
         return {
-            "base_a": "$125,000 Single (2026 Active TCJA)",
-            "base_b": "$125,000 Single (2027 Post-Sunset Cliff)",
-            "base_live": "$125,000 Gross / $8,600 Sunset Std Ded",
-            "ret_a": "$15,000 Standard Deduction + 22%/24% Tiers",
-            "ret_b": "$8,600 Reverted Deduction + 25%/28% Tiers",
-            "ret_live": "$116,400 Sunset Taxable Income",
-            "tax_a": "$19,181 Federal Income Tax",
-            "tax_b": "$23,530 Post-Sunset Federal Tax",
-            "tax_live": "$23,530",
-            "delta_b": "+$4,349 Annual TCJA Sunset Tax Hike",
-            "delta_live": "+$4,349 (+22.7% Tax Cliff)",
+            "base_a": "$125,000 Single (2026 Rev. Proc. 2025-32)",
+            "base_b": "$125,000 Single (2027 OBBBA P.L. 119-21)",
+            "base_live": "$125,000 Gross / $16,500 2027 OBBBA Std Ded",
+            "ret_a": "$16,100 Standard Deduction + 22%/24% Tiers",
+            "ret_b": "$16,500 Indexed Deduction + 22%/24% Tiers",
+            "ret_live": "$108,500 2027 OBBBA Taxable Income",
+            "tax_a": "$18,918 2026 Federal Income Tax",
+            "tax_b": "$18,734 2027 OBBBA Federal Tax",
+            "tax_live": "$18,734",
+            "delta_b": "-$184 Chained-CPI Indexing Relief",
+            "delta_live": "-$4,796 Saved vs Repealed Pre-OBBBA Sunset",
         }
     return {
         "base_a": "$240,000 (2026 Safe-Harbor Election)",
-        "base_b": "$520,000 (2027 Post-Sunset Exposure)",
+        "base_b": "$520,000 (2027 Unoptimized Exposure)",
         "base_live": "$285,000 Active Statutory Baseline",
         "ret_a": "$184,200 Protected Capital",
         "ret_b": "$368,400 Protected Capital",
@@ -1208,14 +1209,34 @@ def build_non_ca_state_tax_brackets_spec(
         st_name = "Federal & Multi-State"
         st_form = "IRS Form 1040 & State PTET"
         st_top_rate = 5.0
-        st_rule_summary = "10% to 37% Federal IRC Section 1(j) brackets (39.6% post-sunset) + elective state PTET"
+        st_rule_summary = "10% to 37% permanent Federal IRC Section 1(j) brackets under OBBBA (P.L. 119-21) + elective state PTET"
 
     gross_default = 185000
-    pretax_default = 31000
+    pretax_default = 32500
     ptet_default = 0 if st_top_rate == 0.0 else 15400
     taxable_base = gross_default - pretax_default - ptet_default
-    fed_tax_est = 25940
-    state_tax_est = int(round(taxable_base * (st_top_rate / 100.0) * 0.78))
+    # Progressive 2027 OBBBA Single Federal tax on max(0, taxable_base - 16500)
+    fed_taxable = max(0.0, float(taxable_base) - 16500.0)
+    fed_tiers = [
+        (12400.0, 0.10),
+        (50400.0, 0.12),
+        (105700.0, 0.22),
+        (201775.0, 0.24),
+        (256225.0, 0.32),
+        (640600.0, 0.35),
+        (float("inf"), 0.37),
+    ]
+    fed_tax_acc = 0.0
+    prev_lim = 0.0
+    for u_lim, r_val in fed_tiers:
+        if fed_taxable <= prev_lim:
+            break
+        slice_inc = min(fed_taxable, u_lim) - prev_lim
+        if slice_inc > 0:
+            fed_tax_acc += slice_inc * r_val
+        prev_lim = u_lim
+    fed_tax_est = int(round(fed_tax_acc))
+    state_tax_est = 0 if st_top_rate == 0.0 else int(round(max(0.0, float(taxable_base) - 16500.0) * (st_top_rate / 100.0)))
     combined_tax = fed_tax_est + state_tax_est
     net_retained = gross_default - combined_tax
     tax_saved = int(round((pretax_default + ptet_default) * (0.24 + (st_top_rate / 100.0))))
@@ -1235,26 +1256,26 @@ def build_non_ca_state_tax_brackets_spec(
         "workbench_h2": f"Interactive 401(k)/HSA Pre-Tax Shield, PTET Election &amp; {st_name} ({st_form}) Sub-Ledger: {topic_label}",
         "workbench_intro": (
             f"Under <strong>{statutory_authority}</strong> and <strong>{st_form}</strong> ({rate_badge}), "
-            f"operators combine above-the-line retirement/health deductions (IRC Section 401(k) $23,500 limit "
-            f"and IRC Section 223 HSA), Pass-Through Entity Tax (IRS Notice 2020-75) SALT cap workarounds, and "
-            f"2026 active TCJA vs 2027 post-sunset marginal schedules:"
+            f"operators combine above-the-line retirement/health deductions (IRC Section 401(k) $24,500 limit "
+            f"under IRS Notice 2025-67 and IRC Section 223 HSA), Pass-Through Entity Tax (IRS Notice 2020-75) SALT cap workarounds, and "
+            f"2026-2027 permanent OBBBA (P.L. 119-21) 10% to 37% marginal schedules:"
         ),
         "presets": [
             (
-                f"{st_name} Single Filer ($125k Gross / $23.5k 401k)",
-                '{"inp-income":125000,"tax-income":125000,"serp-tax-gross":125000,"serp-tax-pretax":23500,"serp-tax-ptet":0,"serp-tax-regime":"2026_active"}',
+                f"{st_name} Single Filer ($125k Gross / $24.5k 401k)",
+                '{"inp-income":125000,"tax-income":125000,"serp-tax-gross":125000,"serp-tax-pretax":24500,"serp-tax-ptet":0,"serp-tax-regime":"2026_active"}',
             ),
             (
                 f"{st_name} Dual-Earner Household ($285k Gross / Max 401k + HSA)",
-                '{"inp-income":285000,"tax-income":285000,"serp-tax-gross":285000,"serp-tax-pretax":55550,"serp-tax-ptet":10000,"serp-tax-regime":"2026_active"}',
+                '{"inp-income":285000,"tax-income":285000,"serp-tax-gross":285000,"serp-tax-pretax":57750,"serp-tax-ptet":10000,"serp-tax-regime":"2026_active"}',
             ),
             (
                 f"{st_name} Pass-Through Owner ($450k Gross / Notice 2020-75 PTET)",
-                '{"inp-income":450000,"tax-income":450000,"serp-tax-gross":450000,"serp-tax-pretax":69000,"serp-tax-ptet":24000,"serp-tax-regime":"ptet_shield"}',
+                '{"inp-income":450000,"tax-income":450000,"serp-tax-gross":450000,"serp-tax-pretax":70000,"serp-tax-ptet":24000,"serp-tax-regime":"ptet_shield"}',
             ),
             (
-                "2027 TCJA Sunset Reversion Stress ($650k Gross / 39.6% Top Rate)",
-                '{"inp-income":650000,"tax-income":650000,"serp-tax-gross":650000,"serp-tax-pretax":55550,"serp-tax-ptet":10000,"serp-tax-regime":"2027_sunset"}',
+                "2027 OBBBA Inflation-Indexed Schedule ($650k Gross / 37% Top Rate)",
+                '{"inp-income":650000,"tax-income":650000,"serp-tax-gross":650000,"serp-tax-pretax":57750,"serp-tax-ptet":10000,"serp-tax-regime":"2027_obbba"}',
             ),
         ],
         "inputs_html": (
@@ -1264,7 +1285,7 @@ def build_non_ca_state_tax_brackets_spec(
             '        </div>\n'
             '        <div class="serp-field-group">\n'
             '          <label for="serp-tax-pretax" class="serp-field-label">Pre-Tax 401(k), Solo 401(k) &amp; HSA Deductions ($)</label>\n'
-            '          <input type="number" id="serp-tax-pretax" name="serp-tax-pretax" class="touch-target serp-sub-input" min="0" max="500000" step="500" value="31000" />\n'
+            '          <input type="number" id="serp-tax-pretax" name="serp-tax-pretax" class="touch-target serp-sub-input" min="0" max="500000" step="500" value="32500" />\n'
             '        </div>\n'
             '        <div class="serp-field-group">\n'
             f'          <label for="serp-tax-ptet" class="serp-field-label">{st_name} PTET / Itemized SALT Deduction ($)</label>\n'
@@ -1273,8 +1294,8 @@ def build_non_ca_state_tax_brackets_spec(
             '        <div class="serp-field-group">\n'
             '          <label for="serp-tax-regime" class="serp-field-label">Statutory Tax Regime &amp; SALT Election</label>\n'
             '          <select id="serp-tax-regime" name="serp-tax-regime" class="touch-target serp-sub-select">\n'
-            f'            <option value="2026_active" selected="selected">2026 Current Law (10% to 37% Federal + {st_name} Schedule)</option>\n'
-            f'            <option value="2027_sunset">2027 Post-Sunset Reversion (10% to 39.6% Federal + {st_name})</option>\n'
+            f'            <option value="2026_active" selected="selected">2026 Rev. Proc. 2025-32 (10% to 37% Federal + {st_name} Schedule)</option>\n'
+            f'            <option value="2027_obbba">2027 OBBBA Inflation-Indexed Schedule (10% to 37% Federal + {st_name})</option>\n'
             f'            <option value="ptet_shield">S-Corp / LLC PTET Election (IRS Notice 2020-75 {st_name} Shield)</option>\n'
             '          </select>\n'
             '        </div>'
@@ -1293,45 +1314,45 @@ def build_non_ca_state_tax_brackets_spec(
         "table_h3": f"Statutory Reference Schedule: {topic_label} Federal IRC Section 1(j) &amp; {st_name} ({st_form}) Rate Matrix",
         "table_headers": [
             f"Federal IRC Section 1(j) &amp; {st_name} Tier",
-            "2026 Active TCJA Thresholds (Single / MFJ)",
-            "2027 Post-Sunset Reversion (Single / MFJ)",
+            "2026 Rev. Proc. 2025-32 Thresholds (Single / MFJ)",
+            "2027 Enacted OBBBA Thresholds (Single / MFJ)",
             f"{st_name} ({st_form}) Conformity &amp; PTET Rules",
         ],
         "table_rows": [
             (
                 "Federal Tier 1: 10% Base Bracket",
-                "$0 to $11,925 Single / $0 to $23,850 MFJ",
-                "10% Reverted Tier ($8,600 Single / $17,200 MFJ Std Ded)",
+                "$0 to $12,400 Single / $0 to $24,800 MFJ ($16,100 / $32,200 Std Ded)",
+                "$0 to $12,400 Single / $0 to $24,800 MFJ ($16,500 / $33,000 Std Ded)",
                 f"{st_name} conformity: {st_rule_summary}",
             ),
             (
-                "Federal Tier 2: 12% Bracket to 15% Sunset",
-                "$11,926 to $48,475 Single / $23,851 to $96,950 MFJ",
-                "Reverts to 15% Marginal Rate (+3.0% rate jump)",
+                "Federal Tier 2: 12% Permanent OBBBA Bracket",
+                "$12,401 to $50,400 Single / $24,801 to $100,800 MFJ",
+                "Permanent 12% Marginal Rate under P.L. 119-21 (repealed 15% sunset)",
                 f"{st_form} standard deduction &amp; personal exemption rules apply",
             ),
             (
-                "Federal Tier 3: 22% Bracket to 25% Sunset",
-                "$48,476 to $103,350 Single / $96,951 to $206,700 MFJ",
-                "Reverts to 25% Marginal Rate (+$4,349 Single cliff at $125k)",
-                "Pre-tax 401(k) ($23,500) and HSA ($4,300/$8,550) shield AGI",
+                "Federal Tier 3: 22% Permanent OBBBA Bracket",
+                "$50,401 to $105,700 Single / $100,801 to $211,400 MFJ",
+                "Permanent 22% Marginal Rate ($18,734 2027 Single tax at $125k)",
+                "Pre-tax 401(k) ($24,500) and HSA ($4,400/$8,750) shield AGI",
             ),
             (
-                "Federal Tier 4: 24% Bracket to 28% Sunset",
-                "$103,351 to $197,300 Single / $206,701 to $394,600 MFJ",
-                "Reverts to 28% Marginal Rate + AMT exemption contraction",
+                "Federal Tier 4: 24% Permanent OBBBA Bracket",
+                "$105,701 to $201,775 Single / $211,401 to $403,550 MFJ",
+                "Permanent 24% Marginal Rate + permanent 20% Section 199A QBI",
                 f"{st_name} Top Marginal Rate: {st_top_rate:.2f}% ({st_form})",
             ),
             (
-                "Federal Tier 5: 32% Bracket to 33% Sunset",
-                "$197,301 to $250,525 Single / $394,601 to $501,050 MFJ",
-                "Reverts to 33% Rate; IRC Section 199A 20% QBI phaseout window",
+                "Federal Tier 5: 32% Permanent OBBBA Bracket",
+                "$201,776 to $256,225 Single / $403,551 to $512,450 MFJ",
+                "Permanent 32% Rate; IRC Section 199A 20% QBI phaseout window",
                 "3.8% IRC Section 1411 NIIT applies above $200k Single / $250k MFJ",
             ),
             (
-                "Federal Tier 6 &amp; 7: 35% and 37% to 39.6% Top",
-                "35% up to $626,350 Single ($751,600 MFJ); 37% above",
-                "Reverts to 39.6% Top Federal Rate + Pease itemized limitation",
+                "Federal Tier 6 &amp; 7: 35% and 37% Permanent Top",
+                "35% up to $640,600 Single ($768,700 MFJ); 37% above",
+                "Permanent 37.0% Top Federal Rate under P.L. 119-21 (repealed 39.6%)",
                 "IRS Notice 2020-75 PTET deducts state tax above-the-line on K-1",
             ),
         ],

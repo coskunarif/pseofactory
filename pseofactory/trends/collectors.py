@@ -470,7 +470,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "IRC Section 179 Maximum Deduction Cap",
                 "USD",
                 "IRS",
-                {2024: 1220000.0, 2025: 1250000.0, 2026: 1290000.0, 2027: 1330000.0, 2028: 1370000.0, 2029: 1410000.0, 2030: 1450000.0},
+                {2024: 1220000.0, 2025: 2500000.0, 2026: 2560000.0, 2027: 2620000.0, 2028: 2690000.0, 2029: 2760000.0, 2030: 2830000.0},
             ),
             (
                 "irs_sec179_phaseout",
@@ -481,7 +481,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "IRC Section 179 Investment Phaseout Threshold",
                 "USD",
                 "IRS",
-                {2024: 3050000.0, 2025: 3130000.0, 2026: 3220000.0, 2027: 3320000.0, 2028: 3420000.0, 2029: 3520000.0, 2030: 3630000.0},
+                {2024: 3050000.0, 2025: 4000000.0, 2026: 4090000.0, 2027: 4190000.0, 2028: 4290000.0, 2029: 4400000.0, 2030: 4510000.0},
             ),
             (
                 "irs_sec168k_bonus",
@@ -503,7 +503,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "IRC Section 199A Qualified Business Income Deduction Rate",
                 "PCT",
                 "IRS",
-                {2024: 20.0, 2025: 20.0, 2026: 0.0, 2027: 0.0, 2028: 0.0, 2029: 0.0, 2030: 0.0},
+                {2024: 20.0, 2025: 20.0, 2026: 20.0, 2027: 20.0, 2028: 20.0, 2029: 20.0, 2030: 20.0},
             ),
             (
                 "cbp_sec301_tariff",
@@ -536,7 +536,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "Social Security OASDI Maximum Taxable Wage Base",
                 "USD",
                 "SSA-IRS",
-                {2024: 168600.0, 2025: 176100.0, 2026: 181800.0, 2027: 187500.0, 2028: 193500.0, 2029: 199700.0, 2030: 206100.0},
+                {2024: 168600.0, 2025: 176100.0, 2026: 184500.0, 2027: 190500.0, 2028: 196500.0, 2029: 202800.0, 2030: 209300.0},
             ),
             (
                 "ed_idr_discretionary_levy",
