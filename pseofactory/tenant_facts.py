@@ -2677,9 +2677,9 @@ class TruthReconciliationEngine:
     )
 
     PROFITHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
-        ("with real-time scenario mo...", "with real-time scenario modeling."),
-        ("with real-time scenario ...", "with real-time scenario modeling."),
-        ("with real-time scenari...", "with real-time scenario modeling."),
+        ("with real-time scenario mo...", "with scenario analysis."),
+        ("with real-time scenario ...", "with scenario analysis."),
+        ("with real-time scenari...", "with scenario analysis."),
         ("divided by (1 - 0.133)", "divided by (1 minus 0.133)"),
         ("IRC Sections 1001, 1012, 1222, and 1411", "IRC Section 1001, Section 1012, Section 1222, and Section 1411"),
         ("IRC Sections 3111 and 3301", "IRC Section 3111 and Section 3301"),
@@ -4194,6 +4194,18 @@ class TruthReconciliationEngine:
                     for old_str, new_str in cls.PROFITHELM_HTML_REPLACEMENTS:
                         if old_str in dt_new:
                             dt_new = dt_new.replace(old_str, new_str)
+                    parsed_dt = _json_lib.loads(dt_new)
+                    dt_items = parsed_dt if isinstance(parsed_dt, list) else parsed_dt.get("tools", [])
+                    dt_item_changed = False
+                    for dt_obj in dt_items:
+                        if isinstance(dt_obj, dict):
+                            for d_key in ("description", "problem_statement"):
+                                d_val = str(dt_obj.get(d_key) or "")
+                                if len(d_val) > 160 and "with real-time scenario modeling." in d_val:
+                                    dt_obj[d_key] = d_val.replace("with real-time scenario modeling.", "with scenario analysis.")
+                                    dt_item_changed = True
+                    if dt_item_changed:
+                        dt_new = _json_lib.dumps(parsed_dt, ensure_ascii=False, indent=2) + "\n"
                     if dt_new != dt_txt:
                         dyn_tools_f.write_text(dt_new, encoding="utf-8")
                         repaired_paths.append(str(dyn_tools_f))

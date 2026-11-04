@@ -14020,6 +14020,19 @@ def reflect_and_recompile_all_assets(
                         dyn_changed = False
                         for dt in dyn_list:
                             dt_slug = str(dt.get("slug") or "")
+                            for d_key in ("description", "problem_statement"):
+                                d_val = str(dt.get(d_key) or "")
+                                if d_val:
+                                    d_new = (
+                                        d_val.replace("with real-time scenario mo...", "with scenario analysis.")
+                                        .replace("with real-time scenario ...", "with scenario analysis.")
+                                        .replace("with real-time scenari...", "with scenario analysis.")
+                                    )
+                                    if len(d_new) > 160 and "with real-time scenario modeling." in d_new:
+                                        d_new = d_new.replace("with real-time scenario modeling.", "with scenario analysis.")
+                                    if d_new != d_val:
+                                        dt[d_key] = d_new
+                                        dyn_changed = True
                             dt_cm = dt.get("calculation_manifest")
                             fb_dt = RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS.get(dt_slug)
                             if isinstance(dt_cm, dict) and fb_dt:
