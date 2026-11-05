@@ -5707,6 +5707,10 @@ def synthesize_personalized_audit_workpaper(
             regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
 
     datapack_url = str(offer.get("datapack_url") or f"{offer['fulfillment_url']}&format=datapack")
+    playbook_csv_url = f"{offer['playbook_url']}&format=csv"
+    playbook_datapack_url = f"{offer['playbook_url']}&format=datapack"
+    active_csv_url = offer["csv_fulfillment_url"] if mode == "paid_toolkit" else playbook_csv_url
+    active_datapack_url = datapack_url if mode == "paid_toolkit" else playbook_datapack_url
     # Revenue is only ever settled with edge-verified live Stripe payment proof; `mode` alone
     # (a preview/paid-toolkit render) never books revenue.
     is_settled_mode = bool(isinstance(lead_record, dict) and is_verified_stripe_payment(lead_record))
@@ -5787,8 +5791,8 @@ def synthesize_personalized_audit_workpaper(
         "</div>"
         "<div class='no-print' style='display:flex;gap:8px;flex-wrap:wrap;'>"
         "<button onclick='window.print()' style='background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;'>Print / Save PDF</button>"
-        f"<a href='{offer['csv_fulfillment_url']}' style='background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download CSV Schedule</a>"
-        f"<a href='{datapack_url}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download Statutory Data Pack (JSON)</a>"
+        f"<a href='{active_csv_url}' style='background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download CSV Schedule</a>"
+        f"<a href='{active_datapack_url}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download Statutory Data Pack (JSON)</a>"
         "</div></div>"
         f"<div style='font-size:13px;color:#334155;margin-bottom:14px;'>Reference ID: <strong>{lead_id}</strong> | Prepared For: <strong>{email}</strong> | Modeled Principal: <strong>${base_amount:,.2f}</strong> (Band: <strong>{capital_band}</strong>)</div>"
         f"{inputs_summary_html}"
@@ -5836,6 +5840,8 @@ def synthesize_personalized_audit_workpaper(
         "sensitivity_matrix": sensitivity_matrix,
         "deliverables": offer["deliverables"],
         "playbook_url": offer["playbook_url"],
+        "playbook_csv_url": playbook_csv_url,
+        "playbook_datapack_url": playbook_datapack_url,
         "fulfillment_url": offer["fulfillment_url"],
         "csv_fulfillment_url": offer["csv_fulfillment_url"],
         "datapack_url": datapack_url,

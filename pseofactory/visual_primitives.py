@@ -2382,7 +2382,9 @@ def _render_runtime_sync_events_js() -> str:
         linksRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;";
         var pbUrl = data.playbook_url ? (String(data.playbook_url) + "&format=html") : "";
         var ffUrl = data.fulfillment_url ? (String(data.fulfillment_url) + "&format=html") : "";
-        var csvUrl = data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "";
+        var csvUrl = mode === "checkout_fulfill"
+          ? (data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "")
+          : (data.playbook_csv_url ? String(data.playbook_csv_url) : (data.playbook_url ? (String(data.playbook_url) + "&format=csv") : (data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "")));
         if (mode === "checkout_fulfill" && ffUrl) {
           var ffLink = document.createElement("a");
           ffLink.id = "checkout-fulfillment-html-link";
@@ -2437,7 +2439,9 @@ def _render_runtime_sync_events_js() -> str:
           });
           linksRow.appendChild(csvLink);
         }
-        var dpUrl = data.datapack_url ? String(data.datapack_url) : (data.fulfillment_url ? (String(data.fulfillment_url) + "&format=datapack") : "");
+        var dpUrl = mode === "checkout_fulfill"
+          ? (data.datapack_url ? String(data.datapack_url) : (data.fulfillment_url ? (String(data.fulfillment_url) + "&format=datapack") : ""))
+          : (data.playbook_datapack_url ? String(data.playbook_datapack_url) : (data.playbook_url ? (String(data.playbook_url) + "&format=datapack") : (data.datapack_url ? String(data.datapack_url) : "")));
         if (dpUrl) {
           var dpLink = document.createElement("a");
           dpLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-datapack-link" : "playbook-datapack-link";
@@ -2501,10 +2505,19 @@ def _render_runtime_sync_events_js() -> str:
                 upgDrawer.setAttribute("data-checkout-status", "fulfilled");
               }
               if (data && Array.isArray(data.reconciliation_schedule) && data.reconciliation_schedule.length > 0) {
+                var ffResolved = data.fulfillment_url || fulfillBase;
+                var csvResolved = data.csv_fulfillment_url || (fulfillBase + "&format=csv");
+                var dpResolved = data.datapack_url || (fulfillBase + "&format=datapack");
+                if (sessionId) {
+                  var sessParam = "&session_id=" + encodeURIComponent(sessionId);
+                  if (ffResolved.indexOf("session_id=") === -1) ffResolved += sessParam;
+                  if (csvResolved.indexOf("session_id=") === -1) csvResolved += sessParam;
+                  if (dpResolved.indexOf("session_id=") === -1) dpResolved += sessParam;
+                }
                 renderPlaybookAndFulfillmentDrawer(hostTarget, {
-                  fulfillment_url: data.fulfillment_url || fulfillBase,
-                  csv_fulfillment_url: data.csv_fulfillment_url || (fulfillBase + "&format=csv"),
-                  datapack_url: data.datapack_url || (fulfillBase + "&format=datapack"),
+                  fulfillment_url: ffResolved,
+                  csv_fulfillment_url: csvResolved,
+                  datapack_url: dpResolved,
                   reconciliation_schedule: data.reconciliation_schedule
                 }, "checkout_fulfill");
               }
@@ -2895,6 +2908,8 @@ def _render_runtime_sync_events_js() -> str:
             if (previewHost) {
               renderPlaybookAndFulfillmentDrawer(previewHost, {
                 playbook_url: pbBase,
+                playbook_csv_url: pbBase + "&format=csv",
+                playbook_datapack_url: pbBase + "&format=datapack",
                 fulfillment_url: ffBase,
                 csv_fulfillment_url: ffBase + "&format=csv",
                 datapack_url: ffBase + "&format=datapack",
@@ -2908,8 +2923,11 @@ def _render_runtime_sync_events_js() -> str:
                 .then(function(r) { return r && r.ok ? r.json() : null; })
                 .then(function(pData) {
                   if (pData && previewHost) {
+                    var resPbUrl = pData.playbook_url || pbBase;
                     renderPlaybookAndFulfillmentDrawer(previewHost, {
-                      playbook_url: pData.playbook_url || pbBase,
+                      playbook_url: resPbUrl,
+                      playbook_csv_url: pData.playbook_csv_url || (resPbUrl + "&format=csv"),
+                      playbook_datapack_url: pData.playbook_datapack_url || (resPbUrl + "&format=datapack"),
                       fulfillment_url: pData.fulfillment_url || ffBase,
                       csv_fulfillment_url: pData.csv_fulfillment_url || (ffBase + "&format=csv"),
                       datapack_url: pData.datapack_url || (ffBase + "&format=datapack"),
@@ -3335,10 +3353,17 @@ def _render_runtime_sync_events_js() -> str:
           var currentPath = (window.location && window.location.pathname) ? window.location.pathname : "/";
           var ts = new Date().toISOString();
           var bpSnapshot = collectWorkbenchBlueprintState();
+          var qStepNode = document.getElementById("partner-quote-intake-step");
+          var upgDrawerNode = document.getElementById("post-calculation-upgrade-drawer");
+          var pbPartnerEl = document.querySelector(".calc-inline-cta[data-partner], .affiliate-cta-section[data-partner], a[href^='/r/'][data-partner]");
+          var pbPartnerKey = (qStepNode && qStepNode.getAttribute("data-partner-key")) || (pbPartnerEl && pbPartnerEl.getAttribute("data-partner")) || "";
+          var pbOfferSku = (upgDrawerNode && upgDrawerNode.getAttribute("data-offer-sku")) || "";
           var leadPayload = {
             email: rawEmail,
             source: currentPath,
             tool_slug: resolveCurrentToolSlug(),
+            partner_key: pbPartnerKey,
+            offer_sku: pbOfferSku,
             scenario_amount: bpSnapshot.calculated_amount || 0,
             scenario_inputs: bpSnapshot.inputs || {},
             scenario_outputs: bpSnapshot.outputs || {},
@@ -5077,6 +5102,7 @@ def normalize_html_visual_primitives(
                 or "rem179 * 0.80" in sync_body
                 or "offer_price_usd || 29" in sync_body
                 or "isPrexvo" in sync_body
+                or "playbook_csv_url" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:
@@ -5496,7 +5522,7 @@ function createSimulatedDom(tenantConfig) {
     },
     gtag(ev, name, payload) { beaconPayloads.push({ gtag: name, payload }); },
     fetch(url, opts = {}) {
-      fetchCalls.push({ url: String(url), method: opts.method || 'GET' });
+      fetchCalls.push({ url: String(url), method: opts.method || 'GET', body: opts.body || null });
       const u = String(url);
       if (u.includes('checkout=1')) {
         return Promise.resolve({
@@ -5510,6 +5536,8 @@ function createSimulatedDom(tenantConfig) {
             offer_price_usd: tenantConfig.price,
             calculated_amount: 180000,
             playbook_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000`,
+            playbook_csv_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
+            playbook_datapack_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
             fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
             csv_fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
             datapack_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
@@ -5528,6 +5556,8 @@ function createSimulatedDom(tenantConfig) {
           json: () => Promise.resolve({
             ok: true,
             playbook_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000`,
+            playbook_csv_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
+            playbook_datapack_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
             fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
             csv_fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
             datapack_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
@@ -5546,6 +5576,8 @@ function createSimulatedDom(tenantConfig) {
           offer_price_usd: tenantConfig.price,
           checkout_url: `/api/lead-capture?checkout=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
           playbook_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000`,
+          playbook_csv_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
+          playbook_datapack_url: `/api/lead-capture?playbook=1&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
           fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000`,
           csv_fulfillment_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=csv`,
           datapack_url: `/api/lead-capture?fulfill=1&sku=${tenantConfig.sku}&tool_slug=${tenantConfig.slug}&amount=180000&format=datapack`,
@@ -5647,7 +5679,11 @@ async function runSimulationForTenant(tenantConfig) {
   const pbHtmlLink = sim.elementsById['playbook-download-link'];
   const pbCsvLink = sim.elementsById['playbook-csv-link'];
   const pbDpLink = sim.elementsById['playbook-datapack-link'];
-  const previewPassed = Boolean(pbHtmlLink && pbCsvLink && pbDpLink);
+  const pbCsvHref = pbCsvLink ? String(pbCsvLink.getAttribute('href') || '') : '';
+  const pbDpHref = pbDpLink ? String(pbDpLink.getAttribute('href') || '') : '';
+  const playbookCsvUsesPlaybookRail = pbCsvHref.includes('playbook=1') && pbCsvHref.includes('format=csv') && !pbCsvHref.includes('fulfill=1');
+  const playbookDpUsesPlaybookRail = pbDpHref.includes('playbook=1') && pbDpHref.includes('format=datapack') && !pbDpHref.includes('fulfill=1');
+  const previewPassed = Boolean(pbHtmlLink && pbCsvLink && pbDpLink && playbookCsvUsesPlaybookRail && playbookDpUsesPlaybookRail);
 
   // 5. Click Statutory Data Pack Checkout button
   const checkoutBtn = sim.elementsById['btn-post-calc-upgrade-checkout'];
@@ -5685,6 +5721,13 @@ async function runSimulationForTenant(tenantConfig) {
   }
   await new Promise(r => setImmediate(r));
   const leadCaptured = pbForm.getAttribute('data-lead-captured') === 'true' && pbForm.getAttribute('data-submission-state') === 'success';
+  const pbPostCall = sim.fetchCalls.find(c => c.method === 'POST' && c.url.includes('/api/lead-capture') && c.body && String(c.body).includes('audit-verify@example.com'));
+  let pbPostParsed = {};
+  try { pbPostParsed = pbPostCall && pbPostCall.body ? JSON.parse(pbPostCall.body) : {}; } catch (_) {}
+  const leadCapturePropagatesPartnerAndSku = (
+    pbPostParsed.partner_key === tenantConfig.partner &&
+    pbPostParsed.offer_sku === tenantConfig.sku
+  );
 
   const qForm = sim.elementsById['partner-quote-intake-form'];
   for (const fn of sim.docListeners.submit) {
@@ -5701,10 +5744,13 @@ async function runSimulationForTenant(tenantConfig) {
     scenario_pin_passed: pinnedA && pinnedB && pinReset,
     blueprint_actions_passed: blueprintPassed,
     workpaper_preview_passed: previewPassed,
+    playbook_csv_url_uses_playbook_rail: playbookCsvUsesPlaybookRail,
+    playbook_datapack_url_uses_playbook_rail: playbookDpUsesPlaybookRail,
     datapack_checkout_passed: checkoutPassed,
     deliverable_downloads_passed: Boolean(ffDpLink && ffDpLink.getAttribute('data-download-triggered') === 'true'),
     affiliate_cta_click_passed: affiliateClicked,
     lead_and_quote_submit_passed: leadCaptured && quoteCaptured,
+    lead_capture_propagates_partner_and_sku: leadCapturePropagatesPartnerAndSku,
     fetch_call_count: sim.fetchCalls.length,
     beacon_count: sim.beaconPayloads.length,
     passed: (
@@ -5716,6 +5762,7 @@ async function runSimulationForTenant(tenantConfig) {
       checkoutPassed &&
       affiliateClicked &&
       leadCaptured &&
+      leadCapturePropagatesPartnerAndSku &&
       quoteCaptured
     )
   };
@@ -5803,7 +5850,10 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
         tools_dir = Path(raw_dir)
         if not tools_dir.exists():
             continue
-        html_files = sorted(tools_dir.glob("*/index.html"))
+        html_files = [
+            p for p in sorted(tools_dir.rglob("index.html"))
+            if p != tools_dir / "index.html"
+        ]
         t_pages = 0
         t_commercial = 0
         t_restricted = 0
@@ -5817,10 +5867,14 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
         t_page_records: List[Dict[str, Any]] = []
 
         for html_file in html_files:
-            slug = html_file.parent.name
+            rel_parts = html_file.relative_to(tools_dir).parts[:-1]
+            slug = "-".join(rel_parts) if rel_parts else html_file.parent.name
             raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
             norm_html, _ = normalize_html_visual_primitives(raw_html)
-            is_restricted = slug in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+            is_restricted = (
+                slug in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+                or html_file.parent.name in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+            )
 
             t_pages += 1
             total_pages += 1

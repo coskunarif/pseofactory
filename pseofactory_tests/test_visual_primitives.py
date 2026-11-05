@@ -404,22 +404,22 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
 
     audit = audit_monetization_and_datapack_ui_ux_surfaces(execute_dom_simulation=True)
     assert audit["all_surfaces_and_handlers_passed"] is True, f"UI/UX button surface audit failed: {audit}"
-    assert audit["total_pages_audited"] >= 50
-    assert audit["commercial_pages_audited"] >= 46
+    assert audit["total_pages_audited"] >= 175
+    assert audit["commercial_pages_audited"] >= 171
     assert audit["restricted_ymyl_pages_audited"] == 4
     assert audit["total_pages_audited"] == audit["commercial_pages_audited"] + audit["restricted_ymyl_pages_audited"]
     assert audit["coexistence_and_surface_violations"] == []
 
     inv = audit["button_inventory_totals"]
-    assert inv["affiliate_outbound_ctas"] >= 150
+    assert inv["affiliate_outbound_ctas"] >= 450
     assert inv["datapack_checkout_buttons"] == audit["commercial_pages_audited"]
     assert inv["workpaper_preview_buttons"] == audit["commercial_pages_audited"]
-    assert inv["decision_blueprint_buttons"] >= 138
-    assert inv["scenario_comparator_pin_buttons"] >= 138
-    assert inv["scenario_preset_buttons"] >= 200
-    assert inv["lead_quote_and_calc_forms"] >= 92
+    assert inv["decision_blueprint_buttons"] >= 500
+    assert inv["scenario_comparator_pin_buttons"] >= 500
+    assert inv["scenario_preset_buttons"] >= 500
+    assert inv["lead_quote_and_calc_forms"] >= 340
 
-    assert audit["tenants"]["profithelm"]["total_pages"] >= 22
+    assert audit["tenants"]["profithelm"]["total_pages"] >= 149
     assert audit["tenants"]["profithelm"]["coexistence_pass_count"] == audit["tenants"]["profithelm"]["total_pages"]
     assert audit["tenants"]["prexvo"]["total_pages"] >= 18
     assert audit["tenants"]["prexvo"]["commercial_pages"] >= 14
@@ -437,10 +437,149 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
         assert t_sim["scenario_pin_passed"] is True
         assert t_sim["blueprint_actions_passed"] is True
         assert t_sim["workpaper_preview_passed"] is True
+        assert t_sim["playbook_csv_url_uses_playbook_rail"] is True
+        assert t_sim["playbook_datapack_url_uses_playbook_rail"] is True
         assert t_sim["datapack_checkout_passed"] is True
         assert t_sim["deliverable_downloads_passed"] is True
         assert t_sim["affiliate_cta_click_passed"] is True
         assert t_sim["lead_and_quote_submit_passed"] is True
+        assert t_sim["lead_capture_propagates_partner_and_sku"] is True
+
+
+def test_profithelm_spoke_monetization_and_playbook_autonomy(tmp_path):
+    """
+    Verifies ProfitHelm edge lead-capture and monetization autonomy across nested
+    state and vehicle spokes:
+    1. Canonical 2-level spoke route resolution (/tools/<hub>/<state_or_vehicle>/) in
+       Stripe Checkout success_url and cancel_url.
+    2. Automatic 2-letter US state jurisdiction inference (CA, NY, TX) from spoke slugs.
+    3. Free Playbook preview/email links use playbook=1&format=csv|datapack (HTTP 200)
+       while Paid Toolkit fulfillment remains gated by Stripe session verification.
+    """
+    import json
+    import subprocess
+    from pseofactory.edge import generate_edge_lead_capture_function
+
+    js_code = generate_edge_lead_capture_function("profithelm")
+    mod_path = tmp_path / "profithelm_spoke_lead_capture.mjs"
+    mod_path.write_text(js_code, encoding="utf-8")
+
+    runner = f"""
+import {{ onRequestPost, onRequestGet }} from {json.dumps(str(mod_path))};
+const env = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
+globalThis.fetch = async (url, init) => {{
+  const u = String(url || "");
+  if (u.includes("/v1/checkout/sessions") && (!init || init.method === "POST")) {{
+    return new Response(JSON.stringify({{
+      id: "cs_live_SPOKE_SESSION_1",
+      url: "https://checkout.stripe.com/c/pay/cs_live_SPOKE_SESSION_1",
+      livemode: true
+    }}), {{ status: 200, headers: {{ "Content-Type": "application/json" }} }});
+  }}
+  return new Response("{{}}", {{ status: 200 }});
+}};
+
+const chkCaRes = await onRequestGet({{
+  request: new Request("https://profithelm.com/api/lead-capture?checkout=1&tool_slug=irs-2027-tax-brackets-california&amount=240000"),
+  env
+}});
+const chkCa = await chkCaRes.json();
+
+const chkNyRes = await onRequestGet({{
+  request: new Request("https://profithelm.com/api/lead-capture?checkout=1&tool_slug=section-1031-calculator-new-york&amount=650000"),
+  env
+}});
+const chkNy = await chkNyRes.json();
+
+const chkVehRes = await onRequestGet({{
+  request: new Request("https://profithelm.com/api/lead-capture?checkout=1&tool_slug=section-179-calculator-ford-super-duty-f250&amount=95000"),
+  env
+}});
+const chkVeh = await chkVehRes.json();
+
+const pbPostRes = await onRequestPost({{
+  request: new Request("https://profithelm.com/api/lead-capture", {{
+    method: "POST",
+    headers: {{ "Content-Type": "application/json", "X-Pseofactory-Test": "1" }},
+    body: JSON.stringify({{
+      email: "cfo-spoke@synthetic.pseofactory.test",
+      tool_slug: "section-1031-calculator-texas",
+      partner_key: "ipx1031",
+      offer_sku: "ph_1031_boot_replacement_workpapers",
+      scenario_amount: 520000,
+      synthetic_test: true
+    }})
+  }}),
+  env
+}});
+const pbPost = await pbPostRes.json();
+
+const pbCsvRes = await onRequestGet({{
+  request: new Request("https://profithelm.com" + pbPost.playbook_csv_url + "&synthetic_test=1"),
+  env
+}});
+const pbDpRes = await onRequestGet({{
+  request: new Request("https://profithelm.com" + pbPost.playbook_datapack_url + "&synthetic_test=1"),
+  env
+}});
+const pbHtmlRes = await onRequestGet({{
+  request: new Request("https://profithelm.com" + pbPost.playbook_url + "&format=html&synthetic_test=1"),
+  env
+}});
+const pbHtmlText = await pbHtmlRes.text();
+
+console.log(JSON.stringify({{
+  chkCaSuccess: chkCa.success_url,
+  chkCaCancel: chkCa.cancel_url,
+  chkCaState: chkCa.custom_parameter_ledger && chkCa.custom_parameter_ledger.state,
+  chkNySuccess: chkNy.success_url,
+  chkNyState: chkNy.custom_parameter_ledger && chkNy.custom_parameter_ledger.state,
+  chkVehSuccess: chkVeh.success_url,
+  pbPostState: pbPost.state,
+  pbPostPartner: pbPost.partner_key,
+  pbPostRedirect: pbPost.redirect_url,
+  pbPostCancel: pbPost.cancel_url,
+  pbCsvUrl: pbPost.playbook_csv_url,
+  pbDpUrl: pbPost.playbook_datapack_url,
+  pbCsvStatus: pbCsvRes.status,
+  pbDpStatus: pbDpRes.status,
+  pbHtmlUsesPlaybookLinks: pbHtmlText.includes("playbook=1") && !pbHtmlText.includes("fulfill=1")
+}}));
+"""
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", runner],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["chkCaSuccess"].startswith(
+        "https://profithelm.com/tools/irs-2027-tax-brackets/california/?checkout_status=success"
+    )
+    assert out["chkCaCancel"].startswith(
+        "https://profithelm.com/tools/irs-2027-tax-brackets/california/?checkout_status=cancelled"
+    )
+    assert out["chkCaState"] == "CA"
+    assert out["chkNySuccess"].startswith(
+        "https://profithelm.com/tools/section-1031-calculator/new-york/?checkout_status=success"
+    )
+    assert out["chkNyState"] == "NY"
+    assert out["chkVehSuccess"].startswith(
+        "https://profithelm.com/tools/section-179-calculator/ford-super-duty-f250/?checkout_status=success"
+    )
+    assert out["pbPostState"] == "TX"
+    assert out["pbPostPartner"] == "ipx1031"
+    assert out["pbPostRedirect"].startswith("/r/ipx1031")
+    assert out["pbPostCancel"].startswith(
+        "https://profithelm.com/tools/section-1031-calculator/texas/?checkout_status=cancelled"
+    )
+    assert "playbook=1" in out["pbCsvUrl"] and "format=csv" in out["pbCsvUrl"]
+    assert "playbook=1" in out["pbDpUrl"] and "format=datapack" in out["pbDpUrl"]
+    assert out["pbCsvStatus"] == 200
+    assert out["pbDpStatus"] == 200
+    assert out["pbHtmlUsesPlaybookLinks"] is True
+
 
 
 

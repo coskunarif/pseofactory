@@ -8941,6 +8941,7 @@ class RetroReflectionEngine:
             )
             or "data-checkout-trigger" not in html_content
             or "checkout-settlement-attribution-banner" not in html_content
+            or "playbook_csv_url" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or "window.location.protocol === 'file:'" in html_content
             or (
