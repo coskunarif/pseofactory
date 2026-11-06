@@ -946,6 +946,25 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
             return 1
 
 
+def cmd_parasite_ledger(args: argparse.Namespace) -> int:
+    """Track syndicated parasite URLs and rank platforms by survival (x-like:2103576504143634852)."""
+    from pseofactory.parasite_ledger import ParasiteLedger
+
+    led = ParasiteLedger(getattr(args, "ledger", None))
+    action = args.action
+    if action == "record":
+        if not (args.url and args.platform and args.tenant):
+            print("record requires --url, --platform and --tenant", file=sys.stderr)
+            return 2
+        new = led.record_post(args.url, args.platform, args.tenant, args.keyword or "", args.tool_slug or "")
+        print(json.dumps({"recorded": new, "url": args.url}))
+    elif action == "check":
+        print(json.dumps(led.check_all(), indent=2))
+    else:
+        print(json.dumps(led.platform_scores(args.tenant, args.keyword), indent=2))
+    return 0
+
+
 def cmd_distribute(args: argparse.Namespace) -> int:
     """
     Executes multi-channel syndication export and Voice DNA verification.
@@ -2262,6 +2281,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_dist.add_argument("--dry-run", action="store_true", help="Dry-run simulation mode without live publishing")
     p_dist.add_argument("--json", action="store_true", help="Output machine-readable JSON distribution report")
 
+    # parasite-ledger
+    p_pl = subparsers.add_parser("parasite-ledger", help="Record, recheck and rank syndicated parasite URLs by survival")
+    p_pl.add_argument("action", choices=["record", "check", "report"])
+    p_pl.add_argument("--url", type=str, default=None)
+    p_pl.add_argument("--platform", type=str, default=None)
+    p_pl.add_argument("--tenant", type=str, default=None)
+    p_pl.add_argument("--keyword", type=str, default=None)
+    p_pl.add_argument("--tool-slug", type=str, default=None)
+    p_pl.add_argument("--ledger", type=str, default=None, help="Override ledger path")
+
     # partner-sync
     p_psync = subparsers.add_parser(
         "partner-sync",
@@ -2644,6 +2673,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_sync_monetization(args)
     elif args.command == "distribute":
         return cmd_distribute(args)
+    elif args.command == "parasite-ledger":
+        return cmd_parasite_ledger(args)
     elif args.command == "partner-sync":
         return cmd_partner_sync(args)
     elif args.command == "partner-status":
