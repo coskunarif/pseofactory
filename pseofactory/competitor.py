@@ -7054,6 +7054,33 @@ def cluster_keywords_by_serp_overlap(
     return output_clusters
 
 
+LOW_BUYER_INTENT_TOOL_FLOOR = 25.0
+
+
+def build_high_intent_comparison_targets(
+    category: str,
+    competitors: List[str],
+) -> List[Dict[str, str]]:
+    """
+    x-like:2108291159890014523: high-intent 'best X tools' and 'alternative to competitor'
+    keyword targets that convert and surface in AI search, versus low-intent free-tool traffic.
+    Zero em-dashes. Zero en-dashes.
+    """
+    cat = re.sub(r"\s+", " ", str(category or "").strip().lower())
+    targets: List[Dict[str, str]] = []
+    if cat:
+        targets.append({"keyword": f"best {cat} tools", "page_type": "best_of_roundup"})
+    seen: Set[str] = set()
+    for comp in competitors or []:
+        name = re.sub(r"\s+", " ", str(comp or "").strip())
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        targets.append({"keyword": f"{name.lower()} alternative", "page_type": "competitor_alternative"})
+        targets.append({"keyword": f"alternative to {name.lower()}", "page_type": "competitor_alternative"})
+    return targets
+
+
 def score_tool_cluster_roi_and_crawl_risk(
     cluster: Dict[str, Any],
     *,
@@ -7097,6 +7124,17 @@ def score_tool_cluster_roi_and_crawl_risk(
         1,
     )
 
+    # x-like:2108291159890014523: free-tool traffic without buyer intent produces visitors, not revenue.
+    from .market_intel import score_buyer_intent
+
+    intent_eval = score_buyer_intent(
+        primary_kw or concept,
+        cpc_usd=float(cluster.get("avg_cpc_usd", 0.0) or 0.0),
+        intent_cluster=str(cluster.get("intent_cluster") or "calculator"),
+    )
+    buyer_intent = float(intent_eval.buyer_intent_score)
+    low_intent_traffic_only = buyer_intent < LOW_BUYER_INTENT_TOOL_FLOOR and combined_vol >= 1000
+
     already_exists = bool(existing_estate_slugs and t_slug in existing_estate_slugs)
     # Consolidating into an existing canonical tool or building a high-overlap statutory calculator has very low crawl risk
     base_crawl_risk = 12.0 if already_exists else 18.0
@@ -7108,6 +7146,8 @@ def score_tool_cluster_roi_and_crawl_risk(
 
     if crawl_risk_score >= 50.0 or roi_score < 50.0:
         action = "REJECT_CRAWL_BLOAT_OR_LOW_ROI"
+    elif low_intent_traffic_only and not already_exists:
+        action = "REJECT_LOW_INTENT_TRAFFIC_ONLY"
     elif already_exists:
         action = "UPGRADE_EXISTING_CANONICAL_TOOL"
     else:
@@ -7138,7 +7178,9 @@ def score_tool_cluster_roi_and_crawl_risk(
                 "competitor_weakness_score": comp_weakness,
                 "algorithmic_roi_score": roi_score,
                 "crawl_budget_risk_score": crawl_risk_score,
+                "buyer_intent_score": buyer_intent,
             },
+            "low_intent_traffic_only": low_intent_traffic_only,
             "algorithmic_roi_score": roi_score,
             "crawl_budget_risk_score": crawl_risk_score,
             "what_to_build": what_to_build,
@@ -7290,6 +7332,7 @@ __all__ = [
     "filter_rankable_tool_keywords",
     "cluster_keywords_by_serp_overlap",
     "score_tool_cluster_roi_and_crawl_risk",
+    "build_high_intent_comparison_targets",
     "run_agentic_free_tool_keyword_pipeline",
 ]
 
