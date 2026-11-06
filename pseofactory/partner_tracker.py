@@ -1655,6 +1655,7 @@ class PartnerTrackingEngine:
         }
         base_ledger_dir = Path(ledger_dir) if ledger_dir is not None else None
         results: Dict[str, Dict[str, Any]] = {}
+        fetch_errors: Dict[str, str] = {}
 
         for prop_id in ("profithelm", "prexvo", "gainhelm"):
             if base_ledger_dir is not None:
@@ -1688,29 +1689,44 @@ class PartnerTrackingEngine:
             if injected_events and isinstance(injected_events.get(prop_id), list):
                 incoming.extend(e for e in injected_events[prop_id] if isinstance(e, dict))
             elif fetch_live:
-                try:
-                    import socket
-                    _old_to = socket.getdefaulttimeout()
-                    socket.setdefaulttimeout(5.0)
-                    try:
-                        req = urllib.request.Request(
-                            endpoints[prop_id],
-                            headers={
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                "Accept": "application/json",
-                                "Connection": "close",
-                            },
-                        )
-                        with urllib.request.urlopen(req, timeout=5.0) as resp:
-                            content_len = resp.headers.get("Content-Length")
-                            max_bytes = min(int(content_len), 1048576) if content_len and content_len.isdigit() else 65536
-                            payload = json.loads(resp.read(max_bytes).decode("utf-8"))
-                            if isinstance(payload, dict) and isinstance(payload.get("events"), list):
-                                incoming.extend(e for e in payload["events"] if isinstance(e, dict))
-                    finally:
-                        socket.setdefaulttimeout(_old_to)
-                except Exception:
-                    pass
+                # Page through the edge KV listing with a generous timeout. The edge sends no
+                # Content-Length, so reading a fixed byte cap truncated the JSON and the old
+                # code swallowed the error, freezing the ledger. Failures are now reported.
+                import time as _time
+                from urllib.parse import quote as _quote
+
+                fetch_error = ""
+                cursor = ""
+                for _page in range(50):
+                    page_url = endpoints[prop_id].replace("limit=1000", "limit=200")
+                    if cursor:
+                        page_url += "&cursor=" + _quote(cursor, safe="")
+                    payload = None
+                    for _attempt in range(2):
+                        try:
+                            req = urllib.request.Request(
+                                page_url,
+                                headers={
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                    "Accept": "application/json",
+                                    "Connection": "close",
+                                },
+                            )
+                            with urllib.request.urlopen(req, timeout=45.0) as resp:
+                                payload = json.loads(resp.read(16 * 1048576).decode("utf-8"))
+                            break
+                        except Exception as exc:
+                            fetch_error = f"{type(exc).__name__}: {exc}"
+                            _time.sleep(0.5)
+                    if not isinstance(payload, dict):
+                        break
+                    fetch_error = ""
+                    if isinstance(payload.get("events"), list):
+                        incoming.extend(e for e in payload["events"] if isinstance(e, dict))
+                    cursor = str(payload.get("cursor") or "")
+                    if payload.get("list_complete", True) or not cursor:
+                        break
+                fetch_errors[prop_id] = fetch_error
 
             ingested_new = 0
             for ev in incoming:
@@ -1744,6 +1760,7 @@ class PartnerTrackingEngine:
                 "ledger_path": str(jsonl_path),
                 "summary_path": str(summary_path),
                 "aggregation": agg,
+                "fetch_error": fetch_errors.get(prop_id, ""),
             }
 
         return results
