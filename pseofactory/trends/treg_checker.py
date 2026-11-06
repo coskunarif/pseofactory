@@ -243,6 +243,33 @@ _PROCESS_AI_CITATION_CACHE: Dict[str, Dict[str, Any]] = {}
 _PROCESS_LIVE_AI_CALLS_MADE: int = 0
 _PROCESS_DISK_CACHE_LOADED: bool = False
 
+# A cached AI citation result is only reused while it is a real measurement younger than this.
+AI_CITATION_TTL_DAYS = float(os.environ.get("PSEOFACTORY_AI_CITATION_TTL_DAYS", "7") or 7)
+
+
+def is_fresh_measured_citation(entry: Any, ttl_days: Optional[float] = None) -> bool:
+    """
+    True only for a measured (live or observatory) citation result stamped within the TTL.
+    Synthetic fallbacks (endpoint suffix '#...'), unstamped entries and expired entries are never reused.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("measured") is False or "#" in str(entry.get("endpoint_called", "")):
+        return False
+    stamp = entry.get("checked_at")
+    if not stamp:
+        return False
+    try:
+        checked = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if checked.tzinfo is None:
+        checked = checked.replace(tzinfo=timezone.utc)
+    ttl = AI_CITATION_TTL_DAYS if ttl_days is None else float(ttl_days)
+    age_days = (datetime.now(timezone.utc) - checked).total_seconds() / 86400.0
+    return 0.0 <= age_days < ttl
+
 
 class TregChecker:
     """
@@ -259,8 +286,10 @@ class TregChecker:
         db: Optional[Any] = None,
         check_ai_citations: bool = False,
         tenant_domains: Optional[List[str]] = None,
+        observatory: Optional[Any] = None,
     ):
         global _PROCESS_DISK_CACHE_LOADED
+        self.observatory = observatory
         self.mock_registry: Dict[str, Dict[str, Any]] = {}
         if mock_data:
             for k, v in mock_data.items():
@@ -288,7 +317,7 @@ class TregChecker:
                 raw_disk = json.loads(self._disk_cache_path.read_text(encoding="utf-8"))
                 if isinstance(raw_disk, dict):
                     for dk, dv in raw_disk.items():
-                        if isinstance(dv, dict):
+                        if is_fresh_measured_citation(dv):
                             self.ai_citation_cache[str(dk).lower().strip()] = dv
                 _PROCESS_DISK_CACHE_LOADED = True
             except Exception:
@@ -300,7 +329,8 @@ class TregChecker:
         try:
             self._disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_p = self._disk_cache_path.with_suffix(".json.tmp")
-            tmp_p.write_text(json.dumps(self.ai_citation_cache, indent=2), encoding="utf-8")
+            measured_only = {k: v for k, v in self.ai_citation_cache.items() if is_fresh_measured_citation(v)}
+            tmp_p.write_text(json.dumps(measured_only, indent=2), encoding="utf-8")
             tmp_p.replace(self._disk_cache_path)
         except Exception:
             pass
@@ -328,8 +358,11 @@ class TregChecker:
         eff_tenants = tenant_domains or self.tenant_domains
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
 
-        if q_key in self.ai_citation_cache and mock_override is None and not is_mocked:
-            return self.ai_citation_cache[q_key]
+        cached_entry = self.ai_citation_cache.get(q_key)
+        if cached_entry is not None and mock_override is None and not is_mocked:
+            if is_fresh_measured_citation(cached_entry):
+                return cached_entry
+            self.ai_citation_cache.pop(q_key, None)
 
         if remaining_budget is not None and remaining_budget < 15.0:
             fallback = {
@@ -343,6 +376,7 @@ class TregChecker:
                 "citation_gap_status": "MISSING_AI_OVERVIEW",
                 "tenant_cited": False,
                 "ai_citation_checked": True,
+                "measured": False,
             }
             return fallback
 
@@ -366,9 +400,16 @@ class TregChecker:
                 "citation_gap_status": parsed["citation_gap_status"],
                 "tenant_cited": parsed["tenant_cited"],
                 "ai_citation_checked": True,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "measured": True,
             }
             self.ai_citation_cache[q_key] = res
             return res
+
+        observed = self._observatory_evidence(clean_q, eff_tenants, is_mocked)
+        if observed is not None:
+            self.ai_citation_cache[q_key] = observed
+            return observed
 
         global _PROCESS_LIVE_AI_CALLS_MADE
         treg_bin = shutil.which("treg")
@@ -422,6 +463,8 @@ class TregChecker:
                         "citation_gap_status": parsed["citation_gap_status"],
                         "tenant_cited": parsed["tenant_cited"],
                         "ai_citation_checked": True,
+                        "checked_at": datetime.now(timezone.utc).isoformat(),
+                        "measured": True,
                     }
                     self.ai_citation_cache[q_key] = res
                     if not is_mocked:
@@ -430,6 +473,8 @@ class TregChecker:
             except (subprocess.TimeoutExpired, Exception):
                 pass
 
+        # Offline heuristics are a guess, not a measurement: never cache or persist them,
+        # so the next run with live budget re-measures instead of inheriting the guess.
         offline_payload = self._offline_ai_citation_payload(q_key)
         parsed_offline = parse_ai_citation_payload(offline_payload, tenant_domains=eff_tenants)
         fallback = {
@@ -443,11 +488,34 @@ class TregChecker:
             "citation_gap_status": parsed_offline["citation_gap_status"],
             "tenant_cited": parsed_offline["tenant_cited"],
             "ai_citation_checked": True,
+            "measured": False,
         }
-        self.ai_citation_cache[q_key] = fallback
-        if not is_mocked:
-            self._persist_ai_citation_disk_cache()
         return fallback
+
+    def _observatory_evidence(
+        self, query: str, tenant_domains: List[str], is_mocked: bool
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Measured Google AI Overview evidence from the AIO observatory (multi-sample, last 7 days), if any.
+        Skipped under pytest unless an observatory was injected explicitly.
+        Zero em-dashes. Zero en-dashes.
+        """
+        obs = self.observatory
+        if obs is None:
+            if is_mocked or "PYTEST_CURRENT_TEST" in os.environ:
+                return None
+            try:
+                from pseofactory.aio_observatory import AIOObservatory, DEFAULT_AIO_DB_PATH
+
+                if not DEFAULT_AIO_DB_PATH.is_file():
+                    return None
+                obs = AIOObservatory()
+            except Exception:
+                return None
+        try:
+            return obs.citation_evidence(query, tenant_domains=tenant_domains)
+        except Exception:
+            return None
 
     def _offline_ai_citation_payload(self, q_key: str) -> Dict[str, Any]:
         """

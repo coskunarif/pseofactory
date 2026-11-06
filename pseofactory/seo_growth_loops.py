@@ -3070,6 +3070,8 @@ def compile_search_opportunity_briefs(
             "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
             "missing_ai_overview": ai_res["missing_ai_overview"],
             "citation_gap_status": ai_res["citation_gap_status"],
+            "ai_citation_measured": bool(ai_res.get("measured", False)),
+            "aio_blueprint": ai_res.get("aio_blueprint"),
             "needs_deterministic_math": math_info["needs_deterministic_math"],
             "min_impressions_floor": min_impressions_floor,
         }
@@ -3082,9 +3084,15 @@ def compile_search_opportunity_briefs(
             if (best_pos <= 10.0 or bool(striking_4_15_rows))
             else ("STRIKING_DISTANCE_PAGE_2" if (best_pos <= 30.0 or bool(striking_16_30_rows)) else "EARLY_INDEXATION_EXPANSION")
         )
+        # Only measured citation evidence (live or AIO observatory) may boost priority;
+        # offline heuristics are guesses and must not reorder the queue.
         ai_math_boost = (
             1.35
-            if (math_info["needs_deterministic_math"] and (ai_res["losing_to_weaker_domains"] or ai_res["missing_ai_overview"]))
+            if (
+                ai_res.get("measured", False)
+                and math_info["needs_deterministic_math"]
+                and (ai_res["losing_to_weaker_domains"] or ai_res["missing_ai_overview"])
+            )
             else 1.0
         )
         conv_slot_mult = float(conversion_slot_weights.get(leaf_slug.lower(), 1.15 if overlay_spec.get("commercial_offers_allowed", True) else 1.0))
@@ -3222,6 +3230,8 @@ def compile_search_opportunity_briefs(
             "losing_to_weaker_domains": ai_res["losing_to_weaker_domains"],
             "missing_ai_overview": ai_res["missing_ai_overview"],
             "citation_gap_status": ai_res["citation_gap_status"],
+            "ai_citation_measured": bool(ai_res.get("measured", False)),
+            "aio_blueprint": ai_res.get("aio_blueprint"),
             "needs_deterministic_math": math_info["needs_deterministic_math"],
             "math_domain": math_info["math_domain"],
             "compiled_brief_spec": {

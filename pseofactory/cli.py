@@ -11,7 +11,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 # Ensure package root takes precedence in sys.path when invoked directly
 _project_root = str(Path(__file__).resolve().parent.parent)
@@ -959,6 +959,38 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"Supervisor error: {exc}", file=sys.stderr)
             return 1
+
+
+def cmd_aio_observe(args: argparse.Namespace) -> int:
+    """Google AI Overview observatory: sample, analyze, blueprint, scoreboard (x-like:2107453596107219294)."""
+    from pseofactory.aio_observatory import AIOObservatory, load_watchlist
+
+    obs = AIOObservatory(getattr(args, "db", None))
+    window = float(getattr(args, "window_days", 7) or 7)
+    action = args.action
+    if action == "sample":
+        tenants = [args.tenant] if getattr(args, "tenant", None) else None
+        pairs = load_watchlist(tenants=tenants)
+        if getattr(args, "query", None):
+            pairs = [(args.tenant or "unassigned", args.query.strip().lower())]
+        out: Any = obs.sample(pairs, max_queries=getattr(args, "max_queries", None))
+        out["watchlist_size"] = len(pairs)
+    elif action == "watchlist":
+        out = [{"tenant": t, "query": q} for t, q in load_watchlist(tenants=[args.tenant] if args.tenant else None)]
+    elif action in ("analyze", "blueprint"):
+        if not args.query:
+            print(f"{action} requires --query", file=sys.stderr)
+            return 2
+        fn = obs.analyze if action == "analyze" else obs.blueprint
+        out = fn(args.query, window_days=window)
+    else:
+        out = obs.scoreboard(window_days=window)
+        if getattr(args, "tenant", None):
+            out["tenants"] = {k: v for k, v in out["tenants"].items() if k == args.tenant}
+    print(json.dumps(out, indent=2))
+    if action == "sample" and out.get("sampled", 0) == 0 and out.get("watchlist_size", 0) > 0:
+        return 1
+    return 0
 
 
 def cmd_parasite_ledger(args: argparse.Namespace) -> int:
@@ -2306,6 +2338,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_pl.add_argument("--tool-slug", type=str, default=None)
     p_pl.add_argument("--ledger", type=str, default=None, help="Override ledger path")
 
+    # aio-observe
+    p_aio = subparsers.add_parser(
+        "aio-observe",
+        help="Track Google AI Overviews over time: citation stability, page blueprints, tenant citation scoreboard",
+    )
+    p_aio.add_argument("action", choices=["sample", "watchlist", "analyze", "blueprint", "scoreboard"])
+    p_aio.add_argument("--tenant", type=str, default=None)
+    p_aio.add_argument("--query", type=str, default=None)
+    p_aio.add_argument("--window-days", type=float, default=7.0)
+    p_aio.add_argument("--max-queries", type=int, default=None)
+    p_aio.add_argument("--db", type=str, default=None, help="Override observatory SQLite path")
+
     # partner-sync
     p_psync = subparsers.add_parser(
         "partner-sync",
@@ -2690,6 +2734,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_distribute(args)
     elif args.command == "parasite-ledger":
         return cmd_parasite_ledger(args)
+    elif args.command == "aio-observe":
+        return cmd_aio_observe(args)
     elif args.command == "partner-sync":
         return cmd_partner_sync(args)
     elif args.command == "partner-status":

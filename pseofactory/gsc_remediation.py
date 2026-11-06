@@ -4662,6 +4662,8 @@ def compile_remediation_overlay_spec(
         "losing_to_weaker_domains",
         "missing_ai_overview",
         "citation_gap_status",
+        "ai_citation_measured",
+        "aio_blueprint",
         "needs_deterministic_math",
         "mobile_impressions",
         "desktop_impressions",
