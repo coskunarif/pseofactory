@@ -2713,7 +2713,28 @@ def _render_runtime_sync_events_js() -> str:
           var chkUrl = chkBtn.getAttribute("href") || "";
           if (chkUrl && typeof window.fetch === "function") {
             var liveBp = collectWorkbenchBlueprintState();
+            try {
+              if (window.localStorage && liveBp && liveBp.slug) {
+                window.localStorage.setItem("pseo_blueprint_" + liveBp.slug, JSON.stringify(liveBp));
+              }
+            } catch (bpSaveErr) {}
             var sep = chkUrl.indexOf("?") === -1 ? "?" : "&";
+            var activeLeadId = window.__pseoActiveLeadId || chkBtn.getAttribute("data-lead-id") || "";
+            var activeLeadEmail = window.__pseoActiveLeadEmail || chkBtn.getAttribute("data-lead-email") || "";
+            if (!activeLeadEmail) {
+              var typedEmailEl = document.getElementById("quote-intake-email") || document.querySelector('#lead-capture-form input[type="email"], form.lead-capture-form input[type="email"]');
+              if (typedEmailEl && typedEmailEl.value && String(typedEmailEl.value).indexOf("@") !== -1) {
+                activeLeadEmail = String(typedEmailEl.value).trim();
+              }
+            }
+            if (activeLeadId && chkUrl.indexOf("lead_id=") === -1) {
+              chkUrl += sep + "lead_id=" + encodeURIComponent(String(activeLeadId));
+              sep = "&";
+            }
+            if (activeLeadEmail && chkUrl.indexOf("email=") === -1) {
+              chkUrl += sep + "email=" + encodeURIComponent(String(activeLeadEmail));
+              sep = "&";
+            }
             if (liveBp && liveBp.calculated_amount > 0 && chkUrl.indexOf("amount=") === -1) {
               chkUrl += sep + "amount=" + encodeURIComponent(String(liveBp.calculated_amount));
               sep = "&";
@@ -2756,6 +2777,7 @@ def _render_runtime_sync_events_js() -> str:
                 var stlStatus = stl.settlement_status || "settled";
                 var attrRev = stl.attributed_revenue_usd !== undefined ? stl.attributed_revenue_usd : (data.offer_price_usd || 49);
                 var dpId = stl.datapack_pack_id || (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ("dp_" + (data.lead_id || "verified"));
+                var isLiveStripeRedirect = (cMode.indexOf("live_session") !== -1 && data.checkout_url && String(data.checkout_url).indexOf("https://checkout.") === 0 && !window.__PSEO_SYNTHETIC_TEST__);
                 chkBtn.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                 chkBtn.setAttribute("data-checkout-session-id", sessId);
                 chkBtn.setAttribute("data-checkout-mode", cMode);
@@ -2763,7 +2785,9 @@ def _render_runtime_sync_events_js() -> str:
                 chkBtn.setAttribute("data-settlement-id", String(stlId));
                 chkBtn.setAttribute("data-attributed-revenue-usd", String(attrRev));
                 chkBtn.setAttribute("data-datapack-id", String(dpId));
-                chkBtn.textContent = "Checkout Settled & Data Pack Ready (" + sessId + ")";
+                chkBtn.textContent = isLiveStripeRedirect
+                  ? "Redirecting to Secure Stripe Checkout (" + sessId + ")..."
+                  : "Checkout Settled & Data Pack Ready (" + sessId + ")";
                 var parentStep = chkBtn.closest("#post-calculation-upgrade-drawer, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
@@ -2772,15 +2796,17 @@ def _render_runtime_sync_events_js() -> str:
                   parentStep.setAttribute("data-settlement-id", String(stlId));
                   parentStep.setAttribute("data-attributed-revenue-usd", String(attrRev));
                   parentStep.setAttribute("data-datapack-id", String(dpId));
-                  renderPlaybookAndFulfillmentDrawer(parentStep, data, "checkout_fulfill");
+                  if (!isLiveStripeRedirect) {
+                    renderPlaybookAndFulfillmentDrawer(parentStep, data, "checkout_fulfill");
+                  }
                 }
-                emitWorkbenchEngagementBeacon("post_calc_upgrade_settled", "post_calculation_upgrade_drawer", {
+                emitWorkbenchEngagementBeacon(isLiveStripeRedirect ? "post_calc_checkout_redirecting" : "post_calc_upgrade_settled", "post_calculation_upgrade_drawer", {
                   offer_sku: data.offer_sku || chkBtn.getAttribute("data-offer-sku") || "",
                   settlement_id: String(stlId),
                   attributed_revenue_usd: Number(attrRev || 0),
                   datapack_id: String(dpId)
                 });
-                if (cMode.indexOf("live_session") !== -1 && data.checkout_url && String(data.checkout_url).indexOf("https://checkout.") === 0 && !window.__PSEO_SYNTHETIC_TEST__) {
+                if (isLiveStripeRedirect) {
                   window.location.assign(data.checkout_url);
                 }
               }
@@ -3370,6 +3396,7 @@ def _render_runtime_sync_events_js() -> str:
             blueprint_state: bpSnapshot,
             timestamp: ts
           };
+          window.__pseoActiveLeadEmail = rawEmail;
           if (window.__PSEO_SYNTHETIC_TEST__) {
             leadPayload.synthetic_test = true;
           }
@@ -3407,6 +3434,12 @@ def _render_runtime_sync_events_js() -> str:
               return res.json();
             }).then(function(data) {
               if (data && data.ok) {
+                window.__pseoActiveLeadId = data.lead_id || "verified";
+                var upgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
+                if (upgChkBtn) {
+                  upgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
+                  upgChkBtn.setAttribute("data-lead-email", rawEmail);
+                }
                 pbForm.setAttribute("data-submission-state", "success");
                 pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
                 if (data.checkout_url) pbForm.setAttribute("data-checkout-url", data.checkout_url);
@@ -3511,6 +3544,13 @@ def _render_runtime_sync_events_js() -> str:
             return res.json();
           }).then(function(data) {
             if (data && data.redirect_url) {
+              window.__pseoActiveLeadId = data.lead_id || "verified";
+              window.__pseoActiveLeadEmail = emailVal;
+              var qUpgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
+              if (qUpgChkBtn) {
+                qUpgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
+                qUpgChkBtn.setAttribute("data-lead-email", emailVal);
+              }
               qForm.setAttribute("data-submission-state", "success");
               if (drawer) {
                 if (data.lead_id) drawer.setAttribute("data-lead-id", data.lead_id);

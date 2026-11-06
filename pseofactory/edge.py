@@ -3482,6 +3482,19 @@ function maskEdgeEmail(email) {
   return s.slice(0, 1) + "***" + s.slice(at);
 }
 
+function isPlaceholderCheckoutEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e || !e.includes("@")) return true;
+  return (
+    e === "cfo@profithelm.com" ||
+    e === "borrower@prexvo.com" ||
+    e === "ciso@gainhelm.com" ||
+    e === "audit@profithelm.com" ||
+    e === "audit@prexvo.com" ||
+    e === "audit@gainhelm.com"
+  );
+}
+
 function isEdgeVerifiedPaidRecord(item) {
   return Boolean(
     item &&
@@ -3503,6 +3516,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     currency: null,
     livemode: null,
     stripe_http_status: null,
+    customer_email: null,
+    calculated_amount: null,
+    state: null,
   };
   if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {
     out.reason = "session_id_must_be_a_live_stripe_checkout_session";
@@ -3533,7 +3549,11 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
     out.currency = data.currency || null;
     out.livemode = data.livemode === true;
+    const custDetails = (data && data.customer_details) || {};
+    out.customer_email = custDetails.email || data.customer_email || null;
     const meta = (data && data.metadata) || {};
+    out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
+    out.state = meta.state || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -3602,8 +3622,23 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
+  const resolvedEmail =
+    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+      ? String(payment.customer_email).trim().toLowerCase()
+      : record.email;
+  const resolvedAmount =
+    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+      ? Number(payment.calculated_amount)
+      : record.calculated_amount;
+  const resolvedState =
+    payment.state && (!record.state || record.state === "US")
+      ? payment.state
+      : record.state;
   const settledRecord = {
     ...record,
+    email: resolvedEmail,
+    calculated_amount: resolvedAmount,
+    state: resolvedState,
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
@@ -3719,10 +3754,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
 
   if (!isSyntheticProbe && stripeKey && typeof fetch === "function") {
     try {
-      const params = new URLSearchParams({
+      const candidateEmail = String((bundle && bundle.email) || email || "").trim();
+      const paramsObj = {
         mode: "payment",
         "payment_method_types[0]": "card",
-        customer_email: email || "ciso@gainhelm.com",
         client_reference_id: leadId,
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -3737,8 +3772,13 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[offer_sku]": offer.sku,
         "metadata[merchant_email]": stripeMerchantEmail,
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 48500),
+        "metadata[state]": String((bundle && bundle.state) || "DE"),
         "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
-      });
+      };
+      if (!isPlaceholderCheckoutEmail(candidateEmail)) {
+        paramsObj.customer_email = candidateEmail;
+      }
+      const params = new URLSearchParams(paramsObj);
       const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
         method: "POST",
         headers: {
@@ -3856,14 +3896,28 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@gainhelm.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "GainHelm Research Desk";
   const emailSubject = `[GainHelm Playbook] Your Enterprise GRC & Audit Readiness Worksheet (${record.tool_slug})`;
-  const rawGhCheckout = String(record.checkout_url || "");
+  const fallbackGhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_gainhelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "soc-2-audit-cost-calculator")}&redirect=1`;
+  const rawGhCheckout = String(record.checkout_url || fallbackGhCheckoutPath);
   const fullGhCheckoutUrl = rawGhCheckout.startsWith("http")
     ? rawGhCheckout
     : `https://gainhelm.com${rawGhCheckout}${rawGhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
+  const ghPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_gainhelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "soc-2-audit-cost-calculator")}`);
+  const ghPlaybookHtmlUrl = `https://gainhelm.com${ghPlaybookPath}${ghPlaybookPath.includes("format=") ? "" : "&format=html"}`;
+  const ghPlaybookCsvUrl = `https://gainhelm.com${record.playbook_csv_url || (ghPlaybookPath + "&format=csv")}`;
+  const ghSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const ghTableHtml = ghSchedRows.length > 0
+    ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
+      `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
+      `<tbody>` +
+      ghSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      `</tbody></table>`
+    : "";
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your GainHelm Enterprise GRC &amp; Security Audit Worksheet</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
     `<p>Modeled Scope: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "mid_market"}</strong></p>` +
+    ghTableHtml +
+    `<p><a href="${ghPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${ghPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
     `<p><a href="https://gainhelm.com${record.redirect_url}">Review Matched GRC &amp; Audit Platform (${record.partner_rep_desk || "Enterprise GRC & C3PAO / CPA Audit Desk"})</a></p>` +
     `<p><a href="${fullGhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
@@ -4875,6 +4929,19 @@ function maskEdgeEmail(email) {
   return s.slice(0, 1) + "***" + s.slice(at);
 }
 
+function isPlaceholderCheckoutEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e || !e.includes("@")) return true;
+  return (
+    e === "cfo@profithelm.com" ||
+    e === "borrower@prexvo.com" ||
+    e === "ciso@gainhelm.com" ||
+    e === "audit@profithelm.com" ||
+    e === "audit@prexvo.com" ||
+    e === "audit@gainhelm.com"
+  );
+}
+
 function isEdgeVerifiedPaidRecord(item) {
   return Boolean(
     item &&
@@ -4896,6 +4963,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     currency: null,
     livemode: null,
     stripe_http_status: null,
+    customer_email: null,
+    calculated_amount: null,
+    state: null,
   };
   if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {
     out.reason = "session_id_must_be_a_live_stripe_checkout_session";
@@ -4926,7 +4996,11 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
     out.currency = data.currency || null;
     out.livemode = data.livemode === true;
+    const custDetails = (data && data.customer_details) || {};
+    out.customer_email = custDetails.email || data.customer_email || null;
     const meta = (data && data.metadata) || {};
+    out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
+    out.state = meta.state || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -4995,8 +5069,23 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
+  const resolvedEmail =
+    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+      ? String(payment.customer_email).trim().toLowerCase()
+      : record.email;
+  const resolvedAmount =
+    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+      ? Number(payment.calculated_amount)
+      : record.calculated_amount;
+  const resolvedState =
+    payment.state && (!record.state || record.state === "US")
+      ? payment.state
+      : record.state;
   const settledRecord = {
     ...record,
+    email: resolvedEmail,
+    calculated_amount: resolvedAmount,
+    state: resolvedState,
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
@@ -5131,7 +5220,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
       baseRecord.capital_band = deriveCapitalBand(parsedAmt);
     }
     if (stateParam) baseRecord.state = stateParam;
-    if (emailParam) baseRecord.email = emailParam;
+    if (emailParam && !isPlaceholderCheckoutEmail(emailParam)) baseRecord.email = emailParam;
     if (parsedInputs) {
       baseRecord.scenario_inputs = { ...(baseRecord.scenario_inputs || {}), ...parsedInputs };
     }
@@ -5243,10 +5332,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   let stripeHttpStatus = null;
   let stripeErrorCode = null;
   try {
-    const params = new URLSearchParams({
+    const candidateEmail = String((customRecord && customRecord.email) || email || "").trim();
+    const paramsObj = {
       mode: "payment",
       "payment_method_types[0]": "card",
-      customer_email: email,
       client_reference_id: leadId,
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -5261,8 +5350,13 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "metadata[offer_sku]": PREXVO_TOOLKIT_OFFER.sku,
       "metadata[merchant_email]": stripeMerchantEmail,
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 85000),
+      "metadata[state]": String((customRecord && customRecord.state) || "US"),
       "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
-    });
+    };
+    if (!isPlaceholderCheckoutEmail(candidateEmail)) {
+      paramsObj.customer_email = candidateEmail;
+    }
+    const params = new URLSearchParams(paramsObj);
     const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
@@ -5383,14 +5477,28 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@prexvo.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
   const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`;
-  const rawPxCheckout = String(record.checkout_url || "");
+  const fallbackPxCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}&redirect=1`;
+  const rawPxCheckout = String(record.checkout_url || fallbackPxCheckoutPath);
   const fullPxCheckoutUrl = rawPxCheckout.startsWith("http")
     ? rawPxCheckout
     : `https://prexvo.com${rawPxCheckout}${rawPxCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
+  const pxPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}`);
+  const pxPlaybookHtmlUrl = `https://prexvo.com${pxPlaybookPath}${pxPlaybookPath.includes("format=") ? "" : "&format=html"}`;
+  const pxPlaybookCsvUrl = `https://prexvo.com${record.playbook_csv_url || (pxPlaybookPath + "&format=csv")}`;
+  const pxSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const pxTableHtml = pxSchedRows.length > 0
+    ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
+      `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
+      `<tbody>` +
+      pxSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      `</tbody></table>`
+    : "";
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your Prexvo Student Loan Refinance Worksheet &amp; Decision Checklist</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
     `<p>Model Balance: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
+    pxTableHtml +
+    `<p><a href="${pxPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${pxPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
     `<p><a href="https://prexvo.com${record.redirect_url}">Compare Matched Lender Rates (${record.partner_rep_desk || "Splash Financial Partner Desk"})</a></p>` +
     `<p><a href="${fullPxCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
@@ -6047,6 +6155,9 @@ export async function onRequestPost(context) {
     const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, "paid_toolkit");
     record.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
     record.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
+    record.playbook_url = workpaperBundle.playbook_url;
+    record.playbook_csv_url = workpaperBundle.playbook_csv_url;
+    record.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
 
     const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
@@ -6818,6 +6929,19 @@ function maskEdgeEmail(email) {
   return s.slice(0, 1) + "***" + s.slice(at);
 }
 
+function isPlaceholderCheckoutEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e || !e.includes("@")) return true;
+  return (
+    e === "cfo@profithelm.com" ||
+    e === "borrower@prexvo.com" ||
+    e === "ciso@gainhelm.com" ||
+    e === "audit@profithelm.com" ||
+    e === "audit@prexvo.com" ||
+    e === "audit@gainhelm.com"
+  );
+}
+
 function isEdgeVerifiedPaidRecord(item) {
   return Boolean(
     item &&
@@ -6839,6 +6963,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     currency: null,
     livemode: null,
     stripe_http_status: null,
+    customer_email: null,
+    calculated_amount: null,
+    state: null,
   };
   if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {
     out.reason = "session_id_must_be_a_live_stripe_checkout_session";
@@ -6869,7 +6996,11 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
     out.currency = data.currency || null;
     out.livemode = data.livemode === true;
+    const custDetails = (data && data.customer_details) || {};
+    out.customer_email = custDetails.email || data.customer_email || null;
     const meta = (data && data.metadata) || {};
+    out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
+    out.state = meta.state || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -6938,8 +7069,23 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
+  const resolvedEmail =
+    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+      ? String(payment.customer_email).trim().toLowerCase()
+      : record.email;
+  const resolvedAmount =
+    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+      ? Number(payment.calculated_amount)
+      : record.calculated_amount;
+  const resolvedState =
+    payment.state && (!record.state || record.state === "US")
+      ? payment.state
+      : record.state;
   const settledRecord = {
     ...record,
+    email: resolvedEmail,
+    calculated_amount: resolvedAmount,
+    state: resolvedState,
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
@@ -7077,7 +7223,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
     }
     if (stateParam) baseRecord.state = resolvedState;
     else if (!baseRecord.state || baseRecord.state === "US") baseRecord.state = resolvedState;
-    if (emailParam) baseRecord.email = emailParam;
+    if (emailParam && !isPlaceholderCheckoutEmail(emailParam)) baseRecord.email = emailParam;
     if (parsedInputs) {
       baseRecord.scenario_inputs = { ...(baseRecord.scenario_inputs || {}), ...parsedInputs };
     }
@@ -7189,10 +7335,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   let stripeHttpStatus = null;
   let stripeErrorCode = null;
   try {
-    const params = new URLSearchParams({
+    const candidateEmail = String((customRecord && customRecord.email) || email || "").trim();
+    const paramsObj = {
       mode: "payment",
       "payment_method_types[0]": "card",
-      customer_email: email,
       client_reference_id: leadId,
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -7207,8 +7353,13 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "metadata[offer_sku]": spec.offerSku,
       "metadata[merchant_email]": stripeMerchantEmail,
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 250000),
+      "metadata[state]": String((customRecord && customRecord.state) || "US"),
       "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
-    });
+    };
+    if (!isPlaceholderCheckoutEmail(candidateEmail)) {
+      paramsObj.customer_email = candidateEmail;
+    }
+    const params = new URLSearchParams(paramsObj);
     const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
@@ -7329,14 +7480,28 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
   const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`;
-  const rawPhCheckout = String(record.checkout_url || "");
+  const fallbackPhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}&redirect=1`;
+  const rawPhCheckout = String(record.checkout_url || fallbackPhCheckoutPath);
   const fullPhCheckoutUrl = rawPhCheckout.startsWith("http")
     ? rawPhCheckout
     : `https://profithelm.com${rawPhCheckout}${rawPhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
+  const phPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}`);
+  const phPlaybookHtmlUrl = `https://profithelm.com${phPlaybookPath}${phPlaybookPath.includes("format=") ? "" : "&format=html"}`;
+  const phPlaybookCsvUrl = `https://profithelm.com${record.playbook_csv_url || (phPlaybookPath + "&format=csv")}`;
+  const phSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const phTableHtml = phSchedRows.length > 0
+    ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
+      `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
+      `<tbody>` +
+      phSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      `</tbody></table>`
+    : "";
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your ProfitHelm Statutory Calculation Worksheet &amp; Compliance Briefing</h2>` +
     `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
     `<p>Model Amount: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
+    phTableHtml +
+    `<p><a href="${phPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${phPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
     `<p><a href="https://profithelm.com${record.redirect_url}">Access Matched Commercial Desk (${record.partner_rep_desk || "ProfitHelm Partner Desk"})</a></p>` +
     `<p><a href="${fullPhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
@@ -7978,6 +8143,9 @@ export async function onRequestPost(context) {
     const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, spec, "paid_toolkit");
     record.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
     record.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
+    record.playbook_url = workpaperBundle.playbook_url;
+    record.playbook_csv_url = workpaperBundle.playbook_csv_url;
+    record.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
 
     const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);

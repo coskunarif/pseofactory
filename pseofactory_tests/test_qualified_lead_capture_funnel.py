@@ -1664,3 +1664,181 @@ def test_ui_ux_e2e_repro_gate(tmp_path):
         assert calc_rep.get("inputs_tested_count", 0) >= 2
         assert calc_rep.get("input_failures") == []
 
+
+def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_email(tmp_path):
+    """
+    Verifies three live conversion requirements across ProfitHelm and Prexvo edge workers:
+    1. Anonymous GET /api/lead-capture?checkout=1 omits customer_email from Stripe session
+       creation so Stripe Checkout lets the buyer type their own email instead of locking
+       cfo@profithelm.com or borrower@prexvo.com.
+    2. When a lead already submitted an email via POST /api/lead-capture, a subsequent
+       GET /api/lead-capture?checkout=1&lead_id=<id> preserves their stored KV email and
+       pre-fills that real email into Stripe Checkout rather than overwriting it with a placeholder.
+    3. When an anonymous buyer completes payment on Stripe (returning customer_details.email
+       on /v1/checkout/sessions/cs_live_...), fulfill=1 syncs that real buyer email onto the
+       settled lead record so lead_origin is 'real' (not 'internal_probe').
+    4. Playbook email body dispatched by dispatchEdgeZeptoMailPlaybook includes the inline
+       4-line reconciliation_schedule table and direct free Playbook worksheet/CSV links.
+    """
+    import subprocess
+    import json
+
+    for prop_id in ("profithelm", "prexvo"):
+        fn_dir = tmp_path / f"{prop_id}_conv" / "functions" / "api"
+        fn_dir.mkdir(parents=True)
+        fn_file = fn_dir / "lead-capture.js"
+        fn_file.write_text(generate_edge_lead_capture_function(prop_id), encoding="utf-8")
+
+        slug = (
+            "section-1031-calculator"
+            if prop_id == "profithelm"
+            else "student-loan-refinance-break-even-calculator"
+        )
+        node_script = f"""
+        import("./functions/api/lead-capture.js").then(async mod => {{
+          const kvStore = new Map();
+          const stripePostBodies = [];
+          let capturedEmailHtml = "";
+          globalThis.fetch = async (url, init) => {{
+            const u = String(url);
+            if (u.includes("api.nango.dev/connection")) {{
+              return new Response(JSON.stringify({{
+                credentials: {{ access_token: "1000.mock_zoho_oauth_token" }}
+              }}), {{ status: 200 }});
+            }}
+            if (u.includes("mail.zoho.com/api/accounts")) {{
+              const parsed = JSON.parse(init.body || "{{}}");
+              capturedEmailHtml = parsed.content || "";
+              return new Response(JSON.stringify({{
+                status: {{ code: 200 }},
+                data: {{ messageId: "msg_rich_123", mailId: "msg_rich_123" }}
+              }}), {{ status: 200 }});
+            }}
+            if (u === "https://api.stripe.com/v1/checkout/sessions" && init && init.method === "POST") {{
+              stripePostBodies.push(String(init.body || ""));
+              return new Response(JSON.stringify({{
+                id: "cs_live_SESSION_" + stripePostBodies.length,
+                url: "https://checkout.stripe.com/c/pay/cs_live_SESSION_" + stripePostBodies.length
+              }}), {{ status: 200 }});
+            }}
+            if (u.includes("api.stripe.com/v1/checkout/sessions/cs_live_PAID_ANON")) {{
+              return new Response(JSON.stringify({{
+                id: "cs_live_PAID_ANON",
+                livemode: true,
+                payment_status: "paid",
+                amount_total: 4900,
+                currency: "usd",
+                client_reference_id: "lead_{prop_id}_anon_buyer",
+                customer_details: {{ email: "realbuyer@externalclient.io" }},
+                metadata: {{
+                  lead_id: "lead_{prop_id}_anon_buyer",
+                  property_id: "{prop_id}",
+                  calculated_amount: "325000",
+                  state: "TX"
+                }}
+              }}), {{ status: 200 }});
+            }}
+            return new Response("{{}}", {{ status: 200 }});
+          }};
+
+          const mockEnv = {{
+            NANGO_SECRET_KEY: "mock_nango_secret",
+            NANGO_CONNECTION_ID: "mock_nango_conn",
+            ZOHO_MAIL_ACCOUNT_ID: "676891000000008002",
+            STRIPE_ACCOUNT_ID: "acct_1T6fSTIq0ckFsf5j",
+            STRIPE_PUBLISHABLE_KEY: "pk_live_mock",
+            STRIPE_SECRET_KEY: "sk_live_mock",
+            PROFITHELM_LEADS: {{
+              put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+              list: async ({{ prefix }}) => ({{
+                keys: Array.from(kvStore.keys()).filter(k => k.startsWith(prefix)).map(name => ({{ name }}))
+              }}),
+              get: async (k) => kvStore.get(k) || null
+            }},
+            PREXVO_LEADS: {{
+              put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+              list: async ({{ prefix }}) => ({{
+                keys: Array.from(kvStore.keys()).filter(k => k.startsWith(prefix)).map(name => ({{ name }}))
+              }}),
+              get: async (k) => kvStore.get(k) || null
+            }}
+          }};
+
+          // 1. Anonymous checkout=1 click (no email query param)
+          const anonCoRes = await mod.onRequestGet({{
+            request: new Request("https://{prop_id}.com/api/lead-capture?checkout=1&tool_slug={slug}&amount=325000&lead_id=lead_{prop_id}_anon_buyer&format=json"),
+            env: mockEnv
+          }});
+          const anonCoData = await anonCoRes.json();
+
+          // 2. Playbook form submission with real visitor email, followed by checkout=1 with lead_id (no email query param)
+          const pbRes = await mod.onRequestPost({{
+            request: {{
+              url: "https://{prop_id}.com/api/lead-capture",
+              headers: new Headers({{ "content-type": "application/json" }}),
+              json: async () => ({{
+                email: "leadbuyer@acmecorp.io",
+                source: "/tools/{slug}/",
+                tool_slug: "{slug}",
+                scenario_amount: 410000
+              }})
+            }},
+            env: mockEnv
+          }});
+          const pbData = await pbRes.json();
+
+          const leadCoRes = await mod.onRequestGet({{
+            request: new Request("https://{prop_id}.com/api/lead-capture?checkout=1&lead_id=" + pbData.lead_id + "&tool_slug={slug}&format=json"),
+            env: mockEnv
+          }});
+          const leadCoData = await leadCoRes.json();
+
+          // 3. Anonymous buyer completes Stripe Checkout and hits fulfill=1
+          const fulfillRes = await mod.onRequestGet({{
+            request: new Request("https://{prop_id}.com/api/lead-capture?fulfill=1&lead_id=lead_{prop_id}_anon_buyer&tool_slug={slug}&session_id=cs_live_PAID_ANON&format=json"),
+            env: mockEnv
+          }});
+          const fulfillData = await fulfillRes.json();
+
+          const listRes = await mod.onRequestGet({{
+            request: new Request("https://{prop_id}.com/api/lead-capture?limit=50"),
+            env: mockEnv
+          }});
+          const listData = await listRes.json();
+
+          console.log(JSON.stringify({{
+            stripePostBodies,
+            capturedEmailHtml,
+            anonCoStatus: anonCoRes.status,
+            leadCoStatus: leadCoRes.status,
+            fulfillStatus: fulfillRes.status,
+            listData
+          }}));
+        }});
+        """
+        proc = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=tmp_path / f"{prop_id}_conv",
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout.strip())
+        bodies = out["stripePostBodies"]
+        assert len(bodies) >= 3
+        # Body 0: anonymous GET checkout=1 -> must NOT lock customer_email to cfo@profithelm.com / borrower@prexvo.com
+        assert "customer_email=" not in bodies[0], f"Anonymous checkout locked customer_email: {bodies[0]}"
+        # Body 1 (from POST) and Body 2 (from GET checkout=1&lead_id=...) -> must pass leadbuyer@acmecorp.io
+        assert "customer_email=leadbuyer%40acmecorp.io" in bodies[2], f"Stored KV lead email was overwritten on checkout=1: {bodies[2]}"
+        # Rich Playbook email must include reconciliation table and playbook=1 links
+        email_html = out["capturedEmailHtml"]
+        assert "playbook=1" in email_html, f"Playbook email missing free playbook=1 link: {email_html}"
+        assert "format=csv" in email_html, f"Playbook email missing CSV schedule link: {email_html}"
+        assert "<table" in email_html and "Statutory Line Item" in email_html, f"Playbook email missing inline reconciliation table: {email_html}"
+        # Fulfilled anonymous checkout must sync realbuyer@externalclient.io from Stripe customer_details so lead_origin is 'real'
+        settled_lead = next((l for l in out["listData"]["leads"] if l["lead_id"] == f"lead_{prop_id}_anon_buyer"), None)
+        assert settled_lead is not None
+        assert settled_lead["settlement_status"] == "settled"
+        assert settled_lead["lead_origin"] == "real", f"Settled anonymous buyer should have lead_origin='real' from Stripe customer_details.email, got: {settled_lead}"
+
+
