@@ -7424,6 +7424,205 @@ def evaluate_x_like_2109219955271196726_capability_matrix(
     }
 
 
+_X_LIKE_2104700186404811010_FIXES: List[Tuple[str, str, str, str]] = [
+    # (fix, disposition, pseofactory_stage, case_for)
+    ("Add alt text", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (alt_text)", "Every <img> in compiled HTML must carry a non-empty alt attribute."),
+    ("Add a sitemap", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (sitemap)", "Every indexable route must appear in a sitemap*.xml and robots.txt must reference a sitemap."),
+    ("Fix page titles", "ALREADY_SOLVED_IN_SUBSTRATE", "verifier.audit_estate_technical_seo_and_cannibalization", "Title length bounds and intra-tenant uniqueness already gated."),
+    ("One H1 per page", "ALREADY_SOLVED_IN_SUBSTRATE", "verifier.audit_estate_technical_seo_and_cannibalization", "Exactly one H1 per indexable page already gated."),
+    ("Compress images", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (image_weight)", "Raster images above the byte budget fail the gate."),
+    ("Set page language", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (html_lang)", "Every page needs <html lang>."),
+    ("Add canonical tags", "ALREADY_SOLVED_IN_SUBSTRATE", "verifier.audit_estate_technical_seo_and_cannibalization", "Canonical presence, og:url parity, and uniqueness already gated."),
+    ("Optimize robots.txt", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (robots_txt)", "robots.txt must exist, must not block the whole site for all agents, and must list sitemaps."),
+    ("Use readable URLs", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (readable_urls)", "Lowercase, hyphenated, no spaces, underscores, or query strings in route paths."),
+    ("Add schema markup", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (schema_markup)", "Every indexable page needs at least one parseable JSON-LD block with @type."),
+    ("Remove noindex tags", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (noindex_hygiene)", "No sitemap URL may be noindex and no noindex page may be listed in a sitemap."),
+    ("Link pages together", "ALREADY_SOLVED_IN_SUBSTRATE", "verifier.audit_estate_technical_seo_and_cannibalization", "Orphan, broken-link, and fragment checks already gated."),
+    ("Speed up load times", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (render_blocking)", "No external render-blocking script without async/defer/module, plus image weight budget."),
+    ("Add meta descriptions", "ALREADY_SOLVED_IN_SUBSTRATE", "verifier.audit_estate_technical_seo_and_cannibalization", "Presence, length bounds, and uniqueness already gated."),
+    ("Redirect deleted URLs", "ALREADY_SOLVED_IN_SUBSTRATE", "verifier.audit_estate_technical_seo_and_cannibalization", "_redirects chains, loops, dead targets, and sitemap-redirect conflicts already gated."),
+    ("Add Search Console tag", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (search_console)", "Home page needs a google-site-verification meta tag or a verification file in dist."),
+    ("Hide test pages from Google", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (test_pages_hidden)", "No test/staging/dev route may be in a sitemap or be indexable."),
+    ("Make content load without JavaScript", "NEW_DETERMINISTIC_GATE", "verifier.audit_estate_seo_fix_checklist (no_js_content)", "Raw HTML (scripts stripped) must carry the H1 and a minimum body word count."),
+]
+
+X_LIKE_2104700186404811010_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "rank": i,
+        "fix": fix,
+        "disposition": disp,
+        "pseofactory_stage": stage,
+        "vault_surface": "pseofactory audit --property <tenant>",
+        "case_for": case,
+        "case_against": "Checklist items alone do not rank pages; they are table stakes that must be enforced at compile time, not asserted.",
+    }
+    for i, (fix, disp, stage, case) in enumerate(_X_LIKE_2104700186404811010_FIXES, start=1)
+]
+
+_SEO_FIX_TEST_ROUTE_RE = re.compile(r"(^|/)(test|tests|staging|stage|dev|draft|sandbox)(/|$|[-_.])", re.I)
+_SEO_FIX_IMAGE_BYTE_BUDGET = 300_000
+_SEO_FIX_MIN_NO_JS_WORDS = 150
+
+
+def _seo_fix_sitemap_paths(d_path: Path, domain: str) -> Set[str]:
+    paths: Set[str] = set()
+    for sm in sorted(d_path.glob("sitemap*.xml")):
+        for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sm.read_text(encoding="utf-8", errors="ignore")):
+            if loc.startswith(domain):
+                loc = loc[len(domain):] or "/"
+            if loc.endswith(".xml"):
+                continue
+            paths.add(loc if loc.startswith("/") else "/" + loc)
+    return paths
+
+
+def audit_estate_seo_fix_checklist(
+    dist_dir: Optional[Union[str, Path]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Deterministic gate for the 18 SEO fixes in x-like:2104700186404811010 that the
+    estate technical audit did not already cover: alt text, sitemap coverage, image
+    weight, html lang, robots.txt, readable URLs, JSON-LD, noindex hygiene,
+    render-blocking scripts, Search Console tag, hidden test pages, and no-JS content.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json as _json
+
+    prop, domain, d_path = _resolve_tenant_dist_and_domain(property_id, dist_dir)
+    if not d_path.is_dir():
+        return {"status": "FAIL", "passed": False, "property_id": prop, "dist_dir": str(d_path),
+                "issues": [f"Distribution directory not found: {d_path}"]}
+
+    issues: List[str] = []
+    sm_paths = _seo_fix_sitemap_paths(d_path, domain)
+    sm_norm = {p if p.endswith("/") or "." in p.rsplit("/", 1)[-1] else p + "/" for p in sm_paths}
+
+    robots = d_path / "robots.txt"
+    if not robots.is_file():
+        issues.append("robots_txt: robots.txt missing")
+    else:
+        r_txt = robots.read_text(encoding="utf-8", errors="ignore")
+        if not re.search(r"^\s*Sitemap:\s*\S+", r_txt, re.I | re.M):
+            issues.append("robots_txt: no Sitemap directive")
+        for grp in re.split(r"\n\s*\n", r_txt):
+            if re.search(r"^\s*User-agent:\s*\*\s*$", grp, re.I | re.M) and re.search(r"^\s*Disallow:\s*/\s*$", grp, re.M):
+                issues.append("robots_txt: blanket 'Disallow: /' for all agents")
+    if not sm_paths:
+        issues.append("sitemap: no sitemap*.xml with page locs found")
+
+    for f in sorted(d_path.rglob("*")):
+        if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".bmp") and f.stat().st_size > _SEO_FIX_IMAGE_BYTE_BUDGET:
+            issues.append(f"image_weight: {f.relative_to(d_path).as_posix()} is {f.stat().st_size} bytes (> {_SEO_FIX_IMAGE_BYTE_BUDGET})")
+
+    indexable = 0
+    pages = 0
+    home_has_gsc = False
+    for f in sorted(d_path.rglob("*.html")):
+        rel = f.relative_to(d_path).as_posix()
+        if rel == "404.html":
+            continue
+        pages += 1
+        route = "/" if rel == "index.html" else (f"/{rel[:-10]}" if rel.endswith("/index.html") else f"/{rel}")
+        content = f.read_text(encoding="utf-8", errors="ignore")
+        noindex = bool(re.search(r"<meta\b[^>]*name=[\"']robots[\"'][^>]*content=[\"'][^\"']*noindex", content, re.I))
+        in_sitemap = route in sm_norm
+
+        if rel == "index.html" and (re.search(r"google-site-verification", content, re.I) or list(d_path.glob("google*.html"))):
+            home_has_gsc = True
+        if _SEO_FIX_TEST_ROUTE_RE.search(route.strip("/")) and (in_sitemap or not noindex):
+            issues.append(f"test_pages_hidden: {route} is a test/staging route that is indexable or in a sitemap")
+        if noindex and in_sitemap:
+            issues.append(f"noindex_hygiene: {route} is noindex but listed in a sitemap")
+        if noindex:
+            continue
+        indexable += 1
+        if indexable and not in_sitemap and not _SEO_FIX_TEST_ROUTE_RE.search(route.strip("/")) and sm_paths:
+            issues.append(f"sitemap: indexable route {route} missing from sitemap")
+
+        if re.search(r"[A-Z_ ]|%20", route) or "?" in route:
+            issues.append(f"readable_urls: {route} is not lowercase-hyphenated")
+        if not re.search(r"<html\b[^>]*\blang=[\"'][A-Za-z-]{2,}[\"']", content, re.I):
+            issues.append(f"html_lang: {rel} missing <html lang>")
+        for img in re.findall(r"<img\b[^>]*>", content, re.I):
+            m = re.search(r"\balt=([\"'])(.*?)\1", img, re.I | re.S)
+            if not m or not m.group(2).strip():
+                issues.append(f"alt_text: {rel} has <img> without alt text")
+                break
+
+        blocks = re.findall(r"<script\b[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", content, re.I | re.S)
+        good = 0
+        for b in blocks:
+            try:
+                data = _json.loads(b)
+            except ValueError:
+                issues.append(f"schema_markup: {rel} has invalid JSON-LD")
+                continue
+            nodes = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
+            if any(isinstance(n, dict) and n.get("@type") for n in nodes):
+                good += 1
+        if not good:
+            issues.append(f"schema_markup: {rel} has no valid JSON-LD with @type")
+
+        for tag in re.findall(r"<script\b[^>]*\bsrc=[^>]*>", content, re.I):
+            if re.search(r"src=[\"']https?://", tag, re.I) and not re.search(r"\b(async|defer)\b|type=[\"']module[\"']", tag, re.I):
+                issues.append(f"render_blocking: {rel} loads external script without async/defer")
+
+        raw = re.sub(r"<(script|style|noscript)\b[^>]*>.*?</\1>", " ", content, flags=re.I | re.S)
+        if not re.search(r"<h1\b[^>]*>\s*\S", raw, re.I):
+            issues.append(f"no_js_content: {rel} has no H1 in raw HTML")
+        words = len(re.sub(r"<[^>]+>", " ", raw).split())
+        if words < _SEO_FIX_MIN_NO_JS_WORDS:
+            issues.append(f"no_js_content: {rel} has only {words} words without JavaScript (< {_SEO_FIX_MIN_NO_JS_WORDS})")
+
+    if not home_has_gsc:
+        issues.append("search_console: home page lacks google-site-verification tag and no verification file found")
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": not issues,
+        "property_id": prop,
+        "domain": domain,
+        "dist_dir": str(d_path),
+        "html_files_scanned": pages,
+        "indexable_routes_count": indexable,
+        "sitemap_paths_count": len(sm_paths),
+        "issues": issues,
+    }
+
+
+def evaluate_x_like_2104700186404811010_capability_matrix(
+    include_live_estate_audit: bool = True,
+) -> Dict[str, Any]:
+    """
+    Maps the 18 SEO fixes from x-like:2104700186404811010 onto pseofactory gates and
+    (optionally) runs both the estate technical audit and the new checklist gate on
+    ProfitHelm, Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    m = X_LIKE_2104700186404811010_CAPABILITY_MATRIX
+    tenant_reports: Dict[str, Any] = {}
+    all_passed = True
+    if include_live_estate_audit:
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
+            tech = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
+            chk = audit_estate_seo_fix_checklist(property_id=t_id)
+            tenant_reports[t_id] = {"technical": tech, "checklist": chk}
+            all_passed = all_passed and tech.get("passed", False) and chk["passed"]
+    return {
+        "pointer": "x-like:2104700186404811010",
+        "tweet_id": "2104700186404811010",
+        "author_handle": "TheCoolestCool",
+        "total_fixes_evaluated": len(m),
+        "new_deterministic_gates_count": sum(1 for x in m if x["disposition"] == "NEW_DETERMINISTIC_GATE"),
+        "already_solved_in_substrate_count": sum(1 for x in m if x["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"),
+        "matrix": list(m),
+        "tenant_reports": tenant_reports,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }
+
+
 X_LIKE_2102358751290236980_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
     {
         "workflow_id": 1,
