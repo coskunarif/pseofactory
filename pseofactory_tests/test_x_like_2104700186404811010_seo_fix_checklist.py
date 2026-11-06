@@ -91,3 +91,16 @@ def test_live_tenants_pass_both_audits():
     for t, rep in s["tenant_reports"].items():
         assert rep["checklist"]["passed"], (t, rep["checklist"]["issues"][:5])
         assert rep["technical"]["passed"], (t, rep["technical"]["issues"][:5])
+
+
+def test_cli_audit_blocks_on_seo_fix_failure(monkeypatch, capsys):
+    """The autonomous `pseofactory audit --property` path must fail when the checklist fails."""
+    import pseofactory.cli as cli
+    import pseofactory.verifier as v
+
+    fake = {"status": "FAIL", "passed": False, "html_files_scanned": 1, "issues": ["alt_text: x has <img> without alt text"]}
+    monkeypatch.setattr(v, "audit_estate_seo_fix_checklist", lambda **kw: fake)
+    assert cli._run_seo_fix_checklist_gate("gainhelm", as_json=False) is False
+    assert "alt_text" in capsys.readouterr().out
+    monkeypatch.setattr(v, "audit_estate_seo_fix_checklist", lambda **kw: {**fake, "status": "PASS", "passed": True, "issues": []})
+    assert cli._run_seo_fix_checklist_gate("gainhelm", as_json=True) is True

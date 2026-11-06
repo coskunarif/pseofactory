@@ -52,6 +52,18 @@ from pseofactory.drift import (
 from pseofactory.tenant_facts import CANONICAL_TENANT_IDS
 
 
+def _run_seo_fix_checklist_gate(property_id: str, as_json: bool) -> bool:
+    """Runs the x-like:2104700186404811010 SEO fix checklist gate on a tenant's compiled dist."""
+    from pseofactory.verifier import audit_estate_seo_fix_checklist
+
+    rep = audit_estate_seo_fix_checklist(property_id=property_id)
+    if not as_json:
+        print(f"[{rep['status']}] SEO Fix Checklist for '{property_id}': Pages: {rep.get('html_files_scanned', 0)} | Issues: {len(rep['issues'])}")
+        for issue in rep["issues"][:20]:
+            print(f"  - {issue}")
+    return bool(rep["passed"])
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """
     Executes asset integrity audit across property static assets.
@@ -230,6 +242,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     )
             if rep.status != "PASS":
                 all_passed = False
+            if not _run_seo_fix_checklist_gate(p_id, args.json):
+                all_passed = False
         if args.json:
             print(json.dumps({"status": "PASS" if all_passed else "DRIFT", "properties": reports_dict}, indent=2))
         return 0 if all_passed else 1
@@ -267,7 +281,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 f"[{b_rep.get('status', 'UNKNOWN')}] Browser CDP Audit for '{property_id}': "
                 f"Total: {b_rep.get('total_routes', 0)} | Audited: {b_rep.get('routes_audited', 0)} | Failed: {b_rep.get('failed_count', 0)}"
             )
-    return 0 if (report.status == "PASS" and browser_ok) else 1
+    seo_fix_ok = _run_seo_fix_checklist_gate(property_id, args.json)
+    return 0 if (report.status == "PASS" and browser_ok and seo_fix_ok) else 1
 
 
 def cmd_maintain(args: argparse.Namespace) -> int:
