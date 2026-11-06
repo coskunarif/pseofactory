@@ -1840,5 +1840,8 @@ def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_e
         assert settled_lead is not None
         assert settled_lead["settlement_status"] == "settled"
         assert settled_lead["lead_origin"] == "real", f"Settled anonymous buyer should have lead_origin='real' from Stripe customer_details.email, got: {settled_lead}"
+        from pseofactory.maintenance import CrossPropertyContaminationScanner
+        contam = CrossPropertyContaminationScanner().scan_directory(fn_dir, prop_id)
+        assert not contam, f"Cross-property contamination in {prop_id} lead-capture.js: {contam}"
 
 

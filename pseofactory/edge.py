@@ -3486,11 +3486,7 @@ function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@")) return true;
   return (
-    e === "cfo@profithelm.com" ||
-    e === "borrower@prexvo.com" ||
     e === "ciso@gainhelm.com" ||
-    e === "audit@profithelm.com" ||
-    e === "audit@prexvo.com" ||
     e === "audit@gainhelm.com"
   );
 }
@@ -4933,12 +4929,8 @@ function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@")) return true;
   return (
-    e === "cfo@profithelm.com" ||
     e === "borrower@prexvo.com" ||
-    e === "ciso@gainhelm.com" ||
-    e === "audit@profithelm.com" ||
-    e === "audit@prexvo.com" ||
-    e === "audit@gainhelm.com"
+    e === "audit@prexvo.com"
   );
 }
 
@@ -6934,11 +6926,7 @@ function isPlaceholderCheckoutEmail(email) {
   if (!e || !e.includes("@")) return true;
   return (
     e === "cfo@profithelm.com" ||
-    e === "borrower@prexvo.com" ||
-    e === "ciso@gainhelm.com" ||
-    e === "audit@profithelm.com" ||
-    e === "audit@prexvo.com" ||
-    e === "audit@gainhelm.com"
+    e === "audit@profithelm.com"
   );
 }
 
