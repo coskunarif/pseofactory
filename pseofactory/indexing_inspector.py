@@ -369,6 +369,7 @@ class DailyIndexingInspector:
         Audits search traffic drops by computing 7-day and 28-day rolling averages (RMA_7 / RMA_28)
         and flagging declines exceeding drop_threshold (15%) past dynamic floor.
         """
+        harvest_error: Optional[str] = None
         if gsc_records is None and daily_series is not None:
             gsc_records = daily_series
         if not gsc_records and "PYTEST_CURRENT_TEST" not in os.environ:
@@ -379,8 +380,18 @@ class DailyIndexingInspector:
                     repo_root=self.base_dir,
                     persist=False,
                 )
-            except Exception:
+            except Exception as exc:
+                harvest_error = str(exc)
                 gsc_records = None
+
+        if harvest_error:
+            return {
+                "status": "WARN",
+                "traffic_drop_detected": False,
+                "reason": "GSC_TIMELINE_HARVEST_ERROR",
+                "error": harvest_error,
+                "drop_percentage": 0.0,
+            }
 
         if not gsc_records or len(gsc_records) < 14:
             return {
@@ -1260,6 +1271,7 @@ class DailyIndexingInspector:
                             quarantine_report.get("status") == "PASS"
                             and velocity_report.get("status") == "PASS"
                             and traffic_report.get("status") == "PASS"
+                            and not has_unindexed_gsc
                         ):
                             overall_status = "PASS"
                             report["audit_status"] = "PASS"
@@ -1267,11 +1279,16 @@ class DailyIndexingInspector:
                         pass
 
                 report["auto_remediation"] = auto_rem_res
+                if isinstance(auto_rem_res, dict) and auto_rem_res.get("status") == "FAILED":
+                    overall_status = "FAIL"
+                    report["audit_status"] = "FAIL"
             except Exception as rem_err:
                 report["auto_remediation"] = {
                     "status": "FAILED",
                     "error": str(rem_err),
                 }
+                overall_status = "FAIL"
+                report["audit_status"] = "FAIL"
 
         # Cooldown-locked GSC query-page cohort & Day-28 expired overlay evaluation
         try:

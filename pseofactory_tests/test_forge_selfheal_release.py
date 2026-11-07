@@ -226,3 +226,105 @@ def test_published_demand_telemetry_is_stable_across_trend_cycles(monkeypatch):
         assert k not in t1
     assert t1["source"] == "pseofactory/trends/data/trend_history.db"
     assert t1["jev_score"] > 0
+
+
+def test_missing_gsccli_does_not_fake_url_inspection_pass(monkeypatch):
+    from pseofactory.indexer import PushIndexer
+
+    orchestrator = PushIndexer(domain="profithelm.com")
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr(Path, "is_file", lambda self: False)
+
+    res = orchestrator.inspect_gsc_url("https://profithelm.com/tools/section-179-calculator/")
+    assert res["is_indexed"] is False
+    assert res["verdict"] != "PASS"
+    assert res["status"] == "UNAVAILABLE"
+
+
+def test_traffic_audit_reports_warn_when_gsc_harvest_throws(monkeypatch, tmp_path):
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    import pseofactory.seo_growth_loops as sgl
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(
+        sgl,
+        "harvest_and_sync_gsc_daily_timeline",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("gsccli auth expired")),
+    )
+    inspector = DailyIndexingInspector(tenant_id="profithelm", base_dir=tmp_path)
+    res = inspector.audit_search_traffic()
+    assert res["status"] == "WARN"
+    assert res["reason"] == "GSC_TIMELINE_HARVEST_ERROR"
+
+
+def test_inspector_does_not_override_failed_auto_remediation_to_pass(tmp_path):
+    import json
+    from pseofactory.indexing_inspector import DailyIndexingInspector
+    from pseofactory.telemetry import AtomicTelemetryLogger
+
+    rollover = tmp_path / "rollover.json"
+    quarantine = tmp_path / "quarantine.json"
+    velocity = tmp_path / "velocity.json"
+    recovery = tmp_path / "recovery.json"
+    rollover.write_text(json.dumps(["https://profithelm.com/tools/t1/"]), encoding="utf-8")
+    quarantine.write_text(json.dumps({}), encoding="utf-8")
+    velocity.write_text(json.dumps({"routes": []}), encoding="utf-8")
+
+    inspector = DailyIndexingInspector(
+        tenant_id="profithelm",
+        base_dir=tmp_path,
+        recovery_ledger_path=recovery,
+        quarantine_ledger_path=quarantine,
+        velocity_ledger_path=velocity,
+        rollover_queue_path=rollover,
+        telemetry_logger=AtomicTelemetryLogger(log_path=tmp_path / "t.jsonl"),
+    )
+
+    with patch(
+        "pseofactory.indexing.feedback_loop.IndexingFeedbackLoop.run_feedback_cycle",
+        return_value={"status": "FAILED", "error": "recompile error"},
+    ):
+        rep = inspector.run_inspection(dry_run=True, auto_remediate=True)
+
+    assert rep["audit_status"] == "FAIL"
+
+
+def test_supervisor_escalation_triggers_autonomous_self_healing(tmp_path):
+    from pseofactory.maintenance import TenantRegistry
+    from pseofactory.supervisor import AutonomousLifecycleSupervisor, MaintenanceResult
+
+    sup = AutonomousLifecycleSupervisor(
+        workspace_root=tmp_path,
+        registry=TenantRegistry.default(),
+        max_consecutive_failures=1,
+    )
+    fail_res = MaintenanceResult(
+        property_id="profithelm",
+        status="FAILED",
+        assets_audited=10,
+        assets_drifted=1,
+        assets_refactored=0,
+        assets_failed=1,
+        failed_records=[{"error": "edge fail"}],
+        engine_hash=None,
+        duration_seconds=1.0,
+    )
+    with patch.object(sup.coordinator, "run_fleet", return_value={"profithelm": fail_res}), patch.object(
+        sup.failure_streak,
+        "record_cycle",
+        return_value=[{"tenant_id": "profithelm", "streak": 3, "first_seen": "2026-11-06T00:00:00Z", "reason": "edge fail"}],
+    ), patch(
+        "pseofactory.gitops.reconcile_workspace_tracking_state",
+        return_value={"status": "PASS"},
+    ), patch(
+        "pseofactory.indexing_inspector.DailyIndexingInspector.run_inspection",
+        return_value={"audit_status": "PASS"},
+    ) as mock_insp:
+        res = sup.run_cycle(property_ids=["profithelm"], force=True, dry_run=False, enable_gitops=False)
+
+    actions = res.get("self_healing_actions") or []
+    assert len(actions) == 1
+    assert actions[0]["status"] == "RECOVERED"
+    assert mock_insp.called
+    assert (tmp_path / ".agy" / "self_healing_ledger.jsonl").is_file()
+
