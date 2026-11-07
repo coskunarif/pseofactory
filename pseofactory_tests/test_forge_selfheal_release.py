@@ -328,3 +328,42 @@ def test_supervisor_escalation_triggers_autonomous_self_healing(tmp_path):
     assert mock_insp.called
     assert (tmp_path / ".agy" / "self_healing_ledger.jsonl").is_file()
 
+
+def test_retro_reflection_flags_and_heals_volatile_telemetry_in_html_and_sidecar(tmp_path):
+    import json
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    raw_html = Path("/home/ubuntuadmin/projects/prexvo/dist/tools/icr-repayment-calculator/index.html").read_text(
+        encoding="utf-8"
+    )
+    if '"consecutive_cycles_count":' not in raw_html:
+        raw_html = raw_html.replace(
+            '"property_id": "prexvo"',
+            '"property_id": "prexvo",\n      "consecutive_cycles_count": 355',
+            1,
+        )
+    missing = RetroReflectionEngine.audit_html_mechanics(raw_html)
+    assert "calculation_manifest" in missing
+
+    sidecar = tmp_path / "icr-repayment-calculator.json"
+    sidecar.write_text(
+        json.dumps(
+            {
+                "entity_type": "STUDENT_LOAN_REPAYMENT",
+                "formula": "x",
+                "inputs": {"x": 1},
+                "published_output": 1.0,
+                "statutory_economic_matrix": {"a": 1},
+                "proprietary_telemetry": {
+                    "demand_telemetry": {
+                        "query": "icr repayment calculator",
+                        "consecutive_cycles_count": 355,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert RetroReflectionEngine._sidecar_needs_sync(sidecar, raw_html) is True
+
+

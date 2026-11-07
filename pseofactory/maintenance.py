@@ -8660,12 +8660,15 @@ class RetroReflectionEngine:
                         curr_m = json.loads(script_m.group(1).strip())
                         curr_pub = float(curr_m.get("published_output") or 0.0)
                         from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+                        from pseofactory.proprietary_signals import PUBLISH_VOLATILE_TELEMETRY_KEYS
+                        curr_demand_tel = (curr_m.get("proprietary_telemetry") or {}).get("demand_telemetry") or {}
                         if (
                             round(curr_pub, 4) != round(exp_pub, 4)
                             or str(curr_m.get("formula") or "") != expected_m["formula"]
                             or curr_m.get("inputs") != expected_m.get("inputs")
                             or str(curr_m.get("sample_calculation") or "") != expected_m["sample_calculation"]
                             or str(curr_m.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
+                            or any(k in curr_demand_tel for k in PUBLISH_VOLATILE_TELEMETRY_KEYS)
                             or (
                                 inferred_prop in ("profithelm", "prexvo", "gainhelm")
                                 and (
@@ -9280,13 +9283,16 @@ class RetroReflectionEngine:
             )
         try:
             from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+            from pseofactory.proprietary_signals import PUBLISH_VOLATILE_TELEMETRY_KEYS
             sc_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            sc_demand_tel = ((sc_data.get("proprietary_telemetry") if isinstance(sc_data, dict) else {}) or {}).get("demand_telemetry") or {}
             if (
                 not isinstance(sc_data, dict)
                 or str(sc_data.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                 or not sc_data.get("statutory_economic_matrix")
                 or not sc_data.get("proprietary_telemetry")
                 or '"year":' in json.dumps(sc_data.get("statutory_economic_matrix") or {})
+                or any(k in sc_demand_tel for k in PUBLISH_VOLATILE_TELEMETRY_KEYS)
             ):
                 return True
             m = re.search(
@@ -9765,6 +9771,11 @@ class RetroReflectionEngine:
                     existing_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
                     sidecar_stat = str(existing_sidecar.get("statutory_authority") or "")
                     from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+                    from pseofactory.proprietary_signals import PUBLISH_VOLATILE_TELEMETRY_KEYS
+                    existing_demand_tel = (
+                        ((existing_sidecar.get("proprietary_telemetry") if isinstance(existing_sidecar, dict) else {}) or {}).get("demand_telemetry")
+                        or {}
+                    )
                     sidecar_needs_heal = (
                         not isinstance(existing_sidecar, dict)
                         or not existing_sidecar.get("formula")
@@ -9779,6 +9790,7 @@ class RetroReflectionEngine:
                         or not existing_sidecar.get("proprietary_telemetry")
                         or '"year":' in json.dumps(existing_sidecar.get("statutory_economic_matrix") or {})
                         or existing_sidecar.get("statutory_economic_matrix") != manifest["statutory_economic_matrix"]
+                        or any(k in existing_demand_tel for k in PUBLISH_VOLATILE_TELEMETRY_KEYS)
                         or (
                             property_id.lower() != "prexvo"
                             and (
@@ -12264,6 +12276,26 @@ class RetroReflectionEngine:
             if (repaired or overlay_injected) and updated_html != content:
                 html_file.write_text(updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
+
+        manifests_dir = d / "manifests"
+        if manifests_dir.is_dir():
+            from pseofactory.proprietary_signals import PUBLISH_VOLATILE_TELEMETRY_KEYS
+            for mf_path in sorted(manifests_dir.glob("*.json")):
+                try:
+                    mf_data = json.loads(mf_path.read_text(encoding="utf-8"))
+                    if isinstance(mf_data, dict):
+                        prop_tel = mf_data.get("proprietary_telemetry")
+                        if isinstance(prop_tel, dict):
+                            dem_tel = prop_tel.get("demand_telemetry")
+                            if isinstance(dem_tel, dict) and any(k in dem_tel for k in PUBLISH_VOLATILE_TELEMETRY_KEYS):
+                                for k in PUBLISH_VOLATILE_TELEMETRY_KEYS:
+                                    dem_tel.pop(k, None)
+                                mf_path.write_text(json.dumps(mf_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                                rel_mf = mf_path.relative_to(d).as_posix()
+                                if rel_mf not in retrofitted_paths:
+                                    retrofitted_paths.append(rel_mf)
+                except Exception:
+                    pass
 
         if agy_dir.is_dir():
             try:
