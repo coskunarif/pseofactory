@@ -7684,6 +7684,12 @@ def reposition_affiliate_placements_from_gsc_signals(
                 raw_sec = m_sec.group(0)
                 h2_m = re.search(r"<h2[^>]*>.*?</h2>", raw_sec, flags=re.S | re.I)
                 h2_str = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
+                reg_m = re.search(
+                    r'\s*<div\b[^>]*id=["\']partner-registration-drawer["\'][^>]*>[\s\S]*?</form>\s*</div>',
+                    raw_sec,
+                    flags=re.S | re.I,
+                )
+                reg_str = ("\n      " + reg_m.group(0).strip()) if reg_m else ""
                 lead_pk_attr = html_lib.escape(str(slot_plan.get("promoted_partner_key") or ""))
                 return (
                     f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
@@ -7692,7 +7698,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                     f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
                     f'data-gsc-tier="{html_lib.escape(gsc_tier)}">\n'
                     f'        {h2_str}'
-                    f'{cards_html}\n'
+                    f'{cards_html}{reg_str}\n'
                     f'      </section>'
                 )
             updated = re.sub(

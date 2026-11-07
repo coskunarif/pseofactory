@@ -60,6 +60,8 @@ STATUTORY_PROVENANCE_PATTERNS: List[str] = [
     r"\bFedRAMP\b",
     r"\bHITECH\b",
     r"\bNAIC\b",
+    r"\bRegulation\s*\(EU\)\s*\d{4}/\d+\b",
+    r"\bDigital\s+Operational\s+Resilience\s+Act\b",
 ]
 
 US_STATE_NAME_TO_SLUG: Dict[str, str] = {

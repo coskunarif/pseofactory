@@ -418,3 +418,113 @@ def test_p2_builder_distinct_models_and_zero_broken_links_on_real_estate(tmp_pat
         existing_pages=[],
     )
     assert gate["passed"] is True
+
+
+def test_p2_daily_builder_stale_ledger_reconciliation_and_fallback_manifests(tmp_path: Path) -> None:
+    """
+    Verifies:
+    1. RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS includes
+       qsbs-section-1202-state-conformity-tax-calculator and
+       RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS includes
+       dora-ict-third-party-risk-compliance-cost-calculator.
+    2. execute_autonomous_daily_trend_page_build reconciles stale ledger entries whose
+       output_file is missing on disk, resets the queue item from BUILT to PENDING,
+       re-materializes the page, and writes calculation_manifest into deployed_voids.json.
+    """
+    import json
+    from pseofactory.maintenance import ConfigurablePropertyAdapter, RetroReflectionEngine, TenantRegistry
+    from pseofactory.pipeline import execute_autonomous_daily_trend_page_build
+
+    assert "qsbs-section-1202-state-conformity-tax-calculator" in RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS
+    assert "dora-ict-third-party-risk-compliance-cost-calculator" in RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS
+
+    gh_repo = tmp_path / "gainhelm"
+    gh_dist = gh_repo / "dist"
+    (gh_dist / "tools").mkdir(parents=True, exist_ok=True)
+    (gh_dist / "index.html").write_text("<html><body><main></main></body></html>", encoding="utf-8")
+    (gh_dist / "tools" / "index.html").write_text("<html><body><main></main></body></html>", encoding="utf-8")
+
+    reg = TenantRegistry()
+    reg.register_adapter(
+        ConfigurablePropertyAdapter(
+            property_id="gainhelm",
+            brand_name="GainHelm",
+            domain="gainhelm.com",
+            canonical_base="https://gainhelm.com",
+            dist_dir=gh_dist,
+            repo_path=gh_repo,
+        )
+    )
+
+    queue_file = tmp_path / "void_candidates.jsonl"
+    queue_file.write_text(
+        json.dumps(
+            {
+                "property_id": "gainhelm",
+                "tenant": "gainhelm",
+                "slug": "dora-ict-third-party-risk-compliance-cost-calculator",
+                "query": "dora ict third party risk compliance cost calculator",
+                "title": "DORA ICT Third-Party Risk Compliance Cost Model",
+                "action": "BUILD_PAGE",
+                "status": "BUILT",
+                "composite_profit_yield": 92.4,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ledger_file = tmp_path / "daily_ledger.json"
+    missing_out = gh_dist / "tools" / "dora-ict-third-party-risk-compliance-cost-calculator" / "index.html"
+    ledger_file.write_text(
+        json.dumps(
+            {
+                "days": {
+                    "2026-11-07": {
+                        "gainhelm": [
+                            {
+                                "property_id": "gainhelm",
+                                "slug": "dora-ict-third-party-risk-compliance-cost-calculator",
+                                "output_file": str(missing_out),
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    res = execute_autonomous_daily_trend_page_build(
+        property_ids=["gainhelm"],
+        void_candidates_path=queue_file,
+        ledger_path=ledger_file,
+        date_key="2026-11-07",
+        registry=reg,
+        dry_run=False,
+        enable_gitops=False,
+        dispatch_push_indexing=False,
+    )
+    assert res["reconciled_stale_ledger_count"] == 1
+    assert res["built_count"] == 1
+    assert missing_out.is_file()
+    dv_file = gh_repo / "content" / "deployed_voids.json"
+    assert dv_file.is_file()
+    dv_data = json.loads(dv_file.read_text(encoding="utf-8"))
+    assert len(dv_data) == 1
+    assert dv_data[0]["slug"] == "dora-ict-third-party-risk-compliance-cost-calculator"
+    assert isinstance(dv_data[0].get("calculation_manifest"), dict)
+    assert 50 <= len(f"{dv_data[0]['title']} | GainHelm") <= 60
+
+    from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
+
+    built_html = missing_out.read_text(encoding="utf-8")
+    assert 'id="partner-registration-drawer"' in built_html
+    retro_html, _ = reposition_affiliate_placements_from_gsc_signals(
+        built_html,
+        property_id="gainhelm",
+        slug="dora-ict-third-party-risk-compliance-cost-calculator",
+    )
+    assert 'id="partner-registration-drawer"' in retro_html
+
+

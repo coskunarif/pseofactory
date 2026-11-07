@@ -1421,6 +1421,7 @@ def execute_autonomous_daily_trend_page_build(
     registry: Optional[TenantRegistry] = None,
     dry_run: bool = False,
     enable_gitops: bool = False,
+    dispatch_push_indexing: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes the P2 autonomous trend-to-page builder:
@@ -1513,7 +1514,92 @@ def execute_autonomous_daily_trend_page_build(
 
     reconciled_already_built_count = 0
     reconciled_cannibalizing_count = 0
+    reconciled_stale_ledger_count = 0
     queue_mutated = False
+
+    # Reconcile any ledger records for today whose compiled HTML file was wiped or missing
+    for t_id in target_props:
+        t_records = day_bucket.get(t_id)
+        if not isinstance(t_records, list) or not t_records:
+            continue
+        surviving_records: List[Dict[str, Any]] = []
+        wiped_slugs: Set[str] = set()
+        for rec in t_records:
+            if not isinstance(rec, dict):
+                continue
+            out_f = str(rec.get("output_file") or "").strip()
+            r_slug = str(rec.get("slug") or "").strip().lower()
+            if out_f and Path(out_f).is_file():
+                surviving_records.append(rec)
+            else:
+                if r_slug:
+                    wiped_slugs.add(r_slug)
+                reconciled_stale_ledger_count += 1
+        if len(surviving_records) != len(t_records):
+            day_bucket[t_id] = surviving_records
+            for q_item in queue_items:
+                q_tid = str(q_item.get("property_id") or q_item.get("tenant") or "").strip().lower()
+                q_slug = str(q_item.get("slug") or "").strip().lower()
+                if q_tid == t_id and q_slug in wiped_slugs and str(q_item.get("status") or "").upper() == "BUILT":
+                    q_item["status"] = "PENDING"
+                    q_item.pop("built_at", None)
+                    q_item.pop("reconciled_reason", None)
+                    queue_mutated = True
+
+    # Auto-seed canonical non-cannibalizing breakout candidate when using default queue and tenant has 0 pending items
+    is_default_queue = (
+        void_candidates_path is None
+        or Path(void_candidates_path).resolve() == VOID_CANDIDATES_QUEUE_PATH.resolve()
+    )
+    if is_default_queue:
+        default_breakout_seeds: Dict[str, Dict[str, Any]] = {
+            "gainhelm": {
+                "property_id": "gainhelm",
+                "tenant": "gainhelm",
+                "slug": "dora-ict-third-party-risk-compliance-cost-calculator",
+                "query": "dora ict third party risk compliance cost calculator",
+                "title": "DORA ICT Third-Party Risk Compliance Cost Model",
+                "action": "BUILD_PAGE",
+                "status": "PENDING",
+                "composite_profit_yield": 92.4,
+                "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
+                "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+                "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
+                "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
+                "inputs": {
+                    "tlpt_red_team_fee": 42000.0,
+                    "critical_ict_vendors": 12.0,
+                    "fee_per_ict_vendor": 2800.0,
+                    "register_of_information_cost": 16500.0,
+                    "remediation_hours": 160.0,
+                    "engineering_hourly_rate": 125.0,
+                },
+                "published_output": 112100.0,
+                "sample_calculation": (
+                    "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: "
+                    "Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and "
+                    "contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation "
+                    "($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost."
+                ),
+            },
+        }
+        for t_id, seed_item in default_breakout_seeds.items():
+            if t_id not in target_props:
+                continue
+            if len(day_bucket.get(t_id, []) or []) >= daily_cap:
+                continue
+            seed_slug = str(seed_item["slug"]).strip().lower()
+            if seed_slug in existing_slugs_by_tenant.get(t_id, set()):
+                continue
+            has_pending_for_tid = any(
+                str(qi.get("property_id") or qi.get("tenant") or "").strip().lower() == t_id
+                and str(qi.get("status") or "PENDING").upper() == "PENDING"
+                and str(qi.get("action") or "BUILD_PAGE").upper() == "BUILD_PAGE"
+                for qi in queue_items
+            )
+            if not has_pending_for_tid and not any(str(qi.get("slug") or "").strip().lower() == seed_slug for qi in queue_items):
+                queue_items.append(dict(seed_item))
+                queue_mutated = True
 
     for item in queue_items:
         t_id = str(item.get("property_id") or item.get("tenant") or "").strip().lower()
@@ -1790,12 +1876,33 @@ def execute_autonomous_daily_trend_page_build(
             repo_root = getattr(adp, "repo_path", None) or dist_dir.parent
             if repo_root and Path(repo_root).is_dir():
                 r_root = Path(repo_root)
+                prov_title = raw_title
+                if t_id in ("gainhelm", "prexvo"):
+                    brand_sfx = f" | {adp.brand_name}"
+                    max_b = 60 - len(brand_sfx)
+                    min_b = 50 - len(brand_sfx)
+                    if len(prov_title) > max_b:
+                        prov_title = prov_title[:max_b].rsplit(" ", 1)[0].rstrip(" |-&")
+                        if len(prov_title) < min_b and "calculator" not in prov_title.lower():
+                            for pad_s in ("Cost Model", "Calculator", "Model"):
+                                if min_b <= len(f"{prov_title} {pad_s}") <= max_b:
+                                    prov_title = f"{prov_title} {pad_s}"
+                                    break
+                    elif len(prov_title) < min_b:
+                        for pad_s in ("Compliance Cost Model", "Calculation Engine", "Cost Model", "Engine"):
+                            if min_b <= len(f"{prov_title} {pad_s}") <= max_b:
+                                prov_title = f"{prov_title} {pad_s}"
+                                break
+                prov_desc = f"Deterministic quantitative calculator for {c_query} under {candidate_spec['statutory_authority']}."
+                if len(prov_desc) > 155:
+                    prov_desc = prov_desc[:154].rsplit(" ", 1)[0].rstrip(".,;:- ") + "."
                 prov_entry = {
                     "slug": c_slug,
-                    "title": raw_title,
-                    "short_title": raw_title[:24].strip(),
-                    "description": f"Deterministic quantitative calculator for {c_query} under {candidate_spec['statutory_authority']}.",
+                    "title": prov_title,
+                    "short_title": prov_title[:24].strip(),
+                    "description": prov_desc,
                     "primary_keyword": c_query.lower(),
+                    "calculation_manifest": dict(manifest_out) if isinstance(manifest_out, dict) else {},
                     "verified_at": built_ts,
                 }
                 dv_targets = (
@@ -1855,6 +1962,39 @@ def execute_autonomous_daily_trend_page_build(
             except Exception as g_exc:
                 gitops_results[t_id] = {"status": "FAILED", "error": str(g_exc)}
 
+    push_indexing_results: Dict[str, Any] = {}
+    if dispatch_push_indexing and not dry_run and "PYTEST_CURRENT_TEST" not in os.environ:
+        from pseofactory.indexer import PushIndexer
+        for t_id in target_props:
+            t_records = day_bucket.get(t_id)
+            if not isinstance(t_records, list) or not t_records:
+                continue
+            adp = adapters_by_tenant.get(t_id)
+            if adp is None:
+                continue
+            dist_dir = Path(adp.dist_dir)
+            repo_root = getattr(adp, "repo_path", None) or dist_dir.parent
+            urls_to_push = [
+                f"{adp.canonical_base.rstrip('/')}/tools/{str(r.get('slug')).strip('/')}/"
+                for r in t_records
+                if isinstance(r, dict) and r.get("slug")
+            ]
+            if urls_to_push:
+                try:
+                    p_idx = PushIndexer(
+                        domain=adp.domain,
+                        canonical_base=adp.canonical_base,
+                        base_dir=Path(repo_root),
+                        dist_dir=dist_dir,
+                        tenant_id=t_id,
+                    )
+                    push_indexing_results[t_id] = p_idx.dispatch_automated_indexing(
+                        urls=urls_to_push,
+                        live=True,
+                    )
+                except Exception as p_exc:
+                    push_indexing_results[t_id] = {"status": "FAILED", "error": str(p_exc)}
+
     if not dry_run:
         ledger_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         AtomicStateLedger.save_json(daily_ledger_file, ledger_data)
@@ -1872,8 +2012,10 @@ def execute_autonomous_daily_trend_page_build(
         "skipped_daily_cap_tenants": sorted(list(skipped_daily_cap_tenants)),
         "reconciled_already_built_count": reconciled_already_built_count,
         "reconciled_cannibalizing_count": reconciled_cannibalizing_count,
+        "reconciled_stale_ledger_count": reconciled_stale_ledger_count,
         "aborted_candidates": aborted_candidates,
         "gitops_results": gitops_results,
+        "push_indexing_results": push_indexing_results,
     }
 
 

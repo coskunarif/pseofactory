@@ -8242,6 +8242,16 @@ class RetroReflectionEngine:
             "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC) and State Rating Bureau Filings",
             "sample_calculation": "Annual payroll of $500,000 at 8.65% combined FICA/FUTA/SUTA plus $3.45 per $100 workers comp rate yields $60,500 employer burden.",
         },
+        "qsbs-section-1202-state-conformity-tax-calculator": {
+            "model_name": "QSBSSection1202StateConformityModel",
+            "entity_type": "TaxCalculationModel",
+            "formula": "round(min(qualified_gain, max(10000000.0, cost_basis * 10.0)) * 0.238, 2)",
+            "inputs": {"qualified_gain": 8000000.0, "cost_basis": 500000.0},
+            "published_output": 1904000.0,
+            "statutory_authority": "IRC Section 1202(a)(4) & Section 1202(b)(1) Qualified Small Business Stock Exclusion",
+            "economic_dataset": "IRS SOI Capital Gains Realization Series and FRED CPILFESL Series",
+            "sample_calculation": "On an $8,000,000 qualified small business stock gain with $500,000 original basis under the $10,000,000 IRC Section 1202(b)(1) ceiling, federal exclusion saves $1,904,000.00 at the 23.8% combined capital gains and NIIT rate.",
+        },
     }
 
     GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8407,6 +8417,23 @@ class RetroReflectionEngine:
             "statutory_authority": "NAIC Cyber Insurance Supplement & SEC Cybersecurity Risk Governance Rule (17 CFR 229.106)",
             "economic_dataset": "NAIC Property & Casualty Cyber Loss Ratio Series & BLS OEWS SOC 15-1212 Wage Series",
             "sample_calculation": "Enterprise purchasing a $5M cyber liability limit ($3,400/M base rate * 1.35 sector hazard * 0.80 MFA/EDR/immutable-backup credit + $2,055 surplus lines fee = $20,415.00 annual premium) plus $20,485.00 self-insured retention reserve = $40,900.00 total annual risk transfer cost.",
+        },
+        "dora-ict-third-party-risk-compliance-cost-calculator": {
+            "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "tlpt_red_team_fee": 42000.0,
+                "critical_ict_vendors": 12.0,
+                "fee_per_ict_vendor": 2800.0,
+                "register_of_information_cost": 16500.0,
+                "remediation_hours": 160.0,
+                "engineering_hourly_rate": 125.0,
+            },
+            "published_output": 112100.0,
+            "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
+            "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation ($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost.",
         },
     }
 
@@ -14177,6 +14204,146 @@ def reflect_and_recompile_all_assets(
                         ph_oracle_file.write_text(ph_o_src, encoding="utf-8")
                         source_sync_changed = True
 
+                ph_builder_file = Path(adapter.repo_path) / "profithelm" / "builder.py"
+                if ph_builder_file.is_file():
+                    ph_b_src = ph_builder_file.read_text(encoding="utf-8")
+                    ph_b_orig = ph_b_src
+                    old_qsbs_manifest = (
+                        '        elif "qsbs" in slug or "1202" in slug:\n'
+                        '            base_spec = {\n'
+                        '                "model_name": clean_model,\n'
+                        '                "entity_type": "PersonalTaxBracket",\n'
+                        '                "statutory_authority": "IRC Section 1202 Qualified Small Business Stock",\n'
+                        '                "economic_dataset": "BLS Consumer Expenditure Survey and FRED Series WFRBST01134",\n'
+                        '                "inputs": {"eligible_gain": 10000000, "exclusion_pct": 1.0},\n'
+                        '                "formula": "eligible_gain * exclusion_pct",\n'
+                        '                "published_output": 10000000.0,\n'
+                        '                "sample_calculation": "$10,000,000 eligible QSBS gain at 100% exclusion rate yields $10,000,000 excluded from federal tax under Section 1202",\n'
+                        '            }'
+                    )
+                    new_qsbs_manifest = (
+                        '        elif "qsbs" in slug or "1202" in slug:\n'
+                        '            base_spec = {\n'
+                        '                "model_name": clean_model,\n'
+                        '                "entity_type": "TaxCalculationModel",\n'
+                        '                "statutory_authority": "IRC Section 1202(a)(4) & Section 1202(b)(1) Qualified Small Business Stock Exclusion",\n'
+                        '                "economic_dataset": "IRS SOI Capital Gains Realization Series and FRED CPILFESL Series",\n'
+                        '                "inputs": {"qualified_gain": 8000000.0, "cost_basis": 500000.0},\n'
+                        '                "formula": "round(min(qualified_gain, max(10000000.0, cost_basis * 10.0)) * 0.238, 2)",\n'
+                        '                "published_output": 1904000.0,\n'
+                        '                "sample_calculation": "On an $8,000,000 qualified small business stock gain with $500,000 original basis under the $10,000,000 IRC Section 1202(b)(1) ceiling, federal exclusion saves $1,904,000.00 at the 23.8% combined capital gains and NIIT rate.",\n'
+                        '            }'
+                    )
+                    if old_qsbs_manifest in ph_b_src:
+                        ph_b_src = ph_b_src.replace(old_qsbs_manifest, new_qsbs_manifest, 1)
+
+                    old_footer_links = (
+                        'def render_footer() -> str:\n'
+                        '    """Renders authoritative footer with institutional disclosures, links, and FTC compliance."""\n'
+                        '    tool_links_html = "".join(\n'
+                        '        f\'<li><a href="/tools/{t["slug"]}/" class="footer-link">{t["title"]}</a></li>\'\n'
+                        '        for t in TOOLS\n'
+                        '    )'
+                    )
+                    new_footer_links = (
+                        'def render_footer() -> str:\n'
+                        '    """Renders authoritative footer with institutional disclosures, links, and FTC compliance."""\n'
+                        '    footer_tools = list(TOOLS)\n'
+                        '    if DIST_DIR == BASE_DIR / "dist":\n'
+                        '        prov_file = BASE_DIR / ".agy" / "deployed_voids.json"\n'
+                        '        if prov_file.is_file():\n'
+                        '            try:\n'
+                        '                prov_items = json.loads(prov_file.read_text(encoding="utf-8"))\n'
+                        '                seen_f = {t.get("slug") for t in footer_tools}\n'
+                        '                for pv in (prov_items if isinstance(prov_items, list) else []):\n'
+                        '                    pv_s = str(pv.get("slug") or "").strip()\n'
+                        '                    if pv_s and pv_s not in seen_f and pv_s not in RETIRED_TOOL_SLUGS:\n'
+                        '                        footer_tools.append({"slug": pv_s, "title": str(pv.get("title") or pv_s.replace("-", " ").title())})\n'
+                        '                        seen_f.add(pv_s)\n'
+                        '            except Exception:\n'
+                        '                pass\n'
+                        '    tool_links_html = "".join(\n'
+                        '        f\'<li><a href="/tools/{t["slug"]}/" class="footer-link">{t["title"]}</a></li>\'\n'
+                        '        for t in footer_tools\n'
+                        '    )'
+                    )
+                    if old_footer_links in ph_b_src:
+                        ph_b_src = ph_b_src.replace(old_footer_links, new_footer_links, 1)
+
+                    old_tools_dir_loop = (
+                        '    if tools_dir.exists():\n'
+                        '        for child in tools_dir.iterdir():\n'
+                        '            if child.is_symlink():\n'
+                        '                child.unlink()\n'
+                        '                continue\n'
+                        '            if child.is_dir() and (child / "index.html").exists():\n'
+                        '                slug = child.name\n'
+                        '                is_red = f"/tools/{slug}" in redirect_map or f"/tools/{slug}/" in redirect_map\n'
+                        '                if slug not in RETIRED_TOOL_SLUGS and not is_red and slug not in existing_slugs:\n'
+                        '                    spec = {"slug": slug}\n'
+                        '                    try:\n'
+                        '                        from profithelm.config import register_tool\n'
+                        '                        register_tool(spec, persist=False)\n'
+                        '                    except Exception:\n'
+                        '                        pass\n'
+                        '                    active_tools.append(spec)\n'
+                        '                    existing_slugs.add(slug)'
+                    )
+                    new_tools_dir_loop = (
+                        '    if DIST_DIR == BASE_DIR / "dist":\n'
+                        '        prov_file = BASE_DIR / ".agy" / "deployed_voids.json"\n'
+                        '        if prov_file.is_file():\n'
+                        '            try:\n'
+                        '                prov_items = json.loads(prov_file.read_text(encoding="utf-8"))\n'
+                        '                for pv in (prov_items if isinstance(prov_items, list) else []):\n'
+                        '                    if not isinstance(pv, dict):\n'
+                        '                        continue\n'
+                        '                    slug = str(pv.get("slug") or "").strip()\n'
+                        '                    is_red = f"/tools/{slug}" in redirect_map or f"/tools/{slug}/" in redirect_map\n'
+                        '                    if slug and slug not in RETIRED_TOOL_SLUGS and not is_red and slug not in existing_slugs:\n'
+                        '                        spec = {"slug": slug}\n'
+                        '                        if pv.get("title"):\n'
+                        '                            spec["title"] = str(pv["title"])\n'
+                        '                        if pv.get("calculation_manifest") and isinstance(pv["calculation_manifest"], dict):\n'
+                        '                            spec["calculation_manifest"] = dict(pv["calculation_manifest"])\n'
+                        '                        try:\n'
+                        '                            from profithelm.config import register_tool, reset_tools_to_core\n'
+                        '                            register_tool(spec, persist=False)\n'
+                        '                            if not extra_tools:\n'
+                        '                                reset_tools_to_core()\n'
+                        '                        except Exception:\n'
+                        '                            pass\n'
+                        '                        active_tools.append(spec)\n'
+                        '                        existing_slugs.add(slug)\n'
+                        '            except Exception:\n'
+                        '                pass\n'
+                        '    if tools_dir.exists():\n'
+                        '        for child in tools_dir.iterdir():\n'
+                        '            if child.is_symlink():\n'
+                        '                child.unlink()\n'
+                        '                continue\n'
+                        '            if child.is_dir() and (child / "index.html").exists():\n'
+                        '                slug = child.name\n'
+                        '                is_red = f"/tools/{slug}" in redirect_map or f"/tools/{slug}/" in redirect_map\n'
+                        '                if slug not in RETIRED_TOOL_SLUGS and not is_red and slug not in existing_slugs:\n'
+                        '                    spec = {"slug": slug}\n'
+                        '                    try:\n'
+                        '                        from profithelm.config import register_tool, reset_tools_to_core\n'
+                        '                        register_tool(spec, persist=False)\n'
+                        '                        if not extra_tools:\n'
+                        '                            reset_tools_to_core()\n'
+                        '                    except Exception:\n'
+                        '                        pass\n'
+                        '                    active_tools.append(spec)\n'
+                        '                    existing_slugs.add(slug)'
+                    )
+                    if old_tools_dir_loop in ph_b_src:
+                        ph_b_src = ph_b_src.replace(old_tools_dir_loop, new_tools_dir_loop, 1)
+
+                    if ph_b_src != ph_b_orig:
+                        ph_builder_file.write_text(ph_b_src, encoding="utf-8")
+                        source_sync_changed = True
+
                 ph_test_bf = Path(adapter.repo_path) / "tests" / "test_boost_factory_fixes.py"
                 if ph_test_bf.is_file():
                     ph_bf_src = ph_test_bf.read_text(encoding="utf-8")
@@ -14615,6 +14782,23 @@ def reflect_and_recompile_all_assets(
                         count=1,
                         flags=re.DOTALL,
                     )
+                    old_gh_home_tools = (
+                        "    tools_list_html = []\n"
+                        "    for tool in TOOLS:\n"
+                        "        tools_list_html.append(\n"
+                        '            f\'<li class="tool-link-item"><a href="/tools/{tool["slug"]}/" class="tool-link touch-target">{html.escape(tool["title"])}</a> <span class="tool-desc">- {html.escape(tool["description"])}</span></li>\'\n'
+                        "        )"
+                    )
+                    new_gh_home_tools = (
+                        "    from gainhelm.catalog import discover_all_tools\n"
+                        "    tools_list_html = []\n"
+                        "    for tool in discover_all_tools():\n"
+                        "        tools_list_html.append(\n"
+                        '            f\'<li class="tool-link-item"><a href="/tools/{tool["slug"]}/" class="tool-link touch-target">{html.escape(tool["title"])}</a> <span class="tool-desc">- {html.escape(tool["description"])}</span></li>\'\n'
+                        "        )"
+                    )
+                    if old_gh_home_tools in gh_b_src:
+                        gh_b_src = gh_b_src.replace(old_gh_home_tools, new_gh_home_tools, 1)
                     if gh_b_src != gh_b_orig:
                         gh_builder.write_text(gh_b_src, encoding="utf-8")
                         source_sync_changed = True
