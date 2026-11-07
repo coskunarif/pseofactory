@@ -517,12 +517,28 @@ def test_p2_daily_builder_stale_ledger_reconciliation_and_fallback_manifests(tmp
     assert 50 <= len(f"{dv_data[0]['title']} | GainHelm") <= 60
 
     from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
+    from pseofactory.gsc_remediation import _normalize_meta_120_155
     import inspect
     import pseofactory.maintenance as maint_mod
 
     assert 'pv.get("source") != "p2_autonomous_daily_builder"' in inspect.getsource(
         maint_mod.reflect_and_recompile_all_assets
     )
+    assert "Regulatory Note: Refinancing federal student loans permanently waives federal protections" in inspect.getsource(
+        maint_mod.reflect_and_recompile_all_assets
+    )
+    meta_pp = _normalize_meta_120_155(
+        raw_meta="Calculate Parent PLUS Double Consolidation repayment options comparing 10% IDR discretionary formulas against 20% single-consolidation ICR.",
+        tenant_id="prexvo",
+        query_label="parent plus loan payment calculator",
+    )
+    meta_dc = _normalize_meta_120_155(
+        raw_meta="",
+        tenant_id="prexvo",
+        query_label="parent plus double consolidation",
+    )
+    assert meta_pp != meta_dc
+    assert "34 CFR 685.208" in meta_pp
 
     built_html = missing_out.read_text(encoding="utf-8")
     assert 'id="partner-registration-drawer"' in built_html

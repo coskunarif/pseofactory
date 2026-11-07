@@ -14680,11 +14680,24 @@ def reflect_and_recompile_all_assets(
                         '        f"Regulatory Note: Refinancing federal student loans permanently waives federal protections including IDR and PSLF.\\n"\n'
                         '        f"Canonical Citation URL: {CANONICAL_BASE}/tools/{slug}/\\n"\n'
                     )
-                    if old_mat_line in px_d_src and "permanently waives federal protections" not in px_d_src:
+                    if old_mat_line in px_d_src and "Regulatory Note: Refinancing federal student loans permanently waives federal protections" not in px_d_src:
                         px_d_src = px_d_src.replace(old_mat_line, new_mat_line, 1)
                     if px_d_src != px_d_orig:
                         px_dist.write_text(px_d_src, encoding="utf-8")
                         source_sync_changed = True
+                px_synd_dir = Path(adapter.repo_path) / "syndication"
+                if px_synd_dir.is_dir():
+                    for md_file in px_synd_dir.rglob("*refinanc*.md"):
+                        try:
+                            md_txt = md_file.read_text(encoding="utf-8")
+                            if "permanently waives" not in md_txt.lower() and "forfeits" not in md_txt.lower():
+                                md_file.write_text(
+                                    md_txt.rstrip()
+                                    + "\n\nRegulatory Note: Refinancing federal student loans permanently waives federal protections including IDR and PSLF.\n",
+                                    encoding="utf-8",
+                                )
+                        except Exception:
+                            pass
                 _sync_prexvo_affiliate_status_compat(Path(adapter.repo_path))
             except Exception:
                 pass

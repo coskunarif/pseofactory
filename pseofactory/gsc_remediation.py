@@ -2270,6 +2270,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
             and short_label.lower() not in ("section 179", "section 179 calculator", "statutory tax liability")
             and short_label.lower() not in clean.lower()
         )
+        or (
+            ("parent plus" in q_low or "parent-plus" in q_low)
+            and "double" not in q_low
+            and "consolidation" not in q_low
+            and "double consolidation" in clean.lower()
+        )
     )
     if (
         120 <= len(clean) <= 155
@@ -2346,6 +2352,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "Calculate federal Parent PLUS Loan monthly payments across Standard, Graduated, "
                     "Extended, and 20% ICR consolidation schedules under 34 CFR 685.208.",
                     " Verified under Title IV 34 CFR 685.208 and 685.209(b).",
+                )
+            if ("parent plus" in q_low or "parent-plus" in q_low) and "double" not in q_low and "consolidation" not in q_low:
+                return (
+                    "Calculate Parent PLUS monthly loan payments, 10-year Standard vs 20% ICR schedules, "
+                    "and origination fee amortization under 34 CFR 685.208.",
+                    " Verified under HEA Section 455 and Title IV 34 CFR 685.208.",
                 )
             if "parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low:
                 return (
