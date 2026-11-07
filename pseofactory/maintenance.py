@@ -14237,7 +14237,7 @@ def reflect_and_recompile_all_assets(
                     if old_qsbs_manifest in ph_b_src:
                         ph_b_src = ph_b_src.replace(old_qsbs_manifest, new_qsbs_manifest, 1)
 
-                    old_footer_links = (
+                    old_footer_links_v1 = (
                         'def render_footer() -> str:\n'
                         '    """Renders authoritative footer with institutional disclosures, links, and FTC compliance."""\n'
                         '    tool_links_html = "".join(\n'
@@ -14245,7 +14245,7 @@ def reflect_and_recompile_all_assets(
                         '        for t in TOOLS\n'
                         '    )'
                     )
-                    new_footer_links = (
+                    old_footer_links_v2 = (
                         'def render_footer() -> str:\n'
                         '    """Renders authoritative footer with institutional disclosures, links, and FTC compliance."""\n'
                         '    footer_tools = list(TOOLS)\n'
@@ -14267,10 +14267,35 @@ def reflect_and_recompile_all_assets(
                         '        for t in footer_tools\n'
                         '    )'
                     )
-                    if old_footer_links in ph_b_src:
-                        ph_b_src = ph_b_src.replace(old_footer_links, new_footer_links, 1)
+                    new_footer_links = (
+                        'def render_footer() -> str:\n'
+                        '    """Renders authoritative footer with institutional disclosures, links, and FTC compliance."""\n'
+                        '    footer_tools = list(TOOLS)\n'
+                        '    if DIST_DIR == BASE_DIR / "dist":\n'
+                        '        prov_file = BASE_DIR / ".agy" / "deployed_voids.json"\n'
+                        '        if prov_file.is_file():\n'
+                        '            try:\n'
+                        '                prov_items = json.loads(prov_file.read_text(encoding="utf-8"))\n'
+                        '                seen_f = {t.get("slug") for t in footer_tools}\n'
+                        '                for pv in (prov_items if isinstance(prov_items, list) else []):\n'
+                        '                    if not isinstance(pv, dict) or pv.get("source") != "p2_autonomous_daily_builder":\n'
+                        '                        continue\n'
+                        '                    pv_s = str(pv.get("slug") or "").strip()\n'
+                        '                    if pv_s and pv_s not in seen_f and pv_s not in RETIRED_TOOL_SLUGS:\n'
+                        '                        footer_tools.append({"slug": pv_s, "title": str(pv.get("title") or pv_s.replace("-", " ").title())})\n'
+                        '                        seen_f.add(pv_s)\n'
+                        '            except Exception:\n'
+                        '                pass\n'
+                        '    tool_links_html = "".join(\n'
+                        '        f\'<li><a href="/tools/{t["slug"]}/" class="footer-link">{t["title"]}</a></li>\'\n'
+                        '        for t in footer_tools\n'
+                        '    )'
+                    )
+                    for old_fl in (old_footer_links_v1, old_footer_links_v2):
+                        if old_fl in ph_b_src:
+                            ph_b_src = ph_b_src.replace(old_fl, new_footer_links, 1)
 
-                    old_tools_dir_loop = (
+                    old_tools_dir_loop_v1 = (
                         '    if tools_dir.exists():\n'
                         '        for child in tools_dir.iterdir():\n'
                         '            if child.is_symlink():\n'
@@ -14289,7 +14314,7 @@ def reflect_and_recompile_all_assets(
                         '                    active_tools.append(spec)\n'
                         '                    existing_slugs.add(slug)'
                     )
-                    new_tools_dir_loop = (
+                    old_tools_dir_loop_v2 = (
                         '    if DIST_DIR == BASE_DIR / "dist":\n'
                         '        prov_file = BASE_DIR / ".agy" / "deployed_voids.json"\n'
                         '        if prov_file.is_file():\n'
@@ -14297,7 +14322,20 @@ def reflect_and_recompile_all_assets(
                         '                prov_items = json.loads(prov_file.read_text(encoding="utf-8"))\n'
                         '                for pv in (prov_items if isinstance(prov_items, list) else []):\n'
                         '                    if not isinstance(pv, dict):\n'
-                        '                        continue\n'
+                        '                        continue'
+                    )
+                    new_tools_dir_loop_head = (
+                        '    if DIST_DIR == BASE_DIR / "dist":\n'
+                        '        prov_file = BASE_DIR / ".agy" / "deployed_voids.json"\n'
+                        '        if prov_file.is_file():\n'
+                        '            try:\n'
+                        '                prov_items = json.loads(prov_file.read_text(encoding="utf-8"))\n'
+                        '                for pv in (prov_items if isinstance(prov_items, list) else []):\n'
+                        '                    if not isinstance(pv, dict) or pv.get("source") != "p2_autonomous_daily_builder":\n'
+                        '                        continue'
+                    )
+                    new_tools_dir_loop = (
+                        new_tools_dir_loop_head + '\n'
                         '                    slug = str(pv.get("slug") or "").strip()\n'
                         '                    is_red = f"/tools/{slug}" in redirect_map or f"/tools/{slug}/" in redirect_map\n'
                         '                    if slug and slug not in RETIRED_TOOL_SLUGS and not is_red and slug not in existing_slugs:\n'
@@ -14337,8 +14375,10 @@ def reflect_and_recompile_all_assets(
                         '                    active_tools.append(spec)\n'
                         '                    existing_slugs.add(slug)'
                     )
-                    if old_tools_dir_loop in ph_b_src:
-                        ph_b_src = ph_b_src.replace(old_tools_dir_loop, new_tools_dir_loop, 1)
+                    if old_tools_dir_loop_v2 in ph_b_src:
+                        ph_b_src = ph_b_src.replace(old_tools_dir_loop_v2, new_tools_dir_loop_head, 1)
+                    elif old_tools_dir_loop_v1 in ph_b_src:
+                        ph_b_src = ph_b_src.replace(old_tools_dir_loop_v1, new_tools_dir_loop, 1)
 
                     if ph_b_src != ph_b_orig:
                         ph_builder_file.write_text(ph_b_src, encoding="utf-8")

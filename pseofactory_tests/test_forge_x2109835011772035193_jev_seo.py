@@ -517,6 +517,12 @@ def test_p2_daily_builder_stale_ledger_reconciliation_and_fallback_manifests(tmp
     assert 50 <= len(f"{dv_data[0]['title']} | GainHelm") <= 60
 
     from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
+    import inspect
+    import pseofactory.maintenance as maint_mod
+
+    assert 'pv.get("source") != "p2_autonomous_daily_builder"' in inspect.getsource(
+        maint_mod.reflect_and_recompile_all_assets
+    )
 
     built_html = missing_out.read_text(encoding="utf-8")
     assert 'id="partner-registration-drawer"' in built_html
