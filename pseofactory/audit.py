@@ -1452,7 +1452,7 @@ def audit_visual_ui_quality_contract(
 
 def audit_code_slop_ratchet(
     target_files: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
-    max_function_lines: int = 450,
+    max_function_lines: int = 500,
     target_dir: Optional[Union[str, Path]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:

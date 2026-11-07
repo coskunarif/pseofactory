@@ -190,6 +190,7 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
     )
     home_html = (
         '<!DOCTYPE html><html lang="en"><head>'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
         "<title>GainHelm Enterprise Cyber Compliance &amp; GRC Cost Intelligence</title>"
         '<meta name="description" content="Model deterministic enterprise cyber compliance costs across AICPA SOC 2, DoD CMMC 2.0, NIST 800-171 SPRS, ISO 27001, and HIPAA frameworks.">'
         '<link rel="canonical" href="https://gainhelm.com/">'
@@ -203,6 +204,7 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
     )
     tool_html = (
         '<!DOCTYPE html><html lang="en"><head>'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
         "<title>SOC 2 Type II Audit Cost &amp; Readiness Calculator | GainHelm</title>"
         '<meta name="description" content="Calculate deterministic 2026 SOC 2 Type II audit fees, readiness workpaper costs, and continuous GRC automation ROI under AICPA TSC.">'
         '<link rel="canonical" href="https://gainhelm.com/tools/soc-2-audit-cost-calculator/">'
