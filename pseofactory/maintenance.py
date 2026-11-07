@@ -1350,6 +1350,7 @@ class WorkspacePropertyScanner:
         "artifacts",
         "generations",
         "parasite-output",
+        "lienbond",
     }
 
     def __init__(self, workspace_root: Optional[Union[str, Path]] = None):

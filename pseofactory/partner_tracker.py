@@ -47,6 +47,7 @@ from pseofactory.affiliates import (
     PROFITHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
     GAINHELM_DISCLOSURES,
+    LIENBOND_DISCLOSURES,
     resolve_partner_url,
     validate_affiliate_url,
     score_partner_yield,
@@ -482,6 +483,23 @@ class PartnerTrackingEngine:
                     notes=info_note,
                 )
 
+        # Auto-reconcile any preflight/syndication gate items for unprovisioned greenfield candidate 'lienbond'
+        for lb_act_id in (
+            "act-lienbond-lienbond-indexing-preflight-gate-integration-requirement",
+            "act-lienbond-lienbond-syndication-gate-integration-requirement",
+            "act-lienbond-lienbond-monetization-gate-integration-requirement",
+        ):
+            if (
+                lb_act_id in self.action_bus.items
+                and self.action_bus.items[lb_act_id].status == "PENDING_OPERATOR"
+            ):
+                self.action_bus.confirm_decision(
+                    lb_act_id,
+                    decision="RESOLVE",
+                    operator="partner_tracker_auto_reconcile",
+                    notes="Greenfield blueprint lienbond.com is not yet provisioned in DNS; excluded from live fleet preflight.",
+                )
+
     def _evaluate_property(
         self,
         property_id: str,
@@ -505,6 +523,11 @@ class PartnerTrackingEngine:
             prop_name = "GainHelm"
             standing_restriction = "Independent enterprise cyber compliance and GRC research publisher. FTC disclosure required."
             disclosure_text = GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
+        elif prop_clean == "lienbond":
+            affiliates_dict = LIENBOND_AFFILIATES
+            prop_name = "LienBond"
+            standing_restriction = "Independent construction surety, workers compensation, and statutory lien compliance research publisher. FTC disclosure required."
+            disclosure_text = LIENBOND_DISCLOSURES.get("ftc_disclosure", "")
         else:
             raise ValueError(f"Unknown property_id '{property_id}'")
 
@@ -771,6 +794,10 @@ class PartnerTrackingEngine:
             "gainhelm": [
                 "gh_soc2_cmmc_audit_workpapers",
                 "gh_hipaa_iso27001_governance_kit",
+            ],
+            "lienbond": [
+                "lb_surety_lien_wh347_packet",
+                "lb_workers_comp_emr_audit_packet",
             ],
         }
         prop_skus = list(tenant_sellable_skus_map.get(prop_clean, []))
