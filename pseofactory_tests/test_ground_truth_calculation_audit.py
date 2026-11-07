@@ -469,6 +469,7 @@ def test_gainhelm_fallback_manifests_match_ground_truth_compliance_formulas() ->
         "hitrust-csf-e1-i1-r2-certification-cost-calculator": 115000.00,
         "penetration-testing-scoping-cost-calculator": 23300.00,
         "cyber-liability-insurance-breach-exposure-calculator": 40900.00,
+        "dora-ict-third-party-risk-compliance-cost-calculator": 112100.00,
     }
     manifests = RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS
     assert set(manifests.keys()) == set(expected_outputs.keys())

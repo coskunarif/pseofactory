@@ -270,33 +270,10 @@ def verify_manifest_ssr_metric_parity(
             return issues
 
     # Skip multi-plan shared widget check on specialized Prexvo or GainHelm tools whose primary model is outside the 4-card shared widget
-    if any(
-        k in slug_low
-        for k in (
-            "pslf-buyback",
-            "pslf-qualifying-payment-simulator",
-            "grad-plus-borrowing-cap",
-            "student-loan-refinance-break-even",
-            "married-filing-separately",
-            "student-loan-interest-deduction-phaseout",
-            "student-loan-forgiveness-tax-bomb-insolvency",
-            "student-loan-forgiveness-2026",
-            "parent-plus-double-consolidation-loophole",
-        )
-    ) and "metric-rap_payment" in metrics and len(metrics) >= 4:
+    if "metric-rap_payment" in metrics and len(metrics) >= 4:
         return issues
 
-    if any(
-        k in slug_low
-        for k in (
-            "hipaa-",
-            "pci-dss-4-0",
-            "fedramp-authorization",
-            "hitrust-csf",
-            "penetration-testing",
-            "cyber-liability-insurance",
-        )
-    ) and "metric-soc2_total_cost" in metrics and len(metrics) >= 4:
+    if "metric-soc2_total_cost" in metrics and len(metrics) >= 4:
         return issues
 
     if (
