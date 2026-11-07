@@ -16,6 +16,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from pseofactory.contracts import safe_eval_mathematical_formula
 
 _TREND_DB_CACHE: Optional[Dict[str, Any]] = None
+
+# Per-cycle trend counters change every hourly trend run. Publishing them into page HTML
+# and calculation manifests made every page differ every hour, which forced a recompile,
+# commit, push and Cloudflare deploy per tenant per hour with no content change, and kept
+# the supervisor from ever reaching its SKIPPED_ALIGNED idle state. They stay in
+# trend_history.db for internal decisions; they are never published.
+PUBLISH_VOLATILE_TELEMETRY_KEYS = frozenset({"consecutive_cycles_count", "latest_velocity", "acceleration_2nd_deriv"})
 _SCENARIO_ATTRIBUTION_CACHE: Optional[Dict[str, Any]] = None
 
 # Fixed statutory constants, rates, caps, and thresholds that do NOT scale when
@@ -519,7 +526,7 @@ def resolve_proprietary_signal_bundle(
     }
 
     if best_kw is not None:
-        demand_telemetry = dict(best_kw)
+        demand_telemetry = {k: v for k, v in dict(best_kw).items() if k not in PUBLISH_VOLATILE_TELEMETRY_KEYS}
         if isinstance(demand_telemetry.get("query"), str):
             demand_telemetry["query"] = normalize_statutory_acronym_casing(demand_telemetry["query"])
     else:
@@ -527,9 +534,6 @@ def resolve_proprietary_signal_bundle(
             "query_slug": base_slug,
             "query": normalize_statutory_acronym_casing(base_slug.replace("-", " ")),
             "property_id": prop,
-            "consecutive_cycles_count": 3,
-            "latest_velocity": 0.42,
-            "acceleration_2nd_deriv": 0.08,
             "search_volume": 3200,
             "cpc_usd": 14.50,
             "keyword_difficulty": 34.0,
@@ -668,12 +672,11 @@ def compute_multi_year_longitudinal_trajectory(
     sda = bundle["scenario_attribution"]
     db_series = _load_trend_db_cache()["series_by_id"]
 
-    vel = tel.get("latest_velocity", 0.42)
     jev = tel.get("jev_score", 18.4)
     clicks = sda.get("commercial_interaction_clicks", 0)
     delivs = sda.get("deliverable_requests_count", 0)
     telemetry_tag = (
-        f"Proprietary Signal Telemetry: JEV {jev:.1f} | Velocity {vel:+.2f} | "
+        f"Proprietary Signal Telemetry: JEV {jev:.1f} | "
         f"{clicks:,} Scenario Interactions ({delivs:,} Workpaper Exports)."
     )
 
