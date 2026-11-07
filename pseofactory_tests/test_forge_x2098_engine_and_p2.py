@@ -363,3 +363,99 @@ def test_p2_autonomous_daily_trend_page_build_and_supervisor_integration(tmp_pat
     cycle_res = sup.run_cycle(force=False, dry_run=True, enable_gitops=False)
     assert "daily_trend_page_build" in cycle_res
     assert cycle_res["daily_trend_page_build"]["status"] == "PASS"
+
+
+def test_partner_slot_299_checkout_and_ux_navigation_retrofits(tmp_path: Path) -> None:
+    """
+    Verifies:
+      1. GET /api/lead-capture?checkout=1&sku=<gh|px|ph>_verified_partner_slot resolves
+         to $299 ("Verified Calculator Partner Slot") across all 3 tenants.
+      2. /r/simply_business upgrades to https://www.jdoqocy.com/click-101906407-16985242.
+      3. normalize_html_visual_primitives retrofits .pro-hook-card to #post-calculation-upgrade-drawer,
+         injects #partner-registration-drawer, #state-first-hero-bar, and #hero-range-anchor on
+         commercial calculator pages, and wires deterministic #hash focus handling.
+    """
+    from pseofactory.edge import generate_edge_redirect_function
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    ph_redirect_js = generate_edge_redirect_function("profithelm")
+    assert 'simply_business: {\n    defaultUrl: "https://www.simplybusiness.com/",\n    directContractUrl: "https://www.jdoqocy.com/click-101906407-16985242",' in ph_redirect_js
+
+    for idx, (prop, slug, expected_sku) in enumerate(
+        (
+            ("profithelm", "section-179-calculator", "ph_verified_partner_slot"),
+            ("prexvo", "student-loan-refinance-break-even-calculator", "px_verified_partner_slot"),
+            ("gainhelm", "soc-2-audit-cost-calculator", "gh_verified_partner_slot"),
+        )
+    ):
+        fn_js = generate_edge_lead_capture_function(prop)
+        mod_file = tmp_path / f"lead_chk_{idx}_{prop}.mjs"
+        mod_file.write_text(fn_js, encoding="utf-8")
+        runner = tmp_path / f"run_chk_{idx}_{prop}.mjs"
+        runner.write_text(
+            f"""
+import {{ onRequestGet }} from {json.dumps(str(mod_file))};
+const env = {{}};
+const req = new Request("https://{prop}.com/api/lead-capture?checkout=1&lead_id=lead_test_slot&sku={expected_sku}&tool_slug={slug}&format=json&synthetic_test=1", {{
+  method: "GET",
+  headers: {{ "Accept": "application/json", "X-Pseofactory-Test": "1" }}
+}});
+const res = await onRequestGet({{ request: req, env }});
+const data = await res.json();
+console.log(JSON.stringify(data));
+""",
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            ["node", str(runner)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=15,
+        )
+        chk_data = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert chk_data["offer_sku"] == expected_sku
+        assert chk_data["offer_price_usd"] == 299
+        assert chk_data["offer_title"] == "Verified Calculator Partner Slot"
+
+    sample_legacy_html = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Sample Legacy Tool</title></head>
+<body>
+  <main>
+    <section class="hero-section">
+      <h1>Sample Legacy Tool</h1>
+    </section>
+    <div class="result-box">
+      <strong class="output-value">$125,000</strong>
+      <div class="pro-hook-card">
+        <span><strong>ProfitHelm Pro:</strong> Export Audit-Ready PDF Worksheets</span>
+        <a href="#lead-capture-form" class="pro-hook-link">Get Pro ($49/mo) &rarr;</a>
+      </div>
+      <form class="lead-capture-form" action="/api/lead-capture" method="POST">
+        <input type="email" name="email" aria-label="email" />
+        <button type="submit">Get Free Briefing</button>
+      </form>
+    </div>
+    <div id="saveable-decision-blueprint" data-blueprint-slug="section-1031-calculator">
+      <div id="blueprint-status-readout">Ready</div>
+    </div>
+    <div id="partner-quote-intake-step" data-property-id="profithelm" data-tool-slug="section-1031-calculator" data-calculated-amount="125000"></div>
+    <section class="affiliate-cta-section"><h2>Partners</h2></section>
+  </main>
+</body>
+</html>"""
+    normalized_html, actions = normalize_html_visual_primitives(sample_legacy_html)
+    assert 'id="post-calculation-upgrade-drawer"' in normalized_html
+    assert 'href="#post-calculation-upgrade-drawer"' in normalized_html
+    assert 'data-checkout-nav="1"' in normalized_html
+    assert "Export Audit Workpaper ($79)" in normalized_html
+    assert "Get Pro ($49/mo)" not in normalized_html
+    assert 'id="partner-registration-drawer"' in normalized_html
+    assert 'id="partner-registration-form"' in normalized_html
+    assert 'id="state-first-hero-bar"' in normalized_html
+    assert 'id="quote-intake-hero-state"' in normalized_html
+    assert 'id="hero-range-anchor"' in normalized_html
+    assert 'href="#partner-registration-drawer"' in normalized_html
+    assert "data-focused-target" in normalized_html
+

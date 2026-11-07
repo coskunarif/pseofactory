@@ -8933,11 +8933,22 @@ class RetroReflectionEngine:
             or "48350" in html_content
             or "data-preset-crit" not in html_content
             or "carryShield" not in html_content
+            or "data-focused-target" not in html_content
             or "keepalive: true" in html_content
             or "0.285" in html_content
             or "0.235 : 0.252" in html_content
             or "adjGain * 0.238" in html_content
             or ('id="partner-quote-intake-step"' in html_content and 'id="lead-capture-form"' not in html_content)
+            or (
+                'id="partner-quote-intake-step"' in html_content
+                and 'data-restricted-public-service="true"' not in html_content
+                and 'id="partner-registration-drawer"' not in html_content
+            )
+            or (
+                'class="pro-hook-card"' in html_content
+                and 'id="post-calculation-upgrade-drawer"' in html_content
+                and 'data-checkout-nav="1"' not in html_content
+            )
             or (
                 'id="partner-quote-intake-step"' in html_content
                 and 'id="saveable-decision-blueprint"' in html_content

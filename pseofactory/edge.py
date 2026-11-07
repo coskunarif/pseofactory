@@ -2219,7 +2219,7 @@ export async function onRequest(context) {{
         "capitalize": "https://gusto.pxf.io/c/7932737/1226287/15154",
         "rippling": "https://try.rippling.com/mcfo1m09qiwt",
         "deel": "https://try.rippling.com/mcfo1m09qiwt",
-        "simply_business": "https://try.rippling.com/mcfo1m09qiwt",
+        "simply_business": "https://www.jdoqocy.com/click-101906407-16985242",
         "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
         "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
@@ -3416,7 +3416,7 @@ const CORS_HEADERS = {
 };
 
 const PARTNER_ROUTES = {
-  simply_business: "https://try.rippling.com/mcfo1m09qiwt",
+  simply_business: "https://www.jdoqocy.com/click-101906407-16985242",
   suretybonds_direct: "https://www.jdoqocy.com/click-101906407-16985242",
   next_insurance_b2b: "https://www.jdoqocy.com/click-101906407-16985242",
   thimble_contractor: "https://www.thimble.com/contractor-insurance",
@@ -5034,6 +5034,19 @@ const GAINHELM_TOOLKIT_OFFERS = {
       "Signed Enterprise Security Governance Audit Manifest (JSON)",
     ],
   },
+  gh_verified_partner_slot: {
+    sku: "gh_verified_partner_slot",
+    title: "Verified Calculator Partner Slot",
+    price_usd: 299,
+    price_cents: 29900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "GainHelm B2B Security & Compliance Advisory Partner Standard",
+    deliverables: [
+      "Verified vCISO, SOC 2 CPA, or Cyber Broker Calculator Partner Slot Placement",
+      "Real-Time Qualified Enterprise Compliance Lead Routing & Attribution Feed",
+    ],
+  },
 };
 
 function getLeadsKv(env) {
@@ -6419,7 +6432,7 @@ export async function onRequestPost(context) {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
       const partnerLeadId = String(body.lead_id || `lead_gainhelm_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       const partnerSku = "gh_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "gainhelm",
@@ -7348,13 +7361,28 @@ function isSyntheticProbeRequest(request, body, email) {
   return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
 }
 
-async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false, customRecord = null) {
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false, customRecord = null, reqSku = "") {
+  const isPartnerSlotSku = String(reqSku || (customRecord && customRecord.offer_sku) || "").trim().toLowerCase() === "px_verified_partner_slot";
+  const activeOffer = isPartnerSlotSku
+    ? {
+        sku: "px_verified_partner_slot",
+        title: "Verified Calculator Partner Slot",
+        price_usd: 299,
+        price_cents: 29900,
+        currency: "usd",
+        statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+        deliverables: [
+          "Verified Student Loan Tax CPA or Fiduciary Refinance Advisor Partner Slot Placement",
+          "Qualified Borrower & Repayment Simulation Attribution Routing",
+        ],
+      }
+    : PREXVO_TOOLKIT_OFFER;
   const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, "paid_toolkit") : null;
-  const fallbackUrl = customBundle ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fallbackUrl = customBundle && !isPartnerSlotSku ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
   const playbookDatapackUrl = customBundle && customBundle.playbook_datapack_url ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
-  const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = customBundle && !isPartnerSlotSku ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
@@ -7363,8 +7391,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/student-loan-refinance-break-even-calculator/";
-  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}`;
+  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
     calculated_amount: customBundle.calculated_amount,
@@ -7380,11 +7408,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   } : {};
   if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
-      offer_sku: PREXVO_TOOLKIT_OFFER.sku,
-      offer_title: PREXVO_TOOLKIT_OFFER.title,
-      offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
-      statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
-      deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
+      offer_sku: activeOffer.sku,
+      offer_title: activeOffer.title,
+      offer_price_usd: activeOffer.price_usd,
+      statutory_authority: activeOffer.statutory_authority,
+      deliverables: activeOffer.deliverables,
       checkout_url: null,
       playbook_url: playbookUrl,
       playbook_csv_url: playbookCsvUrl,
@@ -7427,17 +7455,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       client_reference_id: leadId,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      "line_items[0][price_data][currency]": PREXVO_TOOLKIT_OFFER.currency,
-      "line_items[0][price_data][unit_amount]": String(PREXVO_TOOLKIT_OFFER.price_cents),
-      "line_items[0][price_data][product_data][name]": PREXVO_TOOLKIT_OFFER.title,
-      "line_items[0][price_data][product_data][description]": `Prexvo Statutory Decision Audit & Execution Packet (${PREXVO_TOOLKIT_OFFER.statutory_authority})`,
+      "line_items[0][price_data][currency]": activeOffer.currency,
+      "line_items[0][price_data][unit_amount]": String(activeOffer.price_cents),
+      "line_items[0][price_data][product_data][name]": activeOffer.title,
+      "line_items[0][price_data][product_data][description]": `Prexvo Statutory Decision Audit & Execution Packet (${activeOffer.statutory_authority})`,
       "line_items[0][quantity]": "1",
       "payment_intent_data[statement_descriptor_suffix]": "PREXVO",
       "metadata[lead_id]": leadId,
       "metadata[workpaper_id]": `wp_${leadId}`,
       "metadata[property_id]": "prexvo",
       "metadata[tool_slug]": toolSlug,
-      "metadata[offer_sku]": PREXVO_TOOLKIT_OFFER.sku,
+      "metadata[offer_sku]": activeOffer.sku,
       "metadata[merchant_email]": stripeMerchantEmail,
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 85000),
       "metadata[state]": String((customRecord && customRecord.state) || "US"),
@@ -7459,11 +7487,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     const data = await resp.json().catch(() => ({}));
     if (resp.ok && data && data.url) {
       return {
-        offer_sku: PREXVO_TOOLKIT_OFFER.sku,
-        offer_title: PREXVO_TOOLKIT_OFFER.title,
-        offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
-        statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
-        deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
+        offer_sku: activeOffer.sku,
+        offer_title: activeOffer.title,
+        offer_price_usd: activeOffer.price_usd,
+        statutory_authority: activeOffer.statutory_authority,
+        deliverables: activeOffer.deliverables,
         checkout_url: data.url,
         playbook_url: playbookUrl,
         playbook_csv_url: playbookCsvUrl,
@@ -7503,11 +7531,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   }
   const credStatus = stripeErrorCode === "api_key_expired" ? "api_key_expired_rotation_required" : `provider_error_${stripeErrorCode || "unknown"}`;
   return {
-    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
-    offer_title: PREXVO_TOOLKIT_OFFER.title,
-    offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
-    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
-    deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
+    offer_sku: activeOffer.sku,
+    offer_title: activeOffer.title,
+    offer_price_usd: activeOffer.price_usd,
+    statutory_authority: activeOffer.statutory_authority,
+    deliverables: activeOffer.deliverables,
     checkout_url: null,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
@@ -7879,7 +7907,7 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("inputs_json"),
       reqUrl.searchParams.get("outputs_json")
     );
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord);
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord, reqUrl.searchParams.get("sku") || "");
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -8063,7 +8091,7 @@ export async function onRequestPost(context) {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
       const partnerLeadId = String(body.lead_id || `lead_prexvo_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       const partnerSku = "px_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "prexvo",
@@ -8437,6 +8465,24 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   const s = (toolSlug || "").toLowerCase();
   const skuClean = String(reqSku || "").trim().toLowerCase();
   const pClean = String(reqPartner || "").trim().toLowerCase();
+  if (skuClean === "ph_verified_partner_slot") {
+    return {
+      vertical: "b2b_partner_slot",
+      thresholdUsd: 25000,
+      partnerKey: pClean || "xendoo_impact",
+      partnerRepDesk: "ProfitHelm Verified Advisory Desk",
+      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+      offerSku: "ph_verified_partner_slot",
+      offerTitle: "Verified Calculator Partner Slot",
+      offerPriceUsd: 299,
+      offerPriceCents: 29900,
+      statutoryAuthority: "ProfitHelm B2B CPA & Tax Advisory Partner Placement Standard",
+      deliverables: [
+        "Verified CPA, Tax Attorney, or Commercial Broker Partner Slot Placement",
+        "High-Intent Calculator Lead Routing & Statutory Attribution Feed",
+      ],
+    };
+  }
   if (
     skuClean === "ph_1031_boot_replacement_workpapers" ||
     (skuClean === "" &&
@@ -10149,7 +10195,7 @@ export async function onRequestPost(context) {
       const partnerState = inferStateFromToolSlug(toolSlug, body.state);
       const partnerLeadId = String(body.lead_id || `lead_profithelm_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       const partnerSku = "ph_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "profithelm",
