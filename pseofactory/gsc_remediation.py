@@ -4050,9 +4050,14 @@ def _build_tax_bracket_profithelm_overlay_blocks(
     impr: int,
 ) -> Dict[str, Any]:
     """Builds vertical-isolated overlay blocks for IRS/state tax brackets, TCJA sunset, and capital gains models."""
+    is_qsbs = any(k in f"{heading_label} {query_clean}".lower() for k in ("1202", "qsbs"))
     return {
         "h2_headings": [
-            f"{heading_label}: IRC Section 1(j) Marginal Rate Tiers & TCJA Sunset Rules",
+            (
+                f"{heading_label}: IRC Section 1202 Qualified Small Business Stock Exclusion & State Conformity Rules"
+                if is_qsbs
+                else f"{heading_label}: IRC Section 1(j) Marginal Rate Tiers & TCJA Sunset Rules"
+            ),
             f"Audit-Ready {heading_label} Scenarios & Combined Effective Tax Rate",
         ],
         "preset_scenarios": [
