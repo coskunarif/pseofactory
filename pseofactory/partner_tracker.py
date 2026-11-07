@@ -38,9 +38,11 @@ from pseofactory.affiliates import (
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
     GAINHELM_AFFILIATES,
+    LIENBOND_AFFILIATES,
     B2B_PARTNER_KEYS,
     STUDENT_LOAN_PARTNER_KEYS,
     GAINHELM_PARTNER_KEYS,
+    LIENBOND_PARTNER_KEYS,
     PREXVO_STANDING_RESTRICTION,
     PROFITHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
@@ -2786,7 +2788,7 @@ class PartnerTrackingEngine:
         from pseofactory.affiliates import is_restricted_public_service_slug
 
         prop_clean = (property_id or "profithelm").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
+        if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             raise ValueError(f"Unsupported property_id '{property_id}'.")
 
         slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
@@ -2834,6 +2836,18 @@ class PartnerTrackingEngine:
                 )
             if eff_partner_key not in GAINHELM_AFFILIATES:
                 eff_partner_key = eval_info["primary_partner_key"] or "vanta_security"
+        elif prop_clean == "lienbond":
+            if (
+                eff_partner_key in STUDENT_LOAN_PARTNER_KEYS
+                or eff_partner_key in PREXVO_AFFILIATES
+                or eff_partner_key in GAINHELM_PARTNER_KEYS
+                or eff_partner_key in GAINHELM_AFFILIATES
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Student loan or GRC partner '{eff_partner_key}' cannot be used on LienBond."
+                )
+            if eff_partner_key not in LIENBOND_AFFILIATES:
+                eff_partner_key = eval_info["primary_partner_key"] or "suretybonds_direct"
         else:
             if (
                 eff_partner_key in STUDENT_LOAN_PARTNER_KEYS
@@ -4825,6 +4839,50 @@ def resolve_lead_monetization_offer(
             else (default_sku_slug if sku_clean else "")
         )
         tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+    elif prop_clean == "lienbond" or sku_clean in (
+        "lb_surety_lien_wh347_packet",
+        "lb_workers_comp_emr_audit_packet",
+    ):
+        prop_clean = "lienbond"
+        if sku_clean == "lb_workers_comp_emr_audit_packet" or (
+            not sku_clean
+            and any(
+                t in slug_clean or t in vert_clean
+                for t in ("workers-comp", "emr", "general-liability", "builders-risk", "sdi")
+            )
+        ):
+            offer_sku = "lb_workers_comp_emr_audit_packet"
+            offer_title = "LienBond NCCI Workers Comp Class Code, EMR & Contractor Insurance Audit Packet"
+            offer_price_usd = 49.0
+            offer_price_cents = 4900
+            statutory_authority = "NCCI Experience Rating Plan Manual, State Workers Comp Codes & ISO CG 00 01"
+            deliverables = [
+                "NCCI Split-Point Primary vs Excess Loss & Experience Modification Rate (EMR) Reconciliation Schedule",
+                "Governing Class Code 8810/5403/5190 Payroll Segregation & Audit Defense Matrix",
+                "ISO CG 20 10 / CG 20 37 Additional Insured & Builders Risk Soft-Cost Coverage Workpaper",
+                "Licensed Commercial Carrier & Surety Underwriting Submission Sheet (CSV & Print-Ready Audit HTML)",
+            ]
+            default_sku_slug = "workers-compensation-class-code-rate-calculator-by-state"
+        else:
+            offer_sku = "lb_surety_lien_wh347_packet"
+            offer_title = "LienBond 50-State Statutory Lien Waiver, Surety AIA A312 & WH-347 Filing Packet"
+            offer_price_usd = 79.0
+            offer_price_cents = 7900
+            statutory_authority = "40 U.S.C. 3131 Federal Miller Act, State Mechanics Lien Statutes & 29 CFR 5.5 WH-347"
+            deliverables = [
+                "50-State Preliminary Notice, Mechanics Lien Recording & Statutory Lien Waiver Packet",
+                "40 U.S.C. 3131 Miller Act & AIA A310/A312 Surety Underwriting Working Capital Workpaper",
+                "Davis-Bacon 29 CFR 5.5 Certified Payroll Form WH-347 Statement of Compliance & Fringe Ledger",
+                "Statutory Retainage Release & Payment Bond Notice Deadline Defense Calendar (CSV & Print-Ready Audit HTML)",
+            ]
+            default_sku_slug = "contractor-license-bond-cost-calculator-by-credit-score"
+        canonical_domain = "https://lienbond.com"
+        eff_slug_for_path = (
+            slug_clean
+            if slug_clean not in ("index", "general")
+            else (default_sku_slug if sku_clean else "")
+        )
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
     else:
         if sku_clean == "ph_1031_boot_replacement_workpapers" or (
             not sku_clean
@@ -4998,6 +5056,9 @@ def resolve_post_calculation_upgrade_spec(
         elif prop_clean == "gainhelm":
             regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
             default_econ_ds = "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Benchmarks"
+        elif prop_clean == "lienbond":
+            regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
+            default_econ_ds = "SFAA Surety Loss Ratios, NCCI Class Rate Filings, and BLS Construction Wage Series"
 
     trend_series = _resolve_trend_statutory_timeseries_for_workpaper(
         property_id=prop_clean,
@@ -5216,6 +5277,36 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
         "source_agency": "ISO-IAF",
         "points": {"2024": 11.0, "2025": 11.0, "2026": 11.5, "2027": 11.5, "2028": 12.0, "2029": 12.0, "2030": 12.0},
     },
+    {
+        "series_id": "sfaa_contract_surety_loss_ratio",
+        "property_id": "lienbond",
+        "statutory_citation": "40 U.S.C. 3131 / 31 CFR Part 223 Circular 570",
+        "metric_key": "contract_surety_direct_loss_ratio_pct",
+        "metric_label": "SFAA U.S. Treasury Circular 570 Contract Surety Direct Loss Ratio",
+        "unit": "PCT",
+        "source_agency": "TREASURY-SFAA",
+        "points": {"2024": 23.8, "2025": 25.4, "2026": 26.8, "2027": 27.5, "2028": 28.1, "2029": 28.6, "2030": 29.0},
+    },
+    {
+        "series_id": "ncci_emr_primary_split_point",
+        "property_id": "lienbond",
+        "statutory_citation": "NCCI Experience Rating Plan Manual Rule 2-E",
+        "metric_key": "ncci_primary_loss_split_point_usd",
+        "metric_label": "NCCI Workers Compensation Experience Rating Primary Loss Split-Point",
+        "unit": "USD",
+        "source_agency": "NCCI",
+        "points": {"2024": 19000.0, "2025": 19500.0, "2026": 20000.0, "2027": 20500.0, "2028": 21000.0, "2029": 21500.0, "2030": 22000.0},
+    },
+    {
+        "series_id": "dol_davis_bacon_fringe_rate",
+        "property_id": "lienbond",
+        "statutory_citation": "40 U.S.C. 3141 / 29 CFR 5.5",
+        "metric_key": "davis_bacon_median_hourly_fringe_usd",
+        "metric_label": "DOL Wage and Hour Division Davis-Bacon Median Prevailing Fringe Benefit Rate",
+        "unit": "USD",
+        "source_agency": "DOL-WHD",
+        "points": {"2024": 19.8, "2025": 21.1, "2026": 22.45, "2027": 23.6, "2028": 24.8, "2029": 26.0, "2030": 27.25},
+    },
 ]
 
 
@@ -5278,6 +5369,17 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
             "dod_cmmc_c3pao_assessment_base",
             "hhs_hipaa_tier4_annual_cap",
             "iso_27006_stage2_auditor_days",
+            "fred_cpilfesl_inflation",
+            "fred_dgs10_yield",
+        ]
+    elif prop_clean == "lienbond" or sku_clean in (
+        "lb_surety_lien_wh347_packet",
+        "lb_workers_comp_emr_audit_packet",
+    ):
+        preferred_ids = [
+            "sfaa_contract_surety_loss_ratio",
+            "ncci_emr_primary_split_point",
+            "dol_davis_bacon_fringe_rate",
             "fred_cpilfesl_inflation",
             "fred_dgs10_yield",
         ]
@@ -8778,6 +8880,23 @@ def evaluate_lead_quote_threshold(
             primary_partner_key = "vanta_security"
             partner_rep_desk = "Vanta Trust Management & SOC 2 Audit Desk"
             live_destination_url = "https://join.ramp.com/c/7932737/3981015/51436"
+    elif prop_clean == "lienbond":
+        threshold_usd = 25000.0
+        if any(tok in slug_clean for tok in ("workers-comp", "emr", "prevailing-wage")):
+            vertical = "workers_comp_underwriting"
+            primary_partner_key = "simply_business"
+            partner_rep_desk = "Simply Business Commercial Workers Comp Underwriting Desk"
+            live_destination_url = "https://www.kqzyfj.com/click-101707560-14021242"
+        elif any(tok in slug_clean for tok in ("general-liability", "builders-risk", "sdi")):
+            vertical = "contractor_casualty_insurance"
+            primary_partner_key = "next_insurance_b2b"
+            partner_rep_desk = "Next Insurance Commercial Contractor Desk"
+            live_destination_url = "https://www.jdoqocy.com/click-101906407-16985242"
+        else:
+            vertical = "surety_bond_underwriting"
+            primary_partner_key = "suretybonds_direct"
+            partner_rep_desk = "SuretyBonds.com Commercial Surety Underwriting Desk"
+            live_destination_url = "https://www.kqzyfj.com/click-101707560-14021242"
     else:
         if any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
             threshold_usd = 50000.0

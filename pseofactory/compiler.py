@@ -23,6 +23,7 @@ from typing import Dict, Any, Optional, List
 
 from pseofactory.affiliates import (
     GAINHELM_DISCLOSURES,
+    LIENBOND_DISCLOSURES,
     PREXVO_DISCLOSURES,
     PROFITHELM_DISCLOSURES,
     get_affiliate_route,
@@ -223,6 +224,197 @@ GAINHELM_CYBER_COMPLIANCE_CLUSTER = [
     ("penetration-testing-scoping-cost-calculator", "CREST and OSCP Penetration Testing Scoping Cost Calculator"),
     ("cyber-liability-insurance-breach-exposure-calculator", "Cyber Liability Insurance Premium and Breach Exposure Calculator"),
 ]
+
+LIENBOND_CONSTRUCTION_SURETY_CLUSTER = [
+    ("workers-compensation-class-code-rate-calculator-by-state", "NCCI Workers Compensation Class Code Rate Calculator by State"),
+    ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator by Credit Score"),
+    ("miller-act-performance-and-payment-bond-premium-calculator", "Miller Act Performance and Payment Bond Premium Calculator"),
+    ("contractor-lien-release-statutory-matrix-by-state", "50-State Contractor Mechanics Lien Release Statutory Matrix"),
+    ("commercial-construction-retainage-interest-penalty-calculator-by-state", "Commercial Construction Retainage Interest Penalty Calculator by State"),
+    ("davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", "Davis-Bacon Prevailing Wage and WH-347 Fringe Benefit Rate Calculator"),
+    ("erisa-fidelity-bond-coverage-amount-calculator", "ERISA Section 412 Fidelity Bond Coverage Amount Calculator"),
+    ("contractor-overhead-and-profit-markup-vs-margin-calculator", "Contractor Overhead and Profit Markup vs Margin Calculator"),
+    ("experience-modification-rate-emr-workers-comp-penalty-calculator", "Experience Modification Rate (EMR) Workers Comp Penalty Calculator"),
+    ("california-texas-florida-preliminary-notice-deadline-calculator", "California, Texas and Florida Preliminary Notice Deadline Calculator"),
+]
+
+LIENBOND_EXPANSION_SPECS: List[Dict[str, Any]] = [
+    {
+        "query": "workers compensation class code rate calculator by state",
+        "slug": "workers-compensation-class-code-rate-calculator-by-state",
+        "title": "NCCI Workers Compensation Class Code Rate Calculator by State",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "IRC Section 3111 Payroll Burden, 29 CFR Part 1904 OSHA Recordkeeping, and NCCI Basic Manual Class Codes",
+        "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC Construction Series) and NCCI Loss Cost Filings",
+        "model_name": "NCCIWorkersCompClassCodePremiumModel",
+        "formula": "round((field_trade_payroll / 100.0) * class_code_rate_per_100 * emr_modification_factor, 2)",
+        "inputs": {"field_trade_payroll": 650000.0, "class_code_rate_per_100": 6.80, "emr_modification_factor": 1.0},
+        "published_output": 44200.0,
+        "sample_calculation": "Field construction payroll of $650,000 classified at $6.80 per $100 of remuneration with a 1.00 unity EMR modifier yields $44,200.00 in annual workers compensation manual premium",
+        "expected_partner": "simply_business",
+    },
+    {
+        "query": "contractor license bond cost calculator by credit score",
+        "slug": "contractor-license-bond-cost-calculator-by-credit-score",
+        "title": "Contractor License Bond Cost Calculator by Credit Score",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "31 CFR Part 223 U.S. Treasury Circular 570, 40 U.S.C. Section 3131, and California BPC Section 7071.6",
+        "economic_dataset": "FRED Commercial Bank Prime Rate Series, BLS Construction Wage Series, and SFAA Surety Loss Ratios",
+        "model_name": "ContractorLicenseBondCreditTierModel",
+        "formula": "round(bond_penalty_amount * (underwriting_rate_pct / 100.0) * multi_year_discount_factor, 2)",
+        "inputs": {"bond_penalty_amount": 25000.0, "underwriting_rate_pct": 1.5, "multi_year_discount_factor": 1.0},
+        "published_output": 375.0,
+        "sample_calculation": "Statutory $25,000 CSLB contractor license bond underwritten at a 1.50% preferred credit tier rate (1.0x single-year factor) yields a $375.00 annual surety bond premium",
+        "expected_partner": "suretybonds_direct",
+    },
+    {
+        "query": "performance and payment bond premium calculator",
+        "slug": "miller-act-performance-and-payment-bond-premium-calculator",
+        "title": "Miller Act Performance and Payment Bond Premium Calculator",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "40 U.S.C. Section 3131 Federal Miller Act, 48 CFR Part 28 (FAR 28.102-2), and State Little Miller Acts",
+        "economic_dataset": "FRED Total Construction Spending Series (TTLCONS) and SFAA Class B Contract Surety Rate Manuals",
+        "model_name": "MillerActSlidingScaleBondPremiumModel",
+        "formula": "round(min(contract_price, 100000.0) * 0.025 + max(0.0, min(contract_price - 100000.0, 400000.0)) * 0.015 + max(0.0, contract_price - 500000.0) * (sliding_tier_rate_pct / 100.0), 2)",
+        "inputs": {"contract_price": 1200000.0, "sliding_tier_rate_pct": 1.0},
+        "published_output": 15500.0,
+        "sample_calculation": "Public works contract of $1,200,000 under SFAA Class B sliding-scale rates ($2,500 on first $100k at 2.5% + $6,000 on next $400k at 1.5% + $7,000 on remaining $700k at 1.0%) produces a $15,500.00 combined AIA A312 performance and payment bond premium",
+        "expected_partner": "suretybonds_direct",
+    },
+    {
+        "query": "contractor lien release statutory matrix by state",
+        "slug": "contractor-lien-release-statutory-matrix-by-state",
+        "title": "50-State Contractor Mechanics Lien Release Statutory Matrix",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "40 U.S.C. Section 3133(b) Miller Act 90-Day Notice Rule, California Civil Code Section 8132, and Texas Property Code Chapter 53",
+        "economic_dataset": "FRED Commercial Construction Credit Series and BLS Producer Price Index for Construction",
+        "model_name": "StatutoryMechanicsLienWaiverProtectionModel",
+        "formula": "round(unpaid_contract_draw + change_order_balance - min(unpaid_contract_draw + change_order_balance, unserved_late_days * daily_forfeiture_rate), 2)",
+        "inputs": {"unpaid_contract_draw": 85000.0, "change_order_balance": 12500.0, "unserved_late_days": 0.0, "daily_forfeiture_rate": 1250.0},
+        "published_output": 97500.0,
+        "sample_calculation": "Unpaid progress draw of $85,000 plus $12,500 in executed change orders with 0 late preliminary notice days preserves $97,500.00 in secured statutory mechanics lien principal",
+        "expected_partner": "levelset_lien_filing",
+    },
+    {
+        "query": "commercial construction retainage interest penalty calculator by state",
+        "slug": "commercial-construction-retainage-interest-penalty-calculator-by-state",
+        "title": "Commercial Construction Retainage Interest Penalty Calculator by State",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "31 U.S.C. Section 3903 Federal Prompt Payment Act, 48 CFR 52.232-5 Progress Payments, and State Retainage Caps",
+        "economic_dataset": "Federal Reserve H.15 Commercial Bank Prime Loan Rate and FRED Construction Spending Series",
+        "model_name": "ConstructionRetainageWorkingCapitalDragModel",
+        "formula": "round(gross_contract_billed * (retainage_holdback_pct / 100.0) * (1.0 + (credit_line_apr_pct / 100.0) * (retainage_hold_days / 365.0)), 2)",
+        "inputs": {"gross_contract_billed": 900000.0, "retainage_holdback_pct": 10.0, "credit_line_apr_pct": 8.5, "retainage_hold_days": 180.0},
+        "published_output": 93772.6,
+        "sample_calculation": "Withholding 10.0% retainage ($90,000) on $900,000 of progress billings financed at 8.50% APR for 180 days locks up $93,772.60 in principal plus working capital interest drag",
+        "expected_partner": "jobber_field_service",
+    },
+    {
+        "query": "davis bacon prevailing wage fringe benefit rate calculator",
+        "slug": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+        "title": "Davis-Bacon Prevailing Wage and WH-347 Fringe Benefit Rate Calculator",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "40 U.S.C. Section 3141 Davis-Bacon Act, 29 CFR Section 5.5 Certified Payroll WH-347, and IRC Section 3111",
+        "economic_dataset": "BLS National Compensation Survey Construction Fringe Benefit Series and DOL Wage Determinations",
+        "model_name": "DavisBaconFringeCashInLieuPayrollBurdenModel",
+        "formula": "round(annual_prevailing_hours * (base_hourly_wage + (required_fringe_hourly - bona_fide_plan_credit_hourly) * (1.0 + payroll_tax_burden_pct / 100.0) + bona_fide_plan_credit_hourly), 2)",
+        "inputs": {"annual_prevailing_hours": 2000.0, "base_hourly_wage": 48.0, "required_fringe_hourly": 22.0, "bona_fide_plan_credit_hourly": 0.0, "payroll_tax_burden_pct": 14.5},
+        "published_output": 146380.0,
+        "sample_calculation": "Paying $48.00/hr base wage plus $22.00/hr fringe in cash-in-lieu over 2,000 hours with a 14.5% FICA/FUTA/WC payroll burden on cash fringes totals $146,380.00 ($6,380.00 excess payroll tax penalty vs a bona fide ERISA trust)",
+        "expected_partner": "simply_business",
+    },
+    {
+        "query": "erisa fidelity bond coverage amount calculator",
+        "slug": "erisa-fidelity-bond-coverage-amount-calculator",
+        "title": "ERISA Section 412 Fidelity Bond Coverage Amount Calculator",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "29 U.S.C. Section 1112 (ERISA Section 412), 29 CFR 2580.412-1, and U.S. Treasury Circular 570",
+        "economic_dataset": "BLS Employee Benefits Survey Retirement Plan Series and FRED Corporate Bond Yield Series",
+        "model_name": "ERISASection412FidelityBondLimitModel",
+        "formula": "round(min(max(qualifying_plan_assets * 0.10, 1000.0), 500000.0), 2)",
+        "inputs": {"qualifying_plan_assets": 2400000.0},
+        "published_output": 240000.0,
+        "sample_calculation": "Qualified 401(k) retirement plan holding $2,400,000 in qualifying plan assets under 29 U.S.C. 1112 (10% statutory bond rule capped at $500,000) requires a $240,000.00 ERISA fidelity bond",
+        "expected_partner": "suretybonds_direct",
+    },
+    {
+        "query": "contractor overhead and profit markup vs margin calculator",
+        "slug": "contractor-overhead-and-profit-markup-vs-margin-calculator",
+        "title": "Contractor Overhead and Profit Markup vs Margin Calculator",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "48 CFR Part 31 (FAR Contract Cost Principles), IRC Section 460 Percentage-of-Completion, and AIA A102",
+        "economic_dataset": "BLS Producer Price Index for Nonresidential Building Construction and FRED Construction Series",
+        "model_name": "ContractorMarkupVsGrossMarginModel",
+        "formula": "round(direct_job_cost / (1.0 - (overhead_pct + target_net_profit_pct) / 100.0), 2)",
+        "inputs": {"direct_job_cost": 340000.0, "overhead_pct": 12.0, "target_net_profit_pct": 8.0},
+        "published_output": 425000.0,
+        "sample_calculation": "Direct job cost of $340,000 divided by (1.0 minus 20.0% combined overhead and profit margin) requires a $425,000.00 contract bid price (1.25x markup divisor)",
+        "expected_partner": "jobber_field_service",
+    },
+    {
+        "query": "experience modification rate emr workers comp penalty calculator",
+        "slug": "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "title": "Experience Modification Rate (EMR) Workers Comp Penalty Calculator",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "29 CFR Part 1904 Occupational Injury Reporting, IRC Section 162 Insurance Deduction, and NCCI Experience Rating Plan Rule 2-E",
+        "economic_dataset": "BLS Survey of Occupational Injuries and Illnesses (SOII) and NCCI Primary Split-Point Series",
+        "model_name": "NCCIExperienceModificationRateSurchargeModel",
+        "formula": "round(manual_workers_comp_premium * emr_factor * (1.0 - safety_credit_pct / 100.0), 2)",
+        "inputs": {"manual_workers_comp_premium": 52000.0, "emr_factor": 1.15, "safety_credit_pct": 5.0},
+        "published_output": 56810.0,
+        "sample_calculation": "Manual workers compensation premium of $52,000 modified by a 1.15 debit EMR and a 5.0% state safety committee credit yields $56,810.00 net audited premium",
+        "expected_partner": "simply_business",
+    },
+    {
+        "query": "preliminary notice deadline calculator california texas florida",
+        "slug": "california-texas-florida-preliminary-notice-deadline-calculator",
+        "title": "California, Texas and Florida Preliminary Notice Deadline Calculator",
+        "tenant": "lienbond",
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "statutory_authority": "40 U.S.C. Section 3133(b) Miller Act, California Civil Code Section 8204, Texas Property Code Section 53.056, and Florida Statutes Section 713.06",
+        "economic_dataset": "FRED Commercial Construction Credit Series and BLS Specialty Trade Contractor Series",
+        "model_name": "TriStatePreliminaryNoticeLookbackModel",
+        "formula": "round(unpaid_progress_billing * max(0.0, min(1.0, (statutory_lookback_window_days - max(0.0, days_elapsed_since_first_furnishing - statutory_lookback_window_days)) / statutory_lookback_window_days)), 2)",
+        "inputs": {"unpaid_progress_billing": 120000.0, "days_elapsed_since_first_furnishing": 20.0, "statutory_lookback_window_days": 20.0},
+        "published_output": 120000.0,
+        "sample_calculation": "Serving a California 20-Day Preliminary Notice on Day 20 from first furnishing preserves 100% ($120,000.00) of statutory mechanics lien and stop payment notice rights",
+        "expected_partner": "levelset_lien_filing",
+    },
+]
+
+
+def get_lienbond_expansion_specs() -> List[Dict[str, Any]]:
+    """Returns deep copies of the 10 Factor-7-verified LienBond construction surety, workers comp, and lien calculator specs."""
+    return [dict(spec, inputs=dict(spec["inputs"])) for spec in LIENBOND_EXPANSION_SPECS]
 
 
 def compile_ast_to_js(
@@ -591,17 +783,18 @@ def _render_compiler_monetization_and_guardrail_html(
     is_prexvo: bool,
     candidate_spec: Dict[str, Any],
     is_gainhelm: bool = False,
+    is_lienbond: bool = False,
 ) -> Dict[str, Any]:
     """
     Renders domain-isolated multi-company affiliate partner rosters and deterministic
-    conversion slots on profithelm and gainhelm, and enforces YMYL statutory guardrails on prexvo
+    conversion slots on profithelm, gainhelm, and lienbond, and enforces YMYL statutory guardrails on prexvo
     (suppressing commercial offers on restricted public-service pages).
     Zero em-dashes. Zero en-dashes.
     """
     import html as html_lib
     from pseofactory.affiliates import bind_asset_partner_roster
 
-    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     gsc_metrics_raw: Dict[str, Any] = {}
     if isinstance(candidate_spec.get("gsc_telemetry"), dict):
         gsc_metrics_raw.update(candidate_spec["gsc_telemetry"])
@@ -786,8 +979,16 @@ def _render_compiler_monetization_and_guardrail_html(
         )
 
     if not is_prexvo:
-        default_slug = "soc-2-audit-cost-calculator" if is_gainhelm else "section-179-deduction-calculator"
-        default_pk = "vanta_security" if is_gainhelm else "crest_capital"
+        default_slug = (
+            "soc-2-audit-cost-calculator"
+            if is_gainhelm
+            else ("contractor-license-bond-cost-calculator-by-credit-score" if is_lienbond else "section-179-deduction-calculator")
+        )
+        default_pk = (
+            "vanta_security"
+            if is_gainhelm
+            else ("suretybonds_direct" if is_lienbond else "crest_capital")
+        )
         try:
             route = get_affiliate_route(prop_id, slug)
         except ValueError:
@@ -807,14 +1008,14 @@ def _render_compiler_monetization_and_guardrail_html(
                 route = get_affiliate_route(prop_id, slug, partner_key=partner_key)
             except ValueError:
                 pass
-            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Vanta" if is_gainhelm else "Xendoo"))
+            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Vanta" if is_gainhelm else ("SuretyBonds.com" if is_lienbond else "Xendoo")))
             cta_text = str(primary_offer.get("cta_text") or route.get("cta_text", "Explore Partner"))
-            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.vanta.com/" if is_gainhelm else "https://www.xendoo.com/"))
+            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.kqzyfj.com/click-101707560-14021242" if is_lienbond else "https://www.xendoo.com/")))
         else:
             partner_key = route.get("partner_key", default_pk)
-            partner_name = route.get("partner_name", "Vanta Automated GRC" if is_gainhelm else "Xendoo Section 179 & Business Tax Accounting")
-            cta_text = route.get("cta_text", "Automate Audit Readiness with Vanta" if is_gainhelm else "Optimize Section 179 Accounting with Xendoo")
-            raw_url = route.get("url", "https://www.vanta.com/" if is_gainhelm else "https://www.xendoo.com/")
+            partner_name = route.get("partner_name", "Vanta Automated GRC" if is_gainhelm else ("SuretyBonds.com Commercial Surety Desk" if is_lienbond else "Xendoo Section 179 & Business Tax Accounting"))
+            cta_text = route.get("cta_text", "Automate Audit Readiness with Vanta" if is_gainhelm else ("Bind Instant Surety Bond Quote" if is_lienbond else "Optimize Section 179 Accounting with Xendoo"))
+            raw_url = route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.kqzyfj.com/click-101707560-14021242" if is_lienbond else "https://www.xendoo.com/"))
         url = (
             raw_url
             if route.get("status") in ("live", "active_direct") and not str(raw_url).startswith("/r/")
@@ -823,7 +1024,7 @@ def _render_compiler_monetization_and_guardrail_html(
         if str(url).startswith("/r/") and "?" not in str(url):
             url = f"{url}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
         rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
-        disc_dict = GAINHELM_DISCLOSURES if is_gainhelm else PROFITHELM_DISCLOSURES
+        disc_dict = GAINHELM_DISCLOSURES if is_gainhelm else (LIENBOND_DISCLOSURES if is_lienbond else PROFITHELM_DISCLOSURES)
         ftc_disc = disc_dict.get("ftc_disclosure", "")
         roster_keys_csv = html_lib.escape(",".join(roster_info.get("roster_keys") or []))
         companies_csv = html_lib.escape(",".join(roster_info.get("distinct_companies") or []))
@@ -835,7 +1036,11 @@ def _render_compiler_monetization_and_guardrail_html(
         partner_lead_copy = (
             "Execute your modeled compliance or audit readiness scenario with a vetted GRC automation, CPA audit, or security assurance partner matched to this calculation:"
             if is_gainhelm
-            else "Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:"
+            else (
+                "Execute your modeled surety bond, workers compensation, or statutory mechanics lien scenario with a vetted Treasury Circular 570 underwriter or commercial carrier matched to this calculation:"
+                if is_lienbond
+                else "Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:"
+            )
         )
 
         block_html = (
@@ -1027,6 +1232,7 @@ def _build_compiler_faq_entities(
     is_prediction_tool: bool,
     is_prexvo: bool,
     is_gainhelm: bool = False,
+    is_lienbond: bool = False,
 ) -> List[Dict[str, Any]]:
     """Builds conversational FAQPage entities tailored to tenant and tool cluster."""
     faq_entities: List[Dict[str, Any]] = [
@@ -1120,6 +1326,25 @@ def _build_compiler_faq_entities(
                 },
             },
         ])
+    elif is_lienbond:
+        faq_entities.extend([
+            {
+                "@type": "Question",
+                "name": f"What statutory filings and underwriting documents are required under {statutory_authority}?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Contractors and subcontractors must maintain verified Treasury Circular 570 surety bond riders, trade-segregated NCCI payroll ledgers, certified mail Preliminary Notice proofs of service, and conditional/unconditional statutory lien waivers.",
+                },
+            },
+            {
+                "@type": "Question",
+                "name": "How do working capital ratios, EMR scores, and credit tiers affect surety bond and workers comp rates?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": f"Underwriters evaluate net working capital (target 10% of bonded backlog), FICO credit tiers, and NCCI Experience Modification Rates (EMR) against empirical benchmarks in {economic_dataset}.",
+                },
+            },
+        ])
     else:
         faq_entities.extend([
             {
@@ -1153,9 +1378,10 @@ def _build_compiled_json_ld_graph(
     is_prexvo: bool,
     faq_entities: List[Dict[str, Any]],
     is_gainhelm: bool = False,
+    is_lienbond: bool = False,
 ) -> str:
     """Builds the unified Schema.org @graph JSON-LD string for compiled programmatic pages."""
-    brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else "ProfitHelm")
+    brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
     if "/" in slug:
         spoke_parts = [sp for sp in slug.split("/") if sp]
         hub_slug_part = spoke_parts[0]
@@ -1347,13 +1573,17 @@ def _enrich_manifest_with_proprietary_signals(
         for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
     ).lower()
     inferred_prop = (
-        "gainhelm"
-        if "gainhelm" in spec_tenant_hint
+        "lienbond"
+        if "lienbond" in spec_tenant_hint
         else (
-            "prexvo"
-            if "prexvo" in spec_tenant_hint
-            or any(t in str(statutory_authority).lower() for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan"))
-            else "profithelm"
+            "gainhelm"
+            if "gainhelm" in spec_tenant_hint
+            else (
+                "prexvo"
+                if "prexvo" in spec_tenant_hint
+                or any(t in str(statutory_authority).lower() for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan"))
+                else "profithelm"
+            )
         )
     )
     bundle = resolve_proprietary_signal_bundle(
@@ -1641,7 +1871,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
     ).lower()
     is_gainhelm = False
-    if "gainhelm" in spec_tenant_signals:
+    is_lienbond = False
+    if "lienbond" in spec_tenant_signals:
+        is_prexvo = False
+        is_lienbond = True
+    elif "gainhelm" in spec_tenant_signals:
         is_prexvo = False
         is_gainhelm = True
     elif "profithelm" in spec_tenant_signals and "prexvo" not in spec_tenant_signals:
@@ -1654,7 +1888,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             os.environ.get("FACTORY_BRAND_NAME", "").lower(),
             os.environ.get("FACTORY_DOMAIN", "").lower(),
         ])
-        if "gainhelm" in env_signals or any(
+        if "lienbond" in env_signals:
+            is_prexvo = False
+            is_lienbond = True
+        elif "gainhelm" in env_signals or any(
             t in str(candidate_spec.get("statutory_authority") or "").lower()
             for t in ("aicpa ssae 18", "32 cfr part 170", "dfars 252.204", "iso/iec 27006", "45 cfr 160.404", "pci dss v4", "fedramp", "hitrust csf")
         ):
@@ -1668,13 +1905,19 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
                     for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
                 )
             )
-    default_base = "https://prexvo.com" if is_prexvo else ("https://gainhelm.com" if is_gainhelm else "https://profithelm.com")
+    default_base = (
+        "https://prexvo.com"
+        if is_prexvo
+        else ("https://gainhelm.com" if is_gainhelm else ("https://lienbond.com" if is_lienbond else "https://profithelm.com"))
+    )
     env_base = os.environ.get("FACTORY_CANONICAL_BASE", "").strip()
-    if is_prexvo and ("profithelm.com" in env_base.lower() or "gainhelm.com" in env_base.lower()):
+    if is_prexvo and ("profithelm.com" in env_base.lower() or "gainhelm.com" in env_base.lower() or "lienbond.com" in env_base.lower()):
         env_base = ""
-    elif is_gainhelm and ("profithelm.com" in env_base.lower() or "prexvo.com" in env_base.lower()):
+    elif is_gainhelm and ("profithelm.com" in env_base.lower() or "prexvo.com" in env_base.lower() or "lienbond.com" in env_base.lower()):
         env_base = ""
-    elif not is_prexvo and not is_gainhelm and ("prexvo.com" in env_base.lower() or "gainhelm.com" in env_base.lower()):
+    elif is_lienbond and ("profithelm.com" in env_base.lower() or "prexvo.com" in env_base.lower() or "gainhelm.com" in env_base.lower()):
+        env_base = ""
+    elif not is_prexvo and not is_gainhelm and not is_lienbond and ("prexvo.com" in env_base.lower() or "gainhelm.com" in env_base.lower() or "lienbond.com" in env_base.lower()):
         env_base = ""
     canonical_base = (
         str(candidate_spec.get("canonical_base") or "").strip()
@@ -1693,6 +1936,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         is_prexvo=is_prexvo,
         candidate_spec=candidate_spec,
         is_gainhelm=is_gainhelm,
+        is_lienbond=is_lienbond,
     )
     monetization_section_html = monetization_block["html"]
     inline_calc_cta_html = monetization_block.get("inline_calc_cta_html", "")
@@ -1700,7 +1944,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     if comparison_table_cta_html:
         scenario_table_html = f"{scenario_table_html}\n{comparison_table_cta_html}"
 
-    resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     from pseofactory.competitor import render_competitor_winning_pattern_blocks
     winning_blocks = render_competitor_winning_pattern_blocks(
         slug=slug,
@@ -1719,7 +1963,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     is_prexvo_js = "true" if is_prexvo else "false"
 
-    is_prediction_tool = (not is_prexvo and not is_gainhelm) and any(
+    is_prediction_tool = (not is_prexvo and not is_gainhelm and not is_lienbond) and any(
         tok in slug.lower()
         for tok in (
             "prediction",
@@ -1736,7 +1980,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         )
     )
 
-    application_category = "BusinessApplication" if is_gainhelm else "FinanceApplication"
+    application_category = "BusinessApplication" if (is_gainhelm or is_lienbond) else "FinanceApplication"
 
     if is_prexvo:
         cluster = PREXVO_STUDENT_LOAN_CLUSTER
@@ -1744,6 +1988,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     elif is_gainhelm:
         cluster = GAINHELM_CYBER_COMPLIANCE_CLUSTER
         cluster_title = "Related Cyber Compliance and GRC Audit Cost Tools"
+    elif is_lienbond:
+        cluster = LIENBOND_CONSTRUCTION_SURETY_CLUSTER
+        cluster_title = "Related Construction Surety Bond, Workers Comp and Lien Tools"
     elif is_prediction_tool:
         cluster = PROFITHELM_PREDICTION_CLUSTER
         cluster_title = "Related Prediction Market Quantitative Tools"
@@ -1778,6 +2025,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         is_prediction_tool=is_prediction_tool,
         is_prexvo=is_prexvo,
         is_gainhelm=is_gainhelm,
+        is_lienbond=is_lienbond,
     )
 
     faq_json_str = json.dumps(faq_entities, ensure_ascii=False, indent=6)
@@ -1821,6 +2069,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         regulatory_disclosures_html.append(
             '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
             f'        {GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", "")}\n'
+            '      </p>'
+        )
+    elif is_lienbond:
+        regulatory_disclosures_html.append(
+            '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+            f'        {LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer", "")}\n'
             '      </p>'
         )
     elif not is_prexvo:
@@ -1903,6 +2157,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         is_prexvo=is_prexvo,
         faq_entities=faq_entities,
         is_gainhelm=is_gainhelm,
+        is_lienbond=is_lienbond,
     )
 
     html_content = f"""<!DOCTYPE html>
@@ -2414,7 +2669,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     )
     from pseofactory.tenant_facts import TruthReconciliationEngine
 
-    resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     html_content, _ = TruthReconciliationEngine.reconcile_html_truth(
         html_content,
         tenant=resolved_tenant,
@@ -2463,4 +2718,347 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         "verified": True,
         "boundary_fuzz_verified": bool(fuzz_res.get("passed", True)),
     }
+
+
+def compile_lienbond_estate(output_dir: Any) -> Dict[str, Any]:
+    """
+    Compiles the complete LienBond (lienbond.com) tenant estate into `output_dir`:
+    - 10 high-effort construction surety bond, workers comp class code / EMR, 50-state mechanics
+      lien deadline/waiver, and Davis-Bacon WH-347 calculators under `dist/tools/<slug>/index.html`
+    - Factor-7 manifests under `dist/manifests/<slug>.json`
+    - Hub & governance pages (`dist/index.html`, `dist/tools/index.html`, `dist/disclaimers/index.html`,
+      `dist/methodology/index.html`, `dist/404.html`)
+    - Sitemaps (`dist/sitemap.xml`, `dist/sitemap-hubs.xml`, `dist/sitemap-leaves.xml`), `dist/robots.txt`,
+      `dist/llms.txt`, `dist/llms-full.txt`, `dist/catalog.json`, `dist/media-kit.json`, `dist/_headers`, `dist/_redirects`
+    - Cloudflare Pages Functions (`functions/r/[partner].js`, `functions/api/telemetry.js`,
+      `functions/api/lead-capture.js`, `functions/api/checkout.js`, `functions/api/lead-fulfillment.js`)
+    - `.pseofactory.json`, `wrangler.toml`, and `README.md`
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+
+    root = Path(output_dir).resolve()
+    dist = root / "dist"
+    tools_dir = dist / "tools"
+    manifests_dir = dist / "manifests"
+    disclaimers_dir = dist / "disclaimers"
+    methodology_dir = dist / "methodology"
+    for d in (dist, tools_dir, manifests_dir, disclaimers_dir, methodology_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    specs = get_lienbond_expansion_specs()
+    compiled_pages: List[Dict[str, Any]] = []
+    catalog_tools: List[Dict[str, Any]] = []
+
+    for spec in specs:
+        res = compile_high_effort_page(spec)
+        slug = res["slug"]
+        leaf_dir = tools_dir / slug
+        leaf_dir.mkdir(parents=True, exist_ok=True)
+        leaf_html_path = leaf_dir / "index.html"
+        leaf_html_path.write_text(res["html"], encoding="utf-8")
+
+        manifest_path = manifests_dir / f"{slug}.json"
+        manifest_path.write_text(json.dumps(res["manifest"], indent=2), encoding="utf-8")
+
+        compiled_pages.append(
+            {
+                "slug": slug,
+                "title": res["title"],
+                "html_path": str(leaf_html_path),
+                "manifest_path": str(manifest_path),
+                "published_output": res["published_output"],
+                "statutory_authority": spec["statutory_authority"],
+                "economic_dataset": spec["economic_dataset"],
+                "formula": spec["formula"],
+                "sample_calculation": spec["sample_calculation"],
+            }
+        )
+        catalog_tools.append(
+            {
+                "slug": slug,
+                "title": res["title"],
+                "url": f"https://lienbond.com/tools/{slug}/",
+                "manifest_url": f"https://lienbond.com/manifests/{slug}.json",
+                "statutory_authority": spec["statutory_authority"],
+                "economic_dataset": spec["economic_dataset"],
+                "formula": spec["formula"],
+                "published_output": res["published_output"],
+            }
+        )
+
+    tool_cards_html = "\n".join(
+        f'        <article class="card" style="background:#0f172a;border:1px solid rgba(255,255,255,0.10);border-radius:12px;padding:20px;">\n'
+        f'          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#38bdf8;margin-bottom:6px;">{p["statutory_authority"]}</div>\n'
+        f'          <h2 style="font-size:18px;margin:0 0 8px 0;"><a href="/tools/{p["slug"]}/" class="touch-target" style="color:#f8fafc;text-decoration:none;display:inline-flex;align-items:center;min-height:44px;">{p["title"]}</a></h2>\n'
+        f'          <p style="font-size:14px;color:#94a3b8;margin:0 0 12px 0;">{p["sample_calculation"]}.</p>\n'
+        f'          <div style="display:flex;gap:10px;flex-wrap:wrap;">\n'
+        f'            <a href="/tools/{p["slug"]}/" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;border-radius:8px;background:#38bdf8;color:#07090e;font-weight:700;text-decoration:none;font-size:14px;">Launch Calculator</a>\n'
+        f'            <a href="/api/lead-capture?playbook=1&amp;tool_slug={p["slug"]}&amp;format=html" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 14px;border-radius:8px;border:1px solid #38bdf8;color:#38bdf8;font-weight:600;text-decoration:none;font-size:13px;">Preview Statutory Packet</a>\n'
+        f'          </div>\n'
+        f'        </article>'
+        for p in compiled_pages
+    )
+
+    hub_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LienBond | Construction Surety Bonds, Workers Comp &amp; 50-State Mechanics Lien Calculators</title>
+  <meta name="description" content="Deterministic construction surety bond, NCCI workers compensation class code and EMR, 50-state mechanics lien deadline, and Davis-Bacon WH-347 calculators." />
+  <link rel="canonical" href="https://lienbond.com/" />
+  <link rel="tool-catalog" type="application/json" href="/catalog.json" />
+  <style>
+    body {{ background:#07090e; color:#f8fafc; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; line-height:1.6; margin:0; padding:32px 16px; }}
+    .container {{ max-width:1040px; margin:0 auto; }}
+    .hero {{ background:#0f172a; border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:28px; margin-bottom:24px; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }}
+    .touch-target {{ min-height:44px; min-width:44px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#38bdf8;">LienBond Statutory Construction Finance &amp; Surety Engine</div>
+      <h1 style="font-size:30px;margin:8px 0 12px 0;">Construction Surety Bond, NCCI Workers Comp &amp; 50-State Mechanics Lien Calculators</h1>
+      <p style="color:#cbd5e1;margin:0 0 16px 0;">
+        Model Treasury Circular 570 contractor license and AIA A312 performance/payment bond premiums, NCCI workers compensation class codes and Experience Modification Rates (EMR), 50-state statutory mechanics lien deadlines, and Davis-Bacon Certified Payroll Form WH-347 fringe burdens. Export jurisdiction-locked statutory filing packets or bind instant underwriting quotes.
+      </p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <a href="/tools/contractor-license-bond-cost-calculator-by-credit-score/" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;padding:12px 18px;border-radius:8px;background:#38bdf8;color:#07090e;font-weight:700;text-decoration:none;">Contractor License Bond Calculator</a>
+        <a href="/tools/contractor-lien-release-statutory-matrix-by-state/" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;padding:12px 18px;border-radius:8px;border:1px solid #38bdf8;color:#38bdf8;font-weight:700;text-decoration:none;">50-State Mechanics Lien Matrix</a>
+        <a href="/api/lead-capture?checkout=1&amp;sku=lb_surety_lien_wh347_packet&amp;tool_slug=contractor-license-bond-cost-calculator-by-credit-score&amp;redirect=1" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;padding:12px 18px;border-radius:8px;background:#10b981;color:#07090e;font-weight:700;text-decoration:none;">Download 50-State Lien, AIA A312 &amp; WH-347 Packet ($79)</a>
+      </div>
+    </header>
+    <main class="grid">
+{tool_cards_html}
+    </main>
+    <footer style="margin-top:32px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.1);font-size:13px;color:#94a3b8;">
+      <p>{LIENBOND_DISCLOSURES["statutory_surety_disclaimer"]}</p>
+      <p>{LIENBOND_DISCLOSURES["ftc_disclosure"]}</p>
+      <p><a href="/methodology/" style="color:#38bdf8;">Statutory Methodology</a> | <a href="/disclaimers/" style="color:#38bdf8;">Disclaimers &amp; Disclosures</a> | <a href="/sitemap.xml" style="color:#38bdf8;">Sitemap</a></p>
+    </footer>
+  </div>
+</body>
+</html>
+"""
+    assert_no_forbidden_dashes(hub_html, context="lienbond hub_html")
+    (dist / "index.html").write_text(hub_html, encoding="utf-8")
+    (tools_dir / "index.html").write_text(hub_html.replace('href="https://lienbond.com/"', 'href="https://lienbond.com/tools/"'), encoding="utf-8")
+    (dist / "404.html").write_text(hub_html, encoding="utf-8")
+
+    disclaimers_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Statutory Surety, Lien &amp; FTC Disclosures | LienBond</title>
+  <link rel="canonical" href="https://lienbond.com/disclaimers/" />
+</head>
+<body style="background:#07090e;color:#f8fafc;font-family:system-ui,sans-serif;max-width:860px;margin:0 auto;padding:32px 16px;line-height:1.6;">
+  <h1>Statutory Surety, Mechanics Lien &amp; Commercial Insurance Disclosures</h1>
+  <p>{LIENBOND_DISCLOSURES["statutory_surety_disclaimer"]}</p>
+  <p>{LIENBOND_DISCLOSURES["ftc_disclosure"]}</p>
+  <p><a href="/" style="color:#38bdf8;">Return to LienBond Calculators</a></p>
+</body>
+</html>
+"""
+    assert_no_forbidden_dashes(disclaimers_html, context="lienbond disclaimers_html")
+    (disclaimers_dir / "index.html").write_text(disclaimers_html, encoding="utf-8")
+
+    methodology_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quantitative Surety, NCCI Workers Comp &amp; Statutory Lien Methodology | LienBond</title>
+  <link rel="canonical" href="https://lienbond.com/methodology/" />
+</head>
+<body style="background:#07090e;color:#f8fafc;font-family:system-ui,sans-serif;max-width:860px;margin:0 auto;padding:32px 16px;line-height:1.6;">
+  <h1>Quantitative Construction Surety, NCCI Class Code &amp; Statutory Mechanics Lien Methodology</h1>
+  <p>Every LienBond calculator evaluates abstract syntax tree mathematical formulas anchored to primary statutory authorities: 40 U.S.C. Section 3131 (Federal Miller Act), U.S. Treasury Circular 570, State Contractors License Board bond schedules, NCCI Experience Rating Plan Manuals, 50-state mechanics lien codes, and 40 U.S.C. Section 3141 Davis-Bacon WH-347 rules.</p>
+  <p><a href="/" style="color:#38bdf8;">Return to LienBond Calculators</a></p>
+</body>
+</html>
+"""
+    assert_no_forbidden_dashes(methodology_html, context="lienbond methodology_html")
+    (methodology_dir / "index.html").write_text(methodology_html, encoding="utf-8")
+
+    sitemap_index = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://lienbond.com/sitemap-hubs.xml</loc>
+    <lastmod>2026-11-06</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://lienbond.com/sitemap-leaves.xml</loc>
+    <lastmod>2026-11-06</lastmod>
+  </sitemap>
+</sitemapindex>
+"""
+    sitemap_hubs = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://lienbond.com/</loc><lastmod>2026-11-06</lastmod></url>
+  <url><loc>https://lienbond.com/tools/</loc><lastmod>2026-11-06</lastmod></url>
+  <url><loc>https://lienbond.com/methodology/</loc><lastmod>2026-11-06</lastmod></url>
+  <url><loc>https://lienbond.com/disclaimers/</loc><lastmod>2026-11-06</lastmod></url>
+</urlset>
+"""
+    leaves_urls = "\n".join(
+        f'  <url><loc>https://lienbond.com/tools/{p["slug"]}/</loc><lastmod>2026-11-06</lastmod></url>'
+        for p in compiled_pages
+    )
+    sitemap_leaves = f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{leaves_urls}
+</urlset>
+"""
+    (dist / "sitemap.xml").write_text(sitemap_index, encoding="utf-8")
+    (dist / "sitemap-hubs.xml").write_text(sitemap_hubs, encoding="utf-8")
+    (dist / "sitemap-leaves.xml").write_text(sitemap_leaves, encoding="utf-8")
+
+    robots_txt = """User-agent: *
+Allow: /
+
+Sitemap: https://lienbond.com/sitemap.xml
+"""
+    (dist / "robots.txt").write_text(robots_txt, encoding="utf-8")
+
+    llms_lines = [
+        "# LienBond (https://lienbond.com)",
+        "",
+        "> Deterministic construction surety bond, NCCI workers compensation class code/EMR, 50-state mechanics lien deadline, and Davis-Bacon WH-347 compliance calculators.",
+        "",
+        "## Calculators",
+    ]
+    for p in compiled_pages:
+        llms_lines.append(f"- [{p['title']}](https://lienbond.com/tools/{p['slug']}/): {p['sample_calculation']}")
+    llms_txt = "\n".join(llms_lines) + "\n"
+    (dist / "llms.txt").write_text(llms_txt, encoding="utf-8")
+    (dist / "llms-full.txt").write_text(llms_txt, encoding="utf-8")
+
+    (dist / "catalog.json").write_text(
+        json.dumps({"property_id": "lienbond", "domain": "lienbond.com", "tools": catalog_tools}, indent=2),
+        encoding="utf-8",
+    )
+    (dist / "media-kit.json").write_text(
+        json.dumps(
+            {
+                "property_id": "lienbond",
+                "brand_name": "LienBond",
+                "domain": "lienbond.com",
+                "vertical": "construction_surety_workers_comp_mechanics_lien",
+                "deliverable_skus": ["lb_surety_lien_wh347_packet", "lb_workers_comp_emr_audit_packet"],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (dist / "_headers").write_text(
+        "/*\n  X-Content-Type-Options: nosniff\n  X-Frame-Options: SAMEORIGIN\n  Referrer-Policy: strict-origin-when-cross-origin\n",
+        encoding="utf-8",
+    )
+    (dist / "_redirects").write_text("", encoding="utf-8")
+
+    pseo_meta = {
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "brand_name": "LienBond",
+        "package_name": "lienbond",
+        "dist_dir": "dist",
+    }
+    (root / ".pseofactory.json").write_text(json.dumps(pseo_meta, indent=2) + "\n", encoding="utf-8")
+
+    wrangler_toml = """name = "lienbond"
+compatibility_date = "2026-09-15"
+pages_build_output_dir = "dist"
+
+[vars]
+DOMAIN = "lienbond.com"
+CANONICAL_BASE = "https://lienbond.com"
+
+# Cloudflare KV Binding for Durable LienBond Click & Calculation Telemetry
+[[kv_namespaces]]
+binding = "LIENBOND_TELEMETRY_KV"
+id = "d7e2021ef7cf47eea4ae382742481e75"
+
+# Cloudflare KV Binding for LienBond Consented Surety, Workers Comp & Lien Filing Quote Leads
+[[kv_namespaces]]
+binding = "LIENBOND_LEADS"
+id = "d7e2021ef7cf47eea4ae382742481e75"
+"""
+    (root / "wrangler.toml").write_text(wrangler_toml, encoding="utf-8")
+
+    readme_md = """# LienBond (lienbond.com)
+
+Compiled tenant of `pseofactory` serving deterministic Construction Surety Bond, NCCI Workers Compensation Class Code & EMR, 50-State Statutory Mechanics Lien Deadline, and Davis-Bacon WH-347 Certified Payroll calculators.
+
+Do not edit directly. All changes must be made in `pseofactory` and compiled via `compile_lienbond_estate`.
+"""
+    (root / "README.md").write_text(readme_md, encoding="utf-8")
+
+    (root / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    (root / "functions" / "api").mkdir(parents=True, exist_ok=True)
+    sync_res = sync_tenant_edge_redirect_function(root, property_id="lienbond")
+
+    api_dir = root / "functions" / "api"
+    api_dir.mkdir(parents=True, exist_ok=True)
+    checkout_js = """import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";
+
+function withCheckoutFlag(context) {
+  const url = new URL(context.request.url);
+  if (!url.searchParams.has("checkout")) url.searchParams.set("checkout", "1");
+  const req = new Request(url.toString(), context.request);
+  return { ...context, request: req };
+}
+
+export async function onRequestGet(context) {
+  return lcGet(withCheckoutFlag(context));
+}
+
+export async function onRequestPost(context) {
+  return lcPost(withCheckoutFlag(context));
+}
+
+export async function onRequestOptions(context) {
+  return lcOpt(context);
+}
+"""
+    fulfillment_js = """import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";
+
+function withFulfillFlag(context) {
+  const url = new URL(context.request.url);
+  if (!url.searchParams.has("fulfill")) url.searchParams.set("fulfill", "1");
+  const req = new Request(url.toString(), context.request);
+  return { ...context, request: req };
+}
+
+export async function onRequestGet(context) {
+  return lcGet(withFulfillFlag(context));
+}
+
+export async function onRequestPost(context) {
+  return lcPost(withFulfillFlag(context));
+}
+
+export async function onRequestOptions(context) {
+  return lcOpt(context);
+}
+"""
+    (api_dir / "checkout.js").write_text(checkout_js, encoding="utf-8")
+    (api_dir / "lead-fulfillment.js").write_text(fulfillment_js, encoding="utf-8")
+
+    return {
+        "property_id": "lienbond",
+        "domain": "lienbond.com",
+        "output_dir": str(root),
+        "dist_dir": str(dist),
+        "compiled_count": len(compiled_pages),
+        "compiled_pages": compiled_pages,
+        "edge_functions": sync_res,
+    }
+
 

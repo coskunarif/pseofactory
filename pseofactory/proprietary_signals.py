@@ -419,7 +419,7 @@ def resolve_proprietary_signal_bundle(
     TREG/JEV search demand telemetry, and first-party scenario demand attribution.
     """
     prop = str(property_id or "profithelm").strip().lower()
-    if prop not in ("profithelm", "prexvo", "gainhelm"):
+    if prop not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
         prop = "profithelm"
     s_clean = str(slug or "index").strip("/").lower()
     base_slug = s_clean.split("/")[0]

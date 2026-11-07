@@ -2514,6 +2514,7 @@ def _resolve_vertical_competitor_content(
     s_low = slug.lower()
     is_prexvo = property_id.strip().lower() == "prexvo"
     is_gainhelm = property_id.strip().lower() == "gainhelm"
+    is_lienbond = property_id.strip().lower() == "lienbond"
     base_url = canonical_base.rstrip("/")
 
     if is_prexvo:
@@ -2724,6 +2725,70 @@ def _resolve_vertical_competitor_content(
                     ("hipaa-violation-penalty-breach-cost-calculator", "HIPAA Civil Monetary Penalty & HITECH Breach Cost Calculator"),
                     ("hitrust-csf-e1-i1-r2-certification-cost-calculator", "HITRUST CSF e1, i1, and r2 Certification Cost Calculator"),
                     ("cyber-liability-insurance-breach-exposure-calculator", "Cyber Liability Insurance Premium & Breach Exposure Calculator"),
+                ],
+            ),
+        ]
+    elif is_lienbond:
+        trap_title = "Immediate Statutory Notice Deadline & Surety Underwriting Trap Alert (40 U.S.C. 3131 & State Lien Codes)"
+        trap_body = (
+            "Under 40 U.S.C. Section 3131 (Federal Miller Act), Little Miller Acts, and state mechanics lien statutes "
+            "(such as California Civil Code Section 8200 20-day Preliminary Notice and Texas Property Code Section 53.056 "
+            "15th-day-of-the-3rd-month trap), serving a Preliminary Notice even 1 calendar day late or signing an "
+            "unconditional waiver before funds clear bank settlement permanently extinguishes statutory lien and payment bond rights."
+        )
+        checklist_items = [
+            "Serve statutory Preliminary Notice via Certified Mail with Return Receipt Requested within the state window (20 days from first furnishing in CA/AZ; 45 days in FL).",
+            "Maintain verified CPA Reviewed or Audited financial statements showing net working capital (current assets minus current liabilities) at or above 10% of aggregate bonded backlog.",
+            "Segregate high-rate field construction payroll (Class 5403/5190) from clerical (Class 8810) and outside sales (Class 8742) with daily timecards before annual NCCI workers comp audit.",
+            "Verify weekly Davis-Bacon Certified Payroll Form WH-347 submission and bona fide fringe benefit plan credits under 29 CFR Section 5.5 to prevent contract progress withholding.",
+        ]
+        pitfalls = [
+            (
+                "Executing an Unconditional Waiver and Release on Progress Payment before check clearing",
+                "Extinguishes statutory mechanics lien and payment bond rights immediately upon signature even if the check bounces",
+                "Strictly execute Conditional Waivers upon invoice submission and release Unconditional Waivers only after bank wire settlement",
+            ),
+            (
+                "Lumping clerical, estimating, and field labor into a single payroll bucket during workers comp audit",
+                "NCCI Governing Class rules reassign 100% of unsegregated payroll to the highest-rated construction trade class code",
+                "Maintain contemporaneous trade-by-trade timecards separating Class 8810 clerical staff from field installation codes",
+            ),
+            (
+                "Bidding public works above single-job surety capacity without verified CPA working capital schedules",
+                "Triggers bid bond rejection or 5% bid bond forfeiture if the principal cannot execute AIA A312 performance/payment bonds",
+                "Pre-qualify single and aggregate surety credit lines against Treasury Circular 570 underwriting ratios before bid opening",
+            ),
+        ]
+        handoff_title = "Treasury Circular 570 Surety & Commercial Contractor Insurance Vetting Checklist"
+        handoff_items = [
+            "Confirm surety carrier listing on U.S. Department of the Treasury Circular 570 with AM Best A- (Excellent) or higher rating.",
+            "Verify instant digital COI issuance with ISO CG 20 10 (ongoing operations) and CG 20 37 (completed operations) additional insured endorsements.",
+            "Audit state workers compensation Experience Modification Rate (EMR) worksheets against NCCI primary/excess split-point tables.",
+        ]
+        tier_clusters = [
+            (
+                "Tier 1: Statutory Surety Bond & Public Works Pillar Models",
+                [
+                    ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator by Credit Score"),
+                    ("miller-act-performance-and-payment-bond-premium-calculator", "Miller Act Performance and Payment Bond Premium Calculator"),
+                    ("davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", "Davis-Bacon Prevailing Wage & WH-347 Fringe Benefit Rate Calculator"),
+                    ("erisa-fidelity-bond-coverage-amount-calculator", "ERISA Section 412 Fidelity Bond Coverage Amount Calculator"),
+                ],
+            ),
+            (
+                "Tier 2: 50-State Mechanics Lien, Retainage & Preliminary Notice Matrices",
+                [
+                    ("contractor-lien-release-statutory-matrix-by-state", "50-State Contractor Mechanics Lien Release Statutory Matrix"),
+                    ("california-texas-florida-preliminary-notice-deadline-calculator", "California, Texas and Florida Preliminary Notice Deadline Calculator"),
+                    ("commercial-construction-retainage-interest-penalty-calculator-by-state", "Commercial Construction Retainage Interest Penalty Calculator by State"),
+                ],
+            ),
+            (
+                "Tier 3: Workers Compensation Class Code, EMR & Contractor Margin Spokes",
+                [
+                    ("workers-compensation-class-code-rate-calculator-by-state", "NCCI Workers Compensation Class Code Rate Calculator by State"),
+                    ("experience-modification-rate-emr-workers-comp-penalty-calculator", "Experience Modification Rate (EMR) Workers Comp Penalty Calculator"),
+                    ("contractor-overhead-and-profit-markup-vs-margin-calculator", "Contractor Overhead and Profit Markup vs Margin Calculator"),
                 ],
             ),
         ]
@@ -4320,6 +4385,23 @@ def render_partner_quote_intake_html(
             "a customized readiness quote."
         )
         btn_text = "Request Matched GRC & Audit Quote"
+    elif prop_clean == "lienbond":
+        heading_text = f"Commercial Surety Bond, Workers Comp & Lien Filing Quote Intake ({threshold_fmt}+ Project Threshold)"
+        sub_text = (
+            f"Construction bond penalties, payroll exposures, and contract values at or above {threshold_fmt} qualify for "
+            f"instant Treasury Circular 570 surety underwriting, NCCI class-code rate matching, and statutory lien filing quotes. "
+            f"Sub-threshold calculations stay 100% frictionless."
+        )
+        email_label = "Contractor or Project Accounting Email Address"
+        state_label = "Project & License Jurisdiction State"
+        band_label = "Bond Penalty / Annual Payroll / Contract Band"
+        consent_copy = (
+            "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
+            "project jurisdiction state, and bond/payroll band with matched Treasury-listed surety underwriters, "
+            "commercial workers compensation carriers, and statutory lien service partners (including SuretyBonds.com, "
+            "Simply Business, Next Insurance, Thimble, and Levelset) to prepare a customized underwriting quote."
+        )
+        btn_text = "Request Instant Surety & Insurance Quote"
     else:
         if vertical == "1031_exchange":
             heading_text = f"Qualified Intermediary & Tax Advisory Quote Intake ({threshold_fmt}+ Exchange Threshold)"
@@ -4491,6 +4573,10 @@ def render_post_calculation_upgrade_drawer_html(
         badge_text = "Post-Calculation Board, CISO & Assessor Deliverable"
         pillar_1_title = "1. Personalized Audit Readiness Workpaper (HTML/PDF + CSV)"
         pillar_2_title = f"2. Tailored Multi-Framework Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
+    elif prop_clean == "lienbond":
+        badge_text = "Post-Calculation Contractor, CFO & Surety Underwriter Deliverable"
+        pillar_1_title = "1. 50-State Statutory Lien Waiver, AIA A312 & WH-347 Packet (HTML/PDF + CSV)"
+        pillar_2_title = f"2. Tailored Surety, NCCI EMR & Prevailing Wage Data Pack ({trend_count} Series, 2024 to 2030)"
     else:
         badge_text = "Post-Calculation CPA, CFO & Tax Committee Deliverable"
         pillar_1_title = "1. Personalized Statutory Tax Workpaper (HTML/PDF + CSV)"
@@ -4558,6 +4644,10 @@ def _render_saveable_decision_blueprint_html(
         reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
         eff_stat = statutory_authority or "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
         eff_prop = property_id or "gainhelm"
+    elif str(property_id).strip().lower() == "lienbond":
+        reviewer_label = "surety underwriter, project CFO, or construction counsel review"
+        eff_stat = statutory_authority or "40 U.S.C. Section 3131 Federal Miller Act and State Mechanics Lien Statutes"
+        eff_prop = "lienbond"
     else:
         reviewer_label = "CPA or advisor review"
         eff_stat = statutory_authority or "26 U.S.C. Internal Revenue Code"
@@ -4729,6 +4819,7 @@ def render_serp_incumbent_depth_upgrade_block(
         economic_dataset=economic_dataset,
         is_prexvo=is_prexvo,
         is_gainhelm=is_gainhelm,
+        property_id=property_id,
     )
 
     return (

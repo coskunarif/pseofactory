@@ -5925,9 +5925,11 @@ def verify_html_cross_web_consensus_and_corroboration(
     issues.extend(detected)
 
     lower_doc = html_content.lower()
-    if "<html" in lower_doc and ("profithelm" in lower_doc or "prexvo" in lower_doc or "gainhelm" in lower_doc):
+    if "<html" in lower_doc and ("profithelm" in lower_doc or "prexvo" in lower_doc or "gainhelm" in lower_doc or "lienbond" in lower_doc):
         from pseofactory.tenant_facts import TruthReconciliationEngine
-        if "gainhelm" in lower_doc:
+        if "lienbond" in lower_doc:
+            inferred_tenant = "lienbond"
+        elif "gainhelm" in lower_doc:
             inferred_tenant = "gainhelm"
         elif "prexvo" in lower_doc:
             inferred_tenant = "prexvo"

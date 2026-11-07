@@ -777,6 +777,183 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
     )
 
 
+def _build_lienbond_profile() -> TenantTruthProfile:
+    """Builds the canonical truth profile for LienBond (lienbond.com)."""
+    pricing = {
+        "free": PricingTier(
+            name="Free",
+            price_usd=0.0,
+            billing_period="month",
+            features=[
+                "50-State Mechanics Lien Deadline Matrix",
+                "Contractor License & Miller Act Bond Premium Calculators",
+                "Workers Comp Class Code & EMR Rate Calculator",
+            ],
+        ),
+        "pro": PricingTier(
+            name="Pro",
+            price_usd=49.0,
+            billing_period="month",
+            features=[
+                "50-State Statutory Lien Waiver & Preliminary Notice Packet",
+                "Contractor Surety Bond & Underwriting Readiness Dossier",
+                "NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet",
+                "Federal Miller Act (40 U.S.C. 3131) Sliding-Scale Bond Schedule",
+            ],
+        ),
+        "enterprise": PricingTier(
+            name="Enterprise",
+            price_usd=69.0,
+            billing_period="month",
+            features=[
+                "DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet",
+                "ERISA Section 412 (29 U.S.C. 1112) Fidelity Bond Fiduciary Resolution",
+                "State Prompt Payment Act Retainage Penalty Demand Notice",
+                "Multi-State Subcontractor Lien & Bond Compliance Consolidation",
+            ],
+        ),
+    }
+
+    features = {
+        "50-State Mechanics Lien Deadline Matrix": FeatureContract(
+            name="50-State Mechanics Lien Deadline Matrix",
+            enabled=True,
+            tier_availability=["free", "pro", "enterprise"],
+            description="Statutory preliminary notice, mechanics lien recording, and enforcement deadline calculation under Cal. Civ. Code 8132-8416, Tex. Prop. Code Ch. 53, Fla. Stat. Ch. 713, and N.Y. Lien Law.",
+        ),
+        "Contractor Surety Bond & Underwriting Readiness Dossier": FeatureContract(
+            name="Contractor Surety Bond & Underwriting Readiness Dossier",
+            enabled=True,
+            tier_availability=["free", "pro", "enterprise"],
+            description="Federal Miller Act (40 U.S.C. 3131), state Little Miller Act, and CSLB contractor license surety bond premium and working-capital capacity modeling.",
+        ),
+        "NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet": FeatureContract(
+            name="NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet",
+            enabled=True,
+            tier_availability=["free", "pro", "enterprise"],
+            description="NCCI Basic Manual and state rating bureau trade class code (5403, 5183, 5190, 5551) manual premium and Experience Modification Rate (EMR) split-point calculation.",
+        ),
+        "DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet": FeatureContract(
+            name="DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet",
+            enabled=True,
+            tier_availability=["pro", "enterprise"],
+            description="40 U.S.C. 3141 Davis-Bacon Act and 29 CFR Part 5 prevailing wage, annualized bona fide fringe credit, and WH-347 statement of compliance preparation.",
+        ),
+    }
+
+    statutory = TenantStatutoryTruth(
+        tenant_id="lienbond",
+        statutory_citations={
+            "federal_miller_act_40_usc_3131": "40 U.S.C. 3131-3134 (Federal Miller Act) & FAR 28.102",
+            "davis_bacon_act_40_usc_3141": "40 U.S.C. 3141-3148 (Davis-Bacon Act) & 29 CFR Part 5",
+            "erisa_sec_412_29_usc_1112": "29 U.S.C. 1112 (ERISA Section 412) & 29 CFR 2580.412",
+            "prompt_payment_act_31_usc_3902": "31 U.S.C. 3902 (Federal Prompt Payment Act) & State Retainage Statutes",
+            "ca_mechanics_lien_civ_code_8132_8416": "Cal. Civ. Code Sections 8132-8138, 8200-8216 & 8412-8416",
+            "tx_mechanics_lien_prop_code_53": "Tex. Prop. Code Sections 53.052, 53.056, 53.101 & 53.284",
+            "fl_construction_lien_stat_713": "Fla. Stat. Sections 713.06, 713.08 & 713.20",
+            "ncci_experience_rating_plan": "NCCI Basic Manual & Experience Rating Plan Manual (Primary/Excess Split Point)",
+        },
+        limits_and_thresholds={
+            "miller_act_federal_bond_threshold_usd": 150000.0,
+            "miller_act_alternative_payment_protection_min_usd": 35000.0,
+            "erisa_fidelity_bond_statutory_rate_pct": 10.0,
+            "erisa_fidelity_bond_min_floor_usd": 1000.0,
+            "erisa_fidelity_bond_standard_cap_usd": 500000.0,
+            "erisa_fidelity_bond_employer_securities_cap_usd": 1000000.0,
+            "ca_preliminary_notice_window_days": 20,
+            "ca_direct_contractor_lien_window_with_noc_days": 60,
+            "ca_subcontractor_lien_window_with_noc_days": 30,
+            "ca_lien_window_without_noc_days": 90,
+            "ca_lien_foreclosure_action_deadline_days": 90,
+            "fl_notice_to_owner_window_days": 45,
+            "fl_claim_of_lien_window_days": 90,
+            "cslb_ca_contractor_license_bond_amount_usd": 25000.0,
+        },
+    )
+
+    claims_allowlist = [
+        "50-State Mechanics Lien Deadline Matrix",
+        "Contractor Surety Bond & Underwriting Readiness Dossier",
+        "NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet",
+        "DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet",
+    ]
+
+    claims_banned = [
+        "licensed surety underwriter",
+        "admitted treasury circular 570 surety carrier",
+        "guaranteed mechanics lien foreclosure recovery",
+        "formal legal representation",
+        "official federal loan servicer",
+        "automated irs tax filing",
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
+        "vanta_security",
+        "drata_compliance",
+        "sprinto_compliance",
+        "thoropass_audit",
+    ]
+
+    mandatory_disclosures = [
+        "Statutory Surety, Workers Comp & Construction Lien Disclaimer (Non-Attorney / Non-Licensed Producer Modeling Notice)",
+        "FTC Partner Compensation Disclosure",
+        "Independent Publisher Disclaimer",
+    ]
+
+    cross_tenant_forbidden_tokens = {
+        "title iv",
+        "34 cfr",
+        "pslf",
+        "paye sunset",
+        "student loan",
+        "repayment assistance plan",
+        "income-contingent repayment",
+        "direct consolidation",
+        "prexvo.com",
+        "prexvo",
+        "106482194",
+        "splash_financial",
+        "sofi",
+        "credible",
+        "earnest",
+        "lendkey",
+        "section 1031",
+        "1031 exchange",
+        "qsbs",
+        "section 1202",
+        "profithelm.com",
+        "profithelm",
+        "143884102",
+        "coinledger",
+        "koinly",
+        "turbotax",
+        "taxslayer",
+        "kalshi",
+        "gainhelm.com",
+        "gainhelm",
+        "106482195",
+        "vanta_security",
+        "drata_compliance",
+        "sprinto_compliance",
+        "thoropass_audit",
+    }
+
+    return TenantTruthProfile(
+        tenant_id="lienbond",
+        brand_name="LienBond",
+        canonical_domain="https://lienbond.com",
+        pricing_tiers=pricing,
+        features=features,
+        statutory_truth=statutory,
+        claims_allowlist=claims_allowlist,
+        claims_banned=claims_banned,
+        mandatory_disclosures=mandatory_disclosures,
+        cross_tenant_forbidden_tokens=cross_tenant_forbidden_tokens,
+    )
+
+
 STAGED_RESERVE_TENANT_DOMAINS: Tuple[str, ...] = ()
 DECOMMISSIONED_TENANT_DOMAINS: Tuple[str, ...] = (
     "adspendguardian.com",
@@ -1587,6 +1764,158 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
 CANONICAL_TENANT_DECLARATIONS: Dict[str, DeclarativeTenantContract] = _build_canonical_tenant_declarations()
 CANONICAL_TENANT_REGISTRY: Dict[str, DeclarativeTenantContract] = CANONICAL_TENANT_DECLARATIONS
 
+LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
+    property_id="lienbond",
+    repo_dir_name="lienbond",
+    domain="lienbond.com",
+    canonical_base="https://lienbond.com",
+    brand_name="LienBond",
+    package_name="lienbond",
+    dist_dir="dist",
+    repo_root="/home/ubuntuadmin/projects/lienbond",
+    runner_work_dist_dir="/home/ubuntuadmin/.local/share/actions-runner/lienbond/_work/lienbond/lienbond/dist",
+    env_prefix="LIENBOND",
+    linkedin_company_id="",
+    cloudflare_zone_id="",
+    cloudflare_pages_cname_target="lienbond.pages.dev",
+    truth_profile=_build_lienbond_profile(),
+    research_entity="LienBond Statutory Surety & Construction Compliance Research",
+    legal_entity="LienBond LLC",
+    publisher_entity_label="LienBond Statutory Surety & Construction Compliance Research",
+    editorial_classification="Deterministic Construction Surety Bond, Workers Compensation EMR, 50-State Mechanics Lien & Davis-Bacon Prevailing Wage Engine",
+    primary_statutory_authority="40 U.S.C. 3131 (Miller Act); 40 U.S.C. 3141 (Davis-Bacon Act); Cal. Civ. Code 8132-8416; Tex. Prop. Code Ch. 53; NCCI Experience Rating Plan",
+    economic_dataset_label="NCCI Workers Compensation Class Rate Benchmarks, Surety Association Sliding-Scale Schedules & 50-State Mechanics Lien Statutory Tables",
+    llms_manifest_title="LienBond: Complete Machine Knowledge Base & Statutory Surety/Lien Calculation Manifest",
+    llms_statutory_summary_block=(
+        "## Statutory Surety, Workers Comp & Construction Lien Authorities\n"
+        "- Federal Miller Act (40 U.S.C. 3131-3134 & FAR 28.102): Requires 100% performance and payment bonds on federal construction contracts exceeding $150,000.\n"
+        "- NCCI Workers Compensation & EMR Formula: Manual_Premium = (Annual_Payroll / 100) * State_Class_Rate; Net_Premium = Manual_Premium * EMR_Factor * (1 - Schedule_Credit).\n"
+        "- 50-State Mechanics Lien & Preliminary Notice Deadlines: Governed by Cal. Civ. Code 8202/8412/8414 (20-day preliminary notice, 30/60/90-day recording), Tex. Prop. Code 53.052/53.056 (15th day of 2nd/3rd month notice), and Fla. Stat. 713.06/713.08 (45-day Notice to Owner, 90-day Claim of Lien).\n"
+        "- Davis-Bacon Prevailing Wage (40 U.S.C. 3141 & 29 CFR Part 5): Overtime_Hourly_Pay = (Base_Prevailing_Rate * 1.5) + max(0, Required_Fringe_Rate - Annualized_Bona_Fide_Benefit_Credit).\n"
+        "- ERISA Section 412 Fidelity Bond (29 U.S.C. 1112): Required_Bond = clamp(Plan_Assets * 0.10, $1,000, $500,000 or $1,000,000 with employer securities).\n"
+    ),
+    home_topic_label="Contractor Surety Bonds, Workers Comp EMR & 50-State Mechanics Lien Calculators",
+    tools_directory_topic_label="Statutory Construction Surety, Workers Comp & Mechanics Lien Calculators",
+    fallback_calculator_title="Statutory Surety Bond, Workers Comp & Mechanics Lien Calculator",
+    default_heading_fallback_label="Statutory Surety & Lien Calculator",
+    default_query_syntax_template="?contract={contract}&state={state}",
+    statutory_intent_tokens=(
+        "surety bond",
+        "license bond",
+        "performance bond",
+        "payment bond",
+        "miller act",
+        "bid bond",
+        "workers comp",
+        "workers compensation",
+        "class code",
+        "emr",
+        "experience modification",
+        "erisa fidelity",
+        "fidelity bond",
+        "mechanics lien",
+        "contractor lien",
+        "preliminary notice",
+        "lien waiver",
+        "lien release",
+        "retainage",
+        "prompt payment act",
+        "davis bacon",
+        "prevailing wage",
+        "wh-347",
+        "contractor markup",
+    ),
+    own_boundary_tokens=(
+        "lienbond",
+        "lienbond.com",
+        "miller act",
+        "mechanics lien",
+        "preliminary notice",
+        "wh-347",
+    ),
+    category_seed_taxonomy={
+        "surety_bonds_and_underwriting": [
+            "contractor license bond cost calculator by credit score",
+            "miller act performance and payment bond premium calculator",
+            "bid bond to performance bond capacity calculator",
+            "erisa fidelity bond coverage amount calculator",
+        ],
+        "workers_comp_and_contractor_insurance": [
+            "workers compensation class code rate calculator by state",
+            "experience modification rate emr impact calculator",
+            "general contractor commercial general liability coi cost calculator",
+        ],
+        "mechanics_lien_retainage_and_prevailing_wage": [
+            "contractor lien release statutory matrix by state",
+            "commercial construction retainage interest penalty calculator by state",
+            "davis bacon prevailing wage fringe benefit rate calculator",
+        ],
+    },
+    default_core_tools=(
+        {"slug": "workers-compensation-class-code-rate-calculator-by-state", "primary_keyword": "workers compensation class code rate calculator by state"},
+        {"slug": "contractor-license-bond-cost-calculator-by-credit-score", "primary_keyword": "contractor license bond cost calculator by credit score"},
+        {"slug": "miller-act-performance-and-payment-bond-premium-calculator", "primary_keyword": "performance and payment bond premium calculator"},
+        {"slug": "contractor-lien-release-statutory-matrix-by-state", "primary_keyword": "contractor lien release statutory matrix by state"},
+        {"slug": "commercial-construction-retainage-interest-penalty-calculator-by-state", "primary_keyword": "commercial construction retainage interest penalty calculator by state"},
+        {"slug": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", "primary_keyword": "davis bacon prevailing wage fringe benefit rate calculator"},
+        {"slug": "erisa-fidelity-bond-coverage-amount-calculator", "primary_keyword": "erisa fidelity bond coverage amount calculator"},
+        {"slug": "contractor-overhead-and-profit-markup-vs-margin-calculator", "primary_keyword": "contractor overhead and profit markup vs margin calculator"},
+        {"slug": "experience-modification-rate-emr-workers-comp-penalty-calculator", "primary_keyword": "experience modification rate emr workers comp penalty calculator"},
+        {"slug": "california-texas-florida-preliminary-notice-deadline-calculator", "primary_keyword": "preliminary notice deadline calculator california texas florida"},
+    ),
+    flagship_anchor_slugs=(
+        "workers-compensation-class-code-rate-calculator-by-state",
+        "contractor-license-bond-cost-calculator-by-credit-score",
+        "contractor-lien-release-statutory-matrix-by-state",
+    ),
+    video_branding={
+        "brand_name": "LienBond",
+        "domain": "lienbond.com",
+        "canonical_base": "https://lienbond.com",
+        "badge_text": "LIENBOND.COM | SURETY & LIEN ENGINE",
+        "verification_pill": "50-STATE STATUTORY VERIFIED",
+        "bg_rgb": (15, 23, 42),
+        "card_rgb": (30, 41, 59),
+        "accent_rgb": (245, 158, 11),
+        "accent_hex": "#f59e0b",
+        "voice": "en-US-ChristopherNeural",
+    },
+    default_cpc_usd=18.5,
+    default_erpm_usd=115.0,
+    default_sample_query="workers compensation class code rate calculator by state",
+    default_sample_slug="workers-compensation-class-code-rate-calculator-by-state",
+    top_modifier_fallback="(50-State Statutory)",
+    vertical_paren_modifier="Surety & Lien Guide",
+    default_smoke_probe={
+        "query": "miller act performance and payment bond premium calculator",
+        "foreign_query": "save plan student loan repayment calculator",
+    },
+    priority_hub_slugs=(
+        "workers-compensation-class-code-rate-calculator-by-state",
+        "contractor-lien-release-statutory-matrix-by-state",
+    ),
+    default_complementary_peers=(
+        ("workers-compensation-class-code-rate-calculator-by-state", "Workers Comp Class Code & EMR Calculator"),
+        ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Surety Bond Cost Calculator"),
+        ("contractor-lien-release-statutory-matrix-by-state", "50-State Mechanics Lien Deadline & Waiver Matrix"),
+    ),
+    primary_fallback_manifest_slug="workers-compensation-class-code-rate-calculator-by-state",
+    primary_partner_key="simply_business",
+    primary_partner_name="Simply Business Commercial Contractor Insurance & Bonding",
+    primary_partner_url="https://www.simplybusiness.com/",
+    primary_partner_cta="Compare Instant Contractor Insurance & Bond Quotes at Simply Business",
+    tools_directory_seed_section_html=(
+        '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+        '        <h2>Verified Surety Bond, Workers Comp &amp; Lien Execution Partners</h2>\n'
+        '        <div class="affiliate-card partner-card"><a href="/r/simply_business" target="_blank" rel="noopener sponsored nofollow">Simply Business</a></div>\n'
+        '      </section>\n    '
+    ),
+)
+
+SPAWNED_TENANT_DECLARATIONS: Dict[str, DeclarativeTenantContract] = {
+    "lienbond": LIENBOND_TENANT_CONTRACT,
+}
+
 CANONICAL_TENANT_IDS: List[str] = []
 CANONICAL_TENANT_DOMAINS: List[str] = []
 CANONICAL_TENANT_HOSTS: Dict[str, str] = {}
@@ -1714,16 +2043,19 @@ def resolve_canonical_property_id(
 ) -> str:
     """
     Resolves a property_id, repo_dir_name, domain, URL, or filesystem path
-    to a registered tenant property_id in CANONICAL_TENANT_DECLARATIONS.
+    to a registered tenant property_id in CANONICAL_TENANT_DECLARATIONS or SPAWNED_TENANT_DECLARATIONS.
     """
     raw = str(tenant_or_context or "").strip().lower()
     if raw in CANONICAL_TENANT_DECLARATIONS:
         return raw
+    if raw in SPAWNED_TENANT_DECLARATIONS:
+        return raw
     if raw in REPO_DIR_TO_PROPERTY_ID:
         return REPO_DIR_TO_PROPERTY_ID[raw]
     combined = f"{raw} {repo_root or ''}".lower()
+    all_decls = {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}
     # Check non-default tenants first so specific substrings win over default fallback
-    for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+    for pid, contract in all_decls.items():
         if pid == default:
             continue
         if (
@@ -1732,8 +2064,8 @@ def resolve_canonical_property_id(
             or (contract.domain and contract.domain.lower() in combined)
         ):
             return pid
-    if default in CANONICAL_TENANT_DECLARATIONS:
-        def_c = CANONICAL_TENANT_DECLARATIONS[default]
+    if default in all_decls:
+        def_c = all_decls[default]
         if (
             default in combined
             or (def_c.repo_dir_name and def_c.repo_dir_name.lower() in combined)
@@ -1750,7 +2082,11 @@ def get_tenant_contract(
 ) -> DeclarativeTenantContract:
     """Returns the DeclarativeTenantContract for a tenant ID, domain, or repo path."""
     pid = resolve_canonical_property_id(tenant_or_context, repo_root=repo_root, default=default)
-    return CANONICAL_TENANT_DECLARATIONS.get(pid) or CANONICAL_TENANT_DECLARATIONS["profithelm"]
+    return (
+        CANONICAL_TENANT_DECLARATIONS.get(pid)
+        or SPAWNED_TENANT_DECLARATIONS.get(pid)
+        or CANONICAL_TENANT_DECLARATIONS["profithelm"]
+    )
 
 
 def match_tenant_statutory_intent(query: str) -> Dict[str, bool]:
@@ -1822,7 +2158,7 @@ class TenantFactStore:
     def __init__(self):
         self._profiles: Dict[str, TenantTruthProfile] = {
             pid: contract.truth_profile
-            for pid, contract in CANONICAL_TENANT_DECLARATIONS.items()
+            for pid, contract in {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}.items()
             if contract.truth_profile is not None
         }
 

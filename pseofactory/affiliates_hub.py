@@ -26,17 +26,22 @@ from pseofactory.affiliates import (
     PROFITHELM_AFFILIATES,
     PREXVO_AFFILIATES,
     GAINHELM_AFFILIATES,
+    LIENBOND_AFFILIATES,
     PROFITHELM_DISCLOSURES,
     PREXVO_DISCLOSURES,
     GAINHELM_DISCLOSURES,
+    LIENBOND_DISCLOSURES,
     PREXVO_STANDING_RESTRICTION,
     B2B_PARTNER_KEYS,
     STUDENT_LOAN_PARTNER_KEYS,
     GAINHELM_PARTNER_KEYS,
+    LIENBOND_PARTNER_KEYS,
     PROFITHELM_TOOL_PATTERNS,
     PREXVO_TOOL_PATTERNS,
     GAINHELM_TOOL_PATTERNS,
+    LIENBOND_TOOL_PATTERNS,
     GAINHELM_MONETIZED_CALCULATOR_SLUGS,
+    LIENBOND_MONETIZED_CALCULATOR_SLUGS,
     ENTERPRISE_B2B_PARTNERS,
     RETAIL_TAX_PARTNERS,
     RETAIL_TAX_SLUGS,
@@ -446,7 +451,7 @@ class MonetizationHub:
         URL safety (SSRF rejection), and typography invariants.
         """
         prop_clean = (property_id or "").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm"):
+        if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm", "lienbond"):
             raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
         if program_data is None and partner_key is not None:
@@ -861,7 +866,7 @@ class MonetizationHub:
         for ProfitHelm long-tail tools; strictly rejects sub-affiliate fallback on Prexvo.
         """
         prop_clean = (property_id or "").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm"):
+        if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm", "lienbond"):
             raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
         key_clean = (partner_key or "").strip().lower()
@@ -1014,6 +1019,52 @@ class MonetizationHub:
 
             assert_no_forbidden_dashes(route["cta_text"], context="CTA text for GainHelm route")
             assert_no_forbidden_dashes(route["name"], context="Name for GainHelm route")
+            return route
+
+        # LienBond routing
+        if prop_clean == "lienbond":
+            if (
+                key_clean in STUDENT_LOAN_PARTNER_KEYS
+                or key_clean in PREXVO_AFFILIATES
+                or key_clean in GAINHELM_PARTNER_KEYS
+                or key_clean in GAINHELM_AFFILIATES
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Foreign tenant partner '{key_clean}' is prohibited on LienBond."
+                )
+            for foreign_tok in (
+                "student-loan",
+                "rap-vs-ibr",
+                "pslf",
+                "section-179",
+                "section-1031",
+                "qsbs-section-1202",
+                "soc-2-audit",
+                "cmmc-2-0",
+            ):
+                if foreign_tok in slug_clean:
+                    raise ValueError(
+                        f"Strict isolation violation: Foreign tenant tool '{slug_clean}' is prohibited on LienBond."
+                    )
+            route = get_affiliate_route(
+                "lienbond",
+                tool_slug=slug_clean,
+                partner_key=key_clean or None,
+                value_tier=value_tier,
+            )
+            partner_obj = LIENBOND_AFFILIATES.get(route["partner"])
+            if partner_obj:
+                route["bounty_est"] = partner_obj.bounty_est
+                route["bounty_score"] = score_partner_yield(partner_obj, route["status"])
+            route["is_live"] = route.get("status") in ("live", "active_direct")
+            route["calculator_slug"] = slug_clean
+            route["partner_name"] = route["name"]
+            route["is_fallback"] = False
+            route["disclosure"] = LIENBOND_DISCLOSURES.get("ftc_disclosure", "")
+            route["ymyl_warning"] = LIENBOND_DISCLOSURES.get("statutory_compliance_disclaimer", "")
+
+            assert_no_forbidden_dashes(route["cta_text"], context="CTA text for LienBond route")
+            assert_no_forbidden_dashes(route["name"], context="Name for LienBond route")
             return route
 
         # ProfitHelm / Exchange1031 routing

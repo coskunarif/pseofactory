@@ -261,6 +261,36 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         "click_to_conversion_rate": 0.052,
         "ltv_bounty_equivalent_usd": 275.00,
     },
+    "thimble_contractor": {
+        "partnership_model": "CPA_BOUNTY",
+        "cpa_bounty_usd": 125.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.068,
+        "ltv_bounty_equivalent_usd": 125.00,
+    },
+    "jobber_field_service": {
+        "partnership_model": "RECURRING_SAAS_REVSHARE",
+        "cpa_bounty_usd": 160.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 20.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "",
+        "click_to_conversion_rate": 0.060,
+        "ltv_bounty_equivalent_usd": 195.00,
+    },
+    "levelset_lien_filing": {
+        "partnership_model": "USAGE_API_REFERRAL",
+        "cpa_bounty_usd": 190.00,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 12,
+        "usage_referral_basis": "Statutory preliminary notice and mechanics lien filing volume",
+        "click_to_conversion_rate": 0.065,
+        "ltv_bounty_equivalent_usd": 190.00,
+    },
     # 3. Flat CPA Bounties (CPA_BOUNTY)
     "mercury": {
         "partnership_model": "CPA_BOUNTY",
@@ -1614,8 +1644,160 @@ GAINHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
 }
 
+LIENBOND_DISCLOSURES: Dict[str, str] = {
+    "statutory_compliance_disclaimer": (
+        "Statutory Surety, Workers Comp & Construction Lien Disclaimer: Bond premium, NCCI workers compensation "
+        "EMR, mechanics lien deadline, retainage penalty, and Davis-Bacon WH-347 figures are deterministic "
+        "computational models and do not constitute legal advice, a recorded mechanics lien, "
+        "or an active surety binder from a Treasury Circular 570 carrier."
+    ),
+    "statutory_surety_disclaimer": (
+        "Statutory Surety, Workers Comp & Construction Lien Disclaimer: Bond premium, NCCI workers compensation "
+        "EMR, mechanics lien deadline, retainage penalty, and Davis-Bacon WH-347 figures are deterministic "
+        "computational models and do not constitute legal advice, a recorded mechanics lien, "
+        "or an active surety binder from a Treasury Circular 570 carrier."
+    ),
+    "ftc_disclosure": (
+        "FTC Partner Compensation Disclosure: LienBond is an independent construction surety, workers compensation, "
+        "and statutory lien compliance research publisher. We may receive referral compensation when you request "
+        "surety bond quotes, commercial contractor insurance, preliminary notice filings, or job-costing software "
+        "trials through verified partner links (such as Simply Business, SuretyBonds.com, Next Insurance, Thimble, "
+        "Jobber, or Levelset) at no additional cost to you."
+    ),
+    "independent_publisher_disclaimer": (
+        "Independent Publisher Disclaimer: LienBond is an independent construction compliance and surety calculation "
+        "publisher and is not affiliated with NCCI, the U.S. Department of Labor, U.S. Treasury Circular 570, or state "
+        "contractor licensing boards."
+    ),
+}
+
+LIENBOND_MONETIZED_CALCULATOR_SLUGS: List[str] = [
+    "workers-compensation-class-code-rate-calculator-by-state",
+    "contractor-license-bond-cost-calculator-by-credit-score",
+    "miller-act-performance-and-payment-bond-premium-calculator",
+    "contractor-lien-release-statutory-matrix-by-state",
+    "commercial-construction-retainage-interest-penalty-calculator-by-state",
+    "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+    "erisa-fidelity-bond-coverage-amount-calculator",
+    "contractor-overhead-and-profit-markup-vs-margin-calculator",
+    "experience-modification-rate-emr-workers-comp-penalty-calculator",
+    "california-texas-florida-preliminary-notice-deadline-calculator",
+]
+
+LIENBOND_AFFILIATES: Dict[str, AffiliatePartner] = {
+    "simply_business": AffiliatePartner(
+        key="simply_business",
+        name="Simply Business Commercial Contractor Insurance & Bonding",
+        category="Commercial Contractor Insurance & Workers Comp",
+        property_id="lienbond",
+        status="live",
+        env_var="AFFILIATE_SIMPLY_BUSINESS_URL",
+        default_url="https://www.simplybusiness.com/insurance/workers-compensation/",
+        badge="Instant Multi-Carrier Workers Comp & GL Quotes",
+        commission_est="$160-$210/qualified quote",
+        bounty_est="$185",
+        network="Impact / Sovrn Commerce",
+        description="Compare instant multi-carrier workers compensation, general liability, and builder risk quotes across NCCI and state rating bureau trade class codes.",
+        target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Compare Instant Workers Comp & Contractor Quotes at Simply Business",
+        partnership_model="QUALIFIED_LEAD_CPL",
+    ),
+    "suretybonds_direct": AffiliatePartner(
+        key="suretybonds_direct",
+        name="SuretyBonds.com Nationwide Surety & License Bonding",
+        category="Contractor License & Miller Act Surety Bonds",
+        property_id="lienbond",
+        status="live",
+        env_var="AFFILIATE_SURETYBONDS_DIRECT_URL",
+        default_url="https://www.jdoqocy.com/click-101906407-16985242",
+        badge="Nationwide State License, Bid & Performance Bonds",
+        commission_est="$150-$225/issued bond + revshare",
+        bounty_est="$175-$230",
+        network="CJ Affiliate",
+        description="Instant online underwriting for state contractor license bonds (CSLB, TX, FL), Federal Miller Act performance/payment bonds, and ERISA Section 412 fidelity bonds.",
+        target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Get Your Instant State License or Performance Bond Quote",
+        partnership_model="HYBRID_CPA_REVSHARE",
+    ),
+    "next_insurance_b2b": AffiliatePartner(
+        key="next_insurance_b2b",
+        name="Next Insurance Commercial Contractor Policies",
+        category="On-Demand Workers Comp & General Liability COI",
+        property_id="lienbond",
+        status="live",
+        env_var="AFFILIATE_NEXT_INSURANCE_B2B_URL",
+        default_url="https://www.nextinsurance.com/business/general-contractors-insurance/",
+        badge="Bind Workers Comp + Live COI in 10 Minutes",
+        commission_est="$140-$180/qualified quote",
+        bounty_est="$160",
+        network="Impact / PartnerStack",
+        description="Digital commercial insurance for general contractors and trade subcontractors with instant live Certificates of Insurance (COI) and additional insured endorsements.",
+        target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Bind Workers Comp & Download Live COI with Next Insurance",
+        partnership_model="QUALIFIED_LEAD_CPL",
+    ),
+    "thimble_contractor": AffiliatePartner(
+        key="thimble_contractor",
+        name="Thimble On-Demand Contractor Insurance",
+        category="Instant Certificate of Insurance (COI)",
+        property_id="lienbond",
+        status="live",
+        env_var="AFFILIATE_THIMBLE_CONTRACTOR_URL",
+        default_url="https://www.thimble.com/contractors-insurance/",
+        badge="Instant Job-Site COI & Subcontractor Coverage",
+        commission_est="$110-$145/bound policy",
+        bounty_est="$125",
+        network="Impact",
+        description="Same-day general liability and commercial contractor policies designed for subcontractors who need an immediate compliant Certificate of Insurance to step onto a job site.",
+        target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Get an Instant Job-Site Certificate of Insurance via Thimble",
+        partnership_model="CPA_BOUNTY",
+    ),
+    "jobber_field_service": AffiliatePartner(
+        key="jobber_field_service",
+        name="Jobber Contractor Estimating, Markup & Progress Billing",
+        category="Construction Estimating & Invoicing SaaS",
+        property_id="lienbond",
+        status="live",
+        env_var="AFFILIATE_JOBBER_FIELD_SERVICE_URL",
+        default_url="https://getjobber.com/",
+        badge="Automated Contractor Markup & Progress Billing",
+        commission_est="$150-$185/paid trial + revshare",
+        bounty_est="$160-$195",
+        network="PartnerStack",
+        description="Automated contractor job costing, overhead/markup-to-margin bid templates, AIA-style progress invoicing, and automated client payment collection.",
+        target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="Automate Contractor Estimates & Progress Billing with Jobber",
+        partnership_model="RECURRING_SAAS_REVSHARE",
+    ),
+    "levelset_lien_filing": AffiliatePartner(
+        key="levelset_lien_filing",
+        name="Levelset Construction Preliminary Notice & Lien Automation",
+        category="50-State Mechanics Lien & Notice Recording",
+        property_id="lienbond",
+        status="live",
+        env_var="AFFILIATE_LEVELSET_LIEN_FILING_URL",
+        default_url="https://www.levelset.com/mechanics-lien/",
+        badge="50-State Certified Notice & Lien Recording",
+        commission_est="$165-$215/recorded filing",
+        bounty_est="$190",
+        network="Impact / Direct",
+        description="Automated 50-state preliminary notice tracking, statutory conditional/unconditional lien waiver exchange, and county recorder mechanics lien filing.",
+        target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
+        supported_params=["ph_tier"],
+        cta_text="File Your State Preliminary Notice or Mechanics Lien via Levelset",
+        partnership_model="USAGE_API_REFERRAL",
+    ),
+}
+
 # Unified Master Registry
 AFFILIATE_REGISTRY: Dict[str, AffiliatePartner] = {
+    **LIENBOND_AFFILIATES,
     **PROFITHELM_AFFILIATES,
     **PREXVO_AFFILIATES,
     **GAINHELM_AFFILIATES,
@@ -1665,6 +1847,31 @@ GAINHELM_PARTNER_KEYS: Set[str] = {
     "coalition_cyber_insurance",
     "cobalt_pentest",
 }
+
+LIENBOND_PARTNER_KEYS: Set[str] = {
+    "simply_business",
+    "suretybonds_direct",
+    "next_insurance_b2b",
+    "thimble_contractor",
+    "jobber_field_service",
+    "levelset_lien_filing",
+}
+
+LIENBOND_TOOL_PATTERNS: List[str] = [
+    "workers-compensation",
+    "workers-comp",
+    "class-code",
+    "emr",
+    "license-bond",
+    "miller-act",
+    "performance-and-payment-bond",
+    "lien-release",
+    "preliminary-notice",
+    "retainage",
+    "davis-bacon",
+    "erisa-fidelity-bond",
+    "markup-vs-margin",
+]
 
 GAINHELM_TOOL_PATTERNS: List[str] = [
     "soc-2",
@@ -2020,6 +2227,8 @@ def get_affiliates_for_property(property_id: str) -> Dict[str, AffiliatePartner]
         return dict(PREXVO_AFFILIATES)
     elif prop_clean == "gainhelm":
         return dict(GAINHELM_AFFILIATES)
+    elif prop_clean == "lienbond":
+        return dict(LIENBOND_AFFILIATES)
     raise ValueError(f"Unknown property_id: '{property_id}'")
 
 
@@ -2428,6 +2637,25 @@ def resolve_optimal_partner_for_slug(
         candidates = [GAINHELM_AFFILIATES[k] for k in bucket_keys if k in GAINHELM_AFFILIATES]
         if not candidates:
             candidates = list(GAINHELM_AFFILIATES.values())
+        if engagement_metrics:
+            return max(
+                candidates,
+                key=lambda p: score_partner_yield(p, p.status, engagement_metrics=engagement_metrics, slug=s),
+            )
+        return candidates[0]
+
+    if prop == "lienbond":
+        if any(t in s for t in ("bond", "miller-act", "erisa", "fidelity")):
+            lb_keys = ["suretybonds_direct", "simply_business", "next_insurance_b2b", "thimble_contractor"]
+        elif any(t in s for t in ("lien", "preliminary-notice", "retainage", "waiver")):
+            lb_keys = ["levelset_lien_filing", "jobber_field_service", "suretybonds_direct", "simply_business"]
+        elif any(t in s for t in ("markup", "margin", "davis-bacon", "prevailing-wage")):
+            lb_keys = ["jobber_field_service", "simply_business", "next_insurance_b2b", "suretybonds_direct"]
+        else:
+            lb_keys = ["simply_business", "next_insurance_b2b", "thimble_contractor", "suretybonds_direct"]
+        candidates = [LIENBOND_AFFILIATES[k] for k in lb_keys if k in LIENBOND_AFFILIATES]
+        if not candidates:
+            candidates = list(LIENBOND_AFFILIATES.values())
         if engagement_metrics:
             return max(
                 candidates,
@@ -3193,6 +3421,8 @@ def rank_partner_offers_by_revenue_yield(
             candidate_keys = list(PREXVO_AFFILIATES.keys())
         elif prop == "gainhelm":
             candidate_keys = list(GAINHELM_AFFILIATES.keys())
+        elif prop == "lienbond":
+            candidate_keys = list(LIENBOND_AFFILIATES.keys())
         else:
             bucket = _resolve_profithelm_bucket(s_clean)
             candidate_keys = list(INTENT_ROUTING_TABLE.get(bucket, ["mercury", "ramp", "coinledger"]))
@@ -3209,9 +3439,19 @@ def rank_partner_offers_by_revenue_yield(
             continue
         if prop == "gainhelm" and (k in STUDENT_LOAN_PARTNER_KEYS or k in PREXVO_AFFILIATES or k in B2B_PARTNER_KEYS):
             continue
+        if prop == "lienbond" and (k in STUDENT_LOAN_PARTNER_KEYS or k in PREXVO_AFFILIATES or k in GAINHELM_AFFILIATES):
+            continue
         seen.add(k)
 
-        registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+        registry = (
+            PREXVO_AFFILIATES
+            if prop == "prexvo"
+            else (
+                GAINHELM_AFFILIATES
+                if prop == "gainhelm"
+                else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES)
+            )
+        )
         p_obj = registry.get(k) or (PREXVO_AFFILIATES.get("sofi") if k == "sofi_refi" else None)
         bounty_mid = get_partner_bounty_midpoint(p_obj if p_obj is not None else k)
         ov_status = _extract_partner_vault_status(k, vault_overrides)
@@ -3456,7 +3696,7 @@ def get_affiliate_route(
     - Guarantees rel='noopener sponsored nofollow' and target='_blank'.
     """
     prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm"):
+    if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm", "lienbond"):
         raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
     selected_key = (partner_key or "").strip().lower()
@@ -3496,6 +3736,15 @@ def get_affiliate_route(
                 raise ValueError(
                     f"Partner '{selected_key}' not found in GainHelm affiliate registry."
                 )
+        elif prop_clean == "lienbond":
+            if selected_key in STUDENT_LOAN_PARTNER_KEYS or selected_key in PREXVO_AFFILIATES or selected_key in GAINHELM_PARTNER_KEYS:
+                raise ValueError(
+                    f"Strict isolation violation: Foreign tenant partner '{selected_key}' is prohibited on LienBond."
+                )
+            if selected_key not in LIENBOND_AFFILIATES:
+                raise ValueError(
+                    f"Partner '{selected_key}' not found in LienBond affiliate registry."
+                )
     else:
         # Slug boundary validation and auto-selection
         if prop_clean == "prexvo":
@@ -3517,6 +3766,12 @@ def get_affiliate_route(
                 if foreign_tok in slug_clean:
                     raise ValueError(
                         f"Strict isolation violation: Foreign tenant tool '{tool_slug}' is prohibited on GainHelm."
+                    )
+        elif prop_clean == "lienbond":
+            for foreign_tok in ("student-loan", "rap-vs-ibr", "pslf", "section-179", "section-1031", "qsbs-section-1202", "soc-2-audit", "cmmc-2-0"):
+                if foreign_tok in slug_clean:
+                    raise ValueError(
+                        f"Strict isolation violation: Foreign tenant tool '{tool_slug}' is prohibited on LienBond."
                     )
         selected_key = _select_partner_for_slug(prop_clean, slug_clean)
 
@@ -3591,7 +3846,11 @@ def get_affiliate_route(
         else (
             GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
             if prop_clean == "gainhelm"
-            else PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+            else (
+                LIENBOND_DISCLOSURES.get("ftc_disclosure", "")
+                if prop_clean == "lienbond"
+                else PROFITHELM_DISCLOSURES.get("ftc_disclosure", "")
+            )
         )
     )
     ymyl_warning = (
@@ -3600,7 +3859,11 @@ def get_affiliate_route(
         else (
             GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer", "")
             if prop_clean == "gainhelm"
-            else ""
+            else (
+                LIENBOND_DISCLOSURES.get("statutory_compliance_disclaimer", "")
+                if prop_clean == "lienbond"
+                else ""
+            )
         )
     )
 
@@ -6338,6 +6601,11 @@ COMPANY_BRAND_BY_PARTNER_KEY: Dict[str, str] = {
     "thoropass_audit": "Thoropass",
     "coalition_cyber_insurance": "Coalition",
     "cobalt_pentest": "Cobalt",
+    "simply_business": "Simply Business",
+    "next_insurance_b2b": "Next Insurance",
+    "thimble_contractor": "Thimble",
+    "jobber_field_service": "Jobber",
+    "levelset_lien_filing": "Levelset",
 }
 
 VERTICAL_DIVERSIFIED_PARTNER_ROSTERS: Dict[str, List[str]] = {
@@ -6995,7 +7263,15 @@ def bind_asset_partner_roster(
             "slot_plan": slot_plan,
         }
 
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+    registry = (
+        PREXVO_AFFILIATES
+        if prop == "prexvo"
+        else (
+            GAINHELM_AFFILIATES
+            if prop == "gainhelm"
+            else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES)
+        )
+    )
 
     # 1. Start with ranked tool affiliates from existing catalog + vertical diversified roster
     ranked_initial = rank_partner_offers_by_revenue_yield(
@@ -7032,7 +7308,11 @@ def bind_asset_partner_roster(
         else (
             ["vanta_security", "drata_compliance", "sprinto_compliance", "thoropass_audit", "coalition_cyber_insurance", "cobalt_pentest"]
             if prop == "gainhelm"
-            else ["crest_capital", "gusto", "rippling", "mercury", "taxslayer", "coinledger", "kalshi", "lawdepot"]
+            else (
+                ["simply_business", "suretybonds_direct", "next_insurance_b2b", "thimble_contractor", "jobber_field_service", "levelset_lien_filing"]
+                if prop == "lienbond"
+                else ["crest_capital", "gusto", "rippling", "mercury", "taxslayer", "coinledger", "kalshi", "lawdepot"]
+            )
         )
     )
     for sk in supplement_pool:

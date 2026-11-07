@@ -16,7 +16,12 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
-OWN_TENANT_DOMAINS: Tuple[str, ...] = ("profithelm.com", "prexvo.com", "gainhelm.com")
+OWN_TENANT_DOMAINS: Tuple[str, ...] = (
+    "profithelm.com",
+    "prexvo.com",
+    "gainhelm.com",
+    "lienbond.com",
+)
 
 # Fixture / documentation domains used by self-tests, batch fixtures and probes.
 SYNTHETIC_DOMAINS: Tuple[str, ...] = (
