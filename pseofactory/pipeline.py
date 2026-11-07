@@ -1403,6 +1403,446 @@ def arbitrate_actions(
     return ("NO_OP", None)
 
 
+VOID_CANDIDATES_QUEUE_PATH: Path = (
+    Path(__file__).resolve().parent.parent / ".agy" / "void_candidates.jsonl"
+)
+
+DAILY_PAGE_BUILD_LEDGER_PATH: Path = (
+    Path(__file__).resolve().parent.parent / ".agy" / "daily_page_build_ledger.json"
+)
+
+
+def execute_autonomous_daily_trend_page_build(
+    property_ids: Optional[List[str]] = None,
+    void_candidates_path: Optional[Union[str, Path]] = None,
+    ledger_path: Optional[Union[str, Path]] = None,
+    max_pages_per_tenant_per_day: int = 1,
+    date_key: Optional[str] = None,
+    registry: Optional[TenantRegistry] = None,
+    dry_run: bool = False,
+    enable_gitops: bool = False,
+) -> Dict[str, Any]:
+    """
+    Executes the P2 autonomous trend-to-page builder:
+      1. Consumes PENDING BUILD_PAGE candidates from .agy/void_candidates.jsonl ranked by
+         composite_profit_yield via rank_revenue_weighted_expansion_queue.
+      2. Reconciles already-built slugs in dist/tools/<slug>/index.html to BUILT and
+         cannibalizing slugs (check_search_intent_cannibalization) to REFACTOR_PAGE.
+      3. Enforces a strict cap of max_pages_per_tenant_per_day (default: 1 page per tenant
+         per UTC day) tracked atomically in .agy/daily_page_build_ledger.json.
+      4. Compiles the top qualified candidate via compile_high_effort_page, verifies via
+         CrossPropertyContaminationScanner.assert_clean and ContentAccuracyAuditStage,
+         writes dist/tools/<slug>/index.html + dist/manifests/<slug>.json, registers
+         provenance (deployed_voids.json / dynamic_tools.json), links the new route in
+         dist/tools/index.html + dist/sitemap-leaves.xml + dist/_headers (zero orphans),
+         and optionally ships via GitOpsCoordinator with P1 auto-rollback.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from datetime import datetime, timezone
+    from pseofactory.partner_tracker import rank_revenue_weighted_expansion_queue
+    from pseofactory.qualification import check_search_intent_cannibalization
+    from pseofactory.supervisor import AtomicStateLedger
+
+    target_props = [
+        str(p).strip().lower()
+        for p in (property_ids or ["profithelm", "prexvo", "gainhelm"])
+        if str(p).strip()
+    ]
+    date_str = str(date_key or datetime.now(timezone.utc).strftime("%Y-%m-%d")).strip()
+    queue_file = Path(void_candidates_path) if void_candidates_path else VOID_CANDIDATES_QUEUE_PATH
+    daily_ledger_file = Path(ledger_path) if ledger_path else DAILY_PAGE_BUILD_LEDGER_PATH
+    daily_cap = max(1, int(max_pages_per_tenant_per_day))
+
+    reg = registry or TenantRegistry.default()
+    scanner = CrossPropertyContaminationScanner()
+    gap_engine = CompetitorGapEngine()
+
+    ledger_data = AtomicStateLedger.load_json(daily_ledger_file)
+    if not isinstance(ledger_data, dict):
+        ledger_data = {}
+    days_map = ledger_data.setdefault("days", {})
+    if not isinstance(days_map, dict):
+        days_map = {}
+        ledger_data["days"] = days_map
+    day_bucket = days_map.setdefault(date_str, {})
+    if not isinstance(day_bucket, dict):
+        day_bucket = {}
+        days_map[date_str] = day_bucket
+
+    queue_items: List[Dict[str, Any]] = []
+    if queue_file.is_file():
+        try:
+            for line in queue_file.read_text(encoding="utf-8").splitlines():
+                line_s = line.strip()
+                if not line_s:
+                    continue
+                rec = json.loads(line_s)
+                if isinstance(rec, dict):
+                    queue_items.append(rec)
+        except Exception:
+            queue_items = []
+
+    existing_slugs_by_tenant: Dict[str, set] = {}
+    existing_tools_by_tenant: Dict[str, List[Dict[str, Any]]] = {}
+    adapters_by_tenant: Dict[str, PropertyAdapter] = {}
+
+    for t_id in target_props:
+        try:
+            adp = reg.get_adapter(t_id)
+        except Exception:
+            adp = ConfigurablePropertyAdapter(
+                property_id=t_id,
+                brand_name=t_id.capitalize(),
+                domain=f"{t_id}.com",
+                canonical_base=f"https://{t_id}.com",
+                dist_dir=Path(f"/tmp/{t_id}-dist"),
+            )
+        adapters_by_tenant[t_id] = adp
+        t_slugs = set()
+        if getattr(adp, "dist_dir", None) and (Path(adp.dist_dir) / "tools").is_dir():
+            for td in (Path(adp.dist_dir) / "tools").iterdir():
+                if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file():
+                    t_slugs.add(td.name.strip().lower())
+        for t_entry in getattr(adp, "tools", None) or []:
+            if isinstance(t_entry, dict) and t_entry.get("slug"):
+                t_slugs.add(str(t_entry["slug"]).strip().lower())
+        existing_slugs_by_tenant[t_id] = t_slugs
+        existing_tools_by_tenant[t_id] = [
+            {"slug": s, "query": s.replace("-", " ")} for s in sorted(t_slugs)
+        ]
+
+    reconciled_already_built_count = 0
+    reconciled_cannibalizing_count = 0
+    queue_mutated = False
+
+    for item in queue_items:
+        t_id = str(item.get("property_id") or item.get("tenant") or "").strip().lower()
+        if t_id not in target_props:
+            continue
+        if str(item.get("status") or "PENDING").upper() != "PENDING":
+            continue
+        if str(item.get("action") or "BUILD_PAGE").upper() != "BUILD_PAGE":
+            continue
+        c_slug = str(item.get("slug") or "").strip().lower()
+        c_query = str(item.get("query") or c_slug.replace("-", " ")).strip()
+        if not c_slug:
+            continue
+        if c_slug in existing_slugs_by_tenant.get(t_id, set()):
+            item["status"] = "BUILT"
+            item["reconciled_reason"] = "ALREADY_IN_DIST"
+            reconciled_already_built_count += 1
+            queue_mutated = True
+            continue
+        cannib = check_search_intent_cannibalization(
+            query=c_query,
+            existing_tools=existing_tools_by_tenant.get(t_id, []),
+            candidate_spec=item,
+        )
+        if cannib.get("is_cannibalizing"):
+            item["action"] = "REFACTOR_PAGE"
+            item["status"] = "RECONCILED_CANNIBALIZATION"
+            item["parent_slug"] = cannib.get("parent_slug")
+            reconciled_cannibalizing_count += 1
+            queue_mutated = True
+
+    pending_build_items = [
+        item
+        for item in queue_items
+        if str(item.get("property_id") or item.get("tenant") or "").strip().lower() in target_props
+        and str(item.get("status") or "PENDING").upper() == "PENDING"
+        and str(item.get("action") or "BUILD_PAGE").upper() == "BUILD_PAGE"
+    ]
+    ranking_report = rank_revenue_weighted_expansion_queue(
+        void_candidates_path=str(queue_file) if queue_file.is_file() else None
+    )
+    ranked_pending = (
+        ranking_report.get("after_queue", [])
+        if isinstance(ranking_report, dict)
+        else []
+    )
+    ranked_by_key = {
+        (
+            str(r.get("property_id") or r.get("tenant") or "").strip().lower(),
+            str(r.get("slug") or "").strip().lower(),
+        ): r
+        for r in ranked_pending
+        if isinstance(r, dict)
+    }
+    pending_sorted = sorted(
+        pending_build_items,
+        key=lambda x: float(
+            ranked_by_key.get(
+                (
+                    str(x.get("property_id") or x.get("tenant") or "").strip().lower(),
+                    str(x.get("slug") or "").strip().lower(),
+                ),
+                x,
+            ).get(
+                "revenue_weighted_yield",
+                ranked_by_key.get(
+                    (
+                        str(x.get("property_id") or x.get("tenant") or "").strip().lower(),
+                        str(x.get("slug") or "").strip().lower(),
+                    ),
+                    x,
+                ).get("composite_profit_yield", x.get("composite_profit_yield", 0.0)),
+            )
+            or 0.0
+        ),
+        reverse=True,
+    )
+
+    built_pages: List[Dict[str, Any]] = []
+    aborted_candidates: List[Dict[str, Any]] = []
+    skipped_daily_cap_tenants: set = set()
+    gitops_results: Dict[str, Any] = {}
+
+    for item in pending_sorted:
+        t_id = str(item.get("property_id") or item.get("tenant") or "").strip().lower()
+        c_slug = str(item.get("slug") or "").strip().lower()
+        c_query = str(item.get("query") or c_slug.replace("-", " ")).strip()
+        if not t_id or not c_slug:
+            continue
+
+        built_today_list = day_bucket.setdefault(t_id, [])
+        if not isinstance(built_today_list, list):
+            built_today_list = []
+            day_bucket[t_id] = built_today_list
+
+        if len(built_today_list) >= daily_cap:
+            skipped_daily_cap_tenants.add(t_id)
+            continue
+
+        adp = adapters_by_tenant[t_id]
+        raw_title = str(item.get("title") or c_query.title()).strip()
+        if "calculator" not in raw_title.lower() and "simulator" not in raw_title.lower() and "estimator" not in raw_title.lower():
+            raw_title = f"{raw_title} Calculator"
+
+        candidate_spec: Dict[str, Any] = dict(
+            item.get("candidate_spec") if isinstance(item.get("candidate_spec"), dict) else {}
+        )
+        for k in (
+            "statutory_authority",
+            "economic_dataset",
+            "formula",
+            "inputs",
+            "model_name",
+            "sample_calculation",
+            "published_output",
+            "mandatory_disclosures",
+        ):
+            if k in item and item[k] is not None and k not in candidate_spec:
+                candidate_spec[k] = item[k]
+        candidate_spec.update(
+            {
+                "slug": c_slug,
+                "query": c_query,
+                "title": raw_title,
+                "property_id": t_id,
+                "tenant": t_id,
+                "domain": adp.domain,
+                "brand_name": adp.brand_name,
+                "canonical_base": adp.canonical_base,
+            }
+        )
+
+        try:
+            tenant_profile = TenantFactStore.get_instance().get_profile(t_id)
+            tenant_gap_engine = CompetitorGapEngine(tenant_profile=tenant_profile)
+            candidate_spec = tenant_gap_engine.enrich_candidate_spec(candidate_spec)
+            assert_high_effort_content_qualified(
+                candidate_spec, context=f"p2_daily_build:{t_id}:{c_slug}"
+            )
+            with adp.scoped_environment():
+                compiled_res = compile_high_effort_page(candidate_spec)
+            html_out = compiled_res["html"]
+            manifest_out = compiled_res.get("manifest", {})
+            scanner.assert_clean(
+                html_out,
+                property_id=t_id,
+                context=f"p2_daily_build:{t_id}:{c_slug}",
+            )
+            audit_stage = ContentAccuracyAuditStage(tolerance=0.01, strict=False)
+            audit_rep = audit_stage.audit(
+                html=html_out,
+                candidate_spec=candidate_spec,
+                tenant=t_id,
+            )
+            if not audit_rep.passed:
+                raise ValueError(f"ContentAccuracyAuditStage failed: {audit_rep.violations}")
+        except Exception as exc:
+            clean_err = str(exc).replace("\u2014", "-").replace("\u2013", "-")
+            aborted_candidates.append(
+                {
+                    "property_id": t_id,
+                    "slug": c_slug,
+                    "query": c_query,
+                    "reason": clean_err,
+                }
+            )
+            continue
+
+        built_ts = datetime.now(timezone.utc).isoformat()
+        dist_dir = Path(adp.dist_dir)
+        out_html_path = dist_dir / "tools" / c_slug / "index.html"
+        out_manifest_path = dist_dir / "manifests" / f"{c_slug}.json"
+
+        if not dry_run:
+            out_html_path.parent.mkdir(parents=True, exist_ok=True)
+            out_html_path.write_text(html_out, encoding="utf-8")
+            out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            out_manifest_path.write_text(json.dumps(manifest_out, indent=2) + "\n", encoding="utf-8")
+
+            # Link in dist/tools/index.html and dist/index.html so zero orphan pages exist
+            for hub_rel in ("tools/index.html", "index.html"):
+                hub_file = dist_dir / hub_rel
+                if hub_file.is_file():
+                    try:
+                        hub_html = hub_file.read_text(encoding="utf-8")
+                        if f"/tools/{c_slug}/" not in hub_html:
+                            link_Html = (
+                                f'\n      <div class="card" style="margin-top:12px;">'
+                                f'<a href="/tools/{c_slug}/" class="touch-target" '
+                                f'style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;font-weight:600;">'
+                                f'{raw_title}</a></div>\n'
+                            )
+                            if "</main>" in hub_html:
+                                hub_html = hub_html.replace("</main>", link_Html + "</main>", 1)
+                            elif "</body>" in hub_html:
+                                hub_html = hub_html.replace("</body>", link_Html + "</body>", 1)
+                            hub_file.write_text(hub_html, encoding="utf-8")
+                    except Exception:
+                        pass
+
+            # Link in sitemap-leaves.xml / sitemap.xml
+            loc_url = f"{adp.canonical_base.rstrip('/')}/tools/{c_slug}/"
+            for sm_name in ("sitemap-leaves.xml", "sitemap.xml"):
+                sm_file = dist_dir / sm_name
+                if sm_file.is_file():
+                    try:
+                        sm_txt = sm_file.read_text(encoding="utf-8")
+                        if loc_url not in sm_txt and "</urlset>" in sm_txt:
+                            url_entry = (
+                                f"  <url>\n"
+                                f"    <loc>{loc_url}</loc>\n"
+                                f"    <lastmod>{date_str}</lastmod>\n"
+                                f"  </url>\n"
+                            )
+                            sm_txt = sm_txt.replace("</urlset>", url_entry + "</urlset>", 1)
+                            sm_file.write_text(sm_txt, encoding="utf-8")
+                    except Exception:
+                        pass
+
+            # Update dist/_headers
+            try:
+                from pseofactory.edge import build_edge_headers
+                headers_file = dist_dir / "_headers"
+                route_path = f"/tools/{c_slug}/"
+                existing_routes: List[str] = []
+                if headers_file.is_file():
+                    for ln in headers_file.read_text(encoding="utf-8").splitlines():
+                        ln_s = ln.strip()
+                        if ln_s.startswith("/tools/"):
+                            existing_routes.append(ln_s)
+                all_routes = list(dict.fromkeys(existing_routes + [route_path]))
+                headers_file.write_text(
+                    build_edge_headers(canonical_base=adp.canonical_base, routes=all_routes),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+
+            # Register provenance in tenant repository so future builds preserve the tool
+            repo_root = getattr(adp, "repo_path", None) or dist_dir.parent
+            if repo_root and Path(repo_root).is_dir():
+                r_root = Path(repo_root)
+                prov_entry = {
+                    "slug": c_slug,
+                    "title": raw_title,
+                    "short_title": raw_title[:24].strip(),
+                    "description": f"Deterministic quantitative calculator for {c_query} under {candidate_spec['statutory_authority']}.",
+                    "primary_keyword": c_query.lower(),
+                    "verified_at": built_ts,
+                }
+                dv_targets = (
+                    [r_root / ".agy" / "deployed_voids.json"]
+                    if t_id == "profithelm"
+                    else [r_root / "content" / "deployed_voids.json"]
+                )
+                for dv_f in dv_targets:
+                    try:
+                        dv_list = []
+                        if dv_f.is_file():
+                            loaded_dv = json.loads(dv_f.read_text(encoding="utf-8"))
+                            if isinstance(loaded_dv, list):
+                                dv_list = [d for d in loaded_dv if isinstance(d, dict) and d.get("slug") != c_slug]
+                        dv_list.append(prov_entry)
+                        dv_f.parent.mkdir(parents=True, exist_ok=True)
+                        dv_f.write_text(json.dumps(dv_list, indent=2) + "\n", encoding="utf-8")
+                    except Exception:
+                        pass
+
+        item["status"] = "BUILT"
+        item["built_at"] = built_ts
+        queue_mutated = True
+        existing_slugs_by_tenant.setdefault(t_id, set()).add(c_slug)
+        existing_tools_by_tenant.setdefault(t_id, []).append({"slug": c_slug, "query": c_query})
+
+        build_rec = {
+            "property_id": t_id,
+            "slug": c_slug,
+            "query": c_query,
+            "title": raw_title,
+            "output_file": str(out_html_path),
+            "composite_profit_yield": float(
+                ranked_by_key.get((t_id, c_slug), item).get(
+                    "composite_profit_yield", item.get("composite_profit_yield", 0.0)
+                )
+                or 0.0
+            ),
+            "built_at": built_ts,
+        }
+        built_today_list.append(build_rec)
+        built_pages.append(build_rec)
+
+        if enable_gitops and not dry_run:
+            try:
+                from pseofactory.gitops import GitOpsCoordinator
+                repo_root = getattr(adp, "repo_path", None) or dist_dir.parent
+                coord = GitOpsCoordinator(repo_path=Path(repo_root), branch="main", dry_run=dry_run)
+                g_res = coord.dispatch_to_shipper(
+                    property_id=t_id,
+                    dry_run=dry_run,
+                    commit_message=f"feat({t_id}): autonomous daily trend build {c_slug}",
+                    dist_dir=dist_dir,
+                    edge_url=f"https://{adp.domain}",
+                )
+                gitops_results[t_id] = g_res.to_dict()
+            except Exception as g_exc:
+                gitops_results[t_id] = {"status": "FAILED", "error": str(g_exc)}
+
+    if not dry_run:
+        ledger_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        AtomicStateLedger.save_json(daily_ledger_file, ledger_data)
+        if queue_mutated and queue_file.parent.is_dir():
+            lines_out = [json.dumps(rec, ensure_ascii=False) for rec in queue_items]
+            queue_file.write_text("\n".join(lines_out) + ("\n" if lines_out else ""), encoding="utf-8")
+
+    return {
+        "status": "PASS",
+        "date_key": date_str,
+        "max_pages_per_tenant_per_day": daily_cap,
+        "dry_run": dry_run,
+        "built_count": len(built_pages),
+        "built_pages": built_pages,
+        "skipped_daily_cap_tenants": sorted(list(skipped_daily_cap_tenants)),
+        "reconciled_already_built_count": reconciled_already_built_count,
+        "reconciled_cannibalizing_count": reconciled_cannibalizing_count,
+        "aborted_candidates": aborted_candidates,
+        "gitops_results": gitops_results,
+    }
+
+
 from pseofactory.supervisor import (  # noqa: E402
     CANONICAL_DEPARTMENT_CONTRACTS,
     CANONICAL_TENANTS,

@@ -2572,7 +2572,17 @@ class AutonomousLifecycleSupervisor:
         registry: Optional[TenantRegistry] = None,
         coordinator: Optional[AsyncFleetCoordinator] = None,
         heartbeat_tracker: Optional[HeartbeatTracker] = None,
+        void_candidates_path: Optional[Union[str, Path]] = None,
+        daily_build_ledger_path: Optional[Union[str, Path]] = None,
+        max_pages_per_tenant_per_day: int = 1,
     ):
+        self.void_candidates_path = (
+            Path(void_candidates_path).resolve() if void_candidates_path else None
+        )
+        self.daily_build_ledger_path = (
+            Path(daily_build_ledger_path).resolve() if daily_build_ledger_path else None
+        )
+        self.max_pages_per_tenant_per_day = max(1, int(max_pages_per_tenant_per_day))
         self.workspace_root = Path(
             workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
         ).resolve()
@@ -2857,6 +2867,29 @@ class AutonomousLifecycleSupervisor:
                 "consecutive_failures": self.consecutive_failures,
             }
 
+        daily_trend_build_summary: Dict[str, Any] = {}
+        if self.void_candidates_path is not None or (
+            not dry_run
+            and "PYTEST_CURRENT_TEST" not in os.environ
+            and "pytest" not in sys.modules
+            and os.environ.get("PSEUFACTORY_ENABLE_AUTONOMOUS_DAILY_BUILD", "1") == "1"
+        ):
+            try:
+                from pseofactory.pipeline import execute_autonomous_daily_trend_page_build
+
+                daily_trend_build_summary = execute_autonomous_daily_trend_page_build(
+                    property_ids=list(adapters.keys()),
+                    void_candidates_path=self.void_candidates_path,
+                    ledger_path=self.daily_build_ledger_path,
+                    max_pages_per_tenant_per_day=self.max_pages_per_tenant_per_day,
+                    registry=self.registry,
+                    dry_run=dry_run,
+                    enable_gitops=False,
+                )
+            except Exception as dt_exc:
+                daily_trend_build_summary = {"status": "ERROR", "error": str(dt_exc)}
+
+        daily_built_cnt = int(daily_trend_build_summary.get("built_count", 0) or 0)
         pipeline_sm = DepartmentPipelineStateMachine(
             state_path=self.state_file.parent / "department_pipeline_state.json",
             ledger=getattr(self.heartbeat_tracker, "ledger", AtomicStateLedger),
@@ -2864,18 +2897,19 @@ class AutonomousLifecycleSupervisor:
         pipeline_sm.record_stage(
             stage="DISCOVERY",
             status="COMPLETED",
-            trigger_mode="IMMEDIATE_DELTA" if (force or drift_detected) else "BATCHED_CADENCE",
-            delta_detected=bool(force or drift_detected),
+            trigger_mode="IMMEDIATE_DELTA" if (force or drift_detected or daily_built_cnt > 0) else "BATCHED_CADENCE",
+            delta_detected=bool(force or drift_detected or daily_built_cnt > 0),
             upstream_fingerprint=current_engine_hash,
             summary={
                 "properties_discovered": list(adapters.keys()),
                 "engine_drift_detected": drift_detected,
                 "forced": bool(force),
+                "daily_trend_page_build": daily_trend_build_summary,
             },
         )
 
         partner_sync_summary: Dict[str, Any] = {}
-        monetization_requires_rebuild = False
+        monetization_requires_rebuild = bool(daily_built_cnt > 0)
         if not dry_run and "PYTEST_CURRENT_TEST" not in os.environ:
             try:
                 from pseofactory.partner_tracker import (
@@ -3053,6 +3087,7 @@ class AutonomousLifecycleSupervisor:
                     "duration_seconds": duration,
                     "consecutive_failures": self.consecutive_failures,
                     "department_pipeline": pipeline_state,
+                    "daily_trend_page_build": daily_trend_build_summary,
                 }
 
         def on_tenant_start(tid: str) -> None:
@@ -3232,6 +3267,7 @@ class AutonomousLifecycleSupervisor:
                     "duration_seconds": duration,
                     "consecutive_failures": self.consecutive_failures,
                     "department_pipeline": pipeline_state,
+                    "daily_trend_page_build": daily_trend_build_summary,
                 }
             else:
                 self.consecutive_failures += 1

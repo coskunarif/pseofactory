@@ -742,6 +742,49 @@ def _render_compiler_monetization_and_guardrail_html(
             + "\n      </div>\n"
         )
 
+    def _build_partner_registration_drawer_html() -> str:
+        default_reg_state = "DE" if is_gainhelm else "CA"
+        firm_placeholder = (
+            "Vanguard Cyber Assurance CPA LLP"
+            if is_gainhelm
+            else ("Summit Refinance Advisory Group" if is_prexvo else "Apex Tax & Advisory LLP")
+        )
+        return (
+            f'      <div id="partner-registration-drawer" class="partner-registration-drawer" '
+            f'data-mechanic="partner_supply_registration" data-property="{prop_id}" data-tool-slug="{html_lib.escape(slug_id)}" '
+            f'style="margin-top: 14px; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated);">\n'
+            f'        <div style="font-weight: 700; font-size: 14px; margin-bottom: 8px;">\n'
+            f'          Register Your Firm: Claim a Verified Partner Slot on This Calculator\n'
+            f'        </div>\n'
+            f'        <form id="partner-registration-form" class="partner-registration-form" action="/api/lead-capture" method="POST" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;" novalidate>\n'
+            f'          <input type="hidden" name="intent" value="partner_registration" />\n'
+            f'          <div style="flex: 1; min-width: 180px;">\n'
+            f'            <label for="partner-reg-firm-name" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Advisory / Provider Firm Name</label>\n'
+            f'            <input type="text" id="partner-reg-firm-name" name="firm_name" placeholder="{firm_placeholder}" aria-label="Advisory or Provider Firm Name" required class="touch-target" style="width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);" />\n'
+            f'          </div>\n'
+            f'          <div style="flex: 1; min-width: 200px;">\n'
+            f'            <label for="partner-reg-email" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Partner Desk Work Email</label>\n'
+            f'            <input type="email" id="partner-reg-email" name="email" placeholder="partners@firm.com" aria-label="Partner Desk Work Email" required class="touch-target" style="width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);" />\n'
+            f'          </div>\n'
+            f'          <div style="min-width: 150px;">\n'
+            f'            <label for="quote-intake-partner-reg-state" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Primary Jurisdiction</label>\n'
+            f'            <select id="quote-intake-partner-reg-state" name="state" aria-label="Primary Jurisdiction" class="touch-target" style="width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);">\n'
+            f'              <option value="CA"{" selected" if default_reg_state == "CA" else ""}>California (CA)</option>\n'
+            f'              <option value="DE"{" selected" if default_reg_state == "DE" else ""}>Delaware (DE)</option>\n'
+            f'              <option value="TX">Texas (TX)</option>\n'
+            f'              <option value="NY">New York (NY)</option>\n'
+            f'              <option value="FL">Florida (FL)</option>\n'
+            f'              <option value="IL">Illinois (IL)</option>\n'
+            f'              <option value="WA">Washington (WA)</option>\n'
+            f'              <option value="MA">Massachusetts (MA)</option>\n'
+            f'            </select>\n'
+            f'          </div>\n'
+            f'          <button type="submit" id="partner-registration-submit-btn" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 6px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 700; border: none; cursor: pointer;">Register Firm</button>\n'
+            f'          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite" style="width: 100%; font-size: 13px; font-weight: 600; margin-top: 6px;"></div>\n'
+            f'        </form>\n'
+            f'      </div>\n'
+        )
+
     if not is_prexvo:
         default_slug = "soc-2-audit-cost-calculator" if is_gainhelm else "section-179-deduction-calculator"
         default_pk = "vanta_security" if is_gainhelm else "crest_capital"
@@ -788,6 +831,7 @@ def _render_compiler_monetization_and_guardrail_html(
         primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
+        partner_reg_drawer_html = _build_partner_registration_drawer_html()
         partner_lead_copy = (
             "Execute your modeled compliance or audit readiness scenario with a vetted GRC automation, CPA audit, or security assurance partner matched to this calculation:"
             if is_gainhelm
@@ -812,6 +856,7 @@ def _render_compiler_monetization_and_guardrail_html(
             f'{cta_text}</a>\n'
             f'      </p>\n'
             f'{roster_grid_html}'
+            f'{partner_reg_drawer_html}'
             f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted, #475569); margin-top: 10px;">\n'
             f'        {ftc_disc}\n'
             f'      </p>\n'
@@ -874,6 +919,7 @@ def _render_compiler_monetization_and_guardrail_html(
         primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "CPA_BOUNTY"))
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
+        partner_reg_drawer_html = _build_partner_registration_drawer_html()
 
         block_html = (
             f'    <section class="affiliate-cta-section refinance-partner-section ymyl-refinance-guardrail card pseo-card" data-property="prexvo" '
@@ -895,6 +941,7 @@ def _render_compiler_monetization_and_guardrail_html(
             f'{cta_text}</a>\n'
             f'      </p>\n'
             f'{roster_grid_html}'
+            f'{partner_reg_drawer_html}'
             f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted, #475569); margin-top: 10px;">\n'
             f'        {ftc_disc}\n'
             f'      </p>\n'
@@ -1323,6 +1370,80 @@ def _enrich_manifest_with_proprietary_signals(
         manifest["corroborating_sources"] = corroborating_sources
 
 
+def _build_hero_range_and_state_bar_html(
+    published_output: float,
+    display_output: str,
+    monetization_section_html: str,
+    is_gainhelm: bool,
+) -> tuple[str, str]:
+    """Renders the above-the-fold Instant Range Anchor and Step 1 State Selector bar."""
+    conservative_range_str = _format_scenario_number(published_output * 0.8)
+    aggressive_range_str = _format_scenario_number(published_output * 1.2)
+    has_partner_reg_drawer = 'id="partner-registration-drawer"' in monetization_section_html
+    hero_register_firm_link_html = (
+        ""
+        if not has_partner_reg_drawer
+        else (
+            '\n        <a href="#partner-registration-drawer" class="touch-target hero-register-firm-link" '
+            'style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; '
+            'padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); '
+            'color: var(--accent); font-weight: 600; text-decoration: none; font-size: 13px;">Register Your Firm</a>'
+        )
+    )
+    hero_range_anchor_html = (
+        f'      <div id="hero-range-anchor" class="hero-range-anchor" data-mechanic="instant_range_anchor" '
+        f'data-range-low="{conservative_range_str}" data-range-baseline="{display_output}" data-range-high="{aggressive_range_str}" '
+        f'style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; background: var(--bg-elevated); '
+        f'border: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">\n'
+        f'        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 14px; font-variant-numeric: tabular-nums;">\n'
+        f'          <span><strong>Instant Statutory Range:</strong></span>\n'
+        f'          <span>Conservative (0.8x): <strong id="hero-range-low">{conservative_range_str}</strong></span>\n'
+        f'          <span>Baseline (1.0x): <strong id="hero-range-baseline">{display_output}</strong></span>\n'
+        f'          <span>Aggressive (1.2x): <strong id="hero-range-high">{aggressive_range_str}</strong></span>\n'
+        f'        </div>{hero_register_firm_link_html}\n'
+        f'      </div>'
+    )
+    default_hero_state = "DE" if is_gainhelm else "CA"
+    hero_us_states = (
+        ("CA", "California (CA)"),
+        ("DE", "Delaware (DE)"),
+        ("TX", "Texas (TX)"),
+        ("NY", "New York (NY)"),
+        ("FL", "Florida (FL)"),
+        ("IL", "Illinois (IL)"),
+        ("PA", "Pennsylvania (PA)"),
+        ("OH", "Ohio (OH)"),
+        ("GA", "Georgia (GA)"),
+        ("NC", "North Carolina (NC)"),
+        ("MI", "Michigan (MI)"),
+        ("NJ", "New Jersey (NJ)"),
+        ("VA", "Virginia (VA)"),
+        ("WA", "Washington (WA)"),
+        ("AZ", "Arizona (AZ)"),
+        ("MA", "Massachusetts (MA)"),
+        ("TN", "Tennessee (TN)"),
+        ("CO", "Colorado (CO)"),
+        ("MN", "Minnesota (MN)"),
+        ("DC", "District of Columbia (DC)"),
+    )
+    hero_state_options_str = "\n".join(
+        f'          <option value="{st_c}"{" selected" if st_c == default_hero_state else ""}>{st_lbl}</option>'
+        for st_c, st_lbl in hero_us_states
+    )
+    state_first_hero_bar_html = (
+        '      <div id="state-first-hero-bar" class="state-first-hero-bar" data-mechanic="state_first_hero_input" '
+        'style="margin-bottom: 16px; padding: 12px 16px; border-radius: 8px; background: var(--bg-elevated); '
+        'border: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">\n'
+        '        <label for="quote-intake-hero-state" style="font-weight: 600; font-size: 14px;">Step 1: Select Filing State / Jurisdiction</label>\n'
+        '        <select id="quote-intake-hero-state" name="state" class="touch-target" aria-label="Step 1: Select Filing State / Jurisdiction" '
+        'style="min-height: 44px; min-width: 220px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">\n'
+        f'{hero_state_options_str}\n'
+        '        </select>\n'
+        '      </div>'
+    )
+    return hero_range_anchor_html, state_first_hero_bar_html
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -1728,6 +1849,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     from pseofactory.affiliates import is_restricted_public_service_slug
     is_restricted_asset = bool(is_prexvo and is_restricted_public_service_slug(slug, title))
+    hero_range_anchor_html, state_first_hero_bar_html = _build_hero_range_and_state_bar_html(
+        published_output=published_output,
+        display_output=display_output,
+        monetization_section_html=monetization_section_html,
+        is_gainhelm=is_gainhelm,
+    )
     playbook_footer_html = (
         ""
         if is_restricted_asset
@@ -2049,6 +2176,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
           to compute exact quantitative projections and variance across multi-tier planning scenarios.
         </p>
       </div>
+{hero_range_anchor_html}
     </header>
 
     <div id="calculator-workspace-anchor" class="calculation-container card" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}" data-gsc-trajectory="{gsc_trajectory}" data-gsc-coverage-state="{gsc_coverage_state}">
@@ -2057,6 +2185,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
         (greater than or equal to zero) per HWL-1263 to prevent crawler or user state corruption.
       </p>
+{state_first_hero_bar_html}
 {scenario_presets_bar_html}
 {edge_case_trap_html}
       <form class="calculator-form" id="{slug}-calculator" method="post" action="javascript:void(0);">
@@ -2246,6 +2375,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       if (outputElem) {{
         outputElem.textContent = formatNumber(result);
       }}
+      var hrBase = document.getElementById("hero-range-baseline");
+      var hrLow = document.getElementById("hero-range-low");
+      var hrHigh = document.getElementById("hero-range-high");
+      if (hrBase) hrBase.textContent = formatNumber(result);
+      if (hrLow) hrLow.textContent = formatNumber(result * 0.8);
+      if (hrHigh) hrHigh.textContent = formatNumber(result * 1.2);
     }}
 
     syncInputsFromParams();

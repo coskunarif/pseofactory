@@ -9217,7 +9217,7 @@ class ZeroSignupInstantResultHTMLParser(HTMLParser):
             combined_form_sig = f"{el_id} {' '.join(cls_tokens)} {attr_map.get('action', '').lower()}"
             if not any(
                 sec_id in combined_form_sig
-                for sec_id in ("lead-capture-form", "partner-quote-intake-form", "newsletter")
+                for sec_id in ("lead-capture-form", "partner-quote-intake-form", "partner-registration-form", "newsletter")
             ):
                 self._in_primary_form = True
 

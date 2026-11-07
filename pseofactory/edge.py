@@ -3702,7 +3702,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     b.deliverable_requests_count += 1;
     if (item.lead_type === "qualified_quote" || Boolean(item.partner_sharing_consent)) {
       b.qualified_quote_requests_count += 1;
-    } else {
+    } else if (item.lead_type !== "partner_registration") {
       b.playbook_workpaper_requests_count += 1;
     }
     b.total_modeled_exposure_usd = Math.round((b.total_modeled_exposure_usd + Number(item.calculated_amount || 0)) * 100) / 100;
@@ -4265,8 +4265,9 @@ export async function onRequestGet(context) {
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
   const summary = {
-    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
+    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription" && l.lead_type !== "partner_registration").length,
     playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
+    partner_registrations_count: leads.filter((l) => l.lead_type === "partner_registration").length,
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
@@ -4410,6 +4411,52 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid work email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
+    if (intentParam === "partner_registration") {
+      const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
+      const partnerLeadId = String(body.lead_id || `lead_gainhelm_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      const partnerSku = "gh_verified_partner_slot";
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const partnerRecord = {
+        lead_id: partnerLeadId,
+        property_id: "gainhelm",
+        lead_type: "partner_registration",
+        intent: "partner_registration",
+        lifecycle_stage: "partner_registered",
+        tool_slug: toolSlug,
+        vertical: "b2b_cyber_compliance",
+        email,
+        firm_name: firmName,
+        state,
+        offer_sku: partnerSku,
+        offer_title: "Verified Calculator Partner Slot",
+        offer_price_usd: 299,
+        checkout_url: partnerCheckoutUrl,
+        captured_at: new Date().toISOString(),
+      };
+      if (!isSynth) {
+        const buf = getMemoryBuffer();
+        buf.unshift(partnerRecord);
+        if (buf.length > 250) buf.length = 250;
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {
+          await kv.put(partnerLeadId, JSON.stringify(partnerRecord), { expirationTtl: 90 * 86400 });
+          await kv.put(`partner:${toolSlug}:${email}`, JSON.stringify(partnerRecord), { expirationTtl: 90 * 86400 });
+        }
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSynth,
+          persisted: !isSynth,
+          status: "partner_registered",
+          ...partnerRecord,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
 
@@ -5145,7 +5192,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     b.deliverable_requests_count += 1;
     if (item.lead_type === "qualified_quote" || Boolean(item.partner_sharing_consent)) {
       b.qualified_quote_requests_count += 1;
-    } else {
+    } else if (item.lead_type !== "partner_registration") {
       b.playbook_workpaper_requests_count += 1;
     }
     b.total_modeled_exposure_usd = Math.round((b.total_modeled_exposure_usd + Number(item.calculated_amount || 0)) * 100) / 100;
@@ -5862,8 +5909,9 @@ export async function onRequestGet(context) {
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
   const summary = {
-    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
+    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription" && l.lead_type !== "partner_registration").length,
     playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
+    partner_registrations_count: leads.filter((l) => l.lead_type === "partner_registration").length,
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
@@ -5950,6 +5998,58 @@ export async function onRequestPost(context) {
           error: "Restricted public-service asset cannot capture commercial student loan refinance leads.",
         }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
+    if (intentParam === "partner_registration") {
+      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        return new Response(
+          JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
+          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+      const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
+      const partnerLeadId = String(body.lead_id || `lead_prexvo_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      const partnerSku = "px_verified_partner_slot";
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const partnerRecord = {
+        lead_id: partnerLeadId,
+        property_id: "prexvo",
+        lead_type: "partner_registration",
+        intent: "partner_registration",
+        lifecycle_stage: "partner_registered",
+        tool_slug: toolSlug,
+        vertical: "student_loan_refinance",
+        email,
+        firm_name: firmName,
+        state: state || "CA",
+        offer_sku: partnerSku,
+        offer_title: "Verified Calculator Partner Slot",
+        offer_price_usd: 299,
+        checkout_url: partnerCheckoutUrl,
+        captured_at: new Date().toISOString(),
+      };
+      if (!isSyntheticProbe) {
+        const buf = getMemoryBuffer();
+        buf.unshift(partnerRecord);
+        if (buf.length > 250) buf.length = 250;
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {
+          await kv.put(partnerLeadId, JSON.stringify(partnerRecord), { expirationTtl: 90 * 86400 });
+          await kv.put(`partner:${toolSlug}:${email}`, JSON.stringify(partnerRecord), { expirationTtl: 90 * 86400 });
+        }
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSyntheticProbe,
+          persisted: !isSyntheticProbe,
+          status: "partner_registered",
+          ...partnerRecord,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
 
@@ -7142,7 +7242,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
     b.deliverable_requests_count += 1;
     if (item.lead_type === "qualified_quote" || Boolean(item.partner_sharing_consent)) {
       b.qualified_quote_requests_count += 1;
-    } else {
+    } else if (item.lead_type !== "partner_registration") {
       b.playbook_workpaper_requests_count += 1;
     }
     b.total_modeled_exposure_usd = Math.round((b.total_modeled_exposure_usd + Number(item.calculated_amount || 0)) * 100) / 100;
@@ -7857,8 +7957,9 @@ export async function onRequestGet(context) {
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
   const summary = {
-    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
+    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription" && l.lead_type !== "partner_registration").length,
     playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
+    partner_registrations_count: leads.filter((l) => l.lead_type === "partner_registration").length,
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
@@ -7934,6 +8035,59 @@ export async function onRequestPost(context) {
         }
       );
     }
+    const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
+    if (intentParam === "partner_registration") {
+      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        return new Response(
+          JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
+          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+      const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
+      const partnerState = inferStateFromToolSlug(toolSlug, body.state);
+      const partnerLeadId = String(body.lead_id || `lead_profithelm_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      const partnerSku = "ph_verified_partner_slot";
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const partnerRecord = {
+        lead_id: partnerLeadId,
+        property_id: "profithelm",
+        lead_type: "partner_registration",
+        intent: "partner_registration",
+        lifecycle_stage: "partner_registered",
+        tool_slug: toolSlug,
+        vertical: spec.vertical,
+        email,
+        firm_name: firmName,
+        state: partnerState,
+        offer_sku: partnerSku,
+        offer_title: "Verified Calculator Partner Slot",
+        offer_price_usd: 299,
+        checkout_url: partnerCheckoutUrl,
+        captured_at: new Date().toISOString(),
+      };
+      if (!isSyntheticProbe) {
+        const buf = getMemoryBuffer();
+        buf.unshift(partnerRecord);
+        if (buf.length > 250) buf.length = 250;
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {
+          await kv.put(partnerLeadId, JSON.stringify(partnerRecord), { expirationTtl: 90 * 86400 });
+          await kv.put(`partner:${toolSlug}:${email}`, JSON.stringify(partnerRecord), { expirationTtl: 90 * 86400 });
+        }
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSyntheticProbe,
+          persisted: !isSyntheticProbe,
+          status: "partner_registered",
+          ...partnerRecord,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
     const blueprintState = body.blueprint_state && typeof body.blueprint_state === "object" ? body.blueprint_state : {};
     const scenarioInputs =
       body.scenario_inputs && typeof body.scenario_inputs === "object"

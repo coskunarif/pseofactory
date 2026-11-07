@@ -976,7 +976,7 @@ class UnifiedBrowserAuditor:
         // 2. All calculator inputs/selects/sliders, cliff visualizer, scenario comparator, presets, and deep-link hydration
         const allCalcControls = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), select')).filter(el => {
             if (el.disabled) return false;
-            if (el.closest && el.closest('#partner-quote-intake-form, #lead-capture-form')) return false;
+            if (el.closest && el.closest('#partner-quote-intake-form, #lead-capture-form, #partner-registration-form, #state-first-hero-bar')) return false;
             const s = window.getComputedStyle(el);
             return s.display !== 'none' && s.visibility !== 'hidden';
         });

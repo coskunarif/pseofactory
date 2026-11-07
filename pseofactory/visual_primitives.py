@@ -1429,7 +1429,7 @@ def _render_runtime_sync_workbench_js() -> str:
         var secDelta = 0;
         for (var sIdx = 0; sIdx < secEls.length; sIdx++) {
           var sEl = secEls[sIdx];
-          if (sEl.closest && sEl.closest("#partner-quote-intake-form, #lead-capture-form, #serp-incumbent-depth-workbench")) continue;
+          if (sEl.closest && sEl.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form, #serp-incumbent-depth-workbench")) continue;
           var sId = sEl.id || "";
           if (sId && (primarySrcSet[sId] || sId.indexOf("calc-input-") === 0)) continue;
           if (sEl.tagName === "SELECT") {
@@ -1879,7 +1879,7 @@ def _render_runtime_sync_workbench_js() -> str:
         var allCalcControls = document.querySelectorAll('input[type="number"]:not([readonly]), select:not([id^="quote-intake-"])');
         for (var acIdx = 0; acIdx < allCalcControls.length; acIdx++) {
           var acEl = allCalcControls[acIdx];
-          if (acEl.closest && acEl.closest("#partner-quote-intake-form, #lead-capture-form")) continue;
+          if (acEl.closest && acEl.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form")) continue;
           if (acEl.tagName === "SELECT") {
             var bIdx = parseInt(acEl.getAttribute("data-pseo-base-idx") || "0", 10) || 0;
             var cIdx = acEl.selectedIndex || 0;
@@ -1915,13 +1915,25 @@ def _render_runtime_sync_workbench_js() -> str:
           var scModCon = document.querySelector(".scenario-moderate-contraction");
           var scModExp = document.querySelector(".scenario-moderate-expansion");
           var scAgg = document.querySelector(".scenario-aggressive");
+          var hrBase = document.getElementById("hero-range-baseline");
+          var hrLow = document.getElementById("hero-range-low");
+          var hrHigh = document.getElementById("hero-range-high");
           if (scBase) scBase.textContent = formatOutNum(newOut);
           if (scCon) scCon.textContent = formatOutNum(newOut * 0.8);
           if (scModCon) scModCon.textContent = formatOutNum(newOut * 0.9);
           if (scModExp) scModExp.textContent = formatOutNum(newOut * 1.1);
           if (scAgg) scAgg.textContent = formatOutNum(newOut * 1.2);
+          if (hrBase) hrBase.textContent = formatOutNum(newOut);
+          if (hrLow) hrLow.textContent = formatOutNum(newOut * 0.8);
+          if (hrHigh) hrHigh.textContent = formatOutNum(newOut * 1.2);
         } else if (!isNaN(baseOut) && Math.abs(ratio-1.0) <= 1e-6) {
           outEl.textContent = formatOutNum(baseOut);
+          var hrBaseReset = document.getElementById("hero-range-baseline");
+          var hrLowReset = document.getElementById("hero-range-low");
+          var hrHighReset = document.getElementById("hero-range-high");
+          if (hrBaseReset) hrBaseReset.textContent = formatOutNum(baseOut);
+          if (hrLowReset) hrLowReset.textContent = formatOutNum(baseOut * 0.8);
+          if (hrHighReset) hrHighReset.textContent = formatOutNum(baseOut * 1.2);
         }
       }
       if (!document.getElementById("serp-incumbent-depth-workbench") && (document.getElementById("stateful-scenario-comparator") || document.getElementById("multi-year-cliff-visualizer"))) {
@@ -2561,6 +2573,19 @@ def _render_runtime_sync_events_js() -> str:
                     }
                   }
                 }
+                if (cKey === "state") {
+                  var stateSels = [
+                    document.getElementById("quote-intake-hero-state"),
+                    document.getElementById("quote-intake-state"),
+                    document.getElementById("quote-intake-partner-reg-state")
+                  ];
+                  for (var ssIdx = 0; ssIdx < stateSels.length; ssIdx++) {
+                    var ssEl = stateSels[ssIdx];
+                    if (ssEl && ssEl !== el) {
+                      ssEl.value = valStr.toUpperCase();
+                    }
+                  }
+                }
               } else {
                 var numVal = parseFloat(valStr.replace(/,/g, ""));
                 var baseDef = parseFloat(el.getAttribute("data-pseo-base-val") || el.value || "0");
@@ -2688,10 +2713,29 @@ def _render_runtime_sync_events_js() -> str:
       var target = e.target;
       if (!target || target.tagName !== "SELECT") return;
       _syncing = true;
-      _userInteracted = true;
-      _lastInteractionScope = ((target.closest && target.closest("#serp-incumbent-depth-workbench")) || (target.id && target.id.indexOf("serp-") === 0)) ? "serp" : "primary";
       try {
-        updateOutputsSynchronously();
+        if (target.id && target.id.indexOf("quote-intake-") === 0 && target.name === "state") {
+          var stVal = String(target.value || "").trim().toUpperCase();
+          var peerIds = ["quote-intake-hero-state", "quote-intake-state", "quote-intake-partner-reg-state"];
+          for (var pIdx = 0; pIdx < peerIds.length; pIdx++) {
+            var peerEl = document.getElementById(peerIds[pIdx]);
+            if (peerEl && peerEl !== target && stVal) {
+              peerEl.value = stVal;
+            }
+          }
+          try {
+            if (window.history && window.history.replaceState && stVal) {
+              var u = new URL(window.location.href);
+              u.searchParams.set("state", stVal);
+              window.history.replaceState({}, "", u.toString());
+            }
+          } catch (uErr) {}
+          syncOutboundAffiliateLinks();
+        } else {
+          _userInteracted = true;
+          _lastInteractionScope = ((target.closest && target.closest("#serp-incumbent-depth-workbench")) || (target.id && target.id.indexOf("serp-") === 0)) ? "serp" : "primary";
+          updateOutputsSynchronously();
+        }
       } finally {
         _syncing = false;
       }
@@ -3464,6 +3508,84 @@ def _render_runtime_sync_events_js() -> str:
         return;
       }
 
+      var prForm = e.target && (e.target.id === "partner-registration-form" || (e.target.classList && e.target.classList.contains("partner-registration-form"))) ? e.target : null;
+      if (prForm) {
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+        try {
+          var prEmailInp = prForm.querySelector('input[type="email"]');
+          var prFirmInp = prForm.querySelector('input[name="firm_name"]');
+          var prStateSel = prForm.querySelector('select[name="state"]') || document.getElementById("quote-intake-hero-state") || document.getElementById("quote-intake-state");
+          var prBtn = prForm.querySelector('button[type="submit"]');
+          var prStatus = document.getElementById("partner-registration-status") || prForm.querySelector(".partner-registration-status");
+          var prEmail = prEmailInp ? String(prEmailInp.value || "").trim() : "";
+          var prFirm = prFirmInp ? String(prFirmInp.value || "").trim() : "";
+          var prState = prStateSel ? String(prStateSel.value || "CA").trim().toUpperCase() : "CA";
+          if (!prStatus) {
+            prStatus = document.createElement("div");
+            prStatus.id = "partner-registration-status";
+            prStatus.className = "partner-registration-status";
+            prStatus.setAttribute("role", "status");
+            prStatus.setAttribute("aria-live", "polite");
+            prForm.appendChild(prStatus);
+          }
+          if (!prEmail || prEmail.indexOf("@") === -1) {
+            prStatus.textContent = "Please enter a valid partner desk work email address.";
+            prStatus.setAttribute("data-status", "validation_error");
+            return;
+          }
+          var prDrawer = document.getElementById("partner-registration-drawer");
+          var prPayload = {
+            intent: "partner_registration",
+            lead_type: "partner_registration",
+            email: prEmail,
+            firm_name: prFirm || "Advisory Partner Firm",
+            state: prState,
+            tool_slug: resolveCurrentToolSlug(),
+            source: (window.location && window.location.pathname) ? window.location.pathname : "/",
+            timestamp: new Date().toISOString()
+          };
+          if (window.__PSEO_SYNTHETIC_TEST__) {
+            prPayload.synthetic_test = true;
+          }
+          if (prBtn) {
+            prBtn.textContent = "Firm Registered";
+          }
+          prForm.setAttribute("data-lead-captured", "true");
+          if (prDrawer) prDrawer.setAttribute("data-lead-captured", "true");
+          prStatus.textContent = "Submitting verified partner registration...";
+          prStatus.setAttribute("data-status", "submitting");
+          emitWorkbenchEngagementBeacon("partner_registration_submit", "partner_supply_registration", { state: prState });
+          if (typeof window.fetch === "function") {
+            var prHeaders = { "Content-Type": "application/json" };
+            if (window.__PSEO_SYNTHETIC_TEST__) {
+              prHeaders["X-Pseofactory-Test"] = "1";
+            }
+            window.fetch("/api/lead-capture", {
+              method: "POST",
+              headers: prHeaders,
+              body: JSON.stringify(prPayload)
+            }).then(function(res) {
+              return res.json();
+            }).then(function(data) {
+              if (data && data.ok) {
+                prForm.setAttribute("data-submission-state", "success");
+                prForm.setAttribute("data-lead-id", data.lead_id || "verified");
+                if (data.checkout_url) prForm.setAttribute("data-checkout-url", data.checkout_url);
+                prStatus.setAttribute("data-status", data.status || "partner_registered");
+                prStatus.setAttribute("data-lead-id", data.lead_id || "verified");
+                prStatus.textContent = "Partner registration confirmed for " + (data.firm_name || prPayload.firm_name) + " (" + (data.lead_id || "verified") + "). ";
+                if (data.checkout_url) {
+                  var prSlotUsd = typeof data.offer_price_usd === "number" ? data.offer_price_usd : 299;
+                  appendActionLink(prStatus, "partner-slot-checkout-link", data.checkout_url, "Activate Verified Partner Slot ($" + String(prSlotUsd) + ")", true);
+                }
+              }
+            }).catch(function() {});
+          }
+        } catch (prErr) {}
+        return;
+      }
+
       var qForm = e.target && e.target.id === "partner-quote-intake-form" ? e.target : null;
       if (!qForm) {
         var calcForm = e.target && e.target.tagName === "FORM" ? e.target : null;
@@ -3485,7 +3607,7 @@ def _render_runtime_sync_events_js() -> str:
         var drawer = document.getElementById("partner-quote-intake-step");
         var statusNode = document.getElementById("partner-quote-intake-status");
         var emailInp = document.getElementById("quote-intake-email") || qForm.querySelector('input[type="email"]');
-        var stateInp = document.getElementById("quote-intake-state") || qForm.querySelector('select[name="state"]');
+        var stateInp = document.getElementById("quote-intake-state") || document.getElementById("quote-intake-hero-state") || qForm.querySelector('select[name="state"]');
         var bandInp = document.getElementById("quote-intake-capital-band") || qForm.querySelector('select[name="capital_band"]');
         var consentInp = document.getElementById("quote-intake-consent") || qForm.querySelector('input[type="checkbox"]');
         var emailVal = emailInp ? String(emailInp.value || "").trim() : "";
@@ -5946,7 +6068,7 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
                 flags=re.IGNORECASE,
             )
             lead_submit_matches = re.findall(
-                r'<form\b[^>]*id=["\'](?:lead-capture-form|partner-quote-intake-form|gainhelm-compliance-form)["\'][\s\S]*?</form>',
+                r'<form\b[^>]*id=["\'](?:lead-capture-form|partner-quote-intake-form|partner-registration-form|gainhelm-compliance-form)["\'][\s\S]*?</form>',
                 norm_html,
                 flags=re.IGNORECASE,
             )

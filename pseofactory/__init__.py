@@ -546,6 +546,7 @@ from pseofactory.trends import (
     run_trend_pipeline,
 )
 from pseofactory.pipeline import (
+    DAILY_PAGE_BUILD_LEDGER_PATH,
     PipelineConfig,
     QualifiedOpportunity,
     AbortedOpportunity,
@@ -553,6 +554,7 @@ from pseofactory.pipeline import (
     DriverExecutionResult,
     FactoryPipeline,
     run_factory_pipeline,
+    execute_autonomous_daily_trend_page_build,
     RejectionReason,
 )
 from pseofactory.competitor import (
@@ -1150,6 +1152,8 @@ __all__ = [
     "CANONICAL_DEPARTMENT_CONTRACTS",
     "DepartmentHandoffChainVerifier",
     "verify_department_handoff_chain",
+    "DAILY_PAGE_BUILD_LEDGER_PATH",
+    "execute_autonomous_daily_trend_page_build",
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses
