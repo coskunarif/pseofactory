@@ -10010,7 +10010,8 @@ Calculations and statutory rules derived from:
                 f"| **ICR** | 100% of Federal Poverty Line | 20% or 12-Yr Income-Adjusted | None | 300 Months (25 Yrs) |\n"
                 f"| **Tiered Standard** | N/A (Fixed Amortization) | Fixed by Principal Tier | N/A | 120 - 360 Months |\n\n"
                 f"## Verification & Deterministic Execution\n"
-                f"All figures and amortizations are verified against federal Title IV regulations at https://prexvo.com/tools/{s_val}/.\n"
+                f"All figures and amortizations are verified against federal Title IV regulations at https://prexvo.com/tools/{s_val}/.\n\n"
+                f"**YMYL Statutory Notice:** Private student loan refinancing permanently forfeits access to federal Title IV repayment plans (RAP, IBR, PAYE, ICR), PSLF discharge, and statutory deferment protections.\n"
             )
             assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
             (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")

@@ -2341,6 +2341,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "two-step Direct Consolidation rules, and 10% IDR vs 20% ICR caps.",
                     " Verified under Title IV 34 CFR 685.209(b) and 685.220.",
                 )
+            if "double" not in q_low and ("parent plus loan payment" in q_low or "parent-plus-loan-payment" in q_low or ("parent plus" in q_low and "payment" in q_low)):
+                return (
+                    "Calculate federal Parent PLUS Loan monthly payments across Standard, Graduated, "
+                    "Extended, and 20% ICR consolidation schedules under 34 CFR 685.208.",
+                    " Verified under Title IV 34 CFR 685.208 and 685.209(b).",
+                )
             if "parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low:
                 return (
                     "Calculate Parent PLUS Double Consolidation repayment options comparing 10% IDR "
