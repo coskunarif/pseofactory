@@ -1643,6 +1643,7 @@ def execute_autonomous_daily_trend_page_build(
                 "domain": adp.domain,
                 "brand_name": adp.brand_name,
                 "canonical_base": adp.canonical_base,
+                "existing_tool_slugs": sorted(existing_slugs_by_tenant.get(t_id, set())),
             }
         )
 
@@ -1670,6 +1671,39 @@ def execute_autonomous_daily_trend_page_build(
             )
             if not audit_rep.passed:
                 raise ValueError(f"ContentAccuracyAuditStage failed: {audit_rep.violations}")
+
+            from pseofactory.jev_client import evaluate_page_prepublish_gate
+            existing_pages_for_jev: List[Dict[str, str]] = []
+            tools_dir = Path(adp.dist_dir) / "tools"
+            if tools_dir.is_dir():
+                for existing_sub in sorted(tools_dir.iterdir()):
+                    if not existing_sub.is_dir() or existing_sub.name == c_slug:
+                        continue
+                    idx_f = existing_sub / "index.html"
+                    if idx_f.is_file():
+                        try:
+                            raw_idx = idx_f.read_text(encoding="utf-8", errors="ignore")
+                            t_m = re.search(r"<title[^>]*>(.*?)</title>", raw_idx, re.IGNORECASE | re.DOTALL)
+                            h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw_idx, re.IGNORECASE | re.DOTALL)
+                            existing_pages_for_jev.append(
+                                {
+                                    "slug": existing_sub.name,
+                                    "url": f"{adp.canonical_base}/tools/{existing_sub.name}/",
+                                    "title": re.sub(r"<[^>]+>", "", t_m.group(1)).strip() if t_m else existing_sub.name,
+                                    "h1": re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else "",
+                                }
+                            )
+                        except Exception:
+                            pass
+            jev_gate_rep = evaluate_page_prepublish_gate(
+                html_out,
+                candidate_spec,
+                existing_pages=existing_pages_for_jev,
+            )
+            if not jev_gate_rep.get("passed", False):
+                raise ValueError(
+                    f"JevPrePublishGate failed: {jev_gate_rep.get('violations') or jev_gate_rep.get('findings')}"
+                )
         except Exception as exc:
             clean_err = str(exc).replace("\u2014", "-").replace("\u2013", "-")
             aborted_candidates.append(

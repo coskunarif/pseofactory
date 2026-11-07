@@ -1672,7 +1672,7 @@ def _generate_dynamic_distribution_copy(tool: Dict[str, Any]) -> Dict[str, Any]:
     fb_url = _build_parameterized_calculator_url(slug, deep_params, {"utm_source": "facebook", "utm_medium": "social", "utm_campaign": slug})
 
     try:
-        from profithelm.jev import get_jev_client
+        from pseofactory.jev_client import get_jev_client
         jev = get_jev_client()
         social_angle = jev.select_social_distribution_angle(tool_title=title, query=query, key_finding=qa)
     except Exception:
@@ -9724,7 +9724,7 @@ def export_all_syndication_files(
 
             if property_id == "profithelm":
                 from profithelm.config import AFFILIATES, BASE_DIR as PH_BASE_DIR
-                from profithelm.jev import batch_verify_affiliate_routes
+                from pseofactory.jev_client import batch_verify_affiliate_routes
 
                 jev_db = PH_BASE_DIR / ".agy" / "jev_decision_cache.db"
                 if jev_db.is_file():

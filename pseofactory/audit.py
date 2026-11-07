@@ -389,6 +389,7 @@ ALLOWED_TITLE_EXPANSIONS: Set[str] = {
     "marginal", "corporate", "business", "spoke", "leaf", "hub", "texas",
     "amortization", "10", "year", "hardship", "grad", "plus", "sec", "projection", "projections",
     "crew", "cab", "truck", "fleet", "van", "cargo", "electric", "4wd", "work", "suv",
+    "schedule", "schedules",
 }
 
 
@@ -400,8 +401,8 @@ def _titles_match(title_a: str, title_b: str) -> bool:
     b_raw = html.unescape(str(title_b))
     a_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", a_raw, flags=re.IGNORECASE).strip()
     b_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", b_raw, flags=re.IGNORECASE).strip()
-    a_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|\d{4})\)", "", a_clean, flags=re.IGNORECASE).strip()
-    b_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|\d{4})\)", "", b_clean, flags=re.IGNORECASE).strip()
+    a_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|0%\s+State(?:\s+Income)?\s+Tax|\d{4})\)", "", a_clean, flags=re.IGNORECASE).strip()
+    b_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|0%\s+State(?:\s+Income)?\s+Tax|\d{4})\)", "", b_clean, flags=re.IGNORECASE).strip()
     if a_clean.lower() == b_clean.lower():
         return True
     a_no_yr = re.sub(r"\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$", "", a_clean, flags=re.IGNORECASE).strip()
@@ -2445,12 +2446,16 @@ __all__ = [
     "evaluate_x_like_2108272246804648049_capability_matrix",
     "X_LIKE_2098466289282842729_CAPABILITY_MATRIX",
     "evaluate_x_like_2098466289282842729_capability_matrix",
+    "X_LIKE_2109835011772035193_CAPABILITY_MATRIX",
+    "evaluate_x_like_2109835011772035193_capability_matrix",
+    "score_estate_jev_seo_rubric",
 ]
 
 
 
 from pseofactory.verifier import (
     X_LIKE_2098466289282842729_CAPABILITY_MATRIX,
+    X_LIKE_2109835011772035193_CAPABILITY_MATRIX,
     X_LIKE_2102328294410461564_CAPABILITY_MATRIX,
     X_LIKE_2102358751290236980_CAPABILITY_MATRIX,
     X_LIKE_2107194110046060952_CAPABILITY_MATRIX,
@@ -2462,6 +2467,8 @@ from pseofactory.verifier import (
     audit_estate_technical_seo_and_cannibalization,
     audit_free_tool_seo_and_instant_ux_readiness,
     evaluate_x_like_2098466289282842729_capability_matrix,
+    evaluate_x_like_2109835011772035193_capability_matrix,
+    score_estate_jev_seo_rubric,
     evaluate_x_like_2102328294410461564_capability_matrix,
     evaluate_x_like_2102358751290236980_capability_matrix,
     evaluate_x_like_2107194110046060952_capability_matrix,

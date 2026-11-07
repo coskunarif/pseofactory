@@ -2872,7 +2872,11 @@ class AutonomousLifecycleSupervisor:
             not dry_run
             and "PYTEST_CURRENT_TEST" not in os.environ
             and "pytest" not in sys.modules
-            and os.environ.get("PSEUFACTORY_ENABLE_AUTONOMOUS_DAILY_BUILD", "1") == "1"
+            and os.environ.get(
+                "PSEOFACTORY_ENABLE_AUTONOMOUS_DAILY_BUILD",
+                os.environ.get("PSEUFACTORY_ENABLE_AUTONOMOUS_DAILY_BUILD", "1"),
+            )
+            == "1"
         ):
             try:
                 from pseofactory.pipeline import execute_autonomous_daily_trend_page_build

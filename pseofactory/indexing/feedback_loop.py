@@ -693,7 +693,7 @@ class GSCRootCauseClassifier:
         cache_key = hashlib.sha256(f"{url}|{cov_low}|{err_low}|{stage_up}".encode("utf-8")).hexdigest()[:24]
         cache_path = Path("/home/ubuntuadmin/projects/.agy/jev_quarantine_triage_cache.json")
         cached_entry: Optional[Dict[str, Any]] = None
-        if cache_path.is_file():
+        if cache_path.is_file() and not bool(data.get("force_jev_in_test", False)):
             try:
                 raw_cache = json.loads(cache_path.read_text(encoding="utf-8"))
                 if isinstance(raw_cache, dict) and isinstance(raw_cache.get(cache_key), dict):
@@ -716,20 +716,17 @@ class GSCRootCauseClassifier:
                     break
             triage_source = "jev_semantic_cache"
             triage_rationale = str(cached_entry.get("rationale") or triage_rationale)
-        elif "PYTEST_CURRENT_TEST" not in os.environ and bool(data.get("invoke_jev_live", False)):
+        elif bool(data.get("invoke_jev_live", False)) and (
+            "PYTEST_CURRENT_TEST" not in os.environ or bool(data.get("force_jev_in_test", False))
+        ):
             try:
-                import sys as _sys
-                if "/home/ubuntuadmin/projects/vault" not in _sys.path:
-                    _sys.path.append("/home/ubuntuadmin/projects/vault")
-                import vault_jev  # type: ignore
-                prompt = (
-                    f"Classify this SEO indexing quarantine record into exactly one category "
-                    f"(CONTENT_QUALITY_OR_ANSWER_DEFICIENCY, CONTENT_DEPTH_DEFICIT, CANONICAL_TEMPLATE_DEFECT, "
-                    f"DEAD_ROUTE_IN_SITEMAP, or CRAWL_BUDGET_SIGNAL_LAG). "
-                    f"URL: {url}, coverage_state: '{eff_cov}', error: '{eff_err}', stage: '{stage_up}'. "
-                    f"Return JSON with keys 'classification' and 'rationale'."
+                from pseofactory.jev_client import get_jev_client
+                jev_resp = get_jev_client().classify_quarantine_record(
+                    url=str(url),
+                    coverage_state=str(eff_cov),
+                    error=str(eff_err),
+                    stage=str(stage_up),
                 )
-                jev_resp = vault_jev.call_system_one(prompt, json_mode=True)
                 if isinstance(jev_resp, dict) and jev_resp.get("classification"):
                     cls_str = str(jev_resp["classification"]).strip()
                     for member in RootCauseClassification:
@@ -743,23 +740,24 @@ class GSCRootCauseClassifier:
                         .replace(" - ", ": ")
                     )
                     triage_source = "jev_system_one"
-                    try:
-                        cache_path.parent.mkdir(parents=True, exist_ok=True)
-                        curr_cache = (
-                            json.loads(cache_path.read_text(encoding="utf-8"))
-                            if cache_path.is_file()
-                            else {}
-                        )
-                        if not isinstance(curr_cache, dict):
-                            curr_cache = {}
-                        curr_cache[cache_key] = {
-                            "url": url,
-                            "classification": triage_classification.value,
-                            "rationale": triage_rationale,
-                        }
-                        cache_path.write_text(json.dumps(curr_cache, indent=2), encoding="utf-8")
-                    except Exception:
-                        pass
+                    if "PYTEST_CURRENT_TEST" not in os.environ:
+                        try:
+                            cache_path.parent.mkdir(parents=True, exist_ok=True)
+                            curr_cache = (
+                                json.loads(cache_path.read_text(encoding="utf-8"))
+                                if cache_path.is_file()
+                                else {}
+                            )
+                            if not isinstance(curr_cache, dict):
+                                curr_cache = {}
+                            curr_cache[cache_key] = {
+                                "url": url,
+                                "classification": triage_classification.value,
+                                "rationale": triage_rationale,
+                            }
+                            cache_path.write_text(json.dumps(curr_cache, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

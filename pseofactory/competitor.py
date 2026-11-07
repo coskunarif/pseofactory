@@ -766,6 +766,54 @@ class CompetitorGapEngine:
                     "sample_calculation",
                     "Gross payout 10,000 minus contract cost 6,200 yields 3,800 net settlement gain",
                 )
+            elif any(t in combined for t in ("qsbs", "1202")):
+                spec.setdefault(
+                    "statutory_authority",
+                    "IRC Section 1202(a)(4) & Section 1202(b)(1) Qualified Small Business Stock Exclusion",
+                )
+                spec.setdefault("economic_dataset", "FRED CPILFESL Series")
+                spec.setdefault("category", "Tax Intelligence")
+                spec.setdefault("affiliates", ["crest_capital", "mercury"])
+                spec.setdefault("model_name", "QSBSSection1202StateConformityModel")
+                spec.setdefault("formula", "round(min(qualified_gain, max(10000000.0, cost_basis * 10.0)) * 0.238, 2)")
+                spec.setdefault("inputs", {"qualified_gain": 8000000, "cost_basis": 500000})
+                spec.setdefault("published_output", 1904000.0)
+                spec.setdefault(
+                    "sample_calculation",
+                    "Qualified gain 8,000,000 on 500,000 basis under 10,000,000 cap at 23.8 percent yields 1,904,000.0 tax shield",
+                )
+            elif any(t in combined for t in ("199a", "qbi")):
+                spec.setdefault(
+                    "statutory_authority",
+                    "IRC Section 199A(b)(2) Qualified Business Income Deduction & W-2 Wage Limit",
+                )
+                spec.setdefault("economic_dataset", "FRED CPILFESL Series")
+                spec.setdefault("category", "Tax Intelligence")
+                spec.setdefault("affiliates", ["crest_capital", "mercury"])
+                spec.setdefault("model_name", "Section199AQBIWageLimitModel")
+                spec.setdefault("formula", "round(min(qbi_income * 0.20, w2_wages * 0.50) * marginal_rate, 2)")
+                spec.setdefault("inputs", {"qbi_income": 600000, "w2_wages": 200000, "marginal_rate": 0.37})
+                spec.setdefault("published_output", 37000.0)
+                spec.setdefault(
+                    "sample_calculation",
+                    "QBI 600,000 capped by 50 percent of 200,000 W-2 wages (100,000 deduction) at 37 percent yields 37,000.0 tax savings",
+                )
+            elif any(t in combined for t in ("camt", "corporate-amt", "corporate amt", "book-income", "book income")):
+                spec.setdefault(
+                    "statutory_authority",
+                    "IRC Section 55(b)(2) & Section 56A Corporate Alternative Minimum Tax",
+                )
+                spec.setdefault("economic_dataset", "FRED CPILFESL Series")
+                spec.setdefault("category", "Commercial Tax Intelligence")
+                spec.setdefault("affiliates", ["crest_capital", "mercury"])
+                spec.setdefault("model_name", "CorporateAMTCAMTBookIncomeModel")
+                spec.setdefault("formula", "round(max(0.0, (afsi_book_income * 0.15) - regular_corporate_tax), 2)")
+                spec.setdefault("inputs", {"afsi_book_income": 1200000000, "regular_corporate_tax": 145000000})
+                spec.setdefault("published_output", 35000000.0)
+                spec.setdefault(
+                    "sample_calculation",
+                    "AFSI 1,200,000,000 at 15 percent tentative CAMT minus 145,000,000 regular tax yields 35,000,000.0 net CAMT liability",
+                )
             elif any(t in combined for t in ("bracket", "tcja", "capital-gains", "capital gains", "standard deduction")):
                 spec.setdefault("statutory_authority", "IRC Section 1(j) & Rev. Proc. 2025-32")
                 spec.setdefault("economic_dataset", "FRED CPILFESL Series")

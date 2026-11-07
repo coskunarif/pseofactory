@@ -1613,7 +1613,7 @@ _SINGLE_FACT_ZERO_CLICK_RE = re.compile(
 
 
 def evaluate_query_expected_value_gate(
-    query: str,
+    query: Union[str, Dict[str, Any]],
     query_data: Optional[Dict[str, Any]] = None,
     min_ev_score: float = 0.65,
 ) -> Dict[str, Any]:
@@ -1627,9 +1627,15 @@ def evaluate_query_expected_value_gate(
     """
     import hashlib
 
-    q_clean = str(query or "").strip()
+    if isinstance(query, dict):
+        data = dict(query)
+        if isinstance(query_data, dict):
+            data.update(query_data)
+        q_clean = str(data.get("query") or "").strip()
+    else:
+        q_clean = str(query or "").strip()
+        data = query_data if isinstance(query_data, dict) else {}
     q_low = q_clean.lower()
-    data = query_data if isinstance(query_data, dict) else {}
 
     if "expected_value_score" in data and data["expected_value_score"] is not None:
         explicit_ev = round(float(data["expected_value_score"]), 4)
@@ -1689,43 +1695,43 @@ def evaluate_query_expected_value_gate(
 
     cache_key = hashlib.sha256(q_low.encode("utf-8")).hexdigest()[:24]
     cache_path = Path("/home/ubuntuadmin/projects/.agy/jev_intent_ev_cache.json")
-    if cache_path.is_file():
+    cache_hit = False
+    if cache_path.is_file() and not bool(data.get("force_jev_in_test", False)):
         try:
             raw_c = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(raw_c, dict) and isinstance(raw_c.get(cache_key), dict):
                 ev_score = round(float(raw_c[cache_key].get("expected_value_score", ev_score)), 4)
                 is_single_fact = bool(raw_c[cache_key].get("is_zero_click_single_fact", is_single_fact))
                 triage_source = "jev_ev_cache"
+                cache_hit = True
         except Exception:
             pass
-    elif "PYTEST_CURRENT_TEST" not in os.environ and bool(data.get("invoke_jev_live", False)):
+    if (
+        not cache_hit
+        and bool(data.get("invoke_jev_live", False))
+        and ("PYTEST_CURRENT_TEST" not in os.environ or bool(data.get("force_jev_in_test", False)))
+    ):
         try:
-            import sys as _sys
-            if "/home/ubuntuadmin/projects/vault" not in _sys.path:
-                _sys.path.append("/home/ubuntuadmin/projects/vault")
-            import vault_jev  # type: ignore
-            prompt = (
-                f"Evaluate search query '{q_clean}' for interactive financial/statutory calculator utility. "
-                f"Return JSON with keys 'expected_value_score' (float 0.0 to 1.0) and 'is_zero_click_single_fact' (bool)."
-            )
-            jev_res = vault_jev.call_system_one(prompt, json_mode=True)
+            from pseofactory.jev_client import get_jev_client
+            jev_res = get_jev_client().evaluate_query_calculator_ev(q_clean)
             if isinstance(jev_res, dict) and "expected_value_score" in jev_res:
                 ev_score = round(float(jev_res["expected_value_score"]), 4)
                 is_single_fact = bool(jev_res.get("is_zero_click_single_fact", ev_score < min_ev_score))
                 triage_source = "jev_system_one"
-                try:
-                    cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    curr_c = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
-                    if not isinstance(curr_c, dict):
-                        curr_c = {}
-                    curr_c[cache_key] = {
-                        "query": q_clean,
-                        "expected_value_score": ev_score,
-                        "is_zero_click_single_fact": is_single_fact,
-                    }
-                    cache_path.write_text(json.dumps(curr_c, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
+                if "PYTEST_CURRENT_TEST" not in os.environ:
+                    try:
+                        cache_path.parent.mkdir(parents=True, exist_ok=True)
+                        curr_c = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
+                        if not isinstance(curr_c, dict):
+                            curr_c = {}
+                        curr_c[cache_key] = {
+                            "query": q_clean,
+                            "expected_value_score": ev_score,
+                            "is_zero_click_single_fact": is_single_fact,
+                        }
+                        cache_path.write_text(json.dumps(curr_c, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -1747,6 +1753,9 @@ def evaluate_query_expected_value_gate(
             else f"Zero-click single-fact query '{q_clean}' (EV={ev_score:.2f} < {min_ev_score:.2f}) folded into parent hub FAQ to prevent zero-click URL bloat"
         ),
     }
+
+
+evaluate_intent_expected_value = evaluate_query_expected_value_gate
 
 
 def qualify_search_intent(

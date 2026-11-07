@@ -1154,6 +1154,13 @@ __all__ = [
     "verify_department_handoff_chain",
     "DAILY_PAGE_BUILD_LEDGER_PATH",
     "execute_autonomous_daily_trend_page_build",
+    "X_LIKE_2109835011772035193_CAPABILITY_MATRIX",
+    "evaluate_x_like_2109835011772035193_capability_matrix",
+    "score_estate_jev_seo_rubric",
+    "JevClient",
+    "get_jev_client",
+    "evaluate_page_prepublish_gate",
+    "shortlist_cannibalization_pairs",
 ]
 
 from pseofactory.contracts import assert_sitemap_index_parses
@@ -1193,5 +1200,14 @@ from pseofactory.trends.filters import classify_longitudinal_trajectory
 from pseofactory.verifier import (
     X_LIKE_2098466289282842729_CAPABILITY_MATRIX,
     evaluate_x_like_2098466289282842729_capability_matrix,
+    X_LIKE_2109835011772035193_CAPABILITY_MATRIX,
+    evaluate_x_like_2109835011772035193_capability_matrix,
+    score_estate_jev_seo_rubric,
+)
+from pseofactory.jev_client import (
+    JevClient,
+    get_jev_client,
+    evaluate_page_prepublish_gate,
+    shortlist_cannibalization_pairs,
 )
 

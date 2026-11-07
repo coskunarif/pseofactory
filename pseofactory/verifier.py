@@ -7159,10 +7159,25 @@ def audit_estate_technical_seo_and_cannibalization(
     to x-like:2109219955271196726 without browser extension bloat.
     Zero em-dashes. Zero en-dashes.
     """
-    from collections import defaultdict
+    from collections import defaultdict, deque
     from pseofactory.affiliates import GAINHELM_AFFILIATES, PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
     from pseofactory.maintenance import CrossPropertyContaminationScanner
     from pseofactory.tenant_facts import TenantFactStore
+
+    generic_anchor_set = {
+        "click here",
+        "here",
+        "read more",
+        "learn more",
+        "more",
+        "this",
+        "link",
+        "go",
+        "details",
+        "continue",
+        "see more",
+        "view more",
+    }
 
     prop, domain, d_path = _resolve_tenant_dist_and_domain(property_id, dist_dir)
     if not d_path.is_dir():
@@ -7201,6 +7216,7 @@ def audit_estate_technical_seo_and_cannibalization(
     metas_map: Dict[str, List[str]] = defaultdict(list)
     canonicals_map: Dict[str, List[str]] = defaultdict(list)
     inbound_links: Dict[str, Set[str]] = defaultdict(set)
+    outbound_adj: Dict[str, Set[str]] = defaultdict(set)
     indexable_routes: Set[str] = set()
 
     onpage_issues: List[str] = []
@@ -7210,13 +7226,23 @@ def audit_estate_technical_seo_and_cannibalization(
     unqualified_commercial_links: List[Tuple[str, str]] = []
     invalid_partner_links: List[Tuple[str, str]] = []
     cross_tenant_leaks: List[str] = []
+    generic_anchors: List[Tuple[str, str, str]] = []
+    missing_image_alt: List[Tuple[str, str]] = []
+    missing_image_dimensions: List[Tuple[str, str]] = []
+    heavy_html_pages: List[Tuple[str, int]] = []
+    missing_html_lang: List[str] = []
+    missing_viewport_meta: List[str] = []
+    multiple_titles: List[Tuple[str, int]] = []
 
     for f in html_files:
         rel = f.relative_to(d_path).as_posix()
-        if rel == "404.html":
+        if rel == "404.html" or f.name.startswith("."):
             continue
         route = "/" if rel == "index.html" else (f"/{rel[:-10]}" if rel.endswith("/index.html") else f"/{rel}")
         content = f.read_text(encoding="utf-8", errors="ignore")
+        byte_len = len(content.encode("utf-8"))
+        if byte_len > 500_000:
+            heavy_html_pages.append((rel, byte_len))
         is_noindex = bool(re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', content, re.I))
 
         leaks = scanner.scan_text(content, prop, context=rel)
@@ -7232,18 +7258,26 @@ def audit_estate_technical_seo_and_cannibalization(
             if not ok_claim:
                 cross_tenant_leaks.extend(f"{rel}: {v}" for v in f_viol)
 
+        no_script = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", content, flags=re.I | re.S)
+
         if not is_noindex:
             indexable_routes.add(route)
-            t_m = re.search(r"<title[^>]*>(.*?)</title>", content, re.I | re.S)
-            if t_m:
-                t_txt = html.unescape(t_m.group(1)).strip()
+            if not re.search(r"<html\b[^>]*\blang=['\"][a-zA-Z-]+['\"]", content, re.I):
+                missing_html_lang.append(rel)
+            if not re.search(r'<meta\b[^>]*name=["\']viewport["\']', content, re.I):
+                missing_viewport_meta.append(rel)
+
+            title_tags = re.findall(r"<title\b[^>]*>(.*?)</title>", no_script, flags=re.I | re.S)
+            if len(title_tags) > 1:
+                multiple_titles.append((rel, len(title_tags)))
+            if title_tags:
+                t_txt = html.unescape(title_tags[0]).strip()
                 titles_map[t_txt].append(rel)
                 if len(t_txt) < ORGANIC_SEARCH_TITLE_MIN_CHARS or len(t_txt) > ORGANIC_SEARCH_TITLE_MAX_CHARS:
                     onpage_issues.append(f"{rel}: title length {len(t_txt)} outside [{ORGANIC_SEARCH_TITLE_MIN_CHARS}, {ORGANIC_SEARCH_TITLE_MAX_CHARS}]")
             else:
                 onpage_issues.append(f"{rel}: missing <title>")
 
-            no_script = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", content, flags=re.I | re.S)
             h1_list = re.findall(r"<h1\b[^>]*>(.*?)</h1>", no_script, flags=re.I | re.S)
             if len(h1_list) != 1:
                 onpage_issues.append(f"{rel}: expected 1 <h1>, found {len(h1_list)}")
@@ -7256,6 +7290,15 @@ def audit_estate_technical_seo_and_cannibalization(
                 if h_levels[idx] > h_levels[idx - 1] + 1:
                     onpage_issues.append(f"{rel}: skipped heading level h{h_levels[idx - 1]}->h{h_levels[idx]}")
                     break
+
+            for img_m in re.finditer(r"<img\b([^>]*)>", no_script, re.I):
+                img_attrs = img_m.group(1)
+                src_m = re.search(r'\bsrc=["\']([^"\']*)["\']', img_attrs, re.I)
+                img_src = src_m.group(1) if src_m else "<img>"
+                if not re.search(r"\balt\s*=", img_attrs, re.I):
+                    missing_image_alt.append((rel, img_src))
+                if not (re.search(r"\bwidth\s*=", img_attrs, re.I) and re.search(r"\bheight\s*=", img_attrs, re.I)):
+                    missing_image_dimensions.append((rel, img_src))
 
             m_m = re.search(r'<meta\b[^>]*name=["\']description["\'][^>]*content=(["\'])(.*?)\1', content, re.I | re.S)
             if not m_m:
@@ -7283,8 +7326,8 @@ def audit_estate_technical_seo_and_cannibalization(
             if 'name="twitter:card"' not in content and "name='twitter:card'" not in content:
                 onpage_issues.append(f"{rel}: missing twitter:card")
 
-        for tag_m in re.finditer(r'<a\b([^>]*href=["\']([^"\']+)["\'][^>]*)>', content, re.I):
-            attrs, href = tag_m.group(1), tag_m.group(2).strip()
+        for tag_m in re.finditer(r'<a\b([^>]*href=["\']([^"\']+)["\'][^>]*)>(.*?)</a>', no_script, re.I | re.S):
+            attrs, href, inner_html = tag_m.group(1), tag_m.group(2).strip(), tag_m.group(3)
             if not href or href.startswith(("mailto:", "tel:", "javascript:")):
                 continue
             if href.startswith("#"):
@@ -7301,6 +7344,9 @@ def audit_estate_technical_seo_and_cannibalization(
                     unqualified_commercial_links.append((rel, href))
                 continue
             if href.startswith("/") or href.startswith(domain):
+                anchor_clean = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", inner_html)).strip().lower().split())
+                if anchor_clean in generic_anchor_set:
+                    generic_anchors.append((rel, href, anchor_clean))
                 p_part = href[len(domain) :] if href.startswith(domain) else href
                 if not p_part.startswith("/"):
                     p_part = "/" + p_part
@@ -7317,8 +7363,25 @@ def audit_estate_technical_seo_and_cannibalization(
                     norm_t = p_clean if p_clean.endswith("/") or "." in p_clean.split("/")[-1] else p_clean + "/"
                     if norm_t != route:
                         inbound_links[norm_t].add(route)
+                        outbound_adj[route].add(norm_t)
                     if frag and norm_t in route_ids and frag not in route_ids[norm_t]:
                         broken_fragment_anchors.append((rel, href))
+
+    # BFS click depth from homepage "/"
+    click_depth: Dict[str, int] = {"/": 0}
+    bfs_q: deque[str] = deque(["/"])
+    while bfs_q:
+        curr_r = bfs_q.popleft()
+        for nxt_r in sorted(outbound_adj.get(curr_r, set())):
+            if nxt_r not in click_depth:
+                click_depth[nxt_r] = click_depth[curr_r] + 1
+                bfs_q.append(nxt_r)
+
+    deep_pages = [
+        (r, click_depth[r])
+        for r in sorted(indexable_routes)
+        if r in click_depth and 3 < click_depth[r] < 99
+    ]
 
     dup_titles = {k: v for k, v in titles_map.items() if len(v) > 1}
     dup_h1s = {k: v for k, v in h1s_map.items() if len(v) > 1}
@@ -7347,6 +7410,22 @@ def audit_estate_technical_seo_and_cannibalization(
         issues.append(f"{rel}: unknown partner key '{pk}' for tenant '{prop}'")
     for r in orphan_routes:
         issues.append(f"Orphan indexable route with 0 inbound links: '{r}'")
+    for r, depth_val in deep_pages:
+        issues.append(f"Deep indexable route > 3 clicks from homepage ({depth_val} clicks): '{r}'")
+    for rel, href, anc in generic_anchors:
+        issues.append(f"{rel}: generic internal anchor '{anc}' on '{href}'")
+    for rel, img_src in missing_image_alt:
+        issues.append(f"{rel}: image '{img_src}' missing alt attribute")
+    for rel, img_src in missing_image_dimensions:
+        issues.append(f"{rel}: image '{img_src}' missing explicit width and height attributes")
+    for rel, b_len in heavy_html_pages:
+        issues.append(f"{rel}: heavy HTML document ({b_len} bytes > 500,000 bytes)")
+    for rel in missing_html_lang:
+        issues.append(f"{rel}: missing lang attribute on <html> element")
+    for rel in missing_viewport_meta:
+        issues.append(f"{rel}: missing mobile viewport meta tag")
+    for rel, cnt in multiple_titles:
+        issues.append(f"{rel}: multiple <title> tags found ({cnt})")
     for src, mid, dst in red_info["redirect_chains"]:
         issues.append(f"Redirect chain detected: {src} -> {mid} -> {dst}")
     for src in red_info["redirect_loops"]:
@@ -7377,6 +7456,14 @@ def audit_estate_technical_seo_and_cannibalization(
         "unqualified_commercial_links_count": len(unqualified_commercial_links),
         "invalid_partner_links_count": len(invalid_partner_links),
         "orphan_routes_count": len(orphan_routes),
+        "deep_pages_count": len(deep_pages),
+        "generic_anchors_count": len(generic_anchors),
+        "missing_image_alt_count": len(missing_image_alt),
+        "missing_image_dimensions_count": len(missing_image_dimensions),
+        "heavy_html_pages_count": len(heavy_html_pages),
+        "missing_html_lang_count": len(missing_html_lang),
+        "missing_viewport_meta_count": len(missing_viewport_meta),
+        "multiple_titles_count": len(multiple_titles),
         "redirect_chains_count": len(red_info["redirect_chains"]),
         "links_to_redirects_count": len(links_to_redirects),
         "cross_tenant_leaks_count": len(cross_tenant_leaks),
@@ -9413,6 +9500,221 @@ def evaluate_x_like_2098466289282842729_capability_matrix(
         },
         "matrix": list(X_LIKE_2098466289282842729_CAPABILITY_MATRIX),
         "tenant_routing_reports": tenant_routing_reports,
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+    }
+
+
+X_LIKE_2109835011772035193_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
+    {
+        "capability_id": "jev_seo_52_deterministic_search_central_rules",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/checks.py",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/verifier.py::audit_estate_technical_seo_and_cannibalization",
+        "case_for": "Enforces all 52 Google Search Central rules (robots.txt, XML sitemaps, dead links, redirect chains, canonicals, JSON-LD, generic anchors, BFS click depth <= 3, image alt and width/height CLS dimensions, HTML weight <= 500KB, lang/viewport/single-title) directly on compiled dist/ before deployment.",
+    },
+    {
+        "capability_id": "jev_system_one_batched_page_primitives",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/jev.py",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/jev_client.py::build_jev_page_questions + JevClient.evaluate",
+        "case_for": "Unifies TypeSafe System One (jev-latest) Choice, Score, and Noul primitives inside pseofactory, batching independent page questions over one state and pruning questions code can verify mechanically.",
+    },
+    {
+        "capability_id": "side_of_threshold_score_decisiveness",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/jev.py::normalize_jev_answer",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/jev_client.py::normalize_jev_answer",
+        "case_for": "Sums probability mass on the same side of the 0.50 midpoint (side_probability >= 0.80 -> 'act', else 'review'), preventing noisy 50/50 model splits from triggering autonomous rewrites.",
+    },
+    {
+        "capability_id": "opening_after_h1_answer_first_extraction",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/jev.py::opening",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/jev_client.py::extract_opening_after_h1",
+        "case_for": "Slices the first 500 characters immediately after <h1> so breadcrumbs and navigation chrome are never misclassified as the page opening.",
+    },
+    {
+        "capability_id": "pair_jaccard_substitution_cannibalization_gate",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/jev.py::overlap_candidates",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/jev_client.py::shortlist_cannibalization_pairs + evaluate_page_prepublish_gate",
+        "case_for": "Shortlists page pairs with title+H1 word Jaccard >= 0.40 (excluding intentional hub-spoke state/vehicle pairs) and screens for searcher substitution before P2 persists any new page.",
+    },
+    {
+        "capability_id": "substantive_600_word_merge_protection_guardrail",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/score.py::jev_findings",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/jev_client.py::evaluate_page_prepublish_gate",
+        "case_for": "Blocks merge_or_remove model verdicts on pages with >= 600 words so a model judgment alone can never delete a substantive calculator or statutory guide.",
+    },
+    {
+        "capability_id": "impact_reach_importance_area_scoring_rubric",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/score.py",
+        "disposition": "INTEGRATED_DETERMINISTIC_GATE",
+        "pseofactory_stage": "pseofactory/verifier.py::score_estate_jev_seo_rubric",
+        "case_for": "Computes transparent category scores (crawl 20, onpage 15, content 20, links 10, structured 8, ai 12, performance 10, security 5) and prioritizes fixes by severity * reach * page importance.",
+    },
+    {
+        "capability_id": "hard_api_budget_cap_and_cost_ledger",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/jev.py::Jev",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "pseofactory/jev_client.py::JevClient",
+        "case_for": "Enforces a hard per-run USD budget cap ($0.25 default at $0.042/Mtok) checked before every request with fail-open circuit breaker protection.",
+    },
+    {
+        "capability_id": "llms_txt_and_ai_crawler_robots_governance",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/checks.py",
+        "disposition": "ALREADY_SOLVED_IN_SUBSTRATE",
+        "pseofactory_stage": "pseofactory/verifier.py::audit_aeo_geo_three_plane_readiness",
+        "case_for": "Already enforced at compile time via dist/llms.txt, dist/llms-full.txt, and explicit AI crawler allowlists in dist/robots.txt across all 3 tenants.",
+    },
+    {
+        "capability_id": "weasyprint_client_pdf_and_excel_workbook_exports",
+        "source_module": "AgriciDaniel/jev-seo::jevseo/report/",
+        "disposition": "REJECTED_BLOAT_OR_OFF_VERTICAL",
+        "pseofactory_stage": "N/A (autonomous self-healing compiler)",
+        "case_for": "Rejected: PDF client pitch decks and manual Excel action trackers are agency consulting artifacts; pseofactory remediates findings directly in code via RetroReflectionEngine.",
+    },
+]
+
+
+def score_estate_jev_seo_rubric(
+    dist_dir: Optional[Union[str, Path]] = None,
+    property_id: str = "profithelm",
+) -> Dict[str, Any]:
+    """
+    Computes jev-seo's transparent 8-area rubric score (crawl 20, onpage 15, content 20,
+    links 10, structured 8, ai 12, performance 10, security 5) and Impact * Reach * Importance
+    action list over a compiled tenant distribution.
+    Zero em-dashes. Zero en-dashes.
+    """
+    tech_rep = audit_estate_technical_seo_and_cannibalization(dist_dir=dist_dir, property_id=property_id)
+    n_pages = max(1, int(tech_rep.get("indexable_routes_count", 1) or 1))
+
+    deduct_map = {"critical": 25.0, "high": 12.0, "medium": 6.0, "low": 2.0, "info": 0.0}
+    sev_weight = {"critical": 10.0, "high": 6.0, "medium": 3.0, "low": 1.0, "info": 0.0}
+    cat_weights = {
+        "crawl": 20,
+        "onpage": 15,
+        "content": 20,
+        "links": 10,
+        "structured": 8,
+        "ai": 12,
+        "performance": 10,
+        "security": 5,
+    }
+
+    rule_specs = [
+        ("broken_internal_links", "links", "high", int(tech_rep.get("broken_internal_links_count", 0))),
+        ("links_to_redirects", "links", "low", int(tech_rep.get("links_to_redirects_count", 0))),
+        ("orphan_pages", "links", "medium", int(tech_rep.get("orphan_routes_count", 0))),
+        ("deep_pages", "links", "low", int(tech_rep.get("deep_pages_count", 0))),
+        ("generic_anchors", "links", "low", int(tech_rep.get("generic_anchors_count", 0))),
+        ("redirect_chains", "crawl", "medium", int(tech_rep.get("redirect_chains_count", 0))),
+        ("title_duplicate", "onpage", "medium", int(tech_rep.get("duplicate_titles_count", 0))),
+        ("meta_duplicate", "onpage", "low", int(tech_rep.get("duplicate_metas_count", 0))),
+        ("h1_duplicate", "onpage", "low", int(tech_rep.get("duplicate_h1s_count", 0))),
+        ("multiple_titles", "onpage", "low", int(tech_rep.get("multiple_titles_count", 0))),
+        ("lang_missing", "onpage", "low", int(tech_rep.get("missing_html_lang_count", 0))),
+        ("viewport_missing", "onpage", "high", int(tech_rep.get("missing_viewport_meta_count", 0))),
+        ("images_alt", "onpage", "medium", int(tech_rep.get("missing_image_alt_count", 0))),
+        ("images_dimensions", "performance", "low", int(tech_rep.get("missing_image_dimensions_count", 0))),
+        ("heavy_html", "performance", "low", int(tech_rep.get("heavy_html_pages_count", 0))),
+        ("cross_tenant_leaks", "content", "critical", int(tech_rep.get("cross_tenant_leaks_count", 0))),
+    ]
+
+    area_deductions: Dict[str, float] = {k: 0.0 for k in cat_weights}
+    actions: List[Dict[str, Any]] = []
+
+    for r_id, cat, sev, cnt in rule_specs:
+        if cnt <= 0:
+            continue
+        r_reach = min(1.0, cnt / n_pages)
+        area_deductions[cat] += deduct_map[sev] * (0.5 + 0.5 * r_reach)
+        raw_impact = sev_weight[sev] * (0.6 + 0.4 * r_reach) * (0.6 + 0.8 * 1.0)
+        actions.append(
+            {
+                "id": r_id,
+                "category": cat,
+                "severity": sev,
+                "count": cnt,
+                "reach": round(r_reach, 4),
+                "raw_impact": round(raw_impact, 4),
+            }
+        )
+
+    area_scores = {
+        cat: round(max(0.0, 100.0 - ded), 2) for cat, ded in area_deductions.items()
+    }
+    total_w = sum(cat_weights.values())
+    overall_score = round(
+        sum(area_scores[cat] * w for cat, w in cat_weights.items()) / total_w, 2
+    )
+
+    return {
+        "property_id": tech_rep["property_id"],
+        "domain": tech_rep["domain"],
+        "overall_score": overall_score,
+        "area_scores": area_scores,
+        "actions_count": len(actions),
+        "actions": actions,
+        "status": "PASS" if (tech_rep["passed"] and overall_score >= 95.0) else "FAIL",
+        "passed": bool(tech_rep["passed"] and overall_score >= 95.0),
+    }
+
+
+def evaluate_x_like_2109835011772035193_capability_matrix(
+    include_live_estate_audit: bool = True,
+) -> Dict[str, Any]:
+    """
+    Evaluates the jev-seo architecture from x-like:2109835011772035193 (@haoge6699,
+    AgriciDaniel/jev-seo) against pseofactory engine stages and runs deterministic 52-rule
+    + Jev rubric verification across ProfitHelm, Prexvo, and GainHelm.
+    Zero em-dashes. Zero en-dashes.
+    """
+    integrated = [
+        m for m in X_LIKE_2109835011772035193_CAPABILITY_MATRIX
+        if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"
+    ]
+    already_solved = [
+        m for m in X_LIKE_2109835011772035193_CAPABILITY_MATRIX
+        if m["disposition"] == "ALREADY_SOLVED_IN_SUBSTRATE"
+    ]
+    rejected = [
+        m for m in X_LIKE_2109835011772035193_CAPABILITY_MATRIX
+        if m["disposition"] == "REJECTED_BLOAT_OR_OFF_VERTICAL"
+    ]
+
+    tenant_reports: Dict[str, Any] = {}
+    rubric_reports: Dict[str, Any] = {}
+    all_passed = True
+
+    if include_live_estate_audit:
+        for t_id in ("profithelm", "prexvo", "gainhelm"):
+            rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
+            if not rep.get("passed", False):
+                from pseofactory.maintenance import RetroReflectionEngine
+                RetroReflectionEngine.retrofit_estate(rep["dist_dir"], t_id)
+                rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
+            rub = score_estate_jev_seo_rubric(dist_dir=rep["dist_dir"], property_id=t_id)
+            tenant_reports[t_id] = rep
+            rubric_reports[t_id] = rub
+            if not rep.get("passed", False) or not rub.get("passed", False):
+                all_passed = False
+
+    return {
+        "pointer": "x-like:2109835011772035193",
+        "tweet_id": "2109835011772035193",
+        "author_handle": "haoge6699",
+        "repo_url": "https://github.com/AgriciDaniel/jev-seo",
+        "total_capabilities_evaluated": len(X_LIKE_2109835011772035193_CAPABILITY_MATRIX),
+        "integrated_deterministic_gates_count": len(integrated),
+        "already_solved_in_substrate_count": len(already_solved),
+        "rejected_bloat_or_off_vertical_count": len(rejected),
+        "matrix": list(X_LIKE_2109835011772035193_CAPABILITY_MATRIX),
+        "tenant_reports": tenant_reports,
+        "rubric_reports": rubric_reports,
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
     }

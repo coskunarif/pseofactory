@@ -1999,6 +1999,25 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         cluster_title = "Related Tax and Capital Optimization Tools"
 
     sibling_links = [(s_slug, s_title) for (s_slug, s_title) in cluster if s_slug != slug]
+    existing_tool_slugs_raw = candidate_spec.get("existing_tool_slugs")
+    if isinstance(existing_tool_slugs_raw, (list, set, tuple)) and existing_tool_slugs_raw:
+        live_tool_slugs = {str(s).strip() for s in existing_tool_slugs_raw if str(s).strip()}
+        legacy_slug_aliases = {
+            "qsbs-section-1202-calculator": "qsbs-calculator",
+            "tcja-sunset-bracket-calculator": "irs-2027-tax-brackets",
+            "student-loan-forgiveness-calculator": "student-loan-repayment-calculator",
+            "pslf-qualifying-payment-calculator": "student-loan-repayment-calculator",
+            "student-loan-interest-subsidy-calculator": "rap-vs-ibr-calculator",
+        }
+        resolved_siblings = []
+        seen_sibling_slugs = {slug}
+        for s_slug, s_title in sibling_links:
+            target_slug = s_slug if s_slug in live_tool_slugs else legacy_slug_aliases.get(s_slug, s_slug)
+            if target_slug in live_tool_slugs and target_slug not in seen_sibling_slugs:
+                seen_sibling_slugs.add(target_slug)
+                resolved_siblings.append((target_slug, s_title))
+        if resolved_siblings:
+            sibling_links = resolved_siblings
     if not sibling_links:
         sibling_links = cluster
 
