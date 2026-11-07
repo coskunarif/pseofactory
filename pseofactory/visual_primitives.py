@@ -4988,7 +4988,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         firm_ph = (
             "Vanguard Cyber Assurance CPA LLP"
             if prop_id == "gainhelm"
-            else ("Summit Refinance Advisory Group" if prop_id == "prexvo" else "Apex Tax &amp; Advisory LLP")
+            else ("Summit Student Loan Advisory Group" if prop_id == "prexvo" else "Apex Tax &amp; Advisory LLP")
         )
         partner_reg_html = (
             f'      <div id="partner-registration-drawer" class="partner-registration-drawer" '

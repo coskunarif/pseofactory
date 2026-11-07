@@ -940,7 +940,7 @@ def _render_compiler_monetization_and_guardrail_html(
         firm_placeholder = (
             "Vanguard Cyber Assurance CPA LLP"
             if is_gainhelm
-            else ("Summit Refinance Advisory Group" if is_prexvo else "Apex Tax & Advisory LLP")
+            else ("Summit Student Loan Advisory Group" if is_prexvo else "Apex Tax & Advisory LLP")
         )
         return (
             f'      <div id="partner-registration-drawer" class="partner-registration-drawer" '
