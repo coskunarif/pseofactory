@@ -292,7 +292,7 @@
         "eztaxreturn_com": {
           "advertiser_id": "6874782",
           "advertiser_name": "ezTaxReturn.com",
-          "status": "Active (Accepted 2026-10-19, Notification #848)",
+          "status": "Active (Accepted 2026-10-19, Notification #848 & Direct Confirmation Inbox #1074 from Allwyn Symon on 2026-11-06)",
           "commission_terms": "15.00% New Customer (Param 675960) / 5.00% Returning Customer (Param 675961) on federal and state filing fees",
           "cookie_duration_days": 90,
           "primary_tracking_url": "https://www.dpbolvw.net/click-101906407-15704796",
@@ -387,8 +387,8 @@
         "CORPORATE_SPEND": {
           "primary_partner": "ramp",
           "fallback_partner": "mercury",
-          "direct_url": "https://ramp.com/",
-          "status": "pending",
+          "direct_url": "https://join.ramp.com/c/7932737/3981015/51436",
+          "status": "live",
           "bounty": "$500"
         },
         "DIGITAL_ASSETS": {
@@ -564,7 +564,7 @@
           "bounty": "$40-$100",
           "firstpromoter_welcome_url": "https://koinly.io/?fpr=arif-4c0b88",
           "payout_method": "PayPal (arif.coskun@profithelm.com - verified and saved via HTTP 200 on app.koinly.io/affiliate)",
-          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token via=A4FABF09 verified active via /r/koinly -> https://koinly.io/?fpr=arif-4c0b88 + FirstPromoter welcome link https://koinly.io/?fpr=arif-4c0b88 received in Newsletter #1588 & Inbox #1007 on 2026-10-20; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
+          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token fpr=arif-4c0b88 verified active via /r/koinly -> https://koinly.io/?fpr=arif-4c0b88 + FirstPromoter welcome link received in Newsletter #1588 & Inbox #1007 on 2026-10-20; placement & 20% commission terms confirmed by Gorkem Bereket in Inbox #1045 & #1071 on 2026-11-02; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
         },
         "rippling": {
           "status": "live",
@@ -733,7 +733,7 @@
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + ezTaxReturn.com (#6874782) & FreeTaxUSA (#4526117 / #1722649) Approved (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; ezTaxReturn.com CJ Advertiser ID #6874782 approved via Notification #848 with tracking link https://www.dpbolvw.net/click-101906407-15704796 + FreeTaxUSA CJ Advertiser ID #4526117 approved on 2026-10-21 via Notification #851 with tracking link https://www.jdoqocy.com/click-101906407-12306188 wired at /r/freetaxusa; TaxSlayer CJ Advertiser ID #5273914 pending)",
+          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + ezTaxReturn.com (#6874782) & FreeTaxUSA (#4526117 / #1722649) Approved (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; ezTaxReturn.com CJ Advertiser ID #6874782 approved via Notification #848 & confirmed directly by Allwyn Symon [allwyn.symon@ezTaxReturn.com] in Inbox #1074 on 2026-11-06 with tracking link https://www.dpbolvw.net/click-101906407-15704796 + FreeTaxUSA CJ Advertiser ID #4526117 approved on 2026-10-21 via Notification #851 with tracking link https://www.jdoqocy.com/click-101906407-12306188 wired at /r/freetaxusa; TaxSlayer CJ Advertiser ID #5273914 pending)",
           "cj_advertiser_id": "5273914",
           "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
         },

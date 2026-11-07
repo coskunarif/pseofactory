@@ -875,6 +875,12 @@ class DepartmentHandoffChainVerifier:
 
             if pid not in coverage_by_prop:
                 t_errs.append(f"PartnerTrackingEngine missing monetization_coverage_by_property for '{pid}'")
+            else:
+                prop_cov = coverage_by_prop[pid]
+                if not prop_cov.get("production_monetization_ready", False) or float(prop_cov.get("production_monetization_score", 0.0)) < 100.0:
+                    t_errs.append(f"production monetization readiness below 100% for '{pid}': {prop_cov.get('production_monetization_score')}")
+                if int(prop_cov.get("sellable_assets_live_count", 0)) < 1:
+                    t_errs.append(f"missing live sellable Stripe Checkout SKU for '{pid}'")
 
             repo_path = Path(adapter.repo_path) if getattr(adapter, "repo_path", None) else adapter.dist_dir.parent
             redirect_fn = repo_path / "functions" / "r" / "[partner].js"
@@ -907,6 +913,9 @@ class DepartmentHandoffChainVerifier:
                 "edge_functions_verified": redirect_fn.is_file() and lead_fn.is_file(),
                 "callouts_audited": callout_by_tenant[pid]["callouts_audited"],
                 "callout_mismatches": mismatch_cnt,
+                "production_monetization_ready": bool((coverage_by_prop.get(pid) or {}).get("production_monetization_ready", True)),
+                "production_monetization_score": float((coverage_by_prop.get(pid) or {}).get("production_monetization_score", 100.0)),
+                "sellable_assets_live_count": int((coverage_by_prop.get(pid) or {}).get("sellable_assets_live_count", 0)),
                 "errors": t_errs,
             }
 
@@ -2900,6 +2909,9 @@ class AutonomousLifecycleSupervisor:
                     "all_prerequisites_met": bool(prereq.get("all_prerequisites_met", True)),
                     "stalled_applications_count": int(stalled.get("stalled_applications_count", 0)),
                     "uncovered_commercial_clusters_count": int(gaps.get("uncovered_commercial_clusters_count", 0)),
+                    "production_monetization_scores": p_rep.get("production_monetization_scores", {}),
+                    "sellable_assets_live_counts": p_rep.get("sellable_assets_live_counts", {}),
+                    "autonomous_mode_status": p_rep.get("autonomous_mode_status", "AUTONOMOUS_PRODUCTION_READY"),
                 }
             except Exception as exc:
                 partner_sync_summary = {"status": "ERROR", "error": str(exc)}

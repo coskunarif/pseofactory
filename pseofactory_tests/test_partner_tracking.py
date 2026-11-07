@@ -3809,3 +3809,119 @@ def test_realized_revenue_weights_topic_selection_and_syndication_priority_e2e(t
         synd = prioritize_distribution_queue_by_referral_yield(property_id=prop)
         assert synd, prop
         assert all(float(item.get("realized_revenue_usd") or 0.0) == 0.0 for item in synd)
+
+
+def test_autonomous_production_monetization_zero_nag_and_followup_idempotency(tmp_path) -> None:
+    """
+    Verifies autonomous production-ready monetization across profithelm, prexvo, and gainhelm:
+    1. Informational notifications (Mercury sweep agreement notif-863 stating no action is required,
+       and Mercury mobile app download reminder notif-871) classify as GENERAL_INQUIRY with
+       requires_operator_decision=False and are auto-resolved on the HumanActionBus.
+    2. dispatch_autonomous_partner_followups remains permanently idempotent for already-dispatched
+       trigger_email_id entries even after the 7-day cooldown window elapses.
+    3. sync_and_evaluate reports 100.0% production_monetization_score, AUTONOMOUS_PRODUCTION_READY,
+       zero PENDING_OPERATOR items on the default action bus, and all 6 live sellable Stripe SKUs.
+    """
+    import json as _json
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.email_ingest import EmailIngestionEngine, EmailMessage
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+
+    email_engine = EmailIngestionEngine(
+        cache_path=str(tmp_path / "email_cache.json"),
+        state_path=str(tmp_path / "email_state.json"),
+    )
+    info_msgs = [
+        EmailMessage(
+            id="notif-863",
+            message_id="<863@mercury.com>",
+            account="zoho",
+            mailbox="Notification",
+            date="2026-10-27T16:17:15Z",
+            subject="Update to your sweep agreement",
+            sender_name="The Mercury Team",
+            sender_email="no-reply@mercury.com",
+            body_snippet="You don't need to take any action right now, but we encourage you to read the new agreement.",
+        ),
+        EmailMessage(
+            id="notif-871",
+            message_id="<871@mercury.com>",
+            account="zoho",
+            mailbox="Notification",
+            date="2026-11-04T20:29:06Z",
+            subject="REMINDER: Download the Mercury app to keep your account secure",
+            sender_name="The Mercury Team",
+            sender_email="no-reply@mercury.com",
+            body_snippet="Download the Mercury mobile app. Review a declined card transaction. This email contains an advertisement from Mercury.",
+        ),
+    ]
+    cls_res = email_engine.classify_partner_emails(info_msgs)
+    by_id = {c.email_id: c for c in cls_res}
+    assert by_id["notif-863"].classification_type == "GENERAL_INQUIRY"
+    assert by_id["notif-863"].requires_operator_decision is False
+    assert by_id["notif-871"].classification_type == "GENERAL_INQUIRY"
+    assert by_id["notif-871"].requires_operator_decision is False
+
+    # Verify stale notif-863 PENDING_OPERATOR item is auto-resolved by _ensure_standing_operator_items
+    bus = HumanActionBus(bus_path=str(tmp_path / "bus.json"))
+    stale_item = bus.route_manual_requirement(
+        property_id="profithelm",
+        partner_key="mercury",
+        partner_name="Mercury Startup Banking",
+        title="Mercury Startup Banking: Governance Warning",
+        description="Inbound correspondence matched for Mercury Startup Banking on profithelm.",
+        action_type="GOVERNANCE_WARNING",
+        severity="HIGH",
+    )
+    stale_item.source_email_id = "notif-863"
+    assert stale_item.status == "PENDING_OPERATOR"
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=bus)
+    tracker._ensure_standing_operator_items()
+    assert bus.items[stale_item.action_id].status == "RESOLVED"
+
+    # Verify follow-up idempotency even when dispatched_at is 30 days in the past (same trigger_email_id)
+    followup_ledger = tmp_path / "followup_ledger.json"
+    seeded_dispatches = {
+        "dispatches": {
+            k: {
+                "action_key": k,
+                "trigger_email_id": trig,
+                "dispatched": True,
+                "dispatched_at": "2026-09-01T00:00:00+00:00",
+                "message_id": f"msg_{k}",
+                "mail_id": f"<{k}@profithelm.com>",
+            }
+            for k, trig in (
+                ("koinly_firstpromoter_checkin_reply", "Newsletter:1614"),
+                ("xendoo_firstpromoter_checkin_reply", "Newsletter:1604"),
+                ("invoice_simple_impact_appeal", "Inbox:1025"),
+                ("splash_financial_stalled_followup", "Sent:169"),
+                ("lendkey_stalled_followup", "Sent:170"),
+            )
+        }
+    }
+    followup_ledger.write_text(_json.dumps(seeded_dispatches, indent=2), encoding="utf-8")
+    f_res = tracker.dispatch_autonomous_partner_followups(
+        execute_live=False,
+        ledger_path=str(followup_ledger),
+        cooldown_days=7,
+    )
+    assert f_res["skipped_cooldown_count"] == 5
+    assert f_res["newly_dispatched_count"] == 0
+
+    # Verify default production PartnerTrackingEngine reports 100% production readiness and 0 pending operator items
+    live_tracker = PartnerTrackingEngine()
+    live_dash = live_tracker.sync_and_evaluate(force_mail_poll=False)
+    pending_live = [it for it in live_dash.all_action_items if it.status == "PENDING_OPERATOR"]
+    assert len(pending_live) == 0
+    for prop_rep, exp_sku_cnt in (
+        (live_dash.profithelm, 3),
+        (live_dash.prexvo, 1),
+        (live_dash.gainhelm, 2),
+    ):
+        assert prop_rep.production_monetization_ready is True
+        assert prop_rep.production_monetization_score == 100.0
+        assert prop_rep.sellable_assets_live_count == exp_sku_cnt
+        assert prop_rep.edge_redirect_coverage_pct == 100.0
+        assert prop_rep.autonomous_mode_status == "AUTONOMOUS_PRODUCTION_READY"
+

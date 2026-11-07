@@ -1400,6 +1400,7 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                     print(f"  Messages Polled:  {lifecycle_rep.get('ingested_messages_count')}")
                     print(f"  Classifications:  {lifecycle_rep.get('classifications_count')}")
                     print(f"  Readiness Scores: {lifecycle_rep.get('readiness_scores')}")
+                    print(f"  Production Ready: {lifecycle_rep.get('production_monetization_scores')} [{lifecycle_rep.get('autonomous_mode_status')}]")
                 return 0
             except Exception as exc:
                 if args.json:
@@ -1471,10 +1472,10 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
             ph = dashboard.profithelm
             px = dashboard.prexvo
             gh = getattr(dashboard, "gainhelm", None)
-            print(f"  ProfitHelm Active Partners: {ph.active_partners_count} / {ph.total_registered_partners} (Readiness: {ph.monetization_readiness_score}%)")
-            print(f"  Prexvo Active Partners:     {px.active_partners_count} / {px.total_registered_partners} (Readiness: {px.monetization_readiness_score}%)")
+            print(f"  ProfitHelm Active Partners: {ph.active_partners_count} / {ph.total_registered_partners} (Direct Readiness: {ph.monetization_readiness_score}% | Production Ready: {ph.production_monetization_score}% | Live SKUs: {ph.sellable_assets_live_count})")
+            print(f"  Prexvo Active Partners:     {px.active_partners_count} / {px.total_registered_partners} (Direct Readiness: {px.monetization_readiness_score}% | Production Ready: {px.production_monetization_score}% | Live SKUs: {px.sellable_assets_live_count})")
             if gh is not None:
-                print(f"  GainHelm Active Partners:   {gh.active_partners_count} / {gh.total_registered_partners} (Readiness: {gh.monetization_readiness_score}%)")
+                print(f"  GainHelm Active Partners:   {gh.active_partners_count} / {gh.total_registered_partners} (Direct Readiness: {gh.monetization_readiness_score}% | Production Ready: {gh.production_monetization_score}% | Live SKUs: {gh.sellable_assets_live_count})")
             pending_count = sum(1 for it in dashboard.all_action_items if it.status == "PENDING_OPERATOR")
             print(f"  Human Action Bus Items:     {pending_count} pending operator confirmation")
             prereq_st = (lifecycle_sync.get("publisher_prerequisites_and_compliance") or {}).get("status", "PASS")
@@ -1531,7 +1532,8 @@ def cmd_partner_status(args: argparse.Namespace) -> int:
             reports.append(dashboard.gainhelm)
 
         for r in reports:
-            print(f"=== {r.property_name} Monetization Readiness: {r.monetization_readiness_score}% ===")
+            print(f"=== {r.property_name} Production Monetization: {r.production_monetization_score}% [{r.autonomous_mode_status}] (Direct Affiliate Contracts: {r.monetization_readiness_score}%) ===")
+            print(f"  Sellable Stripe SKUs Live: {r.sellable_assets_live_count} ({', '.join(r.sellable_skus)}) | Edge Redirect Coverage: {r.edge_redirect_coverage_pct}%")
             print(f"  Active Live: {r.active_partners_count} | Awaiting: {r.awaiting_response_count} | Follow-up: {r.requires_followup_count} | Pending: {r.pending_expansion_count}")
             print("  Partners:")
             for p in r.partners:

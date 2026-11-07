@@ -1681,7 +1681,13 @@ class EmailIngestionEngine:
                 )
 
             # 4. Mercury Startup Banking Funds Alert
-            elif "mercury" in combined_text and ("declined" in combined_text or "add or transfer funds" in combined_text):
+            elif (
+                "mercury" in combined_text
+                and ("declined" in combined_text or "add or transfer funds" in combined_text)
+                and "download the mercury app" not in combined_text
+                and "review a declined card transaction" not in combined_text
+                and "this email contains an advertisement" not in combined_text
+            ):
                 classifications.append(
                     PartnerEmailClassification(
                         email_id=msg.id,
@@ -1877,8 +1883,25 @@ class EmailIngestionEngine:
                         break
 
                 if matched_partner:
-                    req_decision = ("action required" in combined_text or "urgent" in combined_text or
-                                    "warning" in combined_text or "update" in combined_text)
+                    is_informational_notice = (
+                        "you don't need to take any action" in combined_text
+                        or "you do not need to take any action" in combined_text
+                        or "no action required" in combined_text
+                        or "no action is needed" in combined_text
+                        or "sweep agreement" in combined_text
+                        or "download the mercury app" in combined_text
+                        or "agent controls" in combined_text
+                        or "this email contains an advertisement" in combined_text
+                    )
+                    req_decision = (
+                        not is_informational_notice
+                        and (
+                            "action required" in combined_text
+                            or "urgent" in combined_text
+                            or "warning" in combined_text
+                            or "update" in combined_text
+                        )
+                    )
                     classifications.append(
                         PartnerEmailClassification(
                             email_id=msg.id,
