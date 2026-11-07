@@ -5025,26 +5025,27 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             f'        </form>\n'
             f'      </div>\n'
         )
-        aff_matches = list(
-            re.finditer(
-                r'(<section\b[^>]*class=["\'][^"\']*\b(?:affiliate-cta-section|affiliates-section)\b[^"\']*["\'][^>]*>[\s\S]*?)(</section>)',
-                updated,
-                re.IGNORECASE,
-            )
-        )
-        if aff_matches:
-            last_aff = aff_matches[-1]
-            updated = (
-                updated[: last_aff.start(2)]
-                + "\n"
-                + partner_reg_html
-                + "    "
-                + updated[last_aff.start(2) :]
-            )
-            actions.append("partner_registration_drawer")
-        elif q_match:
+        if q_match:
             updated = updated[: q_match.start()] + partner_reg_html + updated[q_match.start() :]
             actions.append("partner_registration_drawer")
+        else:
+            aff_matches = list(
+                re.finditer(
+                    r'(<section\b[^>]*class=["\'][^"\']*\b(?:affiliate-cta-section|affiliates-section)\b[^"\']*["\'][^>]*>[\s\S]*?)(</section>)',
+                    updated,
+                    re.IGNORECASE,
+                )
+            )
+            if aff_matches:
+                last_aff = aff_matches[-1]
+                updated = (
+                    updated[: last_aff.start(2)]
+                    + "\n"
+                    + partner_reg_html
+                    + "    "
+                    + updated[last_aff.start(2) :]
+                )
+                actions.append("partner_registration_drawer")
 
     has_hero_section = bool(
         re.search(r'<section\b[^>]*class=["\'][^"\']*\bhero-section\b[^"\']*["\'][^>]*>', updated, re.IGNORECASE)

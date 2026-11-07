@@ -3656,8 +3656,8 @@ class RefactorCascadeEngine:
                                     slug=slug,
                                     dist_dir=adapter.dist_dir,
                                 )
-                            raw_h_fast, _ = normalize_html_visual_primitives(raw_h_fast)
                             raw_h_fast = normalize_html_callout_message_match(raw_h_fast, property_id=adapter.property_id)
+                            raw_h_fast, _ = normalize_html_visual_primitives(raw_h_fast)
                             target_path.write_text(raw_h_fast, encoding="utf-8")
                             self.evaluator._audit_cache.clear()
                         except Exception:
@@ -3721,7 +3721,13 @@ class RefactorCascadeEngine:
                     )
                     if (
                         detect_visual_and_ux_contract_issues(raw_html, rel_path=rel_target)
-                        or (is_tool_page and _needs_page_structure_geo_normalization(raw_html))
+                        or (
+                            is_tool_page
+                            and (
+                                _needs_page_structure_geo_normalization(raw_html)
+                                or bool(RetroReflectionEngine.audit_html_mechanics(raw_html))
+                            )
+                        )
                     ):
                         if is_tool_page:
                             retro_html, _ = RetroReflectionEngine.retrofit_html(
@@ -3750,6 +3756,7 @@ class RefactorCascadeEngine:
                         from pseofactory.affiliates import normalize_html_callout_message_match
                         callout_html = normalize_html_callout_message_match(raw_html, property_id=adapter.property_id)
                         if callout_html != raw_html:
+                            callout_html, _ = normalize_html_visual_primitives(callout_html)
                             target_path.write_text(callout_html, encoding="utf-8")
                     except Exception:
                         pass
@@ -12290,6 +12297,7 @@ class RetroReflectionEngine:
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)
                     if norm_tool_html != updated_html:
+                        norm_tool_html, _ = normalize_html_visual_primitives(norm_tool_html)
                         updated_html = norm_tool_html
                         if "callout_message_match" not in repaired:
                             repaired.append("callout_message_match")
