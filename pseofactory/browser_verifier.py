@@ -2100,9 +2100,28 @@ class UnifiedBrowserAuditor:
             except Exception:
                 pass
 
+    @staticmethod
+    def _cdp_session_lock(cdp_port: int):
+        """Serializes CDP multi-viewport audits across concurrent xdist workers on the same Chrome instance."""
+        import contextlib, fcntl
+        @contextlib.contextmanager
+        def _lock_ctx():
+            lock_path = f"/tmp/pseofactory_cdp_{cdp_port}.lock"
+            with open(lock_path, "w") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    try:
+                        fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+                    except Exception:
+                        pass
+        return _lock_ctx()
+
     def audit_route(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for verifying a single route."""
-        return asyncio.run(self.verify_route(base_url, route))
+        with self._cdp_session_lock(self.cdp_port):
+            return asyncio.run(self.verify_route(base_url, route))
 
     async def verify_interactive_surface(
         self,
@@ -2212,7 +2231,8 @@ class UnifiedBrowserAuditor:
 
     def audit_interactive_surface(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for full E2E interactive surface verification on a route."""
-        return asyncio.run(self.verify_interactive_surface(base_url, route))
+        with self._cdp_session_lock(self.cdp_port):
+            return asyncio.run(self.verify_interactive_surface(base_url, route))
 
     def run_audit(self, sample_size: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -2306,7 +2326,8 @@ class UnifiedBrowserAuditor:
                     except Exception:
                         pass
 
-            asyncio.run(audit_all())
+            with self._cdp_session_lock(self.cdp_port):
+                asyncio.run(audit_all())
 
         failed_count = sum(
             1

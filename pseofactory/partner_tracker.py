@@ -152,6 +152,11 @@ class FleetMonetizationDashboardData:
         return out
 
 
+# Max seconds one sync spends paging one property of edge telemetry. The edge KV listing is
+# slow (seconds per page); the cursor is persisted so the next run resumes where this one stopped.
+TELEMETRY_FETCH_BUDGET_SECONDS = 60.0
+
+
 class PartnerTrackingEngine:
     """
     Central coordinator reconciling affiliate registries, inbound email correspondence,
@@ -245,10 +250,27 @@ class PartnerTrackingEngine:
         if engagement_metrics:
             self.action_bus.rank_pending_partner_approvals(engagement_metrics=engagement_metrics)
 
-        # 3. Evaluate property statuses
-        ph_report = self._evaluate_property("profithelm", classifications, engagement_metrics=engagement_metrics)
-        px_report = self._evaluate_property("prexvo", classifications, engagement_metrics=engagement_metrics)
-        gh_report = self._evaluate_property("gainhelm", classifications, engagement_metrics=engagement_metrics)
+        # 3. Evaluate property statuses (load durable edge click telemetry when not explicitly passed)
+        if engagement_metrics is None:
+            try:
+                _sync_data = self.sync_edge_click_telemetry(fetch_live=False)
+            except Exception:
+                _sync_data = {}
+            ph_eng = (_sync_data.get("profithelm") or {}).get("aggregation") or None
+            px_eng = (_sync_data.get("prexvo") or {}).get("aggregation") or None
+            gh_eng = (_sync_data.get("gainhelm") or {}).get("aggregation") or None
+        elif isinstance(engagement_metrics, dict) and any(k in engagement_metrics for k in ("profithelm", "prexvo", "gainhelm")) and "by_partner" not in engagement_metrics:
+            ph_eng = engagement_metrics.get("profithelm")
+            px_eng = engagement_metrics.get("prexvo")
+            gh_eng = engagement_metrics.get("gainhelm")
+        else:
+            ph_eng = engagement_metrics
+            px_eng = engagement_metrics
+            gh_eng = engagement_metrics
+
+        ph_report = self._evaluate_property("profithelm", classifications, engagement_metrics=ph_eng)
+        px_report = self._evaluate_property("prexvo", classifications, engagement_metrics=px_eng)
+        gh_report = self._evaluate_property("gainhelm", classifications, engagement_metrics=gh_eng)
 
         # 4. Enforce strict property isolation
         self._assert_fleet_isolation(ph_report, px_report, gh_report)
@@ -671,8 +693,8 @@ class PartnerTrackingEngine:
                 self._assert_summary_invariants(summary)
                 partner_summaries.append(summary)
 
-        # Calculate Readiness Score
-        total_p = len(partner_summaries)
+        # Calculate Readiness Score (exclude non-affiliate external_governance items from denominator)
+        total_p = sum(1 for p_sum in partner_summaries if p_sum.registry_status != "external_governance")
         if live_count > 0:
             readiness_score = round((live_count / max(total_p, 1)) * 100, 1)
         else:
@@ -1696,8 +1718,15 @@ class PartnerTrackingEngine:
                 from urllib.parse import quote as _quote
 
                 fetch_error = ""
-                cursor = ""
-                for _page in range(50):
+                cursor_path = jsonl_path.with_name(jsonl_path.stem + ".cursor")
+                try:
+                    cursor = cursor_path.read_text(encoding="utf-8").strip() if cursor_path.is_file() else ""
+                except Exception:
+                    cursor = ""
+                _deadline = _time.monotonic() + float(TELEMETRY_FETCH_BUDGET_SECONDS)
+                for _page in range(500):
+                    if _time.monotonic() > _deadline:
+                        break
                     page_url = endpoints[prop_id].replace("limit=1000", "limit=200")
                     if cursor:
                         page_url += "&cursor=" + _quote(cursor, safe="")
@@ -1725,7 +1754,15 @@ class PartnerTrackingEngine:
                         incoming.extend(e for e in payload["events"] if isinstance(e, dict))
                     cursor = str(payload.get("cursor") or "")
                     if payload.get("list_complete", True) or not cursor:
+                        cursor = ""
                         break
+                try:
+                    if cursor:
+                        cursor_path.write_text(cursor, encoding="utf-8")
+                    elif cursor_path.is_file():
+                        cursor_path.unlink()
+                except Exception:
+                    pass
                 fetch_errors[prop_id] = fetch_error
 
             ingested_new = 0
