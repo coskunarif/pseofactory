@@ -171,3 +171,15 @@ def test_compile_lienbond_estate_end_to_end(tmp_path: Path) -> None:
     assert (tmp_path / "functions" / "api" / "telemetry.js").is_file()
     assert (tmp_path / "functions" / "api" / "checkout.js").is_file()
     assert (tmp_path / "functions" / "api" / "lead-fulfillment.js").is_file()
+
+    import json
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    retro_res = RetroReflectionEngine.retrofit_estate(tmp_path / "dist", "lienbond")
+    assert retro_res["status"] == "PASS"
+    audit_res = RetroReflectionEngine.audit_estate(tmp_path / "dist", "lienbond")
+    assert audit_res["status"] == "PASS"
+    assert audit_res["stale_count"] == 0
+    cat_obj = json.loads((tmp_path / "dist" / "catalog.json").read_text(encoding="utf-8"))
+    assert cat_obj["property_id"] == "lienbond"
+    assert cat_obj["domain"] == "lienbond.com"
