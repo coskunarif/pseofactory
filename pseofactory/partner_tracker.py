@@ -8425,6 +8425,13 @@ def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[s
             "ZEPTOMAIL_FROM_EMAIL": "arif@profithelm.com",
             "ZEPTOMAIL_FROM_NAME": "GainHelm Research Desk",
         },
+        "lienbond": {
+            **shared_vars,
+            "CANONICAL_BASE": "https://lienbond.com",
+            "DOMAIN": "lienbond.com",
+            "ZEPTOMAIL_FROM_EMAIL": "arif@profithelm.com",
+            "ZEPTOMAIL_FROM_NAME": "LienBond Underwriting & Statutory Desk",
+        },
     }
 
     report: Dict[str, Any] = {

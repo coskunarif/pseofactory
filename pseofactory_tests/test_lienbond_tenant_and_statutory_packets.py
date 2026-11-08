@@ -183,3 +183,23 @@ def test_compile_lienbond_estate_end_to_end(tmp_path: Path) -> None:
     cat_obj = json.loads((tmp_path / "dist" / "catalog.json").read_text(encoding="utf-8"))
     assert cat_obj["property_id"] == "lienbond"
     assert cat_obj["domain"] == "lienbond.com"
+
+
+def test_provision_tenant_custom_domain_and_dns_reconciler() -> None:
+    """Verifies automated Cloudflare Pages custom-domain binding and DNS CNAME/SPF/DMARC provisioning plan for lienbond.com."""
+    from pseofactory.infra_audit import provision_tenant_custom_domain_and_dns
+
+    plan = provision_tenant_custom_domain_and_dns(
+        property_id="lienbond",
+        domain="lienbond.com",
+        pages_target="lienbond.pages.dev",
+        execute_live=False,
+    )
+    assert plan["status"] == "DRY_RUN_PLANNED"
+    assert plan["property_id"] == "lienbond"
+    assert plan["domain"] == "lienbond.com"
+    assert plan["pages_target"] == "lienbond.pages.dev"
+    assert plan["pages_custom_domains_attached"] == ["lienbond.com", "www.lienbond.com"]
+    assert len(plan["planned_dns_records"]) == 4
+    cname_targets = [r["content"] for r in plan["planned_dns_records"] if r["type"] == "CNAME"]
+    assert cname_targets == ["lienbond.pages.dev", "lienbond.pages.dev"]
