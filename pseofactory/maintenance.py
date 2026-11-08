@@ -26,6 +26,24 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable
 
+
+def _atomic_write_text(path: Union[Path, str], content: str, encoding: str = "utf-8") -> None:
+    """Atomically writes text to path via a PID-scoped temporary file and os.replace."""
+    target_path = Path(path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target_path.with_name(f".{target_path.name}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp")
+    try:
+        tmp_path.write_text(content, encoding=encoding)
+        os.replace(tmp_path, target_path)
+    except Exception:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
+
+
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
     assert_touch_targets,
@@ -3997,7 +4015,7 @@ class RefactorCascadeEngine:
                         raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
                         norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
                         if norm_c != raw_c:
-                            html_f.write_text(norm_c, encoding="utf-8")
+                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
                 except Exception:
                     pass
                 self.evaluator._audit_cache.clear()
@@ -12359,7 +12377,7 @@ class RetroReflectionEngine:
                 except Exception:
                     pass
             if (repaired or overlay_injected) and updated_html != content:
-                html_file.write_text(updated_html, encoding="utf-8")
+                _atomic_write_text(html_file, updated_html, encoding="utf-8")
                 retrofitted_paths.append(rel)
 
         manifests_dir = d / "manifests"
@@ -14422,6 +14440,87 @@ def reflect_and_recompile_all_assets(
                         ph_fp_src = "import pytest\n" + ph_fp_src
                     if ph_fp_src != ph_fp_orig:
                         ph_test_fp.write_text(ph_fp_src, encoding="utf-8")
+                        source_sync_changed = True
+
+                ph_factory_file = Path(adapter.repo_path) / "profithelm" / "factory.py"
+                if ph_factory_file.is_file():
+                    ph_fac_src = ph_factory_file.read_text(encoding="utf-8")
+                    ph_fac_orig = ph_fac_src
+                    old_prov_block = (
+                        '    deployed_voids_file = BASE_DIR / ".agy" / "deployed_voids.json"\n'
+                        '    if deployed_voids_file.is_file():\n'
+                        '        try:\n'
+                        '            for item in json.loads(deployed_voids_file.read_text(encoding="utf-8")):\n'
+                        '                if isinstance(item, dict) and item.get("slug"):\n'
+                        '                    provenanced.add(item["slug"])\n'
+                        '        except Exception:\n'
+                        '            pass'
+                    )
+                    new_prov_block = (
+                        '    for prov_file in (BASE_DIR / ".agy" / "deployed_voids.json", BASE_DIR / "profithelm" / "data" / "dynamic_tools.json"):\n'
+                        '        if prov_file.is_file():\n'
+                        '            try:\n'
+                        '                raw_prov = json.loads(prov_file.read_text(encoding="utf-8"))\n'
+                        '                prov_items = raw_prov if isinstance(raw_prov, list) else raw_prov.get("tools", [])\n'
+                        '                for item in prov_items:\n'
+                        '                    if isinstance(item, dict) and item.get("slug"):\n'
+                        '                        provenanced.add(item["slug"])\n'
+                        '            except Exception:\n'
+                        '                pass'
+                    )
+                    if old_prov_block in ph_fac_src:
+                        ph_fac_src = ph_fac_src.replace(old_prov_block, new_prov_block, 1)
+                    if ph_fac_src != ph_fac_orig:
+                        ph_factory_file.write_text(ph_fac_src, encoding="utf-8")
+                        source_sync_changed = True
+
+                ph_test_fr = Path(adapter.repo_path) / "tests" / "test_factory_repair.py"
+                if ph_test_fr.is_file():
+                    ph_fr_src = ph_test_fr.read_text(encoding="utf-8")
+                    ph_fr_orig = ph_fr_src
+                    if "def test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):" in ph_fr_src and '@pytest.mark.xdist_group(name="pipeline_build")' not in ph_fr_src:
+                        ph_fr_src = ph_fr_src.replace(
+                            "def test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):",
+                            '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):',
+                            1,
+                        )
+                    old_fr_mock = 'monkeypatch.setattr("profithelm.seo_verifier.audit_seo_checklist", lambda **k: {"gates": {f"gate_{i}": True for i in range(18)}})'
+                    new_fr_mock = 'monkeypatch.setattr("profithelm.seo_verifier.audit_seo_checklist", lambda **k: {"status": "PASS", "gates": {f"gate_{i}": True for i in range(18)}})'
+                    if old_fr_mock in ph_fr_src:
+                        ph_fr_src = ph_fr_src.replace(old_fr_mock, new_fr_mock, 1)
+                    if ph_fr_src != ph_fr_orig:
+                        ph_test_fr.write_text(ph_fr_src, encoding="utf-8")
+                        source_sync_changed = True
+
+                ph_test_cg = Path(adapter.repo_path) / "tests" / "test_compliance_gate.py"
+                if ph_test_cg.is_file():
+                    ph_cg_src = ph_test_cg.read_text(encoding="utf-8")
+                    ph_cg_orig = ph_cg_src
+                    for cg_fn in ("def test_compliance_gate_passes_on_production_dist():", "def test_cli_audit_wires_compliance_gate():"):
+                        if cg_fn in ph_cg_src and f'@pytest.mark.xdist_group(name="pipeline_build")\n{cg_fn}' not in ph_cg_src:
+                            ph_cg_src = ph_cg_src.replace(
+                                cg_fn,
+                                f'@pytest.mark.xdist_group(name="pipeline_build")\n{cg_fn}',
+                                1,
+                            )
+                    if ph_cg_src != ph_cg_orig:
+                        ph_test_cg.write_text(ph_cg_src, encoding="utf-8")
+                        source_sync_changed = True
+
+                ph_test_ci = Path(adapter.repo_path) / "tests" / "test_competitor_intelligence_upgrades.py"
+                if ph_test_ci.is_file():
+                    ph_ci_src = ph_test_ci.read_text(encoding="utf-8")
+                    ph_ci_orig = ph_ci_src
+                    ci_fn = "def test_slice_3_matrix_multi_dataset_validation():"
+                    if ci_fn in ph_ci_src and f'@pytest.mark.xdist_group(name="pipeline_build")\n{ci_fn}' not in ph_ci_src:
+                        ph_ci_src = ph_ci_src.replace(
+                            ci_fn,
+                            f'@pytest.mark.xdist_group(name="pipeline_build")\n{ci_fn}',
+                            1,
+                        )
+                    if ph_ci_src != ph_ci_orig:
+                        ph_test_ci.write_text(ph_ci_src, encoding="utf-8")
+                        source_sync_changed = True
             except Exception:
                 pass
 
@@ -14961,7 +15060,7 @@ def reflect_and_recompile_all_assets(
                         raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
                         norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
                         if norm_c != raw_c:
-                            html_f.write_text(norm_c, encoding="utf-8")
+                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
                             pre_retrofitted_count += 1
                 try:
                     from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -15149,7 +15248,7 @@ def reflect_and_recompile_all_assets(
                                     raw_h = target_html.read_text(encoding="utf-8")
                                     updated_h = inject_overlay_into_html(raw_h, ov_spec)
                                     if updated_h != raw_h:
-                                        target_html.write_text(updated_h, encoding="utf-8")
+                                        _atomic_write_text(target_html, updated_h, encoding="utf-8")
                 except Exception:
                     pass
 
@@ -15202,7 +15301,7 @@ def reflect_and_recompile_all_assets(
                         raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
                         norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
                         if norm_c != raw_c:
-                            html_f.write_text(norm_c, encoding="utf-8")
+                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
                 except Exception:
                     pass
                 try:
@@ -15288,7 +15387,7 @@ def reflect_and_recompile_all_assets(
                         raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
                         norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
                         if norm_c != raw_c:
-                            html_f.write_text(norm_c, encoding="utf-8")
+                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
                             retrofitted_count += 1
                     for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                         evaluator._audit_cache.pop(_ck, None)

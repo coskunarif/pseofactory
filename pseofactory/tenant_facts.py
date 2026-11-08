@@ -4408,7 +4408,16 @@ class TruthReconciliationEngine:
                         if updated_html != before_rb and "degraded_overlay_rolled_back" not in rep_list:
                             rep_list.append("degraded_overlay_rolled_back")
                     if rep_list and updated_html != content:
-                        html_file.write_text(updated_html, encoding="utf-8")
+                        tmp_html = html_file.with_name(f".{html_file.name}.{os.getpid()}.tmp")
+                        try:
+                            tmp_html.write_text(updated_html, encoding="utf-8")
+                            os.replace(tmp_html, html_file)
+                        finally:
+                            if tmp_html.exists():
+                                try:
+                                    tmp_html.unlink()
+                                except OSError:
+                                    pass
                         repaired_paths.append(str(html_file))
                 except Exception:
                     pass
