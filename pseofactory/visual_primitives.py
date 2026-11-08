@@ -2830,6 +2830,7 @@ def _render_runtime_sync_events_js() -> str:
                 var stlId = stl.settlement_id || ("stl_" + sessId);
                 var stlStatus = stl.settlement_status || "settled";
                 var attrRev = stl.attributed_revenue_usd !== undefined ? stl.attributed_revenue_usd : (data.offer_price_usd || 49);
+                var offerPriceUsd = data.offer_price_usd !== undefined ? data.offer_price_usd : (stl.offer_price_usd || chkBtn.getAttribute("data-offer-price") || 49);
                 var dpId = stl.datapack_pack_id || (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ("dp_" + (data.lead_id || "verified"));
                 var isLiveStripeRedirect = (cMode.indexOf("live_session") !== -1 && data.checkout_url && String(data.checkout_url).indexOf("https://checkout.") === 0 && !window.__PSEO_SYNTHETIC_TEST__);
                 chkBtn.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
@@ -2838,6 +2839,7 @@ def _render_runtime_sync_events_js() -> str:
                 chkBtn.setAttribute("data-settlement-status", String(stlStatus));
                 chkBtn.setAttribute("data-settlement-id", String(stlId));
                 chkBtn.setAttribute("data-attributed-revenue-usd", String(attrRev));
+                chkBtn.setAttribute("data-offer-price-usd", String(offerPriceUsd));
                 chkBtn.setAttribute("data-datapack-id", String(dpId));
                 chkBtn.textContent = isLiveStripeRedirect
                   ? "Redirecting to Secure Stripe Checkout (" + sessId + ")..."
@@ -2849,6 +2851,7 @@ def _render_runtime_sync_events_js() -> str:
                   parentStep.setAttribute("data-settlement-status", String(stlStatus));
                   parentStep.setAttribute("data-settlement-id", String(stlId));
                   parentStep.setAttribute("data-attributed-revenue-usd", String(attrRev));
+                  parentStep.setAttribute("data-offer-price-usd", String(offerPriceUsd));
                   parentStep.setAttribute("data-datapack-id", String(dpId));
                   if (!isLiveStripeRedirect) {
                     renderPlaybookAndFulfillmentDrawer(parentStep, data, "checkout_fulfill");
@@ -3684,11 +3687,15 @@ def _render_runtime_sync_events_js() -> str:
         var bandVal = bandInp ? String(bandInp.value || "100k_250k").trim() : "100k_250k";
         var hasConsent = Boolean(consentInp && consentInp.checked);
         if (!emailVal || emailVal.indexOf("@") === -1) {
+          if (qForm && qForm.style && qForm.style.display === "none") qForm.style.display = "block";
+          if (drawer && drawer.style && drawer.style.display === "none") drawer.style.display = "block";
           if (statusNode) statusNode.textContent = "Please enter a valid email address to receive your matched quote.";
           if (emailInp && typeof emailInp.focus === "function") emailInp.focus();
           return;
         }
         if (!hasConsent) {
+          if (qForm && qForm.style && qForm.style.display === "none") qForm.style.display = "block";
+          if (drawer && drawer.style && drawer.style.display === "none") drawer.style.display = "block";
           if (statusNode) statusNode.textContent = "Please check the TCPA partner sharing consent box to proceed.";
           if (consentInp && typeof consentInp.focus === "function") consentInp.focus();
           return;
@@ -5603,6 +5610,7 @@ def normalize_html_visual_primitives(
                 or "offer_price_usd || 29" in sync_body
                 or "isPrexvo" in sync_body
                 or "playbook_csv_url" not in sync_body
+                or "data-offer-price-usd" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:

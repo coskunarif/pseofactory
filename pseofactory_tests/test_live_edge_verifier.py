@@ -439,3 +439,42 @@ def test_live_edge_verifier_rejects_stale_figures_and_local_dist_divergence(tmp_
         rel_path="tools/soc-2-audit-cost-calculator/index.html",
     ) == []
 
+
+def test_live_edge_verifier_full_monetization_checkout_and_partner_slot_matrix(tmp_path: Path):
+    """9. LiveEdgeVerifier.verify_edge_functions validates checkout session creation, $299 partner slot, partner_registration POST, 402 gate, and multi-partner 302 redirects."""
+    from pseofactory.browser_verifier import LienBondBrowserAdapter, RouteManifestExtractor
+    from pseofactory.server import EphemeralDistServer
+
+    for idx, slug in enumerate(("alpha-calc", "beta-calc", "gamma-calc", "delta-calc")):
+        d = tmp_path / "tools" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.html").write_text(f"<html><body><h1>{slug}</h1></body></html>", encoding="utf-8")
+    (tmp_path / "index.html").write_text("<html><body><h1>Home</h1></body></html>", encoding="utf-8")
+
+    extractor = RouteManifestExtractor(tmp_path)
+    all_routes = extractor.extract_routes()
+    smart_routes = extractor.select_smart_routes(all_routes, 3)
+    assert len(smart_routes) == 3
+    assert "/" in smart_routes
+    assert any(r.startswith("/tools/") and r != "/tools/" for r in smart_routes)
+
+    lb_adapter = LienBondBrowserAdapter()
+    assert lb_adapter.tenant_id == "lienbond"
+    assert len(lb_adapter.get_widget_specs()) >= 2
+
+    verifier = LiveEdgeVerifier(timeout=5.0, retries=1)
+    for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        with EphemeralDistServer(tmp_path, property_id=prop_id) as srv:
+            res = verifier.verify_edge_functions(srv.base_url, property_id=prop_id)
+            assert res["status"] == "PASS", f"verify_edge_functions failed for {prop_id}: {res}"
+            assert res["issues"] == []
+            routes_map = res["routes"]
+            assert routes_map["GET /api/lead-capture?checkout=1&format=json"]["status"] == "PASS"
+            assert routes_map["POST /api/lead-capture (partner_registration)"]["status"] == "PASS"
+            assert routes_map["GET /api/lead-fulfillment"]["status"] == "PASS"
+            assert routes_map["GET /api/lead-fulfillment"]["status_code"] == 402
+            redir_keys = [k for k in routes_map if k.startswith("GET /r/")]
+            assert len(redir_keys) >= 2
+            assert all(routes_map[rk]["status"] == "PASS" for rk in redir_keys)
+
+

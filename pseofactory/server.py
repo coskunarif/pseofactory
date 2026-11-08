@@ -121,6 +121,8 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return "prexvo"
         if "gainhelm" in root_low:
             return "gainhelm"
+        if "lienbond" in root_low:
+            return "lienbond"
         return "profithelm"
 
     def _evaluate_redirects_file(self, clean_path: str, query_str: str = "") -> Optional[tuple]:
@@ -252,10 +254,31 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if qs.get("playbook", [""])[0] == "1" or qs.get("fulfill", [""])[0] == "1" or qs.get("mode", [""])[0] in ("playbook", "fulfill"):
                 is_fulfill = qs.get("fulfill", [""])[0] == "1" or qs.get("mode", [""])[0] == "fulfill"
                 lead_id = qs.get("lead_id", [f"lead_{prop_id}_direct"])[0]
+                session_id = qs.get("session_id", [""])[0].strip()
+                settle_flag = qs.get("settle", [""])[0].strip().lower() in ("1", "true")
+                if is_fulfill and clean_path == "/api/lead-fulfillment" and not session_id and not settle_flag:
+                    self._send_json(402, {
+                        "ok": False,
+                        "success": False,
+                        "settled": False,
+                        "status": "payment_required",
+                        "property_id": prop_id,
+                        "lead_id": lead_id,
+                        "error": "Verified paid Stripe Checkout session required to unlock unredacted statutory filing packet.",
+                    })
+                    return
                 default_slug = (
                     "section-1031-calculator"
                     if prop_id == "profithelm"
-                    else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
+                    else (
+                        "soc-2-audit-cost-calculator"
+                        if prop_id == "gainhelm"
+                        else (
+                            "contractor-license-bond-cost-calculator-by-credit-score"
+                            if prop_id == "lienbond"
+                            else "student-loan-refinance-break-even-calculator"
+                        )
+                    )
                 )
                 tool_slug = qs.get("tool_slug", qs.get("slug", [default_slug]))[0]
                 stored_rec = None
@@ -398,7 +421,7 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "checkout_session_id": offer["checkout_session_id"],
                     "checkout_mode": "edge_checkout_rail",
                     "stripe_account_id": "acct_1T6fSTIq0ckFsf5j",
-                    "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    "stripe_merchant_email": f"arif.coskun@{prop_id}.com",
                 }
                 if dist_srv is not None:
                     dist_srv.checkout_sessions.append(chk_record)
@@ -509,9 +532,59 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if raw_slug.startswith("tools/"):
                 raw_slug = raw_slug[6:]
             tool_slug = raw_slug.replace("/", "-") or "calculator"
+            is_synth = bool(
+                body.get("synthetic_test")
+                or str(self.headers.get("X-Pseofactory-Test") or "").strip().lower() in ("1", "true")
+                or email.endswith("@synthetic.pseofactory.test")
+            )
+            intent_val = str(body.get("intent") or body.get("lead_type") or "").strip().lower()
+            if intent_val == "partner_registration":
+                firm_name = str(body.get("firm_name") or body.get("company_name") or "").strip() or (email.split("@")[1] if "@" in email else "Advisory Partner Firm")
+                p_state = str(body.get("state") or "CA").strip().upper()[:2] or "CA"
+                p_lead_id = str(body.get("lead_id") or f"lead_{prop_id}_partner_{int(time.time() * 1000)}")
+                slot_sku = {
+                    "prexvo": "px_verified_partner_slot",
+                    "gainhelm": "gh_verified_partner_slot",
+                    "lienbond": "lb_verified_partner_slot",
+                }.get(prop_id, "ph_verified_partner_slot")
+                p_checkout_url = (
+                    f"/api/lead-capture?checkout=1&lead_id={urllib.parse.quote(p_lead_id)}"
+                    f"&sku={slot_sku}&tool_slug={urllib.parse.quote(tool_slug)}&redirect=1"
+                )
+                p_rec = {
+                    "ok": True,
+                    "success": True,
+                    "status": "partner_registered",
+                    "lead_id": p_lead_id,
+                    "property_id": prop_id,
+                    "lead_type": "partner_registration",
+                    "intent": "partner_registration",
+                    "lifecycle_stage": "partner_registered",
+                    "tool_slug": tool_slug,
+                    "email": email,
+                    "firm_name": firm_name,
+                    "state": p_state,
+                    "offer_sku": slot_sku,
+                    "offer_title": "Verified Calculator Partner Slot",
+                    "offer_price_usd": 299,
+                    "checkout_url": p_checkout_url,
+                    "synthetic_test": is_synth,
+                    "persisted": not is_synth,
+                    "zeptomail_status": "synthetic_test_suppressed",
+                    "fulfillment_status": "synthetic_verified",
+                }
+                if dist_srv is not None:
+                    dist_srv.captured_leads.append(p_rec)
+                self._send_json(200, p_rec)
+                return
+
             partner_key = str(
                 body.get("partner_key")
-                or ("splash_financial" if prop_id == "prexvo" else ("vanta_security" if prop_id == "gainhelm" else "ipx1031"))
+                or (
+                    "splash_financial"
+                    if prop_id == "prexvo"
+                    else ("vanta_security" if prop_id == "gainhelm" else ("simply_business" if prop_id == "lienbond" else "ipx1031"))
+                )
             ).strip().lower()
             has_quote_fields = any(
                 k in body for k in ("calculated_amount", "loan_balance", "state", "capital_band", "partner_sharing_consent")
@@ -543,8 +616,11 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "redirect_url": redirect_url,
                     "checkout_url": offer["checkout_url"],
                     "playbook_url": offer["playbook_url"],
+                    "playbook_csv_url": offer["playbook_csv_url"],
+                    "playbook_datapack_url": offer["playbook_datapack_url"],
                     "fulfillment_url": offer["fulfillment_url"],
                     "csv_fulfillment_url": offer["csv_fulfillment_url"],
+                    "datapack_url": offer["datapack_url"],
                     "checkout_session_id": offer["checkout_session_id"],
                     "checkout_mode": "edge_checkout_rail",
                     "offer_sku": offer["offer_sku"],
@@ -554,6 +630,10 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "scenario_inputs": scen_inputs,
                     "scenario_outputs": scen_outputs,
                     "blueprint_state": bp_state,
+                    "synthetic_test": is_synth,
+                    "persisted": not is_synth,
+                    "zeptomail_status": "synthetic_test_suppressed",
+                    "fulfillment_status": "synthetic_verified",
                 }
                 wp = synthesize_personalized_audit_workpaper(prop_id, tool_slug, lead_record=record, mode="free_playbook")
                 record["reconciliation_schedule"] = wp["reconciliation_schedule"]
@@ -592,8 +672,11 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "redirect_url": redirect_url,
                 "checkout_url": offer["checkout_url"],
                 "playbook_url": offer["playbook_url"],
+                "playbook_csv_url": offer["playbook_csv_url"],
+                "playbook_datapack_url": offer["playbook_datapack_url"],
                 "fulfillment_url": offer["fulfillment_url"],
                 "csv_fulfillment_url": offer["csv_fulfillment_url"],
+                "datapack_url": offer["datapack_url"],
                 "checkout_session_id": offer["checkout_session_id"],
                 "checkout_mode": "edge_checkout_rail",
                 "offer_sku": offer["offer_sku"],
@@ -603,7 +686,10 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "scenario_inputs": scen_inputs,
                 "scenario_outputs": scen_outputs,
                 "blueprint_state": bp_state,
+                "synthetic_test": is_synth,
+                "persisted": not is_synth,
                 "zeptomail_status": "synthetic_test_suppressed",
+                "fulfillment_status": "synthetic_verified",
             }
             wp = synthesize_personalized_audit_workpaper(prop_id, tool_slug, lead_record=record, mode="paid_toolkit")
             record["reconciliation_schedule"] = wp["reconciliation_schedule"]

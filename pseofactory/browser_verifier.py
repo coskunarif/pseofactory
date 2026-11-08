@@ -226,6 +226,46 @@ class GainHelmBrowserAdapter(TenantBrowserAdapter):
         ]
 
 
+class LienBondBrowserAdapter(TenantBrowserAdapter):
+    """Browser verification adapter for LienBond commercial surety, workers comp, and lien platform distribution."""
+
+    @property
+    def tenant_id(self) -> str:
+        return "lienbond"
+
+    @property
+    def dist_dir(self) -> Path:
+        return Path("/home/ubuntuadmin/projects/lienbond/dist")
+
+    @property
+    def canonical_domain(self) -> str:
+        return "https://lienbond.com"
+
+    def get_widget_specs(self) -> List[InteractiveWidgetSpec]:
+        return [
+            InteractiveWidgetSpec(
+                route="/tools/contractor-license-bond-cost-calculator-by-credit-score/",
+                widget_id="contractor-license-bond-cost-calculator-by-credit-score",
+                precondition_selector="#field-bond_amount, [data-calc-input], input[type='number']",
+                input_selector="#field-bond_amount, [data-calc-input], input[type='number']",
+                input_value="50000",
+                output_selector=".output-value, .calc-metric-value, .metric-value",
+                trigger_event="input",
+                verify_popstate=True,
+            ),
+            InteractiveWidgetSpec(
+                route="/tools/workers-compensation-class-code-rate-calculator-by-state/",
+                widget_id="workers-compensation-class-code-rate-calculator-by-state",
+                precondition_selector="#field-annual_payroll, [data-calc-input], input[type='number']",
+                input_selector="#field-annual_payroll, [data-calc-input], input[type='number']",
+                input_value="250000",
+                output_selector=".output-value, .calc-metric-value, .metric-value",
+                trigger_event="input",
+                verify_popstate=False,
+            ),
+        ]
+
+
 class RouteManifestExtractor:
     """
     Extracts complete route manifests from sitemap.xml and dist HTML filesystem tree.
@@ -305,6 +345,118 @@ class RouteManifestExtractor:
     def routes(self) -> List[str]:
         """Property returning extracted routes."""
         return self.extract_routes()
+
+    def detect_git_dirty_routes(self) -> List[str]:
+        """Detects any modified or untracked HTML routes in dist_dir via git status --porcelain."""
+        import subprocess
+
+        if not self.dist_dir.exists():
+            return []
+        repo_root = self.dist_dir.parent
+        if not (repo_root / ".git").exists():
+            return []
+        dirty_routes: List[str] = []
+        seen = set()
+        try:
+            res = subprocess.run(
+                ["git", "-C", str(repo_root), "status", "--porcelain", "--", "dist"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if res.returncode == 0 and res.stdout:
+                for raw_line in res.stdout.splitlines():
+                    if len(raw_line) < 4:
+                        continue
+                    rel_part = raw_line[3:].strip().strip('"')
+                    if " -> " in rel_part:
+                        rel_part = rel_part.split(" -> ", 1)[1].strip().strip('"')
+                    full_p = (repo_root / rel_part).resolve()
+                    if not full_p.exists():
+                        continue
+                    html_files = [full_p] if full_p.is_file() and full_p.suffix == ".html" else (
+                        list(full_p.glob("**/*.html")) if full_p.is_dir() else []
+                    )
+                    for hf in html_files:
+                        try:
+                            rel = hf.relative_to(self.dist_dir)
+                        except ValueError:
+                            continue
+                        if "syndication" in rel.parts or any(p.startswith(".") for p in rel.parts):
+                            continue
+                        if rel.name == "index.html":
+                            r = "/" + "/".join(rel.parent.parts) + "/" if rel.parent.parts else "/"
+                        elif rel.name == "404.html":
+                            r = "/404.html"
+                        else:
+                            r = "/" + str(rel)
+                        if r not in seen:
+                            seen.add(r)
+                            dirty_routes.append(r)
+        except Exception:
+            pass
+        return dirty_routes
+
+    def select_smart_routes(
+        self,
+        all_routes: List[str],
+        sample_size: Optional[int],
+        widget_specs: Optional[List[InteractiveWidgetSpec]] = None,
+    ) -> List[str]:
+        """
+        Selects a deterministic, archetype-stratified + delta-aware route sample:
+        1. All git-dirty / newly generated HTML routes in dist/ (up to 10)
+        2. Primary interactive calculator widget routes from widget_specs (or newest /tools/*/ route)
+        3. Most recently modified /tools/<slug>/ calculator route on disk
+        4. Root hub route ('/') and remaining routes up to max(sample_size, len(dirty_routes) + 1)
+        """
+        if sample_size is None or sample_size <= 0 or sample_size >= len(all_routes):
+            return list(all_routes)
+        available = set(all_routes)
+        selected: List[str] = []
+
+        def _pick(r: str) -> None:
+            if r in available and r not in selected:
+                selected.append(r)
+
+        dirty = [r for r in self.detect_git_dirty_routes() if r in available][:10]
+        for dr in dirty:
+            _pick(dr)
+
+        for spec in (widget_specs or []):
+            if len(selected) >= max(sample_size, len(dirty) + 1) and len(dirty) == 0:
+                break
+            _pick(spec.route)
+            if len(dirty) == 0 and len(selected) >= max(1, sample_size - 1):
+                break
+
+        tool_routes = [r for r in all_routes if r.startswith("/tools/") and r != "/tools/"]
+        if tool_routes:
+            newest_route = None
+            newest_mtime = -1.0
+            for tr in tool_routes:
+                f_path = self.dist_dir / tr.strip("/") / "index.html"
+                if f_path.is_file():
+                    try:
+                        mt = f_path.stat().st_mtime
+                        if mt > newest_mtime:
+                            newest_mtime = mt
+                            newest_route = tr
+                    except Exception:
+                        pass
+            if newest_route and len(selected) < max(sample_size, len(dirty) + 1):
+                _pick(newest_route)
+            if not any(r.startswith("/tools/") and r != "/tools/" for r in selected):
+                _pick(tool_routes[0])
+
+        target_cap = max(sample_size, len(dirty) + (1 if len(dirty) > 0 else 0))
+        if len(selected) < target_cap:
+            _pick("/")
+        for r in all_routes:
+            if len(selected) >= target_cap:
+                break
+            _pick(r)
+        return selected
 
 
 class UnifiedBrowserAuditor:
@@ -870,6 +1022,11 @@ class UnifiedBrowserAuditor:
             post_calc_upgrade_drawer: { present: false, passed: true, preview_rendered: false, checkout_status: '', settlement_id: '', datapack_download_triggered: false },
             playbook_lead_capture_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
             partner_quote_intake_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
+            partner_registration_and_slot_checkout: { present: false, passed: true, submission_state: '', checkout_href: '', checkout_status: '', checkout_session_id: '', slot_price_usd: 0, focused_after_submit: false },
+            hash_navigation_and_focus: { present: false, passed: true, links_tested_count: 0, failures: [] },
+            hero_state_and_range_anchor: { present: false, passed: true, range_anchor_present: false, synced_state: '', peer_sync_passed: true },
+            validation_focus_and_error_states: { present: false, passed: true, forms_tested_count: 0, focus_failures: [] },
+            sellable_assets_and_fulfillment_gate: { present: false, passed: true, unpaid_402_enforced: false, free_playbook_verified: false, free_csv_verified: false, free_datapack_verified: false, paid_html_verified: false, paid_csv_verified: false, paid_datapack_verified: false, email_dispatch_verified: false, failures: [] },
             affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '', partners_verified_count: 0, all_partner_redirects: [], partner_failures: [] }
         };
 
@@ -1261,6 +1418,106 @@ class UnifiedBrowserAuditor:
             }
         }
 
+        // 3c. In-page #hash navigation & focus transfer (.pro-hook-link, TOC anchors)
+        const hashCandidates = Array.from(document.querySelectorAll('a.pro-hook-link[href^="#"], .on-this-page-nav a[href^="#"], a[href="#post-calculation-upgrade-drawer"], a[href="#lead-capture-form"], a[href="#partner-quote-intake-step"]')).filter(a => {
+            if (a.classList && a.classList.contains('skip-to-content-link')) return false;
+            const h = (a.getAttribute('href') || '').trim();
+            if (h.length <= 1) return false;
+            const tEl = document.getElementById(h.slice(1));
+            if (!tEl) return false;
+            const cs = window.getComputedStyle(a);
+            return cs.display !== 'none' && cs.visibility !== 'hidden';
+        }).slice(0, 3);
+        if (hashCandidates.length > 0) {
+            report.hash_navigation_and_focus.present = true;
+            const origHashUrl = window.location.pathname + window.location.search + window.location.hash;
+            for (const hLink of hashCandidates) {
+                const rawH = hLink.getAttribute('href') || '';
+                const tId = rawH.slice(1);
+                const tEl = document.getElementById(tId);
+                if (!tEl) continue;
+                hLink.click();
+                report.hash_navigation_and_focus.links_tested_count += 1;
+                const focusedOk = (
+                    tEl.getAttribute('data-focused-target') === 'true' &&
+                    Boolean(document.activeElement && (document.activeElement === tEl || tEl.contains(document.activeElement)))
+                );
+                if (!focusedOk) {
+                    report.hash_navigation_and_focus.failures.push(rawH);
+                }
+            }
+            window.history.replaceState(null, '', origHashUrl);
+            window.scrollTo(0, 0);
+            if (report.hash_navigation_and_focus.failures.length > 0) {
+                report.hash_navigation_and_focus.passed = false;
+            }
+        }
+
+        // 3d. State-First Hero Bar bidirectional state sync & #hero-range-anchor verification
+        const heroStateSel = document.getElementById('quote-intake-hero-state');
+        if (heroStateSel && heroStateSel.options && heroStateSel.options.length > 1) {
+            report.hero_state_and_range_anchor.present = true;
+            const rangeAnchor = document.getElementById('hero-range-anchor');
+            report.hero_state_and_range_anchor.range_anchor_present = Boolean(
+                rangeAnchor && ((rangeAnchor.innerText || rangeAnchor.textContent || '').trim().length > 0)
+            );
+            const origHeroVal = heroStateSel.value;
+            const origStateUrl = window.location.pathname + window.location.search + window.location.hash;
+            const nextStateVal = origHeroVal === 'TX' ? 'NY' : 'TX';
+            heroStateSel.value = nextStateVal;
+            heroStateSel.dispatchEvent(new Event('change', { bubbles: true }));
+            report.hero_state_and_range_anchor.synced_state = heroStateSel.value;
+            const qStatePeer = document.getElementById('quote-intake-state');
+            const prStatePeer = document.getElementById('quote-intake-partner-reg-state');
+            const peerOk = (
+                (!qStatePeer || qStatePeer.value === nextStateVal) &&
+                (!prStatePeer || prStatePeer.value === nextStateVal)
+            );
+            report.hero_state_and_range_anchor.peer_sync_passed = peerOk;
+            heroStateSel.value = origHeroVal;
+            heroStateSel.dispatchEvent(new Event('change', { bubbles: true }));
+            window.history.replaceState(null, '', origStateUrl);
+            if (!report.hero_state_and_range_anchor.range_anchor_present || !peerOk) {
+                report.hero_state_and_range_anchor.passed = false;
+            }
+        }
+
+        // 3e. Empty-submit validation focus verification across monetization forms
+        const valForms = [
+            { form: document.getElementById('lead-capture-form') || document.querySelector('form.lead-capture-form'), name: 'lead-capture-form' },
+            { form: document.getElementById('partner-registration-form') || document.querySelector('form.partner-registration-form'), name: 'partner-registration-form' },
+            { form: document.getElementById('partner-quote-intake-form') || document.querySelector('form.partner-quote-intake-form'), name: 'partner-quote-intake-form' }
+        ].filter(x => Boolean(x.form));
+        if (valForms.length > 0) {
+            report.validation_focus_and_error_states.present = true;
+            for (const item of valForms) {
+                const fNode = item.form;
+                if (window.getComputedStyle(fNode).display === 'none') {
+                    fNode.style.display = 'block';
+                }
+                const qDrawer = fNode.closest ? fNode.closest('#partner-quote-intake-step') : null;
+                if (qDrawer && window.getComputedStyle(qDrawer).display === 'none') {
+                    qDrawer.style.display = 'block';
+                }
+                const emNode = fNode.querySelector('input[type="email"], input[name="email"]');
+                if (!emNode) continue;
+                const prevEm = emNode.value;
+                emNode.value = '';
+                if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
+                }
+                fNode.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                report.validation_focus_and_error_states.forms_tested_count += 1;
+                if (document.activeElement !== emNode || fNode.getAttribute('data-submission-state') === 'success') {
+                    report.validation_focus_and_error_states.focus_failures.push(item.name + ':email_focus');
+                }
+                emNode.value = prevEm;
+            }
+            if (report.validation_focus_and_error_states.focus_failures.length > 0) {
+                report.validation_focus_and_error_states.passed = false;
+            }
+        }
+
         // 4. Playbook subscription form POST + checkout trigger
         const leadForm = document.getElementById('lead-capture-form') || document.querySelector('form.lead-capture-form');
         if (leadForm) {
@@ -1336,6 +1593,190 @@ class UnifiedBrowserAuditor:
                 report.partner_quote_intake_and_checkout.checkout_status !== 'checkout_session_ready'
             ) {
                 report.partner_quote_intake_and_checkout.passed = false;
+            }
+        }
+
+        // 5b. Partner Registration Drawer ($299 Verified Partner Slot) POST + checkout trigger
+        const prForm = document.getElementById('partner-registration-form') || document.querySelector('form.partner-registration-form');
+        if (prForm) {
+            report.partner_registration_and_slot_checkout.present = true;
+            const prFirm = prForm.querySelector('input[name="firm_name"]');
+            const prEmail = prForm.querySelector('input[type="email"], input[name="email"]');
+            const prState = prForm.querySelector('select[name="state"]');
+            if (prFirm) prFirm.value = 'Apex Statutory Advisory LLP';
+            if (prEmail) prEmail.value = 'partner-desk@synthetic.pseofactory.test';
+            if (prState && !prState.value) prState.value = 'CA';
+            prForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            for (let i = 0; i < 60; i++) {
+                if (prForm.getAttribute('data-submission-state') === 'success') break;
+                await new Promise(r => setTimeout(r, 12));
+            }
+            report.partner_registration_and_slot_checkout.submission_state = prForm.getAttribute('data-submission-state') || '';
+            const prChkLink = document.getElementById('partner-slot-checkout-link');
+            if (prChkLink) {
+                report.partner_registration_and_slot_checkout.checkout_href = prChkLink.getAttribute('href') || '';
+                report.partner_registration_and_slot_checkout.focused_after_submit = (document.activeElement === prChkLink);
+                prChkLink.click();
+                for (let i = 0; i < 60; i++) {
+                    if (prChkLink.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
+                    await new Promise(r => setTimeout(r, 12));
+                }
+                report.partner_registration_and_slot_checkout.checkout_status = prChkLink.getAttribute('data-checkout-status') || '';
+                report.partner_registration_and_slot_checkout.checkout_session_id = prChkLink.getAttribute('data-checkout-session-id') || '';
+                report.partner_registration_and_slot_checkout.slot_price_usd = parseFloat(
+                    prChkLink.getAttribute('data-offer-price-usd') ||
+                    prChkLink.getAttribute('data-offer-price') ||
+                    prChkLink.getAttribute('data-attributed-revenue-usd') ||
+                    '0'
+                ) || 0;
+            }
+            if (
+                report.partner_registration_and_slot_checkout.submission_state !== 'success' ||
+                !report.partner_registration_and_slot_checkout.checkout_href.includes('_verified_partner_slot') ||
+                report.partner_registration_and_slot_checkout.checkout_status !== 'checkout_session_ready' ||
+                report.partner_registration_and_slot_checkout.slot_price_usd !== 299
+            ) {
+                report.partner_registration_and_slot_checkout.passed = false;
+            }
+        }
+
+        // 5c. Deep Sellable Assets (HTML/CSV/Datapack), 402 Payment Gate & Email Dispatch Verification
+        if (upgDrawer || leadForm) {
+            report.sellable_assets_and_fulfillment_gate.present = true;
+            try {
+                const unpaidResp = await fetch('/api/lead-fulfillment?lead_id=unpaid_probe_check', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' }
+                });
+                const unpaidJson = await unpaidResp.json().catch(() => ({}));
+                report.sellable_assets_and_fulfillment_gate.unpaid_402_enforced = (
+                    unpaidResp.status === 402 &&
+                    unpaidJson.status === 'payment_required' &&
+                    unpaidJson.settled === false
+                );
+                if (!report.sellable_assets_and_fulfillment_gate.unpaid_402_enforced) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('unpaid_402_gate_not_enforced');
+                }
+            } catch (e) {
+                report.sellable_assets_and_fulfillment_gate.failures.push('unpaid_402_fetch_error');
+            }
+
+            try {
+                const pbDlEl = document.getElementById('playbook-download-link');
+                const pbCsvEl = document.getElementById('playbook-csv-link');
+                const pbDpEl = document.getElementById('playbook-datapack-link');
+                const pbJsonUrl = (leadForm && leadForm.getAttribute('data-playbook-url')) || '/api/lead-capture?playbook=1';
+                const pbJsonResp = await fetch(pbJsonUrl, { headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' } });
+                const pbJsonData = await pbJsonResp.json().catch(() => ({}));
+                const pbArts = Array.isArray(pbJsonData.statutory_execution_artifacts)
+                    ? pbJsonData.statutory_execution_artifacts
+                    : (pbJsonData.statutory_data_pack && Array.isArray(pbJsonData.statutory_data_pack.statutory_execution_artifacts)
+                        ? pbJsonData.statutory_data_pack.statutory_execution_artifacts
+                        : []);
+                report.sellable_assets_and_fulfillment_gate.free_playbook_verified = (
+                    pbJsonResp.status === 200 &&
+                    pbJsonData.status === 'playbook_ready' &&
+                    Array.isArray(pbJsonData.reconciliation_schedule) && pbJsonData.reconciliation_schedule.length >= 3 &&
+                    Array.isArray(pbJsonData.sensitivity_matrix) && pbJsonData.sensitivity_matrix.length >= 3 &&
+                    pbArts.length >= 1 &&
+                    pbArts.every(a =>
+                        a.redaction_state === 'PREVIEW_REDACTED' ||
+                        a.execution_status === 'PREVIEW_REDACTED_PENDING_CHECKOUT' ||
+                        String(a.statutory_clause_body || a.body_preview || '').includes('REDACTED')
+                    )
+                );
+                if (!report.sellable_assets_and_fulfillment_gate.free_playbook_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('free_playbook_contract_failed');
+                }
+
+                const pbCsvHref = (pbCsvEl && pbCsvEl.getAttribute('href')) || (pbJsonUrl + '&format=csv');
+                const pbCsvResp = await fetch(pbCsvHref, { headers: { 'X-Pseofactory-Test': '1' } });
+                const pbCsvTxt = await pbCsvResp.text();
+                report.sellable_assets_and_fulfillment_gate.free_csv_verified = (
+                    pbCsvResp.status === 200 && pbCsvTxt.trim().split(/\\r?\\n/).length >= 4
+                );
+                if (!report.sellable_assets_and_fulfillment_gate.free_csv_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('free_csv_contract_failed');
+                }
+
+                const pbDpHref = (pbDpEl && pbDpEl.getAttribute('href')) || (pbJsonUrl + '&format=datapack');
+                const pbDpResp = await fetch(pbDpHref, { headers: { 'X-Pseofactory-Test': '1' } });
+                const pbDpJson = await pbDpResp.json().catch(() => ({}));
+                report.sellable_assets_and_fulfillment_gate.free_datapack_verified = (
+                    pbDpResp.status === 200 && Boolean(pbDpJson && (pbDpJson.pack_id || pbDpJson.reconciliation_schedule))
+                );
+                if (!report.sellable_assets_and_fulfillment_gate.free_datapack_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('free_datapack_contract_failed');
+                }
+
+                const ffHtmlEl = document.getElementById('checkout-fulfillment-html-link');
+                const ffCsvEl = document.getElementById('checkout-fulfillment-csv-link');
+                const ffDpEl = document.getElementById('checkout-fulfillment-datapack-link');
+                const ffHtmlHref = (ffHtmlEl && ffHtmlEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=html';
+                const ffCsvHref = (ffCsvEl && ffCsvEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=csv';
+                const ffDpHref = (ffDpEl && ffDpEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=datapack';
+
+                const [ffHtmlResp, ffCsvResp, ffDpResp] = await Promise.all([
+                    fetch(ffHtmlHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch(ffCsvHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch(ffDpHref, { headers: { 'X-Pseofactory-Test': '1' } })
+                ]);
+                const ffHtmlTxt = await ffHtmlResp.text();
+                const ffCsvTxt = await ffCsvResp.text();
+                const ffDpJson = await ffDpResp.json().catch(() => ({}));
+                const ffExecInst = Array.isArray(ffDpJson.statutory_execution_artifacts)
+                    ? ffDpJson.statutory_execution_artifacts
+                    : (Array.isArray(ffDpJson.execution_instruments) ? ffDpJson.execution_instruments : []);
+                report.sellable_assets_and_fulfillment_gate.paid_html_verified = (
+                    ffHtmlResp.status === 200 && ffHtmlTxt.includes('<table') && ffHtmlTxt.length > 400
+                );
+                report.sellable_assets_and_fulfillment_gate.paid_csv_verified = (
+                    ffCsvResp.status === 200 && ffCsvTxt.trim().split(/\\r?\\n/).length >= 4
+                );
+                report.sellable_assets_and_fulfillment_gate.paid_datapack_verified = (
+                    ffDpResp.status === 200 &&
+                    Boolean(ffDpJson && ffDpJson.pack_id) &&
+                    ffExecInst.length >= 1 &&
+                    ffExecInst.every(inst =>
+                        inst.redaction_state === 'UNREDACTED_READY_FOR_FILING' ||
+                        inst.execution_status === 'UNREDACTED_READY_FOR_FILING'
+                    )
+                );
+                if (!report.sellable_assets_and_fulfillment_gate.paid_html_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('paid_html_contract_failed');
+                }
+                if (!report.sellable_assets_and_fulfillment_gate.paid_csv_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('paid_csv_contract_failed');
+                }
+                if (!report.sellable_assets_and_fulfillment_gate.paid_datapack_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('paid_datapack_contract_failed');
+                }
+
+                const emailCheckResp = await fetch('/api/lead-capture', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
+                    body: JSON.stringify({
+                        email: 'email-telemetry-probe@synthetic.pseofactory.test',
+                        tool_slug: window.location.pathname,
+                        synthetic_test: true
+                    })
+                });
+                const emailCheckJson = await emailCheckResp.json().catch(() => ({}));
+                report.sellable_assets_and_fulfillment_gate.email_dispatch_verified = (
+                    emailCheckResp.status === 200 &&
+                    Boolean(emailCheckJson.zeptomail_status) &&
+                    Boolean(emailCheckJson.fulfillment_status) &&
+                    Boolean(emailCheckJson.playbook_url) &&
+                    Boolean(emailCheckJson.checkout_url)
+                );
+                if (!report.sellable_assets_and_fulfillment_gate.email_dispatch_verified) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('email_dispatch_telemetry_failed');
+                }
+            } catch (e) {
+                report.sellable_assets_and_fulfillment_gate.failures.push('sellable_asset_verification_exception');
+            }
+            if (report.sellable_assets_and_fulfillment_gate.failures.length > 0) {
+                report.sellable_assets_and_fulfillment_gate.passed = false;
             }
         }
 
@@ -1731,6 +2172,11 @@ class UnifiedBrowserAuditor:
             and (report.get("post_calc_upgrade_drawer") or {}).get("passed", True)
             and (report.get("playbook_lead_capture_and_checkout") or {}).get("passed", True)
             and (report.get("partner_quote_intake_and_checkout") or {}).get("passed", True)
+            and (report.get("partner_registration_and_slot_checkout") or {}).get("passed", True)
+            and (report.get("hash_navigation_and_focus") or {}).get("passed", True)
+            and (report.get("hero_state_and_range_anchor") or {}).get("passed", True)
+            and (report.get("validation_focus_and_error_states") or {}).get("passed", True)
+            and (report.get("sellable_assets_and_fulfillment_gate") or {}).get("passed", True)
             and (report.get("affiliate_redirect_and_telemetry") or {}).get("passed", True)
         )
         return report
@@ -2266,7 +2712,11 @@ class UnifiedBrowserAuditor:
         all_routes = [r for r in extractor.extract_routes() if r not in self.excluded_routes]
 
         if sample_size is not None and sample_size > 0:
-            routes_to_audit = all_routes[:sample_size]
+            routes_to_audit = extractor.select_smart_routes(
+                all_routes=all_routes,
+                sample_size=sample_size,
+                widget_specs=self.widget_specs,
+            )
         else:
             routes_to_audit = all_routes
 

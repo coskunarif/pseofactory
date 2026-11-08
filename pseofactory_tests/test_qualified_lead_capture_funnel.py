@@ -982,12 +982,28 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             assert report["playbook_lead_capture_and_checkout"]["passed"] is True
             assert report["partner_quote_intake_and_checkout"]["present"] is True
             assert report["partner_quote_intake_and_checkout"]["passed"] is True
+            assert report["partner_registration_and_slot_checkout"]["present"] is True
+            assert report["partner_registration_and_slot_checkout"]["passed"] is True
+            assert report["partner_registration_and_slot_checkout"]["slot_price_usd"] == 299
+            assert report["hash_navigation_and_focus"]["links_tested_count"] >= 1
+            assert report["hash_navigation_and_focus"]["passed"] is True
+            assert report["hero_state_and_range_anchor"]["present"] is True
+            assert report["hero_state_and_range_anchor"]["passed"] is True
+            assert report["validation_focus_and_error_states"]["present"] is True
+            assert report["validation_focus_and_error_states"]["passed"] is True
+            assert report["sellable_assets_and_fulfillment_gate"]["present"] is True
+            assert report["sellable_assets_and_fulfillment_gate"]["passed"] is True
+            assert report["sellable_assets_and_fulfillment_gate"]["unpaid_402_enforced"] is True
+            assert report["sellable_assets_and_fulfillment_gate"]["free_playbook_verified"] is True
+            assert report["sellable_assets_and_fulfillment_gate"]["paid_datapack_verified"] is True
+            assert report["sellable_assets_and_fulfillment_gate"]["email_dispatch_verified"] is True
             assert report["focus_and_keyboard_navigation"]["passed"] is True
             assert report["focus_and_keyboard_navigation"]["skip_link_valid"] is True
             assert report["focus_and_keyboard_navigation"]["zero_outline_failures"] == []
             assert report["affiliate_redirect_and_telemetry"]["tested"] is True
             assert report["affiliate_redirect_and_telemetry"]["passed"] is True
             assert report["affiliate_redirect_and_telemetry"]["dom_click_handled"] is True
+            assert report["affiliate_redirect_and_telemetry"]["partners_verified_count"] >= 1
 
             assert len(server.captured_leads) >= 2
             assert len(server.checkout_sessions) >= 2
@@ -1020,6 +1036,10 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             continue
         real_routes = RouteManifestExtractor(real_dist).extract_routes()
         assert len(real_routes) >= expected_min_routes, f"{prop_id} expected >={expected_min_routes} routes, got {len(real_routes)}"
+        smart_sample = RouteManifestExtractor(real_dist).select_smart_routes(real_routes, 5)
+        assert len(smart_sample) == min(5, len(real_routes))
+        assert "/" in smart_sample
+        assert any(r.startswith("/tools/") and r != "/tools/" for r in smart_sample)
         real_sample_dist = tmp_path / f"real_{prop_id}" / "dist"
         real_sample_dist.mkdir(parents=True, exist_ok=True)
         for rel_f in sample_rel_files:

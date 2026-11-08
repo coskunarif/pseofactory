@@ -2587,11 +2587,17 @@ class LiveEdgeVerifier:
             "User-Agent": ua,
             "X-Pseofactory-Test": "1",
         }
-        primary_partner = (
-            "splash_financial"
-            if property_id == "prexvo"
-            else ("vanta_security" if property_id == "gainhelm" else "mercury")
-        )
+        partner_cohort = {
+            "prexvo": ("splash_financial", "sofi_refi", "simply_business"),
+            "gainhelm": ("vanta_security", "drata_compliance", "simply_business"),
+            "lienbond": ("simply_business", "suretybonds_direct", "lawdepot"),
+            "profithelm": ("mercury", "simply_business", "lawdepot"),
+        }.get(property_id, ("mercury", "simply_business"))
+        slot_sku = {
+            "prexvo": "px_verified_partner_slot",
+            "gainhelm": "gh_verified_partner_slot",
+            "lienbond": "lb_verified_partner_slot",
+        }.get(property_id, "ph_verified_partner_slot")
         foreign_domains = {
             "prexvo": ("profithelm.com", "gainhelm.com"),
             "gainhelm": ("profithelm.com", "prexvo.com"),
@@ -2606,9 +2612,12 @@ class LiveEdgeVerifier:
             method: str = "GET",
             payload: Optional[Dict[str, Any]] = None,
             allowed_codes: Tuple[int, ...] = (200,),
+            synthetic_header: bool = True,
         ) -> Tuple[int, str, Optional[Dict[str, Any]], float]:
             url = f"{base}{path}"
             hdrs = dict(base_headers)
+            if not synthetic_header:
+                hdrs.pop("X-Pseofactory-Test", None)
             data = None
             if payload is not None:
                 hdrs["Content-Type"] = "application/json"
@@ -2671,6 +2680,8 @@ class LiveEdgeVerifier:
             and isinstance(j2, dict)
             and j2.get("status") == "playbook_ready"
             and j2.get("property_id") == property_id
+            and isinstance(j2.get("reconciliation_schedule"), list)
+            and len(j2.get("reconciliation_schedule") or []) >= 3
             and not any(fd in b2.lower() for fd in foreign_domains)
         )
         routes["GET /api/lead-capture?playbook=1"] = {
@@ -2681,12 +2692,23 @@ class LiveEdgeVerifier:
         if not r2_ok:
             issues.append(f"GET /api/lead-capture?playbook=1 failed (HTTP {c2})")
 
-        # 3. GET /api/lead-capture?checkout=1&format=json
-        c3, b3, j3, l3 = _req_json("/api/lead-capture?checkout=1&format=json", "GET", None, (200, 503))
+        # 3. GET /api/lead-capture?checkout=1&format=json (live Stripe session verification, no KV write)
+        c3, b3, j3, l3 = _req_json(
+            "/api/lead-capture?checkout=1&format=json",
+            "GET",
+            None,
+            (200,),
+            synthetic_header=False,
+        )
         merchant_email = str(j3.get("stripe_merchant_email") or "") if isinstance(j3, dict) else ""
+        chk_mode3 = str(j3.get("checkout_mode") or "") if isinstance(j3, dict) else ""
+        chk_url3 = str(j3.get("checkout_url") or "") if isinstance(j3, dict) else ""
         r3_ok = (
-            c3 in (200, 503)
+            c3 == 200
             and isinstance(j3, dict)
+            and j3.get("status") == "checkout_session_ready"
+            and chk_mode3 in ("stripe_live_session", "edge_checkout_rail")
+            and bool(chk_url3)
             and j3.get("property_id") == property_id
             and (not merchant_email or merchant_email.endswith(f"@{property_id}.com"))
             and not any(fd in b3.lower() for fd in foreign_domains)
@@ -2695,12 +2717,38 @@ class LiveEdgeVerifier:
             "status": "PASS" if r3_ok else "FAIL",
             "status_code": c3,
             "latency_ms": l3,
+            "checkout_mode": chk_mode3,
             "stripe_merchant_email": merchant_email,
         }
         if not r3_ok:
             issues.append(
-                f"GET /api/lead-capture?checkout=1&format=json failed (HTTP {c3}, merchant='{merchant_email}')"
+                f"GET /api/lead-capture?checkout=1&format=json failed (HTTP {c3}, mode='{chk_mode3}', merchant='{merchant_email}')"
             )
+
+        # 3b. GET /api/lead-capture?checkout=1&sku=<slot_sku>&format=json ($299 Partner Slot SKU verification)
+        c3b, b3b, j3b, l3b = _req_json(
+            f"/api/lead-capture?checkout=1&sku={slot_sku}&format=json",
+            "GET",
+            None,
+            (200,),
+            synthetic_header=False,
+        )
+        r3b_ok = (
+            c3b == 200
+            and isinstance(j3b, dict)
+            and j3b.get("status") == "checkout_session_ready"
+            and j3b.get("offer_sku") == slot_sku
+            and float(j3b.get("offer_price_usd") or 0) == 299.0
+            and bool(j3b.get("checkout_url"))
+        )
+        routes[f"GET /api/lead-capture?checkout=1&sku={slot_sku}&format=json"] = {
+            "status": "PASS" if r3b_ok else "FAIL",
+            "status_code": c3b,
+            "latency_ms": l3b,
+            "offer_sku": slot_sku,
+        }
+        if not r3b_ok:
+            issues.append(f"GET /api/lead-capture?checkout=1&sku={slot_sku}&format=json failed (HTTP {c3b})")
 
         # 4. POST /api/lead-capture (synthetic probe)
         c4, b4, j4, l4 = _req_json(
@@ -2728,11 +2776,48 @@ class LiveEdgeVerifier:
         if not r4_ok:
             issues.append(f"POST /api/lead-capture synthetic probe failed (HTTP {c4})")
 
+        # 4b. POST /api/lead-capture (partner_registration synthetic probe)
+        c4b, b4b, j4b, l4b = _req_json(
+            "/api/lead-capture",
+            "POST",
+            {
+                "intent": "partner_registration",
+                "lead_type": "partner_registration",
+                "firm_name": "Apex Statutory Desk LLP",
+                "email": "partner-probe@synthetic.pseofactory.test",
+                "state": "CA",
+                "synthetic_test": True,
+            },
+            (200,),
+        )
+        r4b_ok = (
+            c4b == 200
+            and isinstance(j4b, dict)
+            and j4b.get("status") == "partner_registered"
+            and j4b.get("offer_sku") == slot_sku
+            and float(j4b.get("offer_price_usd") or 0) == 299.0
+        )
+        routes["POST /api/lead-capture (partner_registration)"] = {
+            "status": "PASS" if r4b_ok else "FAIL",
+            "status_code": c4b,
+            "latency_ms": l4b,
+            "offer_sku": j4b.get("offer_sku") if isinstance(j4b, dict) else None,
+        }
+        if not r4b_ok:
+            issues.append(f"POST /api/lead-capture partner_registration probe failed (HTTP {c4b})")
+
         # 5. GET /api/checkout?format=json
-        c5, b5, j5, l5 = _req_json("/api/checkout?format=json", "GET", None, (200, 503))
+        c5, b5, j5, l5 = _req_json(
+            "/api/checkout?format=json",
+            "GET",
+            None,
+            (200,),
+            synthetic_header=False,
+        )
         r5_ok = (
-            c5 in (200, 503)
+            c5 == 200
             and isinstance(j5, dict)
+            and j5.get("status") == "checkout_session_ready"
             and j5.get("property_id") == property_id
             and not any(fd in b5.lower() for fd in foreign_domains)
         )
@@ -2760,38 +2845,39 @@ class LiveEdgeVerifier:
         if not r6_ok:
             issues.append(f"GET /api/lead-fulfillment expected HTTP 402 payment_required, got HTTP {c6}")
 
-        # 7. GET /r/<partner> (HTTP 302 redirect)
+        # 7. GET /r/<partner> (HTTP 302 redirect across tenant partner cohort)
         class _NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
 
-        r_path = f"/r/{primary_partner}"
-        r_url = f"{base}{r_path}"
         opener = urllib.request.build_opener(_NoRedirect)
-        req7 = urllib.request.Request(r_url, headers=base_headers, method="GET")
-        t0 = time.time()
-        c7 = 0
-        loc7 = ""
-        try:
-            with opener.open(req7, timeout=self.timeout) as resp7:
-                c7 = resp7.getcode()
-                loc7 = resp7.headers.get("Location", "")
-        except urllib.error.HTTPError as he7:
-            c7 = he7.code
-            if hasattr(he7, "headers") and he7.headers:
-                loc7 = he7.headers.get("Location", "")
-        except Exception:
+        for p_key in partner_cohort:
+            r_path = f"/r/{p_key}"
+            r_url = f"{base}{r_path}"
+            req7 = urllib.request.Request(r_url, headers=base_headers, method="GET")
+            t0 = time.time()
             c7 = 0
-        l7 = round((time.time() - t0) * 1000, 1)
-        r7_ok = c7 in (301, 302, 307, 308) and bool(loc7)
-        routes[f"GET {r_path}"] = {
-            "status": "PASS" if r7_ok else "FAIL",
-            "status_code": c7,
-            "latency_ms": l7,
-            "location": loc7,
-        }
-        if not r7_ok:
-            issues.append(f"GET {r_path} expected HTTP 302 redirect, got HTTP {c7}")
+            loc7 = ""
+            try:
+                with opener.open(req7, timeout=self.timeout) as resp7:
+                    c7 = resp7.getcode()
+                    loc7 = resp7.headers.get("Location", "")
+            except urllib.error.HTTPError as he7:
+                c7 = he7.code
+                if hasattr(he7, "headers") and he7.headers:
+                    loc7 = he7.headers.get("Location", "")
+            except Exception:
+                c7 = 0
+            l7 = round((time.time() - t0) * 1000, 1)
+            r7_ok = c7 in (301, 302, 307, 308) and bool(loc7)
+            routes[f"GET {r_path}"] = {
+                "status": "PASS" if r7_ok else "FAIL",
+                "status_code": c7,
+                "latency_ms": l7,
+                "location": loc7,
+            }
+            if not r7_ok:
+                issues.append(f"GET {r_path} expected HTTP 302 redirect, got HTTP {c7}")
 
         all_ok = len(issues) == 0
         return {

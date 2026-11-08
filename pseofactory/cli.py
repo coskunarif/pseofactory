@@ -97,12 +97,14 @@ def cmd_audit(args: argparse.Namespace) -> int:
             ProfitHelmBrowserAdapter,
             PrexvoBrowserAdapter,
             GainHelmBrowserAdapter,
+            LienBondBrowserAdapter,
         )
         prop = (args.property or "").lower()
         adapter_map = {
             "profithelm": ProfitHelmBrowserAdapter,
             "prexvo": PrexvoBrowserAdapter,
             "gainhelm": GainHelmBrowserAdapter,
+            "lienbond": LienBondBrowserAdapter,
         }
         if prop == "all" and not args.dist_dir:
             all_browser_ok = True
@@ -195,11 +197,13 @@ def cmd_audit(args: argparse.Namespace) -> int:
         ProfitHelmBrowserAdapter as _PHAdapter,
         PrexvoBrowserAdapter as _PXAdapter,
         GainHelmBrowserAdapter as _GHAdapter,
+        LienBondBrowserAdapter as _LBAdapter,
     )
     _default_adapter_map = {
         "profithelm": _PHAdapter,
         "prexvo": _PXAdapter,
         "gainhelm": _GHAdapter,
+        "lienbond": _LBAdapter,
     }
 
     if property_id == "all":

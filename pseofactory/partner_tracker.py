@@ -4857,7 +4857,33 @@ def resolve_lead_monetization_offer(
     sku_clean = (sku or "").strip().lower()
     eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
 
-    if prop_clean == "prexvo" or sku_clean == "px_refi_amortization_decision_audit":
+    if sku_clean in (
+        "ph_verified_partner_slot",
+        "px_verified_partner_slot",
+        "gh_verified_partner_slot",
+        "lb_verified_partner_slot",
+    ):
+        slot_prefix_map = {
+            "px_verified_partner_slot": ("prexvo", "https://prexvo.com", "student-loan-refinance-break-even-calculator"),
+            "gh_verified_partner_slot": ("gainhelm", "https://gainhelm.com", "soc-2-audit-cost-calculator"),
+            "lb_verified_partner_slot": ("lienbond", "https://lienbond.com", "contractor-license-bond-cost-calculator-by-credit-score"),
+            "ph_verified_partner_slot": ("profithelm", "https://profithelm.com", "section-1031-calculator"),
+        }
+        prop_clean, canonical_domain, default_slot_slug = slot_prefix_map[sku_clean]
+        offer_sku = sku_clean
+        offer_title = "Verified Calculator Partner Slot"
+        offer_price_usd = 299.0
+        offer_price_cents = 29900
+        statutory_authority = "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol"
+        deliverables = [
+            "Verified Commercial Partner Desk Placement on Target Calculator Route",
+            "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+            "Direct Calculator CTA & Partner Matrix Priority Slot",
+            "Monthly Partner Attribution & Conversion Reconciliation Digest",
+        ]
+        eff_slug_for_path = slug_clean if slug_clean not in ("index", "general") else default_slot_slug
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+    elif prop_clean == "prexvo" or sku_clean == "px_refi_amortization_decision_audit":
         prop_clean = "prexvo"
         if is_restricted_public_service_slug(slug_clean, slug_clean):
             raise ValueError(
@@ -5055,6 +5081,8 @@ def resolve_lead_monetization_offer(
     )
     checkout_url = f"/api/lead-capture?{checkout_query}"
     playbook_url = f"/api/lead-capture?{playbook_query}"
+    playbook_csv_url = f"{playbook_url}&format=csv"
+    playbook_datapack_url = f"{playbook_url}&format=datapack"
     fulfillment_url = f"/api/lead-capture?{fulfill_query}"
     csv_fulfillment_url = f"{fulfillment_url}&format=csv"
     datapack_url = f"{fulfillment_url}&format=datapack"
@@ -5075,6 +5103,8 @@ def resolve_lead_monetization_offer(
         "checkout_url": checkout_url,
         "live_checkout_endpoint": f"{canonical_domain}{checkout_url}",
         "playbook_url": playbook_url,
+        "playbook_csv_url": playbook_csv_url,
+        "playbook_datapack_url": playbook_datapack_url,
         "live_playbook_endpoint": f"{canonical_domain}{playbook_url}",
         "fulfillment_url": fulfillment_url,
         "live_fulfillment_endpoint": f"{canonical_domain}{fulfillment_url}",
@@ -5505,6 +5535,51 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
         if s["series_id"] not in {x["series_id"] for x in ordered}:
             ordered.append(s)
     return ordered[:5]
+
+
+def _synthesize_statutory_execution_artifacts(
+    prop_clean: str,
+    state_code: str,
+    base_amount: float,
+    offer: Dict[str, Any],
+    mode: str,
+) -> List[Dict[str, Any]]:
+    is_paid = mode == "paid_toolkit"
+    exec_status = "UNREDACTED_READY_FOR_FILING" if is_paid else "PREVIEW_REDACTED_PENDING_CHECKOUT"
+    redact_state = "UNREDACTED_READY_FOR_FILING" if is_paid else "PREVIEW_REDACTED"
+    statute = str(offer.get("statutory_authority") or "IRC Section 199A / Section 179")
+    prefix = {"prexvo": "PX", "gainhelm": "GH", "lienbond": "LB"}.get(prop_clean, "PH")
+    return [
+        {
+            "instrument_id": f"{prefix}-EXEC-101",
+            "instrument_title": f"{state_code} Primary Statutory Election & Filing Instrument ({offer['offer_title']})",
+            "controlling_statute": statute,
+            "filing_deadline_rule": "Timely Statutory Filing With Applicable Return / Notice Window",
+            "execution_status": exec_status,
+            "redaction_state": redact_state,
+            "statutory_clause_body": (
+                f"BINDING STATUTORY EXECUTION INSTRUMENT ({state_code} - {statute}): Modeled principal "
+                f"${base_amount:,.2f} certified for filing attachment and audit reconciliation."
+                if is_paid
+                else f"STATUTORY INSTRUMENT PREVIEW ({state_code} - {statute}): Modeled principal "
+                f"${base_amount:,.2f}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]"
+            ),
+        },
+        {
+            "instrument_id": f"{prefix}-EXEC-102",
+            "instrument_title": f"{state_code} Safe-Harbor Compliance & Substantiation Schedule",
+            "controlling_statute": statute,
+            "filing_deadline_rule": "Retain Contemporaneous Substantiation Workpapers in Audit Binder",
+            "execution_status": exec_status,
+            "redaction_state": redact_state,
+            "statutory_clause_body": (
+                f"SAFE-HARBOR SUBSTANTIATION WORKPAPER ({state_code}): Contemporaneous reconciliation of "
+                f"${base_amount:,.2f} under {statute} verified for examiner inspection."
+                if is_paid
+                else f"SAFE-HARBOR SUBSTANTIATION PREVIEW ({state_code}): [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]"
+            ),
+        },
+    ]
 
 
 def synthesize_personalized_audit_workpaper(
@@ -6068,6 +6143,14 @@ def synthesize_personalized_audit_workpaper(
         ),
     }
 
+    statutory_execution_artifacts = _synthesize_statutory_execution_artifacts(
+        prop_clean=prop_clean,
+        state_code=state_code,
+        base_amount=base_amount,
+        offer=offer,
+        mode=mode,
+    )
+
     statutory_data_pack = {
         "pack_id": f"dp_{lead_id}",
         "schema_version": "pseo-datapack-v1",
@@ -6083,6 +6166,8 @@ def synthesize_personalized_audit_workpaper(
         "reconciliation_schedule": reconciliation_schedule,
         "sensitivity_matrix": sensitivity_matrix,
         "longitudinal_benchmark_series": statutory_trend_timeseries,
+        "statutory_execution_artifacts": statutory_execution_artifacts,
+        "execution_instruments": statutory_execution_artifacts,
         "settlement_attribution": settlement_attribution,
     }
 
@@ -6147,6 +6232,7 @@ def synthesize_personalized_audit_workpaper(
         "scenario_outputs": raw_outputs,
         "custom_parameter_ledger": custom_parameter_ledger,
         "statutory_trend_timeseries": statutory_trend_timeseries,
+        "statutory_execution_artifacts": statutory_execution_artifacts,
         "statutory_data_pack": statutory_data_pack,
         "settlement_attribution": settlement_attribution,
         "reconciliation_schedule": reconciliation_schedule,

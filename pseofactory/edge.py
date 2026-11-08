@@ -3836,6 +3836,21 @@ const LIENBOND_TOOLKIT_OFFERS = {
       "Signed Workers' Comp Premium Audit & Experience Rating Verification Manifest (JSON)",
     ],
   },
+  lb_verified_partner_slot: {
+    sku: "lb_verified_partner_slot",
+    title: "Verified Calculator Partner Slot",
+    price_usd: 299,
+    price_cents: 29900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
+    deliverables: [
+      "Verified Commercial Partner Desk Placement on Target Calculator Route",
+      "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+      "Direct Calculator CTA & Partner Matrix Priority Slot",
+      "Monthly Partner Attribution & Conversion Reconciliation Digest",
+    ],
+  },
 };
 
 function getLeadsKv(env) {
@@ -5097,8 +5112,9 @@ export async function onRequestGet(context) {
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
   const summary = {
-    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription").length,
+    qualified_quotes_count: leads.filter((l) => l.lead_type !== "playbook_subscription" && l.lead_type !== "partner_registration").length,
     playbook_subscriptions_count: leads.filter((l) => l.lead_type === "playbook_subscription").length,
+    partner_registrations_count: leads.filter((l) => l.lead_type === "partner_registration").length,
     zeptomail_dispatched_count: leads.filter((l) => Boolean(l.zeptomail_dispatched)).length,
     fulfilled_count: leads.filter((l) => l.lifecycle_stage === "fulfilled" || Boolean(l.email_message_id)).length,
     settled_upgrades_count: settledCount,
@@ -5239,6 +5255,55 @@ export async function onRequestPost(context) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid contractor or business email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+
+    const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
+    if (intentParam === "partner_registration") {
+      const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Surety & Insurance Partner Agency";
+      const partnerLeadId = String(body.lead_id || `lead_lienbond_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      const partnerSku = "lb_verified_partner_slot";
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const partnerRecord = {
+        lead_id: partnerLeadId,
+        property_id: "lienbond",
+        lead_type: "partner_registration",
+        intent: "partner_registration",
+        lifecycle_stage: "partner_registered",
+        tool_slug: toolSlug,
+        vertical: "commercial_surety_insurance",
+        email,
+        firm_name: firmName,
+        state,
+        offer_sku: partnerSku,
+        offer_title: "Verified Calculator Partner Slot",
+        offer_price_usd: 299,
+        checkout_url: partnerCheckoutUrl,
+        captured_at: new Date().toISOString(),
+      };
+      if (!isSynth) {
+        const buf = getMemoryBuffer();
+        buf.unshift(partnerRecord);
+        if (buf.length > 250) buf.length = 250;
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {
+          const partnerMeta = buildEdgeLeadKvMetadata(partnerRecord);
+          await kv.put(partnerLeadId, JSON.stringify(partnerRecord), {
+            expirationTtl: 90 * 86400,
+            metadata: partnerMeta,
+          });
+        }
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          success: true,
+          synthetic_test: isSynth,
+          persisted: !isSynth,
+          status: "partner_registered",
+          ...partnerRecord,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
 
