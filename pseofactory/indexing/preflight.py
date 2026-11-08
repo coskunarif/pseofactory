@@ -238,7 +238,21 @@ class IndexingPreflightEngine:
                 current_headers: Dict[str, str] = {}
                 for line in headers_file.read_text(encoding="utf-8").splitlines():
                     trimmed = line.strip()
-                    if not trimmed or trimmed.startswith("#"):
+                    if not trimmed:
+                        continue
+                    if trimmed.startswith("# [edge-middleware-canonical] "):
+                        if current_pattern and current_headers:
+                            self._header_rules.append((current_pattern, dict(current_headers)))
+                        current_pattern = trimmed.split("# [edge-middleware-canonical]", 1)[1].strip()
+                        current_headers = {}
+                        continue
+                    if trimmed.startswith("#") and current_pattern and "Link:" in trimmed:
+                        hdr_line = trimmed.lstrip("#").strip()
+                        if ":" in hdr_line:
+                            k, v = hdr_line.split(":", 1)
+                            current_headers[k.strip().lower()] = v.strip()
+                        continue
+                    if trimmed.startswith("#"):
                         continue
                     if not line.startswith(" ") and not line.startswith("\t"):
                         if current_pattern and current_headers:

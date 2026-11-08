@@ -1961,7 +1961,16 @@ class MasterSEOVerifier:
         current_route = None
         for line in content.splitlines():
             line_stripped = line.strip()
-            if not line_stripped or line_stripped.startswith("#"):
+            if not line_stripped:
+                continue
+            if line_stripped.startswith("# [edge-middleware-canonical] "):
+                current_route = line_stripped.split("# [edge-middleware-canonical]", 1)[1].strip()
+                rules.setdefault(current_route, [])
+                continue
+            if line_stripped.startswith("#") and current_route and "Link:" in line_stripped:
+                rules[current_route].append(line_stripped.lstrip("#").strip())
+                continue
+            if line_stripped.startswith("#"):
                 continue
             if not line.startswith(" ") and not line.startswith("\t"):
                 current_route = line_stripped

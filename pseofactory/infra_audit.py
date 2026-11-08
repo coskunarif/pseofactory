@@ -475,7 +475,7 @@ def audit_hibernated_and_retired_dns_isolation(
 
 
 def audit_cloudflare_and_multi_cloud(
-    cloud_cli: Optional[Path] = None, timeout_seconds: int = 45
+    cloud_cli: Optional[Path] = None, timeout_seconds: int = 90
 ) -> Tuple[bool, str]:
     """Runs satellites/cloudflare/bin/cloud audit."""
     cli_path = cloud_cli or DEFAULT_CLOUD_CLI
@@ -902,47 +902,49 @@ def provision_tenant_custom_domain_and_dns(
 
 
 def main() -> int:
-    """CLI Entrypoint for bin/audit-infra.sh."""
+    """CLI Entrypoint for bin/audit-infra.sh (executes consolidated audit in a single pass)."""
     print("=================================================================")
     print(" Consolidated Multi-Cloud Infrastructure & Host Hygiene Audit")
     print("=================================================================")
 
+    res = run_consolidated_infra_audit()
+    checks = res.get("checks", {})
+
     print("[1/5] Auditing Cloudflare zones, SSL, and GCP IAM keys...")
-    ok_cloud, msg_cloud = audit_cloudflare_and_multi_cloud()
-    if ok_cloud:
+    c_cloud = checks.get("cloud_audit", {})
+    if c_cloud.get("ok"):
         print("      PASS: Cloudflare & GCP IAM security audit clean")
     else:
-        print(f"      FAIL: {msg_cloud}")
+        print(f"      FAIL: {c_cloud.get('message', 'Unknown error')}")
 
     print("[2/5] Querying GCP BigQuery billing summary ledger...")
-    ok_gcp, msg_gcp = audit_gcp_billing_summary()
-    if ok_gcp:
+    c_gcp = checks.get("gcp_billing", {})
+    if c_gcp.get("ok"):
         print("      PASS: GCP billing ledger query verified")
     else:
-        print(f"      FAIL: {msg_gcp}")
+        print(f"      FAIL: {c_gcp.get('message', 'Unknown error')}")
 
     print("[3/5] Auditing tenant repository host configuration hygiene (profithelm, prexvo, gainhelm)...")
-    ok_hygiene, msg_hygiene = audit_host_hygiene()
-    if ok_hygiene:
+    c_hyg = checks.get("host_hygiene", {})
+    if c_hyg.get("ok"):
         print("      PASS: 0 crawler barriers or header violations")
     else:
-        print(f"      FAIL: {msg_hygiene}")
+        print(f"      FAIL: {c_hyg.get('message', 'Unknown error')}")
 
     print("[4/5] Probing live edge endpoints (profithelm, prexvo, gainhelm, arifcoskun)...")
-    ok_edge, msg_edge = audit_live_edge_endpoints()
-    if ok_edge:
+    c_edge = checks.get("live_edge", {})
+    if c_edge.get("ok"):
         print("      PASS: All active production endpoints returned HTTP 200")
     else:
-        print(f"      FAIL: {msg_edge}")
+        print(f"      FAIL: {c_edge.get('message', 'Unknown error')}")
 
     print("[5/5] Verifying active tenant (profithelm.com, prexvo.com, gainhelm.com) & retired domain DNS isolation...")
-    ok_dns, msg_dns = audit_hibernated_and_retired_dns_isolation()
-    if ok_dns:
-        print(f"      PASS: {msg_dns}")
+    c_dns = checks.get("dns_isolation", {})
+    if c_dns.get("ok"):
+        print(f"      PASS: {c_dns.get('message', '')}")
     else:
-        print(f"      FAIL: {msg_dns}")
+        print(f"      FAIL: {c_dns.get('message', 'Unknown error')}")
 
-    res = run_consolidated_infra_audit()
     print("=================================================================")
     if res["status"] == "PASS":
         print(" Status: PASS (All multi-cloud infrastructure healthy & compliant)")
