@@ -3156,7 +3156,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         ]
     else:
         base_words = (
-            f"Under IRC Section 1, Section 1(h), and Section 1411 statutory schedules, {short_q} "
+            f"Under IRC Section 1 and Section 1411 statutory schedules, {short_q} "
             f"computes progressive federal and state marginal tax liabilities, standard deduction thresholds, "
             f"and permanent OBBBA (P.L. 119-21) marginal rate tiers (10, 12, 22, 24, 32, 35, and 37 percent) alongside "
             f"the 3.8 percent Net Investment Income Tax surtax."
