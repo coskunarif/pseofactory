@@ -864,6 +864,8 @@ def get_contextual_ftc_disclosure(
         return PREXVO_DISCLOSURES.get("ftc_disclosure", "")
     if prop == "gainhelm":
         return GAINHELM_DISCLOSURES.get("ftc_disclosure", "")
+    if prop == "lienbond":
+        return LIENBOND_DISCLOSURES.get("ftc_disclosure", "")
     s_lower = (slug or "").strip().lower()
     if any(k in s_lower for k in ("1031", "like-kind", "exchange", "real-estate")):
         vertical_partners = "IPX1031, Xendoo, Mercury, DLP Capital, GROUNDFLOOR, and verified Qualified Intermediary or real estate capital partners"

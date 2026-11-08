@@ -347,6 +347,25 @@ def classify_deterministic_math_opportunity(
             "statutory_citation": stat_ref,
         }
 
+    if prop == "lienbond":
+        if "miller" in comb or "performance" in comb or "payment" in comb:
+            stat_ref = "40 U.S.C. Section 3131 (Miller Act) & 48 CFR Part 28"
+        elif "workers" in comb or "class" in comb or "emr" in comb:
+            stat_ref = "NCCI Basic Manual, NCCI Experience Rating Plan & 29 CFR Part 1904"
+        elif "davis" in comb or "prevailing" in comb or "wh-347" in comb:
+            stat_ref = "40 U.S.C. Section 3141 (Davis-Bacon Act) & 29 CFR Section 5.5"
+        elif "retainage" in comb or "prompt" in comb:
+            stat_ref = "31 U.S.C. Section 3903 (Prompt Payment Act) & 48 CFR 52.232-5"
+        elif "lien" in comb or "preliminary" in comb or "notice" in comb:
+            stat_ref = "40 U.S.C. Section 3133(b), CA Civ. Code Sec. 8204 & TX Prop. Code Ch. 53"
+        else:
+            stat_ref = "31 CFR Part 223 (Treasury Circular 570) & 40 U.S.C. Section 3131"
+        return {
+            "needs_deterministic_math": True,
+            "math_domain": "CONSTRUCTION_SURETY_STATUTORY_MATH",
+            "statutory_citation": stat_ref,
+        }
+
     is_tax_math = any(tok in comb for tok in tax_math_tokens) or "calculator" in comb or "simulator" in comb
     if "1031" in comb:
         stat_ref = "IRC Section 1031(a)(3) & Section 1250"
@@ -433,6 +452,17 @@ def _resolve_contextual_internal_links(
             {"anchor": "HITRUST CSF v11 e1, i1 & r2 Validated Assessment Cost Calculator", "href": "/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/"},
             {"anchor": "Penetration Testing Cost & Scope Estimator (Web App, API, Cloud & Network)", "href": "/tools/penetration-testing-scoping-cost-calculator/"},
             {"anchor": "Cyber Liability Insurance Premium & Data Breach Exposure Calculator", "href": "/tools/cyber-liability-insurance-breach-exposure-calculator/"},
+        ]
+    elif eff_tenant == "lienbond":
+        base_hub = {"anchor": "Contractor Surety Bond, Workers Comp & Mechanics Lien Calculators Directory", "href": "/tools/"}
+        cluster = [
+            {"anchor": "Contractor License Bond Cost Calculator by Credit Score & State", "href": "/tools/contractor-license-bond-cost-calculator-by-credit-score/"},
+            {"anchor": "Miller Act Performance & Payment Bond Premium Calculator", "href": "/tools/miller-act-performance-and-payment-bond-premium-calculator/"},
+            {"anchor": "Workers Compensation Class Code Rate Calculator by State", "href": "/tools/workers-compensation-class-code-rate-calculator-by-state/"},
+            {"anchor": "Experience Modification Rate (EMR) Workers Comp Penalty Calculator", "href": "/tools/experience-modification-rate-emr-workers-comp-penalty-calculator/"},
+            {"anchor": "50-State Preliminary Notice & Mechanics Lien Deadline Calculator", "href": "/tools/california-texas-florida-preliminary-notice-deadline-calculator/"},
+            {"anchor": "Commercial Construction Retainage Interest & Prompt Payment Calculator", "href": "/tools/commercial-construction-retainage-interest-penalty-calculator-by-state/"},
+            {"anchor": "Davis-Bacon Prevailing Wage & WH-347 Fringe Benefit Calculator", "href": "/tools/davis-bacon-prevailing-wage-fringe-benefit-rate-calculator/"},
         ]
     else:
         base_hub = {"anchor": "Statutory Tax & Financial Calculators Directory", "href": "/tools/"}
@@ -538,6 +568,7 @@ def _resolve_partner_offer_and_manual_gate(
     """
     from pseofactory.affiliates import (
         GAINHELM_AFFILIATES,
+        LIENBOND_AFFILIATES,
         PREXVO_AFFILIATES,
         PROFITHELM_AFFILIATES,
         is_restricted_public_service_slug,
@@ -682,6 +713,20 @@ def _resolve_partner_offer_and_manual_gate(
         else:
             default_chosen_key = "vanta_security"
             vertical_candidates = ["vanta_security", "drata_compliance", "sprinto_compliance", "thoropass_audit", "secureframe_grc"]
+    elif eff_tenant == "lienbond":
+        registry = LIENBOND_AFFILIATES
+        if any(k in combined for k in ("workers", "class-code", "emr", "modification", "payroll", "davis-bacon", "prevailing", "wh-347")):
+            default_chosen_key = "simply_business"
+            vertical_candidates = ["simply_business", "next_insurance", "thimble_contractor", "suretybonds_direct", "colonial_surety"]
+        elif any(k in combined for k in ("lien", "preliminary", "notice", "retainage", "prompt-payment", "waiver")):
+            default_chosen_key = "levelset_lien_filing"
+            vertical_candidates = ["levelset_lien_filing", "suretybonds_direct", "simply_business", "next_insurance", "colonial_surety"]
+        elif any(k in combined for k in ("miller", "performance", "payment-bond", "erisa", "fidelity")):
+            default_chosen_key = "colonial_surety"
+            vertical_candidates = ["colonial_surety", "suretybonds_direct", "simply_business", "next_insurance", "levelset_lien_filing"]
+        else:
+            default_chosen_key = "suretybonds_direct"
+            vertical_candidates = ["suretybonds_direct", "colonial_surety", "simply_business", "next_insurance", "levelset_lien_filing"]
     else:
         registry = PROFITHELM_AFFILIATES
         # Check if query hits a vertical with a known manual partner dependency while routing fallback live offer
@@ -1043,6 +1088,17 @@ def _resolve_partner_offer_and_manual_gate(
             str(
                 p_data.get("disclosure")
                 or "FTC Disclosure: GainHelm may earn a referral fee when you request a demo through verified GRC partner links at no additional cost to you."
+            )
+        )
+    elif eff_tenant == "lienbond":
+        p_data = registry.get(chosen_key) or registry.get("suretybonds_direct") or {}
+        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "SuretyBonds.com Direct Contractor & License Bond Underwriting"))
+        p_url = str(p_data.get("url") or "https://www.suretybonds.com/")
+        p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or "Get Instant Treasury-Listed Surety Bond Quotes"))
+        p_disc = _strip_forbidden_dashes(
+            str(
+                p_data.get("disclosure")
+                or "FTC Disclosure: LienBond may earn a referral fee when you request a quote through verified surety and commercial insurance partner links at no additional cost to you."
             )
         )
     else:
@@ -2234,6 +2290,8 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
             short_label = "Title IV student loan repayment"
         elif tenant_id == "gainhelm":
             short_label = "enterprise security compliance"
+        elif tenant_id == "lienbond":
+            short_label = "contractor surety bond compliance"
         else:
             short_label = "statutory tax liability"
     q_low = f"{query_label.lower()} {short_label.lower()}"
@@ -2625,7 +2683,7 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
         short_label = _clean_short_label(q_words, max_chars=24) or (
             "Title IV loan repayment"
             if tenant_id == "prexvo"
-            else ("cyber compliance audit" if tenant_id == "gainhelm" else "statutory tax liability")
+            else ("cyber compliance audit" if tenant_id == "gainhelm" else ("contractor surety bond" if tenant_id == "lienbond" else "statutory tax liability"))
         )
         default_meta, tail_pad = _build_default_meta(short_label)
 
@@ -2674,7 +2732,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         else (
             "repayment options"
             if tenant_id == "prexvo"
-            else ("compliance audit costs" if tenant_id == "gainhelm" else "tax deductions")
+            else ("compliance audit costs" if tenant_id == "gainhelm" else ("surety bond rates" if tenant_id == "lienbond" else "tax deductions"))
         )
     )
     combined_low = f"{clean_q.lower()} {slug.lower()}"
@@ -4299,6 +4357,16 @@ def _append_query_subintent_blocks(
                 "workpapers under AICPA SSAE 18, DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024."
             ),
         )
+    elif tenant_id == "lienbond":
+        _add_h2(f"{heading_label}: 2026 Treasury Circular 570, NCCI Basic Manual & 50-State Statutory Rules")
+        _add_faq(
+            f"How do NCCI underwriting manuals and Treasury Circular 570 govern {heading_label}?",
+            (
+                "Surety bond premiums and commercial workers compensation rates are governed by 31 CFR Part 223 "
+                "(U.S. Treasury Circular 570), the Federal Miller Act (40 U.S.C. Section 3131), NCCI Basic Manual "
+                "class-code loss costs, and state mechanics lien preliminary notice statutes."
+            ),
+        )
     elif tenant_id == "prexvo":
         if any(k in joined_low for k in ("rap", "repayment assistance")):
             _add_h2(f"{heading_label}: 2026 RAP Tiered AGI Schedule (1% to 10%) & 100% Unpaid Interest Subsidy")
@@ -4477,10 +4545,13 @@ def compile_remediation_overlay_spec(
         for bad in ("profithelm", "gainhelm", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs"):
             query_clean = re.sub(re.escape(bad), "title iv repayment", query_clean, flags=re.IGNORECASE)
     elif resolved_tenant == "gainhelm":
-        for bad in ("profithelm", "prexvo", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
+        for bad in ("profithelm", "prexvo", "lienbond", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
             query_clean = re.sub(re.escape(bad), "cyber compliance audit", query_clean, flags=re.IGNORECASE)
+    elif resolved_tenant == "lienbond":
+        for bad in ("profithelm", "prexvo", "gainhelm", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs", "title iv", "34 cfr", "pslf", "student loan", "paye sunset", "soc 2", "cmmc"):
+            query_clean = re.sub(re.escape(bad), "contractor surety bond", query_clean, flags=re.IGNORECASE)
     else:
-        for bad in ("prexvo", "gainhelm", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
+        for bad in ("prexvo", "gainhelm", "lienbond", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
             query_clean = re.sub(re.escape(bad), "statutory tax", query_clean, flags=re.IGNORECASE)
 
     query_clean = re.sub(r"\bs[\s-]+corp\b", "S-Corp", query_clean, flags=re.IGNORECASE)
@@ -4654,6 +4725,89 @@ def compile_remediation_overlay_spec(
                         "Attestation and certification engagements are governed by AICPA SSAE 18 (AT-C Section 205), "
                         "DoD 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024 auditor-day "
                         "tables, and 45 CFR 160.404 civil monetary penalty tiers."
+                    ),
+                },
+            ],
+        }
+        v_blocks = _append_query_subintent_blocks(
+            v_blocks,
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+            grouped_queries=grouped_queries_list,
+        )
+        h2_headings = v_blocks["h2_headings"]
+        preset_scenarios = v_blocks["preset_scenarios"]
+        comparison_rows = v_blocks["comparison_rows"]
+        faq_entries = v_blocks["faq_entries"]
+        hub_links = _resolve_contextual_internal_links(
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query=query_clean,
+        )
+    elif resolved_tenant == "lienbond":
+        v_blocks = {
+            "h2_headings": [
+                f"{heading_label}: 2026 Treasury Circular 570 & NCCI Rate Schedule",
+                f"Audit-Ready {heading_label} Underwriting Tiers vs Statutory Thresholds",
+            ],
+            "preset_scenarios": [
+                {
+                    "id": "preset-lienbond-commercial-gc",
+                    "label": f"{heading_label} Commercial General Contractor Baseline ($650k Payroll)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"bond_amount": 25000, "payroll": 650000, "emr": 1.0},
+                    "description": "Commercial general contractor modeling Treasury Circular 570 bond rates, NCCI class codes, and statutory notice deadlines.",
+                },
+                {
+                    "id": "preset-lienbond-public-works",
+                    "label": f"{heading_label} Public Works Miller Act & Prevailing Wage Scope ($1.2M Contract)",
+                    "query": query_clean,
+                    "target_position": pos,
+                    "baseline_ctr": ctr,
+                    "impressions": impr,
+                    "params": {"contract_amount": 1200000, "payroll": 900000, "emr": 0.85},
+                    "description": "Public works contractor modeling 40 U.S.C. Section 3131 Miller Act sliding-scale bonds, EMR credits, and WH-347 fringes.",
+                },
+            ],
+            "comparison_rows": [
+                {
+                    "scenario": "Standard Credit Underwriting vs High-Risk Surety / EMR Debit Tier",
+                    "baseline": "$3,750 Sub-Prime Surety / 1.25 Debit EMR Penalty",
+                    "optimized": "$375 Standard Tier Surety / 0.85 Credit EMR Discount",
+                    "delta": "-$3,375 Direct Underwriting Savings",
+                    "authority": "31 CFR Part 223 (Circular 570) & NCCI Experience Rating Plan",
+                },
+                {
+                    "scenario": "Late Preliminary Notice vs Timely Statutory Notice & Bona Fide ERISA Trust",
+                    "baseline": "Unsecured Progress Draw / 14.5% Cash Fringe Payroll Burden",
+                    "optimized": "100% Secured Mechanics Lien / 0% FICA-Exempt ERISA Trust",
+                    "delta": "100% Lien Priority Preserved + $6,380 Tax Saved",
+                    "authority": "40 U.S.C. Sec. 3133(b), CA Civ. Code Sec. 8204 & 29 CFR Sec. 5.5",
+                },
+            ],
+            "faq_entries": [
+                {
+                    "question": f"How is {query_clean} calculated under 2026 construction and surety standards?",
+                    "answer": (
+                        f"Our deterministic {query_clean} model applies U.S. Treasury Circular 570 surety underwriting tiers, "
+                        f"SFAA Class B Miller Act sliding-scale rates, NCCI Basic Manual workers compensation class codes, "
+                        f"and 50-state statutory mechanics lien deadline formulas."
+                    ),
+                },
+                {
+                    "question": f"What federal and state statutes govern {query_clean}?",
+                    "answer": (
+                        "Construction surety, workers compensation, and lien compliance are governed by the Federal Miller Act "
+                        "(40 U.S.C. Section 3131), Davis-Bacon Act (40 U.S.C. Section 3141), Prompt Payment Act (31 U.S.C. Section 3903), "
+                        "NCCI Experience Rating Plan manuals, and state mechanics lien statutes."
                     ),
                 },
             ],
@@ -5176,6 +5330,39 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Model Combined ISO 27001 & SOC 2 Surveillance TCO",
                 },
             ]
+        return {
+            "autonomous_citation_assertions": assertions,
+            "ai_mode_decision_matrix": matrix,
+        }
+    elif tenant_id == "lienbond":
+        assertions = [
+            f"In 2026, {heading_label} computes statutory contractor surety bond premiums, NCCI workers compensation class-code rates, and 50-state mechanics lien notice deadlines under 40 U.S.C. Section 3131 and 31 CFR Part 223.",
+            "Under the Federal Miller Act (40 U.S.C. Section 3131) and FAR 28.102-2, federal public works contracts exceeding $150,000 require 100 percent performance and payment bonds priced on SFAA Class B sliding-scale tiers ($15,500.00 on a $1,200,000 contract).",
+            "Under NCCI Experience Rating Plan Rule 2-E and 40 U.S.C. Section 3141 (Davis-Bacon Act), maintaining a 0.85 credit EMR and funding prevailing-wage fringes through a bona fide ERISA trust reduces annual labor and insurance burden by $14,180.00+.",
+        ]
+        matrix = [
+            {
+                "profile": "Licensed Commercial General Contractor ($25k License Bond, 720+ FICO)",
+                "statutory_threshold": "31 CFR Part 223 Treasury Circular 570 & State Licensing Code (CA BPC 7071.6)",
+                "optimal_path": "Standard Preferred Surety Underwriting Tier (1.50% Annual Rate)",
+                "net_dollar_impact": "$375.00 Annual Bond Premium (Saves $2,125.00 vs 10% High-Risk Tier)",
+                "next_action": "Calculate Credit-Tier License Bond Premium",
+            },
+            {
+                "profile": "Public Works Prime Contractor ($1.2M Federal / State Contract)",
+                "statutory_threshold": "40 U.S.C. Section 3131 Miller Act ($150,000 Threshold) & SFAA Class B Tiers",
+                "optimal_path": "Sliding-Scale Performance & Payment Bond (2.5% First $100k, 1.5% Next $400k, 1.0% Over $500k)",
+                "net_dollar_impact": "$15,500.00 Combined Bond Premium (1.29% Effective Contract Rate)",
+                "next_action": "Model Miller Act Sliding-Scale Bond Tiers",
+            },
+            {
+                "profile": "Trade Subcontractor Protecting $120k Progress Billings & Payroll",
+                "statutory_threshold": "CA Civ. Code Sec. 8204 (20-Day Notice), TX Prop. Code Sec. 53.056 & FL Stat. Sec. 713.06",
+                "optimal_path": "Serve Preliminary Notice Within Statutory Window + Bona Fide ERISA Fringe Trust",
+                "net_dollar_impact": "$120,000.00 Lien Priority Preserved + $6,380.00 FICA/WC Tax Saved",
+                "next_action": "Verify 50-State Preliminary Notice & WH-347 Deadlines",
+            },
+        ]
         return {
             "autonomous_citation_assertions": assertions,
             "ai_mode_decision_matrix": matrix,
@@ -6385,7 +6572,11 @@ def prioritize_gsc_signals(
         raw_items.extend(unindexed_diagnoses)
 
     eff_tenant = str(resolved_tenant or "profithelm").strip().lower()
-    domain = "prexvo.com" if eff_tenant == "prexvo" else ("gainhelm.com" if eff_tenant == "gainhelm" else "profithelm.com")
+    domain = (
+        "prexvo.com"
+        if eff_tenant == "prexvo"
+        else ("gainhelm.com" if eff_tenant == "gainhelm" else ("lienbond.com" if eff_tenant == "lienbond" else "profithelm.com"))
+    )
     base_dir_arg = kwargs.get("base_dir")
     dist_dir_arg = kwargs.get("dist_dir")
     eng_metrics_arg = kwargs.get("engagement_metrics")
@@ -6414,7 +6605,11 @@ def prioritize_gsc_signals(
         item_domain = (
             "prexvo.com"
             if item_tenant == "prexvo"
-            else ("gainhelm.com" if item_tenant == "gainhelm" else ("profithelm.com" if item_tenant == "profithelm" else domain))
+            else (
+                "gainhelm.com"
+                if item_tenant == "gainhelm"
+                else ("lienbond.com" if item_tenant == "lienbond" else ("profithelm.com" if item_tenant == "profithelm" else domain))
+            )
         )
         target_url = str(rec.get("target_url") or rec.get("page") or rec.get("url") or "").strip()
         query = str(rec.get("query") or rec.get("primary_keyword") or "").strip()
@@ -6450,7 +6645,7 @@ def prioritize_gsc_signals(
 
         is_redirected_row = False
         orig_url = target_url
-        if not is_explicit_dead_route and item_tenant in ("profithelm", "prexvo", "gainhelm"):
+        if not is_explicit_dead_route and item_tenant in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             res_target = resolve_redirected_gsc_target(
                 target_url=target_url,
                 slug=slug,
@@ -7023,7 +7218,11 @@ def evaluate_expired_overlays(
     )
 
     comb_site_root = f"{site_url or ''} {root}".lower()
-    prop = "prexvo" if "prexvo" in comb_site_root else ("gainhelm" if "gainhelm" in comb_site_root else "profithelm")
+    prop = (
+        "prexvo"
+        if "prexvo" in comb_site_root
+        else ("gainhelm" if "gainhelm" in comb_site_root else ("lienbond" if "lienbond" in comb_site_root else "profithelm"))
+    )
     in_pytest = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("PROFITHELM_IN_TEST") == "1"
     if in_pytest and not str(root.resolve()).startswith("/tmp"):
         persist = False
@@ -7368,7 +7567,11 @@ def evaluate_expired_overlays(
                     canon_dom = (
                         "https://prexvo.com"
                         if prop == "prexvo"
-                        else ("https://gainhelm.com" if prop == "gainhelm" else "https://profithelm.com")
+                        else (
+                            "https://gainhelm.com"
+                            if prop == "gainhelm"
+                            else ("https://lienbond.com" if prop == "lienbond" else "https://profithelm.com")
+                        )
                     )
                     healed_spec = compile_remediation_overlay_spec(
                         {
@@ -7791,8 +7994,16 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
     rolled_title = _strip_forbidden_dashes(str(overlay_data.get("rolled_back_title_rewrite") or "")).strip()
     baseline_title = _strip_forbidden_dashes(str(overlay_data.get("baseline_title") or "")).strip()
     raw_ov_t = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").lower()
-    brand = "Prexvo" if raw_ov_t == "prexvo" else ("GainHelm" if raw_ov_t == "gainhelm" else "ProfitHelm")
-    tenant_norm = "prexvo" if brand == "Prexvo" else ("gainhelm" if brand == "GainHelm" else "profithelm")
+    brand = (
+        "Prexvo"
+        if raw_ov_t == "prexvo"
+        else ("GainHelm" if raw_ov_t == "gainhelm" else ("LienBond" if raw_ov_t == "lienbond" else "ProfitHelm"))
+    )
+    tenant_norm = (
+        "prexvo"
+        if brand == "Prexvo"
+        else ("gainhelm" if brand == "GainHelm" else ("lienbond" if brand == "LienBond" else "profithelm"))
+    )
 
     if not baseline_title:
         h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
@@ -7935,9 +8146,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     ov_tenant = (
         "prexvo"
         if "prexvo" in raw_ov_ctx
-        else ("gainhelm" if "gainhelm" in raw_ov_ctx else "profithelm")
+        else ("gainhelm" if "gainhelm" in raw_ov_ctx else ("lienbond" if "lienbond" in raw_ov_ctx else "profithelm"))
     )
-    ov_brand = "Prexvo" if ov_tenant == "prexvo" else ("GainHelm" if ov_tenant == "gainhelm" else "ProfitHelm")
+    ov_brand = (
+        "Prexvo"
+        if ov_tenant == "prexvo"
+        else ("GainHelm" if ov_tenant == "gainhelm" else ("LienBond" if ov_tenant == "lienbond" else "ProfitHelm"))
+    )
     title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
     if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
@@ -8372,7 +8587,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             tok in raw_p_url
             for tok in ("fpr=", "via=", "try.rippling.com", "mercury.com/r/", "utm_source=", "redirect.viglink.com")
         ) or raw_p_url.startswith("/r/")
-        if raw_prop_id.lower() in ("profithelm", "prexvo", "gainhelm") and not _has_direct_token:
+        if raw_prop_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond") and not _has_direct_token:
             p_url = html_lib.escape(str(p_offer.get("redirect_path") or f"/r/{raw_p_key}"))
         else:
             p_url = html_lib.escape(raw_p_url)

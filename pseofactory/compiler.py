@@ -3843,7 +3843,13 @@ def build_estate(output_dir: Any = None) -> Dict[str, Any]:
     from pseofactory.compiler import compile_lienbond_estate
 
     target = Path(output_dir).resolve() if output_dir else Path(__file__).resolve().parent.parent
-    return compile_lienbond_estate(target)
+    return compile_lienbond_estate(target, run_retrofit=True)
+
+
+def build_all(dist_dir: Any = None) -> Path:
+    repo_root = Path(__file__).resolve().parent.parent
+    build_estate(repo_root)
+    return Path(dist_dir).resolve() if dist_dir else (repo_root / "dist")
 """,
         encoding="utf-8",
     )
@@ -3998,6 +4004,22 @@ jobs:
 """,
         encoding="utf-8",
     )
+
+    for ov_dir in (root / "content" / "overlays", root / ".agy" / "overlays"):
+        if ov_dir.is_dir():
+            for ov_file in list(ov_dir.glob("*.json")):
+                if not (tools_dir / ov_file.stem / "index.html").is_file():
+                    ov_file.unlink(missing_ok=True)
+                    continue
+                try:
+                    raw_ov = ov_file.read_text(encoding="utf-8").lower()
+                    if any(
+                        bad_tok in raw_ov
+                        for bad_tok in ("profithelm", "section-179-calculator", "section-301-tariff", "coinledger")
+                    ):
+                        ov_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     retrofit_report: Dict[str, Any] = {}
     if run_retrofit:
