@@ -419,7 +419,8 @@ class RouteManifestExtractor:
             if r in available and r not in selected:
                 selected.append(r)
 
-        dirty = [r for r in self.detect_git_dirty_routes() if r in available][:10]
+        dirty_cap = min(10, max(1, sample_size - 2)) if not widget_specs else 10
+        dirty = [r for r in self.detect_git_dirty_routes() if r in available][:dirty_cap]
         for dr in dirty:
             _pick(dr)
 

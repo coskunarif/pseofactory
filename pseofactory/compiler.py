@@ -1757,6 +1757,42 @@ def _build_hero_range_and_state_bar_html(
     return hero_range_anchor_html, state_first_hero_bar_html
 
 
+def _clamp_candidate_inputs(raw_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Clamps numeric candidate inputs to non-negative (>= 0) per HWL-1263."""
+    clamped_inputs: Dict[str, Any] = {}
+    for k, v in raw_inputs.items():
+        if isinstance(v, (int, float)):
+            clamped_inputs[k] = max(0.0, float(v)) if isinstance(v, float) else max(0, v)
+        elif isinstance(v, str):
+            v_clean = v.replace("$", "").replace(",", "").replace("%", "").strip()
+            try:
+                clamped_inputs[k] = max(0.0, float(v_clean))
+            except ValueError:
+                clamped_inputs[k] = v
+        else:
+            clamped_inputs[k] = v
+    return clamped_inputs
+
+
+def _extract_candidate_metadata(candidate_spec: Dict[str, Any]) -> tuple:
+    """Extracts and normalizes core candidate metadata and manifest fields."""
+    manifest_source = candidate_spec.get("calculation_manifest") if isinstance(candidate_spec.get("calculation_manifest"), dict) else {}
+    query = str(candidate_spec.get("query") or candidate_spec.get("primary_keyword") or "").strip()
+    raw_slug = str(candidate_spec.get("slug") or "").strip()
+    if not raw_slug:
+        slug_src = query or candidate_spec.get("title") or "proprietary-model"
+        raw_slug = re.sub(r"[^a-z0-9]+", "-", str(slug_src).lower()).strip("-")
+    from pseofactory.audit import _resolve_expected_title
+    title = _resolve_expected_title(candidate_spec)
+    model_name = str(candidate_spec.get("model_name") or candidate_spec.get("proprietary_model") or manifest_source.get("model_name") or manifest_source.get("proprietary_model") or "Proprietary Calculation Model").strip()
+    formula = str(candidate_spec.get("formula") or manifest_source.get("formula") or "").strip()
+    raw_inputs = candidate_spec.get("inputs") if candidate_spec.get("inputs") is not None else manifest_source.get("inputs", {})
+    statutory_authority = str(candidate_spec.get("statutory_authority") or candidate_spec.get("statutory_provenance") or candidate_spec.get("authority") or manifest_source.get("statutory_authority") or manifest_source.get("statutory_provenance") or manifest_source.get("authority") or "").strip()
+    economic_dataset = str(candidate_spec.get("economic_dataset") or candidate_spec.get("economic_source") or manifest_source.get("economic_dataset") or manifest_source.get("economic_source") or "").strip()
+    sample_calc = str(candidate_spec.get("sample_calculation") or candidate_spec.get("sample") or manifest_source.get("sample_calculation") or manifest_source.get("sample") or "").strip()
+    return manifest_source, query, raw_slug, title, model_name, formula, raw_inputs, statutory_authority, economic_dataset, sample_calc
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -1770,82 +1806,21 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     assert_high_effort_content_qualified(candidate_spec, context="content compiler intake")
 
     # 2. Extract and resolve candidate metadata
-    manifest_source = (
-        candidate_spec.get("calculation_manifest")
-        if isinstance(candidate_spec.get("calculation_manifest"), dict)
-        else {}
-    )
-
-    query = str(candidate_spec.get("query") or candidate_spec.get("primary_keyword") or "").strip()
-    raw_slug = str(candidate_spec.get("slug") or "").strip()
-    if not raw_slug:
-        slug_src = query or candidate_spec.get("title") or "proprietary-model"
-        raw_slug = re.sub(r"[^a-z0-9]+", "-", str(slug_src).lower()).strip("-")
-    slug = raw_slug
-
-    from pseofactory.audit import _resolve_expected_title
-    title = _resolve_expected_title(candidate_spec)
-
-    model_name = str(
-        candidate_spec.get("model_name")
-        or candidate_spec.get("proprietary_model")
-        or manifest_source.get("model_name")
-        or manifest_source.get("proprietary_model")
-        or "Proprietary Calculation Model"
-    ).strip()
-
-    formula = str(
-        candidate_spec.get("formula")
-        or manifest_source.get("formula")
-        or ""
-    ).strip()
-
-    raw_inputs = (
-        candidate_spec.get("inputs")
-        if candidate_spec.get("inputs") is not None
-        else manifest_source.get("inputs", {})
-    )
-
-    statutory_authority = str(
-        candidate_spec.get("statutory_authority")
-        or candidate_spec.get("statutory_provenance")
-        or candidate_spec.get("authority")
-        or manifest_source.get("statutory_authority")
-        or manifest_source.get("statutory_provenance")
-        or manifest_source.get("authority")
-        or ""
-    ).strip()
-
-    economic_dataset = str(
-        candidate_spec.get("economic_dataset")
-        or candidate_spec.get("economic_source")
-        or manifest_source.get("economic_dataset")
-        or manifest_source.get("economic_source")
-        or ""
-    ).strip()
-
-    sample_calc = str(
-        candidate_spec.get("sample_calculation")
-        or candidate_spec.get("sample")
-        or manifest_source.get("sample_calculation")
-        or manifest_source.get("sample")
-        or ""
-    ).strip()
+    (
+        manifest_source,
+        query,
+        slug,
+        title,
+        model_name,
+        formula,
+        raw_inputs,
+        statutory_authority,
+        economic_dataset,
+        sample_calc,
+    ) = _extract_candidate_metadata(candidate_spec)
 
     # 3. Numeric metric clamping to non-negative (>= 0) per HWL-1263
-    clamped_inputs: Dict[str, Any] = {}
-    for k, v in raw_inputs.items():
-        if isinstance(v, (int, float)):
-            clamped_inputs[k] = max(0.0, float(v)) if isinstance(v, float) else max(0, v)
-        elif isinstance(v, str):
-            v_clean = v.replace("$", "").replace(",", "").replace("%", "").strip()
-            try:
-                num_v = float(v_clean)
-                clamped_inputs[k] = max(0.0, num_v)
-            except ValueError:
-                clamped_inputs[k] = v
-        else:
-            clamped_inputs[k] = v
+    clamped_inputs = _clamp_candidate_inputs(raw_inputs)
 
     # 4. Deterministic AST mathematical formula evaluation
     calculated_output = safe_eval_mathematical_formula(formula, clamped_inputs)
