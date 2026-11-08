@@ -1753,6 +1753,19 @@ def _resolve_secondary_title_modifier(
             return "45 CFR 160"
         return "GRC Audit"
 
+    if tenant_id == "lienbond":
+        if "miller" in primary_low or "performance" in primary_low:
+            return "40 USC 3131"
+        if "workers" in primary_low or "emr" in primary_low:
+            return "NCCI Rate"
+        if "lien" in primary_low or "preliminary" in primary_low or "retainage" in primary_low:
+            return "50-State Law"
+        if "davis" in primary_low or "wh-347" in primary_low:
+            return "WH-347 Rule"
+        if "erisa" in primary_low:
+            return "29 USC 1112"
+        return "Surety & Lien"
+
     if any(k in primary_low for k in ("tax-bracket", "tax bracket", "tax tables", "tax rate", "income tax rate")):
         if ("married" in grouped_low or "jointly" in grouped_low) and "married" not in query_clean.lower():
             return "Single & MFJ"
@@ -2029,6 +2042,8 @@ def _normalize_title_50_60(
         vertical_paren_mod = "Title IV" if "rap" in base_low else "IDR & RAP"
     elif tenant_id == "gainhelm":
         vertical_paren_mod = "GRC Audit"
+    elif tenant_id == "lienbond":
+        vertical_paren_mod = "Surety & Lien"
     else:
         vertical_paren_mod = "IRC Guide"
 
@@ -2054,7 +2069,11 @@ def _normalize_title_50_60(
                     else (
                         [mod_clean, "GRC Audit", "2026 Audit", "2026"]
                         if tenant_id == "gainhelm"
-                        else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                        else (
+                            [mod_clean, "Surety Rate", "50-State", "2026 Bond", "2026"]
+                            if tenant_id == "lienbond"
+                            else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                        )
                     )
                 )
                 for sm in short_mods:
@@ -2092,7 +2111,11 @@ def _normalize_title_50_60(
         else (
             [f"({vertical_paren_mod})", "(2026 Audit)", "2026", "Audit", "Cost", "Schedule", "Estimator", "Rules"]
             if tenant_id == "gainhelm"
-            else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+            else (
+                [f"({vertical_paren_mod})", "(2026 Rates)", "2026", "Bond", "Rate", "Schedule", "Estimator", "Rules"]
+                if tenant_id == "lienbond"
+                else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+            )
         )
     )
     for tok in pad_tokens:
@@ -2116,7 +2139,11 @@ def _normalize_title_50_60(
             else (
                 ["& GRC Cost Estimator", "& Audit Schedule", "Simulator", "Schedule", "Estimator"]
                 if tenant_id == "gainhelm"
-                else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+                else (
+                    ["& Surety Rate Schedule", "& Bond Cost Estimator", "Simulator", "Schedule", "Estimator"]
+                    if tenant_id == "lienbond"
+                    else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+                )
             )
         )
         for ep in extra_pads:
@@ -2136,7 +2163,7 @@ def _normalize_title_50_60(
         elif "rules" not in base.lower():
             add_tok = "Rules"
         else:
-            add_tok = "Plan" if tenant_id == "prexvo" else ("Audit" if tenant_id == "gainhelm" else "Tax")
+            add_tok = "Plan" if tenant_id == "prexvo" else ("Audit" if tenant_id == "gainhelm" else ("Bond" if tenant_id == "lienbond" else "Tax"))
         if len(base) + 1 + len(add_tok) <= max_base and add_tok.lower() not in base.lower():
             base = f"{base} {add_tok}"
         else:
@@ -2472,6 +2499,30 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                 f"AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212 wage benchmarks.",
                 " Verified under AICPA SSAE 18 and 32 CFR Part 170 rules.",
             )
+        if tenant_id == "lienbond":
+            if "disclaimer" in q_low:
+                return (
+                    "Review LienBond contractor surety bond, workers compensation, and 50-state mechanics "
+                    "lien statutory modeling disclaimers and non-attorney notices.",
+                    " Grounded in 40 U.S.C. Section 3131 and NCCI manuals.",
+                )
+            if "methodology" in q_low:
+                return (
+                    "Explore LienBond deterministic surety bond, workers comp class code, EMR, and "
+                    "50-state mechanics lien calculation methodology and datasets.",
+                    " Grounded in 40 U.S.C. Section 3131 and NCCI filings.",
+                )
+            if "tools directory" in q_low or "tools-directory" in q_low or q_low.strip() in ("tools", "tools tools"):
+                return (
+                    "Browse LienBond deterministic calculators for contractor surety bonds, NCCI "
+                    "workers comp class codes, EMR, 50-state mechanics liens, and WH-347 payroll.",
+                    " Grounded in 40 U.S.C. Section 3131 and NCCI rate filings.",
+                )
+            return (
+                f"Calculate {lbl} premiums, NCCI class code rates, and statutory deadlines under "
+                f"40 U.S.C. Section 3131, NCCI manuals, and 50-state construction lien codes.",
+                " Verified under 40 U.S.C. Section 3131 and NCCI rate schedules.",
+            )
         if "disclaimer" in q_low:
             return (
                 "Review ProfitHelm statutory tax and financial modeling disclaimers, CPA/attorney "
@@ -2715,6 +2766,87 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             ).split()
         filler_pool = [
             "Verified", "against", "NIST", "SP", "800-171", "Rev", "2", "and", "45", "CFR", "160.404."
+        ]
+    elif tenant_id == "lienbond":
+        if any(k in combined_low for k in ("workers-compensation", "workers comp", "class-code")):
+            base_words = (
+                "Under IRC Section 3111, 29 CFR Part 1904 OSHA recordkeeping rules, and NCCI Basic Manual "
+                "classification standards, construction workers compensation manual premium equals field trade "
+                "payroll divided by $100, multiplied by the state class-code rate and Experience Modification "
+                "Rate (EMR) factor ($44,200.00 annual baseline on $650,000 payroll at $6.80 per $100)."
+            ).split()
+        elif any(k in combined_low for k in ("license-bond", "credit-score")):
+            base_words = (
+                "Under 31 CFR Part 223 U.S. Treasury Circular 570, 40 U.S.C. Section 3131, and state licensing "
+                "statutes such as California BPC Section 7071.6, contractor license surety bond premiums equal "
+                "the statutory bond penalty multiplied by your credit-tier underwriting rate ($375.00 annual "
+                "baseline on a $25,000 CSLB license bond at 1.50 percent)."
+            ).split()
+        elif any(k in combined_low for k in ("miller-act", "performance-and-payment", "payment-bond")):
+            base_words = (
+                "Under the Federal Miller Act (40 U.S.C. Section 3131) and 48 CFR Part 28 (FAR 28.102-2), public "
+                "works construction contracts exceeding $150,000 require 100 percent performance and payment bonds "
+                "priced on SFAA Class B sliding-scale tiers ($15,500.00 combined premium on a $1,200,000 contract "
+                "across 2.5 percent, 1.5 percent, and 1.0 percent tiers)."
+            ).split()
+        elif any(k in combined_low for k in ("lien-release", "statutory-matrix")):
+            base_words = (
+                "Under 40 U.S.C. Section 3133(b), California Civil Code Section 8132, and Texas Property Code "
+                "Chapter 53, statutory mechanics lien waiver and notice compliance preserves unpaid progress draws "
+                "and executed change orders ($97,500.00 secured principal on $85,000 draw plus $12,500 change "
+                "orders when served within the statutory preliminary notice window)."
+            ).split()
+        elif any(k in combined_low for k in ("retainage", "prompt-payment")):
+            base_words = (
+                "Under the Federal Prompt Payment Act (31 U.S.C. Section 3903), 48 CFR 52.232-5, and state "
+                "retainage cap statutes (5 to 10 percent), withholding 10 percent retainage on $900,000 of "
+                "commercial construction billings financed at 8.50 percent APR over 180 days locks up $93,772.60 "
+                "in principal and working-capital interest drag."
+            ).split()
+        elif any(k in combined_low for k in ("davis-bacon", "prevailing-wage", "wh-347")):
+            base_words = (
+                "Under the Davis-Bacon Act (40 U.S.C. Section 3141), 29 CFR Section 5.5 Form WH-347 certified "
+                "payroll rules, and IRC Section 3111, paying $22.00/hr prevailing fringe benefits in cash over "
+                "2,000 hours at $48.00/hr base wage incurs $146,380.00 total labor cost ($6,380.00 excess payroll "
+                "tax penalty versus a bona fide ERISA trust)."
+            ).split()
+        elif any(k in combined_low for k in ("erisa", "fidelity-bond", "1112")):
+            base_words = (
+                "Under ERISA Section 412 (29 U.S.C. Section 1112) and 29 CFR 2580.412-1, every fiduciary handling "
+                "employee benefit plan funds must maintain a Treasury Circular 570 fidelity bond equal to at least "
+                "10 percent of qualifying plan assets ($240,000.00 mandatory coverage on $2,400,000 in plan assets, "
+                "capped at $500,000 standard maximum)."
+            ).split()
+        elif any(k in combined_low for k in ("overhead-and-profit", "markup-vs-margin")):
+            base_words = (
+                "Under 48 CFR Part 31 (FAR Contract Cost Principles), IRC Section 460 percentage-of-completion "
+                "accounting, and AIA A102 standards, achieving 12 percent overhead and 8 percent net profit margin "
+                "on $340,000 direct job cost requires dividing by 0.80 ($425,000.00 contract bid price at a 1.25x "
+                "markup divisor)."
+            ).split()
+        elif any(k in combined_low for k in ("experience-modification", "emr")):
+            base_words = (
+                "Under NCCI Experience Rating Plan Rule 2-E and 29 CFR Part 1904 OSHA injury reporting standards, "
+                "modifying a $52,000 manual workers compensation premium by a 1.15 debit Experience Modification "
+                "Rate (EMR) and a 5.0 percent state workplace safety credit produces $56,810.00 in net audited "
+                "annual workers compensation premium."
+            ).split()
+        elif any(k in combined_low for k in ("preliminary-notice", "california-texas-florida")):
+            base_words = (
+                "Under 40 U.S.C. Section 3133(b), California Civil Code Section 8204 (20-day lookback), Texas "
+                "Property Code Section 53.056 (15th-day monthly notice), and Florida Statutes Section 713.06 "
+                "(45-day Notice to Owner), serving preliminary notice within Day 20 preserves 100 percent "
+                "($120,000.00) of statutory mechanics lien rights."
+            ).split()
+        else:
+            base_words = (
+                f"Under the Federal Miller Act (40 U.S.C. Section 3131), NCCI Basic Manual workers compensation "
+                f"rules, and 50-state mechanics lien statutes, {short_q} computes deterministic surety bond "
+                f"premiums, Experience Modification Rate (EMR) payroll multipliers, and statutory notice "
+                f"deadlines benchmarked against Bureau of Labor Statistics and SFAA underwriting series."
+            ).split()
+        filler_pool = [
+            "Verified", "against", "U.S.", "Treasury", "Circular", "570", "and", "NCCI", "filings."
         ]
     elif tenant_id == "prexvo":
         if "disclaimer" in combined_low:

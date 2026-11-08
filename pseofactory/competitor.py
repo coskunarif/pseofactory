@@ -4024,6 +4024,118 @@ def _build_gainhelm_depth_spec(
     }
 
 
+def _build_lienbond_depth_spec(
+    topic_label: str, statutory_authority: str, economic_dataset: str
+) -> Dict[str, Any]:
+    return {
+        "workbench_mode": "construction_surety_lien",
+        "workbench_h2": f"Interactive Surety Indemnity, NCCI EMR &amp; Statutory Lien Sub-Ledger: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, construction "
+            f"CFOs, general contractors, and project controllers optimize Treasury Circular 570 surety bond rates, "
+            f"NCCI workers compensation EMR modifiers, and 50-state statutory mechanics lien deadlines:"
+        ),
+        "presets": [
+            (
+                "Preferred Credit License Bond ($25,000 Penal Sum / 720+ FICO / 1.5% Rate)",
+                '{"serp-b2b-gross":25000,"serp-b2b-deduction":375,"serp-b2b-rate":1.5,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "AIA A312 Public Works Performance Bond ($750k Contract / Sliding Scale)",
+                '{"serp-b2b-gross":750000,"serp-b2b-deduction":11250,"serp-b2b-rate":1.5,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "NCCI Workers Comp EMR Stress ($500k Trade Payroll / 1.25 Debit EMR)",
+                '{"serp-b2b-gross":500000,"serp-b2b-deduction":32500,"serp-b2b-rate":6.5,"serp-b2b-regime":"unoptimized_baseline"}',
+            ),
+            (
+                "Federal Miller Act &amp; WH-347 Prevailing Wage ($2.5M Contract / 100% Bond)",
+                '{"serp-b2b-gross":2500000,"serp-b2b-deduction":31250,"serp-b2b-rate":1.25,"serp-b2b-regime":"stress_case"}',
+            ),
+        ],
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-gross" class="serp-field-label">Gross Contract Sum / Penal Bond / Trade Payroll ($)</label>\n'
+            '          <input type="number" id="serp-b2b-gross" name="serp-b2b-gross" class="touch-target serp-sub-input" min="0" max="25000000" step="5000" value="500000" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-deduction" class="serp-field-label">Preferred Tier / Credit EMR Savings Offset ($)</label>\n'
+            '          <input type="number" id="serp-b2b-deduction" name="serp-b2b-deduction" class="touch-target serp-sub-input" min="0" max="5000000" step="500" value="6250" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-rate" class="serp-field-label">Surety Sliding-Scale / NCCI Class Rate (%)</label>\n'
+            '          <input type="number" id="serp-b2b-rate" name="serp-b2b-rate" class="touch-target serp-sub-input" min="0" max="100" step="0.25" value="1.5" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            '          <label for="serp-b2b-regime" class="serp-field-label">Underwriting &amp; Statutory Compliance Tier</label>\n'
+            '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
+            '            <option value="optimal_election" selected="selected">Treasury Circular 570 Preferred Tier + 0.85 Credit EMR</option>\n'
+            '            <option value="unoptimized_baseline">Standard Market Indemnity + 1.00 Unity EMR</option>\n'
+            '            <option value="stress_case">High-Risk Collateral Indemnity + 1.25 Debit EMR</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", "Net Preferred Surety &amp; Insurance Cost", "$7,500"),
+            ("serp-out-secondary", "Unoptimized Standard Market Cost", "$13,750"),
+            ("serp-out-tertiary", "Annual Underwriting &amp; EMR Savings", "$6,250"),
+            ("serp-out-quaternary", "Protected Statutory Lien &amp; Bond Capacity", "$500,000"),
+        ],
+        "svg_left_label": "Protected Contract & Bond Capacity: $492,500 (98.5%)",
+        "svg_right_label": "Net Surety & Insurance Burden: $7,500 (1.5%)",
+        "svg_left_width": "520",
+        "svg_right_x": "520",
+        "svg_right_width": "80",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing Surety, NCCI &amp; Lien Thresholds",
+        "table_headers": [
+            "Statutory Program / Construction Regime",
+            "Governing Legal &amp; Regulatory Citation",
+            "2026 Penal Sum, Rate or Filing Window",
+            "Underwriting &amp; Recording Standard",
+        ],
+        "table_rows": [
+            (
+                "Federal Miller Act Performance &amp; Payment Bonds",
+                "40 U.S.C. Section 3131 &amp; FAR 28.102-1",
+                "100% performance and payment bonds on federal contracts exceeding $150,000",
+                "U.S. Treasury Department Circular 570 admitted corporate surety underwriting",
+            ),
+            (
+                "State Contractor License Surety Bonds",
+                "CA BPC Section 7071.6, WA RCW 18.27.040 &amp; State Licensing Codes",
+                "$25,000 CA CSLB bond ($30,000 WA general); 0.75% to 3.5% preferred rate",
+                "Continuous statutory license bond certificate filed with state registrar",
+            ),
+            (
+                "NCCI Workers Compensation &amp; EMR Split-Point",
+                "NCCI Experience Rating Plan Manual &amp; State Rating Bureaus",
+                "Manual Premium = (Payroll / 100) x Class Rate x EMR ($18,500 split point)",
+                "3-year NCCI unit statistical loss run verification and class-code audit",
+            ),
+            (
+                "50-State Statutory Mechanics Lien Deadlines",
+                "CA Civ. Code Section 8200, TX Prop. Code Ch. 53 &amp; FL Stat. Section 713.06",
+                "CA 20-day preliminary notice; TX 15th day of 2nd/3rd month; FL 45-day NTO",
+                "Certified mail return-receipt affidavit and county recorder statutory form",
+            ),
+            (
+                "Davis-Bacon Certified Payroll Form WH-347",
+                "40 U.S.C. Section 3141 &amp; 29 CFR Part 5 (DOL Wage &amp; Hour Division)",
+                "Weekly WH-347 submission; cash-in-lieu fringe excluded from 1.5x OT base",
+                "Signed Statement of Compliance under 18 U.S.C. Section 1001 and 31 U.S.C. Section 3729",
+            ),
+        ],
+        "banner_html": (
+            '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="construction_surety_lien">\n'
+            '        <div class="serp-intent-banner-text">\n'
+            '          <strong>Live Surety, EMR &amp; Lien Readiness Signal:</strong> Qualifying for Treasury Circular 570 preferred underwriting and NCCI credit EMR reduces net premium burden to <span id="serp-banner-metric-primary">$7,500</span> and saves <span id="serp-banner-metric-secondary">$6,250</span> annually. Compare vetted surety underwriters, workers comp carriers, and statutory lien filing partners below.\n'
+            '        </div>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Surety Bond, Workers Comp &amp; Lien Partners</a>\n'
+            '      </div>'
+        ),
+    }
+
+
 def _build_prediction_market_depth_spec(
     topic_label: str, statutory_authority: str, economic_dataset: str
 ) -> Dict[str, Any]:
@@ -4151,11 +4263,12 @@ def _render_multi_year_cliff_visualizer_html(
     economic_dataset: str,
     is_gainhelm: bool = False,
     slug: str = "",
+    is_lienbond: bool = False,
 ) -> str:
     """Renders the longitudinal 2024 to 2030 statutory and repayment cliff visualizer and SVG trajectory."""
     from pseofactory.proprietary_signals import compute_multi_year_longitudinal_trajectory
 
-    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     traj = compute_multi_year_longitudinal_trajectory(
         property_id=prop_id,
         slug=slug or topic_label.lower().replace(" ", "-"),
@@ -4219,11 +4332,12 @@ def _render_stateful_scenario_comparator_html(
     economic_dataset: str = "",
     is_gainhelm: bool = False,
     slug: str = "",
+    is_lienbond: bool = False,
 ) -> str:
     """Renders the stateful side-by-side Scenario A vs Scenario B vs Live Workbench comparator."""
     from pseofactory.proprietary_signals import compute_stateful_comparator_defaults
 
-    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     comp = compute_stateful_comparator_defaults(
         property_id=prop_id,
         slug=slug or topic_label.lower().replace(" ", "-"),
@@ -4751,6 +4865,7 @@ def render_serp_incumbent_depth_upgrade_block(
     s_low = str(slug or "").strip().lower()
     is_prexvo = property_id.strip().lower() == "prexvo"
     is_gainhelm = property_id.strip().lower() == "gainhelm"
+    is_lienbond = property_id.strip().lower() == "lienbond"
     topic_label = _format_safe_heading_topic(title, slug)
     veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
@@ -4758,6 +4873,8 @@ def render_serp_incumbent_depth_upgrade_block(
         spec = _build_repayment_loan_depth_spec(slug, topic_label, statutory_authority)
     elif is_gainhelm:
         spec = _build_gainhelm_depth_spec(topic_label, statutory_authority, economic_dataset)
+    elif is_lienbond:
+        spec = _build_lienbond_depth_spec(topic_label, statutory_authority, economic_dataset)
     elif any(
         tok in s_low
         for tok in (
@@ -4851,6 +4968,7 @@ def render_serp_incumbent_depth_upgrade_block(
         economic_dataset=economic_dataset,
         is_gainhelm=is_gainhelm,
         slug=s_low,
+        is_lienbond=is_lienbond,
     )
     comparator_html = _render_stateful_scenario_comparator_html(
         topic_label=topic_label,
@@ -4859,6 +4977,7 @@ def render_serp_incumbent_depth_upgrade_block(
         economic_dataset=economic_dataset,
         is_gainhelm=is_gainhelm,
         slug=s_low,
+        is_lienbond=is_lienbond,
     )
     blueprint_html = _render_saveable_decision_blueprint_html(
         slug=s_low,

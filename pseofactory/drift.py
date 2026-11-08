@@ -264,11 +264,13 @@ def verify_all_tenants_aligned_for_latch(
     is_prod_ws = (ws == Path("/home/ubuntuadmin/projects").resolve())
     reasons: List[str] = []
 
-    canonical_tenants = (
+    canonical_tenants = [
         ("profithelm", "profithelm-platform"),
         ("prexvo", "prexvo"),
         ("gainhelm", "gainhelm"),
-    )
+    ]
+    if (ws / "lienbond" / "substrate_lock.json").is_file():
+        canonical_tenants.append(("lienbond", "lienbond"))
     for pid, repo_dir_name in canonical_tenants:
         t_repo = ws / repo_dir_name
         has_git = (t_repo / ".git").exists()

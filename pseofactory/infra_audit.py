@@ -24,6 +24,7 @@ from pseofactory.tenant_facts import (
     CANONICAL_TENANT_DOMAINS,
     CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER,
     CLOUDFLARE_REGISTRAR_ATTESTATION_SHA256,
+    SPAWNED_TENANT_DECLARATIONS,
     TenantFactStore,
 )
 
@@ -45,7 +46,7 @@ KEPT_DOMAINS = ACTIVE_TENANT_DOMAINS + PERSONAL_INFRA_DOMAINS + HIBERNATED_RESER
 ACTIVE_ROUTABLE_ZONE_IDS: Dict[str, str] = {
     **{
         contract.domain: contract.cloudflare_zone_id
-        for contract in CANONICAL_TENANT_DECLARATIONS.values()
+        for contract in (*CANONICAL_TENANT_DECLARATIONS.values(), *SPAWNED_TENANT_DECLARATIONS.values())
         if contract.cloudflare_zone_id
     },
     "arifcoskun.com": "23c4be6bf04fcde33b938b8f94907457",
@@ -54,7 +55,7 @@ ACTIVE_ROUTABLE_ZONE_IDS: Dict[str, str] = {
 EXPECTED_ACTIVE_CNAME_TARGETS: Dict[str, str] = {
     **{
         contract.domain: contract.cloudflare_pages_cname_target
-        for contract in CANONICAL_TENANT_DECLARATIONS.values()
+        for contract in (*CANONICAL_TENANT_DECLARATIONS.values(), *SPAWNED_TENANT_DECLARATIONS.values())
         if contract.cloudflare_pages_cname_target
     },
     "arifcoskun.com": "arif-coskun-platform.pages.dev",
@@ -75,7 +76,10 @@ ALL_PORTFOLIO_ZONE_IDS: Dict[str, str] = {
 FORBIDDEN_ROUTING_RECORD_TYPES = ("A", "AAAA", "CNAME", "MX")
 
 DEFAULT_ENDPOINTS = [
-    *[contract.canonical_base for contract in CANONICAL_TENANT_DECLARATIONS.values()],
+    *[
+        contract.canonical_base
+        for contract in (*CANONICAL_TENANT_DECLARATIONS.values(), *SPAWNED_TENANT_DECLARATIONS.values())
+    ],
     "https://arifcoskun.com",
 ]
 

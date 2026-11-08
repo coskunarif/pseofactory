@@ -1776,7 +1776,7 @@ LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
     runner_work_dist_dir="/home/ubuntuadmin/.local/share/actions-runner/lienbond/_work/lienbond/lienbond/dist",
     env_prefix="LIENBOND",
     linkedin_company_id="",
-    cloudflare_zone_id="",
+    cloudflare_zone_id="47b340339ead09422ed5f28fabe85c4f",
     cloudflare_pages_cname_target="lienbond.pages.dev",
     truth_profile=_build_lienbond_profile(),
     research_entity="LienBond Statutory Surety & Construction Compliance Research",
@@ -1828,10 +1828,15 @@ LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
     own_boundary_tokens=(
         "lienbond",
         "lienbond.com",
-        "miller act",
-        "mechanics lien",
-        "preliminary notice",
-        "wh-347",
+        "47b340339ead09422ed5f28fabe85c4f",
+        "simply_business",
+        "suretybonds_direct",
+        "next_insurance_b2b",
+        "thimble_contractor",
+        "jobber_field_service",
+        "levelset_lien_filing",
+        "lb_surety_lien_wh347_packet",
+        "lb_workers_comp_emr_audit_packet",
     ),
     category_seed_taxonomy={
         "surety_bonds_and_underwriting": [
@@ -1953,7 +1958,7 @@ def _sync_derived_tenant_registries() -> None:
     TENANT_SMOKE_PROBES.clear()
     TENANT_DEFAULT_CPC_USD.clear()
     TENANT_DEFAULT_ERPM_USD.clear()
-    active_pids = set(CANONICAL_TENANT_DECLARATIONS.keys())
+    active_pids = set(CANONICAL_TENANT_DECLARATIONS.keys()) | set(SPAWNED_TENANT_DECLARATIONS.keys())
     for stale_pid in list(TENANT_CORE_TOOLS_BY_ID.keys()):
         if stale_pid not in active_pids:
             TENANT_CORE_TOOLS_BY_ID.pop(stale_pid, None)
@@ -1994,14 +1999,36 @@ def _sync_derived_tenant_registries() -> None:
             REPO_DIR_TO_PROPERTY_ID[contract.repo_dir_name.lower()] = pid
         REPO_DIR_TO_PROPERTY_ID[pid] = pid
 
-    for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+    for pid, contract in SPAWNED_TENANT_DECLARATIONS.items():
+        CANONICAL_TENANT_HOSTS[pid] = contract.domain
+        CANONICAL_TENANT_CONFIGS[pid] = contract.to_tenant_config_dict()
+        TENANT_VIDEO_BRANDING[pid] = dict(contract.video_branding)
+        TENANT_FLAGSHIP_ANCHOR_SLUGS[pid] = tuple(contract.flagship_anchor_slugs)
+        TENANT_SMOKE_PROBES[pid] = dict(contract.default_smoke_probe)
+        TENANT_DEFAULT_CPC_USD[pid] = float(contract.default_cpc_usd)
+        TENANT_DEFAULT_ERPM_USD[pid] = float(contract.default_erpm_usd)
+        existing_tools_list = TENANT_CORE_TOOLS_BY_ID.setdefault(pid, [])
+        existing_tools_list.clear()
+        existing_tools_list.extend(dict(t) for t in contract.default_core_tools)
+        existing_cann_map = TENANT_CANNIBALIZATION_MAPS_BY_ID.setdefault(pid, {})
+        existing_cann_map.update({
+            k: dict(v) for k, v in contract.cannibalization_clone_map.items()
+        })
+        CANONICAL_PRODUCTION_PROPERTIES.add(pid)
+        if contract.repo_dir_name:
+            CANONICAL_PRODUCTION_PROPERTIES.add(contract.repo_dir_name)
+            REPO_DIR_TO_PROPERTY_ID[contract.repo_dir_name.lower()] = pid
+        REPO_DIR_TO_PROPERTY_ID[pid] = pid
+
+    all_decls = {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}
+    for pid, contract in all_decls.items():
         explicit_forbidden = (
             {t.lower() for t in contract.truth_profile.cross_tenant_forbidden_tokens}
             if contract.truth_profile and contract.truth_profile.cross_tenant_forbidden_tokens
             else set()
         )
         peer_tokens: Set[str] = set()
-        for other_id, other_contract in CANONICAL_TENANT_DECLARATIONS.items():
+        for other_id, other_contract in all_decls.items():
             if other_id == pid:
                 continue
             peer_tokens.add(other_id.lower())
@@ -3613,7 +3640,11 @@ class TruthReconciliationEngine:
             from pseofactory.audit import _titles_match
             if not _titles_match(cur_title, h1_title):
                 from pseofactory.gsc_remediation import _normalize_title_50_60
-                brand_sfx = "ProfitHelm" if tenant_norm == "profithelm" else ("Prexvo" if tenant_norm == "prexvo" else "GainHelm")
+                brand_sfx = (
+                    "ProfitHelm"
+                    if tenant_norm == "profithelm"
+                    else ("Prexvo" if tenant_norm == "prexvo" else ("LienBond" if tenant_norm == "lienbond" else "GainHelm"))
+                )
                 cand_title = _normalize_title_50_60(h1_title, brand_sfx, tenant_norm)
                 if cand_title and cand_title != cur_title:
                     new_t_tag = f"<title>{cand_title}</title>"
@@ -3624,7 +3655,7 @@ class TruthReconciliationEngine:
             clean_page_title = h1_title
             if not clean_page_title and t_m:
                 page_title = _html_lib.unescape(re.sub(r"<[^>]+>", "", t_m.group(1)).strip())
-                clean_page_title = re.sub(r'\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$', '', page_title, flags=re.I).strip()
+                clean_page_title = re.sub(r'\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm|LienBond).*$', '', page_title, flags=re.I).strip()
                 clean_page_title = re.sub(r'\s+202[4-9]\s+Model\s+Tool\s+Guide\s*$', '', clean_page_title, flags=re.I).strip()
 
             if clean_page_title and slug:
@@ -3868,9 +3899,33 @@ class TruthReconciliationEngine:
             except Exception:
                 pass
         if not man_stat_val:
-            man_stat_val = "Title IV Higher Education Act (34 CFR Part 685)" if tenant_norm == "prexvo" else ("NIST SP 800-171 and DoD CMMC 2.0" if tenant_norm == "gainhelm" else "IRC Section 179 and Form 4562")
+            man_stat_val = (
+                "Title IV Higher Education Act (34 CFR Part 685)"
+                if tenant_norm == "prexvo"
+                else (
+                    "NIST SP 800-171 and DoD CMMC 2.0"
+                    if tenant_norm == "gainhelm"
+                    else (
+                        "40 U.S.C. 3131 (Miller Act) and State Mechanics Lien Statutes"
+                        if tenant_norm == "lienbond"
+                        else "IRC Section 179 and Form 4562"
+                    )
+                )
+            )
         if not man_econ_val:
-            man_econ_val = "HHS Poverty Guidelines and Department of Education Federal Student Aid" if tenant_norm == "prexvo" else ("DoD Cyber Exchange Defense Industrial Base Statistics" if tenant_norm == "gainhelm" else "Federal Reserve Financial Accounts Series B.101.e")
+            man_econ_val = (
+                "HHS Poverty Guidelines and Department of Education Federal Student Aid"
+                if tenant_norm == "prexvo"
+                else (
+                    "DoD Cyber Exchange Defense Industrial Base Statistics"
+                    if tenant_norm == "gainhelm"
+                    else (
+                        "NCCI Workers Compensation Class Rate Benchmarks and Surety Association Schedules"
+                        if tenant_norm == "lienbond"
+                        else "Federal Reserve Financial Accounts Series B.101.e"
+                    )
+                )
+            )
 
         if "multi-dataset-join" in updated:
             mdj_m = re.search(r'<(?:div|section|aside)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*>', updated, re.I)

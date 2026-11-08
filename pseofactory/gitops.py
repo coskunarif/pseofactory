@@ -6179,7 +6179,7 @@ def reconcile_workspace_tracking_state(
     elif not in_test and not is_explicit:
         target_repo_paths = [
             Path("/home/ubuntuadmin/projects") / rn
-            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm")
+            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
         ]
 
     if not in_test and not is_explicit:
@@ -6240,11 +6240,15 @@ def reconcile_workspace_tracking_state(
                     )
                     healed_tenant_trees += 1
 
-            if repo_name in ("profithelm-platform", "prexvo", "gainhelm") or tenant_repos is not None:
+            if repo_name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond") or tenant_repos is not None:
                 lock_name = (
                     "profithelm_factory.lock"
                     if "profithelm" in repo_name
-                    else ("gainhelm_factory.lock" if "gainhelm" in repo_name else "prexvo_factory.lock")
+                    else (
+                        "gainhelm_factory.lock"
+                        if "gainhelm" in repo_name
+                        else ("lienbond_factory.lock" if "lienbond" in repo_name else "prexvo_factory.lock")
+                    )
                 )
                 lock_path = (
                     (rp / f".{lock_name}")

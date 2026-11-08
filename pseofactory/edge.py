@@ -4846,9 +4846,9 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@lienbond.com";
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@lienbond.com")
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",

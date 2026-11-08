@@ -1368,7 +1368,6 @@ class WorkspacePropertyScanner:
         "artifacts",
         "generations",
         "parasite-output",
-        "lienbond",
     }
 
     def __init__(self, workspace_root: Optional[Union[str, Path]] = None):
@@ -1968,6 +1967,102 @@ GAINHELM_DEFAULT_TOOLS: List[Dict[str, Any]] = [
 
 GAINHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = list(GAINHELM_DEFAULT_TOOLS)
 
+from pseofactory.tenant_facts import LIENBOND_TENANT_CONTRACT, SPAWNED_TENANT_DECLARATIONS
+
+LIENBOND_DEFAULT_TOOLS: List[Dict[str, Any]] = [
+    {
+        "slug": "workers-compensation-class-code-rate-calculator-by-state",
+        "title": "NCCI Workers Compensation Class Code Rate Calculator by State",
+        "short_title": "Workers Comp Class Code Rate",
+        "description": "Calculate construction and commercial workers compensation manual premium by state NCCI class code, field trade payroll per $100 of remuneration, and Experience Modification Rate (EMR) multiplier.",
+        "primary_keyword": "workers compensation class code rate calculator by state",
+        "quick_answer": "Under IRC Section 3111, 29 CFR Part 1904 OSHA recordkeeping rules, and NCCI Basic Manual classification standards, construction workers compensation premium equals field trade payroll divided by $100, multiplied by the state class-code manual rate and Experience Modification Rate (EMR) factor.",
+        "category": "Workers Compensation & EMR",
+    },
+    {
+        "slug": "contractor-license-bond-cost-calculator-by-credit-score",
+        "title": "Contractor License Bond Cost Calculator by Credit Score",
+        "short_title": "Contractor License Bond Cost",
+        "description": "Estimate annual state contractor license surety bond premiums by statutory bond penalty amount ($10,000 to $100,000+), personal and business credit tier underwriting rate, and multi-year continuation discounts.",
+        "primary_keyword": "contractor license bond cost calculator by credit score",
+        "quick_answer": "Under 31 CFR Part 223 Treasury Circular 570, 40 U.S.C. Section 3131, and state licensing statutes such as California BPC Section 7071.6, contractor license bond premiums equal the statutory bond penalty multiplied by your credit-tier underwriting rate (0.75% to 5.0%).",
+        "category": "Contractor Surety Bonds",
+    },
+    {
+        "slug": "miller-act-performance-and-payment-bond-premium-calculator",
+        "title": "Miller Act Performance and Payment Bond Premium Calculator",
+        "short_title": "Miller Act Bond Premium",
+        "description": "Calculate federal Miller Act (40 U.S.C. Section 3131) and state Little Miller Act 100% performance and payment bond premiums using SFAA Class B sliding-scale contract bond rate tiers.",
+        "primary_keyword": "performance and payment bond premium calculator",
+        "quick_answer": "Under the Federal Miller Act (40 U.S.C. Section 3131) and FAR 28.102-2, public works construction contracts exceeding $150,000 require 100% performance and payment bonds priced on SFAA Class B sliding-scale tiers ($25/M first $100k, $15/M next $400k, $10/M excess).",
+        "category": "Contractor Surety Bonds",
+    },
+    {
+        "slug": "contractor-lien-release-statutory-matrix-by-state",
+        "title": "50-State Contractor Mechanics Lien Release Statutory Matrix",
+        "short_title": "50-State Mechanics Lien Matrix",
+        "description": "Verify state-mandated conditional and unconditional progress and final mechanics lien waiver forms, preliminary notice deadlines, and preserved lien principal across California, Texas, Florida, and all 50 states.",
+        "primary_keyword": "contractor lien release statutory matrix by state",
+        "quick_answer": "Under 40 U.S.C. Section 3133(b), California Civil Code Section 8132, and Texas Property Code Chapter 53, statutory mechanics lien principal equals unpaid progress draws plus executed change orders reduced by any unserved preliminary notice lookback forfeiture.",
+        "category": "Mechanics Liens & Waivers",
+    },
+    {
+        "slug": "commercial-construction-retainage-interest-penalty-calculator-by-state",
+        "title": "Commercial Construction Retainage Interest Penalty Calculator by State",
+        "short_title": "Retainage Interest Penalty",
+        "description": "Model construction retainage holdback working-capital drag, commercial line-of-credit financing cost, and statutory prompt payment penalty interest under 31 U.S.C. Section 3903 and state retainage caps.",
+        "primary_keyword": "commercial construction retainage interest penalty calculator by state",
+        "quick_answer": "Under the Federal Prompt Payment Act (31 U.S.C. Section 3903), 48 CFR 52.232-5, and state retainage cap statutes (5% to 10%), withheld construction retainage locks up contractor working capital and accrues statutory interest penalties when held past substantial completion.",
+        "category": "Mechanics Liens & Waivers",
+    },
+    {
+        "slug": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+        "title": "Davis-Bacon Prevailing Wage and WH-347 Fringe Benefit Rate Calculator",
+        "short_title": "Davis-Bacon WH-347 Fringe",
+        "description": "Calculate total annual Davis-Bacon prevailing wage labor cost, comparing cash-in-lieu fringe benefit FICA/FUTA/workers-comp payroll tax drag against bona fide ERISA trust plan annualization credits on DOL Form WH-347.",
+        "primary_keyword": "davis bacon prevailing wage fringe benefit rate calculator",
+        "quick_answer": "Under the Davis-Bacon Act (40 U.S.C. Section 3141), 29 CFR Section 5.5 Form WH-347 certified payroll rules, and IRC Section 3111, paying prevailing fringe benefits in cash triggers FICA, FUTA, and workers compensation payroll burden that bona fide ERISA benefit plans avoid.",
+        "category": "Prevailing Wage & ERISA",
+    },
+    {
+        "slug": "erisa-fidelity-bond-coverage-amount-calculator",
+        "title": "ERISA Section 412 Fidelity Bond Coverage Amount Calculator",
+        "short_title": "ERISA Section 412 Fidelity Bond",
+        "description": "Compute mandatory ERISA Section 412 (29 U.S.C. Section 1112) 10% fiduciary dishonesty bond coverage limits ($1,000 minimum floor to $500,000/$1,000,000 statutory cap) for 401(k) and contractor prevailing-wage benefit plans.",
+        "primary_keyword": "erisa fidelity bond coverage amount calculator",
+        "quick_answer": "Under ERISA Section 412 (29 U.S.C. Section 1112) and 29 CFR 2580.412-1, every fiduciary handling employee benefit plan funds must maintain a Treasury Circular 570 fidelity bond equal to at least 10% of qualifying plan assets ($1,000 minimum up to $500,000 cap).",
+        "category": "Prevailing Wage & ERISA",
+    },
+    {
+        "slug": "contractor-overhead-and-profit-markup-vs-margin-calculator",
+        "title": "Contractor Overhead and Profit Markup vs Margin Calculator",
+        "short_title": "Markup vs Margin Calculator",
+        "description": "Convert direct construction job cost into required contract bid price using gross margin divisor math versus markup multipliers under FAR Part 31 (48 CFR Part 31), IRC Section 460, and AIA A102 cost-plus standards.",
+        "primary_keyword": "contractor overhead and profit markup vs margin calculator",
+        "quick_answer": "Under 48 CFR Part 31 (FAR Contract Cost Principles), IRC Section 460 percentage-of-completion accounting, and AIA A102 standards, achieving a combined overhead and net profit margin requires dividing direct job cost by (1.0 minus target margin percentage) rather than multiplying.",
+        "category": "Contractor Surety Bonds",
+    },
+    {
+        "slug": "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "title": "Experience Modification Rate (EMR) Workers Comp Penalty Calculator",
+        "short_title": "EMR Workers Comp Penalty",
+        "description": "Calculate how debit Experience Modification Rates (EMR > 1.00) and state workplace safety committee credits impact audited construction workers compensation premiums and GC prequalification thresholds.",
+        "primary_keyword": "experience modification rate emr workers comp penalty calculator",
+        "quick_answer": "Under NCCI Experience Rating Plan Rule 2-E and 29 CFR Part 1904 OSHA injury reporting standards, your manual workers compensation premium is multiplied by your 3-year Experience Modification Rate (EMR) factor and adjusted for state safety committee credits.",
+        "category": "Workers Compensation & EMR",
+    },
+    {
+        "slug": "california-texas-florida-preliminary-notice-deadline-calculator",
+        "title": "California, Texas and Florida Preliminary Notice Deadline Calculator",
+        "short_title": "Preliminary Notice Deadlines",
+        "description": "Calculate statutory preliminary notice service windows and preserved mechanics lien principal under California 20-Day Preliminary Notice (Civ. Code 8204), Texas 15th-Day Monthly Notice (Prop. Code 53.056), and Florida 45-Day Notice to Owner (Fla. Stat. 713.06).",
+        "primary_keyword": "preliminary notice deadline calculator california texas florida",
+        "quick_answer": "Under California Civil Code Section 8204 (20-day lookback), Texas Property Code Section 53.056 (15th-day monthly notice), and Florida Statutes Section 713.06 (45-day Notice to Owner), serving preliminary notice within the statutory window preserves 100% of mechanics lien rights.",
+        "category": "Mechanics Liens & Waivers",
+    },
+]
+LIENBOND_EXTENDED_TOOLS: List[Dict[str, Any]] = list(LIENBOND_DEFAULT_TOOLS)
+
 
 def _discover_tenant_tools(
     adapter: PropertyAdapter,
@@ -1987,6 +2082,8 @@ def _discover_tenant_tools(
         ext_source = PREXVO_EXTENDED_TOOLS
     elif adapter.property_id == "gainhelm":
         ext_source = GAINHELM_EXTENDED_TOOLS
+    elif adapter.property_id == "lienbond":
+        ext_source = LIENBOND_EXTENDED_TOOLS
     elif adapter.property_id == "profithelm":
         ext_source = PROFITHELM_EXTENDED_TOOLS
     else:
@@ -2117,6 +2214,8 @@ def _discover_tenant_tools(
                 item["affiliates"] = ["splash_financial", "sofi", "credible"]
             elif adapter.property_id == "gainhelm":
                 item["affiliates"] = ["vanta_security", "drata_compliance", "sprinto_compliance"]
+            elif adapter.property_id == "lienbond":
+                item["affiliates"] = ["suretybonds_com", "lance_surety_bonds", "next_insurance_contractors"]
             else:
                 item["affiliates"] = ["turbotax", "interactive_brokers"]
     return res
@@ -2172,8 +2271,9 @@ class TenantRegistry:
             "prexvo": PREXVO_DEFAULT_TOOLS,
             "profithelm": PROFITHELM_DEFAULT_TOOLS,
             "gainhelm": GAINHELM_DEFAULT_TOOLS,
+            "lienbond": LIENBOND_DEFAULT_TOOLS,
         }
-        for pid, contract in CANONICAL_TENANT_DECLARATIONS.items():
+        for pid, contract in {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}.items():
             if pid not in default_tool_map and contract.default_core_tools:
                 default_tool_map[pid] = [dict(t) for t in contract.default_core_tools]
         for pid, default_tools in default_tool_map.items():
@@ -2513,6 +2613,9 @@ class LiveTruthAuditEngine:
         elif prop_norm == "gainhelm":
             if "turbotax" in content.lower() or "splash_financial" in content.lower():
                 violations.append(f"Cross-tenant affiliate contamination in {p_name}: Foreign tenant affiliate detected in GainHelm asset")
+        elif prop_norm == "lienbond":
+            if "turbotax" in content.lower() or "splash_financial" in content.lower() or "vanta_security" in content.lower():
+                violations.append(f"Cross-tenant affiliate contamination in {p_name}: Foreign tenant affiliate detected in LienBond asset")
         elif prop_norm == "profithelm":
             if "splash_financial" in content.lower() or "vanta_security" in content.lower():
                 violations.append(f"Cross-tenant affiliate contamination in {p_name}: Foreign tenant affiliate detected in ProfitHelm asset")
@@ -3241,7 +3344,11 @@ class AssetIntegrityEvaluator:
             brand_chk = (
                 "Prexvo"
                 if prop_low == "prexvo"
-                else ("GainHelm" if prop_low == "gainhelm" else "ProfitHelm")
+                else (
+                    "GainHelm"
+                    if prop_low == "gainhelm"
+                    else ("LienBond" if prop_low == "lienbond" else "ProfitHelm")
+                )
             )
             for s_item in sorted(synd_dir_cand.iterdir()):
                 if s_item.name.startswith("."):
@@ -4195,7 +4302,7 @@ class MaintenanceLifecycle:
             if (
                 not dry_run
                 and getattr(adapter, "repo_path", None)
-                and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
+                and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
                 and not (
                     "PYTEST_CURRENT_TEST" in os.environ
                     and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
@@ -4567,7 +4674,7 @@ class MaintenanceLifecycle:
                         eff_ov, _ = persist_overlay_respecting_lock(agy_ov_file, overlay_payload)
                         is_canonical_prod_repo = bool(
                             getattr(adapter, "repo_path", None)
-                            and Path(adapter.repo_path).name in ("profithelm-platform", "prexvo", "gainhelm")
+                            and Path(adapter.repo_path).name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
                         )
                         if not is_canonical_prod_repo:
                             content_ov_dir = base_dir / "content" / "overlays"
@@ -4711,7 +4818,7 @@ class MaintenanceLifecycle:
             substrate_lock_existed = False
             if not dry_run and getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
-                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                     try:
                         substrate_lock_path = t_repo / "substrate_lock.json"
                         if substrate_lock_path.is_file():
@@ -4898,7 +5005,7 @@ class MaintenanceLifecycle:
 
             # Stage 11: Non-Blocking Partner Monetization Telemetry & Portal Click Reconciliation
             partner_readiness_status_val: Optional[str] = None
-            if adapter.property_id in ("profithelm", "prexvo", "gainhelm"):
+            if adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                 try:
                     from pseofactory.partner_tracker import (
                         PartnerTrackingEngine,
@@ -4916,7 +5023,7 @@ class MaintenanceLifecycle:
                     recon_rep = partner_engine.reconcile_edge_clicks_with_portals(
                         engagement_by_property={
                             p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                            for p_id in ("profithelm", "prexvo", "gainhelm")
+                            for p_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
                         }
                     )
                     if not dry_run and not in_pytest:
@@ -5781,6 +5888,7 @@ def _needs_page_structure_geo_normalization(
         and '"https://profithelm.com/tools/"' not in html_content
         and '"https://prexvo.com/tools/"' not in html_content
         and '"https://gainhelm.com/tools/"' not in html_content
+        and '"https://lienbond.com/tools/"' not in html_content
     ):
         return True
 
@@ -5852,7 +5960,11 @@ def _needs_page_structure_geo_normalization(
     inferred_tenant = (
         "prexvo"
         if "prexvo.com" in html_content.lower() or "34 cfr" in html_content.lower()
-        else ("gainhelm" if "gainhelm.com" in html_content.lower() else "profithelm")
+        else (
+            "gainhelm"
+            if "gainhelm.com" in html_content.lower()
+            else ("lienbond" if "lienbond.com" in html_content.lower() else "profithelm")
+        )
     )
     if TruthReconciliationEngine.audit_html_truth_reconciliation(
         html_content, tenant=inferred_tenant, include_fact_store=False
@@ -6067,7 +6179,7 @@ def _normalize_spoke_and_synthesized_body_bloat(
         if comm_changed:
             changed = True
 
-    if slug == "tools-directory" and property_id.lower() in ("profithelm", "gainhelm"):
+    if slug == "tools-directory" and property_id.lower() in ("profithelm", "gainhelm", "lienbond"):
         qa_dir_pat = re.compile(
             r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
             re.IGNORECASE,
@@ -6086,6 +6198,12 @@ def _normalize_spoke_and_synthesized_body_bloat(
                         "GainHelm provides a deterministic directory of 10 institutional cyber compliance, GRC audit, "
                         "and statutory penalty calculators anchored to AICPA SSAE 18, 32 CFR Part 170, NIST SP 800-171, "
                         "45 CFR Part 160, and BLS OEWS SOC 15-1212 wage benchmarks with zero AI hallucinations."
+                    )
+                elif property_id.lower() == "lienbond":
+                    dir_qa = (
+                        "LienBond provides a deterministic directory of 10 institutional contractor surety bond, "
+                        "state workers' compensation, and construction statutory filing calculators anchored to "
+                        "40 U.S.C. 3131, Treasury Circular 570, NCCI manual rates, and Form WH-347 with zero AI hallucinations."
                     )
                 else:
                     dir_qa = (
@@ -6476,7 +6594,11 @@ def _normalize_page_structure_and_geo_parity(
         base_dom = (
             "https://prexvo.com"
             if property_id.lower() == "prexvo"
-            else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+            else (
+                "https://gainhelm.com"
+                if property_id.lower() == "gainhelm"
+                else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+            )
         )
         if canonical_url and "/tools/" in canonical_url:
             base_dom = canonical_url.split("/tools/")[0].rstrip("/")
@@ -6491,6 +6613,12 @@ def _normalize_page_structure_and_geo_parity(
                 ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC ROI Calculator"),
                 ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Cost Calculator"),
                 ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
+            ]
+        elif property_id.lower() == "lienbond":
+            m_peers = [
+                ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator"),
+                ("miller-act-performance-and-payment-bond-premium-calculator", "Miller Act Performance & Payment Bond Calculator"),
+                ("workers-compensation-class-code-rate-calculator-by-state", "Workers' Comp Class Code Rate Calculator"),
             ]
         else:
             m_peers = [
@@ -6760,7 +6888,11 @@ def _normalize_page_structure_and_geo_parity(
     brand_label = (
         "Prexvo"
         if property_id.lower() == "prexvo"
-        else ("GainHelm" if property_id.lower() == "gainhelm" else "ProfitHelm")
+        else (
+            "GainHelm"
+            if property_id.lower() == "gainhelm"
+            else ("LienBond" if property_id.lower() == "lienbond" else "ProfitHelm")
+        )
     )
 
     if detect_placeholder_verification_token_issues(updated):
@@ -6963,7 +7095,7 @@ def _normalize_page_structure_and_geo_parity(
     if (
         slug
         and slug not in ("index", "tools-directory", "tools")
-        and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo", "gainhelm"))
+        and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond"))
         and '"@graph"' in updated
         and ('"@type": "Dataset"' not in updated or '"@type": "HowTo"' not in updated)
     ):
@@ -6988,7 +7120,11 @@ def _normalize_page_structure_and_geo_parity(
                     else (
                         "https://prexvo.com"
                         if property_id.lower() == "prexvo"
-                        else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                        else (
+                            "https://gainhelm.com"
+                            if property_id.lower() == "gainhelm"
+                            else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                        )
                     )
                 )
                 clean_lbl = topic_label or slug.replace("-", " ").title()
@@ -7180,8 +7316,11 @@ def _normalize_page_structure_and_geo_parity(
     def _qa_needs_heal(qa_txt: str) -> bool:
         s_low = slug.lower()
         t_low = qa_txt.lower()
+        w_cnt = len([w for w in qa_txt.split() if w.strip()])
         return (
-            detect_sentence_truncation_issues(qa_txt)
+            w_cnt < 40
+            or w_cnt > 60
+            or detect_sentence_truncation_issues(qa_txt)
             or count_quick_answer_sentences(qa_txt) > 2
             or ("grad-plus" in s_low and ("tiered standard" in t_low or "225 percent" in t_low))
             or ("equipment-lease" in s_low and "$2,560,000" in qa_txt)
@@ -7218,7 +7357,7 @@ def _normalize_page_structure_and_geo_parity(
         )
 
     qa_m_norm = re.search(
-        r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>\s*<p[^>]*>)([\s\S]*?)(</p>\s*</aside>)',
+        r'(<(?:aside|div)[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>\s*<p[^>]*>)([\s\S]*?)(</p>\s*</(?:aside|div)>)',
         updated,
         re.IGNORECASE,
     )
@@ -7316,12 +7455,16 @@ def _normalize_page_structure_and_geo_parity(
                 base_u = (
                     "https://prexvo.com"
                     if prop_l == "prexvo"
-                    else ("https://gainhelm.com" if prop_l == "gainhelm" else "https://profithelm.com")
+                    else (
+                        "https://gainhelm.com"
+                        if prop_l == "gainhelm"
+                        else ("https://lienbond.com" if prop_l == "lienbond" else "https://profithelm.com")
+                    )
                 )
                 canon_clean_u = (canonical_url or "").split("#")[0].rstrip("/")
                 is_root_home = (
                     slug == "index"
-                    or canon_clean_u in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com")
+                    or canon_clean_u in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com", "https://lienbond.com")
                 )
                 is_tool_route = (
                     not is_root_home
@@ -7343,6 +7486,12 @@ def _normalize_page_structure_and_geo_parity(
                         ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC Automation Calculator"),
                         ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Compliance Cost Calculator"),
                         ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
+                    ]
+                elif prop_l == "lienbond":
+                    peer_candidates = [
+                        ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator"),
+                        ("miller-act-performance-and-payment-bond-premium-calculator", "Miller Act Performance & Payment Bond Calculator"),
+                        ("workers-compensation-class-code-rate-calculator-by-state", "Workers' Comp Class Code Rate Calculator"),
                     ]
                 else:
                     peer_candidates = [
@@ -7563,6 +7712,7 @@ def _normalize_page_structure_and_geo_parity(
             and '"https://profithelm.com/tools/"' not in updated
             and '"https://prexvo.com/tools/"' not in updated
             and '"https://gainhelm.com/tools/"' not in updated
+            and '"https://lienbond.com/tools/"' not in updated
         )
     ):
         def _inject_breadcrumb_graph(m_bc: re.Match) -> str:
@@ -7575,7 +7725,11 @@ def _normalize_page_structure_and_geo_parity(
                 base_u = (
                     "https://prexvo.com"
                     if property_id.lower() == "prexvo"
-                    else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                    else (
+                        "https://gainhelm.com"
+                        if property_id.lower() == "gainhelm"
+                        else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                    )
                 )
                 page_u = (canonical_url or f"{base_u}/").split("#")[0].rstrip("/") + "/"
                 clean_lbl = topic_label or slug.replace("-", " ").title() or brand_label
@@ -7717,6 +7871,7 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
     try:
         from pseofactory.affiliates import (
             GAINHELM_AFFILIATES,
+            LIENBOND_AFFILIATES,
             PREXVO_AFFILIATES,
             PROFITHELM_AFFILIATES,
         )
@@ -7725,7 +7880,11 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
         registry = (
             PREXVO_AFFILIATES
             if prop == "prexvo"
-            else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+            else (
+                GAINHELM_AFFILIATES
+                if prop == "gainhelm"
+                else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES)
+            )
         )
     except Exception:
         return True
@@ -8455,6 +8614,150 @@ class RetroReflectionEngine:
         },
     }
 
+    LIENBOND_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
+        "workers-compensation-class-code-rate-calculator-by-state": {
+            "model_name": "NCCIWorkersCompClassCodePremiumModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round((field_trade_payroll / 100.0) * class_code_rate_per_100 * emr_modification_factor, 2)",
+            "inputs": {
+                "field_trade_payroll": 650000.0,
+                "class_code_rate_per_100": 6.8,
+                "emr_modification_factor": 1.0,
+            },
+            "published_output": 44200.0,
+            "statutory_authority": "IRC Section 3111 Payroll Burden, 29 CFR Part 1904 OSHA Recordkeeping, and NCCI Basic Manual Class Codes",
+            "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC Construction Series) and NCCI Loss Cost Filings",
+            "sample_calculation": "Field construction payroll of $650,000 classified at $6.80 per $100 of remuneration with a 1.00 unity EMR modifier yields $44,200.00 in annual workers compensation manual premium.",
+        },
+        "contractor-license-bond-cost-calculator-by-credit-score": {
+            "model_name": "ContractorLicenseBondCreditTierModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(bond_penalty_amount * (underwriting_rate_pct / 100.0) * multi_year_discount_factor, 2)",
+            "inputs": {
+                "bond_penalty_amount": 25000.0,
+                "underwriting_rate_pct": 1.5,
+                "multi_year_discount_factor": 1.0,
+            },
+            "published_output": 375.0,
+            "statutory_authority": "31 CFR Part 223 U.S. Treasury Circular 570, 40 U.S.C. Section 3131, and California BPC Section 7071.6",
+            "economic_dataset": "FRED Commercial Bank Prime Rate Series, BLS Construction Wage Series, and SFAA Surety Loss Ratios",
+            "sample_calculation": "Statutory $25,000 CSLB contractor license bond underwritten at a 1.50% preferred credit tier rate (1.0x single-year factor) yields a $375.00 annual surety bond premium.",
+        },
+        "miller-act-performance-and-payment-bond-premium-calculator": {
+            "model_name": "MillerActSlidingScaleBondPremiumModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(min(contract_price, 100000.0) * 0.025 + max(0.0, min(contract_price - 100000.0, 400000.0)) * 0.015 + max(0.0, contract_price - 500000.0) * (sliding_tier_rate_pct / 100.0), 2)",
+            "inputs": {
+                "contract_price": 1200000.0,
+                "sliding_tier_rate_pct": 1.0,
+            },
+            "published_output": 15500.0,
+            "statutory_authority": "40 U.S.C. Section 3131 Federal Miller Act, 48 CFR Part 28 (FAR 28.102-2), and State Little Miller Acts",
+            "economic_dataset": "FRED Total Construction Spending Series (TTLCONS) and SFAA Class B Contract Surety Rate Manuals",
+            "sample_calculation": "Public works contract of $1,200,000 under SFAA Class B sliding-scale rates ($2,500 on first $100k at 2.5% + $6,000 on next $400k at 1.5% + $7,000 on remaining $700k at 1.0%) produces a $15,500.00 combined AIA A312 performance and payment bond premium.",
+        },
+        "contractor-lien-release-statutory-matrix-by-state": {
+            "model_name": "StatutoryMechanicsLienWaiverProtectionModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(unpaid_contract_draw + change_order_balance - min(unpaid_contract_draw + change_order_balance, unserved_late_days * daily_forfeiture_rate), 2)",
+            "inputs": {
+                "unpaid_contract_draw": 85000.0,
+                "change_order_balance": 12500.0,
+                "unserved_late_days": 0.0,
+                "daily_forfeiture_rate": 1250.0,
+            },
+            "published_output": 97500.0,
+            "statutory_authority": "40 U.S.C. Section 3133(b) Miller Act 90-Day Notice Rule, California Civil Code Section 8132, and Texas Property Code Chapter 53",
+            "economic_dataset": "FRED Commercial Construction Credit Series and BLS Producer Price Index for Construction",
+            "sample_calculation": "Unpaid progress draw of $85,000 plus $12,500 in executed change orders with 0 late preliminary notice days preserves $97,500.00 in secured statutory mechanics lien principal.",
+        },
+        "commercial-construction-retainage-interest-penalty-calculator-by-state": {
+            "model_name": "ConstructionRetainageWorkingCapitalDragModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(gross_contract_billed * (retainage_holdback_pct / 100.0) * (1.0 + (credit_line_apr_pct / 100.0) * (retainage_hold_days / 365.0)), 2)",
+            "inputs": {
+                "gross_contract_billed": 900000.0,
+                "retainage_holdback_pct": 10.0,
+                "credit_line_apr_pct": 8.5,
+                "retainage_hold_days": 180.0,
+            },
+            "published_output": 93772.6,
+            "statutory_authority": "31 U.S.C. Section 3903 Federal Prompt Payment Act, 48 CFR 52.232-5 Progress Payments, and State Retainage Caps",
+            "economic_dataset": "Federal Reserve H.15 Commercial Bank Prime Loan Rate and FRED Construction Spending Series",
+            "sample_calculation": "Withholding 10.0% retainage ($90,000) on $900,000 of progress billings financed at 8.50% APR for 180 days locks up $93,772.60 in principal plus working capital interest drag.",
+        },
+        "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator": {
+            "model_name": "DavisBaconFringeCashInLieuPayrollBurdenModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(annual_prevailing_hours * (base_hourly_wage + (required_fringe_hourly - bona_fide_plan_credit_hourly) * (1.0 + payroll_tax_burden_pct / 100.0) + bona_fide_plan_credit_hourly), 2)",
+            "inputs": {
+                "annual_prevailing_hours": 2000.0,
+                "base_hourly_wage": 48.0,
+                "required_fringe_hourly": 22.0,
+                "bona_fide_plan_credit_hourly": 0.0,
+                "payroll_tax_burden_pct": 14.5,
+            },
+            "published_output": 146380.0,
+            "statutory_authority": "40 U.S.C. Section 3141 Davis-Bacon Act, 29 CFR Section 5.5 Certified Payroll WH-347, and IRC Section 3111",
+            "economic_dataset": "BLS National Compensation Survey Construction Fringe Benefit Series and DOL Wage Determinations",
+            "sample_calculation": "Paying $48.00/hr base wage plus $22.00/hr fringe in cash-in-lieu over 2,000 hours with a 14.5% FICA/FUTA/WC payroll burden on cash fringes totals $146,380.00 ($6,380.00 excess payroll tax penalty vs a bona fide ERISA trust).",
+        },
+        "erisa-fidelity-bond-coverage-amount-calculator": {
+            "model_name": "ERISASection412FidelityBondLimitModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(min(max(qualifying_plan_assets * 0.10, 1000.0), 500000.0), 2)",
+            "inputs": {
+                "qualifying_plan_assets": 2400000.0,
+            },
+            "published_output": 240000.0,
+            "statutory_authority": "29 U.S.C. Section 1112 (ERISA Section 412), 29 CFR 2580.412-1, and U.S. Treasury Circular 570",
+            "economic_dataset": "BLS Employee Benefits Survey Retirement Plan Series and FRED Corporate Bond Yield Series",
+            "sample_calculation": "Qualified 401(k) retirement plan holding $2,400,000 in qualifying plan assets under 29 U.S.C. Section 1112 (10% statutory bond rule capped at $500,000) requires a $240,000.00 ERISA fidelity bond.",
+        },
+        "contractor-overhead-and-profit-markup-vs-margin-calculator": {
+            "model_name": "ContractorMarkupVsGrossMarginModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(direct_job_cost / (1.0 - (overhead_pct + target_net_profit_pct) / 100.0), 2)",
+            "inputs": {
+                "direct_job_cost": 340000.0,
+                "overhead_pct": 12.0,
+                "target_net_profit_pct": 8.0,
+            },
+            "published_output": 425000.0,
+            "statutory_authority": "48 CFR Part 31 (FAR Contract Cost Principles), IRC Section 460 Percentage-of-Completion, and AIA A102",
+            "economic_dataset": "BLS Producer Price Index for Nonresidential Building Construction and FRED Construction Series",
+            "sample_calculation": "Direct job cost of $340,000 divided by (1.0 minus 20.0% combined overhead and profit margin) requires a $425,000.00 contract bid price (1.25x markup divisor).",
+        },
+        "experience-modification-rate-emr-workers-comp-penalty-calculator": {
+            "model_name": "NCCIExperienceModificationRateSurchargeModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(manual_workers_comp_premium * emr_factor * (1.0 - safety_credit_pct / 100.0), 2)",
+            "inputs": {
+                "manual_workers_comp_premium": 52000.0,
+                "emr_factor": 1.15,
+                "safety_credit_pct": 5.0,
+            },
+            "published_output": 56810.0,
+            "statutory_authority": "29 CFR Part 1904 Occupational Injury Reporting, IRC Section 162 Insurance Deduction, and NCCI Experience Rating Plan Rule 2-E",
+            "economic_dataset": "BLS Survey of Occupational Injuries and Illnesses (SOII) and NCCI Primary Split-Point Series",
+            "sample_calculation": "Manual workers compensation premium of $52,000 modified by a 1.15 debit EMR and a 5.0% state safety committee credit yields $56,810.00 net audited premium.",
+        },
+        "california-texas-florida-preliminary-notice-deadline-calculator": {
+            "model_name": "TriStatePreliminaryNoticeLookbackModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(unpaid_progress_billing * max(0.0, min(1.0, (statutory_lookback_window_days - max(0.0, days_elapsed_since_first_furnishing - statutory_lookback_window_days)) / statutory_lookback_window_days)), 2)",
+            "inputs": {
+                "unpaid_progress_billing": 120000.0,
+                "days_elapsed_since_first_furnishing": 20.0,
+                "statutory_lookback_window_days": 20.0,
+            },
+            "published_output": 120000.0,
+            "statutory_authority": "40 U.S.C. Section 3133(b) Miller Act, California Civil Code Section 8204, Texas Property Code Section 53.056, and Florida Statutes Section 713.06",
+            "economic_dataset": "FRED Commercial Construction Credit Series and BLS Specialty Trade Contractor Series",
+            "sample_calculation": "Serving a California 20-Day Preliminary Notice on Day 20 from first furnishing preserves 100% ($120,000.00) of statutory mechanics lien and stop payment notice rights.",
+        },
+    }
+
     @classmethod
     def _extract_spoke_manifest_from_html(
         cls,
@@ -8676,7 +8979,11 @@ class RetroReflectionEngine:
             inferred_prop = (
                 "prexvo"
                 if "prexvo.com" in canon_clean
-                else ("gainhelm" if "gainhelm.com" in canon_clean else "profithelm")
+                else (
+                    "gainhelm"
+                    if "gainhelm.com" in canon_clean
+                    else ("lienbond" if "lienbond.com" in canon_clean else "profithelm")
+                )
             )
             inferred_slug = ""
             if "/tools/" in canon_clean:
@@ -8687,10 +8994,13 @@ class RetroReflectionEngine:
                 inferred_slug = "rap-payment-calculator"
             elif canon_clean.rstrip("/") == "https://gainhelm.com":
                 inferred_slug = "soc-2-audit-cost-calculator"
+            elif canon_clean.rstrip("/") == "https://lienbond.com":
+                inferred_slug = "contractor-license-bond-cost-calculator-by-credit-score"
             if inferred_slug and (
                 inferred_slug in cls.PREXVO_FALLBACK_MANIFESTS
                 or inferred_slug in cls.PROFITHELM_FALLBACK_MANIFESTS
                 or inferred_slug in cls.GAINHELM_FALLBACK_MANIFESTS
+                or inferred_slug in cls.LIENBOND_FALLBACK_MANIFESTS
                 or "/" in inferred_slug
             ):
                 expected_m = cls._resolve_manifest_for_page(
@@ -8723,7 +9033,7 @@ class RetroReflectionEngine:
                             or str(curr_m.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
                             or any(k in curr_demand_tel for k in PUBLISH_VOLATILE_TELEMETRY_KEYS)
                             or (
-                                inferred_prop in ("profithelm", "prexvo", "gainhelm")
+                                inferred_prop in ("profithelm", "prexvo", "gainhelm", "lienbond")
                                 and (
                                     not curr_m.get("statutory_economic_matrix")
                                     or not curr_m.get("proprietary_telemetry")
@@ -8783,7 +9093,7 @@ class RetroReflectionEngine:
                 if scen_m and (
                     scen_m.group(1).strip() != exp_disp
                     or (
-                        inferred_prop in ("profithelm", "prexvo", "gainhelm")
+                        inferred_prop in ("profithelm", "prexvo", "gainhelm", "lienbond")
                         and (
                             'class="scenario-ast-eval"' not in html_content
                             or (exp_con_delta and f">{exp_con_delta}<" not in html_content)
@@ -8872,6 +9182,8 @@ class RetroReflectionEngine:
                 and "Income-Based" not in cluster_body
                 and "/tools/soc-2-audit-cost-calculator/" not in cluster_body
                 and "/tools/cmmc-2-0-compliance-cost-calculator/" not in cluster_body
+                and "/tools/contractor-license-bond-cost-calculator-by-credit-score/" not in cluster_body
+                and "/tools/workers-compensation-class-code-rate-calculator-by-state/" not in cluster_body
             )
             or (
                 "/tools/irs-2027-tax-brackets/" in cluster_body
@@ -9104,6 +9416,7 @@ class RetroReflectionEngine:
 
         is_prexvo = property_id.lower() == "prexvo"
         is_gainhelm = property_id.lower() == "gainhelm"
+        is_lienbond = property_id.lower() == "lienbond"
         if is_prexvo:
             default_stat, default_econ = (
                 "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
@@ -9113,6 +9426,10 @@ class RetroReflectionEngine:
             gh_preset_0 = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
             default_stat = str(gh_preset_0["statutory_authority"])
             default_econ = str(gh_preset_0["economic_dataset"])
+        elif is_lienbond:
+            lb_preset_0 = cls.LIENBOND_FALLBACK_MANIFESTS.get(slug) or cls.LIENBOND_FALLBACK_MANIFESTS["contractor-license-bond-cost-calculator-by-credit-score"]
+            default_stat = str(lb_preset_0["statutory_authority"])
+            default_econ = str(lb_preset_0["economic_dataset"])
         else:
             default_stat, default_econ = _resolve_profithelm_statutory_provenance(slug, html_content)
         slug_title = _format_safe_heading_topic("", slug)
@@ -9154,7 +9471,25 @@ class RetroReflectionEngine:
                     or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
                 ):
                     raw = dict(preset)
-            elif not is_prexvo and not is_gainhelm and slug in cls.PROFITHELM_FALLBACK_MANIFESTS:
+            elif is_lienbond and slug in cls.LIENBOND_FALLBACK_MANIFESTS:
+                preset = cls.LIENBOND_FALLBACK_MANIFESTS[slug]
+                raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
+                raw_taut = (
+                    detect_tautological_or_fabricated_manifest_issues(
+                        str(raw.get("formula") or ""), raw.get("inputs") or {}, raw_pub
+                    )
+                    if isinstance(raw, dict) and raw.get("formula")
+                    else ["missing"]
+                )
+                if (
+                    not raw
+                    or not raw.get("formula")
+                    or raw.get("formula") != preset["formula"]
+                    or bool(raw_taut)
+                    or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
+                ):
+                    raw = dict(preset)
+            elif not is_prexvo and not is_gainhelm and not is_lienbond and slug in cls.PROFITHELM_FALLBACK_MANIFESTS:
                 preset = cls.PROFITHELM_FALLBACK_MANIFESTS[slug]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                 if (
@@ -9165,7 +9500,7 @@ class RetroReflectionEngine:
                     or round(raw_pub, 4) != round(float(preset["published_output"]), 4)
                 ):
                     raw = dict(preset)
-            elif not is_prexvo and not is_gainhelm and (
+            elif not is_prexvo and not is_gainhelm and not is_lienbond and (
                 "/" in slug
                 or any(
                     slug.startswith(pfx)
@@ -9196,6 +9531,9 @@ class RetroReflectionEngine:
                 raw = dict(preset)
             elif is_gainhelm:
                 preset = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
+                raw = dict(preset)
+            elif is_lienbond:
+                preset = cls.LIENBOND_FALLBACK_MANIFESTS.get(slug) or cls.LIENBOND_FALLBACK_MANIFESTS["contractor-license-bond-cost-calculator-by-credit-score"]
                 raw = dict(preset)
             elif (
                 "/" not in slug
@@ -9236,7 +9574,7 @@ class RetroReflectionEngine:
                     "economic_dataset": default_econ,
                     "sample_calculation": "Deterministic baseline evaluation at $100,000 gross input and 24% effective rate yields $76,000.00.",
                 }
-        elif not is_prexvo and not is_gainhelm and (
+        elif not is_prexvo and not is_gainhelm and not is_lienbond and (
             (not _is_179_or_equipment_slug(slug) and "Section 179" in str(raw.get("statutory_authority") or ""))
             or (
                 "CFTC 17 CFR Part 40" in str(raw.get("statutory_authority") or "")
@@ -9303,7 +9641,11 @@ class RetroReflectionEngine:
             candidate_entity_type = (
                 "RepaymentPlanSpecification"
                 if is_prexvo
-                else ("AuditRiskRule" if is_gainhelm else "StatutoryDeduction")
+                else (
+                    "AuditRiskRule"
+                    if is_gainhelm
+                    else ("FinancialProductOrService" if is_lienbond else "StatutoryDeduction")
+                )
             )
 
         signal_bundle = resolve_proprietary_signal_bundle(
@@ -9440,12 +9782,16 @@ class RetroReflectionEngine:
                 base_dom = (
                     "https://prexvo.com"
                     if property_id.lower() == "prexvo"
-                    else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                    else (
+                        "https://gainhelm.com"
+                        if property_id.lower() == "gainhelm"
+                        else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                    )
                 )
                 canonical_url = f"{base_dom}/tools/{slug}/"
 
         if (
-            property_id.lower() not in ("prexvo", "gainhelm")
+            property_id.lower() not in ("prexvo", "gainhelm", "lienbond")
             and canonical_url.split("?")[0].rstrip("/").lower() == "https://profithelm.com"
             and slug in ("section-179-deduction-calculator", "index", "tool")
         ):
@@ -9456,6 +9802,12 @@ class RetroReflectionEngine:
             and slug in ("index", "tool")
         ):
             slug = "soc-2-audit-cost-calculator"
+        elif (
+            property_id.lower() == "lienbond"
+            and canonical_url.split("?")[0].rstrip("/").lower() == "https://lienbond.com"
+            and slug in ("index", "tool")
+        ):
+            slug = "contractor-license-bond-cost-calculator-by-credit-score"
 
         manifest = cls._resolve_manifest_for_page(
             updated,
@@ -9562,6 +9914,8 @@ class RetroReflectionEngine:
                     query=slug.replace("-", " "),
                     is_prexvo=(property_id.lower() == "prexvo"),
                     candidate_spec={"slug": slug, "statutory_authority": stat_auth, "property_id": property_id},
+                    is_gainhelm=(property_id.lower() == "gainhelm"),
+                    is_lienbond=(property_id.lower() == "lienbond"),
                 )
                 monetization_block_html = m_block["html"]
                 repaired.append("compliant_intent_monetization")
@@ -9756,7 +10110,11 @@ class RetroReflectionEngine:
             base_dom = (
                 "https://prexvo.com"
                 if property_id.lower() == "prexvo"
-                else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                else (
+                    "https://gainhelm.com"
+                    if property_id.lower() == "gainhelm"
+                    else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                )
             )
             if canonical_url and "/tools/" in canonical_url:
                 base_dom = canonical_url.split("/tools/")[0]
@@ -10256,7 +10614,11 @@ class RetroReflectionEngine:
             or (
                 "https://prexvo.com"
                 if property_id.lower() == "prexvo"
-                else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                else (
+                    "https://gainhelm.com"
+                    if property_id.lower() == "gainhelm"
+                    else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                )
             )
         ).rstrip("/")
         non_tool_slugs = {"disclaimers", "methodology", "tools", "tools-directory", "privacy", "about", "terms", "contact"}
@@ -10434,6 +10796,11 @@ class RetroReflectionEngine:
                                     t_name = str(primary_off.get("name") or "Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance")
                                     t_url = str(primary_off.get("default_url") or "https://www.vanta.com/")
                                     t_cta = str(primary_off.get("cta_text") or "Automate Audit Readiness with Vanta")
+                                elif property_id.lower() == "lienbond":
+                                    t_pk = str(primary_off.get("partner_key") or "suretybonds_com")
+                                    t_name = str(primary_off.get("name") or "SuretyBonds.com Nationwide Surety Underwriting")
+                                    t_url = str(primary_off.get("default_url") or "https://www.suretybonds.com/")
+                                    t_cta = str(primary_off.get("cta_text") or "Get Instant Surety Bond Quote")
                                 else:
                                     if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
                                         t_pk = "kalshi"
@@ -10679,8 +11046,6 @@ class RetroReflectionEngine:
             return normalize_statutory_acronym_casing(s)
 
         updated_files: List[str] = []
-        if property_id.lower() == "lienbond":
-            return updated_files
         tools_dir = dist_dir / "tools"
         if not tools_dir.is_dir():
             return updated_files
@@ -10690,7 +11055,11 @@ class RetroReflectionEngine:
             or (
                 "https://prexvo.com"
                 if property_id.lower() == "prexvo"
-                else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                else (
+                    "https://gainhelm.com"
+                    if property_id.lower() == "gainhelm"
+                    else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                )
             )
         ).rstrip("/")
 
@@ -10884,6 +11253,7 @@ class RetroReflectionEngine:
                 orig_full = llms_full_path.read_text(encoding="utf-8", errors="ignore")
                 is_prexvo = property_id.lower() == "prexvo"
                 is_gainhelm = property_id.lower() == "gainhelm"
+                is_lienbond = property_id.lower() == "lienbond"
                 if is_prexvo:
                     header_block = (
                         "# Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest\n"
@@ -10902,6 +11272,15 @@ class RetroReflectionEngine:
                         "Legal Entity: GainHelm LLC\n"
                         "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
                     )
+                elif is_lienbond:
+                    header_block = (
+                        "# LienBond: Complete Machine Knowledge Base & Surety and Construction Statutory Manifest\n"
+                        "Domain: lienbond.com\n"
+                        f"Base URL: {canon}\n"
+                        "Research Entity: LienBond Statutory Surety & Construction Compliance Research\n"
+                        "Legal Entity: LienBond LLC\n"
+                        "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
+                    )
                 else:
                     header_block = (
                         "# ProfitHelm: Complete Machine Knowledge Base & Statutory Calculation Manifest\n"
@@ -10918,6 +11297,11 @@ class RetroReflectionEngine:
                             return (0, k)
                         if k == "cmmc-2-0-compliance-cost-calculator":
                             return (1, k)
+                    elif is_lienbond:
+                        if k == "contractor-license-bond-cost-calculator-by-credit-score":
+                            return (0, k)
+                        if k == "performance-and-payment-bond-cost-calculator":
+                            return (1, k)
                     elif not is_prexvo:
                         if k == "irs-2027-tax-brackets":
                             return (0, k)
@@ -10928,7 +11312,7 @@ class RetroReflectionEngine:
                 sections_out: List[str] = [header_block]
                 for idx, (s_key, m_info) in enumerate(sorted(tool_meta.items(), key=_tool_sort_key), start=1):
                     sec_title = m_info["title"]
-                    if not is_prexvo and not is_gainhelm and s_key == "crypto-tax-calculator":
+                    if not is_prexvo and not is_gainhelm and not is_lienbond and s_key == "crypto-tax-calculator":
                         sec_title = "Crypto Tax Liability & Capital Gains Calculator 2027"
                     q_syn = m_info.get("query_syntax") or f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
                     stat_line = f"Statutory Authority: {m_info['statutory_authority']}\n" if m_info.get("statutory_authority") else ""
@@ -10951,7 +11335,7 @@ class RetroReflectionEngine:
                             f"Direct Statutory Answer: {m_info['quick_answer']}\n"
                         )
 
-                if not is_prexvo and not is_gainhelm and spoke_lines:
+                if not is_prexvo and not is_gainhelm and not is_lienbond and spoke_lines:
                     sections_out.append(
                         "## State Income Tax, Commercial Vehicle Section 179, and Section 1031 Spoke Endpoints\n"
                         + "\n".join(spoke_lines)
@@ -10977,6 +11361,15 @@ class RetroReflectionEngine:
                         "- HIPAA & HITECH Civil Monetary Penalties: Governed by 45 CFR 160.404 and 42 U.S.C. 1320d-5 four-tier culpability schedules and 500-record media notification triggers.\n"
                         "- FedRAMP & PCI DSS v4.0.1: Governed by 44 U.S.C. 3607 (NIST SP 800-53 Rev 5 3PAO baselines) and PCI DSS v4.0.1 Merchant Levels 1-4 QSA ROC standards.\n"
                     )
+                elif is_lienbond:
+                    sections_out.append(
+                        "## Key Surety Bond, Workers' Compensation & Construction Statutory Authorities\n"
+                        "- Federal Miller Act & Public Works Bonding: Governed by 40 U.S.C. 3131-3134, FAR 28.102-1, and U.S. Treasury Department Circular 570.\n"
+                        "- SBA Surety Bond Guarantee Program: Governed by 15 U.S.C. 694a-694c and 13 CFR Part 115 (0.60% contractor guarantee fee).\n"
+                        "- NCCI Workers' Compensation & Ghost Policy Rules: Governed by NCCI Basic Manual Class Codes, Experience Modification Rate (Ex-Mod) formulas, and Rule 2-E subcontractor audit provisions.\n"
+                        "- Davis-Bacon Prevailing Wage & ERISA Section 412: Governed by 40 U.S.C. 3141-3148, 29 CFR Part 5 (Form WH-347), and 29 U.S.C. 1112.\n"
+                        "- FMCSA BMC-84 & State Mechanics Lien Statutes: Governed by 49 U.S.C. 13906 ($75,000 broker security), California Civil Code Sections 8200-8460, and Texas Property Code Chapter 53.\n"
+                    )
                 else:
                     sections_out.append(
                         "## Key Statutory Authorities\n"
@@ -11001,6 +11394,7 @@ class RetroReflectionEngine:
             try:
                 is_prexvo_cat = property_id.lower() == "prexvo"
                 is_gainhelm_cat = property_id.lower() == "gainhelm"
+                is_lienbond_cat = property_id.lower() == "lienbond"
                 ordered_slugs = sorted(tool_meta.keys())
                 catalog_tools: List[Dict[str, Any]] = []
                 if is_prexvo_cat:
@@ -11014,6 +11408,12 @@ class RetroReflectionEngine:
                         ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC Automation Calculator"),
                         ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Compliance Cost Calculator"),
                         ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
+                    ]
+                elif is_lienbond_cat:
+                    default_comp_peers = [
+                        ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator"),
+                        ("performance-and-payment-bond-cost-calculator", "Performance & Payment Bond Cost Calculator"),
+                        ("workers-compensation-class-code-rate-calculator-by-state", "Workers' Comp Class Code Rate Calculator"),
                     ]
                 else:
                     default_comp_peers = [
@@ -11070,8 +11470,16 @@ class RetroReflectionEngine:
                     )
                 catalog_payload = {
                     "schema_version": "2026.10.27",
-                    "property_id": "prexvo" if is_prexvo_cat else ("gainhelm" if is_gainhelm_cat else "profithelm"),
-                    "domain": "prexvo.com" if is_prexvo_cat else ("gainhelm.com" if is_gainhelm_cat else "profithelm.com"),
+                    "property_id": (
+                        "prexvo"
+                        if is_prexvo_cat
+                        else ("gainhelm" if is_gainhelm_cat else ("lienbond" if is_lienbond_cat else "profithelm"))
+                    ),
+                    "domain": (
+                        "prexvo.com"
+                        if is_prexvo_cat
+                        else ("gainhelm.com" if is_gainhelm_cat else ("lienbond.com" if is_lienbond_cat else "profithelm.com"))
+                    ),
                     "canonical_url": canon,
                     "inLanguage": "en-US",
                     "dateModified": "2026-10-31",
@@ -11151,28 +11559,42 @@ class RetroReflectionEngine:
         if "gainhelm" in tenant_seg:
             is_gainhelm = True
             is_prexvo = False
+            is_lienbond = False
+        elif "lienbond" in tenant_seg:
+            is_gainhelm = False
+            is_prexvo = False
+            is_lienbond = True
         elif "profithelm" in tenant_seg:
             is_gainhelm = False
             is_prexvo = False
+            is_lienbond = False
         elif "prexvo" in tenant_seg:
             is_gainhelm = False
             is_prexvo = True
+            is_lienbond = False
         else:
             is_gainhelm = property_id.lower() == "gainhelm"
             is_prexvo = property_id.lower() == "prexvo"
+            is_lienbond = property_id.lower() == "lienbond"
 
         default_canon = (
             "https://prexvo.com"
             if is_prexvo
-            else ("https://gainhelm.com" if is_gainhelm else "https://profithelm.com")
+            else (
+                "https://gainhelm.com"
+                if is_gainhelm
+                else ("https://lienbond.com" if is_lienbond else "https://profithelm.com")
+            )
         )
         raw_canon = (canonical_base or "").strip().rstrip("/")
         if (
             not raw_canon
-            or (is_prexvo and ("profithelm" in raw_canon.lower() or "gainhelm" in raw_canon.lower()))
+            or (is_prexvo and ("profithelm" in raw_canon.lower() or "gainhelm" in raw_canon.lower() or "lienbond" in raw_canon.lower()))
             or (not is_prexvo and "prexvo" in raw_canon.lower())
             or (not is_gainhelm and "gainhelm" in raw_canon.lower())
-            or (is_gainhelm and ("profithelm" in raw_canon.lower() or "prexvo" in raw_canon.lower()))
+            or (not is_lienbond and "lienbond" in raw_canon.lower())
+            or (is_gainhelm and ("profithelm" in raw_canon.lower() or "prexvo" in raw_canon.lower() or "lienbond" in raw_canon.lower()))
+            or (is_lienbond and ("profithelm" in raw_canon.lower() or "prexvo" in raw_canon.lower() or "gainhelm" in raw_canon.lower()))
         ):
             canon = default_canon
         else:
@@ -11184,7 +11606,11 @@ class RetroReflectionEngine:
             else (
                 "GainHelm Cyber Compliance & Audit Economics Research"
                 if is_gainhelm
-                else "ProfitHelm LLC"
+                else (
+                    "LienBond Statutory Surety & Construction Compliance Research"
+                    if is_lienbond
+                    else "ProfitHelm LLC"
+                )
             )
         )
         meta_block_lines = [
@@ -11216,6 +11642,7 @@ class RetroReflectionEngine:
                     "ProfitHelm LLC",
                     "Prexvo Statutory Research Group",
                     "GainHelm Cyber Compliance & Audit Economics Research",
+                    "LienBond Statutory Surety & Construction Compliance Research",
                 ):
                     if foreign_entity != entity_label and f'<meta name="partnerstack-publisher-entity" content="{foreign_entity}">' in new_h:
                         new_h = new_h.replace(
@@ -11272,7 +11699,7 @@ class RetroReflectionEngine:
             try:
                 orig_red = redirects_file.read_text(encoding="utf-8") if redirects_file.is_file() else ""
                 desired_rules: List[Tuple[str, str]] = []
-                if is_prexvo or is_gainhelm:
+                if is_prexvo or is_gainhelm or is_lienbond:
                     if (d / "methodology" / "index.html").is_file() and not (d / "about" / "index.html").is_file():
                         desired_rules.extend([("/about", "/methodology/"), ("/about/", "/methodology/")])
                     if (d / "disclaimers" / "index.html").is_file() and not (d / "privacy" / "index.html").is_file():
@@ -11364,21 +11791,33 @@ class RetroReflectionEngine:
 
         media_kit_payload = {
             "schema_version": "2026.10.26",
-            "property_id": "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm"),
+            "property_id": (
+                "prexvo"
+                if is_prexvo
+                else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+            ),
             "property_name": (
                 "Prexvo Statutory Research Group"
                 if is_prexvo
                 else (
                     "GainHelm Cyber Compliance & Audit Economics Research"
                     if is_gainhelm
-                    else "ProfitHelm Quantitative Research"
+                    else (
+                        "LienBond Statutory Surety & Construction Compliance Research"
+                        if is_lienbond
+                        else "ProfitHelm Quantitative Research"
+                    )
                 )
             ),
             "legal_entity": entity_label,
             "ein_masked": "41-***1423",
             "jurisdiction": "Washington Secretary of State (Spokane, WA)",
             "headquarters": "522 W Riverside Ave Ste N, Spokane, WA 99201",
-            "domain": "prexvo.com" if is_prexvo else ("gainhelm.com" if is_gainhelm else "profithelm.com"),
+            "domain": (
+                "prexvo.com"
+                if is_prexvo
+                else ("gainhelm.com" if is_gainhelm else ("lienbond.com" if is_lienbond else "profithelm.com"))
+            ),
             "canonical_url": canon,
             "editorial_classification": (
                 "Deterministic Title IV Federal Student Loan & Private Refinance Decision Engine"
@@ -11386,14 +11825,18 @@ class RetroReflectionEngine:
                 else (
                     "Deterministic Enterprise Cyber Compliance, GRC Audit Cost & Statutory Security Governance Engine"
                     if is_gainhelm
-                    else "Deterministic B2B Corporate Tax, Section 179 Depreciation, Section 1031 Exchange & Treasury Modeling Engine"
+                    else (
+                        "Deterministic Contractor Surety Bond, Workers' Compensation & Construction Statutory Filing Engine"
+                        if is_lienbond
+                        else "Deterministic B2B Corporate Tax, Section 179 Depreciation, Section 1031 Exchange & Treasury Modeling Engine"
+                    )
                 )
             ),
             "inventory_profile": {
                 "publisher_size_tier": "MID_MARKET_SPECIALIST_FINANCIAL_PUBLISHER",
-                "root_calculators_count": root_tools_count or (17 if is_prexvo else (10 if is_gainhelm else 22)),
-                "total_deployed_routes_count": total_html_count or (21 if is_prexvo else (18 if is_gainhelm else 177)),
-                "50_state_statutory_spokes_count": 0 if (is_prexvo or is_gainhelm) else 150,
+                "root_calculators_count": root_tools_count or (17 if is_prexvo else (10 if (is_gainhelm or is_lienbond) else 22)),
+                "total_deployed_routes_count": total_html_count or (21 if is_prexvo else (18 if is_gainhelm else (14 if is_lienbond else 177))),
+                "50_state_statutory_spokes_count": 0 if (is_prexvo or is_gainhelm or is_lienbond) else 150,
                 "interactive_client_side_execution": True,
                 "zero_ai_hallucination_statutory_formulas": True,
             },
@@ -11445,7 +11888,7 @@ class RetroReflectionEngine:
                         "sub_affiliate_aggregators_prohibited": True,
                         "unsponsored_deterministic_calculation_formulas": True,
                     }
-                    if is_gainhelm
+                    if (is_gainhelm or is_lienbond)
                     else {
                         "ftc_16_cfr_part_255_affiliate_disclosure": True,
                         "tcpa_explicit_consent_enforced_on_lead_intake": True,
@@ -11478,12 +11921,18 @@ class RetroReflectionEngine:
 
         # 4. Synchronize public IndexNow verification file in dist/
         try:
-            if not is_prexvo and not is_gainhelm:
+            if not is_prexvo and not is_gainhelm and not is_lienbond:
                 ph_v2 = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
                 ph_kf = d / f"{ph_v2}.txt"
                 if not ph_kf.is_file() or ph_kf.read_text(encoding="utf-8").strip() != ph_v2:
                     ph_kf.write_text(ph_v2, encoding="utf-8")
                     updated_files.append(f"{ph_v2}.txt")
+            elif is_lienbond:
+                lb_v1 = hashlib.sha256(b"lienbond.com:indexnow:v1").hexdigest()[:32]
+                lb_kf = d / f"{lb_v1}.txt"
+                if not lb_kf.is_file() or lb_kf.read_text(encoding="utf-8").strip() != lb_v1:
+                    lb_kf.write_text(lb_v1, encoding="utf-8")
+                    updated_files.append(f"{lb_v1}.txt")
         except Exception:
             pass
 
@@ -11587,16 +12036,6 @@ class RetroReflectionEngine:
         d = Path(dist_dir).resolve()
         if not d.is_dir():
             return {"status": "PASS", "pages_scanned": 0, "total_pages": 0, "stale_pages": {}, "stale_count": 0}
-        if property_id.lower() == "lienbond":
-            html_count = sum(1 for f in d.rglob("*.html") if not f.name.startswith("."))
-            return {
-                "status": "PASS",
-                "property_id": "lienbond",
-                "pages_scanned": html_count,
-                "total_pages": html_count,
-                "stale_pages": {},
-                "stale_count": 0,
-            }
 
         from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
         from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -11804,7 +12243,11 @@ class RetroReflectionEngine:
             brand_chk = (
                 "Prexvo"
                 if str(property_id).lower() == "prexvo"
-                else ("GainHelm" if str(property_id).lower() == "gainhelm" else "ProfitHelm")
+                else (
+                    "GainHelm"
+                    if str(property_id).lower() == "gainhelm"
+                    else ("LienBond" if str(property_id).lower() == "lienbond" else "ProfitHelm")
+                )
             )
             for s_item in sorted(synd_dir.iterdir()):
                 if s_item.name.startswith("."):
@@ -11919,19 +12362,10 @@ class RetroReflectionEngine:
                 "pages_retrofitted": 0,
                 "retrofitted_paths": [],
             }
-        if property_id.lower() == "lienbond":
+        if property_id.lower() == "lienbond" and not (d / "index.html").is_file():
             from pseofactory.compiler import compile_lienbond_estate
 
-            compile_lienbond_estate(d.parent if d.name == "dist" else d)
-            html_count = sum(1 for f in d.rglob("*.html") if not f.name.startswith("."))
-            return {
-                "status": "PASS",
-                "property_id": "lienbond",
-                "pages_scanned": html_count,
-                "total_pages": html_count,
-                "pages_retrofitted": 0,
-                "retrofitted_paths": [],
-            }
+            compile_lienbond_estate(d.parent if d.name == "dist" else d, run_retrofit=False)
 
         try:
             from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -12080,6 +12514,13 @@ class RetroReflectionEngine:
                             '        <div class="affiliate-card partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>\n'
                             '      </section>\n    '
                         )
+                    elif property_id.lower() == "lienbond":
+                        seed_sec = (
+                            '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
+                            '        <h2>Verified Commercial Surety &amp; Construction Execution Partners</h2>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/suretybonds_com" target="_blank" rel="noopener sponsored nofollow">SuretyBonds.com</a></div>\n'
+                            '      </section>\n    '
+                        )
                     else:
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
@@ -12107,7 +12548,11 @@ class RetroReflectionEngine:
                     or (
                         "https://prexvo.com"
                         if property_id.lower() == "prexvo"
-                        else ("https://gainhelm.com" if property_id.lower() == "gainhelm" else "https://profithelm.com")
+                        else (
+                            "https://gainhelm.com"
+                            if property_id.lower() == "gainhelm"
+                            else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+                        )
                     )
                 ).rstrip("/") + "/" + ("" if rel == "index.html" else rel.replace("index.html", ""))
                 from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -12127,7 +12572,11 @@ class RetroReflectionEngine:
                         else (
                             "Enterprise Cyber Compliance, GRC Audit Cost & Statutory Security Governance Calculators"
                             if property_id.lower() == "gainhelm"
-                            else "Statutory Tax, Depreciation & Corporate Treasury Calculators"
+                            else (
+                                "Contractor Surety Bond, State Workers' Comp & Statutory Lien Calculators"
+                                if property_id.lower() == "lienbond"
+                                else "Statutory Tax, Depreciation & Corporate Treasury Calculators"
+                            )
                         )
                     ),
                     "disclaimers": "Legal Disclaimers & Statutory Compliance Notice",
@@ -12137,7 +12586,11 @@ class RetroReflectionEngine:
                     "tools-directory": (
                         "Enterprise Cyber Compliance and GRC Audit Cost Calculators"
                         if property_id.lower() == "gainhelm"
-                        else "Statutory Financial Calculators and Decision Tools"
+                        else (
+                            "Contractor Surety Bond and Construction Statutory Calculators"
+                            if property_id.lower() == "lienbond"
+                            else "Statutory Financial Calculators and Decision Tools"
+                        )
                     ),
                 }
                 if 'class="overlay-section' in content or 'id="gsc-striking-overlay"' in content:
@@ -12243,7 +12696,11 @@ class RetroReflectionEngine:
                         else (
                             "AICPA SSAE 18 (AT-C Section 205); 32 CFR Part 170 (CMMC 2.0); 45 CFR 160.404"
                             if property_id.lower() == "gainhelm"
-                            else "IRC Section 1(j); IRC Section 179; IRC Section 1031"
+                            else (
+                                "Federal Miller Act (40 U.S.C. 3131-3134); NCCI Basic Manual; 29 CFR Part 5"
+                                if property_id.lower() == "lienbond"
+                                else "IRC Section 1(j); IRC Section 179; IRC Section 1031"
+                            )
                         )
                     ),
                     econ_ds=(
@@ -12252,7 +12709,11 @@ class RetroReflectionEngine:
                         else (
                             "AICPA Assurance Services Benchmarks, DoD 32 CFR Part 170 Cost Tables, and HHS OCR Breach Archive"
                             if property_id.lower() == "gainhelm"
-                            else "IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series"
+                            else (
+                                "SFAA Surety Loss Ratio Series, NCCI State Loss Cost Filings, and BLS OEWS Construction Wage Series"
+                                if property_id.lower() == "lienbond"
+                                else "IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series"
+                            )
                         )
                     ),
                 )
@@ -12280,7 +12741,11 @@ class RetroReflectionEngine:
                     else (
                         "soc-2-audit-cost-calculator"
                         if property_id.lower() == "gainhelm"
-                        else "tax-bracket-capital-allocation-hub"
+                        else (
+                            "contractor-license-bond-cost-calculator-by-credit-score"
+                            if property_id.lower() == "lienbond"
+                            else "tax-bracket-capital-allocation-hub"
+                        )
                     )
                 )
 
@@ -12668,7 +13133,11 @@ class RetroReflectionEngine:
                         dom_q = (
                             "prexvo.com"
                             if property_id.lower() == "prexvo"
-                            else ("gainhelm.com" if property_id.lower() == "gainhelm" else "profithelm.com")
+                            else (
+                                "gainhelm.com"
+                                if property_id.lower() == "gainhelm"
+                                else ("lienbond.com" if property_id.lower() == "lienbond" else "profithelm.com")
+                            )
                         )
                         pf_eng = IndexingPreflightEngine(property_id=property_id, domain=dom_q, dist_dir=d)
                         pf_rep = pf_eng.inspect_dist(d)
@@ -12979,6 +13448,8 @@ def _execute_autonomous_downstream_chain(
         default_tools = PREXVO_DEFAULT_TOOLS
     elif adapter.property_id == "gainhelm":
         default_tools = GAINHELM_DEFAULT_TOOLS
+    elif adapter.property_id == "lienbond":
+        default_tools = LIENBOND_DEFAULT_TOOLS
     elif adapter.property_id == "profithelm":
         default_tools = PROFITHELM_DEFAULT_TOOLS
     else:
@@ -13372,7 +13843,7 @@ def _execute_autonomous_downstream_chain(
         recon_rep = tracker.reconcile_edge_clicks_with_portals(
             engagement_by_property={
                 p_id: telemetry_sync.get(p_id, {}).get("aggregation", {})
-                for p_id in ("profithelm", "prexvo", "gainhelm")
+                for p_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
             }
         )
         if not dry_run:
@@ -13573,6 +14044,8 @@ def reflect_and_recompile_all_assets(
                 _adp._tools = _discover_tenant_tools(_adp, PROFITHELM_DEFAULT_TOOLS)
             elif _pid == "gainhelm":
                 _adp._tools = _discover_tenant_tools(_adp, GAINHELM_DEFAULT_TOOLS)
+            elif _pid == "lienbond":
+                _adp._tools = _discover_tenant_tools(_adp, LIENBOND_DEFAULT_TOOLS)
 
     target_ids = (
         [p.lower() for p in properties]
@@ -13620,7 +14093,7 @@ def reflect_and_recompile_all_assets(
         edge_functions_updated = False
         if (
             getattr(adapter, "repo_path", None)
-            and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
+            and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
             and (Path(adapter.repo_path) / "functions" / "r").is_dir()
             and not is_foreign_pytest
         ):
@@ -13639,7 +14112,7 @@ def reflect_and_recompile_all_assets(
         )
         if (
             getattr(adapter, "repo_path", None)
-            and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
+            and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
             and not is_foreign_pytest
             and not is_unmerged_worktree_early
         ):
@@ -15416,7 +15889,7 @@ def reflect_and_recompile_all_assets(
         substrate_lock_stale = False
         if getattr(adapter, "repo_path", None) and not is_unmerged_worktree:
             t_repo = Path(adapter.repo_path)
-            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
+            if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                 lock_file = t_repo / "substrate_lock.json"
                 if not lock_file.is_file():
                     substrate_lock_stale = True
@@ -15444,7 +15917,7 @@ def reflect_and_recompile_all_assets(
         ):
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
-                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm"):
+                if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                     try:
                         from pseofactory.drift import compute_dist_lock_metrics
 
@@ -15672,7 +16145,7 @@ def reflect_and_recompile_all_assets(
                         pass
                     if getattr(adapter, "repo_path", None):
                         t_repo_l = Path(adapter.repo_path)
-                        if (t_repo_l / ".git").exists() and t_repo_l.name in ("profithelm-platform", "prexvo", "gainhelm"):
+                        if (t_repo_l / ".git").exists() and t_repo_l.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                             try:
                                 from pseofactory.drift import compute_dist_lock_metrics
                                 cur_sub_h = compute_engine_hash()

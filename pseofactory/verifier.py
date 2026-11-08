@@ -1606,7 +1606,11 @@ class MasterSEOVerifier:
                 else (
                     "GainHelm"
                     if "gainhelm" in self.domain.lower()
-                    else ("ProfitHelm" if "profithelm" in self.domain.lower() else "")
+                    else (
+                        "LienBond"
+                        if "lienbond" in self.domain.lower()
+                        else ("ProfitHelm" if "profithelm" in self.domain.lower() else "")
+                    )
                 ),
             )
         )
@@ -1625,6 +1629,19 @@ class MasterSEOVerifier:
 
         if required_endpoints is not None:
             self.required_endpoints = list(required_endpoints)
+        elif "lienbond" in str(self.dist_dir).lower() or "lienbond" in self.domain.lower():
+            self.required_endpoints = [
+                "/feed.xml",
+                "/llms.txt",
+                "/llms-full.txt",
+                "/sitemap.xml",
+                "/sitemap-hubs.xml",
+                "/sitemap-leaves.xml",
+                "/",
+                "/methodology/",
+                "/disclaimers/",
+                "/tools/",
+            ]
         else:
             self.required_endpoints = [
                 "/feed.xml",
@@ -1652,7 +1669,9 @@ class MasterSEOVerifier:
                     from pseofactory.maintenance import RetroReflectionEngine
                     res_d = self.dist_dir.resolve()
                     dist_low = res_d.parent.name.lower() if res_d.name.lower() == "dist" else res_d.name.lower()
-                    if "gainhelm" in dist_low:
+                    if "lienbond" in dist_low:
+                        prop_id = "lienbond"
+                    elif "gainhelm" in dist_low:
                         prop_id = "gainhelm"
                     elif "profithelm" in dist_low:
                         prop_id = "profithelm"
@@ -1662,13 +1681,27 @@ class MasterSEOVerifier:
                         prop_id = "prexvo"
                     elif "gainhelm" in str(self.domain).lower() or "gainhelm" in str(self.brand_name).lower():
                         prop_id = "gainhelm"
+                    elif "lienbond" in str(self.domain).lower() or "lienbond" in str(self.brand_name).lower():
+                        prop_id = "lienbond"
                     else:
                         prop_id = "profithelm"
                     safe_canon = (
                         "https://prexvo.com"
                         if prop_id == "prexvo"
-                        else ("https://gainhelm.com" if prop_id == "gainhelm" else "https://profithelm.com")
+                        else (
+                            "https://gainhelm.com"
+                            if prop_id == "gainhelm"
+                            else ("https://lienbond.com" if prop_id == "lienbond" else "https://profithelm.com")
+                        )
                     )
+                    if prop_id == "lienbond":
+                        if not self.domain:
+                            self.domain = "lienbond.com"
+                            self.brand_domain = "lienbond.com"
+                        if not self.canonical_base:
+                            self.canonical_base = "https://lienbond.com"
+                        if not self.brand_name:
+                            self.brand_name = "LienBond"
                     RetroReflectionEngine.sync_tenant_publisher_prerequisites(
                         self.dist_dir,
                         property_id=prop_id,
@@ -4587,7 +4620,13 @@ class MasterSEOVerifier:
             resolved_target_str = str(target.resolve())
             allow_disk_cache = (
                 getattr(self.is_calculation_leaf, "__name__", None)
-                in (None, "_profithelm_calculation_leaf", "_prexvo_calculation_leaf", "_gainhelm_calculation_leaf")
+                in (
+                    None,
+                    "_profithelm_calculation_leaf",
+                    "_prexvo_calculation_leaf",
+                    "_gainhelm_calculation_leaf",
+                    "_lienbond_calculation_leaf",
+                )
                 and "/tmp/" not in resolved_target_str
                 and "/pytest-" not in resolved_target_str
             )
@@ -7088,6 +7127,9 @@ def _resolve_tenant_dist_and_domain(
     elif prop == "gainhelm":
         domain = "https://gainhelm.com"
         default_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
+    elif prop == "lienbond":
+        domain = "https://lienbond.com"
+        default_dist = Path("/home/ubuntuadmin/projects/lienbond/dist")
     else:
         prop = "profithelm"
         domain = "https://profithelm.com"
@@ -7169,7 +7211,7 @@ def audit_estate_technical_seo_and_cannibalization(
     Zero em-dashes. Zero en-dashes.
     """
     from collections import defaultdict, deque
-    from pseofactory.affiliates import GAINHELM_AFFILIATES, PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
+    from pseofactory.affiliates import GAINHELM_AFFILIATES, LIENBOND_AFFILIATES, PREXVO_AFFILIATES, PROFITHELM_AFFILIATES
     from pseofactory.maintenance import CrossPropertyContaminationScanner
     from pseofactory.tenant_facts import TenantFactStore
 
@@ -7201,7 +7243,11 @@ def audit_estate_technical_seo_and_cannibalization(
     registry = (
         PREXVO_AFFILIATES
         if prop == "prexvo"
-        else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+        else (
+            GAINHELM_AFFILIATES
+            if prop == "gainhelm"
+            else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES)
+        )
     )
     scanner = CrossPropertyContaminationScanner()
     fact_store = TenantFactStore.get_instance()

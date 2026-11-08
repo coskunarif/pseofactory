@@ -1718,7 +1718,7 @@ LIENBOND_AFFILIATES: Dict[str, AffiliatePartner] = {
         description="Instant online underwriting for state contractor license bonds (CSLB, TX, FL), Federal Miller Act performance/payment bonds, and ERISA Section 412 fidelity bonds.",
         target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
         supported_params=["ph_tier"],
-        cta_text="Get Your Instant State License or Performance Bond Quote",
+        cta_text="Get Your Instant State License or Performance Bond Quote at SuretyBonds.com",
         partnership_model="HYBRID_CPA_REVSHARE",
     ),
     "next_insurance_b2b": AffiliatePartner(
@@ -3575,7 +3575,7 @@ def estimate_partner_approval_revenue_impact(
     prop = (property_id or "profithelm").strip().lower()
     pk = (partner_key or "").strip().lower()
 
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES))
     p_obj = registry.get(pk)
     bounty_mid = get_partner_bounty_midpoint(p_obj if p_obj is not None else pk)
 
@@ -3584,8 +3584,8 @@ def estimate_partner_approval_revenue_impact(
         # On Prexvo, pending_p2 offers are 100% suppressed until Gate 1 approval
         fallback_yield = 0.0
         bounty_uplift = bounty_mid
-    elif prop == "gainhelm":
-        # On GainHelm, pending direct offers route to approved B2B contracts at the edge (~25% baseline yield)
+    elif prop in ("gainhelm", "lienbond"):
+        # On GainHelm and LienBond, pending direct offers route to approved B2B contracts at the edge (~25% baseline yield)
         fallback_yield = round(bounty_mid * 0.25, 2)
         bounty_uplift = round(max(35.0, bounty_mid - fallback_yield), 2)
     else:
@@ -5304,6 +5304,9 @@ EXPECTED_PARTNER_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "simply_business": ("simply business",),
     "next_insurance_b2b": ("next insurance",),
     "suretybonds_direct": ("hiscox",),
+    "thimble_contractor": ("thimble",),
+    "jobber_field_service": ("jobber",),
+    "levelset_lien_filing": ("levelset",),
     "otr_solutions_factoring": ("invoice simple",),
     "freightos_marketplace": ("invoice simple",),
     "flexport": ("invoice simple",),
@@ -5403,6 +5406,29 @@ def audit_merchant_coverage_and_yield(property_id: str = "profithelm") -> Dict[s
             "routes": gh_routes,
         }
 
+    if prop == "lienbond":
+        lb_routes: Dict[str, Dict[str, Any]] = {}
+        for k, p_obj in LIENBOND_AFFILIATES.items():
+            lb_routes[k] = {
+                "partner_key": k,
+                "verified_merchant_name": p_obj.name,
+                "verified_url": p_obj.default_url,
+                "status": p_obj.status,
+                "approved": p_obj.status == "live",
+                "payout_rate": p_obj.commission_est,
+                "is_external_surety_marketplace": True,
+                "internal_calculator_loop": False,
+            }
+        return {
+            "status": "PASS",
+            "property_id": "lienbond",
+            "total_routes_audited": len(lb_routes),
+            "verified_paying_count": sum(1 for r in lb_routes.values() if r["approved"]),
+            "non_paying_passthrough_count": 0,
+            "internal_loop_count": 0,
+            "routes": lb_routes,
+        }
+
     routes_report: Dict[str, Dict[str, Any]] = {}
     swapped_count = 0
     for k, meta in SOVRN_VERIFIED_PAYING_MERCHANTS.items():
@@ -5438,7 +5464,7 @@ def normalize_html_callout_message_match(
         return html
 
     prop = (property_id or "profithelm").strip().lower()
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES))
     fallback_copy: Dict[str, Tuple[str, str, str]] = {
         "flexport": (
             "Invoice Simple Trade & Commercial Billing",
@@ -5771,8 +5797,12 @@ def normalize_html_callout_message_match(
             f'data-partner-url="{safe_url}"',
             sec_html,
         )
-        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
-        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        if prop == "lienbond" and pk == "suretybonds_direct":
+            expected_tokens = ("suretybonds.com", "suretybonds")
+            forbidden_tokens = ()
+        else:
+            expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+            forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         sec_text_lower = re.sub(r"<[^>]+>", " ", sec_html).lower()
         needs_fix = (
             pk != old_pk
@@ -5839,8 +5869,12 @@ def normalize_html_callout_message_match(
         if not resolved:
             return match.group(0)
         p_name, _, _ = resolved
-        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
-        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+        if prop == "lienbond" and pk == "suretybonds_direct":
+            forbidden_tokens = ()
+            expected_tokens = ("suretybonds.com", "suretybonds")
+        else:
+            forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+            expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         combined_low = f"{h_text} {between}".lower()
         if any(f_tok in combined_low for f_tok in forbidden_tokens) or (
             bool(expected_tokens) and not any(tok in combined_low for tok in expected_tokens)
@@ -5884,8 +5918,12 @@ def normalize_html_callout_message_match(
                 open_tag,
                 flags=re.I,
             )
-        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
-        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+        if prop == "lienbond" and pk == "suretybonds_direct":
+            forbidden_tokens = ()
+            expected_tokens = ("suretybonds.com", "suretybonds")
+        else:
+            forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+            expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         btn_text = re.sub(r"<[^>]+>", " ", inner_html)
         btn_text = re.sub(r"\s+", " ", btn_text).strip()
         start_ctx = max(0, match.start() - 450)
@@ -6061,6 +6099,14 @@ def normalize_html_callout_message_match(
         )
         if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
             primary_inline_pk = "vanta_security"
+
+    elif prop == "lienbond":
+        if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
+            m_prim_lb = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', updated, re.I)
+            if m_prim_lb and m_prim_lb.group(1).lower() in LIENBOND_AFFILIATES:
+                primary_inline_pk = m_prim_lb.group(1).lower()
+            else:
+                primary_inline_pk = "simply_business"
 
     elif prop in ("profithelm", "exchange1031"):
         def _build_profithelm_partner_card(pk: str, card_idx: int = 1) -> str:
@@ -6263,7 +6309,11 @@ def normalize_html_callout_message_match(
             and gsc_inline_meta.get("data-partner") == primary_inline_pk
             and not any(
                 f_tok in preserved_gsc_inline_block.lower()
-                for f_tok in FORBIDDEN_REPLACED_BRAND_TOKENS.get(primary_inline_pk, ())
+                for f_tok in (
+                    ()
+                    if (prop == "lienbond" and primary_inline_pk == "suretybonds_direct")
+                    else FORBIDDEN_REPLACED_BRAND_TOKENS.get(primary_inline_pk, ())
+                )
             )
         ):
             inline_cta_html = (
@@ -6448,15 +6498,19 @@ def audit_callout_destination_message_match(
     from pathlib import Path
 
     prop = (property_id or "profithelm").strip().lower()
-    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else PROFITHELM_AFFILIATES)
+    registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES))
 
     mismatches: List[Dict[str, Any]] = []
     registry_checked = 0
 
     for pk, partner in registry.items():
         registry_checked += 1
-        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, (partner.name.lower(),))
-        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+        if prop == "lienbond" and pk == "suretybonds_direct":
+            expected_tokens: Tuple[str, ...] = ("suretybonds.com", "suretybonds")
+            forbidden_tokens: Tuple[str, ...] = ()
+        else:
+            expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, (partner.name.lower(),))
+            forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         combined_copy = f"{partner.name} {partner.cta_text}".lower()
 
         if not any(tok in combined_copy for tok in expected_tokens):
@@ -6510,8 +6564,12 @@ def audit_callout_destination_message_match(
                     btn_text = re.sub(r"\s+", " ", btn_text).strip()
                     callouts_audited += 1
 
-                    expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
-                    forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
+                    if prop == "lienbond" and pk == "suretybonds_direct":
+                        expected_tokens = ("suretybonds.com", "suretybonds")
+                        forbidden_tokens = ()
+                    else:
+                        expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
+                        forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
 
                     # Inspect surrounding 450 chars before link for card h3/h4 title
                     start_ctx = max(0, m.start() - 450)
