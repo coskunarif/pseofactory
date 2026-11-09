@@ -1902,6 +1902,17 @@ def execute_autonomous_daily_trend_page_build(
                 compiled_res = compile_high_effort_page(candidate_spec)
             html_out = compiled_res["html"]
             manifest_out = compiled_res.get("manifest", {})
+            try:
+                from pseofactory.maintenance import RetroReflectionEngine
+                html_out, _ = RetroReflectionEngine.retrofit_html(
+                    html_out,
+                    property_id=t_id,
+                    slug=c_slug,
+                    canonical_url=f"{adp.canonical_base.rstrip('/')}/tools/{c_slug}/",
+                    manifest_override=manifest_out if isinstance(manifest_out, dict) and manifest_out.get("formula") else None,
+                )
+            except Exception:
+                pass
             scanner.assert_clean(
                 html_out,
                 property_id=t_id,
@@ -1964,6 +1975,11 @@ def execute_autonomous_daily_trend_page_build(
         dist_dir = Path(adp.dist_dir)
         out_html_path = dist_dir / "tools" / c_slug / "index.html"
         out_manifest_path = dist_dir / "manifests" / f"{c_slug}.json"
+
+        if (dist_dir / "about" / "index.html").is_file() and not (dist_dir / "methodology" / "index.html").is_file():
+            html_out = html_out.replace('href="/methodology/"', 'href="/about/"').replace("href='/methodology/'", "href='/about/'")
+        if (dist_dir / "privacy" / "index.html").is_file() and not (dist_dir / "disclaimers" / "index.html").is_file():
+            html_out = html_out.replace('href="/disclaimers/"', 'href="/privacy/"').replace("href='/disclaimers/'", "href='/privacy/'")
 
         if not dry_run:
             out_html_path.parent.mkdir(parents=True, exist_ok=True)

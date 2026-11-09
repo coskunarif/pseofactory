@@ -5256,8 +5256,8 @@ def normalize_html_visual_primitives(
             "/static/css/style.css" in non_prim_doc
             or "/css/style.css" in non_prim_doc
             or 'data-theme="porcelain"' in non_prim_doc
-            or "--bg-canvas: #fbfcfd" in updated
-        ) and "--bg: #07090e" not in non_prim_doc and "--bg-canvas: #07090e" not in updated and 'data-theme="obsidian"' not in non_prim_doc
+            or "--bg-canvas: #fbfcfd" in non_prim_doc
+        ) and "--bg: #07090e" not in non_prim_doc and "--bg-canvas: #07090e" not in non_prim_doc and 'data-theme="obsidian"' not in non_prim_doc
 
     def _heal_inverted_dark_root_block(m: re.Match) -> str:
         root_css = m.group(1)
@@ -5284,8 +5284,9 @@ def normalize_html_visual_primitives(
             re.IGNORECASE,
         )
         prim_body = prim_match.group(1) if prim_match else ""
+        prim_root = prim_body.split('[data-theme="porcelain"]', 1)[0]
         has_token_inversion = (not is_tenant_porcelain) and (
-            "--text-primary: #0f172a" in prim_body or "--bg-surface: #ffffff" in prim_body
+            "--text-primary: #0f172a" in prim_root or "--bg-surface: #ffffff" in prim_root
         )
         needs_style_repair = (
             f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated

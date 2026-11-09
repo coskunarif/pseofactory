@@ -8166,6 +8166,35 @@ class RetroReflectionEngine:
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
             "sample_calculation": "Single borrower earning $65,000 with $15,650 poverty baseline: protected threshold is $15,650 * 2.25 = $35,212.50. Discretionary income is $65,000 - $35,212.50 = $29,787.50. Multiplying by 10% and dividing by 12 produces a monthly payment of $248.23.",
         },
+        "parent-plus-loan-payment-calculator": {
+            "model_name": "ParentPLUSConsolidationRepaymentModel",
+            "entity_type": "RepaymentPlanSpecification",
+            "formula": "round(max(0.0, (agi - (poverty_guideline * 1.0)) * 0.20 / 12.0), 2)",
+            "inputs": {
+                "agi": 95000.0,
+                "poverty_guideline": 21150.0,
+            },
+            "published_output": 1230.83,
+            "statutory_authority": "Higher Education Act Section 455(d) & 34 CFR Section 685.209(c) ICR Rules",
+            "economic_dataset": "U.S. Department of Education FSA Portfolio Summary & HHS Federal Poverty Guidelines",
+            "sample_calculation": "For a $95,000 AGI Parent PLUS borrower with a $21,150 HHS poverty baseline under 34 CFR Section 685.209(c) 20% ICR rules, discretionary income is $73,850 and monthly payment is $1,230.83.",
+        },
+        "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator": {
+            "model_name": "Prexvo-HRSA-NHSC-HPSL-Loan-Repayment-Model-2026",
+            "entity_type": "RepaymentPlanSpecification",
+            "formula": "round(max(0.0, qualifying_health_loan_balance - nhsc_two_year_award - (continuation_years * annual_continuation_award)) * (1.0 + (hpsl_interest_rate_pct / 100.0)), 2)",
+            "inputs": {
+                "qualifying_health_loan_balance": 165000.0,
+                "nhsc_two_year_award": 75000.0,
+                "continuation_years": 2.0,
+                "annual_continuation_award": 20000.0,
+                "hpsl_interest_rate_pct": 5.0,
+            },
+            "published_output": 52500.0,
+            "statutory_authority": "Public Health Service Act Section 338B (42 U.S.C. 254l-1 NHSC LRP) & Title VII Section 723 (42 U.S.C. 292s HPSL)",
+            "economic_dataset": "HRSA Bureau of Health Workforce HPSA Tier Award Schedule & FRED SLSTTOTAL Series",
+            "sample_calculation": "Primary care clinician at a Tier 1 HPSA site with $165,000.00 in qualifying health professions debt: $75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at $20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net payoff obligation is $52,500.00.",
+        },
     }
 
     PROFITHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8429,6 +8458,34 @@ class RetroReflectionEngine:
             "economic_dataset": "IRS SOI Capital Gains Realization Series and FRED CPILFESL Series",
             "sample_calculation": "On an $8,000,000 qualified small business stock gain with $500,000 original basis under the $10,000,000 IRC Section 1202(b)(1) ceiling, federal exclusion saves $1,904,000.00 at the 23.8% combined capital gains and NIIT rate.",
         },
+        "corporate-amt-camt-book-income-minimum-tax-calculator": {
+            "model_name": "ProfitHelm-IRC-55-56A-CAMT-AFSI-Minimum-Tax-Model-2026",
+            "entity_type": "TaxCalculationModel",
+            "formula": "round(max(0.0, (adjusted_financial_statement_income * 0.15) - camt_foreign_tax_credit - regular_corporate_tax_plus_beat), 2)",
+            "inputs": {
+                "adjusted_financial_statement_income": 1250000000.0,
+                "camt_foreign_tax_credit": 12000000.0,
+                "regular_corporate_tax_plus_beat": 75000000.0,
+            },
+            "published_output": 100500000.0,
+            "statutory_authority": "IRC Section 55(b)(2) & Section 56A (15% Corporate Alternative Minimum Tax on Adjusted Financial Statement Income)",
+            "economic_dataset": "IRS SOI Corporate Tax Return Benchmark & FRED CPILFESL Series",
+            "sample_calculation": "Applicable corporation with $1,250,000,000.00 in 3-year average Adjusted Financial Statement Income (AFSI): 15% tentative CAMT ($187,500,000.00) less $12,000,000.00 CAMT foreign tax credit less $75,000,000.00 regular corporate income tax and BEAT = $100,500,000.00 net IRC Section 55(b)(2) CAMT liability.",
+        },
+        "section-280g-golden-parachute-excise-tax-safe-harbor-calculator": {
+            "model_name": "ProfitHelm-IRC-280G-Golden-Parachute-Excise-Tax-Model-2026",
+            "entity_type": "TaxCalculationModel",
+            "formula": "round(max(0.0, total_parachute_payment - five_year_avg_w2_base_amount) * (excise_tax_rate_pct / 100.0), 2)",
+            "inputs": {
+                "total_parachute_payment": 1850000.0,
+                "five_year_avg_w2_base_amount": 450000.0,
+                "excise_tax_rate_pct": 20.0,
+            },
+            "published_output": 280000.0,
+            "statutory_authority": "IRC Section 280G & Section 4999 (26 CFR Section 1.280G-1 Safe Harbor 3x Base Amount Rules)",
+            "economic_dataset": "IRS SOI Corporate Executive Compensation Series & FRED DGS10 Treasury AFR Series",
+            "sample_calculation": "Disqualified M&A executive receiving $1,850,000.00 in change-in-control parachute payments with a 5-year average W-2 base amount of $450,000.00 (3x safe harbor threshold = $1,350,000.00): excess parachute payment above 1x base amount is $1,400,000.00, triggering a 20% IRC Section 4999 excise tax of $280,000.00 and corporate deduction disallowance.",
+        },
     }
 
     GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8612,6 +8669,23 @@ class RetroReflectionEngine:
             "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
             "sample_calculation": "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation ($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost.",
         },
+        "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
+            "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
+            "inputs": {
+                "high_risk_ai_systems": 2.0,
+                "notified_body_audit_fee": 28500.0,
+                "annex_iv_technical_dossier_cost": 18000.0,
+                "qms_article_17_setup_fee": 24000.0,
+                "validation_hours": 140.0,
+                "ml_compliance_hourly_rate": 150.0,
+            },
+            "published_output": 120000.0,
+            "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
+            "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
+            "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
+        },
     }
 
     LIENBOND_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8757,19 +8831,20 @@ class RetroReflectionEngine:
             "sample_calculation": "Serving a California 20-Day Preliminary Notice on Day 20 from first furnishing preserves 100% ($120,000.00) of statutory mechanics lien and stop payment notice rights.",
         },
         "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator": {
-            "model_name": "SubcontractorDefaultInsuranceVsSuretyBondTCOModel",
+            "model_name": "LienBond-SDI-vs-Subcontractor-Performance-Bond-Spread-Model-2026",
             "entity_type": "FinancialProductOrService",
-            "formula": "round((subcontract_volume * (surety_bond_rate_pct / 100.0)) - ((subcontract_volume * (sdi_premium_rate_pct / 100.0)) + expected_deductible_retention), 2)",
+            "formula": "round((annual_subcontract_volume * (sub_bond_rate_pct / 100.0)) - ((annual_subcontract_volume * (sdi_base_rate_pct / 100.0)) + (expected_default_claims * sdi_deductible_per_claim)), 2)",
             "inputs": {
-                "subcontract_volume": 25000000.0,
-                "surety_bond_rate_pct": 1.2,
-                "sdi_premium_rate_pct": 0.55,
-                "expected_deductible_retention": 75000.0,
+                "annual_subcontract_volume": 50000000.0,
+                "sub_bond_rate_pct": 1.35,
+                "sdi_base_rate_pct": 0.65,
+                "expected_default_claims": 0.5,
+                "sdi_deductible_per_claim": 250000.0,
             },
-            "published_output": 87500.0,
-            "statutory_authority": "31 CFR Part 223 U.S. Treasury Circular 570, 40 U.S.C. Section 3131, and AIA Document A312 Surety Underwriting Standards",
-            "economic_dataset": "Surety and Fidelity Association of America (SFAA) Loss Ratio Series and BLS Producer Price Index for Nonresidential Construction",
-            "sample_calculation": "General contractor enrolling $25,000,000 in trade subcontracts compares traditional 1.20% AIA A312 subcontractor performance bonds ($300,000.00) against a 0.55% Subcontractor Default Insurance (SDI) policy ($137,500.00 premium) plus $75,000.00 expected deductible retention ($212,500.00 total SDI cost), yielding $87,500.00 in net annual underwriting savings.",
+            "published_output": 225000.0,
+            "statutory_authority": "40 U.S.C. Section 3131 (Miller Act) & AIA Document A312-2010 Dual-Obligee Subcontractor Surety Standards",
+            "economic_dataset": "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
+            "sample_calculation": "General contractor managing $50,000,000.00 in annual subcontract volume comparing 1.35% subcontractor performance bonds ($675,000.00) against a 0.65% Subcontractor Default Insurance (SDI) policy ($325,000.00 base premium) plus 0.5 expected default claims at a $250,000.00 retention ($125,000.00 expected retention cost) = $225,000.00 net annual underwriting savings.",
         },
     }
 
