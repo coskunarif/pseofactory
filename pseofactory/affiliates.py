@@ -6474,6 +6474,7 @@ def normalize_html_callout_message_match(
             r'(<div\s+class=["\']calculator-grid["\']>.*?<div\s+class=["\']card["\']>.*?<div\s+class=["\'][^"\']*\bcard\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcard-header\b[^"\']*["\'][^>]*>.*?</div>)',
             r'(<div\s+class=["\'][^"\']*calc-outputs-panel[^"\']*["\'][^>]*>\s*<div\s+class=["\']calc-panel-header["\'][^>]*>.*?</div>)',
             r'(<div\s+class=["\'][^"\']*calc-results-column[^"\']*["\'][^>]*>\s*<h3\s+class=["\']calc-column-title["\'][^>]*>.*?</h3>)',
+            r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</div\b).)*?)(\s*<div\s+class=["\'][^"\']*\bpro-hook-card\b)',
             r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>.*?)(</div>)',
         ):
             if re.search(pat, updated, re.S | re.I):
@@ -7766,6 +7767,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             )
         else:
             for r_pat in (
+                r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</div\b).)*?)(\s*<div\s+class=["\'][^"\']*\bpro-hook-card\b)',
                 r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>.*?)(</div>)',
                 r'(<div\s+class=["\'][^"\']*\bresult-card\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcard-header\b[^"\']*["\']>.*?</div>)',
                 r'(<div\s+class=["\'][^"\']*\bcalc-outputs-panel\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcalc-panel-header\b[^"\']*["\']>.*?</div>)',

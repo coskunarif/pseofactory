@@ -8880,12 +8880,28 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 inc_html = "\n".join(incremental_parts)
                 if "</main>" in html:
                     html = html.replace("</main>", f"{inc_html}\n</main>", 1)
+                elif re.search(r"(\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>)", html, re.I):
+                    html = re.sub(
+                        r"(\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>)",
+                        lambda m: f"\n{inc_html}{m.group(1)}",
+                        html,
+                        count=1,
+                        flags=re.I,
+                    )
                 elif "</body>" in html:
                     html = html.replace("</body>", f"{inc_html}\n</body>", 1)
                 else:
                     html = f"{html}\n{inc_html}"
         elif "</main>" in html:
             html = html.replace("</main>", f"{overlay_markup}\n</main>", 1)
+        elif re.search(r"(\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>)", html, re.I):
+            html = re.sub(
+                r"(\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>)",
+                lambda m: f"\n{overlay_markup}{m.group(1)}",
+                html,
+                count=1,
+                flags=re.I,
+            )
         elif "</body>" in html:
             html = html.replace("</body>", f"{overlay_markup}\n</body>", 1)
         else:

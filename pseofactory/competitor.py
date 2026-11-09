@@ -4448,6 +4448,134 @@ def _render_stateful_scenario_comparator_html(
     )
 
 
+US_51_JURISDICTIONS: Tuple[Tuple[str, str], ...] = (
+    ("CA", "California (CA)"),
+    ("TX", "Texas (TX)"),
+    ("NY", "New York (NY)"),
+    ("FL", "Florida (FL)"),
+    ("IL", "Illinois (IL)"),
+    ("PA", "Pennsylvania (PA)"),
+    ("OH", "Ohio (OH)"),
+    ("GA", "Georgia (GA)"),
+    ("NC", "North Carolina (NC)"),
+    ("MI", "Michigan (MI)"),
+    ("NJ", "New Jersey (NJ)"),
+    ("VA", "Virginia (VA)"),
+    ("WA", "Washington (WA)"),
+    ("AZ", "Arizona (AZ)"),
+    ("MA", "Massachusetts (MA)"),
+    ("TN", "Tennessee (TN)"),
+    ("IN", "Indiana (IN)"),
+    ("MO", "Missouri (MO)"),
+    ("MD", "Maryland (MD)"),
+    ("WI", "Wisconsin (WI)"),
+    ("CO", "Colorado (CO)"),
+    ("MN", "Minnesota (MN)"),
+    ("SC", "South Carolina (SC)"),
+    ("AL", "Alabama (AL)"),
+    ("LA", "Louisiana (LA)"),
+    ("KY", "Kentucky (KY)"),
+    ("OR", "Oregon (OR)"),
+    ("OK", "Oklahoma (OK)"),
+    ("CT", "Connecticut (CT)"),
+    ("UT", "Utah (UT)"),
+    ("IA", "Iowa (IA)"),
+    ("NV", "Nevada (NV)"),
+    ("AR", "Arkansas (AR)"),
+    ("MS", "Mississippi (MS)"),
+    ("KS", "Kansas (KS)"),
+    ("NM", "New Mexico (NM)"),
+    ("NE", "Nebraska (NE)"),
+    ("ID", "Idaho (ID)"),
+    ("WV", "West Virginia (WV)"),
+    ("HI", "Hawaii (HI)"),
+    ("NH", "New Hampshire (NH)"),
+    ("ME", "Maine (ME)"),
+    ("MT", "Montana (MT)"),
+    ("RI", "Rhode Island (RI)"),
+    ("DE", "Delaware (DE)"),
+    ("SD", "South Dakota (SD)"),
+    ("ND", "North Dakota (ND)"),
+    ("AK", "Alaska (AK)"),
+    ("DC", "District of Columbia (DC)"),
+    ("VT", "Vermont (VT)"),
+    ("WY", "Wyoming (WY)"),
+)
+
+
+_SLUG_STATE_TOKEN_MAP: Tuple[Tuple[str, str], ...] = (
+    ("district-of-columbia", "DC"),
+    ("north-carolina", "NC"),
+    ("south-carolina", "SC"),
+    ("north-dakota", "ND"),
+    ("south-dakota", "SD"),
+    ("west-virginia", "WV"),
+    ("new-hampshire", "NH"),
+    ("new-jersey", "NJ"),
+    ("new-mexico", "NM"),
+    ("new-york", "NY"),
+    ("rhode-island", "RI"),
+    ("california", "CA"),
+    ("connecticut", "CT"),
+    ("massachusetts", "MA"),
+    ("pennsylvania", "PA"),
+    ("washington", "WA"),
+    ("mississippi", "MS"),
+    ("minnesota", "MN"),
+    ("wisconsin", "WI"),
+    ("tennessee", "TN"),
+    ("louisiana", "LA"),
+    ("oklahoma", "OK"),
+    ("kentucky", "KY"),
+    ("maryland", "MD"),
+    ("michigan", "MI"),
+    ("missouri", "MO"),
+    ("colorado", "CO"),
+    ("virginia", "VA"),
+    ("arkansas", "AR"),
+    ("delaware", "DE"),
+    ("illinois", "IL"),
+    ("nebraska", "NE"),
+    ("alabama", "AL"),
+    ("arizona", "AZ"),
+    ("florida", "FL"),
+    ("georgia", "GA"),
+    ("indiana", "IN"),
+    ("montana", "MT"),
+    ("vermont", "VT"),
+    ("wyoming", "WY"),
+    ("alaska", "AK"),
+    ("hawaii", "HI"),
+    ("nevada", "NV"),
+    ("oregon", "OR"),
+    ("kansas", "KS"),
+    ("idaho", "ID"),
+    ("maine", "ME"),
+    ("texas", "TX"),
+    ("iowa", "IA"),
+    ("ohio", "OH"),
+    ("utah", "UT"),
+)
+
+
+def resolve_state_code_from_slug(slug: str, property_id: str = "profithelm") -> str:
+    """
+    Infers the 2-letter US jurisdiction postal code from a calculator slug (e.g.,
+    'irs-2027-tax-brackets-new-york' -> 'NY', 'irs-2027-tax-brackets-oklahoma' -> 'OK',
+    'irs-2027-tax-brackets-maine' -> 'ME') so state selectors pre-select the visitor's
+    exact jurisdiction. Falls back to 'DE' on GainHelm and 'CA' on other properties.
+    Zero em-dashes. Zero en-dashes.
+    """
+    s_low = f"-{str(slug or '').strip().lower().replace('/', '-')}-"
+    for token, st_code in _SLUG_STATE_TOKEN_MAP:
+        if f"-{token}-" in s_low:
+            return st_code
+    if "-cslb-" in s_low or "-ca-tax-" in s_low:
+        return "CA"
+    prop_low = str(property_id or "profithelm").strip().lower()
+    return "DE" if prop_low == "gainhelm" else "CA"
+
+
 def render_partner_quote_intake_html(
     slug: str,
     property_id: str,
@@ -4505,43 +4633,10 @@ def render_partner_quote_intake_html(
     form_display = "block" if is_active else "none"
     note_display = "none" if is_active else "block"
 
-    us_states = (
-        ("CA", "California (CA)"),
-        ("TX", "Texas (TX)"),
-        ("NY", "New York (NY)"),
-        ("FL", "Florida (FL)"),
-        ("IL", "Illinois (IL)"),
-        ("PA", "Pennsylvania (PA)"),
-        ("OH", "Ohio (OH)"),
-        ("GA", "Georgia (GA)"),
-        ("NC", "North Carolina (NC)"),
-        ("MI", "Michigan (MI)"),
-        ("NJ", "New Jersey (NJ)"),
-        ("VA", "Virginia (VA)"),
-        ("WA", "Washington (WA)"),
-        ("AZ", "Arizona (AZ)"),
-        ("MA", "Massachusetts (MA)"),
-        ("TN", "Tennessee (TN)"),
-        ("IN", "Indiana (IN)"),
-        ("MO", "Missouri (MO)"),
-        ("MD", "Maryland (MD)"),
-        ("WI", "Wisconsin (WI)"),
-        ("CO", "Colorado (CO)"),
-        ("MN", "Minnesota (MN)"),
-        ("SC", "South Carolina (SC)"),
-        ("AL", "Alabama (AL)"),
-        ("LA", "Louisiana (LA)"),
-        ("KY", "Kentucky (KY)"),
-        ("OR", "Oregon (OR)"),
-        ("OK", "Oklahoma (OK)"),
-        ("CT", "Connecticut (CT)"),
-        ("UT", "Utah (UT)"),
-        ("NV", "Nevada (NV)"),
-        ("DC", "District of Columbia (DC)"),
-    )
+    selected_state_code = resolve_state_code_from_slug(slug_clean, prop_clean)
     state_options_html = "\n".join(
-        f'              <option value="{st_code}"{" selected" if st_code == "CA" else ""}>{st_label}</option>'
-        for st_code, st_label in us_states
+        f'              <option value="{st_code}"{" selected" if st_code == selected_state_code else ""}>{st_label}</option>'
+        for st_code, st_label in US_51_JURISDICTIONS
     )
 
     bands = (
@@ -4644,10 +4739,10 @@ def render_partner_quote_intake_html(
             )
             band_label = "Annual Exposure / Capital Band"
 
-        email_label = "Work or Business Email Address"
-        state_label = "Company Filing State"
+        email_label = "Personal or Work Email Address"
+        state_label = "Taxpayer or Company Filing State"
         consent_copy = (
-            "I provide explicit TCPA partner_sharing_consent authorizing ProfitHelm to share my business email, "
+            "I provide explicit TCPA partner_sharing_consent authorizing ProfitHelm to share my email, "
             "filing state, and capital band with matched commercial finance, tax, or exchange partners "
             "(including OTR Solutions, E-file, and IPX1031) to prepare a customized quote and route me to the partner portal."
         )
@@ -4680,7 +4775,7 @@ def render_partner_quote_intake_html(
         f'          <div class="serp-sub-inputs-grid" style="margin-bottom: 12px;">\n'
         f'            <div class="serp-input-cell">\n'
         f'              <label for="quote-intake-email">{email_label}</label>\n'
-        f'              <input type="email" id="quote-intake-email" name="email" class="touch-target calc-number-input" required autocomplete="email" aria-label="{email_label}">\n'
+        f'              <input type="email" id="quote-intake-email" name="email" class="touch-target calc-number-input" placeholder="Email address (personal or work)..." required autocomplete="email" aria-label="{email_label}">\n'
         f'            </div>\n'
         f'            <div class="serp-input-cell">\n'
         f'              <label for="quote-intake-state">{state_label}</label>\n'
@@ -4827,6 +4922,12 @@ def render_post_calculation_upgrade_drawer_html(
         f'              <div class="post-calc-pillar-heading">{pillar_2_title}</div>\n'
         f'              <p class="post-calc-pillar-copy">Structured JSON and CSV statutory tables covering {trend_preview} for offline spreadsheet modeling.</p>\n'
         f'            </div>\n'
+        f'          </div>\n'
+        f'          <div class="post-calc-sample-schedule-preview" data-sample-unlocked="true" style="margin-top: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; border: 1px dashed var(--border, #cbd5e1); background: rgba(15, 23, 42, 0.04); font-size: 13px; line-height: 1.45;">\n'
+        f'            <div style="font-weight: 700; margin-bottom: 4px;">Unlocked Sample Packet Lines ({amt_fmt} Baseline):</div>\n'
+        f'            <div>1. [UNLOCKED] {deliv_1} cited to {eff_stat}</div>\n'
+        f'            <div>2. [UNLOCKED] {deliv_2} (0.8x / 1.0x / 1.2x sensitivity tiers)</div>\n'
+        f'            <div>3. [LOCKED: ${price_int}] Signed Audit Readiness Checklist, CSV Worksheet &amp; {trend_count}-Series JSON Data Pack</div>\n'
         f'          </div>\n'
         f'          <div class="post-calc-upgrade-actions" role="group" aria-label="Post-Calculation Workpaper and Data Pack Actions">\n'
         f'            <a id="btn-post-calc-quick-unlock-checkout" href="{quick_checkout_url}" '

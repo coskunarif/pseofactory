@@ -3077,7 +3077,7 @@ def _extract_calculation_variant_nodes_cached(html_or_text: str) -> Tuple[Dict[s
     matches = []
     if any(m in clean_lower for m in _CALC_VARIANT_MARKERS):
         container_pattern = re.compile(
-            r'<(?P<tag>div|section|article|a)\b(?P<attrs>[^>]*(?:(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|calc-scenario-card|scenario-card|scenario-preset-pill)[^"\']*["\'])|(?:data-variant(?:-id)?=["\'][^"\']+["\'])|(?:data-node-id=["\'][^"\']+["\'])|(?:id=["\'](?:variant|calc|node)[-_][^"\']+["\']))[^>]*)>(?P<body>.*?)</(?P=tag)>',
+            r'<(?P<tag>div|section|article|a)\b(?P<attrs>[^>]*(?:(?:class=["\'][^"\']*(?:calculation-variant|fan-out-node|calc-variant|calculation-node|variant-container|calc-scenario-card|scenario-card|scenario-preset-pill)[^"\']*["\'])|(?:data-variant(?:-id)?=["\'][^"\']+["\'])|(?:data-node-id=["\'][^"\']+["\'])|(?:id=["\'](?:variant|calc|node)[-_](?!result-quick-unlock)[^"\']+["\']))[^>]*)>(?P<body>.*?)</(?P=tag)>',
             re.IGNORECASE | re.DOTALL,
         )
         matches = list(container_pattern.finditer(clean_input))
@@ -3096,6 +3096,8 @@ def _extract_calculation_variant_nodes_cached(html_or_text: str) -> Tuple[Dict[s
 
             m_id = re.search(r'\b(?:id|data-variant-id|data-node-id|data-variant)=["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
             node_id = m_id.group(1).strip() if m_id else f"variant-{idx + 1}"
+            if node_id.lower().startswith("calc-result-quick-unlock"):
+                continue
 
             m_h = re.search(r'<h[1-6]\b[^>]*>(.*?)</h[1-6]>', body_html, re.IGNORECASE | re.DOTALL)
             if not m_h:

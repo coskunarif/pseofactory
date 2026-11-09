@@ -2871,7 +2871,7 @@ def _render_runtime_sync_events_js() -> str:
                 chkBtn.textContent = isLiveStripeRedirect
                   ? "Redirecting to Secure Stripe Checkout (" + sessId + ")..."
                   : "Checkout Settled & Data Pack Ready (" + sessId + ")";
-                var parentStep = chkBtn.closest("#calc-result-quick-unlock-bar, #post-calculation-upgrade-drawer, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
+                var parentStep = chkBtn.closest("#calc-result-quick-unlock-bar, #post-calculation-upgrade-drawer, .pro-hook-card, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                   parentStep.setAttribute("data-checkout-session-id", sessId);
@@ -3465,6 +3465,11 @@ def _render_runtime_sync_events_js() -> str:
                 window.history.replaceState({}, "", (window.location ? window.location.pathname + window.location.search : "") + "#" + targetId);
               }
             } catch (hErr) {}
+            targetEl.setAttribute("data-focused-target", "true");
+            var hiddenForm = targetEl.querySelector ? targetEl.querySelector("form[style*='display: none'], form[style*='display:none']") : null;
+            if (hiddenForm) {
+              hiddenForm.style.display = "block";
+            }
             if (targetId === "partner-quote-intake-step" || hashLink.getAttribute("data-quote-jump") === "1") {
               var qFormJump = document.getElementById("partner-quote-intake-form");
               if (qFormJump && qFormJump.style.display === "none") {
@@ -3498,7 +3503,6 @@ def _render_runtime_sync_events_js() -> str:
             if (!targetEl.hasAttribute("tabindex")) {
               targetEl.setAttribute("tabindex", "-1");
             }
-            targetEl.setAttribute("data-focused-target", "true");
             if (typeof nodeToFocus.focus === "function") {
               try {
                 nodeToFocus.focus({ preventScroll: true });
@@ -5019,59 +5023,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         )
         actions.append("playbook_lead_capture_form")
 
-    if 'class="pro-hook-card"' in updated and 'id="post-calculation-upgrade-drawer"' in updated:
-        upg_m = re.search(
-            r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
-            updated,
-            re.IGNORECASE,
-        )
-        offer_price = (_extract_attr(upg_m.group(0), "data-offer-price") if upg_m else "") or "49"
-        new_pro_doc = re.sub(
-            r'(<div\b[^>]*class=["\'][^"\']*\bpro-hook-card\b[^"\']*["\'][^>]*>[\s\S]*?)ProfitHelm Pro:(</strong>)',
-            r"\1Statutory Audit Workpaper:\2",
-            updated,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        new_pro_doc = re.sub(
-            r'<a\b[^>]*href=["\']#lead-capture-form["\'][^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>',
-            (
-                f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" '
-                f'data-checkout-nav="1" style="color: var(--brand-primary); font-weight: 700; '
-                f'text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; '
-                f'min-height: 44px; min-width: 44px; padding: 6px 10px;">'
-                f'Export Audit Workpaper (${offer_price}) &rarr;</a>'
-            ),
-            new_pro_doc,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        if new_pro_doc != updated:
-            updated = new_pro_doc
-            actions.append("pro_hook_checkout_anchor")
-
-    if 'class="lead-capture-card"' in updated:
-        new_lc_doc = re.sub(
-            r'(<div\b[^>]*class=["\'][^"\']*\blead-capture-card\b[^"\']*["\'][^>]*>\s*<div[^>]*>)\s*Export\s+([^<]*?)\(PDF\)\s*(</div>)',
-            lambda m: f"{m.group(1)}Free {m.group(2).strip()} Cheat Sheet &amp; Instant Summary{m.group(3)}",
-            updated,
-            flags=re.IGNORECASE,
-        )
-        if new_lc_doc != updated:
-            updated = new_lc_doc
-            actions.append("lead_capture_cheat_sheet_heading")
-
-    if 'placeholder="Work email address..."' in updated or 'placeholder="Work email..."' in updated:
-        new_ph_doc = updated.replace(
-            'placeholder="Work email address..."',
-            'placeholder="Enter your email address..."',
-        ).replace(
-            'placeholder="Work email..."',
-            'placeholder="Enter your email address..."',
-        )
-        if new_ph_doc != updated:
-            updated = new_ph_doc
-            actions.append("lead_capture_consumer_email_placeholder")
+    from pseofactory.competitor import US_51_JURISDICTIONS, resolve_state_code_from_slug
 
     is_restricted_ps = 'data-restricted-public-service="true"' in updated
     has_quote_intake = 'id="partner-quote-intake-step"' in updated and not is_restricted_ps
@@ -5094,7 +5046,186 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         or _extract_attr(bp_tag, "data-blueprint-slug")
         or "index"
     ).strip().lower()
-    default_state = "DE" if prop_id == "gainhelm" else "CA"
+    default_state = resolve_state_code_from_slug(tool_slug, prop_id)
+
+    if 'class="pro-hook-card"' in updated and 'id="post-calculation-upgrade-drawer"' in updated:
+        upg_m = re.search(
+            r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
+            updated,
+            re.IGNORECASE,
+        )
+        upg_tag = upg_m.group(0) if upg_m else ""
+        offer_price = (_extract_attr(upg_tag, "data-offer-price") if upg_tag else "") or "49"
+        offer_sku = (_extract_attr(upg_tag, "data-offer-sku") if upg_tag else "") or "ph_statutory_tax_audit_workpapers"
+        calc_amt = (_extract_attr(upg_tag, "data-calculated-amount") if upg_tag else "") or "125000"
+        try:
+            calc_amt_fmt = f"${int(float(calc_amt)):,}"
+        except ValueError:
+            calc_amt_fmt = "$125,000"
+        new_pro_doc = re.sub(
+            r'(<div\b[^>]*class=["\'][^"\']*\bpro-hook-card\b[^"\']*["\'][^>]*>[\s\S]*?)ProfitHelm Pro:(</strong>)',
+            r"\1Statutory Audit Workpaper:\2",
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        new_pro_doc = re.sub(
+            r'<a\b[^>]*href=["\']#lead-capture-form["\'][^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>',
+            (
+                f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" '
+                f'data-checkout-nav="1" style="color: var(--brand-primary); font-weight: 700; '
+                f'text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; '
+                f'min-height: 44px; min-width: 44px; padding: 6px 10px;">'
+                f'Export Audit Workpaper (${offer_price}) &rarr;</a>'
+            ),
+            new_pro_doc,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if 'data-mechanic="above_fold_packet_sample_unlock"' not in new_pro_doc:
+            checkout_href = (
+                f"/api/lead-capture?checkout=1&amp;sku={offer_sku}"
+                f"&amp;tool_slug={tool_slug}&amp;amount={calc_amt}&amp;redirect=1"
+            )
+            quote_jump_html = (
+                f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
+                f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border, #bfdbfe); background: var(--bg-surface, #ffffff); color: var(--brand-primary, #1d4ed8); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
+                f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
+                if has_quote_intake
+                else ""
+            )
+            sample_unlock_html = (
+                f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
+                f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border, #cbd5e1); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary, #475569);">'
+                f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Bracket &amp; Deduction Schedule (Unlocked) | Line 2 Effective vs. Marginal Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
+                f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
+                f'<a href="{checkout_href}" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
+                f'{quote_jump_html}'
+                f'</div></div>'
+            )
+            new_pro_doc = re.sub(
+                r'(<div\b[^>]*class=["\'][^"\']*\bpro-hook-card\b[^"\']*["\'][^>]*>[\s\S]*?<a\b[^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>)(\s*</div>)',
+                lambda m: m.group(1) + sample_unlock_html + m.group(2),
+                new_pro_doc,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        else:
+            new_pro_doc = new_pro_doc.replace("(Locked - $", "(Locked: $")
+        if new_pro_doc != updated:
+            updated = new_pro_doc
+            actions.append("pro_hook_checkout_anchor")
+    elif (
+        'id="post-calculation-upgrade-drawer"' in updated
+        and 'class="pro-hook-card"' not in updated
+        and 'class="calc-inline-cta"' in updated
+        and not is_restricted_ps
+    ):
+        upg_m = re.search(
+            r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
+            updated,
+            re.IGNORECASE,
+        )
+        upg_tag = upg_m.group(0) if upg_m else ""
+        offer_price = (_extract_attr(upg_tag, "data-offer-price") if upg_tag else "") or "49"
+        offer_sku = (_extract_attr(upg_tag, "data-offer-sku") if upg_tag else "") or "ph_statutory_tax_audit_workpapers"
+        calc_amt = (_extract_attr(upg_tag, "data-calculated-amount") if upg_tag else "") or "125000"
+        try:
+            calc_amt_fmt = f"${int(float(calc_amt)):,}"
+        except ValueError:
+            calc_amt_fmt = "$125,000"
+        checkout_href = (
+            f"/api/lead-capture?checkout=1&amp;sku={offer_sku}"
+            f"&amp;tool_slug={tool_slug}&amp;amount={calc_amt}&amp;redirect=1"
+        )
+        quote_jump_html = (
+            f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
+            f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border, #bfdbfe); background: var(--bg-surface, #ffffff); color: var(--brand-primary, #1d4ed8); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
+            f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
+            if has_quote_intake
+            else ""
+        )
+        injected_pro_card = (
+            f'\n          <div class="pro-hook-card" style="background: rgba(29, 78, 216, 0.04); border: 1px dashed var(--brand-border, #bfdbfe); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8125rem; color: var(--text-secondary, #475569); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem;">'
+            f'<span><strong style="color: var(--brand-primary, #1d4ed8);">Statutory Audit Workpaper:</strong> Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>'
+            f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="color: var(--brand-primary, #1d4ed8); font-weight: 700; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">Export Audit Workpaper (${offer_price}) &rarr;</a>'
+            f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
+            f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border, #cbd5e1); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary, #475569);">'
+            f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Reconciliation Schedule (Unlocked) | Line 2 Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
+            f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
+            f'<a href="{checkout_href}" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
+            f'{quote_jump_html}'
+            f'</div></div></div>'
+        )
+        updated, n_phc = re.subn(
+            r'(<div\b[^>]*class=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>[\s\S]*?<a\b[^>]*>[\s\S]*?</a>\s*</div>)',
+            lambda m: m.group(1) + injected_pro_card,
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if n_phc > 0:
+            actions.append("pro_hook_checkout_anchor")
+
+    if 'id="post-calculation-upgrade-drawer"' in updated and 'class="post-calc-sample-schedule-preview"' not in updated:
+        upg_m2 = re.search(
+            r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
+            updated,
+            re.IGNORECASE,
+        )
+        upg_tag2 = upg_m2.group(0) if upg_m2 else ""
+        offer_price2 = (_extract_attr(upg_tag2, "data-offer-price") if upg_tag2 else "") or "49"
+        calc_amt2 = (_extract_attr(upg_tag2, "data-calculated-amount") if upg_tag2 else "") or "125000"
+        try:
+            calc_amt_fmt2 = f"${int(float(calc_amt2)):,}"
+        except ValueError:
+            calc_amt_fmt2 = "$125,000"
+        sample_box_html = (
+            f'          <div class="post-calc-sample-schedule-preview" data-sample-unlocked="true" style="margin-top: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; border: 1px dashed var(--border, #cbd5e1); background: rgba(15, 23, 42, 0.04); font-size: 13px; line-height: 1.45;">\n'
+            f'            <div style="font-weight: 700; margin-bottom: 4px;">Unlocked Sample Packet Lines ({calc_amt_fmt2} Baseline):</div>\n'
+            f'            <div>1. [UNLOCKED] Personalized Statutory Reconciliation Workpaper (HTML/PDF &amp; CSV)</div>\n'
+            f'            <div>2. [UNLOCKED] Multi-Scenario Sensitivity Matrix (0.8x / 1.0x / 1.2x tiers)</div>\n'
+            f'            <div>3. [LOCKED: ${offer_price2}] Signed Audit Readiness Checklist, CSV Worksheet &amp; Multi-Series JSON Data Pack</div>\n'
+            f'          </div>\n'
+        )
+        updated, n_sb = re.subn(
+            r'(<div\b[^>]*class=["\'][^"\']*\bpost-calc-upgrade-actions\b[^"\']*["\'][^>]*>)',
+            lambda m: sample_box_html + m.group(1),
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if n_sb > 0:
+            actions.append("post_calc_sample_schedule_preview")
+    elif "[LOCKED - $" in updated:
+        updated = updated.replace("[LOCKED - $", "[LOCKED: $")
+        actions.append("post_calc_sample_schedule_preview")
+
+    if 'class="lead-capture-card"' in updated:
+        new_lc_doc = re.sub(
+            r'(<div\b[^>]*class=["\'][^"\']*\blead-capture-card\b[^"\']*["\'][^>]*>\s*<div[^>]*>)\s*Export\s+([^<]*?)\(PDF\)\s*(</div>)',
+            lambda m: f"{m.group(1)}Free {m.group(2).strip()} Cheat Sheet &amp; Instant Summary{m.group(3)}",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if new_lc_doc != updated:
+            updated = new_lc_doc
+            actions.append("lead_capture_cheat_sheet_heading")
+
+    if 'placeholder="Work email address..."' in updated or 'placeholder="Work email..."' in updated or 'placeholder="Enter your email address..."' in updated:
+        updated = updated.replace(
+            'placeholder="Work email address..."',
+            'placeholder="Email address (personal or work)..."',
+        ).replace(
+            'placeholder="Work email..."',
+            'placeholder="Email address (personal or work)..."',
+        ).replace(
+            'placeholder="Enter your email address..."',
+            'placeholder="Email address (personal or work)..."',
+        )
+        actions.append("email_placeholder_unlock")
 
     if has_quote_intake and 'id="partner-registration-drawer"' not in updated:
         firm_ph = (
@@ -5334,31 +5465,9 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         and 'id="state-first-hero-bar"' not in updated
         and 'id="quote-intake-hero-state"' not in updated
     ):
-        hero_states = (
-            ("CA", "California (CA)"),
-            ("DE", "Delaware (DE)"),
-            ("TX", "Texas (TX)"),
-            ("NY", "New York (NY)"),
-            ("FL", "Florida (FL)"),
-            ("IL", "Illinois (IL)"),
-            ("PA", "Pennsylvania (PA)"),
-            ("OH", "Ohio (OH)"),
-            ("GA", "Georgia (GA)"),
-            ("NC", "North Carolina (NC)"),
-            ("MI", "Michigan (MI)"),
-            ("NJ", "New Jersey (NJ)"),
-            ("VA", "Virginia (VA)"),
-            ("WA", "Washington (WA)"),
-            ("AZ", "Arizona (AZ)"),
-            ("MA", "Massachusetts (MA)"),
-            ("TN", "Tennessee (TN)"),
-            ("CO", "Colorado (CO)"),
-            ("MN", "Minnesota (MN)"),
-            ("DC", "District of Columbia (DC)"),
-        )
         opts_str = "\n".join(
             f'            <option value="{sc}"{" selected" if sc == default_state else ""}>{sl}</option>'
-            for sc, sl in hero_states
+            for sc, sl in US_51_JURISDICTIONS
         )
         state_bar_html = (
             '        <div id="state-first-hero-bar" class="state-first-hero-bar" data-mechanic="state_first_hero_input" '
@@ -5380,6 +5489,46 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         )
         if n_sfb > 0:
             actions.append("state_first_hero_bar")
+
+    if has_quote_intake and tool_slug != "index":
+        full_opts_14 = "\n".join(
+            f'              <option value="{sc}"{" selected" if sc == default_state else ""}>{sl}</option>'
+            for sc, sl in US_51_JURISDICTIONS
+        )
+        for sel_id in ("quote-intake-hero-state", "quote-intake-state", "quote-intake-partner-reg-state"):
+            sel_pat = re.compile(
+                rf'(<select\b[^>]*id=["\']{re.escape(sel_id)}["\'][^>]*>)([\s\S]*?)(</select>)',
+                re.IGNORECASE,
+            )
+            sel_m = sel_pat.search(updated)
+            if sel_m:
+                cur_inner = sel_m.group(2)
+                if f'value="{default_state}" selected' not in cur_inner or 'value="ME"' not in cur_inner:
+                    new_sel = sel_m.group(1) + "\n" + full_opts_14 + "\n            " + sel_m.group(3)
+                    if new_sel != sel_m.group(0):
+                        updated = updated[: sel_m.start()] + new_sel + updated[sel_m.end() :]
+                        if "state_select_jurisdiction_sync" not in actions:
+                            actions.append("state_select_jurisdiction_sync")
+
+    if "<main" not in updated and 'id="gsc-striking-overlay"' in updated:
+        ov_tail_m = re.search(
+            r'\n?([ \t]*<div\b[^>]*id=["\']gsc-striking-overlay["\'][^>]*>[\s\S]*?</section>\s*</div>)\s*(?=</body>)',
+            updated,
+            re.IGNORECASE,
+        )
+        if ov_tail_m and re.search(r"\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>", updated[: ov_tail_m.start()], re.IGNORECASE):
+            ov_block = ov_tail_m.group(1)
+            stripped_doc = updated[: ov_tail_m.start()] + "\n" + updated[ov_tail_m.end() :]
+            relocated_doc, n_reloc = re.subn(
+                r"(\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>)",
+                lambda m: f"\n    {ov_block.strip()}{m.group(1)}",
+                stripped_doc,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if n_reloc > 0:
+                updated = relocated_doc
+                actions.append("relocate_gsc_overlay_into_container")
 
     return updated, actions
 
@@ -5841,6 +5990,7 @@ def normalize_html_visual_primitives(
                 or 'mode === "lienbond"' in sync_body
                 or "autoPrevBtn" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
+                or "hiddenForm" not in sync_body
             )
             if needs_sync_repair:
                 updated = re.sub(

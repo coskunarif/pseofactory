@@ -731,7 +731,7 @@ def _classify_tool_domain(tool_or_slug: Any) -> str:
     return os.environ.get("FACTORY_DEFAULT_DOMAIN_ARCHETYPE", "tax")
 
 
-def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
+def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """Resolves tool dictionary from either slug string or dictionary representation."""
     from pseofactory.maintenance import (
         PREXVO_DEFAULT_TOOLS,
@@ -739,6 +739,7 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
         PREXVO_EXTENDED_TOOLS,
         PROFITHELM_EXTENDED_TOOLS,
         GAINHELM_DEFAULT_TOOLS,
+        LIENBOND_DEFAULT_TOOLS,
     )
 
     default_slug = os.environ.get("FACTORY_DEFAULT_TOOL_SLUG", "irs-2027-tax-brackets")
@@ -751,15 +752,18 @@ def _resolve_tool(tool_or_slug: Any) -> Dict[str, Any]:
     elif isinstance(tool_or_slug, str):
         t_slug = tool_or_slug.strip()
 
-    prop_env = os.environ.get("PROPERTY_ID") or os.environ.get("TENANT_ID") or ""
+    prop_env = property_id or os.environ.get("PROPERTY_ID") or os.environ.get("TENANT_ID") or ""
     property_id = resolve_canonical_property_id(prop_env, default=prop_env).lower() if prop_env else ""
     is_prexvo = (property_id == "prexvo") or any(t.get("slug") == t_slug for t in PREXVO_DEFAULT_TOOLS)
     is_gainhelm = (property_id == "gainhelm") or any(t.get("slug") == t_slug for t in GAINHELM_DEFAULT_TOOLS)
+    is_lienbond = (property_id == "lienbond") or any(t.get("slug") == t_slug for t in LIENBOND_DEFAULT_TOOLS)
 
     if is_prexvo:
         default_affiliates = ["splash_financial", "sofi", "credible"]
     elif is_gainhelm:
         default_affiliates = ["vanta_security", "drata_compliance", "sprinto_compliance"]
+    elif is_lienbond:
+        default_affiliates = ["suretybonds_direct", "simply_business"]
     else:
         default_affiliates = ["turbotax", "interactive_brokers"]
 
@@ -6500,19 +6504,23 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
 
     is_prexvo = False
     is_gainhelm = False
+    is_lienbond = False
     if str(property_id).lower() == "prexvo":
         is_prexvo = True
     elif str(property_id).lower() == "gainhelm":
         is_gainhelm = True
+    elif str(property_id).lower() == "lienbond":
+        is_lienbond = True
     elif str(property_id).lower() == "profithelm":
         is_prexvo = False
     else:
         is_prexvo = any(t.get("slug") == slug for t in PREXVO_DEFAULT_TOOLS)
         is_gainhelm = any(t.get("slug") == slug for t in GAINHELM_DEFAULT_TOOLS)
+        is_lienbond = any(t.get("slug") == slug for t in LIENBOND_DEFAULT_TOOLS)
 
-    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
-    brand_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else "ProfitHelm")
-    canonical_base = "https://prexvo.com" if is_prexvo else ("https://gainhelm.com" if is_gainhelm else "https://profithelm.com")
+    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    brand_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
+    canonical_base = "https://prexvo.com" if is_prexvo else ("https://gainhelm.com" if is_gainhelm else ("https://lienbond.com" if is_lienbond else "https://profithelm.com"))
 
     proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
     out_fmt = proof["published_output_formatted"]
@@ -9508,7 +9516,7 @@ def export_all_syndication_files(
                             continue
                         built_slugs.add(item.name)
                         if item.name not in known_slugs:
-                            target_tools.append(_resolve_tool(item.name))
+                            target_tools.append(_resolve_tool(item.name, property_id=property_id))
                             known_slugs.add(item.name)
 
         if built_slugs:
@@ -9526,7 +9534,7 @@ def export_all_syndication_files(
         ]
 
     target_tools = [
-        _resolve_tool(t) if isinstance(t, (str, dict)) else t
+        _resolve_tool(t, property_id=property_id) if isinstance(t, (str, dict)) else t
         for t in (target_tools or [])
     ]
     active_slugs = {t["slug"] for t in target_tools if isinstance(t, dict) and "slug" in t}
@@ -9756,9 +9764,22 @@ def export_all_syndication_files(
                     (output_dir / "affiliate_routes_verified.json").write_text(aff_json, encoding="utf-8")
             else:
                 tenant_aff_routes = []
+                fallback_prop_affs = (
+                    ["splash_financial", "sofi", "credible"]
+                    if property_id == "prexvo"
+                    else (
+                        ["vanta_security", "drata_compliance", "sprinto_compliance"]
+                        if property_id == "gainhelm"
+                        else (["suretybonds_direct", "simply_business"] if property_id == "lienbond" else [])
+                    )
+                )
                 for t in target_tools:
                     slug = t["slug"]
-                    for aff in t.get("affiliates", []):
+                    raw_affs = [
+                        a for a in t.get("affiliates", [])
+                        if str(AFFILIATE_REGISTRY.get(a, {}).get("property", property_id)).lower() == property_id
+                    ] or fallback_prop_affs
+                    for aff in raw_affs:
                         reg_entry = AFFILIATE_REGISTRY.get(aff, {})
                         tenant_aff_routes.append({
                             "slug": slug,

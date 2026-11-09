@@ -458,4 +458,74 @@ console.log(JSON.stringify(data));
     assert 'id="hero-range-anchor"' in normalized_html
     assert 'href="#partner-registration-drawer"' in normalized_html
     assert "data-focused-target" in normalized_html
+    assert 'data-mechanic="above_fold_packet_sample_unlock"' in normalized_html
+    assert "pro-hook-direct-checkout" in normalized_html
+    assert "pro-hook-quote-jump" in normalized_html
+    assert 'class="post-calc-sample-schedule-preview"' in normalized_html
+
+
+def test_top_traffic_state_preselection_and_above_fold_conversion_unlock():
+    from pseofactory.competitor import (
+        US_51_JURISDICTIONS,
+        render_partner_quote_intake_html,
+        render_post_calculation_upgrade_drawer_html,
+        resolve_state_code_from_slug,
+    )
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    assert len(US_51_JURISDICTIONS) == 51
+    assert resolve_state_code_from_slug("irs-2027-tax-brackets-new-york", "profithelm") == "NY"
+    assert resolve_state_code_from_slug("irs-2027-tax-brackets-oklahoma", "profithelm") == "OK"
+    assert resolve_state_code_from_slug("irs-2027-tax-brackets-maine", "profithelm") == "ME"
+    assert resolve_state_code_from_slug("irs-2027-tax-brackets-connecticut", "profithelm") == "CT"
+    assert resolve_state_code_from_slug("irs-2027-tax-brackets-new-mexico", "profithelm") == "NM"
+    assert resolve_state_code_from_slug("texas-construction-lien-deadline-calculator", "lienbond") == "TX"
+
+    ny_intake = render_partner_quote_intake_html("irs-2027-tax-brackets-new-york", "profithelm", baseline_amount=150000.0)
+    assert '<option value="NY" selected>New York (NY)</option>' in ny_intake
+    assert "Email address (personal or work)..." in ny_intake
+    assert "Work email address..." not in ny_intake
+
+    ny_drawer = render_post_calculation_upgrade_drawer_html("irs-2027-tax-brackets-new-york", "profithelm", baseline_amount=150000.0)
+    assert 'class="post-calc-sample-schedule-preview"' in ny_drawer
+    assert 'data-sample-unlocked="true"' in ny_drawer
+
+    state_calc_html = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Oklahoma 2027 Tax Brackets</title></head>
+<body>
+  <main>
+    <section class="hero-section">
+      <h1>Oklahoma 2027 Tax Brackets</h1>
+      <div id="state-first-hero-bar" class="state-first-hero-bar">
+        <select id="quote-intake-hero-state" name="hero_state">
+          <option value="CA" selected>California (CA)</option>
+          <option value="NY">New York (NY)</option>
+        </select>
+      </div>
+    </section>
+    <div class="result-box">
+      <strong class="output-value">$14,200</strong>
+      <div class="calc-inline-cta"><span>Ready</span><a href="/r/turbotax" rel="noopener sponsored nofollow">Partner</a></div>
+    </div>
+    <div id="saveable-decision-blueprint" data-blueprint-slug="irs-2027-tax-brackets-oklahoma">
+      <div id="blueprint-status-readout">Ready</div>
+    </div>
+    <div id="partner-quote-intake-step" data-property-id="profithelm" data-tool-slug="irs-2027-tax-brackets-oklahoma" data-calculated-amount="14200">
+      <select id="quote-intake-state" name="state"><option value="CA" selected>California (CA)</option></select>
+      <input id="quote-intake-email" type="email" placeholder="Work email address..." />
+    </div>
+    <section class="affiliate-cta-section"><h2>Partners</h2></section>
+  </main>
+</body>
+</html>"""
+    upgraded_html, _ = normalize_html_visual_primitives(state_calc_html)
+    assert '<option value="OK" selected>Oklahoma (OK)</option>' in upgraded_html
+    assert '<option value="CA" selected>' not in upgraded_html
+    assert 'data-mechanic="above_fold_packet_sample_unlock"' in upgraded_html
+    assert "pro-hook-direct-checkout" in upgraded_html
+    assert "pro-hook-quote-jump" in upgraded_html
+    assert 'class="post-calc-sample-schedule-preview"' in upgraded_html
+    assert "Work email address..." not in upgraded_html
+
 
