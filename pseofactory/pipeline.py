@@ -1446,7 +1446,7 @@ def execute_autonomous_daily_trend_page_build(
 
     target_props = [
         str(p).strip().lower()
-        for p in (property_ids or ["profithelm", "prexvo", "gainhelm"])
+        for p in (property_ids or ["profithelm", "prexvo", "gainhelm", "lienbond"])
         if str(p).strip()
     ]
     date_str = str(date_key or datetime.now(timezone.utc).strftime("%Y-%m-%d")).strip()
@@ -1552,54 +1552,212 @@ def execute_autonomous_daily_trend_page_build(
         or Path(void_candidates_path).resolve() == VOID_CANDIDATES_QUEUE_PATH.resolve()
     )
     if is_default_queue:
-        default_breakout_seeds: Dict[str, Dict[str, Any]] = {
-            "gainhelm": {
-                "property_id": "gainhelm",
-                "tenant": "gainhelm",
-                "slug": "dora-ict-third-party-risk-compliance-cost-calculator",
-                "query": "dora ict third party risk compliance cost calculator",
-                "title": "DORA ICT Third-Party Risk Compliance Cost Model",
-                "action": "BUILD_PAGE",
-                "status": "PENDING",
-                "composite_profit_yield": 92.4,
-                "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
-                "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-                "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
-                "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
-                "inputs": {
-                    "tlpt_red_team_fee": 42000.0,
-                    "critical_ict_vendors": 12.0,
-                    "fee_per_ict_vendor": 2800.0,
-                    "register_of_information_cost": 16500.0,
-                    "remediation_hours": 160.0,
-                    "engineering_hourly_rate": 125.0,
+        default_breakout_seeds: Dict[str, List[Dict[str, Any]]] = {
+            "profithelm": [
+                {
+                    "property_id": "profithelm",
+                    "tenant": "profithelm",
+                    "slug": "corporate-amt-camt-book-income-minimum-tax-calculator",
+                    "query": "corporate amt camt book income minimum tax calculator",
+                    "title": "Corporate AMT (CAMT) 15% AFSI Minimum Tax Calculator",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 94.5,
+                    "statutory_authority": "IRC Section 55(b)(2) & Section 56A (15% Corporate Alternative Minimum Tax on Adjusted Financial Statement Income)",
+                    "economic_dataset": "IRS SOI Corporate Tax Return Benchmark & FRED CPILFESL Series",
+                    "model_name": "ProfitHelm-IRC-55-56A-CAMT-AFSI-Minimum-Tax-Model-2026",
+                    "formula": "round(max(0.0, (adjusted_financial_statement_income * 0.15) - camt_foreign_tax_credit - regular_corporate_tax_plus_beat), 2)",
+                    "inputs": {
+                        "adjusted_financial_statement_income": 1250000000.0,
+                        "camt_foreign_tax_credit": 12000000.0,
+                        "regular_corporate_tax_plus_beat": 75000000.0,
+                    },
+                    "published_output": 100500000.0,
+                    "sample_calculation": (
+                        "Applicable corporation with $1,250,000,000.00 in 3-year average Adjusted Financial Statement Income (AFSI): "
+                        "15% tentative CAMT ($187,500,000.00) less $12,000,000.00 CAMT foreign tax credit less $75,000,000.00 "
+                        "regular corporate income tax and BEAT = $100,500,000.00 net IRC Section 55(b)(2) CAMT liability."
+                    ),
                 },
-                "published_output": 112100.0,
-                "sample_calculation": (
-                    "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: "
-                    "Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and "
-                    "contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation "
-                    "($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost."
-                ),
-            },
+                {
+                    "property_id": "profithelm",
+                    "tenant": "profithelm",
+                    "slug": "section-280g-golden-parachute-excise-tax-safe-harbor-calculator",
+                    "query": "section 280g golden parachute excise tax safe harbor calculator",
+                    "title": "IRC Section 280G Golden Parachute Excise Tax Calculator",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 93.8,
+                    "statutory_authority": "IRC Section 280G & Section 4999 (26 CFR Section 1.280G-1 Safe Harbor 3x Base Amount Rules)",
+                    "economic_dataset": "IRS SOI Corporate Executive Compensation Series & FRED DGS10 Treasury AFR Series",
+                    "model_name": "ProfitHelm-IRC-280G-Golden-Parachute-Excise-Tax-Model-2026",
+                    "formula": "round(max(0.0, total_parachute_payment - five_year_avg_w2_base_amount) * (excise_tax_rate_pct / 100.0), 2)",
+                    "inputs": {
+                        "total_parachute_payment": 1850000.0,
+                        "five_year_avg_w2_base_amount": 450000.0,
+                        "excise_tax_rate_pct": 20.0,
+                    },
+                    "published_output": 280000.0,
+                    "sample_calculation": (
+                        "Disqualified M&A executive receiving $1,850,000.00 in change-in-control parachute payments with a "
+                        "5-year average W-2 base amount of $450,000.00 (3x safe harbor threshold = $1,350,000.00): excess "
+                        "parachute payment above 1x base amount is $1,400,000.00, triggering a 20% IRC Section 4999 excise "
+                        "tax of $280,000.00 and corporate deduction disallowance."
+                    ),
+                },
+            ],
+            "prexvo": [
+                {
+                    "property_id": "prexvo",
+                    "tenant": "prexvo",
+                    "slug": "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator",
+                    "query": "health professions student loan hpsl nhsc forgiveness calculator",
+                    "title": "NHSC & Health Professions Loan Forgiveness Model",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 89.6,
+                    "statutory_authority": "Public Health Service Act Section 338B (42 U.S.C. 254l-1 NHSC LRP) & Title VII Section 723 (42 U.S.C. 292s HPSL)",
+                    "economic_dataset": "HRSA Bureau of Health Workforce HPSA Tier Award Schedule & FRED SLSTTOTAL Series",
+                    "model_name": "Prexvo-HRSA-NHSC-HPSL-Loan-Repayment-Model-2026",
+                    "formula": "round(max(0.0, qualifying_health_loan_balance - nhsc_two_year_award - (continuation_years * annual_continuation_award)) * (1.0 + (hpsl_interest_rate_pct / 100.0)), 2)",
+                    "inputs": {
+                        "qualifying_health_loan_balance": 165000.0,
+                        "nhsc_two_year_award": 75000.0,
+                        "continuation_years": 2.0,
+                        "annual_continuation_award": 20000.0,
+                        "hpsl_interest_rate_pct": 5.0,
+                    },
+                    "published_output": 52500.0,
+                    "sample_calculation": (
+                        "Primary care clinician at a Tier 1 HPSA site with $165,000.00 in qualifying health professions debt: "
+                        "$75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at "
+                        "$20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net "
+                        "payoff obligation is $52,500.00."
+                    ),
+                },
+            ],
+            "gainhelm": [
+                {
+                    "property_id": "gainhelm",
+                    "tenant": "gainhelm",
+                    "slug": "dora-ict-third-party-risk-compliance-cost-calculator",
+                    "query": "dora ict third party risk compliance cost calculator",
+                    "title": "DORA ICT Third-Party Risk Compliance Cost Model",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 92.4,
+                    "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
+                    "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+                    "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
+                    "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
+                    "inputs": {
+                        "tlpt_red_team_fee": 42000.0,
+                        "critical_ict_vendors": 12.0,
+                        "fee_per_ict_vendor": 2800.0,
+                        "register_of_information_cost": 16500.0,
+                        "remediation_hours": 160.0,
+                        "engineering_hourly_rate": 125.0,
+                    },
+                    "published_output": 112100.0,
+                    "sample_calculation": (
+                        "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: "
+                        "Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and "
+                        "contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation "
+                        "($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost."
+                    ),
+                },
+                {
+                    "property_id": "gainhelm",
+                    "tenant": "gainhelm",
+                    "slug": "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
+                    "query": "eu ai act high risk conformity assessment cost calculator",
+                    "title": "EU AI Act High-Risk Conformity Audit Cost Model",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 94.2,
+                    "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
+                    "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
+                    "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
+                    "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
+                    "inputs": {
+                        "high_risk_ai_systems": 2.0,
+                        "notified_body_audit_fee": 28500.0,
+                        "annex_iv_technical_dossier_cost": 18000.0,
+                        "qms_article_17_setup_fee": 24000.0,
+                        "validation_hours": 140.0,
+                        "ml_compliance_hourly_rate": 150.0,
+                    },
+                    "published_output": 120000.0,
+                    "sample_calculation": (
+                        "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: "
+                        "2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical "
+                        "documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) "
+                        "+ 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost."
+                    ),
+                },
+            ],
+            "lienbond": [
+                {
+                    "property_id": "lienbond",
+                    "tenant": "lienbond",
+                    "slug": "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator",
+                    "query": "subcontractor default insurance sdi vs performance bond cost calculator",
+                    "title": "SDI vs Subcontractor Performance Bond Calculator",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 96.1,
+                    "statutory_authority": "40 U.S.C. Section 3131 (Miller Act) & AIA Document A312-2010 Dual-Obligee Subcontractor Surety Standards",
+                    "economic_dataset": "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
+                    "model_name": "LienBond-SDI-vs-Subcontractor-Performance-Bond-Spread-Model-2026",
+                    "formula": "round((annual_subcontract_volume * (sub_bond_rate_pct / 100.0)) - ((annual_subcontract_volume * (sdi_base_rate_pct / 100.0)) + (expected_default_claims * sdi_deductible_per_claim)), 2)",
+                    "inputs": {
+                        "annual_subcontract_volume": 50000000.0,
+                        "sub_bond_rate_pct": 1.35,
+                        "sdi_base_rate_pct": 0.65,
+                        "expected_default_claims": 0.5,
+                        "sdi_deductible_per_claim": 250000.0,
+                    },
+                    "published_output": 225000.0,
+                    "sample_calculation": (
+                        "General contractor managing $50,000,000.00 in annual subcontract volume comparing 1.35% "
+                        "subcontractor performance bonds ($675,000.00) against a 0.65% Subcontractor Default Insurance "
+                        "(SDI) policy ($325,000.00 base premium) plus 0.5 expected default claims at a $250,000.00 "
+                        "retention ($125,000.00 expected retention cost) = $225,000.00 net annual underwriting savings."
+                    ),
+                },
+            ],
         }
-        for t_id, seed_item in default_breakout_seeds.items():
+        for t_id, seed_list in default_breakout_seeds.items():
             if t_id not in target_props:
                 continue
             if len(day_bucket.get(t_id, []) or []) >= daily_cap:
-                continue
-            seed_slug = str(seed_item["slug"]).strip().lower()
-            if seed_slug in existing_slugs_by_tenant.get(t_id, set()):
                 continue
             has_pending_for_tid = any(
                 str(qi.get("property_id") or qi.get("tenant") or "").strip().lower() == t_id
                 and str(qi.get("status") or "PENDING").upper() == "PENDING"
                 and str(qi.get("action") or "BUILD_PAGE").upper() == "BUILD_PAGE"
+                and str(qi.get("slug") or "").strip().lower() not in existing_slugs_by_tenant.get(t_id, set())
                 for qi in queue_items
             )
-            if not has_pending_for_tid and not any(str(qi.get("slug") or "").strip().lower() == seed_slug for qi in queue_items):
-                queue_items.append(dict(seed_item))
+            if has_pending_for_tid:
+                continue
+            for seed_item in seed_list:
+                seed_slug = str(seed_item["slug"]).strip().lower()
+                if seed_slug in existing_slugs_by_tenant.get(t_id, set()):
+                    continue
+                existing_q = next(
+                    (qi for qi in queue_items if str(qi.get("slug") or "").strip().lower() == seed_slug),
+                    None,
+                )
+                if existing_q is not None:
+                    existing_q.update(dict(seed_item))
+                    existing_q["status"] = "PENDING"
+                    existing_q.pop("built_at", None)
+                    existing_q.pop("reconciled_reason", None)
+                else:
+                    queue_items.append(dict(seed_item))
                 queue_mutated = True
+                break
 
     for item in queue_items:
         t_id = str(item.get("property_id") or item.get("tenant") or "").strip().lower()
@@ -1877,7 +2035,7 @@ def execute_autonomous_daily_trend_page_build(
             if repo_root and Path(repo_root).is_dir():
                 r_root = Path(repo_root)
                 prov_title = raw_title
-                if t_id in ("gainhelm", "prexvo"):
+                if t_id in ("gainhelm", "prexvo", "lienbond"):
                     brand_sfx = f" | {adp.brand_name}"
                     max_b = 60 - len(brand_sfx)
                     min_b = 50 - len(brand_sfx)
@@ -1898,10 +2056,19 @@ def execute_autonomous_daily_trend_page_build(
                     prov_desc = prov_desc[:154].rsplit(" ", 1)[0].rstrip(".,;:- ") + "."
                 prov_entry = {
                     "slug": c_slug,
+                    "query": c_query,
                     "title": prov_title,
                     "short_title": prov_title[:24].strip(),
                     "description": prov_desc,
                     "primary_keyword": c_query.lower(),
+                    "source": "p2_autonomous_daily_builder",
+                    "statutory_authority": candidate_spec.get("statutory_authority", ""),
+                    "economic_dataset": candidate_spec.get("economic_dataset", ""),
+                    "model_name": candidate_spec.get("model_name", ""),
+                    "formula": candidate_spec.get("formula", ""),
+                    "inputs": dict(candidate_spec.get("inputs") or {}),
+                    "published_output": compiled_res.get("published_output", candidate_spec.get("published_output", 0.0)),
+                    "sample_calculation": candidate_spec.get("sample_calculation", ""),
                     "calculation_manifest": dict(manifest_out) if isinstance(manifest_out, dict) else {},
                     "verified_at": built_ts,
                 }

@@ -3053,7 +3053,59 @@ th { background-color: var(--bg-elevated); }
     (css_dir / "style.css").write_text(style_css_content, encoding="utf-8")
     (static_css_dir / "style.css").write_text(style_css_content, encoding="utf-8")
 
-    specs = get_lienbond_expansion_specs()
+    specs = list(get_lienbond_expansion_specs())
+    known_slugs = {str(s["slug"]).strip().lower() for s in specs}
+    dv_file = root / "content" / "deployed_voids.json"
+    if dv_file.is_file():
+        try:
+            loaded_dv = json.loads(dv_file.read_text(encoding="utf-8"))
+            if isinstance(loaded_dv, list):
+                from pseofactory.pipeline import CompetitorGapEngine, TenantFactStore
+                lb_profile = TenantFactStore.get_instance().get_profile("lienbond")
+                lb_gap_engine = CompetitorGapEngine(tenant_profile=lb_profile)
+                for dv in loaded_dv:
+                    if not isinstance(dv, dict):
+                        continue
+                    dv_slug = str(dv.get("slug") or "").strip().lower()
+                    if not dv_slug or dv_slug in known_slugs:
+                        continue
+                    cm = dv.get("calculation_manifest") if isinstance(dv.get("calculation_manifest"), dict) else {}
+                    dv_query = str(dv.get("query") or dv.get("primary_keyword") or dv_slug.replace("-", " ")).strip()
+                    dv_title = str(dv.get("title") or dv_query.title()).strip()
+                    dv_spec: Dict[str, Any] = {
+                        "slug": dv_slug,
+                        "query": dv_query,
+                        "title": dv_title,
+                        "property_id": "lienbond",
+                        "tenant": "lienbond",
+                        "domain": "lienbond.com",
+                        "brand_name": "LienBond",
+                        "canonical_base": "https://lienbond.com",
+                        "statutory_authority": str(
+                            dv.get("statutory_authority")
+                            or cm.get("statutory_authority")
+                            or "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes"
+                        ),
+                        "economic_dataset": str(
+                            dv.get("economic_dataset")
+                            or cm.get("economic_dataset")
+                            or "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001"
+                        ),
+                        "model_name": str(
+                            dv.get("model_name")
+                            or cm.get("model_name")
+                            or f"LienBond-{dv_slug[:32]}-Model-2026"
+                        ),
+                        "formula": str(dv.get("formula") or cm.get("formula") or ""),
+                        "inputs": dict(dv.get("inputs") or cm.get("inputs") or {}),
+                        "published_output": dv.get("published_output", cm.get("published_output", 0.0)),
+                        "sample_calculation": str(dv.get("sample_calculation") or cm.get("sample_calculation") or ""),
+                    }
+                    dv_spec = lb_gap_engine.enrich_candidate_spec(dv_spec)
+                    specs.append(dv_spec)
+                    known_slugs.add(dv_slug)
+        except Exception:
+            pass
     all_slugs = [str(s["slug"]) for s in specs]
     compiled_pages: List[Dict[str, Any]] = []
     catalog_tools: List[Dict[str, Any]] = []
@@ -3960,7 +4012,7 @@ def test_compiled_calculators_and_manifests_exist():
     tools_dir = DIST_DIR / "tools"
     manifests_dir = DIST_DIR / "manifests"
     manifests = sorted(manifests_dir.glob("*.json"))
-    assert len(manifests) in (7, 10)
+    assert len(manifests) >= 7
     for mf in manifests:
         slug = mf.stem
         html_path = tools_dir / slug / "index.html"

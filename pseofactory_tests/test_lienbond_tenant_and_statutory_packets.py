@@ -203,3 +203,101 @@ def test_provision_tenant_custom_domain_and_dns_reconciler() -> None:
     assert len(plan["planned_dns_records"]) == 4
     cname_targets = [r["content"] for r in plan["planned_dns_records"] if r["type"] == "CNAME"]
     assert cname_targets == ["lienbond.pages.dev", "lienbond.pages.dev"]
+
+
+def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path) -> None:
+    """
+    Verifies that execute_autonomous_daily_trend_page_build:
+      1. Builds a Factor-7-verified P2 page for lienbond and records source='p2_autonomous_daily_builder'
+         in content/deployed_voids.json.
+      2. Preserves the P2 page across subsequent compile_lienbond_estate() rebuilds.
+    """
+    import json
+    from pseofactory.compiler import compile_lienbond_estate
+    from pseofactory.pipeline import (
+        ConfigurablePropertyAdapter,
+        TenantRegistry,
+        execute_autonomous_daily_trend_page_build,
+    )
+
+    lb_root = tmp_path / "lienbond"
+    init_res = compile_lienbond_estate(lb_root)
+    assert init_res["status"] == "PASS"
+    assert init_res["compiled_count"] == 10
+
+    reg = TenantRegistry()
+    reg.register_adapter(
+        ConfigurablePropertyAdapter(
+            property_id="lienbond",
+            brand_name="LienBond",
+            domain="lienbond.com",
+            canonical_base="https://lienbond.com",
+            dist_dir=lb_root / "dist",
+            repo_path=lb_root,
+            tools=[{"slug": p["slug"]} for p in init_res["compiled_pages"]],
+        )
+    )
+    queue_file = tmp_path / "void_candidates.jsonl"
+    ledger_file = tmp_path / "daily_ledger.json"
+    candidate = {
+        "property_id": "lienbond",
+        "tenant": "lienbond",
+        "slug": "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator",
+        "query": "subcontractor default insurance sdi vs performance bond cost calculator",
+        "title": "SDI vs Subcontractor Performance Bond Calculator",
+        "action": "BUILD_PAGE",
+        "status": "PENDING",
+        "composite_profit_yield": 96.1,
+        "statutory_authority": "40 U.S.C. Section 3131 (Miller Act) & AIA Document A312-2010 Dual-Obligee Subcontractor Surety Standards",
+        "economic_dataset": "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
+        "model_name": "LienBond-SDI-vs-Subcontractor-Performance-Bond-Spread-Model-2026",
+        "formula": "round((annual_subcontract_volume * (sub_bond_rate_pct / 100.0)) - ((annual_subcontract_volume * (sdi_base_rate_pct / 100.0)) + (expected_default_claims * sdi_deductible_per_claim)), 2)",
+        "inputs": {
+            "annual_subcontract_volume": 50000000.0,
+            "sub_bond_rate_pct": 1.35,
+            "sdi_base_rate_pct": 0.65,
+            "expected_default_claims": 0.5,
+            "sdi_deductible_per_claim": 250000.0,
+        },
+        "published_output": 225000.0,
+        "sample_calculation": (
+            "General contractor managing $50,000,000.00 in annual subcontract volume comparing 1.35% "
+            "subcontractor performance bonds ($675,000.00) against a 0.65% Subcontractor Default Insurance "
+            "(SDI) policy ($325,000.00 base premium) plus 0.5 expected default claims at a $250,000.00 "
+            "retention ($125,000.00 expected retention cost) = $225,000.00 net annual underwriting savings."
+        ),
+    }
+    queue_file.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
+
+    p2_res = execute_autonomous_daily_trend_page_build(
+        property_ids=["lienbond"],
+        void_candidates_path=queue_file,
+        ledger_path=ledger_file,
+        max_pages_per_tenant_per_day=1,
+        date_key="2026-11-09",
+        registry=reg,
+        dry_run=False,
+        enable_gitops=False,
+    )
+    assert p2_res["status"] == "PASS"
+    assert p2_res["built_count"] == 1
+    dv_path = lb_root / "content" / "deployed_voids.json"
+    assert dv_path.is_file()
+    dv_list = json.loads(dv_path.read_text(encoding="utf-8"))
+    assert len(dv_list) == 1
+    assert dv_list[0]["source"] == "p2_autonomous_daily_builder"
+    assert dv_list[0]["slug"] == "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator"
+
+    rebuild_res = compile_lienbond_estate(lb_root)
+    assert rebuild_res["status"] == "PASS"
+    assert rebuild_res["compiled_count"] == 11
+    rebuilt_slugs = [p["slug"] for p in rebuild_res["compiled_pages"]]
+    assert "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator" in rebuilt_slugs
+    assert (
+        lb_root
+        / "dist"
+        / "tools"
+        / "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator"
+        / "index.html"
+    ).is_file()
+

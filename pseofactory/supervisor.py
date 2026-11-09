@@ -2686,7 +2686,7 @@ class AutonomousLifecycleSupervisor:
         actions: List[Dict[str, Any]] = []
         for esc in escalations:
             tid = str(esc.get("tenant_id") or "").strip().lower()
-            if tid not in ("profithelm", "prexvo", "gainhelm"):
+            if tid not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                 continue
             rec: Dict[str, Any] = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2934,7 +2934,7 @@ class AutonomousLifecycleSupervisor:
                 gaps = p_rep.get("cluster_monetization_gaps") or {}
                 healed_files = p_rep.get("prerequisite_healed_files") or {}
                 promoted_cnt = int(promo.get("promoted_count", 0))
-                monetization_requires_rebuild = bool(promoted_cnt > 0 or bool(healed_files))
+                monetization_requires_rebuild = bool(daily_built_cnt > 0 or promoted_cnt > 0 or bool(healed_files))
                 partner_sync_summary = {
                     "status": p_rep.get("status", "PASS"),
                     "synced_at": p_rep.get("synced_at"),

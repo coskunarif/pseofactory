@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.affiliates import (
     GAINHELM_DISCLOSURES,
+    LIENBOND_DISCLOSURES,
     PREXVO_DISCLOSURES,
     PROFITHELM_DISCLOSURES,
     is_restricted_public_service_slug,
@@ -373,6 +374,21 @@ class CompetitorGapEngine:
                 GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
             ]
             canonical_base = "https://gainhelm.com"
+        elif self.tenant_id == "lienbond":
+            default_category = "Construction Surety & Statutory Lien Compliance"
+            affiliates = ["suretybonds_direct", "Viking_Bond_Service"]
+            statutory_authority = "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes"
+            economic_dataset = "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001"
+            model_name = "LienBond-Commercial-Surety-Underwriting-Model-2026"
+            formula = "round((bond_amount * (credit_tier_rate_pct / 100.0)) * term_years, 2)"
+            inputs = {"bond_amount": 25000, "credit_tier_rate_pct": 1.5, "term_years": 1}
+            published_output = 375.0
+            sample_calculation = "$25,000.00 statutory contractor license bond at 1.50% preferred credit tier rate over 1 year yields $375.00 annual surety premium"
+            disclosures = [
+                LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer", ""),
+                LIENBOND_DISCLOSURES.get("ftc_disclosure", ""),
+            ]
+            canonical_base = "https://lienbond.com"
         else:
             if "1031" in combined_q or "like-kind" in combined_q:
                 default_category = "1031 Exchange"
@@ -720,6 +736,40 @@ class CompetitorGapEngine:
                 [
                     GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
                     GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
+                ],
+            )
+        elif tenant_id == "lienbond":
+            spec.setdefault("tenant", "lienbond")
+            spec.setdefault("property_id", "lienbond")
+            spec.setdefault("domain", "lienbond.com")
+            spec.setdefault("canonical_base", "https://lienbond.com")
+            spec.setdefault("statutory_authority", "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes")
+            spec.setdefault("economic_dataset", "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001")
+            spec.setdefault("category", "Construction Surety & Statutory Lien Compliance")
+            spec.setdefault(
+                "affiliates",
+                monetization.get("recommended_partners") or ["suretybonds_direct", "Viking_Bond_Service"],
+            )
+            spec.setdefault("model_name", "LienBond-Commercial-Surety-Underwriting-Model-2026")
+            spec.setdefault("formula", "round((bond_amount * (credit_tier_rate_pct / 100.0)) * term_years, 2)")
+            spec.setdefault(
+                "inputs",
+                {
+                    "bond_amount": 25000,
+                    "credit_tier_rate_pct": 1.5,
+                    "term_years": 1,
+                },
+            )
+            spec.setdefault("published_output", 375.0)
+            spec.setdefault(
+                "sample_calculation",
+                "$25,000.00 statutory contractor license bond at 1.50% preferred credit tier rate over 1 year yields $375.00 annual surety premium",
+            )
+            spec.setdefault(
+                "mandatory_disclosures",
+                [
+                    LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer", ""),
+                    LIENBOND_DISCLOSURES.get("ftc_disclosure", ""),
                 ],
             )
         else:
