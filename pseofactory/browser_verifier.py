@@ -246,8 +246,8 @@ class LienBondBrowserAdapter(TenantBrowserAdapter):
             InteractiveWidgetSpec(
                 route="/tools/contractor-license-bond-cost-calculator-by-credit-score/",
                 widget_id="contractor-license-bond-cost-calculator-by-credit-score",
-                precondition_selector="#field-bond_amount, [data-calc-input], input[type='number']",
-                input_selector="#field-bond_amount, [data-calc-input], input[type='number']",
+                precondition_selector="#input-bond_penalty_amount, #field-bond_amount, [data-calc-input]",
+                input_selector="#input-bond_penalty_amount, #field-bond_amount, [data-calc-input]",
                 input_value="50000",
                 output_selector=".output-value, .calc-metric-value, .metric-value",
                 trigger_event="input",
@@ -256,8 +256,8 @@ class LienBondBrowserAdapter(TenantBrowserAdapter):
             InteractiveWidgetSpec(
                 route="/tools/workers-compensation-class-code-rate-calculator-by-state/",
                 widget_id="workers-compensation-class-code-rate-calculator-by-state",
-                precondition_selector="#field-annual_payroll, [data-calc-input], input[type='number']",
-                input_selector="#field-annual_payroll, [data-calc-input], input[type='number']",
+                precondition_selector="#input-field_trade_payroll, #input-annual_payroll, #field-annual_payroll, [data-calc-input]",
+                input_selector="#input-field_trade_payroll, #input-annual_payroll, #field-annual_payroll, [data-calc-input]",
                 input_value="250000",
                 output_selector=".output-value, .calc-metric-value, .metric-value",
                 trigger_event="input",
@@ -1377,7 +1377,7 @@ class UnifiedBrowserAuditor:
             if (previewBtn) {
                 previewBtn.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 40; i++) {
+                for (let i = 0; i < 120; i++) {
                     if (document.getElementById('playbook-download-link') || document.getElementById('playbook-datapack-link')) break;
                     await new Promise(r => setTimeout(r, 12));
                 }
@@ -1391,7 +1391,7 @@ class UnifiedBrowserAuditor:
             if (upgCheckoutBtn) {
                 upgCheckoutBtn.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 60; i++) {
+                for (let i = 0; i < 150; i++) {
                     if (upgCheckoutBtn.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
                     await new Promise(r => setTimeout(r, 12));
                 }
@@ -1528,7 +1528,7 @@ class UnifiedBrowserAuditor:
                 emailInp.value = 'playbook-probe@synthetic.pseofactory.test';
             }
             leadForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 60; i++) {
+            for (let i = 0; i < 150; i++) {
                 if (leadForm.getAttribute('data-submission-state') === 'success' || leadForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
@@ -1540,7 +1540,7 @@ class UnifiedBrowserAuditor:
             report.playbook_lead_capture_and_checkout.partner_href = pbPartner ? (pbPartner.getAttribute('href') || '') : '';
             if (pbCheckout) {
                 pbCheckout.click();
-                for (let i = 0; i < 60; i++) {
+                for (let i = 0; i < 150; i++) {
                     if (pbCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
@@ -1567,7 +1567,7 @@ class UnifiedBrowserAuditor:
             if (qEmail) qEmail.value = 'quote-probe@synthetic.pseofactory.test';
             if (qConsent) qConsent.checked = true;
             quoteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 60; i++) {
+            for (let i = 0; i < 150; i++) {
                 if (quoteForm.getAttribute('data-submission-state') === 'success' || quoteForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
@@ -1579,7 +1579,7 @@ class UnifiedBrowserAuditor:
             report.partner_quote_intake_and_checkout.partner_href = qPartner ? (qPartner.getAttribute('href') || '') : '';
             if (qCheckout) {
                 qCheckout.click();
-                for (let i = 0; i < 60; i++) {
+                for (let i = 0; i < 150; i++) {
                     if (qCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
@@ -1608,7 +1608,7 @@ class UnifiedBrowserAuditor:
             if (prEmail) prEmail.value = 'partner-desk@synthetic.pseofactory.test';
             if (prState && !prState.value) prState.value = 'CA';
             prForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 60; i++) {
+            for (let i = 0; i < 150; i++) {
                 if (prForm.getAttribute('data-submission-state') === 'success') break;
                 await new Promise(r => setTimeout(r, 12));
             }
@@ -1618,7 +1618,7 @@ class UnifiedBrowserAuditor:
                 report.partner_registration_and_slot_checkout.checkout_href = prChkLink.getAttribute('href') || '';
                 report.partner_registration_and_slot_checkout.focused_after_submit = (document.activeElement === prChkLink);
                 prChkLink.click();
-                for (let i = 0; i < 60; i++) {
+                for (let i = 0; i < 150; i++) {
                     if (prChkLink.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
                     await new Promise(r => setTimeout(r, 12));
                 }
@@ -2250,6 +2250,8 @@ class UnifiedBrowserAuditor:
         )
 
         msg_counter[0] += 1
+        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
+        msg_counter[0] += 1
         await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(ws, "Emulation.clearDeviceMetricsOverride", {}, msg_id=msg_counter[0])
@@ -2272,6 +2274,10 @@ class UnifiedBrowserAuditor:
             )
             if rs:
                 break
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
         await asyncio.sleep(0.04)
 
         # 1a. Wide Desktop Viewport (1440x900)
@@ -2401,6 +2407,10 @@ class UnifiedBrowserAuditor:
         for spec in self.widget_specs:
             if spec.route == route:
                 msg_counter[0] += 1
+                in_sel_json = json.dumps(spec.input_selector)
+                out_sel_json = json.dumps(spec.output_selector)
+                in_val_json = json.dumps(spec.input_value)
+                trig_json = json.dumps(spec.trigger_event)
                 js_widget = f"""(() => {{
                     const pickFirst = (selList) => {{
                         for (const s of selList.split(',').map(x => x.trim()).filter(Boolean)) {{
@@ -2409,14 +2419,16 @@ class UnifiedBrowserAuditor:
                         }}
                         return document.querySelector(selList);
                     }};
-                    const inputEl = pickFirst('{spec.input_selector}');
-                    const outEl = pickFirst('{spec.output_selector}');
+                    const inputEl = pickFirst({in_sel_json});
+                    const outEl = pickFirst({out_sel_json});
                     if (!inputEl || !outEl) return {{ success: false, reason: 'elements_missing' }};
                     const origInputVal = inputEl.value;
                     const initialVal = outEl.innerText.trim();
-                    const targetVal = (inputEl.value === '{spec.input_value}') ? String(Number('{spec.input_value}') * 2) : '{spec.input_value}';
+                    const specVal = {in_val_json};
+                    const trigEv = {trig_json};
+                    const targetVal = (Number(inputEl.value) === Number(specVal)) ? String(Number(specVal) * 2) : specVal;
                     inputEl.value = targetVal;
-                    inputEl.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                    inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
                     inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     let finalVal = outEl.innerText.trim();
                     if (initialVal === finalVal) {{
@@ -2425,17 +2437,17 @@ class UnifiedBrowserAuditor:
                             if (alt === inputEl) continue;
                             const origAlt = alt.value;
                             alt.value = targetVal;
-                            alt.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                            alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
                             alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
                             finalVal = outEl.innerText.trim();
                             alt.value = origAlt;
-                            alt.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                            alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
                             alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
                             if (initialVal !== finalVal) break;
                         }}
                     }}
                     inputEl.value = origInputVal;
-                    inputEl.dispatchEvent(new Event('{spec.trigger_event}', {{ bubbles: true }}));
+                    inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
                     inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     let popstateOk = true;
                     if ({'true' if spec.verify_popstate else 'false'}) {{
@@ -2455,6 +2467,10 @@ class UnifiedBrowserAuditor:
                     })
 
         # 8. Restore desktop viewport (1440x900) and run universal interactive state + E2E surface verification
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(
             ws,

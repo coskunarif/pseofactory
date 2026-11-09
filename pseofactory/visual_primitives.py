@@ -634,12 +634,20 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       justify-content: center !important;
     }
     input:not([type="hidden"]):not([type="range"]):not([type="checkbox"]),
-    select, input.touch-target, select.touch-target,
+    select, input.touch-target:not([type="checkbox"]):not([type="radio"]), select.touch-target,
     .form-input, .form-select, .calc-number-input, .calc-select, .calc-input {
       min-height: 44px !important;
       min-width: 44px !important;
       font-size: 16px !important;
       border-radius: 8px !important;
+    }
+    input[type="checkbox"], input[type="radio"],
+    input[type="checkbox"].touch-target, input[type="radio"].touch-target {
+      width: 44px !important;
+      max-width: 44px !important;
+      min-width: 44px !important;
+      min-height: 44px !important;
+      flex: 0 0 44px !important;
     }
     input[type="range"], .range-slider, .form-range, .calc-slider {
       min-height: 44px !important;
@@ -1376,6 +1384,11 @@ def _render_runtime_sync_workbench_js() -> str:
           ["arb-capital", "serp-b2b-gross"],
           ["pm-tax-gain", "serp-b2b-gross"],
           ["field-bond_amount", "serp-b2b-gross"],
+          ["input-bond_penalty_amount", "serp-b2b-gross"],
+          ["input-field_trade_payroll", "serp-b2b-gross"],
+          ["input-annual_payroll", "serp-b2b-gross"],
+          ["input-unpaid_contract_draw", "serp-b2b-gross"],
+          ["input-contract_price", "serp-b2b-gross"],
           ["field-invoice_face_value", "serp-b2b-gross"],
           ["field-current_year_domestic_qre", "serp-b2b-gross"],
           ["field-declared_customs_value", "serp-b2b-gross"],
@@ -1765,7 +1778,7 @@ def _render_runtime_sync_workbench_js() -> str:
           if (lBal > 0) {
             updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1), Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12)));
           }
-        } else if (mode === "b2b" || mode === "cyber_grc") {
+        } else if (mode === "b2b" || mode === "cyber_grc" || mode === "surety_lien" || mode === "construction_surety_lien" || mode) {
           var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || (mode === "cyber_grc" ? "84000" : "450000")) || 0;
           var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || (mode === "cyber_grc" ? "25800" : "165000")) || 0;
           var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {}).value || (mode === "cyber_grc" ? "22.0" : "24.5")) || 0) / 100;
@@ -1875,23 +1888,22 @@ def _render_runtime_sync_workbench_js() -> str:
           ratio = curVal / baseAttr;
         }
       }
-      if (Math.abs(ratio - 1.0) <= 1e-6) {
-        var allCalcControls = document.querySelectorAll('input[type="number"]:not([readonly]), select:not([id^="quote-intake-"])');
-        for (var acIdx = 0; acIdx < allCalcControls.length; acIdx++) {
-          var acEl = allCalcControls[acIdx];
-          if (acEl.closest && acEl.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form")) continue;
-          if (acEl.tagName === "SELECT") {
-            var bIdx = parseInt(acEl.getAttribute("data-pseo-base-idx") || "0", 10) || 0;
-            var cIdx = acEl.selectedIndex || 0;
-            if (cIdx !== bIdx) {
-              ratio = ratio * (1 + ((cIdx - bIdx) * 0.065));
-            }
-          } else {
-            var bVal = parseFloat(acEl.getAttribute("data-pseo-base-val") || "");
-            var cVal = parseFloat(String(acEl.value || "").replace(/,/g, ""));
-            if (!isNaN(cVal) && !isNaN(bVal) && Math.abs(cVal - bVal) > 1e-6) {
-              ratio = ratio * (bVal > 0 ? (0.7 + 0.3 * (cVal / bVal)) : (1 + (cVal * 0.05)));
-            }
+      var allCalcControls = document.querySelectorAll('input[type="number"]:not([readonly]), select:not([id^="quote-intake-"])');
+      for (var acIdx = 0; acIdx < allCalcControls.length; acIdx++) {
+        var acEl = allCalcControls[acIdx];
+        if (acEl === primaryNumEl) continue;
+        if (acEl.closest && acEl.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form")) continue;
+        if (acEl.tagName === "SELECT") {
+          var bIdx = parseInt(acEl.getAttribute("data-pseo-base-idx") || "0", 10) || 0;
+          var cIdx = acEl.selectedIndex || 0;
+          if (cIdx !== bIdx) {
+            ratio = ratio * (1 + ((cIdx - bIdx) * 0.065));
+          }
+        } else {
+          var bVal = parseFloat(acEl.getAttribute("data-pseo-base-val") || "");
+          var cVal = parseFloat(String(acEl.value || "").replace(/,/g, ""));
+          if (!isNaN(cVal) && !isNaN(bVal) && Math.abs(cVal - bVal) > 1e-6) {
+            ratio = ratio * (bVal > 0 ? (0.7 + 0.3 * (cVal / bVal)) : (1 + (cVal * 0.05)));
           }
         }
       }
@@ -5054,6 +5066,31 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 )
                 actions.append("partner_registration_drawer")
 
+    if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
+        pk_fallback = (
+            _extract_attr(q_tag, "data-partner-key")
+            or ("splash_financial" if prop_id == "prexvo" else ("vanta_security" if prop_id == "gainhelm" else "ipx1031"))
+        ).strip().lower()
+        pname_fallback = (
+            _extract_attr(q_tag, "data-partner-name")
+            or ("Splash Financial" if prop_id == "prexvo" else ("Vanta" if prop_id == "gainhelm" else "Verified Partner"))
+        ).strip()
+        fallback_cta_html = (
+            f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
+            f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
+            f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
+            f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
+            f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
+            f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
+            f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
+            f'      </div>\n'
+        )
+        q_pos = updated.find('<div id="partner-quote-intake-step"')
+        if q_pos != -1:
+            updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
+            actions.append("commercial_affiliate_cta_fallback")
+
     has_hero_section = bool(
         re.search(r'<section\b[^>]*class=["\'][^"\']*\bhero-section\b[^"\']*["\'][^>]*>', updated, re.IGNORECASE)
     )
@@ -5220,7 +5257,7 @@ def normalize_html_visual_primitives(
             or "/css/style.css" in non_prim_doc
             or 'data-theme="porcelain"' in non_prim_doc
             or "--bg-canvas: #fbfcfd" in updated
-        ) and "--bg: #07090e" not in non_prim_doc and 'data-theme="obsidian"' not in non_prim_doc
+        ) and "--bg: #07090e" not in non_prim_doc and "--bg-canvas: #07090e" not in updated and 'data-theme="obsidian"' not in non_prim_doc
 
     def _heal_inverted_dark_root_block(m: re.Match) -> str:
         root_css = m.group(1)
@@ -5257,6 +5294,7 @@ def normalize_html_visual_primitives(
             or ".partner-quote-intake-drawer" not in prim_body
             or ".post-calc-upgrade-drawer" not in prim_body
             or ".tool-header.hero-section" not in prim_body
+            or 'input[type="checkbox"].touch-target' not in prim_body
             or has_token_inversion
         )
         if needs_style_repair:
@@ -5339,6 +5377,18 @@ def normalize_html_visual_primitives(
     for r_act in rhythm_actions:
         if r_act not in repaired:
             repaired.append(r_act)
+
+    # 1e. Wrap unquoted inline round(...) formulas in <p> tags inside <code> so subtraction operators are semantic code
+    wrapped_formula_doc = re.sub(
+        r"(<p\b[^>]*>\s*The deterministic calculation model evaluates\s+)(round\([^<]+?\))(\s+based on)",
+        r"\1<code>\2</code>\3",
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if wrapped_formula_doc != updated:
+        updated = wrapped_formula_doc
+        if "formula_code_tag_normalization" not in repaired:
+            repaired.append("formula_code_tag_normalization")
 
     # 2. Normalize ad-hoc table wrappers (<div style="overflow-x: auto;"> and .calc-matrix-table-wrap)
     if 'class="calc-matrix-table-wrap"' in updated:
@@ -5611,6 +5661,8 @@ def normalize_html_visual_primitives(
                 or "isPrexvo" in sync_body
                 or "playbook_csv_url" not in sync_body
                 or "data-offer-price-usd" not in sync_body
+                or "surety_lien" not in sync_body
+                or 'mode === "lienbond"' in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:

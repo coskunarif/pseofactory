@@ -2588,8 +2588,8 @@ class LiveEdgeVerifier:
             "X-Pseofactory-Test": "1",
         }
         partner_cohort = {
-            "prexvo": ("splash_financial", "sofi_refi", "simply_business"),
-            "gainhelm": ("vanta_security", "drata_compliance", "simply_business"),
+            "prexvo": ("splash_financial", "sofi_refi", "earnest"),
+            "gainhelm": ("vanta_security", "drata_compliance", "sprinto_compliance"),
             "lienbond": ("simply_business", "suretybonds_direct", "lawdepot"),
             "profithelm": ("mercury", "simply_business", "lawdepot"),
         }.get(property_id, ("mercury", "simply_business"))
