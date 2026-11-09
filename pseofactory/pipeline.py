@@ -1602,7 +1602,7 @@ def execute_autonomous_daily_trend_page_build(
                     "sample_calculation": (
                         "Executive with $550,000.00 five-year average W-2 base amount (3x safe harbor threshold = $1,650,000.00) "
                         "receiving $2,100,000.00 in change-in-control parachute payments triggers $1,550,000.00 in excess parachute "
-                        "payments ($2,100,000 - $550,000 base amount) and a 20% IRC Section 4999 excise tax of $310,000.00."
+                        "payments ($2,100,000 minus $550,000 base amount) and a 20% IRC Section 4999 excise tax of $310,000.00."
                     ),
                 },
             ],

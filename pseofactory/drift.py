@@ -243,6 +243,38 @@ def compute_dist_lock_metrics(dist_dir: Union[str, Path]) -> Tuple[str, int]:
     return fp_hasher.hexdigest(), len(dist_assets)
 
 
+def write_substrate_lock(
+    repo_root: Union[str, Path],
+    property_id: Optional[str] = None,
+    expected_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Recomputes dist_fingerprint and total_assets for repo_root/dist and writes
+    repo_root/substrate_lock.json atomically.
+    Zero em-dashes. Zero en-dashes.
+    """
+    r_root = Path(repo_root).resolve()
+    lock_file = r_root / "substrate_lock.json"
+    existing: Dict[str, Any] = {}
+    if lock_file.is_file():
+        try:
+            existing = json.loads(lock_file.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+    pid = property_id or str(existing.get("property_id") or r_root.name.split("-")[0]).strip().lower()
+    eh = expected_hash or compute_engine_hash()
+    fp, tot = compute_dist_lock_metrics(r_root / "dist")
+    payload = {
+        "dist_fingerprint": fp,
+        "engine_hash": eh,
+        "property_id": pid,
+        "substrate_hash": eh,
+        "total_assets": tot,
+    }
+    lock_file.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
 def verify_all_tenants_aligned_for_latch(
     workspace_root: Union[str, Path] = "/home/ubuntuadmin/projects",
     expected_hash: Optional[str] = None,

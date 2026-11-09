@@ -2556,11 +2556,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <div class="container">
     <header class="card">
       <h1>{title}</h1>
-      <div class="takeaway quick-answer" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}">
+      <aside class="quick-answer" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}">
         <p class="takeaway">
           {default_takeaway_html}
         </p>
-      </div>
+      </aside>
 {hero_range_anchor_html}
     </header>
 
