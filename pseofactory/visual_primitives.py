@@ -5433,6 +5433,8 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 updated.find('<div id="calc-result-quick-unlock-bar"', kpi_pos if kpi_pos != -1 else 0),
                 updated.find('<div class="calc-statutory-box"', kpi_pos if kpi_pos != -1 else 0),
                 updated.find('<div class="share-pro-container"', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div style="margin-top: 1rem;">', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div class="lead-capture-card"', kpi_pos if kpi_pos != -1 else 0),
             )
             if pos != -1
         ]
