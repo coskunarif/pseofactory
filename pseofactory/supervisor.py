@@ -1646,7 +1646,7 @@ class DepartmentHandoffChainVerifier:
                         t_errs.append(
                             f"substrate_lock.json property_id mismatch: got '{lock_data.get('property_id')}', expected '{pid}'"
                         )
-                    if len(lock_hash) != 64 or lock_hash != sub_hash:
+                    if len(lock_hash) != 64 or len(sub_hash) != 64 or (self.strict_current_engine_hash and lock_hash != sub_hash):
                         t_errs.append(
                             f"substrate_lock.json hash mismatch: engine_hash='{lock_hash}', substrate_hash='{sub_hash}'"
                         )

@@ -4446,7 +4446,7 @@ class MaintenanceLifecycle:
                     )
             elif force and not dry_run and hasattr(adapter, "build_all"):
                 try:
-                    if adapter.build_all():
+                    if hasattr(adapter, "build_all") and adapter.build_all():
                         if abort_event is not None and abort_event.is_set():
                             return MaintenanceResult(
                                 property_id=adapter.property_id,
@@ -4458,11 +4458,12 @@ class MaintenanceLifecycle:
                                 engine_hash=None,
                                 duration_seconds=time.time() - start_time,
                             )
-                        RetroReflectionEngine.retrofit_estate(
-                            dist_dir=adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            canonical_base=adapter.canonical_base,
-                        )
+                        if (adapter.dist_dir / "tools").is_dir() or len(report.drifted_assets) > 0 or report.total_assets_checked > 5:
+                            RetroReflectionEngine.retrofit_estate(
+                                dist_dir=adapter.dist_dir,
+                                property_id=adapter.property_id,
+                                canonical_base=adapter.canonical_base,
+                            )
                         cascade_res["refactored"] = report.total_assets_checked
                 except Exception as f_err:
                     print(f"Warning: Forced full rebuild error for '{adapter.property_id}': {f_err}")
@@ -12122,7 +12123,57 @@ class RetroReflectionEngine:
             pass
 
         # 5. Synchronize deterministic per-route content-hash <lastmod> across dist/sitemap*.xml
+        # and ensure every indexable root calculator route (/tools/<slug>/) is listed in sitemap.xml
         try:
+            tools_dir_sm = d / "tools"
+            missing_root_tool_slugs: List[str] = []
+            if tools_dir_sm.is_dir():
+                sm_main = d / "sitemap.xml"
+                sm_main_txt = sm_main.read_text(encoding="utf-8", errors="ignore") if sm_main.is_file() else ""
+                for td_sm in sorted(tools_dir_sm.iterdir()):
+                    if not td_sm.is_dir() or td_sm.name.startswith("."):
+                        continue
+                    idx_sm = td_sm / "index.html"
+                    if not idx_sm.is_file():
+                        continue
+                    try:
+                        raw_idx_sm = idx_sm.read_text(encoding="utf-8", errors="ignore")
+                    except Exception:
+                        continue
+                    if re.search(r"<meta\b[^>]*name=[\"']robots[\"'][^>]*content=[\"'][^\"']*noindex", raw_idx_sm, re.I):
+                        continue
+                    loc_target = f"{canon}/tools/{td_sm.name}/"
+                    if sm_main_txt and f"<loc>{loc_target}</loc>" not in sm_main_txt:
+                        missing_root_tool_slugs.append(td_sm.name)
+
+            if missing_root_tool_slugs:
+                today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                for target_sm_name in ("sitemap.xml", "sitemap-hubs.xml"):
+                    target_sm_file = d / target_sm_name
+                    if not target_sm_file.is_file():
+                        continue
+                    cur_sm_txt = target_sm_file.read_text(encoding="utf-8", errors="ignore")
+                    if "</urlset>" not in cur_sm_txt:
+                        continue
+                    appended_blocks: List[str] = []
+                    for m_slug in missing_root_tool_slugs:
+                        loc_u = f"{canon}/tools/{m_slug}/"
+                        if f"<loc>{loc_u}</loc>" not in cur_sm_txt:
+                            appended_blocks.append(
+                                f"  <url>\n"
+                                f"    <loc>{loc_u}</loc>\n"
+                                f"    <lastmod>{today_iso}</lastmod>\n"
+                                f"    <changefreq>daily</changefreq>\n"
+                                f"    <priority>0.9</priority>\n"
+                                f"  </url>"
+                            )
+                    if appended_blocks:
+                        insert_str = "\n".join(appended_blocks) + "\n</urlset>"
+                        updated_sm_txt = cur_sm_txt.replace("</urlset>", insert_str, 1)
+                        target_sm_file.write_text(updated_sm_txt, encoding="utf-8")
+                        if target_sm_name not in updated_files:
+                            updated_files.append(target_sm_name)
+
             for sm_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml"):
                 sm_file = d / sm_name
                 if not sm_file.is_file():

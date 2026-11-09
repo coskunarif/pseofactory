@@ -6479,21 +6479,32 @@ def reconcile_workspace_tracking_state(
                                                         if cleaned_h != raw_h:
                                                             h_cand.write_text(cleaned_h, encoding="utf-8")
                                                             rolled_back_modified = True
-                                    if rolled_back_modified and (rp / "substrate_lock.json").is_file():
+                                    if (rp / "substrate_lock.json").is_file():
                                         try:
                                             from pseofactory.drift import compute_dist_lock_metrics, compute_engine_hash
-                                            cur_sub_hash = compute_engine_hash()
-                                            dist_fp_hex, total_assets_cnt = compute_dist_lock_metrics(d_root)
                                             sl_data = json.loads((rp / "substrate_lock.json").read_text(encoding="utf-8"))
                                             if isinstance(sl_data, dict):
-                                                sl_data["engine_hash"] = cur_sub_hash
-                                                sl_data["substrate_hash"] = cur_sub_hash
-                                                sl_data["dist_fingerprint"] = dist_fp_hex
-                                                sl_data["total_assets"] = total_assets_cnt
-                                                (rp / "substrate_lock.json").write_text(
-                                                    json.dumps(sl_data, indent=2, sort_keys=True) + "\n",
-                                                    encoding="utf-8",
-                                                )
+                                                sl_changed = False
+                                                if rolled_back_modified:
+                                                    cur_sub_hash = compute_engine_hash()
+                                                    dist_fp_hex, total_assets_cnt = compute_dist_lock_metrics(d_root)
+                                                    sl_data["engine_hash"] = cur_sub_hash
+                                                    sl_data["substrate_hash"] = cur_sub_hash
+                                                    sl_data["dist_fingerprint"] = dist_fp_hex
+                                                    sl_data["total_assets"] = total_assets_cnt
+                                                    sl_changed = True
+                                                elif (
+                                                    sl_data.get("engine_hash")
+                                                    and len(str(sl_data.get("engine_hash"))) == 64
+                                                    and sl_data.get("substrate_hash") != sl_data.get("engine_hash")
+                                                ):
+                                                    sl_data["substrate_hash"] = sl_data["engine_hash"]
+                                                    sl_changed = True
+                                                if sl_changed:
+                                                    (rp / "substrate_lock.json").write_text(
+                                                        json.dumps(sl_data, indent=2, sort_keys=True) + "\n",
+                                                        encoding="utf-8",
+                                                    )
                                         except Exception:
                                             pass
                             except Exception:
