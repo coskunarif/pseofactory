@@ -231,13 +231,34 @@ def collect_pseofactory_truth(
     root = Path(package_root or _PACKAGE_ROOT)
     agy_dir = root / ".agy"
     if (
-        not (agy_dir / "partner_earnings_ledger.json").exists()
+        package_root is None
+        and not (agy_dir / "partner_earnings_ledger.json").exists()
         and (_PROJECTS_ROOT / "pseofactory" / ".agy" / "partner_earnings_ledger.json").exists()
     ):
         agy_dir = _PROJECTS_ROOT / "pseofactory" / ".agy"
 
     earnings_path = agy_dir / "partner_earnings_ledger.json"
     falsification_path = agy_dir / "monetization_falsification_report.json"
+    captured_leads_path = agy_dir / "captured_leads.jsonl"
+
+    local_leads_by_prop: Dict[str, Dict[str, Dict[str, Any]]] = {
+        p: {} for p in ACTIVE_PSEOFACTORY_PROPERTIES
+    }
+    if captured_leads_path.exists():
+        try:
+            for raw_line in captured_leads_path.read_text(encoding="utf-8").splitlines():
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                rec = json.loads(raw_line)
+                if not isinstance(rec, dict):
+                    continue
+                rec_prop = str(rec.get("property_id") or "profithelm").strip().lower()
+                rec_id = str(rec.get("lead_id") or "").strip()
+                if rec_prop in local_leads_by_prop and rec_id:
+                    local_leads_by_prop[rec_prop][rec_id] = rec
+        except Exception:
+            pass
 
     earnings_data: Dict[str, Any] = {}
     if earnings_path.exists():
@@ -313,13 +334,25 @@ def collect_pseofactory_truth(
         total_gsc_impressions_28d += int(gsc_metrics.get("impressions_28d") or 0)
         total_gsc_clicks_28d += int(gsc_metrics.get("clicks_28d") or 0)
 
-        leads_list: List[Dict[str, Any]] = []
+        merged_leads_by_id: Dict[str, Dict[str, Any]] = dict(
+            local_leads_by_prop.get(prop_id, {})
+        )
+        lead_kv_degraded = False
         if live_network:
             try:
                 lead_resp = _fetch_edge_json(f"https://{domain}/api/lead-capture?limit=100")
-                leads_list = lead_resp.get("leads") or []
+                lead_kv_degraded = bool(lead_resp.get("kv_quota_degraded"))
+                for edge_ld in lead_resp.get("leads") or []:
+                    if not isinstance(edge_ld, dict):
+                        continue
+                    lid = str(edge_ld.get("lead_id") or f"edge_{len(merged_leads_by_id)}").strip()
+                    if lid in merged_leads_by_id:
+                        merged_leads_by_id[lid] = {**merged_leads_by_id[lid], **edge_ld}
+                    else:
+                        merged_leads_by_id[lid] = edge_ld
             except Exception:
-                leads_list = []
+                pass
+        leads_list: List[Dict[str, Any]] = list(merged_leads_by_id.values())
 
         ext_leads = 0
         int_leads = 0
@@ -336,9 +369,9 @@ def collect_pseofactory_truth(
                     {
                         "property_id": prop_id,
                         "lead_id": ld.get("lead_id"),
-                        "email_masked": ld.get("email_masked"),
+                        "email_masked": ld.get("email_masked") or ld.get("email"),
                         "tool_slug": ld.get("tool_slug"),
-                        "created_at": ld.get("created_at"),
+                        "created_at": ld.get("created_at") or ld.get("captured_at"),
                         "stripe_payment_verified": bool(ld.get("stripe_payment_verified")),
                     }
                 )
@@ -353,10 +386,12 @@ def collect_pseofactory_truth(
                 total_synthetic_probe_leads += 1
 
         tel_events: List[Dict[str, Any]] = []
+        tel_kv_degraded = False
         if live_network:
             try:
                 tel_resp = _fetch_edge_json(f"https://{domain}/api/telemetry?limit=100")
                 tel_events = tel_resp.get("events") or []
+                tel_kv_degraded = bool(tel_resp.get("kv_quota_degraded"))
             except Exception:
                 tel_events = []
 
@@ -383,12 +418,14 @@ def collect_pseofactory_truth(
                 "internal_operator_test_leads": int_leads,
                 "synthetic_probe_leads": syn_leads,
                 "stripe_paid_checkouts": paid_leads,
+                "kv_quota_degraded": lead_kv_degraded,
             },
             "edge_telemetry_sample": {
                 "total_sampled": len(tel_events),
                 "organic_candidate_events": organic_tel_count,
                 "synthetic_probe_events": synthetic_tel_count,
                 "cross_tenant_bleed_events": bleed_tel_count,
+                "kv_quota_degraded": tel_kv_degraded,
             },
         }
 

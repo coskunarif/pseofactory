@@ -8731,6 +8731,7 @@ def sync_edge_leads_to_ledger(
         "profithelm": "https://profithelm.com/api/lead-capture",
         "prexvo": "https://prexvo.com/api/lead-capture",
         "gainhelm": "https://gainhelm.com/api/lead-capture",
+        "lienbond": "https://lienbond.com/api/lead-capture",
     }
     edge_status: Dict[str, Any] = {}
     newly_synced = 0
@@ -8969,7 +8970,12 @@ def get_lead_monitoring_summary(
         else:
             leads = seeded_leads
 
-    by_property: Dict[str, int] = {"profithelm": 0, "prexvo": 0, "gainhelm": 0}
+    by_property: Dict[str, int] = {
+        "profithelm": 0,
+        "prexvo": 0,
+        "gainhelm": 0,
+        "lienbond": 0,
+    }
     by_stage: Dict[str, int] = {}
     by_type: Dict[str, int] = {}
     by_vertical: Dict[str, int] = {}

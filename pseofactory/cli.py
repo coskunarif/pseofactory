@@ -2586,6 +2586,7 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
             f"profithelm={summary['by_property'].get('profithelm', 0)} | "
             f"prexvo={summary['by_property'].get('prexvo', 0)} | "
             f"gainhelm={summary['by_property'].get('gainhelm', 0)} | "
+            f"lienbond={summary['by_property'].get('lienbond', 0)} | "
             f"fulfilled={summary['transactional_fulfilled_count']} | "
             f"action_bus={summary['action_bus_dispatched_count']} | "
             f"pipeline_usd=${summary['total_pipeline_calculated_usd']:,.2f} | "

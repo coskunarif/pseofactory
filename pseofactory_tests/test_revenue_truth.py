@@ -255,3 +255,82 @@ def test_cli_revenue_truth_offline_json_and_table(capsys) -> None:
     table_str = format_portfolio_revenue_truth_table(parsed)
     assert "PORTFOLIO REVENUE & ATTRIBUTION TRUTH BOARD" in table_str
     assert_no_forbidden_dashes(table_str, "test_cli_revenue_truth_table")
+
+
+def test_collect_pseofactory_truth_merges_local_captured_leads_ledger_and_lienbond_summary(
+    tmp_path: Path,
+) -> None:
+    from pseofactory.partner_tracker import get_lead_monitoring_summary
+    from pseofactory.revenue_truth import collect_pseofactory_truth
+
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    leads_file = agy_dir / "captured_leads.jsonl"
+    sample_leads = [
+        {
+            "lead_id": "lead_profithelm_real_1",
+            "property_id": "profithelm",
+            "tool_slug": "irs-2027-tax-brackets-alaska",
+            "email": "c***@gmail.com",
+            "captured_at": "2026-10-26T09:29:08.795Z",
+            "lead_origin": "real",
+            "stripe_payment_verified": False,
+        },
+        {
+            "lead_id": "lead_profithelm_test_1",
+            "property_id": "profithelm",
+            "tool_slug": "section-1031-calculator",
+            "email": "a***@profithelm.com",
+            "captured_at": "2026-10-23T09:46:48.305Z",
+            "lead_origin": "organic_user",
+            "stripe_payment_verified": False,
+        },
+        {
+            "lead_id": "probe_prexvo_1",
+            "property_id": "prexvo",
+            "tool_slug": "student-loan-refinance-break-even-calculator",
+            "email": "a***@medcenter-cohort.org",
+            "captured_at": "2026-10-22T18:58:24.170Z",
+            "lead_origin": "internal_probe",
+            "stripe_payment_verified": False,
+        },
+    ]
+    leads_file.write_text(
+        "\n".join(json.dumps(r) for r in sample_leads) + "\n",
+        encoding="utf-8",
+    )
+
+    pseo = collect_pseofactory_truth(package_root=tmp_path, live_network=False)
+    lc = pseo["lead_capture_totals"]
+    assert lc["external_human_leads"] == 1
+    assert lc["internal_operator_test_leads"] == 1
+    assert lc["synthetic_probe_leads"] == 1
+    assert len(lc["external_human_lead_records"]) == 1
+    ext_rec = lc["external_human_lead_records"][0]
+    assert ext_rec["lead_id"] == "lead_profithelm_real_1"
+    assert ext_rec["email_masked"] == "c***@gmail.com"
+    assert ext_rec["created_at"] == "2026-10-26T09:29:08.795Z"
+    assert pseo["properties"]["profithelm"]["lead_capture"]["total_records"] == 2
+    assert pseo["properties"]["prexvo"]["lead_capture"]["total_records"] == 1
+    assert pseo["properties"]["lienbond"]["lead_capture"]["total_records"] == 0
+
+    mon = get_lead_monitoring_summary(
+        leads_ledger_path=str(leads_file),
+        verify_live_providers=False,
+    )
+    assert "lienbond" in mon["by_property"]
+    assert mon["by_property"]["lienbond"] == 0
+    assert mon["by_property"]["profithelm"] == 2
+    assert mon["by_property"]["prexvo"] == 1
+
+    from pseofactory.competitor import run_agentic_free_tool_keyword_pipeline
+
+    lb_pipeline = run_agentic_free_tool_keyword_pipeline(
+        tenant_id="lienbond",
+        repo_root=tmp_path,
+    )
+    assert lb_pipeline["status"] == "PASS"
+    assert lb_pipeline["property_id"] == "lienbond"
+    assert len(lb_pipeline["ranked_clusters"]) >= 3
+
+
