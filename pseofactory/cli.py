@@ -2531,6 +2531,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_vid.add_argument("--dry-run", action="store_true", help="Evaluate eligibility and quota budget without rendering or uploading")
     p_vid.add_argument("--json", action="store_true", help="Output video pipeline telemetry as structured JSON")
 
+    p_rt = subparsers.add_parser(
+        "revenue-truth",
+        help="Build Portfolio Revenue and Attribution Truth Board across pseofactory, local-marketplace-arbitrage, and solana-copy-trader",
+    )
+    p_rt.add_argument("--offline", action="store_true", help="Skip live GSC, Cloudflare edge, and Solana RPC network calls")
+    p_rt.add_argument("--no-persist", action="store_true", help="Do not write .agy/portfolio_revenue_truth.json to disk")
+    p_rt.add_argument("--sol-price", type=float, default=90.0, help="SOL/USD reference price (default: 90.0)")
+    p_rt.add_argument("--json", action="store_true", help="Output machine-readable JSON truth report")
+
     return parser
 
 
@@ -2768,9 +2777,33 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_lead_monitor(args)
     elif args.command == "video":
         return cmd_video(args)
+    elif args.command == "revenue-truth":
+        return cmd_revenue_truth(args)
     else:
         parser.print_help()
         return 1
+
+
+def cmd_revenue_truth(args: argparse.Namespace) -> int:
+    """
+    Builds and prints the Portfolio Revenue and Attribution Truth Board across all 3 active engines.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.revenue_truth import (
+        build_portfolio_revenue_truth_report,
+        format_portfolio_revenue_truth_table,
+    )
+
+    rep = build_portfolio_revenue_truth_report(
+        live_network=not bool(getattr(args, "offline", False)),
+        persist=not bool(getattr(args, "no_persist", False)),
+        sol_price_usd=float(getattr(args, "sol_price", 90.0)),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(rep, indent=2))
+    else:
+        print(format_portfolio_revenue_truth_table(rep))
+    return 0
 
 
 def cmd_video(args: argparse.Namespace) -> int:

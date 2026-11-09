@@ -3421,10 +3421,17 @@ export async function onRequestPost(context) {{
     }}
 
     const reqUrl = new URL(request.url);
+    const uaHeader =
+      (request.headers && typeof request.headers.get === "function"
+        ? request.headers.get("user-agent")
+        : "") || "";
     const isSyntheticProbe =
       request.headers.get("x-pseofactory-test") === "1" ||
       reqUrl.searchParams.get("synthetic_test") === "1" ||
-      Boolean(payload && payload.synthetic_test === true);
+      Boolean(payload && payload.synthetic_test === true) ||
+      /(?:HeadlessChrome|pseofactory-live-edge-verifier|SmokeTest|BrowserVerifier)/i.test(
+        uaHeader
+      );
 
     // Sanitize PII recursively (both top-level and inside properties/parameters)
     payload = deepSanitizePII(payload) || {{}};
@@ -3572,16 +3579,29 @@ export async function onRequestGet(context) {{
       Math.max(1, parseInt(url.searchParams.get("limit") || "100", 10) || 100)
     );
     const cursor = url.searchParams.get("cursor") || undefined;
+    const filterProperty = (
+      url.searchParams.get("property_id") || "{prop_clean}"
+    )
+      .trim()
+      .toLowerCase();
+    const matchesProperty = (evObj) => {{
+      if (filterProperty === "all") return true;
+      if (!evObj || typeof evObj !== "object" || !evObj.property_id) return true;
+      return String(evObj.property_id).trim().toLowerCase() === filterProperty;
+    }};
     const kv = resolveTelemetryKV(env);
-    const memEvents = Array.isArray(globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__)
-      ? globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__
-      : [];
+    const memEvents = (
+      Array.isArray(globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__)
+        ? globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__
+        : []
+    ).filter(matchesProperty);
 
     if (!kv || typeof kv.list !== "function") {{
       const sliced = memEvents.slice(0, limit);
       return new Response(
         JSON.stringify({{
           ok: true,
+          property_id: filterProperty,
           events: sliced,
           count: sliced.length,
           note:
@@ -3620,7 +3640,9 @@ export async function onRequestGet(context) {{
       ) {{
         const metaEv = {{ event_id: key.name, ...key.metadata }};
         seenIds.add(metaEv.event_id);
-        events.push(metaEv);
+        if (matchesProperty(metaEv)) {{
+          events.push(metaEv);
+        }}
         continue;
       }}
       if (legacyGets < maxLegacyGets && !kvQuotaDegraded && typeof kv.get === "function") {{
@@ -3635,7 +3657,9 @@ export async function onRequestGet(context) {{
                   parsed.event_id = key.name;
                 }}
                 seenIds.add(parsed.event_id);
-                events.push(parsed);
+                if (matchesProperty(parsed)) {{
+                  events.push(parsed);
+                }}
               }} else {{
                 seenIds.add(key.name);
                 events.push({{ event_id: key.name, raw: val }});
@@ -3663,6 +3687,7 @@ export async function onRequestGet(context) {{
         memEv &&
         memEv.event_id &&
         !seenIds.has(memEv.event_id) &&
+        matchesProperty(memEv) &&
         events.length < limit
       ) {{
         seenIds.add(memEv.event_id);
@@ -3673,6 +3698,7 @@ export async function onRequestGet(context) {{
     return new Response(
       JSON.stringify({{
         ok: true,
+        property_id: filterProperty,
         events,
         count: events.length,
         kv_quota_degraded: kvQuotaDegraded,
