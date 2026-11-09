@@ -6068,6 +6068,16 @@ def _normalize_spoke_and_synthesized_body_bloat(
             changed = True
 
     # Remove duplicate generic second .decision-framework-card on synthesized or retrofitted pages
+    if '<div class="takeaway quick-answer"' in updated and '<aside id="quick-answer"' in updated:
+        dedup_qa = re.sub(
+            r'\s*<aside\s+id=["\']quick-answer["\'][^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>[\s\S]*?</aside>',
+            "",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if dedup_qa != updated:
+            updated = dedup_qa
+            changed = True
     if len(re.findall(r"<section\b[^>]*\bdecision-framework-card\b", updated, re.IGNORECASE)) > 1:
         dedup_df = re.sub(
             r'\s*<section[^>]*class=["\'][^"\']*decision-framework-card[^"\']*["\'][^>]*>\s*<h2[^>]*>\s*What Is The [^<]*Decision Framework\?\s*</h2>\s*<p[^>]*>\s*Deterministic mathematical model and planning calculator for[\s\S]*?</section>',

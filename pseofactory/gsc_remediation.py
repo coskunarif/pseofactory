@@ -8157,7 +8157,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
     if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
         title_rewrite = _normalize_title_50_60(title_rewrite, ov_brand, ov_tenant)
-    if title_rewrite:
+    if title_rewrite and ov_tenant != "lienbond" and "lienbond.com" not in canon_url_early:
         escaped_title = html_lib.escape(title_rewrite)
         html = re.sub(
             r"<title>.*?</title>",
@@ -8306,7 +8306,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 html,
                 count=1,
             )
-        elif 'class="quick-answer' not in html and 'id="quick-answer"' not in html:
+        elif not re.search(r'class=["\'][^"\']*\bquick-answer\b', html, re.IGNORECASE) and 'id="quick-answer"' not in html:
             injected_sections.append(
                 f'<aside id="quick-answer" class="quick-answer answer-box" data-ai-citation-block="true" data-prominence="first-10-percent">\n'
                 f'  <div class="quick-answer-body" data-ai-citation-block="true" data-prominence="first-10-percent"><p>{escaped_qa}</p></div>\n'
