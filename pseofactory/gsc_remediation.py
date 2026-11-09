@@ -8577,7 +8577,15 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         raw_p_cta = _strip_forbidden_dashes(str(p_offer.get("cta_text") or f"Explore {raw_p_name}")).strip()
         raw_p_url = str(p_offer.get("url") or "https://mercury.com/r/profithelm-llc").strip()
         try:
-            from pseofactory.affiliates import FORBIDDEN_REPLACED_BRAND_TOKENS, get_tenant_affiliates
+            from pseofactory.affiliates import (
+                FORBIDDEN_REPLACED_BRAND_TOKENS,
+                GAINHELM_AFFILIATES,
+                LIENBOND_AFFILIATES,
+                PREXVO_AFFILIATES,
+                PROFITHELM_AFFILIATES,
+                get_tenant_affiliates,
+                resolve_contextual_partner_offer_copy,
+            )
             tenant_affs = get_tenant_affiliates(raw_prop_id.lower())
             canonical_aff = tenant_affs.get(raw_p_key) or {}
             forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(raw_p_key, [])
@@ -8586,6 +8594,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 raw_p_name = _strip_forbidden_dashes(str(canonical_aff.get("name") or raw_p_name)).strip()
                 raw_p_cta = _strip_forbidden_dashes(str(canonical_aff.get("cta_text") or raw_p_cta)).strip()
                 raw_p_url = str(canonical_aff.get("default_url") or raw_p_url).strip()
+            p_reg = PREXVO_AFFILIATES if raw_prop_id.lower() == "prexvo" else (GAINHELM_AFFILIATES if raw_prop_id.lower() == "gainhelm" else (LIENBOND_AFFILIATES if raw_prop_id.lower() == "lienbond" else PROFITHELM_AFFILIATES))
+            p_obj_ov = p_reg.get(raw_p_key)
+            if p_obj_ov:
+                ctx_ov = resolve_contextual_partner_offer_copy(
+                    partner_key=raw_p_key,
+                    p_obj=p_obj_ov,
+                    slug=str(overlay_data.get("slug") or ""),
+                    property_id=raw_prop_id.lower(),
+                )
+                raw_p_name = _strip_forbidden_dashes(str(ctx_ov.get("name") or raw_p_name)).strip()
+                raw_p_cta = _strip_forbidden_dashes(str(ctx_ov.get("cta_text") or raw_p_cta)).strip()
         except Exception:
             pass
         p_name = html_lib.escape(raw_p_name)

@@ -5664,7 +5664,13 @@ def normalize_html_callout_message_match(
     def _resolve_copy(pk: str) -> Optional[Tuple[str, str, str]]:
         partner = registry.get(pk)
         if partner:
-            return (partner.name, partner.cta_text, partner.default_url)
+            ctx_copy = resolve_contextual_partner_offer_copy(
+                partner_key=pk,
+                p_obj=partner,
+                slug=page_slug,
+                property_id=prop,
+            )
+            return (ctx_copy["name"], ctx_copy["cta_text"], partner.default_url)
         return fallback_copy.get(pk)
 
     def _effective_dom_status(pk: str, p_obj: Optional[AffiliatePartner]) -> str:
@@ -5939,6 +5945,8 @@ def normalize_html_callout_message_match(
         sec_text_lower = re.sub(r"<[^>]+>", " ", sec_html).lower()
         needs_fix = (
             pk != old_pk
+            or p_name.lower() not in sec_text_lower
+            or p_cta.lower() not in sec_text_lower
             or any(f_tok in sec_text_lower for f_tok in forbidden_tokens)
             or (bool(expected_tokens) and not any(tok in sec_text_lower for tok in expected_tokens))
         )
@@ -6096,6 +6104,12 @@ def normalize_html_callout_message_match(
                 p_obj = PREXVO_AFFILIATES.get(pk)
                 if not p_obj:
                     continue
+                ctx_px = resolve_contextual_partner_offer_copy(
+                    partner_key=pk,
+                    p_obj=p_obj,
+                    slug=page_slug,
+                    property_id=prop,
+                )
                 slot = "calculator_primary_cta" if pk == "splash_financial" else "partner_matrix_card"
                 card_href = _build_r_href(pk, f"card_{idx}", slot)
                 safe_s = html_lib.escape(page_slug)
@@ -6103,11 +6117,11 @@ def normalize_html_callout_message_match(
                 safe_p_model = html_lib.escape(p_obj.partnership_model)
                 cards_html.append(
                     f'      <div class="partner-card" data-partner="{pk}" data-partnership-model="{safe_p_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
-                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
-                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
-                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
+                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(ctx_px["badge"])}</span>\n'
+                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(ctx_px["name"])}</h3>\n'
+                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(ctx_px["description"])}</p>\n'
                     f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
-                    f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
+                    f'          {html_lib.escape(ctx_px["cta_text"])} &rarr;\n'
                     f'        </a>\n'
                     f'      </div>'
                 )
@@ -6246,6 +6260,12 @@ def normalize_html_callout_message_match(
             p_obj = PROFITHELM_AFFILIATES.get(pk)
             if not p_obj:
                 return ""
+            ctx_card = resolve_contextual_partner_offer_copy(
+                partner_key=pk,
+                p_obj=p_obj,
+                slug=page_slug,
+                property_id=prop,
+            )
             eff_st = _effective_dom_status(pk, p_obj)
             slot = "calculator_primary_cta" if card_idx == 1 else "partner_matrix_card"
             card_href = _build_r_href(pk, f"card_{card_idx}", slot)
@@ -6257,14 +6277,14 @@ def normalize_html_callout_message_match(
             return (
                 f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}">\n'
                 f'      <div class="affiliate-info">\n'
-                f'        <span class="affiliate-badge">{html_lib.escape(p_obj.badge)}</span>\n'
+                f'        <span class="affiliate-badge">{html_lib.escape(ctx_card["badge"])}</span>\n'
                 f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
-                f'        <h3 class="affiliate-title">{html_lib.escape(p_obj.name)}</h3>\n'
-                f'        <p class="affiliate-desc">{html_lib.escape(p_obj.description)}</p>\n'
+                f'        <h3 class="affiliate-title">{html_lib.escape(ctx_card["name"])}</h3>\n'
+                f'        <p class="affiliate-desc">{html_lib.escape(ctx_card["description"])}</p>\n'
                 f'      </div>\n'
                 f'      <div>\n'
                 f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{pk}" data-status="{html_lib.escape(eff_st)}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-cta-slot="{slot}" data-tier="starter" class="btn-cta partner-cta touch-target">\n'
-                f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
+                f'          {html_lib.escape(ctx_card["cta_text"])} &rarr;\n'
                 f'        </a>\n'
                 f'      </div>\n'
                 f'    </div>'
@@ -6422,9 +6442,15 @@ def normalize_html_callout_message_match(
         primary_inline_pk = gsc_inline_meta["data-partner"]
     if primary_inline_pk and primary_inline_pk in registry:
         p_inline = registry[primary_inline_pk]
-        safe_badge = html_lib.escape(p_inline.badge)
-        safe_name = html_lib.escape(p_inline.name)
-        safe_cta = html_lib.escape(p_inline.cta_text)
+        ctx_in = resolve_contextual_partner_offer_copy(
+            partner_key=primary_inline_pk,
+            p_obj=p_inline,
+            slug=page_slug,
+            property_id=prop,
+        )
+        safe_badge = html_lib.escape(ctx_in["badge"])
+        safe_name = html_lib.escape(ctx_in["name"])
+        safe_cta = html_lib.escape(ctx_in["cta_text"])
         safe_status = html_lib.escape(_effective_dom_status(primary_inline_pk, p_inline))
         safe_s = html_lib.escape(page_slug)
         safe_sub = html_lib.escape(f"{page_slug}_inline")
@@ -6440,6 +6466,7 @@ def normalize_html_callout_message_match(
         if (
             preserved_gsc_inline_block
             and gsc_inline_meta.get("data-partner") == primary_inline_pk
+            and safe_cta in preserved_gsc_inline_block
             and not any(
                 f_tok in preserved_gsc_inline_block.lower()
                 for f_tok in (
@@ -6484,6 +6511,45 @@ def normalize_html_callout_message_match(
                     updated = re.sub(pat, rf"\g<1>{inline_cta_html}", updated, count=1, flags=re.S | re.I)
                 injected_inline = True
                 break
+        cta_pos = updated.find('<div class="calc-inline-cta"')
+        kpi_pos = updated.find('<div class="kpi-block"')
+        kpi_end_candidates = [
+            pos
+            for pos in (
+                updated.find('<div id="calc-result-quick-unlock-bar"', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div class="calc-statutory-box"', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div class="share-pro-container"', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div style="margin-top: 1rem;">', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div class="lead-capture-card"', kpi_pos if kpi_pos != -1 else 0),
+            )
+            if pos != -1
+        ]
+        kpi_end = min(kpi_end_candidates) if kpi_end_candidates else -1
+        if cta_pos != -1 and kpi_pos != -1 and kpi_end != -1 and cta_pos < kpi_pos < kpi_end:
+            kpi_slice = updated[kpi_pos:kpi_end].strip()
+            if kpi_slice and "calc-inline-cta" not in kpi_slice:
+                updated = (
+                    updated[:cta_pos]
+                    + kpi_slice
+                    + "\n          "
+                    + updated[cta_pos:kpi_pos]
+                    + updated[kpi_end:]
+                )
+        rap_meter_m = re.search(
+            r'<div\b[^>]*id=["\']rap-subsidy-meter["\'][^>]*>[\s\S]*?<div\s+class=["\']subsidy-meter-legend["\'][^>]*>[\s\S]*?</div>\s*</div>',
+            updated,
+            flags=re.I,
+        )
+        cta_pos2 = updated.find('<div class="calc-inline-cta"')
+        if rap_meter_m and cta_pos2 != -1 and cta_pos2 < rap_meter_m.start():
+            rap_slice = rap_meter_m.group(0).strip()
+            updated = (
+                updated[:cta_pos2]
+                + rap_slice
+                + "\n      "
+                + updated[cta_pos2 : rap_meter_m.start()]
+                + updated[rap_meter_m.end() :]
+            )
         if injected_inline and "</head>" in updated:
             fold_css = (
                 '  <style id="pseo-inline-cta-fold">\n'
@@ -7891,6 +7957,46 @@ def reposition_affiliate_placements_from_gsc_signals(
                     else:
                         updated = re.sub(r_pat, rf"\g<1>\n          {new_inline_div}", updated, count=1, flags=re.S | re.I)
                     break
+
+        cta_pos_m = updated.find('<div class="calc-inline-cta"')
+        kpi_pos_m = updated.find('<div class="kpi-block"')
+        kpi_end_cands_m = [
+            pos
+            for pos in (
+                updated.find('<div id="calc-result-quick-unlock-bar"', kpi_pos_m if kpi_pos_m != -1 else 0),
+                updated.find('<div class="calc-statutory-box"', kpi_pos_m if kpi_pos_m != -1 else 0),
+                updated.find('<div class="share-pro-container"', kpi_pos_m if kpi_pos_m != -1 else 0),
+                updated.find('<div style="margin-top: 1rem;">', kpi_pos_m if kpi_pos_m != -1 else 0),
+                updated.find('<div class="lead-capture-card"', kpi_pos_m if kpi_pos_m != -1 else 0),
+            )
+            if pos != -1
+        ]
+        kpi_end_m = min(kpi_end_cands_m) if kpi_end_cands_m else -1
+        if cta_pos_m != -1 and kpi_pos_m != -1 and kpi_end_m != -1 and cta_pos_m < kpi_pos_m < kpi_end_m:
+            kpi_slice_m = updated[kpi_pos_m:kpi_end_m].strip()
+            if kpi_slice_m and "calc-inline-cta" not in kpi_slice_m:
+                updated = (
+                    updated[:cta_pos_m]
+                    + kpi_slice_m
+                    + "\n          "
+                    + updated[cta_pos_m:kpi_pos_m]
+                    + updated[kpi_end_m:]
+                )
+        rap_meter_m2 = re.search(
+            r'<div\b[^>]*id=["\']rap-subsidy-meter["\'][^>]*>[\s\S]*?<div\s+class=["\']subsidy-meter-legend["\'][^>]*>[\s\S]*?</div>\s*</div>',
+            updated,
+            flags=re.I,
+        )
+        cta_pos_m2 = updated.find('<div class="calc-inline-cta"')
+        if rap_meter_m2 and cta_pos_m2 != -1 and cta_pos_m2 < rap_meter_m2.start():
+            rap_slice_m2 = rap_meter_m2.group(0).strip()
+            updated = (
+                updated[:cta_pos_m2]
+                + rap_slice_m2
+                + "\n      "
+                + updated[cta_pos_m2 : rap_meter_m2.start()]
+                + updated[rap_meter_m2.end() :]
+            )
 
     # 2. Inject or update comparison_table_cta when active in slot_plan
     if "comparison_table_cta" in slot_plan["active_slots"] and table_offer:
