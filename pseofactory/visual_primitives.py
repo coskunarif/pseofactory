@@ -936,7 +936,9 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       gap: 10px;
       align-items: center;
     }
-    .result-card .share-pro-container + .inline-lead-box {
+    .result-card .share-pro-container + .inline-lead-box,
+    .result-box #calc-result-quick-unlock-bar ~ .pro-hook-card,
+    .result-card #calc-result-quick-unlock-bar ~ .pro-hook-card {
       display: none !important;
     }
     a[href]:focus, a[href]:focus-visible,
@@ -2058,6 +2060,27 @@ def _render_runtime_sync_events_js() -> str:
         var socV = parseFloat(socEl.textContent.replace(/[^0-9.]/g, ""));
         if (!isNaN(socV) && socV >= 1000) bestAmt = socV;
       }
+      var primaryCalcIds = [
+        "sec1031-sale-price", "sec179-cost", "tax-income", "field-gross_income",
+        "crypto-long-term", "crypto-short-term", "field-loan_balance", "input-loan_balance",
+        "runway-cash", "tey-principal", "cg-amount", "arb-capital", "pm-tax-gain",
+        "field-bond_amount", "field-invoice_face_value", "field-current_year_domestic_qre",
+        "field-declared_customs_value", "field-annual_covered_payroll",
+        "field-net_business_income", "input-total_parachute_payment",
+        "input-med_school_loan_balance", "input-outside_securities_counsel_retainer",
+        "input-unpaid_subcontract_balance"
+      ];
+      if (_lastInteractionScope !== "serp") {
+        for (var pcIdx = 0; pcIdx < primaryCalcIds.length; pcIdx++) {
+          var pcEl = document.getElementById(primaryCalcIds[pcIdx]);
+          if (pcEl && pcEl.value !== undefined) {
+            var pcVal = parseFloat(String(pcEl.value || "0").replace(/,/g, ""));
+            if (!isNaN(pcVal) && pcVal >= 1000) {
+              return Math.round(pcVal);
+            }
+          }
+        }
+      }
       var priorityIds = [
         "sec1031-sale-price", "serp-1031-rel-debt", "sec179-cost", "serp-179-cost",
         "tax-income", "field-gross_income", "serp-tax-gross", "crypto-short-term",
@@ -2169,17 +2192,19 @@ def _render_runtime_sync_events_js() -> str:
           var qNote = document.getElementById("partner-quote-frictionless-note");
           var bandSelect = document.getElementById("quote-intake-capital-band");
           if (effVal >= qThresh) {
-            quoteDrawer.setAttribute("data-threshold-active", "true");
-            quoteDrawer.setAttribute("data-frictionless-mode", "false");
-            if (qForm) qForm.style.display = "block";
-            if (qNote) qNote.style.display = "none";
+            if (_userInteracted) {
+              quoteDrawer.setAttribute("data-threshold-active", "true");
+              quoteDrawer.setAttribute("data-frictionless-mode", "false");
+              if (qForm) qForm.style.display = "block";
+              if (qNote) qNote.style.display = "none";
+            }
             if (bandSelect) {
               if (effVal >= 500000) bandSelect.value = "500k_plus";
               else if (effVal >= 250000) bandSelect.value = "250k_500k";
               else if (effVal >= 100000) bandSelect.value = "100k_250k";
               else bandSelect.value = "50k_100k";
             }
-          } else {
+          } else if (_userInteracted) {
             quoteDrawer.setAttribute("data-threshold-active", "false");
             quoteDrawer.setAttribute("data-frictionless-mode", "true");
             if (qForm) qForm.style.display = "none";
@@ -5350,9 +5375,12 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             q_calc_amt: Optional[float] = float(raw_q_amt) if raw_q_amt else None
         except ValueError:
             q_calc_amt = None
-        if 'id="calc-result-quick-unlock-bar"' not in updated:
-            from pseofactory.competitor import render_calc_result_quick_unlock_bar_html
+        from pseofactory.competitor import (
+            render_calc_result_quick_unlock_bar_html,
+            resolve_quick_unlock_contextual_copy,
+        )
 
+        if 'id="calc-result-quick-unlock-bar"' not in updated:
             quick_bar_html = render_calc_result_quick_unlock_bar_html(
                 slug=tool_slug,
                 property_id=prop_id,
@@ -5378,6 +5406,72 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                         if q_pos2 != -1:
                             updated = updated[:q_pos2] + quick_bar_html + updated[q_pos2:]
                             actions.append("calc_result_quick_unlock_bar")
+        elif 'data-contextual-v2="1"' not in updated:
+            quick_bar_html = render_calc_result_quick_unlock_bar_html(
+                slug=tool_slug,
+                property_id=prop_id,
+                baseline_amount=q_calc_amt,
+            )
+            if quick_bar_html:
+                updated_qb, n_qb = re.subn(
+                    r'<div\b[^>]*id=["\']calc-result-quick-unlock-bar["\'][^>]*>[\s\S]*?</form>\s*<div[^>]*>[\s\S]*?</div>\s*</div>',
+                    quick_bar_html.strip(),
+                    updated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                if n_qb > 0 and updated_qb != updated:
+                    updated = updated_qb
+                    actions.append("calc_result_quick_unlock_bar_contextual_v2")
+
+        # Ensure primary KPI block (.kpi-block or #rap-subsidy-meter) sits at the top of .result-box before .calc-inline-cta
+        cta_pos = updated.find('<div class="calc-inline-cta"')
+        kpi_pos = updated.find('<div class="kpi-block"')
+        share_pos = updated.find('<div class="share-pro-container"')
+        if cta_pos != -1 and kpi_pos != -1 and share_pos != -1 and cta_pos < kpi_pos < share_pos:
+            kpi_slice = updated[kpi_pos:share_pos].strip()
+            if kpi_slice and "calc-inline-cta" not in kpi_slice:
+                updated = (
+                    updated[:cta_pos]
+                    + kpi_slice
+                    + "\n          "
+                    + updated[cta_pos:kpi_pos]
+                    + updated[share_pos:]
+                )
+                actions.append("result_box_kpi_first_order")
+
+        rap_meter_m = re.search(
+            r'<div\b[^>]*id=["\']rap-subsidy-meter["\'][^>]*>[\s\S]*?<div\s+class=["\']subsidy-meter-legend["\'][^>]*>[\s\S]*?</div>\s*</div>',
+            updated,
+            flags=re.IGNORECASE,
+        )
+        cta_pos2 = updated.find('<div class="calc-inline-cta"')
+        if rap_meter_m and cta_pos2 != -1 and cta_pos2 < rap_meter_m.start():
+            rap_slice = rap_meter_m.group(0).strip()
+            updated = (
+                updated[:cta_pos2]
+                + rap_slice
+                + "\n      "
+                + updated[cta_pos2 : rap_meter_m.start()]
+                + updated[rap_meter_m.end() :]
+            )
+            actions.append("prexvo_subsidy_meter_first_order")
+
+        ctx_q_drawer = resolve_quick_unlock_contextual_copy(
+            slug=tool_slug,
+            property_id=prop_id,
+            quick_price_int=19,
+            full_price_int=39 if prop_id == "prexvo" else (69 if prop_id == "lienbond" else (79 if prop_id == "gainhelm" else 49)),
+        )
+        if 'id="btn-post-calc-quick-unlock-checkout"' in updated and "Instant PDF/CSV Statutory Worksheet ($19)" in updated:
+            updated = re.sub(
+                r'(<a\b[^>]*id=["\']btn-post-calc-quick-unlock-checkout["\'][^>]*>)Instant PDF/CSV Statutory Worksheet \(\$19\)(</a>)',
+                rf'\1{ctx_q_drawer["drawer_quick_btn_label"]}\2',
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            actions.append("post_calc_quick_unlock_button_contextual")
 
         if (
             'id="post-calculation-upgrade-drawer"' in updated
@@ -5412,7 +5506,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 f'data-offer-sku="{quick_sku}" data-offer-price="19" data-cta-slot="post_calc_quick_unlock_cta" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; '
                 f'padding: 10px 18px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; '
-                f'font-size: 14px; text-decoration: none; cursor: pointer;">Instant PDF/CSV Statutory Worksheet ($19)</a>\n            '
+                f'font-size: 14px; text-decoration: none; cursor: pointer;">{ctx_q_drawer["drawer_quick_btn_label"]}</a>\n            '
             )
             updated, n_qbtn = re.subn(
                 r'(<a\b[^>]*id=["\']btn-post-calc-upgrade-checkout["\'][^>]*>)',
@@ -5648,6 +5742,7 @@ def normalize_html_visual_primitives(
             or ".tool-header.hero-section" not in prim_body
             or 'input[type="checkbox"].touch-target' not in prim_body
             or ".share-pro-container + .inline-lead-box" not in prim_body
+            or "#calc-result-quick-unlock-bar ~ .pro-hook-card" not in prim_body
             or has_token_inversion
         )
         if needs_style_repair:
@@ -6021,6 +6116,7 @@ def normalize_html_visual_primitives(
                 or "autoPrevBtn" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
                 or "hiddenForm" not in sync_body
+                or "primaryCalcIds" not in sync_body
             )
             if needs_sync_repair:
                 updated = re.sub(

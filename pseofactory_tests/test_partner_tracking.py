@@ -4029,4 +4029,47 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
         assert roster["primary_offer"]["partner_key"] == "crest_capital"
         assert roster["slot_plan"]["slot_bindings"]["calculator_result_inline"]["partner_key"] == "crest_capital"
 
+    # Contextual partner offer copy: state tax brackets must never show Section 179 copy
+    ny_roster = bind_asset_partner_roster(
+        slug="irs-2027-tax-brackets/new-york",
+        property_id="profithelm",
+        query="irs 2027 tax brackets new york",
+        page_archetype="calculator_workbench",
+    )
+    assert ny_roster["primary_offer"]["partner_key"] == "crest_capital"
+    assert "New York" in ny_roster["primary_offer"]["cta_text"]
+    assert "Section 179" not in ny_roster["primary_offer"]["cta_text"]
+    assert "New York" in ny_roster["primary_offer"]["badge"]
+
+    s179_roster = bind_asset_partner_roster(
+        slug="section-179-calculator/ford-f150-lightning",
+        property_id="profithelm",
+        query="section 179 ford f150 lightning",
+        page_archetype="calculator_workbench",
+    )
+    assert s179_roster["primary_offer"]["partner_key"] == "crest_capital"
+    assert "Section 179" in s179_roster["primary_offer"]["cta_text"]
+
+    insolv_roster = bind_asset_partner_roster(
+        slug="student-loan-forgiveness-tax-bomb-insolvency-calculator",
+        property_id="prexvo",
+        query="student loan forgiveness tax bomb insolvency calculator",
+        page_archetype="calculator_workbench",
+    )
+    assert insolv_roster["primary_offer"]["partner_key"] == "splash_financial"
+    assert "Tax Bomb" in insolv_roster["primary_offer"]["badge"]
+    assert "Lower Fixed Refi Rates" in insolv_roster["primary_offer"]["cta_text"]
+
+    ny_bar = render_calc_result_quick_unlock_bar_html(
+        slug="irs-2027-tax-brackets/new-york",
+        property_id="profithelm",
+        baseline_amount=79557.0,
+    )
+    assert 'data-contextual-v2="1"' in ny_bar
+    assert "New York" in ny_bar
+    assert "W-4" in ny_bar
+
+    assert "W4-L4C" in generate_edge_lead_capture_function(property_id="profithelm")
+
+
 

@@ -9524,6 +9524,14 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
         delta_impact: `-${fmtUsd(ptetShield)} PTET SALT Deduction Shield`,
       },
       {
+        line_code: "W4-L4C",
+        line_item: `IRS Form W-4 Line 4(c) Biweekly Paycheck Withholding Adjustment (${stateCode})`,
+        authority: "IRC Section 3402 & IRS Publication 15-T",
+        baseline_value: `${fmtUsd((estBase + stateTaxBase) / 26)}/paycheck`,
+        optimized_value: `${fmtUsd((estOpt + stateTaxOpt) / 26)}/paycheck`,
+        delta_impact: `+${fmtUsd(((estBase + stateTaxBase) - (estOpt + stateTaxOpt)) / 26)}/paycheck Take-Home`,
+      },
+      {
         line_code: "2210-SH",
         line_item: "Quarterly Estimated Safe-Harbor Installment (25% / Qtr)",
         authority: "IRC Section 6654(d)(1)(B) (100% / 110% Rule)",

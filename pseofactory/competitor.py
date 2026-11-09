@@ -4895,6 +4895,18 @@ def render_post_calculation_upgrade_drawer_html(
         pillar_1_title = "1. Personalized Statutory Tax Workpaper (HTML/PDF + CSV)"
         pillar_2_title = f"2. Tailored IRS & Macroeconomic Data Pack ({trend_count} Series, 2024 to 2030)"
 
+    ctx_q = resolve_quick_unlock_contextual_copy(
+        slug=slug_clean,
+        property_id=prop_clean,
+        quick_price_int=quick_price_int,
+        full_price_int=price_int,
+    )
+    summary_target_phrase = (
+        "servicer-ready repayment, forgiveness, and tax-exclusion workpaper"
+        if prop_clean == "prexvo"
+        else "board-ready audit workpaper"
+    )
+
     return (
         f'        <div id="post-calculation-upgrade-drawer" class="post-calc-upgrade-drawer" '
         f'data-mechanic="post_calculation_workpaper_upgrade" '
@@ -4910,7 +4922,7 @@ def render_post_calculation_upgrade_drawer_html(
         f'            <span class="post-calc-upgrade-badge">{badge_text}</span>\n'
         f'            <h4 class="post-calc-upgrade-title">{offer_title} (${price_int} One-Time Package)</h4>\n'
         f'            <p id="post-calc-upgrade-live-summary" class="post-calc-upgrade-summary">'
-        f'Package your active <strong>{amt_fmt}</strong> scenario into a board-ready audit workpaper and machine-readable '
+        f'Package your active <strong>{amt_fmt}</strong> scenario into a {summary_target_phrase} and machine-readable '
         f'statutory data pack cited to <strong>{eff_stat}</strong> ({regulator_name}).</p>\n'
         f'          </div>\n'
         f'          <div class="post-calc-upgrade-pillars">\n'
@@ -4935,7 +4947,7 @@ def render_post_calculation_upgrade_drawer_html(
         f'data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" '
         f'data-cta-slot="post_calc_quick_unlock_cta" '
         f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; padding: 10px 16px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13.5px; text-decoration: none; cursor: pointer;">'
-        f'Instant PDF/CSV Statutory Worksheet (${quick_price_int})</a>\n'
+        f'{ctx_q["drawer_quick_btn_label"]}</a>\n'
         f'            <a id="btn-post-calc-upgrade-checkout" href="{checkout_url}" '
         f'class="touch-target btn-primary post-calc-upgrade-btn" '
         f'data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{price_int}" '
@@ -4951,6 +4963,170 @@ def render_post_calculation_upgrade_drawer_html(
         f'          <div id="post-calc-workpaper-preview-slot" class="post-calc-preview-slot" aria-live="polite"></div>\n'
         f'        </div>'
     )
+
+
+def resolve_quick_unlock_contextual_copy(
+    slug: str,
+    property_id: str = "profithelm",
+    quick_price_int: int = 19,
+    full_price_int: int = 49,
+) -> Dict[str, str]:
+    """
+    Resolves intent-matched, state-aware copy for #calc-result-quick-unlock-bar and
+    #btn-post-calc-quick-unlock-checkout so visitors see the exact W-4 / Form 4562 /
+    Form 8824 / Form 8949 / Form 982 / SAVE-to-RAP deliverable they unlock for $19,
+    clearly differentiated from the free email summary.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = (property_id or "profithelm").strip().lower()
+    s_low = (slug or "index").strip().strip("/").lower().replace("_", "-")
+
+    state_label = ""
+    s_padded = f"-{s_low.replace('/', '-')}-"
+    for token, st_code in _SLUG_STATE_TOKEN_MAP:
+        if f"-{token}-" in s_padded:
+            for c_code, c_label in US_51_JURISDICTIONS:
+                if c_code == st_code:
+                    state_label = c_label.split(" (")[0].strip()
+                    break
+            break
+
+    if prop == "prexvo":
+        if "tax-bomb" in s_low or "insolvency" in s_low:
+            return {
+                "heading": "Get Your Filled IRS Form 982 Insolvency &amp; 1099-C Tax-Bomb Exclusion Pack",
+                "badge": "IRS Form 982 PDF/CSV + Free Email Summary",
+                "summary": (
+                    "Unlocks line-by-line IRS Form 982 Part I &amp; Insolvency Asset vs. Liability Worksheet "
+                    "to exclude forgiven student debt from federal and state income tax."
+                ),
+                "email_label": "Email Address for Free Tax-Bomb Calculation Summary",
+                "email_btn": "Email Me Free Summary",
+                "quick_btn_label": f"Download IRS Form 982 Insolvency Pack (${quick_price_int}) &rarr;",
+                "drawer_quick_btn_label": f"Download IRS Form 982 Insolvency Pack (${quick_price_int})",
+                "full_link_label": f"Or Full Title IV Audit Kit (${full_price_int})",
+            }
+        return {
+            "heading": "Get Your Custom 2026 SAVE-to-RAP vs. IBR Payment &amp; Forgiveness Plan",
+            "badge": "Month-by-Month PDF/CSV + Free Email Summary",
+            "summary": (
+                "Unlocks month-by-month RAP vs. IBR vs. Refinance amortization schedule, "
+                "Married Filing Separately (MFS) tax break-even table, and servicer switch checklist."
+            ),
+            "email_label": "Email Address for Free Payment Calculation Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download 2026 RAP vs. IBR &amp; Refi Plan (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download 2026 RAP vs. IBR &amp; Refi Plan (${quick_price_int})",
+            "full_link_label": f"Or Full Title IV Audit Kit (${full_price_int})",
+        }
+
+    if prop == "gainhelm":
+        return {
+            "heading": "Get Your Auditor-Ready Control Scope, POA&amp;M &amp; Budget Worksheet",
+            "badge": "Auditor PDF/CSV + Free Email Summary",
+            "summary": (
+                "Unlocks control-by-control evidence collection checklist, engineering remediation "
+                "hour estimator, and board budget approval schedule."
+            ),
+            "email_label": "Email Address for Free Audit Cost Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download Audit Scope &amp; Budget Worksheet (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download Audit Scope &amp; Budget Worksheet (${quick_price_int})",
+            "full_link_label": f"Or Full GRC Evidence Package (${full_price_int})",
+        }
+
+    if prop == "lienbond":
+        loc_prefix = f"{state_label} " if state_label else "50-State "
+        return {
+            "heading": f"Get Your {loc_prefix}Statutory Lien Waiver, Notice &amp; Bond Packet",
+            "badge": "Statutory PDF/CSV + Free Email Summary",
+            "summary": (
+                f"Unlocks {loc_prefix}conditional and unconditional waiver templates, preliminary notice "
+                "recording deadline calendar, and surety underwriting checklist."
+            ),
+            "email_label": "Email Address for Free Bond &amp; Lien Deadline Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download {loc_prefix}Lien &amp; Bond Worksheet (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download {loc_prefix}Lien &amp; Bond Worksheet (${quick_price_int})",
+            "full_link_label": f"Or Full Surety &amp; Lien Packet (${full_price_int})",
+        }
+
+    if "tax-bracket" in s_low or "tax-rate" in s_low:
+        loc = state_label if state_label else "2027 Federal &amp; State"
+        return {
+            "heading": f"Get Your 2027 {loc} + Federal Tax Bracket &amp; W-4 Paycheck Plan",
+            "badge": "W-4 &amp; 1040-ES PDF/CSV + Free Email Summary",
+            "summary": (
+                f"Unlocks your exact 2027 {loc} + Federal marginal/effective bracket table, "
+                "IRS Form W-4 Line 4(c) paycheck withholding adjustment, 4-quarter Form 1040-ES safe-harbor dates, "
+                f"and {loc} PTET / deduction shields to drop a bracket."
+            ),
+            "email_label": f"Email Address for Free 2027 {loc} Tax Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download 2027 {loc} W-4 &amp; Tax Plan (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download 2027 {loc} W-4 &amp; Tax Plan (${quick_price_int})",
+            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+        }
+
+    if any(tok in s_low for tok in ("section-179", "179", "depreciation", "macrs", "equipment", "vehicle")):
+        return {
+            "heading": "Get Your Filled IRS Form 4562 Section 179 &amp; Bonus Depreciation Schedule",
+            "badge": "IRS Form 4562 PDF/CSV + Free Email Summary",
+            "summary": (
+                "Unlocks line-by-line IRS Form 4562 Part I &amp; V entries, 5-year MACRS recapture table, "
+                "business-use log template, and CPA deduction sign-off checklist."
+            ),
+            "email_label": "Email Address for Free Section 179 Deduction Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download IRS Form 4562 &amp; MACRS Schedule (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download IRS Form 4562 &amp; MACRS Schedule (${quick_price_int})",
+            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+        }
+
+    if any(tok in s_low for tok in ("1031", "like-kind", "8824", "boot", "dst")):
+        loc_prefix = f"{state_label} " if state_label else ""
+        return {
+            "heading": f"Get Your Filled {loc_prefix}IRS Form 8824 Like-Kind Exchange &amp; Boot Worksheet",
+            "badge": "IRS Form 8824 PDF/CSV + Free Email Summary",
+            "summary": (
+                "Unlocks line-by-line IRS Form 8824 net boot reconciliation, 45-day / 180-day statutory "
+                "deadline calendar, and Qualified Intermediary (QI) escrow checklist."
+            ),
+            "email_label": "Email Address for Free 1031 Exchange Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download IRS Form 8824 &amp; 1031 Boot Pack (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download IRS Form 8824 &amp; 1031 Boot Pack (${quick_price_int})",
+            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+        }
+
+    if any(tok in s_low for tok in ("crypto", "8949", "staking", "token")):
+        return {
+            "heading": "Get Your IRS Form 8949, Schedule D &amp; Staking Tax Reconciliation Pack",
+            "badge": "IRS Form 8949 PDF/CSV + Free Email Summary",
+            "summary": (
+                "Unlocks short-term vs. long-term capital gains lot worksheet, 3.8% NIIT surtax calculation, "
+                "and quarterly Form 1040-ES safe-harbor payment voucher."
+            ),
+            "email_label": "Email Address for Free Crypto Tax Summary",
+            "email_btn": "Email Me Free Summary",
+            "quick_btn_label": f"Download Form 8949 Crypto Tax Pack (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"Download Form 8949 Crypto Tax Pack (${quick_price_int})",
+            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+        }
+
+    return {
+        "heading": "Get Your Personalized Statutory Tax &amp; Accounting Schedule (PDF + CSV)",
+        "badge": "Instant PDF/CSV + Free Email Summary",
+        "summary": (
+            "Unlocks your line-coded IRS and state statutory calculation worksheet, sensitivity matrix, "
+            "and quarterly safe-harbor compliance checklist."
+        ),
+        "email_label": "Email Address for Free Personalized Calculation Summary",
+        "email_btn": "Email Me Free Summary",
+        "quick_btn_label": f"Download Complete PDF/CSV Worksheet (${quick_price_int}) &rarr;",
+        "drawer_quick_btn_label": f"Download Complete PDF/CSV Worksheet (${quick_price_int})",
+        "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+    }
 
 
 def render_calc_result_quick_unlock_bar_html(
@@ -4998,28 +5174,35 @@ def render_calc_result_quick_unlock_bar_html(
         f'/api/lead-capture?checkout=1&amp;sku={quick_sku}'
         f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
     )
+    ctx_q = resolve_quick_unlock_contextual_copy(
+        slug=slug_clean,
+        property_id=prop_clean,
+        quick_price_int=quick_price_int,
+        full_price_int=full_price_int,
+    )
     return (
         f'          <div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" '
         f'data-mechanic="instant_result_quick_unlock" data-property-id="{prop_clean}" '
         f'data-tool-slug="{slug_clean}" data-offer-sku="{quick_sku}" '
         f'data-offer-price="{quick_price_int}" data-full-offer-sku="{full_sku}" '
-        f'data-full-offer-price="{full_price_int}" '
+        f'data-full-offer-price="{full_price_int}" data-contextual-v2="1" '
         f'style="margin-top: 12px; margin-bottom: 12px; padding: 14px 16px; border-radius: 8px; '
         f'background: var(--bg-elevated, #f8fafc); border: 1px solid var(--border, #cbd5e1); '
         f'border-left: 4px solid #0f766e;">\n'
-        f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;">\n'
-        f'              <div style="font-size: 13.5px; font-weight: 700; color: var(--text, #0f172a);">Save Your Calculated Worksheet &amp; Statutory Schedule</div>\n'
-        f'              <span style="font-size: 11.5px; font-weight: 700; color: #0f766e; background: rgba(15, 118, 110, 0.12); padding: 3px 8px; border-radius: 4px;">Instant PDF/CSV + Free Email Copy</span>\n'
+        f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px;">\n'
+        f'              <div style="font-size: 13.5px; font-weight: 700; color: var(--text, #0f172a);">{ctx_q["heading"]}</div>\n'
+        f'              <span style="font-size: 11.5px; font-weight: 700; color: #0f766e; background: rgba(15, 118, 110, 0.12); padding: 3px 8px; border-radius: 4px;">{ctx_q["badge"]}</span>\n'
         f'            </div>\n'
+        f'            <div class="quick-unlock-value-summary" style="font-size: 12px; line-height: 1.45; color: var(--text-secondary, #475569); margin-bottom: 8px;">{ctx_q["summary"]}</div>\n'
         f'            <form id="inline-worksheet-capture-form" class="lead-capture-form inline-worksheet-capture-form" action="/api/lead-capture" method="POST" data-offer-sku="{quick_sku}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px;" novalidate>\n'
-        f'              <label for="inline-worksheet-email" style="display: block; width: 100%; font-size: 12px; font-weight: 600; margin-bottom: 2px; color: var(--text, #334155);">Email Address for Free Personalized Worksheet</label>\n'
-        f'              <input type="email" id="inline-worksheet-email" name="email" placeholder="Enter email for free custom worksheet..." aria-label="Email Address for Free Personalized Worksheet" required class="touch-target" style="flex: 1; min-width: 190px; min-height: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #ffffff); color: var(--text, #0f172a);" />\n'
-        f'              <button type="submit" id="btn-inline-worksheet-submit" class="touch-target btn-secondary" data-cta-slot="inline_free_worksheet_email_cta" style="min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 700; font-size: 13.5px; border: none; cursor: pointer; white-space: nowrap;">Email Me Free Worksheet</button>\n'
+        f'              <label for="inline-worksheet-email" style="display: block; width: 100%; font-size: 12px; font-weight: 600; margin-bottom: 2px; color: var(--text, #334155);">{ctx_q["email_label"]}</label>\n'
+        f'              <input type="email" id="inline-worksheet-email" name="email" placeholder="Enter email for free calculation summary..." aria-label="{ctx_q["email_label"]}" required class="touch-target" style="flex: 1; min-width: 190px; min-height: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #ffffff); color: var(--text, #0f172a);" />\n'
+        f'              <button type="submit" id="btn-inline-worksheet-submit" class="touch-target btn-secondary" data-cta-slot="inline_free_worksheet_email_cta" style="min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 700; font-size: 13.5px; border: none; cursor: pointer; white-space: nowrap;">{ctx_q["email_btn"]}</button>\n'
         f'              <div id="inline-worksheet-capture-status" class="lead-capture-status-readout" role="status" aria-live="polite" style="width: 100%; font-size: 12.5px; font-weight: 600;"></div>\n'
         f'            </form>\n'
         f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border, #cbd5e1);">\n'
-        f'              <a id="btn-calc-result-quick-unlock" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: nowrap;">Instant PDF/CSV Statutory Worksheet (${quick_price_int}) &rarr;</a>\n'
-        f'              <a href="#post-calculation-upgrade-drawer" class="touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent, #1d4ed8); text-decoration: underline; white-space: nowrap;">Or Full Audit Package (${full_price_int})</a>\n'
+        f'              <a id="btn-calc-result-quick-unlock" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: nowrap;">{ctx_q["quick_btn_label"]}</a>\n'
+        f'              <a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent, #1d4ed8); text-decoration: underline; white-space: nowrap;">{ctx_q["full_link_label"]}</a>\n'
         f'            </div>\n'
         f'          </div>\n'
     )
@@ -7182,6 +7365,107 @@ DEFAULT_TENANT_TOOL_DISCOVERY_SEEDS: Dict[str, Dict[str, Any]] = {
             },
         ],
     },
+    "lienbond": {
+        "seed_competitors": [
+            {
+                "domain": "suretybonds.com",
+                "url": "https://www.suretybonds.com/surety-bond-cost-calculator.html",
+                "organic_traffic": 9400,
+                "dr": 61,
+                "in_top_nav_free_tools": True,
+                "tool_title": "Contractor License Surety Bond Cost Calculator",
+            },
+            {
+                "domain": "lance-surety.com",
+                "url": "https://www.lancesuretybonds.com/surety-bond-quote/surety-bond-cost-calculator",
+                "organic_traffic": 4800,
+                "dr": 49,
+                "in_top_nav_free_tools": True,
+                "tool_title": "Performance and Payment Bond Premium Calculator",
+            },
+            {
+                "domain": "levelset.com",
+                "url": "https://www.levelset.com/payment-help/lien-deadline-calculator/",
+                "organic_traffic": 8100,
+                "dr": 68,
+                "in_top_nav_free_tools": True,
+                "tool_title": "50-State Mechanics Lien & Preliminary Notice Deadline Calculator",
+            },
+        ],
+        "keyword_universe": [
+            {
+                "keyword": "contractor license bond cost calculator by credit score",
+                "source_competitor": "suretybonds.com",
+                "source_url": "https://www.suretybonds.com/surety-bond-cost-calculator.html",
+                "position": 1,
+                "volume": 3800,
+                "traffic": 1450,
+                "kd": 22,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 52,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.suretybonds.com/surety-bond-cost-calculator.html",
+                    "https://www.lancesuretybonds.com/surety-bond-quote/surety-bond-cost-calculator",
+                ],
+            },
+            {
+                "keyword": "miller act performance and payment bond premium calculator",
+                "source_competitor": "lance-surety.com",
+                "source_url": "https://www.lancesuretybonds.com/surety-bond-quote/surety-bond-cost-calculator",
+                "position": 2,
+                "volume": 2100,
+                "traffic": 780,
+                "kd": 19,
+                "intent": "matching_terms",
+                "expansion_source": "matching_terms",
+                "tool_results_in_top10": 5,
+                "avg_top10_dr": 48,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.lancesuretybonds.com/surety-bond-quote/surety-bond-cost-calculator",
+                    "https://www.suretybonds.com/surety-bond-cost-calculator.html",
+                ],
+            },
+            {
+                "keyword": "workers compensation class code rate calculator by state",
+                "source_competitor": "suretybonds.com",
+                "source_url": "https://www.suretybonds.com/surety-bond-cost-calculator.html",
+                "position": 3,
+                "volume": 4400,
+                "traffic": 1620,
+                "kd": 24,
+                "intent": "tool",
+                "expansion_source": "top_pages",
+                "tool_results_in_top10": 6,
+                "avg_top10_dr": 54,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.simplybusiness.com/workers-compensation-insurance/",
+                    "https://www.nextinsurance.com/workers-compensation-insurance/calculator/",
+                ],
+            },
+            {
+                "keyword": "contractor lien release statutory matrix by state",
+                "source_competitor": "levelset.com",
+                "source_url": "https://www.levelset.com/payment-help/lien-deadline-calculator/",
+                "position": 2,
+                "volume": 2900,
+                "traffic": 1050,
+                "kd": 21,
+                "intent": "questions",
+                "expansion_source": "questions",
+                "tool_results_in_top10": 5,
+                "avg_top10_dr": 55,
+                "serp_dominant_format": "interactive_tool",
+                "top10_urls": [
+                    "https://www.levelset.com/payment-help/lien-deadline-calculator/",
+                ],
+            },
+        ],
+    },
 }
 
 
@@ -7404,6 +7688,23 @@ def _resolve_canonical_cluster_slug_for_keyword(keyword: str, tenant_id: str) ->
             return "fedramp-authorization-3pao-cost-calculator"
         if "hitrust" in kw_low:
             return "hitrust-csf-e1-i1-r2-certification-cost-calculator"
+    elif prop == "lienbond":
+        if "workers comp" in kw_low or "class code" in kw_low:
+            return "workers-compensation-class-code-rate-calculator-by-state"
+        if "license bond" in kw_low or "credit score" in kw_low:
+            return "contractor-license-bond-cost-calculator-by-credit-score"
+        if "miller act" in kw_low or "performance and payment" in kw_low:
+            return "miller-act-performance-and-payment-bond-premium-calculator"
+        if "lien release" in kw_low or "lien waiver" in kw_low:
+            return "contractor-lien-release-statutory-matrix-by-state"
+        if "retainage" in kw_low:
+            return "commercial-construction-retainage-interest-penalty-calculator-by-state"
+        if "davis bacon" in kw_low or "prevailing wage" in kw_low:
+            return "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator"
+        if "erisa" in kw_low or "fidelity bond" in kw_low:
+            return "erisa-fidelity-bond-coverage-amount-calculator"
+        if "emr" in kw_low or "experience modification" in kw_low:
+            return "experience-modification-rate-emr-workers-comp-penalty-calculator"
     else:
         if "179" in kw_low or "4562" in kw_low:
             return "section-179-calculator"
@@ -7650,7 +7951,11 @@ def score_tool_cluster_roi_and_crawl_risk(
 
     supporting_list = cluster.get("supporting_keywords") or []
     supp_preview = ", ".join(supporting_list[:3]) if supporting_list else primary_kw
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = (
+        "prexvo.com"
+        if prop == "prexvo"
+        else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
+    )
     what_to_build = (
         f"Build or enrich the zero-signup instant-result {concept} at https://{domain}/tools/{t_slug}/ "
         f"targeting '{primary_kw}' and SERP-overlap variants ({supp_preview}) under {stat_auth} and {econ_ds}. "
@@ -7719,6 +8024,7 @@ def run_agentic_free_tool_keyword_pipeline(
             "profithelm": ws_root / "profithelm-platform",
             "prexvo": ws_root / "prexvo",
             "gainhelm": ws_root / "gainhelm",
+            "lienbond": ws_root / "lienbond",
         }
         t_root = repo_map.get(prop)
     else:

@@ -7396,6 +7396,103 @@ def select_conversion_slot_plan(
     }
 
 
+def resolve_contextual_partner_offer_copy(
+    partner_key: str,
+    p_obj: AffiliatePartner,
+    slug: str = "",
+    vertical_family: str = "",
+    property_id: str = "profithelm",
+) -> Dict[str, str]:
+    """
+    Adapts partner badge, name, description, and CTA button text to the exact page intent
+    and jurisdiction so non-Section-179 pages (such as state tax brackets, 1099-NEC, S-Corp,
+    R&D Section 174, CAMT, surety bonds, or student loan tax-bomb/RAP pages) never display
+    mismatched Section 179 copy.
+    Zero em-dashes. Zero en-dashes.
+    """
+    pk = (partner_key or "").strip().lower()
+    s_low = (slug or "").strip().lower().replace("_", "-")
+    v_fam = (vertical_family or "").strip().lower()
+    prop = (property_id or "profithelm").strip().lower()
+
+    badge = p_obj.badge
+    name = p_obj.name
+    description = p_obj.description
+    cta_text = p_obj.cta_text
+
+    if pk in ("crest_capital", "equipment_macrs"):
+        is_sec179 = (
+            any(tok in s_low for tok in ("section-179", "179", "depreciation", "macrs", "equipment", "vehicle", "fleet"))
+            or v_fam == "section_179_equipment_capex"
+        )
+        if not is_sec179:
+            state_label = ""
+            try:
+                from pseofactory.competitor import US_51_JURISDICTIONS, _SLUG_STATE_TOKEN_MAP
+
+                s_padded = f"-{s_low.replace('/', '-')}-"
+                for token, st_code in _SLUG_STATE_TOKEN_MAP:
+                    if f"-{token}-" in s_padded:
+                        for c_code, c_label in US_51_JURISDICTIONS:
+                            if c_code == st_code:
+                                state_label = c_label.split(" (")[0].strip()
+                                break
+                        break
+            except Exception:
+                state_label = ""
+
+            if "tax-bracket" in s_low or "tax-rate" in s_low or v_fam == "federal_state_tax_brackets":
+                loc = f"{state_label} & Federal" if state_label else "2027 Federal & State"
+                short_loc = state_label if state_label else "Federal & State"
+                badge = f"{loc} CPA Tax Shield"
+                name = f"Xendoo {loc} CPA Tax Advisory"
+                description = (
+                    f"Lower your 2026-2027 {short_loc} marginal tax bill with dedicated CPA tax planning, "
+                    "S-Corp and Notice 2020-75 PTET SALT shield elections, and monthly catch-up bookkeeping."
+                )
+                cta_text = f"Lower Your 2027 {short_loc} Tax Bill with Xendoo CPA"
+            elif any(tok in s_low for tok in ("1099", "s-corp", "self-employment", "qbi", "199a", "estimated-tax", "quarterly", "pass-through")):
+                badge = "1099 & S-Corp Tax Reduction CPA"
+                name = "Xendoo S-Corp & 1099 CPA Tax Advisory"
+                description = (
+                    "Cut self-employment and pass-through taxes with S-Corp reasonable salary optimization, "
+                    "IRC Section 199A QBI deduction tracking, and quarterly CPA filings."
+                )
+                cta_text = "Cut Your 1099 & S-Corp Taxes with Xendoo CPA"
+            elif any(tok in s_low for tok in ("174", "r-and-d", "camt", "280g", "amt", "corporate", "saas", "runway", "qsbs", "1202")):
+                badge = "Corporate & R&D Tax Compliance CPA"
+                name = "Xendoo Corporate & R&D Tax CPA"
+                description = (
+                    "Automate IRC Section 174 R&D capitalization schedules, Form 6765 credit claims, "
+                    "and corporate tax provision workpapers with a dedicated CPA team."
+                )
+                cta_text = "Review Your Corporate Tax Shield with Xendoo CPA"
+            else:
+                badge = "Commercial Financials & Business Tax CPA"
+                name = "Xendoo Business Tax & CPA Bookkeeping"
+                description = (
+                    "Dedicated online bookkeeping, CPA-reviewed financial statements, and proactive "
+                    "federal and state business tax reduction for growing businesses."
+                )
+                cta_text = "Optimize Business Taxes & Books with Xendoo CPA"
+    elif prop == "prexvo" and pk == "splash_financial":
+        if "tax-bomb" in s_low or "insolvency" in s_low:
+            badge = "Skip the 2026 Forgiveness Tax Bomb (2-Min Soft Check)"
+            name = "Splash Financial Multi-Lender Refinance (0 Credit Impact)"
+            cta_text = "Check Lower Fixed Refi Rates with Splash Financial"
+        else:
+            badge = "Beat Federal IDR Interest (2-Min Soft Credit Check)"
+            name = "Splash Financial Multi-Lender Refinance (0 Credit Impact)"
+            cta_text = "Compare Lower Fixed Refi Rates with Splash Financial"
+
+    return {
+        "badge": badge,
+        "name": name,
+        "description": description,
+        "cta_text": cta_text,
+    }
+
+
 def bind_asset_partner_roster(
     property_id: str,
     slug: str,
@@ -7578,11 +7675,18 @@ def bind_asset_partner_roster(
         tier_role = "primary" if idx == 0 else ("secondary" if idx < len(selected_keys) - 1 else "fallback")
         slot_default = "calculator_primary_cta" if idx == 0 else "partner_matrix_card"
         sub_default = f"{slug_id}_card_{idx + 1}"
+        ctx_copy = resolve_contextual_partner_offer_copy(
+            partner_key=pk,
+            p_obj=p_obj,
+            slug=s_norm,
+            vertical_family=vertical_family,
+            property_id=prop,
+        )
 
         roster_offers.append({
             "partner_key": pk,
-            "name": p_obj.name,
-            "partner_name": p_obj.name,
+            "name": ctx_copy["name"],
+            "partner_name": ctx_copy["name"],
             "company_brand": company_brand,
             "tier_role": tier_role,
             "status": "live",
@@ -7598,9 +7702,9 @@ def bind_asset_partner_roster(
             "empirical_cta_ctr": float(r_meta.get("cta_ctr", 0.0) or 0.0),
             "outbound_clicks": int(r_meta.get("outbound_clicks", 0) or 0),
             "estimated_revenue_yield_usd": round(float(r_meta.get("estimated_revenue_yield_usd", 0.0) or 0.0) * emp_fit_scale, 2),
-            "badge": p_obj.badge,
-            "description": p_obj.description,
-            "cta_text": p_obj.cta_text,
+            "badge": ctx_copy["badge"],
+            "description": ctx_copy["description"],
+            "cta_text": ctx_copy["cta_text"],
             "default_url": p_obj.default_url,
             "redirect_path": f"/r/{pk}",
             "attributed_href": f"/r/{pk}?source_tool={slug_id}&subid={sub_default}&cta_slot={slot_default}",
