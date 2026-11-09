@@ -11613,8 +11613,10 @@ def sync_tenant_edge_redirect_function(
                     )
             elif prop_clean == "profithelm":
                 ph_gsc_redirects = [
-                    '    "/tools/kalshi-prediction-market-arbitrage-strategy": "/tools/prediction-market-arbitrage-kelly-calculator/",',
-                    '    "/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-arbitrage-kelly-calculator/",',
+                    '    "/tools/kalshi-prediction-market-arbitrage-strategy": "/tools/prediction-market-odds/",',
+                    '    "/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-odds/",',
+                    '    "/tools/prediction-market-arbitrage-kelly-calculator": "/tools/prediction-market-odds/",',
+                    '    "/tools/prediction-market-arbitrage-kelly-calculator/": "/tools/prediction-market-odds/",',
                     '    "/tools/query-two-buildable": "/tools/",',
                     '    "/tools/query-two-buildable/": "/tools/",',
                     '    "/tools/irs-2027-tax-rates": "/tools/irs-2027-tax-brackets/",',
@@ -11623,8 +11625,10 @@ def sync_tenant_edge_redirect_function(
                     '    "/tools/section-1031-exchange-deferral/": "/tools/section-1031-calculator/",',
                     '    "/tools/prediction-market-odds-scenario-comparison-model": "/tools/prediction-market-odds/",',
                     '    "/tools/prediction-market-odds-scenario-comparison-model/": "/tools/prediction-market-odds/",',
-                    '    "/tools/saas-burn-multiple-benchmarks-2026": "/tools/saas-burn-multiple-runway/",',
-                    '    "/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-burn-multiple-runway/",',
+                    '    "/tools/saas-burn-multiple-benchmarks-2026": "/tools/saas-runway-calculator/",',
+                    '    "/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-runway-calculator/",',
+                    '    "/tools/saas-burn-multiple-runway": "/tools/saas-runway-calculator/",',
+                    '    "/tools/saas-burn-multiple-runway/": "/tools/saas-runway-calculator/",',
                     '    "/tools/section-1031-calculator-scenario-comparison-model": "/tools/section-1031-calculator/",',
                     '    "/tools/section-1031-calculator-scenario-comparison-model/": "/tools/section-1031-calculator/",',
                 ]
@@ -11632,6 +11636,29 @@ def sync_tenant_edge_redirect_function(
                     mw_new = mw_new.replace(
                         "const legacySaaSRedirects = {\n",
                         "const legacySaaSRedirects = {\n" + "\n".join(ph_gsc_redirects) + "\n",
+                        1,
+                    )
+                mw_new = mw_new.replace(
+                    '": "/tools/prediction-market-arbitrage-kelly-calculator/",',
+                    '": "/tools/prediction-market-odds/",',
+                ).replace(
+                    '": "/tools/saas-burn-multiple-runway/",',
+                    '": "/tools/saas-runway-calculator/",',
+                )
+                if '"/tools/prediction-market-arbitrage-kelly-calculator"' not in mw_new and '"/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-odds/",\n' in mw_new:
+                    mw_new = mw_new.replace(
+                        '    "/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-odds/",\n',
+                        '    "/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-odds/",\n'
+                        '    "/tools/prediction-market-arbitrage-kelly-calculator": "/tools/prediction-market-odds/",\n'
+                        '    "/tools/prediction-market-arbitrage-kelly-calculator/": "/tools/prediction-market-odds/",\n',
+                        1,
+                    )
+                if '"/tools/saas-burn-multiple-runway"' not in mw_new and '"/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-runway-calculator/",\n' in mw_new:
+                    mw_new = mw_new.replace(
+                        '    "/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-runway-calculator/",\n',
+                        '    "/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-runway-calculator/",\n'
+                        '    "/tools/saas-burn-multiple-runway": "/tools/saas-runway-calculator/",\n'
+                        '    "/tools/saas-burn-multiple-runway/": "/tools/saas-runway-calculator/",\n',
                         1,
                     )
 

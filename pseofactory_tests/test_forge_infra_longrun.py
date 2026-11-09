@@ -333,7 +333,7 @@ def test_build_edge_routes_json_and_sync_tenant_edge_redirect_function(tmp_path:
     (repo_dir / "functions" / "r").mkdir(parents=True)
     (repo_dir / "dist" / "functions").mkdir(parents=True)
     (repo_dir / "functions" / "_middleware.js").write_text(
-        "export async function onRequest(context) {\n  const url = new URL(context.request.url);\n  const pathname = url.pathname;\n  const response = await context.next();\n  return response;\n}\n",
+        "export async function onRequest(context) {\n  const url = new URL(context.request.url);\n  const pathname = url.pathname;\n  const legacySaaSRedirects = {\n    \"/dashboard\": \"/tools/\",\n  };\n  const response = await context.next();\n  return response;\n}\n",
         encoding="utf-8",
     )
 
@@ -343,6 +343,9 @@ def test_build_edge_routes_json_and_sync_tenant_edge_redirect_function(tmp_path:
     mw_updated = (repo_dir / "functions" / "_middleware.js").read_text(encoding="utf-8")
     assert 'rel="canonical"' in mw_updated
     assert "https://profithelm.com${pathname}" in mw_updated
+    assert 'if (hostname === "www.profithelm.com")' in mw_updated
+    assert '"/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-odds/"' in mw_updated
+    assert '"/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-runway-calculator/"' in mw_updated
 
 
 def test_infra_audit_main_executes_single_pass() -> None:
