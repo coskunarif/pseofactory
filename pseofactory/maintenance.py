@@ -1199,6 +1199,12 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
                 res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
+                    try:
+                        RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+                            self._dist_dir, self._property_id, canonical_base=self.canonical_base
+                        )
+                    except Exception:
+                        pass
                     return True
                 if res.returncode == 75:
                     raise LockContentionError(
@@ -1257,6 +1263,12 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["GAINHELM_CHECK_QUEUE"] = "0"
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
+                    try:
+                        RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+                            self._dist_dir, self._property_id, canonical_base=self.canonical_base
+                        )
+                    except Exception:
+                        pass
                     return True
                 if res.returncode == 75:
                     raise LockContentionError(
@@ -12174,11 +12186,42 @@ class RetroReflectionEngine:
                         if target_sm_name not in updated_files:
                             updated_files.append(target_sm_name)
 
+            tools_dir_sm = d / "tools"
+            indexable_tool_urls: List[str] = []
+            if tools_dir_sm.is_dir():
+                for t_sub in sorted(tools_dir_sm.iterdir()):
+                    if not t_sub.is_dir():
+                        continue
+                    t_idx = t_sub / "index.html"
+                    if t_idx.is_file():
+                        try:
+                            raw_t = t_idx.read_text(encoding="utf-8", errors="ignore")
+                            if not re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', raw_t, re.I):
+                                indexable_tool_urls.append(f"{base}/tools/{t_sub.name}/")
+                        except Exception:
+                            pass
+
             for sm_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml"):
                 sm_file = d / sm_name
                 if not sm_file.is_file():
                     continue
                 orig_sm = sm_file.read_text(encoding="utf-8")
+                if indexable_tool_urls and "</urlset>" in orig_sm and sm_name in ("sitemap.xml", "sitemap-hubs.xml"):
+                    sm_mod = orig_sm
+                    for t_url in indexable_tool_urls:
+                        if f"<loc>{t_url}</loc>" not in sm_mod:
+                            entry_xml = (
+                                f"  <url>\n"
+                                f"    <loc>{t_url}</loc>\n"
+                                f"    <lastmod>{datetime.now(timezone.utc).strftime('%Y-%m-%d')}</lastmod>\n"
+                                f"  </url>\n"
+                            )
+                            sm_mod = sm_mod.replace("</urlset>", entry_xml + "</urlset>", 1)
+                    if sm_mod != orig_sm:
+                        sm_file.write_text(sm_mod, encoding="utf-8")
+                        orig_sm = sm_mod
+                        if sm_name not in updated_files:
+                            updated_files.append(sm_name)
                 if "<url>" not in orig_sm or "<lastmod>" not in orig_sm:
                     continue
                 url_blocks = re.findall(r"<url>.*?</url>", orig_sm, flags=re.DOTALL)

@@ -1638,7 +1638,14 @@ class DepartmentHandoffChainVerifier:
                             timeout=5,
                         )
                         if head_lock.returncode == 0 and head_lock.stdout.strip():
-                            raw_lock_text = head_lock.stdout
+                            try:
+                                head_data = json.loads(head_lock.stdout)
+                                h_eng = str(head_data.get("engine_hash") or "")
+                                h_sub = str(head_data.get("substrate_hash") or "")
+                                if len(h_eng) == 64 and h_eng == h_sub:
+                                    raw_lock_text = head_lock.stdout
+                            except Exception:
+                                pass
                     lock_data = json.loads(raw_lock_text)
                     lock_hash = str(lock_data.get("engine_hash") or "")
                     sub_hash = str(lock_data.get("substrate_hash") or "")
