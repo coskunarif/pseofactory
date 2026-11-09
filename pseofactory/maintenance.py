@@ -8195,6 +8195,22 @@ class RetroReflectionEngine:
             "economic_dataset": "HRSA Bureau of Health Workforce HPSA Tier Award Schedule & FRED SLSTTOTAL Series",
             "sample_calculation": "Primary care clinician at a Tier 1 HPSA site with $165,000.00 in qualifying health professions debt: $75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at $20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net payoff obligation is $52,500.00.",
         },
+        "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator": {
+            "model_name": "Prexvo-HRSA-NHSC-HPSL-Loan-Repayment-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(max(0.0, qualifying_health_loan_balance - nhsc_two_year_award - (continuation_years * annual_continuation_award)) * (1.0 + (hpsl_interest_rate_pct / 100.0)), 2)",
+            "inputs": {
+                "qualifying_health_loan_balance": 165000.0,
+                "nhsc_two_year_award": 75000.0,
+                "continuation_years": 2.0,
+                "annual_continuation_award": 20000.0,
+                "hpsl_interest_rate_pct": 5.0,
+            },
+            "published_output": 52500.0,
+            "statutory_authority": "Public Health Service Act Section 338B (42 U.S.C. 254l-1 NHSC LRP) & Title VII Section 723 (42 U.S.C. 292s HPSL)",
+            "economic_dataset": "HRSA Bureau of Health Workforce HPSA Tier Award Schedule & FRED SLSTTOTAL Series",
+            "sample_calculation": "Primary care clinician at a Tier 1 HPSA site with $165,000.00 in qualifying health professions debt: $75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at $20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net payoff obligation is $52,500.00.",
+        },
     }
 
     PROFITHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8486,6 +8502,30 @@ class RetroReflectionEngine:
             "economic_dataset": "IRS SOI Corporate Executive Compensation Series & FRED DGS10 Treasury AFR Series",
             "sample_calculation": "Disqualified M&A executive receiving $1,850,000.00 in change-in-control parachute payments with a 5-year average W-2 base amount of $450,000.00 (3x safe harbor threshold = $1,350,000.00): excess parachute payment above 1x base amount is $1,400,000.00, triggering a 20% IRC Section 4999 excise tax of $280,000.00 and corporate deduction disallowance.",
         },
+        "corporate-amt-camt-book-income-minimum-tax-calculator": {
+            "model_name": "CorporateAMTCAMTBookIncomeModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(max(0.0, (afsi_book_income * 0.15) - regular_corporate_tax), 2)",
+            "inputs": {"afsi_book_income": 1200000000, "regular_corporate_tax": 145000000},
+            "published_output": 35000000.0,
+            "statutory_authority": "IRC Section 55(b)(2) & Section 56A Corporate Alternative Minimum Tax",
+            "economic_dataset": "FRED CPILFESL Series",
+            "sample_calculation": "AFSI 1,200,000,000 at 15 percent tentative CAMT minus 145,000,000 regular tax yields 35,000,000.0 net CAMT liability",
+        },
+        "section-280g-golden-parachute-excise-tax-safe-harbor-calculator": {
+            "model_name": "Section280GGoldenParachuteSafeHarborModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(max(0.0, total_parachute_payment - five_year_avg_w2_base_amount) * (excise_tax_rate_pct / 100.0), 2)",
+            "inputs": {
+                "total_parachute_payment": 2100000.0,
+                "five_year_avg_w2_base_amount": 550000.0,
+                "excise_tax_rate_pct": 20.0,
+            },
+            "published_output": 310000.0,
+            "statutory_authority": "26 U.S.C. Section 280G Golden Parachute Disallowance & IRC Section 4999 20% Excise Tax",
+            "economic_dataset": "BLS OEWS Chief Executives SOC 11-1011 Wage Series & FRED CPILFESL Series",
+            "sample_calculation": "Executive with $550,000.00 five-year average W-2 base amount (3x safe harbor threshold = $1,650,000.00) receiving $2,100,000.00 in change-in-control parachute payments triggers $1,550,000.00 in excess parachute payments ($2,100,000 - $550,000 base amount) and a 20% IRC Section 4999 excise tax of $310,000.00.",
+        },
     }
 
     GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
@@ -8668,6 +8708,23 @@ class RetroReflectionEngine:
             "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
             "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
             "sample_calculation": "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation ($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost.",
+        },
+        "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
+            "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
+            "inputs": {
+                "high_risk_ai_systems": 2.0,
+                "notified_body_audit_fee": 28500.0,
+                "annex_iv_technical_dossier_cost": 18000.0,
+                "qms_article_17_setup_fee": 24000.0,
+                "validation_hours": 140.0,
+                "ml_compliance_hourly_rate": 150.0,
+            },
+            "published_output": 120000.0,
+            "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
+            "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
+            "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
         },
         "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
             "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
@@ -9104,7 +9161,7 @@ class RetroReflectionEngine:
                 else:
                     exp_disp = f"{exp_pub:,.2f}" if not exp_pub.is_integer() else f"{exp_pub:,.0f}"
                 script_m = re.search(
-                    r'<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
+                    r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
                     html_content,
                     re.DOTALL | re.IGNORECASE,
                 )
@@ -9168,6 +9225,15 @@ class RetroReflectionEngine:
                             if 'class="scenario-presets-bar"' in html_content and "deep_link_scenario_presets" not in missing:
                                 missing.append("deep_link_scenario_presets")
                     except ValueError:
+                        if "output_value" not in missing:
+                            missing.append("output_value")
+                else:
+                    out_m_plain = re.search(
+                        r'<strong[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>\s*([^<]+)<',
+                        html_content,
+                        re.IGNORECASE,
+                    )
+                    if out_m_plain and out_m_plain.group(1).strip() != exp_disp:
                         if "output_value" not in missing:
                             missing.append("output_value")
                 scen_m = re.search(
@@ -9470,7 +9536,7 @@ class RetroReflectionEngine:
         else:
             raw = {}
             script_m = re.search(
-                r'<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
+                r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
                 html_content,
                 re.DOTALL | re.IGNORECASE,
             )
@@ -10114,9 +10180,16 @@ class RetroReflectionEngine:
                     repaired.append("output_value")
         if "output_value" in missing:
             if 'class="output-value"' in updated:
+                if 'data-baseline-output=' in updated:
+                    updated = re.sub(
+                        r'(<strong[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*data-baseline-output=["\'])[^"\']+(["\'][^>]*>)[\s\S]*?(</strong>)',
+                        rf"\g<1>{pub_out}\g<2>{display_out}\g<3>",
+                        updated,
+                        flags=re.IGNORECASE,
+                    )
                 updated = re.sub(
-                    r'(<strong[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*data-baseline-output=["\'])[^"\']+(["\'][^>]*>)[\s\S]*?(</strong>)',
-                    rf"\g<1>{pub_out}\g<2>{display_out}\g<3>",
+                    r'(<strong[^>]*class=["\']output-value["\']>)\s*[^<]+(</strong>)',
+                    rf'<strong class="output-value" data-baseline-output="{pub_out}">{display_out}\g<2>',
                     updated,
                     flags=re.IGNORECASE,
                 )
@@ -10247,12 +10320,12 @@ class RetroReflectionEngine:
                 f'    </script>'
             )
             if re.search(
-                r'<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>[\s\S]*?</script>',
+                r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>[\s\S]*?</script>',
                 updated,
                 flags=re.IGNORECASE,
             ):
                 updated = re.sub(
-                    r'<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>[\s\S]*?</script>',
+                    r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>[\s\S]*?</script>',
                     lambda _m: new_manifest_tag,
                     updated,
                     count=1,

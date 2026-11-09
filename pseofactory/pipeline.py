@@ -1563,20 +1563,17 @@ def execute_autonomous_daily_trend_page_build(
                     "action": "BUILD_PAGE",
                     "status": "PENDING",
                     "composite_profit_yield": 94.5,
-                    "statutory_authority": "IRC Section 55(b)(2) & Section 56A (15% Corporate Alternative Minimum Tax on Adjusted Financial Statement Income)",
-                    "economic_dataset": "IRS SOI Corporate Tax Return Benchmark & FRED CPILFESL Series",
-                    "model_name": "ProfitHelm-IRC-55-56A-CAMT-AFSI-Minimum-Tax-Model-2026",
-                    "formula": "round(max(0.0, (adjusted_financial_statement_income * 0.15) - camt_foreign_tax_credit - regular_corporate_tax_plus_beat), 2)",
+                    "statutory_authority": "IRC Section 55(b)(2) & Section 56A Corporate Alternative Minimum Tax",
+                    "economic_dataset": "FRED CPILFESL Series",
+                    "model_name": "CorporateAMTCAMTBookIncomeModel",
+                    "formula": "round(max(0.0, (afsi_book_income * 0.15) - regular_corporate_tax), 2)",
                     "inputs": {
-                        "adjusted_financial_statement_income": 1250000000.0,
-                        "camt_foreign_tax_credit": 12000000.0,
-                        "regular_corporate_tax_plus_beat": 75000000.0,
+                        "afsi_book_income": 1200000000.0,
+                        "regular_corporate_tax": 145000000.0,
                     },
-                    "published_output": 100500000.0,
+                    "published_output": 35000000.0,
                     "sample_calculation": (
-                        "Applicable corporation with $1,250,000,000.00 in 3-year average Adjusted Financial Statement Income (AFSI): "
-                        "15% tentative CAMT ($187,500,000.00) less $12,000,000.00 CAMT foreign tax credit less $75,000,000.00 "
-                        "regular corporate income tax and BEAT = $100,500,000.00 net IRC Section 55(b)(2) CAMT liability."
+                        "AFSI 1,200,000,000 at 15 percent tentative CAMT minus 145,000,000 regular tax yields 35,000,000.0 net CAMT liability"
                     ),
                 },
                 {
@@ -1901,6 +1898,9 @@ def execute_autonomous_daily_trend_page_build(
             with adp.scoped_environment():
                 compiled_res = compile_high_effort_page(candidate_spec)
             html_out = compiled_res["html"]
+            if t_id == "profithelm":
+                html_out = html_out.replace('href="/methodology/"', 'href="/about/"')
+                html_out = html_out.replace("https://profithelm.com/methodology/", "https://profithelm.com/about/")
             manifest_out = compiled_res.get("manifest", {})
             try:
                 from pseofactory.maintenance import RetroReflectionEngine
@@ -2036,7 +2036,7 @@ def execute_autonomous_daily_trend_page_build(
                 if headers_file.is_file():
                     for ln in headers_file.read_text(encoding="utf-8").splitlines():
                         ln_s = ln.strip()
-                        if ln_s.startswith("/tools/"):
+                        if not ln.startswith((" ", "\t")) and ln_s.startswith("/"):
                             existing_routes.append(ln_s)
                 all_routes = list(dict.fromkeys(existing_routes + [route_path]))
                 headers_file.write_text(
