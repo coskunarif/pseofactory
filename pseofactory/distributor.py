@@ -1484,6 +1484,15 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else ("sprs_max_score" if norm_prop == "gainhelm" else "section_179_limit_2026")
         claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else 2560000)
         q_params = dict(inputs)
+    elif norm_prop == "prexvo" and "refinance" in slug:
+        crefin = CURATED_TOOL_CALCULATION_PROOFS["student-loan-refinance-break-even-calculator"]
+        formula = str(crefin["formula"])
+        inputs = dict(crefin["inputs"])
+        published_output = float(crefin["published_output"])
+        sample_calc = str(crefin["sample_calculation"])
+        claim_key = str(crefin.get("statutory_claim_key", "pslf_qualifying_payments"))
+        claim_val = crefin.get("statutory_claim_value", 120)
+        q_params = dict(crefin["query_params"])
     elif norm_prop == "prexvo":
         formula = "round(monthly_interest - interest_subsidy, 2)"
         inputs = {"monthly_interest": 325.0, "interest_subsidy": 76.77}
@@ -1568,6 +1577,9 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
             claim_key = "standard_deduction_2026_single"
             claim_val = 16100
             q_params = {"income": 125000, "status": "single", "state": "CA"}
+
+    if norm_prop == "prexvo" and "refinance" in slug and "waives federal protections" not in sample_calc.lower():
+        sample_calc = f"{sample_calc.rstrip('.')}; refinancing federal student loans permanently waives federal protections including IDR subsidies and PSLF"
 
     evaluated = float(safe_eval_mathematical_formula(formula, {str(k): float(v) for k, v in inputs.items()}))
     if abs(evaluated - published_output) > 0.05:
@@ -6144,17 +6156,21 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
 
     is_prexvo = False
     is_gainhelm = False
+    is_lienbond = False
     if str(property_id).lower() == "prexvo":
         is_prexvo = True
     elif str(property_id).lower() == "gainhelm":
         is_gainhelm = True
+    elif str(property_id).lower() == "lienbond":
+        is_lienbond = True
     elif str(property_id).lower() == "profithelm":
         is_prexvo = False
     else:
         is_prexvo = any(t.get("slug") == slug for t in PREXVO_DEFAULT_TOOLS)
         is_gainhelm = any(t.get("slug") == slug for t in GAINHELM_DEFAULT_TOOLS)
+        is_lienbond = any(t.get("slug") == slug for t in LIENBOND_DEFAULT_TOOLS)
 
-    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else "profithelm")
+    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
     out_fmt = proof["published_output_formatted"]
     param_url = proof["parameterized_url"]
@@ -6224,7 +6240,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                 "Minimizing monthly qualifying payments under Title IV rules directly maximizes the tax-free balance discharged at payment 120. "
                 "Prexvo simulates multi-year repayment trajectories to help borrowers identify the lowest lifetime repayment cost without fees."
             )
-        elif slug == "student-loan-refinance-break-even-calculator":
+        elif "refinance" in slug:
             seg1_script = (
                 f"Under Title IV 34 CFR Part 685 and Truth in Lending 12 CFR Part 1026, refinancing federal student loans permanently waives federal protections including IDR subsidies and PSLF. "
                 f"Comparing private amortization interest savings against forfeited federal benefits verifies a {out_fmt} benchmark. "
@@ -6354,8 +6370,8 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
             },
         ]
     else:
-        brand_name = "ProfitHelm"
-        canonical_base = "https://profithelm.com"
+        brand_name = "LienBond" if is_lienbond else "ProfitHelm"
+        canonical_base = "https://lienbond.com" if is_lienbond else "https://profithelm.com"
         ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
         ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Core Mathematical Modeling & Rate Calculations"
         ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Tier Scenario Forecasting & Thresholds"
@@ -7983,9 +7999,17 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
 }
 
 
+def _get_prexvo_tool_scenario(slug: str) -> Dict[str, Any]:
+    if slug in PREXVO_TOOL_SCENARIOS:
+        return PREXVO_TOOL_SCENARIOS[slug]
+    if "refinance" in slug:
+        return PREXVO_TOOL_SCENARIOS["student-loan-refinance-break-even-calculator"]
+    return PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"]
+
+
 def _generate_prexvo_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=x&utm_medium=social&utm_campaign={slug}"
     raw_post = f"{scen['x_hook']}\n\nGrounded in Title IV 34 CFR 685 and HHS data.\n{deep_url}"
@@ -8025,7 +8049,7 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     except Exception:
         pass
     slug = tool["slug"]
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
     raw_text = (
@@ -8067,13 +8091,15 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 
 def _generate_prexvo_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
     raw_text = f"{scen['fb_body']}\n\nRun your numbers here: {deep_url}"
     clean_content = _sanitize_distribution_text(raw_text)
     fc_url = _with_first_comment_utm(deep_url, platform="facebook")
     first_comment = f"Interactive Title IV scenario calculator (pre-filled, zero login): {fc_url}"
+    if "refinance" in slug:
+        first_comment += "\n\nMandatory Regulatory Disclosure: Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
     teaser_content = _build_zero_link_teaser_content(clean_content, platform="facebook", brand="Prexvo")
     assert_no_forbidden_dashes(clean_content, context=f"{slug} facebook")
     assert_facebook_post(teaser_content, first_comment, context=f"{slug} facebook teaser")
@@ -8091,7 +8117,7 @@ def _generate_prexvo_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 def _generate_prexvo_reddit(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=reddit&utm_medium=social&utm_campaign={slug}"
     text = (
@@ -8113,7 +8139,7 @@ def _generate_prexvo_reddit(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
     if slug in ("ibr-hardship-cap-calculator", "paye-sunset-calculator"):
@@ -8141,7 +8167,7 @@ def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
             "Under Title IV 34 CFR 685.219 and IRC Section 108(f), Public Service Loan Forgiveness discharges 100% of remaining Direct Loan debt tax-free "
             "after 120 qualifying monthly payments. "
         )
-    elif slug == "student-loan-refinance-break-even-calculator":
+    elif "refinance" in slug:
         statutory_footer = (
             "Under Title IV 34 CFR Part 685 and Truth in Lending 12 CFR Part 1026, refinancing federal student loans permanently waives federal protections "
             "including IDR interest subsidies and 120-payment PSLF discharge. "
@@ -8417,7 +8443,7 @@ def _generate_prexvo_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str,
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
     proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=linkedin_pulse&utm_medium=article&utm_campaign={slug}"
     article = (
@@ -8472,7 +8498,7 @@ def _generate_prexvo_substack(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
     proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
-    scen = PREXVO_TOOL_SCENARIOS.get(slug, PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"])
+    scen = _get_prexvo_tool_scenario(slug)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=substack&utm_medium=article&utm_campaign={slug}"
     sensitivity_rows = _build_sensitivity_markdown_rows(proof)
@@ -8540,11 +8566,14 @@ def _generate_prexvo_newsletter_hook(tool: Dict[str, Any], url: str) -> Dict[str
 
 
 def _generate_prexvo_regulatory_lead_magnet(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    slug = tool.get("slug", "")
     proof = _resolve_tool_calculation_proof(tool, property_id="prexvo")
     deep_url = proof["parameterized_url"]
     content = _sanitize_distribution_text(
         f"Download the 2026 Title IV Student Loan Statutory Decision Matrix ({proof['scenario_label']}: {proof['published_output_formatted']}): {deep_url}"
     )
+    if "refinance" in slug:
+        content += "\n\nMandatory Regulatory Disclosure: Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
     return {"content": content, "target_url": deep_url}
 
 

@@ -2402,6 +2402,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "ICR, PSLF Buyback, Parent PLUS, and Refinance analysis.",
                     " Grounded in federal Title IV 34 CFR Part 685 schedules.",
                 )
+            if ("physician" in q_low or "resident" in q_low) and ("refinance" in q_low or "rap" in q_low):
+                return (
+                    "Calculate physician and medical resident student loan refinance savings vs 2026 Title IV "
+                    "RAP unpaid interest waivers and PSLF discharge.",
+                    " Verified under Title IV 34 CFR Part 685 and 12 CFR Part 1026.",
+                )
             if "refinance" in q_low or "break-even" in q_low or "break even" in q_low:
                 return (
                     "Calculate student loan refinance APR savings, monthly payment reductions, "
