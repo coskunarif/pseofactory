@@ -9453,6 +9453,7 @@ class RetroReflectionEngine:
             or "hydrateInputsFromLocationSearch" not in html_content
             or "resolveBlueprintStatusNode" not in html_content
             or "appendActionLink" not in html_content
+            or '["input-med_school_loan_balance", "serp-loan-balance"]' not in html_content
             or "renderPlaybookAndFulfillmentDrawer" not in html_content
             or "qThreshAmt" not in html_content
             or "evalProgressiveFederalTax" not in html_content
@@ -12360,7 +12361,7 @@ class RetroReflectionEngine:
                         "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
                         for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)
                     )
-                    or ('id="pseo-runtime-sync"' in content and ("resolveBlueprintStatusNode" not in content or "appendActionLink" not in content))
+                    or ('id="pseo-runtime-sync"' in content and ("resolveBlueprintStatusNode" not in content or "appendActionLink" not in content or '["input-med_school_loan_balance", "serp-loan-balance"]' not in content))
                 ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue

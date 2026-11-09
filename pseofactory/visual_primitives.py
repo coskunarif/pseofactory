@@ -1371,9 +1371,17 @@ def _render_runtime_sync_workbench_js() -> str:
           ["crypto-short-term", "serp-crypto-proceeds"],
           ["field-gross_proceeds_1099da", "serp-crypto-proceeds"],
           ["input-agi", "serp-loan-agi"],
+          ["input-pgy_resident_agi", "serp-loan-agi"],
           ["input-loan_balance", "serp-loan-balance"],
+          ["input-med_school_loan_balance", "serp-loan-balance"],
+          ["input-qualifying_health_loan_balance", "serp-loan-balance"],
           ["field-agi", "serp-loan-agi"],
           ["field-loan_balance", "serp-loan-balance"],
+          ["input-total_parachute_payment", "serp-b2b-gross"],
+          ["input-five_year_avg_w2_base_amount", "serp-b2b-deduction"],
+          ["input-outside_securities_counsel_retainer", "serp-b2b-gross"],
+          ["input-unpaid_subcontract_balance", "serp-b2b-gross"],
+          ["input-original_prime_contract_price", "serp-b2b-deduction"],
           ["input-gross_amount", "serp-tax-gross"],
           ["input-gross_amount", "serp-179-cost"],
           ["input-gross_amount", "serp-1031-rel-debt"],
@@ -1778,8 +1786,8 @@ def _render_runtime_sync_workbench_js() -> str:
           var annRap = rapMo * 12;
           var annRet = Math.max(0, bAgi-annRap);
           updateSerpSvgChart(annRet, annRap, "Annual Retained Income", "Annual RAP Obligation");
-          if (lBal > 0) {
-            updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1), Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12)));
+          if (lBal > 0 || sAgi > 0) {
+            updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1) + mfsSaveYr, Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12) + Math.round(mfsSaveYr * 0.25)));
           }
         } else if (mode === "b2b" || mode === "cyber_grc" || mode === "surety_lien" || mode === "construction_surety_lien" || mode) {
           var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || (mode === "cyber_grc" ? "84000" : "450000")) || 0;
@@ -6008,6 +6016,7 @@ def normalize_html_visual_primitives(
                 or "data-offer-price-usd" not in sync_body
                 or "surety_lien" not in sync_body
                 or "btn-calc-result-quick-unlock" not in sync_body
+                or '["input-med_school_loan_balance", "serp-loan-balance"]' not in sync_body
                 or 'mode === "lienbond"' in sync_body
                 or "autoPrevBtn" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
