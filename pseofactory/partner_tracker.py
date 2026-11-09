@@ -4858,6 +4858,83 @@ def resolve_lead_monetization_offer(
     eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
 
     if sku_clean in (
+        "ph_instant_statutory_worksheet_19",
+        "px_instant_repayment_worksheet_19",
+        "gh_instant_compliance_worksheet_19",
+        "lb_instant_lien_bond_worksheet_19",
+    ):
+        quick_prefix_map = {
+            "px_instant_repayment_worksheet_19": (
+                "prexvo",
+                "https://prexvo.com",
+                "student-loan-refinance-break-even-calculator",
+                "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
+                "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026) & 34 CFR 685.209",
+                [
+                    "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
+                    "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
+                    "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
+                    "Machine-Readable Borrower Refinance Scenario Pack (JSON)",
+                ],
+            ),
+            "gh_instant_compliance_worksheet_19": (
+                "gainhelm",
+                "https://gainhelm.com",
+                "soc-2-audit-cost-calculator",
+                "GainHelm Instant Compliance Budget & Control Scoping Worksheet (PDF/CSV)",
+                "AICPA SSAE 18 (AT-C 205), ISO/IEC 27006-1:2024, 32 CFR Part 170 & 45 CFR 160.404",
+                [
+                    "Personalized Audit Readiness & Auditor-Day Scoping Worksheet (Print-Ready HTML/PDF)",
+                    "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
+                    "Multi-Framework Overlap & Evidence Readiness Checklist (HTML/PDF)",
+                    "Machine-Readable Security Governance Scenario Pack (JSON)",
+                ],
+            ),
+            "lb_instant_lien_bond_worksheet_19": (
+                "lienbond",
+                "https://lienbond.com",
+                "contractor-license-bond-cost-calculator-by-credit-score",
+                "LienBond Instant Surety Bond, Workers' Comp & Lien Deadline Worksheet (PDF/CSV)",
+                "40 U.S.C. 3131 (Miller Act), State Mechanics Lien Statutes, 29 CFR 5.5 & NCCI Manual",
+                [
+                    "Personalized Surety Premium, Workers' Comp Rate or State Lien Deadline Worksheet (Print-Ready HTML/PDF)",
+                    "Retainage, Bond Capacity & Payroll Class Code Reconciliation Schedule (CSV)",
+                    "State Preliminary Notice & Statutory Waiver Deadline Checklist (HTML/PDF)",
+                    "Machine-Readable Contractor Compliance Scenario Pack (JSON)",
+                ],
+            ),
+            "ph_instant_statutory_worksheet_19": (
+                "profithelm",
+                "https://profithelm.com",
+                "irs-2027-tax-brackets",
+                "ProfitHelm Instant 2026-2027 Statutory Tax & Depreciation Worksheet (PDF/CSV)",
+                "IRC Statutory Schedules, Rev. Proc. 2025-32, Section 179 & Section 1031 Rules",
+                [
+                    "Personalized Federal & State Statutory Tax or Depreciation Worksheet (Print-Ready HTML/PDF)",
+                    "Line-Item Marginal vs Effective Rate & Deduction Reconciliation Schedule (CSV)",
+                    "Quarterly Safe-Harbor Estimated Tax & Statutory Cutoff Checklist (HTML/PDF)",
+                    "Machine-Readable Scenario Parameter & Statutory Benchmark Pack (JSON)",
+                ],
+            ),
+        }
+        (
+            prop_clean,
+            canonical_domain,
+            default_quick_slug,
+            offer_title,
+            statutory_authority,
+            deliverables,
+        ) = quick_prefix_map[sku_clean]
+        if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
+            raise ValueError(
+                f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
+            )
+        offer_sku = sku_clean
+        offer_price_usd = 19.0
+        offer_price_cents = 1900
+        eff_slug_for_path = slug_clean if slug_clean not in ("index", "general") else default_quick_slug
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+    elif sku_clean in (
         "ph_verified_partner_slot",
         "px_verified_partner_slot",
         "gh_verified_partner_slot",
@@ -5184,6 +5261,20 @@ def resolve_post_calculation_upgrade_spec(
     eff_stat = str(statutory_authority or offer["statutory_authority"]).strip()
     eff_econ = str(economic_dataset or default_econ_ds).strip()
 
+    quick_sku_map = {
+        "prexvo": "px_instant_repayment_worksheet_19",
+        "gainhelm": "gh_instant_compliance_worksheet_19",
+        "lienbond": "lb_instant_lien_bond_worksheet_19",
+        "profithelm": "ph_instant_statutory_worksheet_19",
+    }
+    quick_sku = quick_sku_map.get(prop_clean, "ph_instant_statutory_worksheet_19")
+    quick_offer = resolve_lead_monetization_offer(
+        property_id=prop_clean,
+        tool_slug=slug_clean,
+        sku=quick_sku,
+        lead_id=f"lead_{prop_clean}_quick",
+    )
+
     return {
         "property_id": prop_clean,
         "tool_slug": slug_clean,
@@ -5191,6 +5282,12 @@ def resolve_post_calculation_upgrade_spec(
         "offer_title": offer["offer_title"],
         "offer_price_usd": offer["offer_price_usd"],
         "offer_price_cents": offer["offer_price_cents"],
+        "quick_unlock_sku": quick_offer["offer_sku"],
+        "quick_unlock_title": quick_offer["offer_title"],
+        "quick_unlock_price_usd": quick_offer["offer_price_usd"],
+        "quick_unlock_price_cents": quick_offer["offer_price_cents"],
+        "quick_unlock_checkout_url": quick_offer["checkout_url"],
+        "quick_unlock_fulfillment_url": quick_offer["fulfillment_url"],
         "statutory_authority": eff_stat,
         "economic_dataset": eff_econ,
         "regulator_name": regulator_name,

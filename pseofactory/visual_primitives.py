@@ -2189,6 +2189,18 @@ def _render_runtime_sync_events_js() -> str:
             if (uChkBtn && uSku) {
               uChkBtn.setAttribute("href", "/api/lead-capture?checkout=1&sku=" + encodeURIComponent(uSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&redirect=1");
             }
+            var uQuickSku = upgradeDrawer.getAttribute("data-quick-unlock-sku") || "";
+            var uQuickChkBtn = document.getElementById("btn-post-calc-quick-unlock-checkout");
+            if (uQuickChkBtn && uQuickSku) {
+              uQuickChkBtn.setAttribute("href", "/api/lead-capture?checkout=1&sku=" + encodeURIComponent(uQuickSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&redirect=1");
+            }
+            var rQuickChkBtn = document.getElementById("btn-calc-result-quick-unlock");
+            if (rQuickChkBtn) {
+              var rQuickSku = rQuickChkBtn.getAttribute("data-offer-sku") || uQuickSku;
+              if (rQuickSku) {
+                rQuickChkBtn.setAttribute("href", "/api/lead-capture?checkout=1&sku=" + encodeURIComponent(rQuickSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&redirect=1");
+              }
+            }
             if (uSku) {
               upgradeDrawer.setAttribute("data-datapack-url", "/api/lead-capture?fulfill=1&sku=" + encodeURIComponent(uSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&format=datapack");
             }
@@ -2859,7 +2871,7 @@ def _render_runtime_sync_events_js() -> str:
                 chkBtn.textContent = isLiveStripeRedirect
                   ? "Redirecting to Secure Stripe Checkout (" + sessId + ")..."
                   : "Checkout Settled & Data Pack Ready (" + sessId + ")";
-                var parentStep = chkBtn.closest("#post-calculation-upgrade-drawer, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
+                var parentStep = chkBtn.closest("#calc-result-quick-unlock-bar, #post-calculation-upgrade-drawer, #partner-quote-intake-step, #lead-capture-status, .lead-capture-form");
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                   parentStep.setAttribute("data-checkout-session-id", sessId);
@@ -3538,7 +3550,7 @@ def _render_runtime_sync_events_js() -> str:
           var upgDrawerNode = document.getElementById("post-calculation-upgrade-drawer");
           var pbPartnerEl = document.querySelector(".calc-inline-cta[data-partner], .affiliate-cta-section[data-partner], a[href^='/r/'][data-partner]");
           var pbPartnerKey = (qStepNode && qStepNode.getAttribute("data-partner-key")) || (pbPartnerEl && pbPartnerEl.getAttribute("data-partner")) || "";
-          var pbOfferSku = (upgDrawerNode && upgDrawerNode.getAttribute("data-offer-sku")) || "";
+          var pbOfferSku = pbForm.getAttribute("data-offer-sku") || (upgDrawerNode && upgDrawerNode.getAttribute("data-offer-sku")) || "";
           var leadPayload = {
             email: rawEmail,
             source: currentPath,
@@ -3594,6 +3606,16 @@ def _render_runtime_sync_events_js() -> str:
                 if (upgChkBtn) {
                   upgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
                   upgChkBtn.setAttribute("data-lead-email", rawEmail);
+                }
+                var qkChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
+                if (qkChkBtn1) {
+                  qkChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
+                  qkChkBtn1.setAttribute("data-lead-email", rawEmail);
+                }
+                var qkChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
+                if (qkChkBtn2) {
+                  qkChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
+                  qkChkBtn2.setAttribute("data-lead-email", rawEmail);
                 }
                 pbForm.setAttribute("data-submission-state", "success");
                 pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
@@ -3798,6 +3820,16 @@ def _render_runtime_sync_events_js() -> str:
               if (qUpgChkBtn) {
                 qUpgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
                 qUpgChkBtn.setAttribute("data-lead-email", emailVal);
+              }
+              var qQuickChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
+              if (qQuickChkBtn1) {
+                qQuickChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
+                qQuickChkBtn1.setAttribute("data-lead-email", emailVal);
+              }
+              var qQuickChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
+              if (qQuickChkBtn2) {
+                qQuickChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
+                qQuickChkBtn2.setAttribute("data-lead-email", emailVal);
               }
               qForm.setAttribute("data-submission-state", "success");
               if (drawer) {
@@ -5051,6 +5083,8 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             prop_id = "prexvo"
         elif "gainhelm.com" in updated:
             prop_id = "gainhelm"
+        elif "lienbond.com" in updated:
+            prop_id = "lienbond"
         else:
             prop_id = "profithelm"
     bp_match = re.search(r'<div\b[^>]*id=["\']saveable-decision-blueprint["\'][^>]*>', updated, re.IGNORECASE)
@@ -5149,6 +5183,86 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         if q_pos != -1:
             updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
             actions.append("commercial_affiliate_cta_fallback")
+
+    if has_quote_intake:
+        raw_q_amt = _extract_attr(q_tag, "data-calculated-amount") or ""
+        try:
+            q_calc_amt: Optional[float] = float(raw_q_amt) if raw_q_amt else None
+        except ValueError:
+            q_calc_amt = None
+        if 'id="calc-result-quick-unlock-bar"' not in updated:
+            from pseofactory.competitor import render_calc_result_quick_unlock_bar_html
+
+            quick_bar_html = render_calc_result_quick_unlock_bar_html(
+                slug=tool_slug,
+                property_id=prop_id,
+                baseline_amount=q_calc_amt,
+            )
+            if quick_bar_html:
+                stat_pos = updated.find('<div class="calc-statutory-box">')
+                if stat_pos != -1:
+                    updated = updated[:stat_pos] + quick_bar_html + "          " + updated[stat_pos:]
+                    actions.append("calc_result_quick_unlock_bar")
+                else:
+                    inline_cta_m = re.search(
+                        r'(<div\s+class=["\']calc-inline-cta["\'][^>]*>[\s\S]*?<a\s+[^>]*data-cta-slot=["\']calculator_result_inline["\'][^>]*>[\s\S]*?</a>\s*</div>)',
+                        updated,
+                        flags=re.IGNORECASE,
+                    )
+                    if inline_cta_m:
+                        ins_pos = inline_cta_m.end(1)
+                        updated = updated[:ins_pos] + "\n" + quick_bar_html + updated[ins_pos:]
+                        actions.append("calc_result_quick_unlock_bar")
+                    else:
+                        q_pos2 = updated.find('<div id="partner-quote-intake-step"')
+                        if q_pos2 != -1:
+                            updated = updated[:q_pos2] + quick_bar_html + updated[q_pos2:]
+                            actions.append("calc_result_quick_unlock_bar")
+
+        if (
+            'id="post-calculation-upgrade-drawer"' in updated
+            and 'id="btn-post-calc-quick-unlock-checkout"' not in updated
+        ):
+            quick_sku = (
+                "px_instant_repayment_worksheet_19"
+                if prop_id == "prexvo"
+                else (
+                    "gh_instant_compliance_worksheet_19"
+                    if prop_id == "gainhelm"
+                    else (
+                        "lb_instant_lien_bond_worksheet_19"
+                        if prop_id == "lienbond"
+                        else "ph_instant_statutory_worksheet_19"
+                    )
+                )
+            )
+            amt_int = int(round(q_calc_amt)) if q_calc_amt else 125000
+            if 'data-quick-unlock-sku=' not in updated:
+                updated = re.sub(
+                    r'(<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*?)(>)',
+                    rf'\1 data-quick-unlock-sku="{quick_sku}" data-quick-unlock-price="19"\2',
+                    updated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+            quick_btn_html = (
+                f'<a id="btn-post-calc-quick-unlock-checkout" '
+                f'href="/api/lead-capture?checkout=1&amp;sku={quick_sku}&amp;tool_slug={tool_slug}&amp;amount={amt_int}&amp;redirect=1" '
+                f'class="touch-target btn-primary post-calc-upgrade-btn" data-checkout-trigger="1" '
+                f'data-offer-sku="{quick_sku}" data-offer-price="19" data-cta-slot="post_calc_quick_unlock_cta" '
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; '
+                f'padding: 10px 18px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; '
+                f'font-size: 14px; text-decoration: none; cursor: pointer;">Instant PDF/CSV Statutory Worksheet ($19)</a>\n            '
+            )
+            updated, n_qbtn = re.subn(
+                r'(<a\b[^>]*id=["\']btn-post-calc-upgrade-checkout["\'][^>]*>)',
+                lambda m: quick_btn_html + m.group(1),
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if n_qbtn > 0:
+                actions.append("post_calc_quick_unlock_button")
 
     has_hero_section = bool(
         re.search(r'<section\b[^>]*class=["\'][^"\']*\bhero-section\b[^"\']*["\'][^>]*>', updated, re.IGNORECASE)
@@ -5723,6 +5837,7 @@ def normalize_html_visual_primitives(
                 or "playbook_csv_url" not in sync_body
                 or "data-offer-price-usd" not in sync_body
                 or "surety_lien" not in sync_body
+                or "btn-calc-result-quick-unlock" not in sync_body
                 or 'mode === "lienbond"' in sync_body
                 or "autoPrevBtn" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body

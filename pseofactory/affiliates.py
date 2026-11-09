@@ -7556,6 +7556,15 @@ def bind_asset_partner_roster(
             query=query,
             page_archetype=resolved_archetype,
         )
+        is_non_hr_rippling = pk == "rippling" and vertical_family in (
+            "federal_state_tax_brackets",
+            "section_179_equipment_capex",
+            "1031_like_kind_exchange",
+            "rd_section_174_bookkeeping",
+        )
+        if is_non_hr_rippling:
+            model_fit_mult = round(model_fit_mult * 0.45, 4)
+        emp_fit_scale = 0.0 if is_non_hr_rippling else 1.0
         bounty_mid = float(
             r_meta.get("bounty_midpoint_usd")
             or model_spec.get("ltv_bounty_equivalent_usd")
@@ -7584,10 +7593,10 @@ def bind_asset_partner_roster(
             "bounty_midpoint_usd": round(bounty_mid, 2),
             "expected_epc_usd": expected_epc,
             "yield_score": round(base_yield * intent_multiplier * model_fit_mult, 2),
-            "empirical_erpm_usd": float(r_meta.get("empirical_erpm_usd", 0.0) or 0.0),
+            "empirical_erpm_usd": round(float(r_meta.get("empirical_erpm_usd", 0.0) or 0.0) * emp_fit_scale, 2),
             "empirical_cta_ctr": float(r_meta.get("cta_ctr", 0.0) or 0.0),
             "outbound_clicks": int(r_meta.get("outbound_clicks", 0) or 0),
-            "estimated_revenue_yield_usd": float(r_meta.get("estimated_revenue_yield_usd", 0.0) or 0.0),
+            "estimated_revenue_yield_usd": round(float(r_meta.get("estimated_revenue_yield_usd", 0.0) or 0.0) * emp_fit_scale, 2),
             "badge": p_obj.badge,
             "description": p_obj.description,
             "cta_text": p_obj.cta_text,

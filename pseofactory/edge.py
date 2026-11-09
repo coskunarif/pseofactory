@@ -3862,6 +3862,21 @@ const LIENBOND_TOOLKIT_OFFERS = {
       "Signed Workers' Comp Premium Audit & Experience Rating Verification Manifest (JSON)",
     ],
   },
+  lb_instant_lien_bond_worksheet_19: {
+    sku: "lb_instant_lien_bond_worksheet_19",
+    title: "LienBond Instant Surety Bond, Workers' Comp & Lien Deadline Worksheet (PDF/CSV)",
+    price_usd: 19,
+    price_cents: 1900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "40 U.S.C. 3131 (Miller Act), State Mechanics Lien Statutes, 29 CFR 5.5 & NCCI Manual",
+    deliverables: [
+      "Personalized Surety Premium, Workers' Comp Rate or State Lien Deadline Worksheet (Print-Ready HTML/PDF)",
+      "Retainage, Bond Capacity & Payroll Class Code Reconciliation Schedule (CSV)",
+      "State Preliminary Notice & Statutory Waiver Deadline Checklist (HTML/PDF)",
+      "Machine-Readable Contractor Compliance Scenario Pack (JSON)",
+    ],
+  },
   lb_verified_partner_slot: {
     sku: "lb_verified_partner_slot",
     title: "Verified Calculator Partner Slot",
@@ -5512,6 +5527,21 @@ const GAINHELM_TOOLKIT_OFFERS = {
       "5-Point Breach Notification, Forensics & Multi-Framework Control Overlap Schedule (CSV)",
       "Annex A:2022 (93 Controls) to SOC 2 & HIPAA Security Rule Crosswalk Ledger (CSV/HTML)",
       "Signed Enterprise Security Governance Audit Manifest (JSON)",
+    ],
+  },
+  gh_instant_compliance_worksheet_19: {
+    sku: "gh_instant_compliance_worksheet_19",
+    title: "GainHelm Instant Compliance Budget & Control Scoping Worksheet (PDF/CSV)",
+    price_usd: 19,
+    price_cents: 1900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "AICPA SSAE 18 (AT-C 205), ISO/IEC 27006-1:2024, 32 CFR Part 170 & 45 CFR 160.404",
+    deliverables: [
+      "Personalized Audit Readiness & Auditor-Day Scoping Worksheet (Print-Ready HTML/PDF)",
+      "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
+      "Multi-Framework Overlap & Evidence Readiness Checklist (HTML/PDF)",
+      "Machine-Readable Security Governance Scenario Pack (JSON)",
     ],
   },
   gh_verified_partner_slot: {
@@ -7322,6 +7352,11 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     },
   ];
 
+  const isQuickPx = String((record && record.offer_sku) || "").trim().toLowerCase() === "px_instant_repayment_worksheet_19";
+  const activePxSku = isQuickPx ? "px_instant_repayment_worksheet_19" : PREXVO_TOOLKIT_OFFER.sku;
+  const activePxTitle = isQuickPx ? "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)" : PREXVO_TOOLKIT_OFFER.title;
+  const grossPriceUsd = isQuickPx ? 19 : Number(PREXVO_TOOLKIT_OFFER.price_usd || 39);
+
   const playbookQs = new URLSearchParams({
     playbook: "1",
     lead_id: leadId,
@@ -7332,7 +7367,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   const fulfillQs = new URLSearchParams({
     fulfill: "1",
     lead_id: leadId,
-    sku: PREXVO_TOOLKIT_OFFER.sku,
+    sku: activePxSku,
     tool_slug: toolSlug,
     amount: String(baseAmount),
     state: stateCode,
@@ -7350,7 +7385,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const activeCsvUrl = mode === "paid_toolkit" ? csvFulfillmentUrl : playbookCsvUrl;
   const activeDatapackUrl = mode === "paid_toolkit" ? datapackUrl : playbookDatapackUrl;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(PREXVO_TOOLKIT_OFFER.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
+  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activePxSku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
 
   const statutoryTrendTimeseries = [
     {
@@ -7485,7 +7520,6 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     `<table><thead><tr><th>Instrument ID</th><th>Statutory Instrument &amp; Deadline Rule</th><th>Execution Clause / Filing Text</th></tr></thead><tbody>${execArtifactsHtml}</tbody></table>` +
     `</div></body></html>`;
 
-  const grossPriceUsd = Number(PREXVO_TOOLKIT_OFFER.price_usd || 39);
   const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
   const isPaidSettled = isEdgeVerifiedPaidRecord(record);
@@ -7498,8 +7532,8 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     property_id: "prexvo",
     tool_slug: toolSlug,
     lead_id: leadId,
-    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
-    offer_title: PREXVO_TOOLKIT_OFFER.title,
+    offer_sku: activePxSku,
+    offer_title: activePxTitle,
     gross_amount_usd: grossPriceUsd,
     estimated_processor_fee_usd: estFeeUsd,
     net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
@@ -7518,7 +7552,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     schema_version: "pseo-datapack-v1",
     property_id: "prexvo",
     tool_slug: toolSlug,
-    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
+    offer_sku: activePxSku,
     statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
     effective_tax_year: "2026",
     modeled_scenario_summary: customParameterLedger,
@@ -7535,9 +7569,9 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     tool_slug: toolSlug,
     lead_id: leadId,
     mode,
-    offer_sku: PREXVO_TOOLKIT_OFFER.sku,
-    offer_title: PREXVO_TOOLKIT_OFFER.title,
-    offer_price_usd: PREXVO_TOOLKIT_OFFER.price_usd,
+    offer_sku: activePxSku,
+    offer_title: activePxTitle,
+    offer_price_usd: grossPriceUsd,
     statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
     calculated_amount: baseAmount,
     capital_band: capitalBand,
@@ -7959,7 +7993,9 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false, customRecord = null, reqSku = "") {
-  const isPartnerSlotSku = String(reqSku || (customRecord && customRecord.offer_sku) || "").trim().toLowerCase() === "px_verified_partner_slot";
+  const cleanSku = String(reqSku || (customRecord && customRecord.offer_sku) || "").trim().toLowerCase();
+  const isPartnerSlotSku = cleanSku === "px_verified_partner_slot";
+  const isQuickUnlockSku = cleanSku === "px_instant_repayment_worksheet_19";
   const activeOffer = isPartnerSlotSku
     ? {
         sku: "px_verified_partner_slot",
@@ -7973,8 +8009,33 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
           "Qualified Borrower & Repayment Simulation Attribution Routing",
         ],
       }
+    : isQuickUnlockSku
+    ? {
+        sku: "px_instant_repayment_worksheet_19",
+        title: "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
+        price_usd: 19,
+        price_cents: 1900,
+        currency: "usd",
+        statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+        deliverables: [
+          "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
+          "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
+          "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
+          "Machine-Readable Borrower Refinance Scenario Pack (JSON)",
+        ],
+      }
     : PREXVO_TOOLKIT_OFFER;
-  const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, "paid_toolkit") : null;
+  const customBundle = customRecord
+    ? buildEdgePersonalizedWorkpaperBundle(
+        {
+          ...customRecord,
+          offer_sku: activeOffer.sku,
+          offer_title: activeOffer.title,
+          offer_price_usd: activeOffer.price_usd,
+        },
+        "paid_toolkit"
+      )
+    : null;
   const fallbackUrl = customBundle && !isPartnerSlotSku ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
@@ -8379,15 +8440,11 @@ export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
-  if (
-    reqUrl.searchParams.get("playbook") === "1" ||
-    reqUrl.searchParams.get("fulfill") === "1" ||
-    modeParam === "fulfill" ||
-    modeParam === "playbook"
-  ) {
-    const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
-    const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
-    const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
+    if (reqUrl.searchParams.get("playbook") === "1" || reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill" || modeParam === "playbook") {
+      const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
+      const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
+      const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
+      const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const toolSlug = (
       reqUrl.searchParams.get("tool_slug") ||
       reqUrl.searchParams.get("slug") ||
@@ -8417,10 +8474,13 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("outputs_json")
     );
     let gatedRecord = storedRecord;
+    if (reqSku && gatedRecord) {
+      gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+    }
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, gatedRecord, payment, isSynth);
     }
     const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, isFulfill ? "paid_toolkit" : "free_playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
@@ -8647,6 +8707,7 @@ export async function onRequestPost(context) {
       : "splash_financial";
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
+    const reqSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
     const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
     if (isFulfillMode) {
@@ -8664,6 +8725,7 @@ export async function onRequestPost(context) {
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
+      if (reqSku) storedRecord.offer_sku = reqSku;
       const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
       const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, "paid_toolkit");
       return new Response(
@@ -8787,7 +8849,7 @@ export async function onRequestPost(context) {
       const randSuffix = Math.random().toString(36).slice(2, 10);
       const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
       const redirectUrl = `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
-      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe);
+      const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe, null, reqSku);
       const modeledAmt = extractScenarioAmount(body, scenarioInputs, blueprintState);
       const playbookRecord = {
         lead_id: leadId,
@@ -8922,7 +8984,7 @@ export async function onRequestPost(context) {
     const liveBase = PARTNER_ROUTES[partnerKey];
     const liveDestinationUrl = `${liveBase}${liveBase.includes("?") ? "&" : "?"}${qs}`;
     const actionBusDispatched = calculatedAmount >= 100000;
-    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe);
+    const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe, null, reqSku);
 
     const record = {
       lead_id: leadId,
@@ -9094,6 +9156,32 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   const s = (toolSlug || "").toLowerCase();
   const skuClean = String(reqSku || "").trim().toLowerCase();
   const pClean = String(reqPartner || "").trim().toLowerCase();
+  if (skuClean === "ph_instant_statutory_worksheet_19") {
+    let qPartner = pClean || "crest_capital";
+    if (!pClean) {
+      if (s.includes("1031") || s.includes("like-kind") || s.includes("exchange")) qPartner = "ipx1031";
+      else if (s.includes("crypto") || s.includes("1099-da")) qPartner = "coinledger";
+      else if (s.includes("prediction-market") || s.includes("kalshi") || s.includes("polymarket")) qPartner = "kalshi";
+    }
+    return {
+      vertical: "instant_statutory_worksheet",
+      thresholdUsd: 50000,
+      partnerKey: qPartner,
+      partnerRepDesk: "ProfitHelm Statutory Tax & Depreciation Desk",
+      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
+      offerSku: "ph_instant_statutory_worksheet_19",
+      offerTitle: "ProfitHelm Instant 2026-2027 Statutory Tax & Depreciation Worksheet (PDF/CSV)",
+      offerPriceUsd: 19,
+      offerPriceCents: 1900,
+      statutoryAuthority: "IRC Statutory Schedules, Rev. Proc. 2025-32, Section 179 & Section 1031 Rules",
+      deliverables: [
+        "Personalized Federal & State Statutory Tax or Depreciation Worksheet (Print-Ready HTML/PDF)",
+        "Line-Item Marginal vs Effective Rate & Deduction Reconciliation Schedule (CSV)",
+        "Quarterly Safe-Harbor Estimated Tax & Statutory Cutoff Checklist (HTML/PDF)",
+        "Machine-Readable Scenario Parameter & Statutory Benchmark Pack (JSON)",
+      ],
+    };
+  }
   if (skuClean === "ph_verified_partner_slot") {
     return {
       vertical: "b2b_partner_slot",
@@ -10595,7 +10683,9 @@ export async function onRequestGet(context) {
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
     const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const defaultSlugForSku =
-      reqSku === "ph_commercial_capital_audit_toolkit"
+      reqSku === "ph_instant_statutory_worksheet_19"
+        ? "irs-2027-tax-brackets"
+        : reqSku === "ph_commercial_capital_audit_toolkit"
         ? "section-179-calculator"
         : reqSku === "ph_statutory_tax_audit_workpapers"
         ? "s-corp-reasonable-salary-tax-calculator"
@@ -10620,10 +10710,13 @@ export async function onRequestGet(context) {
       reqUrl.searchParams.get("outputs_json")
     );
     let gatedRecord = storedRecord;
+    if (reqSku && gatedRecord) {
+      gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+    }
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, gatedRecord, payment, isSynth);
     }
     const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
@@ -10682,7 +10775,9 @@ export async function onRequestGet(context) {
     const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
     const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const defaultSlugForSku =
-      reqSku === "ph_commercial_capital_audit_toolkit"
+      reqSku === "ph_instant_statutory_worksheet_19"
+        ? "irs-2027-tax-brackets"
+        : reqSku === "ph_commercial_capital_audit_toolkit"
         ? "section-179-calculator"
         : reqSku === "ph_statutory_tax_audit_workpapers"
         ? "s-corp-reasonable-salary-tax-calculator"

@@ -4757,6 +4757,8 @@ def render_post_calculation_upgrade_drawer_html(
     offer_sku = str(spec["offer_sku"])
     offer_title = str(spec["offer_title"])
     price_int = int(round(float(spec["offer_price_usd"])))
+    quick_sku = str(spec.get("quick_unlock_sku") or "ph_instant_statutory_worksheet_19")
+    quick_price_int = int(round(float(spec.get("quick_unlock_price_usd") or 19)))
     eff_stat = str(spec["statutory_authority"])
     regulator_name = str(spec["regulator_name"])
     trend_count = int(spec["trend_series_count"])
@@ -4764,6 +4766,10 @@ def render_post_calculation_upgrade_drawer_html(
     trend_preview = ", ".join(trend_labels[:2]) if trend_labels else "2024 to 2030 Statutory Benchmark Series"
     checkout_url = (
         f'/api/lead-capture?checkout=1&amp;sku={offer_sku}'
+        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
+    )
+    quick_checkout_url = (
+        f'/api/lead-capture?checkout=1&amp;sku={quick_sku}'
         f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
     )
     datapack_url = (
@@ -4801,6 +4807,8 @@ def render_post_calculation_upgrade_drawer_html(
         f'data-tool-slug="{slug_clean}" '
         f'data-offer-sku="{offer_sku}" '
         f'data-offer-price="{price_int}" '
+        f'data-quick-unlock-sku="{quick_sku}" '
+        f'data-quick-unlock-price="{quick_price_int}" '
         f'data-calculated-amount="{amt_int}" '
         f'data-datapack-url="{datapack_url}">\n'
         f'          <div class="post-calc-upgrade-header">\n'
@@ -4821,6 +4829,12 @@ def render_post_calculation_upgrade_drawer_html(
         f'            </div>\n'
         f'          </div>\n'
         f'          <div class="post-calc-upgrade-actions" role="group" aria-label="Post-Calculation Workpaper and Data Pack Actions">\n'
+        f'            <a id="btn-post-calc-quick-unlock-checkout" href="{quick_checkout_url}" '
+        f'class="touch-target btn-secondary post-calc-quick-unlock-btn" '
+        f'data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" '
+        f'data-cta-slot="post_calc_quick_unlock_cta" '
+        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; padding: 10px 16px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13.5px; text-decoration: none; cursor: pointer;">'
+        f'Instant PDF/CSV Statutory Worksheet (${quick_price_int})</a>\n'
         f'            <a id="btn-post-calc-upgrade-checkout" href="{checkout_url}" '
         f'class="touch-target btn-primary post-calc-upgrade-btn" '
         f'data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{price_int}" '
@@ -4835,6 +4849,78 @@ def render_post_calculation_upgrade_drawer_html(
         f'          </div>\n'
         f'          <div id="post-calc-workpaper-preview-slot" class="post-calc-preview-slot" aria-live="polite"></div>\n'
         f'        </div>'
+    )
+
+
+def render_calc_result_quick_unlock_bar_html(
+    slug: str,
+    property_id: str = "profithelm",
+    baseline_amount: Optional[float] = None,
+) -> str:
+    """
+    Renders the above-the-fold Instant Statutory Worksheet Quick-Unlock ($19) and
+    1-Click Free Worksheet Email Capture bar (#calc-result-quick-unlock-bar) directly
+    inside .calc-outputs-panel / .result-box on commercial calculator pages.
+    Strictly returns an empty string on restricted YMYL public-service pages.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.partner_tracker import resolve_post_calculation_upgrade_spec
+
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    slug_clean = str(slug or "index").strip().strip("/").lower() or "index"
+    spec = resolve_post_calculation_upgrade_spec(
+        property_id=prop_clean,
+        tool_slug=slug_clean,
+    )
+    if not spec:
+        return ""
+
+    default_amt = baseline_amount
+    if default_amt is None:
+        if prop_clean == "prexvo":
+            default_amt = 68500.0
+        elif prop_clean == "gainhelm":
+            default_amt = 58200.0
+        elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
+            default_amt = 85000.0
+        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
+            default_amt = 450000.0
+        else:
+            default_amt = 125000.0
+
+    amt_int = int(round(float(default_amt)))
+    full_sku = str(spec["offer_sku"])
+    full_price_int = int(round(float(spec["offer_price_usd"])))
+    quick_sku = str(spec.get("quick_unlock_sku") or "ph_instant_statutory_worksheet_19")
+    quick_price_int = int(round(float(spec.get("quick_unlock_price_usd") or 19)))
+    quick_checkout_url = (
+        f'/api/lead-capture?checkout=1&amp;sku={quick_sku}'
+        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
+    )
+    return (
+        f'          <div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" '
+        f'data-mechanic="instant_result_quick_unlock" data-property-id="{prop_clean}" '
+        f'data-tool-slug="{slug_clean}" data-offer-sku="{quick_sku}" '
+        f'data-offer-price="{quick_price_int}" data-full-offer-sku="{full_sku}" '
+        f'data-full-offer-price="{full_price_int}" '
+        f'style="margin-top: 12px; margin-bottom: 12px; padding: 14px 16px; border-radius: 8px; '
+        f'background: var(--bg-elevated, #f8fafc); border: 1px solid var(--border, #cbd5e1); '
+        f'border-left: 4px solid #0f766e;">\n'
+        f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;">\n'
+        f'              <div style="font-size: 13.5px; font-weight: 700; color: var(--text, #0f172a);">Save Your Calculated Worksheet &amp; Statutory Schedule</div>\n'
+        f'              <span style="font-size: 11.5px; font-weight: 700; color: #0f766e; background: rgba(15, 118, 110, 0.12); padding: 3px 8px; border-radius: 4px;">Instant PDF/CSV + Free Email Copy</span>\n'
+        f'            </div>\n'
+        f'            <form id="inline-worksheet-capture-form" class="lead-capture-form inline-worksheet-capture-form" action="/api/lead-capture" method="POST" data-offer-sku="{quick_sku}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px;" novalidate>\n'
+        f'              <label for="inline-worksheet-email" style="display: block; width: 100%; font-size: 12px; font-weight: 600; margin-bottom: 2px; color: var(--text, #334155);">Email Address for Free Personalized Worksheet</label>\n'
+        f'              <input type="email" id="inline-worksheet-email" name="email" placeholder="Enter email for free custom worksheet..." aria-label="Email Address for Free Personalized Worksheet" required class="touch-target" style="flex: 1; min-width: 190px; min-height: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #ffffff); color: var(--text, #0f172a);" />\n'
+        f'              <button type="submit" id="btn-inline-worksheet-submit" class="touch-target btn-secondary" data-cta-slot="inline_free_worksheet_email_cta" style="min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 700; font-size: 13.5px; border: none; cursor: pointer; white-space: nowrap;">Email Me Free Worksheet</button>\n'
+        f'              <div id="inline-worksheet-capture-status" class="lead-capture-status-readout" role="status" aria-live="polite" style="width: 100%; font-size: 12.5px; font-weight: 600;"></div>\n'
+        f'            </form>\n'
+        f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border, #cbd5e1);">\n'
+        f'              <a id="btn-calc-result-quick-unlock" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: nowrap;">Instant PDF/CSV Statutory Worksheet (${quick_price_int}) &rarr;</a>\n'
+        f'              <a href="#post-calculation-upgrade-drawer" class="touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent, #1d4ed8); text-decoration: underline; white-space: nowrap;">Or Full Audit Package (${full_price_int})</a>\n'
+        f'            </div>\n'
+        f'          </div>\n'
     )
 
 

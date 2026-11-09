@@ -9473,6 +9473,15 @@ class RetroReflectionEngine:
                 and 'id="partner-registration-drawer"' not in html_content
             )
             or (
+                'id="partner-quote-intake-step"' in html_content
+                and 'data-restricted-public-service="true"' not in html_content
+                and 'id="post-calculation-upgrade-drawer"' in html_content
+                and (
+                    'id="calc-result-quick-unlock-bar"' not in html_content
+                    or 'id="btn-post-calc-quick-unlock-checkout"' not in html_content
+                )
+            )
+            or (
                 'class="pro-hook-card"' in html_content
                 and 'id="post-calculation-upgrade-drawer"' in html_content
                 and 'data-checkout-nav="1"' not in html_content

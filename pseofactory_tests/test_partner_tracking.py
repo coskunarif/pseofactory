@@ -3925,3 +3925,108 @@ def test_autonomous_production_monetization_zero_nag_and_followup_idempotency(tm
         assert prop_rep.edge_redirect_coverage_pct == 100.0
         assert prop_rep.autonomous_mode_status == "AUTONOMOUS_PRODUCTION_READY"
 
+
+def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_cta_intent():
+    """
+    Verifies the $19 instant statutory worksheet quick-unlock funnel upgrade:
+    1. All 4 tenants resolve $19.00 (1900 cents) quick-unlock SKUs in Python and Cloudflare Edge JS:
+       - ph_instant_statutory_worksheet_19 (profithelm)
+       - px_instant_repayment_worksheet_19 (prexvo, strictly blocked on YMYL public-service pages)
+       - gh_instant_compliance_worksheet_19 (gainhelm)
+       - lb_instant_lien_bond_worksheet_19 (lienbond)
+    2. render_calc_result_quick_unlock_bar_html and normalize_html_visual_primitives inject
+       #calc-result-quick-unlock-bar, #inline-worksheet-capture-form, #btn-calc-result-quick-unlock,
+       and #btn-post-calc-quick-unlock-checkout idempotently on commercial calculator pages with zero
+       visual/UX contract issues, while strictly skipping restricted YMYL pages.
+    3. bind_asset_partner_roster and select_conversion_slot_plan keep crest_capital (Xendoo CPA Tax
+       & Bookkeeping) above rippling on irs-2027-tax-brackets and section-179-calculator under
+       high-impression GSC signals.
+    """
+    from pseofactory.partner_tracker import (
+        resolve_lead_monetization_offer,
+        resolve_post_calculation_upgrade_spec,
+    )
+    from pseofactory.edge import (
+        generate_edge_lead_capture_function,
+    )
+    import pseofactory.competitor as comp_mod
+    from pseofactory.competitor import (
+        render_post_calculation_upgrade_drawer_html,
+    )
+    from pseofactory.visual_primitives import (
+        normalize_html_visual_primitives,
+        detect_visual_and_ux_contract_issues,
+    )
+    from pseofactory.affiliates import (
+        bind_asset_partner_roster,
+        select_conversion_slot_plan,
+    )
+
+    expected_skus = [
+        ("profithelm", "irs-2027-tax-brackets", "ph_instant_statutory_worksheet_19"),
+        ("prexvo", "student-loan-refinance-calculator", "px_instant_repayment_worksheet_19"),
+        ("gainhelm", "soc-2-cost-calculator", "gh_instant_compliance_worksheet_19"),
+        ("lienbond", "miller-act-bond-cost-calculator", "lb_instant_lien_bond_worksheet_19"),
+    ]
+    for prop, slug, quick_sku in expected_skus:
+        offer = resolve_lead_monetization_offer(
+            property_id=prop,
+            tool_slug=slug,
+            sku=quick_sku,
+        )
+        assert offer is not None
+        assert offer["offer_sku"] == quick_sku
+        assert offer["offer_price_usd"] == 19.0
+        assert offer["offer_price_cents"] == 1900
+
+        upg_spec = resolve_post_calculation_upgrade_spec(property_id=prop, tool_slug=slug)
+        assert upg_spec is not None
+        assert upg_spec["quick_unlock_sku"] == quick_sku
+        assert upg_spec["quick_unlock_price_usd"] == 19.0
+        assert upg_spec["quick_unlock_price_cents"] == 1900
+        assert f"sku={quick_sku}" in upg_spec["quick_unlock_checkout_url"]
+
+        render_calc_result_quick_unlock_bar_html = getattr(comp_mod, "render_calc_result_quick_unlock_bar_html", None)
+        assert callable(render_calc_result_quick_unlock_bar_html)
+        bar_html = render_calc_result_quick_unlock_bar_html(slug=slug, property_id=prop, baseline_amount=125000.0)
+        assert 'id="calc-result-quick-unlock-bar"' in bar_html
+        assert 'id="inline-worksheet-capture-form"' in bar_html
+        assert f'data-offer-sku="{quick_sku}"' in bar_html
+        assert 'id="btn-calc-result-quick-unlock"' in bar_html
+
+        drawer_html = render_post_calculation_upgrade_drawer_html(slug=slug, property_id=prop, baseline_amount=125000.0)
+        assert 'id="btn-post-calc-quick-unlock-checkout"' in drawer_html
+        assert f'data-quick-unlock-sku="{quick_sku}"' in drawer_html
+
+    # Strict YMYL public-service exclusion on Prexvo
+    with pytest.raises(ValueError, match="Restricted public-service asset"):
+        resolve_lead_monetization_offer(
+            property_id="prexvo",
+            tool_slug="pslf-buyback-calculator",
+            sku="px_instant_repayment_worksheet_19",
+        )
+    assert resolve_post_calculation_upgrade_spec(property_id="prexvo", tool_slug="pslf-buyback-calculator") is None
+    assert render_calc_result_quick_unlock_bar_html(slug="pslf-buyback-calculator", property_id="prexvo") == ""
+
+    # Edge worker JS SKU presence across all 4 tenants
+    assert "ph_instant_statutory_worksheet_19" in generate_edge_lead_capture_function(property_id="profithelm")
+    assert "px_instant_repayment_worksheet_19" in generate_edge_lead_capture_function(property_id="prexvo")
+    assert "gh_instant_compliance_worksheet_19" in generate_edge_lead_capture_function(property_id="gainhelm")
+    assert "lb_instant_lien_bond_worksheet_19" in generate_edge_lead_capture_function(property_id="lienbond")
+
+    # Tax bracket & Section 179 intent alignment: crest_capital (Xendoo CPA) outranks rippling under GSC signals
+    for tax_slug, tax_query in (
+        ("irs-2027-tax-brackets", "irs 2027 tax brackets calculator"),
+        ("section-179-calculator", "section 179 deduction calculator"),
+    ):
+        roster = bind_asset_partner_roster(
+            slug=tax_slug,
+            property_id="profithelm",
+            query=tax_query,
+            page_archetype="calculator_workbench",
+            gsc_metrics={"impressions": 450, "clicks": 3, "ctr": 0.0067, "position": 8.4},
+        )
+        assert roster["primary_offer"]["partner_key"] == "crest_capital"
+        assert roster["slot_plan"]["slot_bindings"]["calculator_result_inline"]["partner_key"] == "crest_capital"
+
+
