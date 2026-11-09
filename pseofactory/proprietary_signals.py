@@ -150,6 +150,8 @@ _FIXED_STATUTORY_INPUT_EXACT: frozenset[str] = frozenset(
         "fee_per_endpoint",
         "retention_reserve_allocation",
         "surplus_lines_fee",
+        "outside_securities_counsel_retainer",
+        "materiality_workflow_platform_fee",
     }
 )
 

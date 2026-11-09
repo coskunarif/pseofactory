@@ -4206,7 +4206,10 @@ def qualify_monetization_opportunity(
             "disclosures_required": {},
         }
 
-    is_student_loan = any(tok in combined for tok in STUDENT_LOAN_INTENT_TOKENS)
+    is_student_loan = any(
+        (bool(re.search(rf"\b{re.escape(tok)}\b", combined)) if len(tok) <= 4 else (tok in combined))
+        for tok in STUDENT_LOAN_INTENT_TOKENS
+    )
     is_b2b = is_commercial_b2b_slug(s_clean) or any(tok in combined for tok in COMMERCIAL_B2B_INTENT_TOKENS)
     is_consumer_fin = (s_clean in RETAIL_TAX_SLUGS) or any(tok in combined for tok in CONSUMER_FINANCIAL_INTENT_TOKENS)
     has_tool_signal = any(tok in combined for tok in PROSPECTIVE_NICHE_TOOL_TOKENS)
@@ -4238,6 +4241,15 @@ def qualify_monetization_opportunity(
             "cyber liability insurance",
             "cyber-liability-insurance",
             "dora",
+            "eu ai act",
+            "eu-ai-act",
+            "conformity assessment",
+            "conformity-assessment",
+            "sec cybersecurity",
+            "sec-cybersecurity",
+            "item 1.05",
+            "item-105",
+            "8-k",
         )
     )
     is_lienbond = any(

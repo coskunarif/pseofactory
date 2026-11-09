@@ -1585,21 +1585,20 @@ def execute_autonomous_daily_trend_page_build(
                     "action": "BUILD_PAGE",
                     "status": "PENDING",
                     "composite_profit_yield": 93.8,
-                    "statutory_authority": "IRC Section 280G & Section 4999 (26 CFR Section 1.280G-1 Safe Harbor 3x Base Amount Rules)",
-                    "economic_dataset": "IRS SOI Corporate Executive Compensation Series & FRED DGS10 Treasury AFR Series",
-                    "model_name": "ProfitHelm-IRC-280G-Golden-Parachute-Excise-Tax-Model-2026",
+                    "statutory_authority": "26 U.S.C. Section 280G Golden Parachute Disallowance & IRC Section 4999 20% Excise Tax",
+                    "economic_dataset": "BLS OEWS Chief Executives SOC 11-1011 Wage Series & FRED CPILFESL Series",
+                    "model_name": "Section280GGoldenParachuteSafeHarborModel",
                     "formula": "round(max(0.0, total_parachute_payment - five_year_avg_w2_base_amount) * (excise_tax_rate_pct / 100.0), 2)",
                     "inputs": {
-                        "total_parachute_payment": 1850000.0,
-                        "five_year_avg_w2_base_amount": 450000.0,
+                        "total_parachute_payment": 2100000.0,
+                        "five_year_avg_w2_base_amount": 550000.0,
                         "excise_tax_rate_pct": 20.0,
                     },
-                    "published_output": 280000.0,
+                    "published_output": 310000.0,
                     "sample_calculation": (
-                        "Disqualified M&A executive receiving $1,850,000.00 in change-in-control parachute payments with a "
-                        "5-year average W-2 base amount of $450,000.00 (3x safe harbor threshold = $1,350,000.00): excess "
-                        "parachute payment above 1x base amount is $1,400,000.00, triggering a 20% IRC Section 4999 excise "
-                        "tax of $280,000.00 and corporate deduction disallowance."
+                        "Executive with $550,000.00 five-year average W-2 base amount (3x safe harbor threshold = $1,650,000.00) "
+                        "receiving $2,100,000.00 in change-in-control parachute payments triggers $1,550,000.00 in excess parachute "
+                        "payments ($2,100,000 - $550,000 base amount) and a 20% IRC Section 4999 excise tax of $310,000.00."
                     ),
                 },
             ],
@@ -1630,6 +1629,33 @@ def execute_autonomous_daily_trend_page_build(
                         "$75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at "
                         "$20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net "
                         "payoff obligation is $52,500.00."
+                    ),
+                },
+                {
+                    "property_id": "prexvo",
+                    "tenant": "prexvo",
+                    "slug": "physician-resident-student-loan-refinance-vs-rap-calculator",
+                    "query": "physician resident student loan refinance vs rap calculator",
+                    "title": "Physician Resident Refinance vs RAP Subsidy Calculator",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 91.8,
+                    "statutory_authority": "One Big Beautiful Bill Act (P.L. 119-21 Section 30001 RAP Interest Subsidy) & Higher Education Act Section 455(d)",
+                    "economic_dataset": "AAMC Medical Education Debt Report & FRED SLSTTOTAL Series",
+                    "model_name": "Prexvo-Physician-Resident-RAP-vs-Refinance-Spread-Model-2026",
+                    "formula": "round(max(0.0, (med_school_loan_balance * (federal_unsubsidized_rate_pct / 100.0)) - (pgy_resident_agi * 0.06)) * residency_years, 2)",
+                    "inputs": {
+                        "med_school_loan_balance": 240000.0,
+                        "federal_unsubsidized_rate_pct": 8.0,
+                        "pgy_resident_agi": 68000.0,
+                        "residency_years": 4.0,
+                    },
+                    "published_output": 60480.0,
+                    "sample_calculation": (
+                        "PGY-1 medical resident carrying $240,000.00 in federal Direct Grad PLUS and Unsubsidized debt at 8.0% "
+                        "interest ($19,200.00/yr interest accrual) with a $68,000.00 residency AGI under P.L. 119-21 RAP (6% AGI "
+                        "payment = $4,080.00/yr): statutory 100% unpaid interest subsidy waives $15,120.00/yr across a 4-year "
+                        "residency for $60,480.00 in total waived interest before private attending refinance."
                     ),
                 },
             ],
@@ -1692,6 +1718,35 @@ def execute_autonomous_daily_trend_page_build(
                         "+ 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost."
                     ),
                 },
+                {
+                    "property_id": "gainhelm",
+                    "tenant": "gainhelm",
+                    "slug": "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",
+                    "query": "sec cybersecurity incident materiality 8k item 105 cost calculator",
+                    "title": "SEC Form 8-K Item 1.05 Cyber Materiality Cost Model",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 95.4,
+                    "statutory_authority": "SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 & Form 8-K Item 1.05 4-Business-Day Mandate)",
+                    "economic_dataset": "SEC Division of Economic and Risk Analysis (DERA) Cyber Disclosure Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+                    "model_name": "GainHelm-SEC-8K-Item105-Materiality-Readiness-Cost-Model-2026",
+                    "formula": "round(outside_securities_counsel_retainer + dfir_tabletop_retainer + (board_reg_sk_106_hours * governance_advisory_hourly_rate) + materiality_workflow_platform_fee, 2)",
+                    "inputs": {
+                        "outside_securities_counsel_retainer": 65000.0,
+                        "dfir_tabletop_retainer": 48000.0,
+                        "board_reg_sk_106_hours": 160.0,
+                        "governance_advisory_hourly_rate": 225.0,
+                        "materiality_workflow_platform_fee": 31000.0,
+                    },
+                    "published_output": 180000.0,
+                    "sample_calculation": (
+                        "Public registrant operationalizing SEC Form 8-K Item 1.05 4-business-day materiality determination "
+                        "and Regulation S-K Item 106 board governance disclosures: outside securities counsel retainer ($65,000.00) "
+                        "+ DFIR forensic readiness and tabletop exercises ($48,000.00) + 160 Regulation S-K Item 106 governance "
+                        "hours at $225/hr ($36,000.00) + automated materiality evidentiary workflow platform ($31,000.00) = "
+                        "$180,000.00 total annual SEC cyber disclosure readiness investment."
+                    ),
+                },
             ],
             "lienbond": [
                 {
@@ -1722,21 +1777,39 @@ def execute_autonomous_daily_trend_page_build(
                         "retention ($125,000.00 expected retention cost) = $225,000.00 net annual underwriting savings."
                     ),
                 },
+                {
+                    "property_id": "lienbond",
+                    "tenant": "lienbond",
+                    "slug": "texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator",
+                    "query": "texas chapter 53 statutory retainage and fund trapping notice calculator",
+                    "title": "Texas Chapter 53 Statutory Retainage & Fund-Trapping Calculator",
+                    "action": "BUILD_PAGE",
+                    "status": "PENDING",
+                    "composite_profit_yield": 94.8,
+                    "statutory_authority": "Texas Property Code Section 53.101 (10% Statutory Reserved Funds) & Section 53.056 (15th Day of 3rd Month Derivative Notice)",
+                    "economic_dataset": "FRED Total Construction Spending Series (TTLCONS) & BLS Specialty Trade Contractors PPI Series",
+                    "model_name": "LienBond-Texas-Chapter53-Statutory-Retainage-FundTrapping-Model-2026",
+                    "formula": "round(min(unpaid_subcontract_balance, (original_prime_contract_price * (statutory_reserved_pct / 100.0)) + trapped_owner_progress_funds), 2)",
+                    "inputs": {
+                        "unpaid_subcontract_balance": 185000.0,
+                        "original_prime_contract_price": 1200000.0,
+                        "statutory_reserved_pct": 10.0,
+                        "trapped_owner_progress_funds": 30000.0,
+                    },
+                    "published_output": 150000.0,
+                    "sample_calculation": (
+                        "Texas commercial subcontractor with $185,000.00 in unpaid progress billings on a $1,200,000.00 prime "
+                        "contract serving a timely Section 53.056 derivative claimant notice by the 15th day of the third month: "
+                        "10% statutory reserved funds under Texas Property Code Section 53.101 ($120,000.00) plus $30,000.00 in "
+                        "trapped owner progress funds secures $150,000.00 in priority mechanics lien recovery."
+                    ),
+                },
             ],
         }
         for t_id, seed_list in default_breakout_seeds.items():
             if t_id not in target_props:
                 continue
             if len(day_bucket.get(t_id, []) or []) >= daily_cap:
-                continue
-            has_pending_for_tid = any(
-                str(qi.get("property_id") or qi.get("tenant") or "").strip().lower() == t_id
-                and str(qi.get("status") or "PENDING").upper() == "PENDING"
-                and str(qi.get("action") or "BUILD_PAGE").upper() == "BUILD_PAGE"
-                and str(qi.get("slug") or "").strip().lower() not in existing_slugs_by_tenant.get(t_id, set())
-                for qi in queue_items
-            )
-            if has_pending_for_tid:
                 continue
             for seed_item in seed_list:
                 seed_slug = str(seed_item["slug"]).strip().lower()
@@ -1961,6 +2034,9 @@ def execute_autonomous_daily_trend_page_build(
                 )
         except Exception as exc:
             clean_err = str(exc).replace("\u2014", "-").replace("\u2013", "-")
+            item["status"] = "ABORTED_QUALIFICATION"
+            item["abort_reason"] = clean_err
+            queue_mutated = True
             aborted_candidates.append(
                 {
                     "property_id": t_id,
@@ -2105,6 +2181,16 @@ def execute_autonomous_daily_trend_page_build(
                         dv_f.write_text(json.dumps(dv_list, indent=2) + "\n", encoding="utf-8")
                     except Exception:
                         pass
+
+            try:
+                from pseofactory.maintenance import RetroReflectionEngine
+                RetroReflectionEngine.retrofit_estate(
+                    dist_dir=dist_dir,
+                    property_id=t_id,
+                    canonical_base=adp.canonical_base,
+                )
+            except Exception:
+                pass
 
         item["status"] = "BUILT"
         item["built_at"] = built_ts

@@ -8204,22 +8204,6 @@ class RetroReflectionEngine:
         },
         "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator": {
             "model_name": "Prexvo-HRSA-NHSC-HPSL-Loan-Repayment-Model-2026",
-            "entity_type": "RepaymentPlanSpecification",
-            "formula": "round(max(0.0, qualifying_health_loan_balance - nhsc_two_year_award - (continuation_years * annual_continuation_award)) * (1.0 + (hpsl_interest_rate_pct / 100.0)), 2)",
-            "inputs": {
-                "qualifying_health_loan_balance": 165000.0,
-                "nhsc_two_year_award": 75000.0,
-                "continuation_years": 2.0,
-                "annual_continuation_award": 20000.0,
-                "hpsl_interest_rate_pct": 5.0,
-            },
-            "published_output": 52500.0,
-            "statutory_authority": "Public Health Service Act Section 338B (42 U.S.C. 254l-1 NHSC LRP) & Title VII Section 723 (42 U.S.C. 292s HPSL)",
-            "economic_dataset": "HRSA Bureau of Health Workforce HPSA Tier Award Schedule & FRED SLSTTOTAL Series",
-            "sample_calculation": "Primary care clinician at a Tier 1 HPSA site with $165,000.00 in qualifying health professions debt: $75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at $20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net payoff obligation is $52,500.00.",
-        },
-        "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator": {
-            "model_name": "Prexvo-HRSA-NHSC-HPSL-Loan-Repayment-Model-2026",
             "entity_type": "FinancialProductOrService",
             "formula": "round(max(0.0, qualifying_health_loan_balance - nhsc_two_year_award - (continuation_years * annual_continuation_award)) * (1.0 + (hpsl_interest_rate_pct / 100.0)), 2)",
             "inputs": {
@@ -8233,6 +8217,21 @@ class RetroReflectionEngine:
             "statutory_authority": "Public Health Service Act Section 338B (42 U.S.C. 254l-1 NHSC LRP) & Title VII Section 723 (42 U.S.C. 292s HPSL)",
             "economic_dataset": "HRSA Bureau of Health Workforce HPSA Tier Award Schedule & FRED SLSTTOTAL Series",
             "sample_calculation": "Primary care clinician at a Tier 1 HPSA site with $165,000.00 in qualifying health professions debt: $75,000.00 initial 2-year tax-free NHSC award (IRC Section 108(f)(4)) plus 2 continuation years at $20,000.00/yr leaves $50,000.00 residual principal; with 5.0% statutory HPSL interest, remaining net payoff obligation is $52,500.00.",
+        },
+        "physician-resident-student-loan-refinance-vs-rap-calculator": {
+            "model_name": "Prexvo-Physician-Resident-RAP-vs-Refinance-Spread-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(max(0.0, (med_school_loan_balance * (federal_unsubsidized_rate_pct / 100.0)) - (pgy_resident_agi * 0.06)) * residency_years, 2)",
+            "inputs": {
+                "med_school_loan_balance": 240000.0,
+                "federal_unsubsidized_rate_pct": 8.0,
+                "pgy_resident_agi": 68000.0,
+                "residency_years": 4.0,
+            },
+            "published_output": 60480.0,
+            "statutory_authority": "One Big Beautiful Bill Act (P.L. 119-21 Section 30001 RAP Interest Subsidy) & Higher Education Act Section 455(d)",
+            "economic_dataset": "AAMC Medical Education Debt Report & FRED SLSTTOTAL Series",
+            "sample_calculation": "PGY-1 medical resident carrying $240,000.00 in federal Direct Grad PLUS and Unsubsidized debt at 8.0% interest ($19,200.00/yr interest accrual) with a $68,000.00 residency AGI under P.L. 119-21 RAP (6% AGI payment = $4,080.00/yr): statutory 100% unpaid interest subsidy waives $15,120.00/yr across a 4-year residency for $60,480.00 in total waived interest before private attending refinance.",
         },
     }
 
@@ -8498,34 +8497,6 @@ class RetroReflectionEngine:
             "sample_calculation": "On an $8,000,000 qualified small business stock gain with $500,000 original basis under the $10,000,000 IRC Section 1202(b)(1) ceiling, federal exclusion saves $1,904,000.00 at the 23.8% combined capital gains and NIIT rate.",
         },
         "corporate-amt-camt-book-income-minimum-tax-calculator": {
-            "model_name": "ProfitHelm-IRC-55-56A-CAMT-AFSI-Minimum-Tax-Model-2026",
-            "entity_type": "TaxCalculationModel",
-            "formula": "round(max(0.0, (adjusted_financial_statement_income * 0.15) - camt_foreign_tax_credit - regular_corporate_tax_plus_beat), 2)",
-            "inputs": {
-                "adjusted_financial_statement_income": 1250000000.0,
-                "camt_foreign_tax_credit": 12000000.0,
-                "regular_corporate_tax_plus_beat": 75000000.0,
-            },
-            "published_output": 100500000.0,
-            "statutory_authority": "IRC Section 55(b)(2) & Section 56A (15% Corporate Alternative Minimum Tax on Adjusted Financial Statement Income)",
-            "economic_dataset": "IRS SOI Corporate Tax Return Benchmark & FRED CPILFESL Series",
-            "sample_calculation": "Applicable corporation with $1,250,000,000.00 in 3-year average Adjusted Financial Statement Income (AFSI): 15% tentative CAMT ($187,500,000.00) less $12,000,000.00 CAMT foreign tax credit less $75,000,000.00 regular corporate income tax and BEAT = $100,500,000.00 net IRC Section 55(b)(2) CAMT liability.",
-        },
-        "section-280g-golden-parachute-excise-tax-safe-harbor-calculator": {
-            "model_name": "ProfitHelm-IRC-280G-Golden-Parachute-Excise-Tax-Model-2026",
-            "entity_type": "TaxCalculationModel",
-            "formula": "round(max(0.0, total_parachute_payment - five_year_avg_w2_base_amount) * (excise_tax_rate_pct / 100.0), 2)",
-            "inputs": {
-                "total_parachute_payment": 1850000.0,
-                "five_year_avg_w2_base_amount": 450000.0,
-                "excise_tax_rate_pct": 20.0,
-            },
-            "published_output": 280000.0,
-            "statutory_authority": "IRC Section 280G & Section 4999 (26 CFR Section 1.280G-1 Safe Harbor 3x Base Amount Rules)",
-            "economic_dataset": "IRS SOI Corporate Executive Compensation Series & FRED DGS10 Treasury AFR Series",
-            "sample_calculation": "Disqualified M&A executive receiving $1,850,000.00 in change-in-control parachute payments with a 5-year average W-2 base amount of $450,000.00 (3x safe harbor threshold = $1,350,000.00): excess parachute payment above 1x base amount is $1,400,000.00, triggering a 20% IRC Section 4999 excise tax of $280,000.00 and corporate deduction disallowance.",
-        },
-        "corporate-amt-camt-book-income-minimum-tax-calculator": {
             "model_name": "CorporateAMTCAMTBookIncomeModel",
             "entity_type": "FinancialProductOrService",
             "formula": "round(max(0.0, (afsi_book_income * 0.15) - regular_corporate_tax), 2)",
@@ -8749,22 +8720,21 @@ class RetroReflectionEngine:
             "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
             "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
         },
-        "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
-            "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
+        "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": {
+            "model_name": "GainHelm-SEC-8K-Item105-Materiality-Readiness-Cost-Model-2026",
             "entity_type": "FinancialProductOrService",
-            "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
+            "formula": "round(outside_securities_counsel_retainer + dfir_tabletop_retainer + (board_reg_sk_106_hours * governance_advisory_hourly_rate) + materiality_workflow_platform_fee, 2)",
             "inputs": {
-                "high_risk_ai_systems": 2.0,
-                "notified_body_audit_fee": 28500.0,
-                "annex_iv_technical_dossier_cost": 18000.0,
-                "qms_article_17_setup_fee": 24000.0,
-                "validation_hours": 140.0,
-                "ml_compliance_hourly_rate": 150.0,
+                "outside_securities_counsel_retainer": 65000.0,
+                "dfir_tabletop_retainer": 48000.0,
+                "board_reg_sk_106_hours": 160.0,
+                "governance_advisory_hourly_rate": 225.0,
+                "materiality_workflow_platform_fee": 31000.0,
             },
-            "published_output": 120000.0,
-            "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
-            "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
-            "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
+            "published_output": 180000.0,
+            "statutory_authority": "SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 & Form 8-K Item 1.05 4-Business-Day Mandate)",
+            "economic_dataset": "SEC Division of Economic and Risk Analysis (DERA) Cyber Disclosure Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Public registrant operationalizing SEC Form 8-K Item 1.05 4-business-day materiality determination and Regulation S-K Item 106 board governance disclosures: outside securities counsel retainer ($65,000.00) + DFIR forensic readiness and tabletop exercises ($48,000.00) + 160 Regulation S-K Item 106 governance hours at $225/hr ($36,000.00) + automated materiality evidentiary workflow platform ($31,000.00) = $180,000.00 total annual SEC cyber disclosure readiness investment.",
         },
     }
 
@@ -8925,6 +8895,21 @@ class RetroReflectionEngine:
             "statutory_authority": "40 U.S.C. Section 3131 (Miller Act) & AIA Document A312-2010 Dual-Obligee Subcontractor Surety Standards",
             "economic_dataset": "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
             "sample_calculation": "General contractor managing $50,000,000.00 in annual subcontract volume comparing 1.35% subcontractor performance bonds ($675,000.00) against a 0.65% Subcontractor Default Insurance (SDI) policy ($325,000.00 base premium) plus 0.5 expected default claims at a $250,000.00 retention ($125,000.00 expected retention cost) = $225,000.00 net annual underwriting savings.",
+        },
+        "texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator": {
+            "model_name": "LienBond-Texas-Chapter53-Statutory-Retainage-FundTrapping-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(min(unpaid_subcontract_balance, (original_prime_contract_price * (statutory_reserved_pct / 100.0)) + trapped_owner_progress_funds), 2)",
+            "inputs": {
+                "unpaid_subcontract_balance": 185000.0,
+                "original_prime_contract_price": 1200000.0,
+                "statutory_reserved_pct": 10.0,
+                "trapped_owner_progress_funds": 30000.0,
+            },
+            "published_output": 150000.0,
+            "statutory_authority": "Texas Property Code Section 53.101 (10% Statutory Reserved Funds) & Section 53.056 (15th Day of 3rd Month Derivative Notice)",
+            "economic_dataset": "FRED Total Construction Spending Series (TTLCONS) & BLS Specialty Trade Contractors PPI Series",
+            "sample_calculation": "Texas commercial subcontractor with $185,000.00 in unpaid progress billings on a $1,200,000.00 prime contract serving a timely Section 53.056 derivative claimant notice by the 15th day of the third month: 10% statutory reserved funds under Texas Property Code Section 53.101 ($120,000.00) plus $30,000.00 in trapped owner progress funds secures $150,000.00 in priority mechanics lien recovery.",
         },
     }
 
