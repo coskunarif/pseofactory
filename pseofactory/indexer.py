@@ -1135,6 +1135,7 @@ class ChildSitemapPushLedger:
             ("profithelm", "/profithelm-platform/.agy/"),
             ("prexvo", "/prexvo/.agy/"),
             ("gainhelm", "/gainhelm/.agy/"),
+            ("lienbond", "/lienbond/.agy/"),
         ):
             if folder in path_str:
                 return t_cand
@@ -1388,6 +1389,12 @@ class PushIndexer:
             or "gainhelm" in str(tenant_id or "").lower()
         ):
             domain = "gainhelm.com"
+        elif domain == DEFAULT_DOMAIN and (
+            "lienbond" in str(base_dir or "").lower()
+            or "lienbond" in str(dist_dir or "").lower()
+            or "lienbond" in str(tenant_id or "").lower()
+        ):
+            domain = "lienbond.com"
         self.domain = domain
         if canonical_base == DEFAULT_CANONICAL_BASE and domain and domain != DEFAULT_DOMAIN:
             self.canonical_base = f"https://{domain}".rstrip("/")
@@ -1398,7 +1405,7 @@ class PushIndexer:
             os.environ.get("PYTEST_CURRENT_TEST")
             and base_dir is None
             and (
-                self.domain not in ("profithelm.com", "prexvo.com", "gainhelm.com")
+                self.domain not in ("profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com")
                 or (dist_dir is not None and "/home/ubuntuadmin/projects" not in str(dist_dir))
             )
         )
@@ -1411,6 +1418,8 @@ class PushIndexer:
             _default_base = Path("/home/ubuntuadmin/projects/prexvo")
         elif "gainhelm" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/gainhelm").exists():
             _default_base = Path("/home/ubuntuadmin/projects/gainhelm")
+        elif "lienbond" in (tenant_id or self.domain or "").lower() and Path("/home/ubuntuadmin/projects/lienbond").exists():
+            _default_base = Path("/home/ubuntuadmin/projects/lienbond")
         else:
             _default_base = DEFAULT_BASE_DIR
         self.base_dir = Path(base_dir) if base_dir else _default_base
@@ -1607,6 +1616,10 @@ class PushIndexer:
                     alt_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
                     if alt_dist.exists():
                         u_dist = alt_dist
+                elif "lienbond.com" in u_host and "lienbond" not in str(eff_dist).lower():
+                    alt_dist = Path("/home/ubuntuadmin/projects/lienbond/dist")
+                    if alt_dist.exists():
+                        u_dist = alt_dist
                 elif "profithelm.com" in u_host and "profithelm" not in str(eff_dist).lower():
                     alt_dist = Path("/home/ubuntuadmin/projects/profithelm-platform/dist")
                     if alt_dist.exists():
@@ -1760,7 +1773,7 @@ class PushIndexer:
         if (
             not os.environ.get("PYTEST_CURRENT_TEST")
             and "/home/ubuntuadmin/projects/" in str(self.dist_dir)
-            and self.domain in ("profithelm.com", "prexvo.com", "gainhelm.com")
+            and self.domain in ("profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com")
         ):
             try:
                 indexnow_cache_dir = Path.home() / ".indexnow"
@@ -2676,7 +2689,7 @@ class PushIndexer:
             eff_tenant = (
                 "prexvo"
                 if "prexvo" in dom_low
-                else ("gainhelm" if "gainhelm" in dom_low else "profithelm")
+                else ("gainhelm" if "gainhelm" in dom_low else ("lienbond" if "lienbond" in dom_low else "profithelm"))
             )
 
         repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent))
@@ -3256,7 +3269,7 @@ class PushIndexer:
                 prop_id = (
                     "prexvo"
                     if "prexvo" in (self.domain or "").lower()
-                    else ("gainhelm" if "gainhelm" in (self.domain or "").lower() else "profithelm")
+                    else ("gainhelm" if "gainhelm" in (self.domain or "").lower() else ("lienbond" if "lienbond" in (self.domain or "").lower() else "profithelm"))
                 )
                 db_records = []
                 for item in inspections:
@@ -3434,6 +3447,8 @@ class PushIndexer:
             search_dirs.append(Path("/home/ubuntuadmin/projects/prexvo/dist"))
         elif self.domain == "gainhelm.com":
             search_dirs.append(Path("/home/ubuntuadmin/projects/gainhelm/dist"))
+        elif self.domain == "lienbond.com":
+            search_dirs.append(Path("/home/ubuntuadmin/projects/lienbond/dist"))
 
         for cand_dist in search_dirs:
             if discovered:
@@ -3469,7 +3484,7 @@ class PushIndexer:
         candidate_urls: List[Any] = list(urls) if urls else []
         if not candidate_urls and "sitemap.xml" in discovered:
             candidate_urls = list(discovered["sitemap.xml"].get("urls", []))
-        if not discovered and candidate_urls and self.domain not in ("profithelm.com", "prexvo.com", "gainhelm.com"):
+        if not discovered and candidate_urls and self.domain not in ("profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com"):
             try:
                 built = build_multi_tenant_sitemaps(
                     urls_or_records=candidate_urls,

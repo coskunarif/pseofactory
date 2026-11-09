@@ -8756,6 +8756,21 @@ class RetroReflectionEngine:
             "economic_dataset": "FRED Commercial Construction Credit Series and BLS Specialty Trade Contractor Series",
             "sample_calculation": "Serving a California 20-Day Preliminary Notice on Day 20 from first furnishing preserves 100% ($120,000.00) of statutory mechanics lien and stop payment notice rights.",
         },
+        "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator": {
+            "model_name": "SubcontractorDefaultInsuranceVsSuretyBondTCOModel",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round((subcontract_volume * (surety_bond_rate_pct / 100.0)) - ((subcontract_volume * (sdi_premium_rate_pct / 100.0)) + expected_deductible_retention), 2)",
+            "inputs": {
+                "subcontract_volume": 25000000.0,
+                "surety_bond_rate_pct": 1.2,
+                "sdi_premium_rate_pct": 0.55,
+                "expected_deductible_retention": 75000.0,
+            },
+            "published_output": 87500.0,
+            "statutory_authority": "31 CFR Part 223 U.S. Treasury Circular 570, 40 U.S.C. Section 3131, and AIA Document A312 Surety Underwriting Standards",
+            "economic_dataset": "Surety and Fidelity Association of America (SFAA) Loss Ratio Series and BLS Producer Price Index for Nonresidential Construction",
+            "sample_calculation": "General contractor enrolling $25,000,000 in trade subcontracts compares traditional 1.20% AIA A312 subcontractor performance bonds ($300,000.00) against a 0.55% Subcontractor Default Insurance (SDI) policy ($137,500.00 premium) plus $75,000.00 expected deductible retention ($212,500.00 total SDI cost), yielding $87,500.00 in net annual underwriting savings.",
+        },
     }
 
     @classmethod

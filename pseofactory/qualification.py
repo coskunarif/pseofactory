@@ -62,6 +62,11 @@ STATUTORY_PROVENANCE_PATTERNS: List[str] = [
     r"\bNAIC\b",
     r"\bRegulation\s*\(EU\)\s*\d{4}/\d+\b",
     r"\bDigital\s+Operational\s+Resilience\s+Act\b",
+    r"\bCircular\s+570\b",
+    r"\bNCCI\b",
+    r"\bMiller\s+Act\b",
+    r"\bAIA\s+(?:Document\s+)?A312\b",
+    r"\b(?:Civil|Property|Construction\s+Lien)\s+(?:Code|Law|Statute)\b",
 ]
 
 US_STATE_NAME_TO_SLUG: Dict[str, str] = {

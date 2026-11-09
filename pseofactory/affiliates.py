@@ -1867,6 +1867,9 @@ LIENBOND_TOOL_PATTERNS: List[str] = [
     "license-bond",
     "miller-act",
     "performance-and-payment-bond",
+    "performance-bond",
+    "subcontractor-default-insurance",
+    "sdi-vs-performance-bond",
     "lien-release",
     "preliminary-notice",
     "retainage",
@@ -4112,6 +4115,21 @@ def verify_partner_domain_alignment(
                 violations.append(
                     f"GainHelm registry violation: unapproved partner '{pk}' on '{s_clean}'."
                 )
+    elif prop == "lienbond":
+        for pk in clean_partners:
+            if (
+                pk in STUDENT_LOAN_PARTNER_KEYS
+                or pk in PREXVO_AFFILIATES
+                or pk in GAINHELM_AFFILIATES
+                or (pk in PROFITHELM_AFFILIATES and pk not in LIENBOND_AFFILIATES)
+            ):
+                violations.append(
+                    f"LienBond isolation violation: foreign tenant partner '{pk}' prohibited on '{s_clean}'."
+                )
+            elif pk not in LIENBOND_AFFILIATES and pk not in LIENBOND_PARTNER_KEYS:
+                violations.append(
+                    f"LienBond registry violation: unapproved partner '{pk}' on '{s_clean}'."
+                )
     elif prop in ("profithelm", "exchange1031"):
         is_b2b = is_commercial_b2b_slug(s_clean)
         is_retail = (s_clean in RETAIL_TAX_SLUGS) or (not is_b2b and any(
@@ -4219,6 +4237,39 @@ def qualify_monetization_opportunity(
             "penetration-testing",
             "cyber liability insurance",
             "cyber-liability-insurance",
+            "dora",
+        )
+    )
+    is_lienbond = any(
+        tok in combined
+        for tok in (
+            "surety",
+            "bond",
+            "mechanics lien",
+            "mechanics-lien",
+            "lien release",
+            "lien-release",
+            "preliminary notice",
+            "preliminary-notice",
+            "retainage",
+            "workers comp",
+            "workers-comp",
+            "workers compensation",
+            "workers-compensation",
+            "emr",
+            "experience modification",
+            "davis-bacon",
+            "davis bacon",
+            "wh-347",
+            "subcontractor default insurance",
+            "subcontractor-default-insurance",
+            "sdi",
+            "circular 570",
+            "miller act",
+            "miller-act",
+            "erisa fidelity",
+            "markup vs margin",
+            "markup-vs-margin",
         )
     )
 
@@ -4341,12 +4392,80 @@ def qualify_monetization_opportunity(
                 "disclosures_required": dict(GAINHELM_DISCLOSURES),
             }
 
+    if prop_explicit == "lienbond":
+        if is_student_loan or is_gainhelm or any(
+            k in combined
+            for k in (
+                "section 179",
+                "section-179",
+                "section 1031",
+                "1031 exchange",
+                "qsbs",
+                "corporate amt",
+                "section 174",
+                "s-corp",
+                "s corp",
+                "macrs",
+                "bonus depreciation",
+            )
+        ):
+            return {
+                "query": q_clean,
+                "slug": s_clean,
+                "property_id": "lienbond",
+                "intent_tier": "cross_tenant_contamination",
+                "monetization_qualified": False,
+                "rejection_reason": "Strict isolation violation: Foreign tenant tax, cyber, or student loan intent is prohibited on LienBond.",
+                "primary_partner": "",
+                "recommended_partners": [],
+                "expected_bounty_usd": 0.0,
+                "effective_partner_yield": 0.0,
+                "intent_weight": 0.0,
+                "y_asset": 0.0,
+                "estimated_monthly_revenue_usd": 0.0,
+                "partner_alignment_verified": False,
+                "disclosures_required": dict(LIENBOND_DISCLOSURES),
+            }
+        if not is_lienbond:
+            return {
+                "query": q_clean,
+                "slug": s_clean,
+                "property_id": "lienbond",
+                "intent_tier": "out_of_scope_lienbond",
+                "monetization_qualified": False,
+                "rejection_reason": "LienBond requires construction surety bond, workers compensation, mechanics lien, or prevailing wage intent.",
+                "primary_partner": "",
+                "recommended_partners": [],
+                "expected_bounty_usd": 0.0,
+                "effective_partner_yield": 0.0,
+                "intent_weight": 0.0,
+                "y_asset": 0.0,
+                "estimated_monthly_revenue_usd": 0.0,
+                "partner_alignment_verified": False,
+                "disclosures_required": dict(LIENBOND_DISCLOSURES),
+            }
+
     is_restricted_ps = False
     commercial_offers_allowed = True
     greenfield_meta: Dict[str, Any] = {}
 
     # 3. Route to canonical intent tier and property
-    if prop_explicit == "gainhelm" or (not prop_explicit and is_gainhelm and not is_student_loan):
+    if prop_explicit == "lienbond" or (not prop_explicit and is_lienbond and not is_student_loan and not is_gainhelm and not is_b2b):
+        resolved_prop = "lienbond"
+        intent_tier = "construction_surety_workers_comp_lien"
+        primary_obj = resolve_optimal_partner_for_slug("lienbond", s_clean, vault_overrides=vault_overrides)
+        rec_partners = [k for k in LIENBOND_AFFILIATES.keys()]
+        if primary_obj and primary_obj.key in rec_partners:
+            rec_partners = [primary_obj.key] + [k for k in rec_partners if k != primary_obj.key]
+        bounty_usd = float(parse_bounty_estimate(primary_obj.bounty_est).get("midpoint", 180.0)) if primary_obj else 180.0
+        eff_yield = score_partner_yield(primary_obj, primary_obj.status) if primary_obj else 180.0
+        intent_weight = 1.35
+        y_asset = round(min(1.85, max(0.95, (bounty_usd / 180.0) * 0.65 + (cpc / 5.0) * 0.35)), 4)
+        disclosures = dict(LIENBOND_DISCLOSURES)
+        alignment = verify_partner_domain_alignment("lienbond", s_clean, rec_partners)
+        qualified = bool(alignment["aligned"] and len(rec_partners) > 0)
+        rejection_reason = "" if qualified else "Failed LienBond partner alignment or monetization threshold"
+    elif prop_explicit == "gainhelm" or (not prop_explicit and is_gainhelm and not is_student_loan):
         resolved_prop = "gainhelm"
         intent_tier = "enterprise_cyber_compliance_grc"
         primary_obj = resolve_optimal_partner_for_slug("gainhelm", s_clean, vault_overrides=vault_overrides)

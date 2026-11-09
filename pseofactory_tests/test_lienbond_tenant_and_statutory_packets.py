@@ -301,3 +301,33 @@ def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path) -> None
         / "index.html"
     ).is_file()
 
+    from pseofactory.indexer import PushIndexer
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.verifier import audit_estate_technical_seo_and_cannibalization
+
+    assert (
+        "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator"
+        in RetroReflectionEngine.LIENBOND_FALLBACK_MANIFESTS
+    )
+    seo_rep = audit_estate_technical_seo_and_cannibalization(
+        dist_dir=lb_root / "dist",
+        property_id="lienbond",
+    )
+    assert seo_rep["passed"] is True, f"SEO issues on LienBond: {seo_rep['issues']}"
+
+    indexer = PushIndexer(
+        domain="lienbond.com",
+        canonical_base="https://lienbond.com",
+        base_dir=lb_root,
+        dist_dir=lb_root / "dist",
+        tenant_id="lienbond",
+    )
+    assert indexer.domain == "lienbond.com"
+    assert indexer.tenant_id == "lienbond"
+    airlock = indexer.preflight_airlock(
+        urls=["https://lienbond.com/tools/subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator/"],
+        dist_dir=lb_root / "dist",
+    )
+    assert len(airlock.valid_urls) == 1
+    assert len(airlock.quarantined_urls) == 0
+
