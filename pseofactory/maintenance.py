@@ -11695,6 +11695,18 @@ class RetroReflectionEngine:
                 try:
                     raw_th = t_html.read_text(encoding="utf-8", errors="ignore")
                     new_th = raw_th
+                    if (
+                        not (is_prexvo or is_gainhelm or is_lienbond)
+                        and (d / "about" / "index.html").is_file()
+                        and not (d / "methodology" / "index.html").is_file()
+                    ):
+                        new_th = new_th.replace('href="/methodology/"', 'href="/about/"')
+                    if (
+                        not (is_prexvo or is_gainhelm or is_lienbond)
+                        and (d / "privacy" / "index.html").is_file()
+                        and not (d / "disclaimers" / "index.html").is_file()
+                    ):
+                        new_th = new_th.replace('href="/disclaimers/"', 'href="/privacy/"')
                     t_missing: List[str] = []
                     if 'rel="publisher-media-kit"' not in new_th:
                         t_missing.append('  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">')
@@ -11702,9 +11714,9 @@ class RetroReflectionEngine:
                         t_missing.append('  <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json">')
                     if t_missing and "</head>" in new_th:
                         new_th = new_th.replace("</head>", "\n".join(t_missing) + "\n</head>", 1)
-                        if new_th != raw_th:
-                            t_html.write_text(new_th, encoding="utf-8")
-                            updated_files.append(rel_tp)
+                    if new_th != raw_th:
+                        t_html.write_text(new_th, encoding="utf-8")
+                        updated_files.append(rel_tp)
                 except Exception:
                     pass
 

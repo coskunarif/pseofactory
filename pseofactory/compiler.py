@@ -2659,8 +2659,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </a>
       <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
-        <a href="/methodology/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
-        <a href="/disclaimers/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
+        <a href="{'/' + ('about' if 'profithelm' in str(canonical_base or '').lower() else 'methodology') + '/'}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
+        <a href="{'/' + ('privacy' if 'profithelm' in str(canonical_base or '').lower() else 'disclaimers') + '/'}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
         <a href="mailto:editorial@{canonical_base.replace('https://', '').replace('http://', '').strip('/')}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
