@@ -4775,7 +4775,7 @@ def render_partner_quote_intake_html(
         f'          <div class="serp-sub-inputs-grid" style="margin-bottom: 12px;">\n'
         f'            <div class="serp-input-cell">\n'
         f'              <label for="quote-intake-email">{email_label}</label>\n'
-        f'              <input type="email" id="quote-intake-email" name="email" class="touch-target calc-number-input" placeholder="Email address (personal or work)..." required autocomplete="email" aria-label="{email_label}">\n'
+        f'              <input type="email" id="quote-intake-email" name="email" class="touch-target calc-number-input" placeholder="Enter your email address..." required autocomplete="email" aria-label="{email_label}">\n'
         f'            </div>\n'
         f'            <div class="serp-input-cell">\n'
         f'              <label for="quote-intake-state">{state_label}</label>\n'

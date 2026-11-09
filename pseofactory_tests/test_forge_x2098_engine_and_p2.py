@@ -483,7 +483,7 @@ def test_top_traffic_state_preselection_and_above_fold_conversion_unlock():
 
     ny_intake = render_partner_quote_intake_html("irs-2027-tax-brackets-new-york", "profithelm", baseline_amount=150000.0)
     assert '<option value="NY" selected>New York (NY)</option>' in ny_intake
-    assert "Email address (personal or work)..." in ny_intake
+    assert "Enter your email address..." in ny_intake
     assert "Work email address..." not in ny_intake
 
     ny_drawer = render_post_calculation_upgrade_drawer_html("irs-2027-tax-brackets-new-york", "profithelm", baseline_amount=150000.0)

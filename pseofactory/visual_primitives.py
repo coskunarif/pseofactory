@@ -5048,6 +5048,31 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
     ).strip().lower()
     default_state = resolve_state_code_from_slug(tool_slug, prop_id)
 
+    if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
+        pk_fallback = (
+            _extract_attr(q_tag, "data-partner-key")
+            or ("splash_financial" if prop_id == "prexvo" else ("vanta_security" if prop_id == "gainhelm" else "ipx1031"))
+        ).strip().lower()
+        pname_fallback = (
+            _extract_attr(q_tag, "data-partner-name")
+            or ("Splash Financial" if prop_id == "prexvo" else ("Vanta" if prop_id == "gainhelm" else "Verified Partner"))
+        ).strip()
+        fallback_cta_html = (
+            f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
+            f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
+            f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
+            f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
+            f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
+            f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
+            f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
+            f'      </div>\n'
+        )
+        q_pos = updated.find('<div id="partner-quote-intake-step"')
+        if q_pos != -1:
+            updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
+            actions.append("commercial_affiliate_cta_fallback")
+
     if 'class="pro-hook-card"' in updated and 'id="post-calculation-upgrade-drawer"' in updated:
         upg_m = re.search(
             r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
@@ -5214,18 +5239,22 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             updated = new_lc_doc
             actions.append("lead_capture_cheat_sheet_heading")
 
-    if 'placeholder="Work email address..."' in updated or 'placeholder="Work email..."' in updated or 'placeholder="Enter your email address..."' in updated:
+    if (
+        'placeholder="Work email address..."' in updated
+        or 'placeholder="Work email..."' in updated
+        or 'placeholder="Email address (personal or work)..."' in updated
+    ):
         updated = updated.replace(
             'placeholder="Work email address..."',
-            'placeholder="Email address (personal or work)..."',
+            'placeholder="Enter your email address..."',
         ).replace(
             'placeholder="Work email..."',
-            'placeholder="Email address (personal or work)..."',
-        ).replace(
             'placeholder="Enter your email address..."',
+        ).replace(
             'placeholder="Email address (personal or work)..."',
+            'placeholder="Enter your email address..."',
         )
-        actions.append("email_placeholder_unlock")
+        actions.append("lead_capture_consumer_email_placeholder")
 
     if has_quote_intake and 'id="partner-registration-drawer"' not in updated:
         firm_ph = (
@@ -5289,31 +5318,6 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                     + updated[last_aff.start(2) :]
                 )
                 actions.append("partner_registration_drawer")
-
-    if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
-        pk_fallback = (
-            _extract_attr(q_tag, "data-partner-key")
-            or ("splash_financial" if prop_id == "prexvo" else ("vanta_security" if prop_id == "gainhelm" else "ipx1031"))
-        ).strip().lower()
-        pname_fallback = (
-            _extract_attr(q_tag, "data-partner-name")
-            or ("Splash Financial" if prop_id == "prexvo" else ("Vanta" if prop_id == "gainhelm" else "Verified Partner"))
-        ).strip()
-        fallback_cta_html = (
-            f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
-            f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
-            f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
-            f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
-            f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
-            f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
-            f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
-            f'      </div>\n'
-        )
-        q_pos = updated.find('<div id="partner-quote-intake-step"')
-        if q_pos != -1:
-            updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
-            actions.append("commercial_affiliate_cta_fallback")
 
     if has_quote_intake:
         raw_q_amt = _extract_attr(q_tag, "data-calculated-amount") or ""

@@ -4269,7 +4269,11 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
     Satisfies Google contentEffort standards and institutional distribution guidelines.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+    from pseofactory.maintenance import (
+        PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS,
+        GAINHELM_DEFAULT_TOOLS,
+        LIENBOND_DEFAULT_TOOLS,
+    )
     if (
         property_id == "prexvo"
         or any(t.get("slug") == tool_slug for t in PREXVO_DEFAULT_TOOLS)
@@ -6124,7 +6128,11 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
     Conforms strictly to zero forbidden dashes, zero personal attribution, and zero conversational filler.
     """
     from pseofactory.contracts import assert_youtube_transcript
-    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+    from pseofactory.maintenance import (
+        PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS,
+        GAINHELM_DEFAULT_TOOLS,
+        LIENBOND_DEFAULT_TOOLS,
+    )
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
@@ -6491,7 +6499,11 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         assert_no_forbidden_dashes,
         assert_no_personal_attribution,
     )
-    from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+    from pseofactory.maintenance import (
+        PREXVO_EXTENDED_TOOLS as PREXVO_DEFAULT_TOOLS,
+        GAINHELM_DEFAULT_TOOLS,
+        LIENBOND_DEFAULT_TOOLS,
+    )
 
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
