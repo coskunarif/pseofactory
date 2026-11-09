@@ -409,10 +409,11 @@ def assert_youtube_transcript(
     10. 40-60 word extractable passage constraints for structured segment data.
     """
     if property_id and not brand_name:
+        prop_low = property_id.lower()
         brand_name = (
             "Prexvo"
-            if property_id.lower() == "prexvo"
-            else ("GainHelm" if property_id.lower() == "gainhelm" else "ProfitHelm")
+            if prop_low == "prexvo"
+            else ("GainHelm" if prop_low == "gainhelm" else ("LienBond" if prop_low == "lienbond" else "ProfitHelm"))
         )
     if not brand_name:
         brand_name = "ProfitHelm"
@@ -420,6 +421,8 @@ def assert_youtube_transcript(
         brand_name = "Prexvo"
     elif brand_name.lower() == "gainhelm":
         brand_name = "GainHelm"
+    elif brand_name.lower() == "lienbond":
+        brand_name = "LienBond"
     elif brand_name.lower() == "profithelm":
         brand_name = "ProfitHelm"
 
@@ -8912,6 +8915,7 @@ def detect_asset_partner_roster_and_slot_issues(
     from pseofactory.affiliates import (
         COMPANY_BRAND_BY_PARTNER_KEY,
         GAINHELM_AFFILIATES,
+        LIENBOND_AFFILIATES,
         PREXVO_AFFILIATES,
         PROFITHELM_AFFILIATES,
         classify_asset_archetype_and_intent,
@@ -8966,10 +8970,17 @@ def detect_asset_partner_roster_and_slot_issues(
 
     if prop == "prexvo":
         registry = PREXVO_AFFILIATES
-        foreign_registry = {**PROFITHELM_AFFILIATES, **GAINHELM_AFFILIATES}
+        foreign_registry = {**PROFITHELM_AFFILIATES, **GAINHELM_AFFILIATES, **LIENBOND_AFFILIATES}
     elif prop == "gainhelm":
         registry = GAINHELM_AFFILIATES
-        foreign_registry = {**PROFITHELM_AFFILIATES, **PREXVO_AFFILIATES}
+        foreign_registry = {**PROFITHELM_AFFILIATES, **PREXVO_AFFILIATES, **LIENBOND_AFFILIATES}
+    elif prop == "lienbond":
+        registry = LIENBOND_AFFILIATES
+        foreign_registry = {
+            k: v
+            for k, v in {**PROFITHELM_AFFILIATES, **PREXVO_AFFILIATES, **GAINHELM_AFFILIATES}.items()
+            if k not in LIENBOND_AFFILIATES
+        }
     else:
         registry = PROFITHELM_AFFILIATES
         foreign_registry = {**PREXVO_AFFILIATES, **GAINHELM_AFFILIATES}

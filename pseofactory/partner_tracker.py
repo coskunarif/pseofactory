@@ -445,7 +445,7 @@ class PartnerTrackingEngine:
                     notes="PartnerStack ToS accepted; partnership part_jp9R0iYpPGriHu is active.",
                 )
 
-        for prop_id in ("profithelm", "prexvo", "gainhelm"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             gate_err_id = f"act-{prop_id}-{prop_id}-monetization-gate-integration-requirement"
             if (
                 gate_err_id in self.action_bus.items
@@ -1788,17 +1788,19 @@ class PartnerTrackingEngine:
             "profithelm": "https://profithelm.com/api/telemetry?limit=1000",
             "prexvo": "https://prexvo.com/api/telemetry?limit=1000",
             "gainhelm": "https://gainhelm.com/api/telemetry?limit=1000",
+            "lienbond": "https://lienbond.com/api/telemetry?limit=1000",
         }
         tenant_repos = {
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo"),
             "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
+            "lienbond": Path("/home/ubuntuadmin/projects/lienbond"),
         }
         base_ledger_dir = Path(ledger_dir) if ledger_dir is not None else None
         results: Dict[str, Dict[str, Any]] = {}
         fetch_errors: Dict[str, str] = {}
 
-        for prop_id in ("profithelm", "prexvo", "gainhelm"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             if base_ledger_dir is not None:
                 base_ledger_dir.mkdir(parents=True, exist_ok=True)
                 jsonl_path = base_ledger_dir / f"{prop_id}_telemetry_events.jsonl"
@@ -1976,7 +1978,7 @@ class PartnerTrackingEngine:
             sync_data = self.sync_edge_click_telemetry(fetch_live=False)
             engagement_by_property = {
                 prop_id: sync_data[prop_id]["aggregation"]
-                for prop_id in ("profithelm", "prexvo", "gainhelm")
+                for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
                 if prop_id in sync_data
             }
 
@@ -2449,7 +2451,7 @@ class PartnerTrackingEngine:
         }
 
         edge_clicks_by_partner: Dict[str, int] = {}
-        for prop_id in ("profithelm", "prexvo", "gainhelm"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             agg = engagement_by_property.get(prop_id) or {}
             for pk, p_data in (agg.get("by_partner") or {}).items():
                 c_val = int(p_data.get("outbound_clicks", 0) or 0)
@@ -2468,6 +2470,7 @@ class PartnerTrackingEngine:
             ("profithelm", PROFITHELM_AFFILIATES),
             ("prexvo", PREXVO_AFFILIATES),
             ("gainhelm", GAINHELM_AFFILIATES),
+            ("lienbond", LIENBOND_AFFILIATES),
         ):
             for p_key, p_obj in reg_map.items():
                 if p_key != p_obj.key:
@@ -2524,7 +2527,7 @@ class PartnerTrackingEngine:
         total_portal_clicks = sum(int(p["portal_verified_clicks"]) for p in portals_state.values())
         total_edge_clicks = sum(
             int((engagement_by_property.get(pid) or {}).get("total_outbound_clicks", 0) or 0)
-            for pid in ("profithelm", "prexvo", "gainhelm")
+            for pid in ("profithelm", "prexvo", "gainhelm", "lienbond")
         )
         total_modeled_pipeline_usd = round(
             sum(float(p["modeled_epc_pipeline_usd"]) for p in partners_reconciliation.values()), 2
@@ -2608,7 +2611,7 @@ class PartnerTrackingEngine:
             sync_data = self.sync_edge_click_telemetry(fetch_live=False)
             engagement_by_property = {
                 prop_id: sync_data[prop_id]["aggregation"]
-                for prop_id in ("profithelm", "prexvo", "gainhelm")
+                for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
                 if prop_id in sync_data
             }
 
@@ -3147,7 +3150,7 @@ class PartnerTrackingEngine:
         from pseofactory.affiliates import is_restricted_public_service_slug
 
         prop_clean = (property_id or "profithelm").strip().lower()
-        if prop_clean not in ("profithelm", "prexvo", "gainhelm"):
+        if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             raise ValueError(f"Unsupported property_id '{property_id}'.")
         slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
         if slug_clean.startswith("tools/"):
@@ -6974,7 +6977,7 @@ def compute_scenario_demand_and_conversion_metrics(
         reverse=True,
     )
 
-    top_by_tenant: Dict[str, List[Dict[str, Any]]] = {"profithelm": [], "prexvo": [], "gainhelm": []}
+    top_by_tenant: Dict[str, List[Dict[str, Any]]] = {"profithelm": [], "prexvo": [], "gainhelm": [], "lienbond": []}
     for sc in ranked_scenarios:
         p_id = sc["property_id"]
         if p_id in top_by_tenant:
@@ -7332,7 +7335,7 @@ def rank_revenue_weighted_expansion_queue(
     actionable_items = [
         x
         for x in enriched_items
-        if x.get("property_id") in ("profithelm", "prexvo", "gainhelm")
+        if x.get("property_id") in ("profithelm", "prexvo", "gainhelm", "lienbond")
         and x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE", "MONITOR")
         and float(x.get("before_composite_profit_yield") or 0.0) > 0.0
     ]
@@ -7380,7 +7383,7 @@ def rank_revenue_weighted_expansion_queue(
         a_item.pop("_action_priority", None)
 
     per_tenant: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
-    for t_id in ("profithelm", "prexvo", "gainhelm"):
+    for t_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
         if prop_filter and t_id != prop_filter:
             continue
         t_items = [x for x in actionable_items if x.get("property_id") == t_id]
@@ -9488,7 +9491,11 @@ def audit_end_to_end_monetization_and_fulfillment(
             domain = (
                 "https://prexvo.com"
                 if prop_id == "prexvo"
-                else ("https://gainhelm.com" if prop_id == "gainhelm" else "https://profithelm.com")
+                else (
+                    "https://gainhelm.com"
+                    if prop_id == "gainhelm"
+                    else ("https://lienbond.com" if prop_id == "lienbond" else "https://profithelm.com")
+                )
             )
             chk_url = f"{domain}/api/lead-capture?checkout=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
             ff_url = f"{domain}/api/lead-capture?fulfill=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
@@ -9567,6 +9574,7 @@ def audit_end_to_end_monetization_and_fulfillment(
         ("profithelm", PROFITHELM_AFFILIATES),
         ("prexvo", PREXVO_AFFILIATES),
         ("gainhelm", GAINHELM_AFFILIATES),
+        ("lienbond", LIENBOND_AFFILIATES),
     ):
         prop_vault = vault_data.get(prop_id, {}) if isinstance(vault_data, dict) else {}
         canonical_keys = [k for k, p_obj in reg_map.items() if k == p_obj.key]

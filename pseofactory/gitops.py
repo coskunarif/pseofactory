@@ -758,11 +758,15 @@ class TenantFactoryLockGuard:
                     return self
                 time.sleep(0.1)
 
+        if self.acquired:
+            os.environ[f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK"] = "1"
+            os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
         if self.acquired and self.repo_path is not None and (self.repo_path / ".git").exists():
             reconcile_repo_with_origin_main(self.repo_path, branch="main")
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        os.environ.pop(f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK", None)
         if self._fd is not None:
             try:
                 if self.acquired:
@@ -1347,7 +1351,7 @@ class GitOpsCoordinator:
             backoffs = [1.0, 2.0, 4.0]
 
         # Refresh Wrangler OAuth token into GitHub Secrets prior to pushing tenant repos
-        if self.repo_path.name in ("profithelm-platform", "prexvo", "gainhelm") and shutil.which("gh"):
+        if self.repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond") and shutil.which("gh"):
             wrangler_cfg = Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml")
             if wrangler_cfg.is_file():
                 try:
@@ -2236,7 +2240,15 @@ class CICDWatcher:
                                         proj_name = (
                                             "prexvo"
                                             if "prexvo" in rp.name
-                                            else ("gainhelm" if "gainhelm" in rp.name else ("profithelm" if "profithelm" in rp.name else ""))
+                                            else (
+                                                "gainhelm"
+                                                if "gainhelm" in rp.name
+                                                else (
+                                                    "lienbond"
+                                                    if "lienbond" in rp.name
+                                                    else ("profithelm" if "profithelm" in rp.name else "")
+                                                )
+                                            )
                                         )
                                         if proj_name and (rp / "dist").is_dir():
                                             try:
@@ -3851,7 +3863,7 @@ def sync_tenant_test_isolation_guards(
             pass
 
     # 3. Ensure tenant factory Stage 6 never commits .agy/runs into git and pytest runs never mutate tracked workspace files
-    for factory_rel in ("profithelm/factory.py", "prexvo/factory.py", "gainhelm/factory.py"):
+    for factory_rel in ("profithelm/factory.py", "prexvo/factory.py", "gainhelm/factory.py", "lienbond/factory.py"):
         factory_py = repo / factory_rel
         if not factory_py.is_file():
             continue
@@ -5788,7 +5800,7 @@ def reconcile_workspace_tracking_state(
         rd_cand = Path(runs_dir).resolve()
         if (rd_cand / ".agy" / "runs").is_dir() or any(
             (rd_cand / rn / ".git").exists()
-            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm")
+            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
         ):
             ws = rd_cand
             runs_dir = rd_cand / ".agy" / "runs"
@@ -5799,7 +5811,7 @@ def reconcile_workspace_tracking_state(
             if tenant_repos is None:
                 tenant_repos = [
                     rd_cand / rn
-                    for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm")
+                    for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
                     if (rd_cand / rn).is_dir()
                 ]
         elif rd_cand.name == "runs" and rd_cand.parent.name == ".agy":
@@ -5807,7 +5819,7 @@ def reconcile_workspace_tracking_state(
             if tenant_repos is None and ws != Path("/home/ubuntuadmin/projects").resolve():
                 tenant_repos = [
                     ws / rn
-                    for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm")
+                    for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
                     if (ws / rn).is_dir()
                 ]
     is_explicit = (
@@ -5846,7 +5858,7 @@ def reconcile_workspace_tracking_state(
         )
     )
 
-    canonical_queue_Owner_ids = {"profithelm", "prexvo", "gainhelm", "pseofactory", "factory", "default"}
+    canonical_queue_Owner_ids = {"profithelm", "prexvo", "gainhelm", "lienbond", "pseofactory", "factory", "default"}
     pruned_queue_files = 0
     reconciled_wal_events = 0
     pruned_ledger_tokens = 0
@@ -5894,6 +5906,7 @@ def reconcile_workspace_tracking_state(
             "profithelm-platform",
             "prexvo",
             "gainhelm",
+            "lienbond",
             "MindBall",
             "ai-field-service-dispatcher",
             "x-likes-explorer",
@@ -5975,7 +5988,7 @@ def reconcile_workspace_tracking_state(
             [Path(tr) for tr in tenant_repos]
             if tenant_repos
             else (
-                [ws / rn for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm")]
+                [ws / rn for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")]
                 if not in_test
                 else []
             )
@@ -6006,7 +6019,7 @@ def reconcile_workspace_tracking_state(
             if tr_runs not in runs_dirs_to_scan:
                 runs_dirs_to_scan.append(tr_runs)
     elif not in_test and not is_explicit:
-        for repo_name in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm"):
+        for repo_name in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond"):
             tr_runs = Path("/home/ubuntuadmin/projects") / repo_name / ".agy" / "runs"
             if tr_runs not in runs_dirs_to_scan:
                 runs_dirs_to_scan.append(tr_runs)
@@ -6108,6 +6121,8 @@ def reconcile_workspace_tracking_state(
                                 synth_proj = "/home/ubuntuadmin/projects/prexvo"
                             elif p_id == "gainhelm":
                                 synth_proj = "/home/ubuntuadmin/projects/gainhelm"
+                            elif p_id == "lienbond":
+                                synth_proj = "/home/ubuntuadmin/projects/lienbond"
                             elif p_id == "profithelm" and run_dir.name.isdigit():
                                 synth_proj = "/home/ubuntuadmin/projects/profithelm-platform"
                     cur_h = heads.get(synth_proj) or heads.get(Path(synth_proj).name) or ""
@@ -6445,7 +6460,15 @@ def reconcile_workspace_tracking_state(
                                 if t_up_log.is_file():
                                     try:
                                         from pseofactory.video_factory import _save_upload_idempotency_record
-                                        t_prop = "profithelm" if "profithelm" in repo_name else ("gainhelm" if "gainhelm" in repo_name else "prexvo")
+                                        t_prop = (
+                                            "profithelm"
+                                            if "profithelm" in repo_name
+                                            else (
+                                                "gainhelm"
+                                                if "gainhelm" in repo_name
+                                                else ("lienbond" if "lienbond" in repo_name else "prexvo")
+                                            )
+                                        )
                                         raw_u_list = json.loads(t_up_log.read_text(encoding="utf-8"))
                                         if isinstance(raw_u_list, list):
                                             for u_entry in raw_u_list:

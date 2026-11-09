@@ -691,7 +691,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 
     def _enforce_sys_modules_isolation(self) -> None:
         """Purges any tenant modules from host sys.modules to guarantee strict memory isolation."""
-        tenant_prefixes = ("profithelm", "prexvo", "gainhelm", self._property_id)
+        tenant_prefixes = ("profithelm", "prexvo", "gainhelm", "lienbond", self._property_id)
         for mod_name in list(sys.modules.keys()):
             if any(mod_name == p or mod_name.startswith(f"{p}.") for p in tenant_prefixes):
                 sys.modules.pop(mod_name, None)
@@ -911,6 +911,12 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PROFITHELM_TARGET"] = slug
                 env["PREXVO_TARGET"] = slug
                 env["GAINHELM_TARGET"] = slug
+                env["LIENBOND_TARGET"] = slug
+                if env.get(f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK") == "1":
+                    child_lock = f"/tmp/{self.property_id}_factory_child_{os.getpid()}.lock"
+                    env["FACTORY_LOCK_FILE"] = child_lock
+                    env[f"{self.property_id.upper()}_LOCK_FILE"] = child_lock
+                    env["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
                 env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=180)
                 if res.returncode == 75:
@@ -1242,7 +1248,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         if not factory_script.is_file():
             factory_script = self._repo_path / "scripts" / "run_factory.sh"
 
-        if factory_script.is_file():
+        if factory_script.is_file() and last_error is None:
             cmd = ["bash", str(factory_script), "--dry-run", "--force"]
             try:
                 env = os.environ.copy()
@@ -1261,6 +1267,13 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["PROFITHELM_CHECK_QUEUE"] = "0"
                 env["GAINHELM_AUTO_LIVE"] = "0"
                 env["GAINHELM_CHECK_QUEUE"] = "0"
+                env["LIENBOND_AUTO_LIVE"] = "0"
+                env["LIENBOND_CHECK_QUEUE"] = "0"
+                if env.get(f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK") == "1":
+                    child_lock = f"/tmp/{self.property_id}_factory_child_{os.getpid()}.lock"
+                    env["FACTORY_LOCK_FILE"] = child_lock
+                    env[f"{self.property_id.upper()}_LOCK_FILE"] = child_lock
+                    env["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
                 res = subprocess.run(cmd, env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
                 if res.returncode == 0:
                     try:
@@ -5753,7 +5766,7 @@ def _needs_page_structure_geo_normalization(
         or '"dateModified"' not in html_content
         or ('class="quick-answer"' in html_content and '"SpeakableSpecification"' not in html_content)
         or (
-            canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com")
+            canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com", "https://lienbond.com")
             and '"ItemList"' not in html_content
         )
         or (
@@ -13602,8 +13615,12 @@ def _has_pending_downstream_work(
     synd_dir = repo_root / "syndication"
     central_synd = (
         Path("/home/ubuntuadmin/projects/pseofactory/syndication")
-        / ("prexvo" if adapter.property_id == "prexvo" else ("gainhelm" if adapter.property_id == "gainhelm" else "profithelm"))
-        if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo", "gainhelm")
+        / (
+            "prexvo"
+            if adapter.property_id == "prexvo"
+            else ("gainhelm" if adapter.property_id == "gainhelm" else ("lienbond" if adapter.property_id == "lienbond" else "profithelm"))
+        )
+        if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
         else None
     )
     for s in built_slugs:
@@ -13640,7 +13657,7 @@ def _has_pending_downstream_work(
     # 2b. Check YouTube video synthesis catalog on production tenant repositories
     if (
         str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
-        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm")
+        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
     ):
         videos_dir_chk = Path(dist_dir) / "videos"
         valid_mp4s = (
@@ -13682,7 +13699,7 @@ def _has_pending_downstream_work(
     if (
         not ignore_git_dirty
         and str(repo_root.resolve()).startswith("/home/ubuntuadmin/projects/")
-        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm")
+        and repo_root.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
         and (repo_root / ".git").exists()
     ):
         try:
@@ -15739,7 +15756,7 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 pass
 
-        if source_sync_changed and getattr(adapter, "property_id", None) in ("profithelm", "prexvo", "gainhelm"):
+        if source_sync_changed and getattr(adapter, "property_id", None) in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             pkg_prefix = adapter.property_id
             for mod_name in list(sys.modules.keys()):
                 if mod_name == pkg_prefix or mod_name.startswith(f"{pkg_prefix}."):
@@ -16234,7 +16251,7 @@ def reflect_and_recompile_all_assets(
                         pass
 
         freshness_needs_refresh = False
-        if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm"):
+        if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             try:
                 f_rep_path = adapter.dist_dir.parent / "freshness_audit_report.json"
                 if not f_rep_path.is_file():
@@ -16278,7 +16295,7 @@ def reflect_and_recompile_all_assets(
                 }
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
 
-                if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm"):
+                if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     try:
                         from pseofactory.qualification import (
                             reconcile_factory_execution_log,
@@ -16348,7 +16365,7 @@ def reflect_and_recompile_all_assets(
                                 push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
                     except Exception:
                         pass
-                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm") and not is_unmerged_worktree and not is_foreign_pytest:
+                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond") and not is_unmerged_worktree and not is_foreign_pytest:
                         try:
                             if adapter.property_id == "profithelm":
                                 import sqlite3

@@ -152,7 +152,7 @@ class MonetizationHub:
         self._init_sovrn_api_key = sovrn_api_key
         self._init_partnerstack_api_key = partnerstack_api_key
         self._init_stripe_account_id = stripe_account_id
-        self._vault: Dict[str, Dict[str, Any]] = {"profithelm": {}, "prexvo": {}, "gainhelm": {}}
+        self._vault: Dict[str, Dict[str, Any]] = {"profithelm": {}, "prexvo": {}, "gainhelm": {}, "lienbond": {}}
 
         self.vault_data = self._load_vault()
         self._rebuild_partner_vault_index()
@@ -160,7 +160,7 @@ class MonetizationHub:
     def _rebuild_partner_vault_index(self) -> None:
         """Populates self._vault[property_id][partner_key] from self.vault_data."""
         props = self.vault_data.get("properties", {}) if isinstance(self.vault_data, dict) else {}
-        for prop_id in ("profithelm", "prexvo", "gainhelm"):
+        for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             prop_map = self._vault.setdefault(prop_id, {})
             prop_data = props.get(prop_id, {})
             if not isinstance(prop_data, dict):
@@ -228,6 +228,10 @@ class MonetizationHub:
                 "gainhelm": {
                     "fallback_enabled": False,
                     "default_fallback_url": "https://gainhelm.com",
+                },
+                "lienbond": {
+                    "fallback_enabled": False,
+                    "default_fallback_url": "https://lienbond.com",
                 },
             },
         }
@@ -384,6 +388,10 @@ class MonetizationHub:
                 "gainhelm": {
                     "fallback_enabled": False,
                     "default_fallback_url": "https://gainhelm.com",
+                },
+                "lienbond": {
+                    "fallback_enabled": False,
+                    "default_fallback_url": "https://lienbond.com",
                 },
             },
             "vault_version": self.vault_data.get("hub_metadata", {}).get("version", "1.0.0"),

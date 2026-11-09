@@ -956,8 +956,8 @@ class DepartmentHandoffChainVerifier:
         leaked_mods = [
             m
             for m in sys.modules
-            if m in ("profithelm", "prexvo", "gainhelm")
-            or m.startswith(("profithelm.", "prexvo.", "gainhelm."))
+            if m in ("profithelm", "prexvo", "gainhelm", "lienbond")
+            or m.startswith(("profithelm.", "prexvo.", "gainhelm.", "lienbond."))
         ]
         if leaked_mods:
             failures.append(f"ENGINEERING[fleet]: tenant modules leaked into host sys.modules: {leaked_mods}")
@@ -1487,7 +1487,7 @@ class DepartmentHandoffChainVerifier:
                 and not self.strict_current_engine_hash
                 and not self.heal_markers
                 and repo_path.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
-                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm")
+                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
             ):
                 in_flight_synd = False
                 for cand_lock in (Path("/tmp/pseofactory_supervisor.lock"), Path(f"/tmp/{pid}_factory.lock")):
@@ -1520,7 +1520,7 @@ class DepartmentHandoffChainVerifier:
                 self.heal_markers
                 and has_pending
                 and repo_path.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
-                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm")
+                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
             ):
                 from pseofactory.maintenance import _execute_autonomous_downstream_chain
 
@@ -1592,7 +1592,7 @@ class DepartmentHandoffChainVerifier:
 
             is_prod_canonical = (
                 repo_path.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
-                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm")
+                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
             )
             in_flight_build = False
             if is_prod_canonical and not self.strict_current_engine_hash and not persist:
@@ -2188,7 +2188,7 @@ class AsyncFleetCoordinator:
         self.tenant_budgets: Dict[str, float] = (
             dict(tenant_budgets)
             if tenant_budgets is not None
-            else {"profithelm": 3600.0, "prexvo": 1800.0, "gainhelm": 1800.0}
+            else {"profithelm": 3600.0, "prexvo": 1800.0, "gainhelm": 1800.0, "lienbond": 1800.0}
         )
 
     def get_tenant_budget(self, tenant_id: str) -> float:
@@ -2426,7 +2426,7 @@ class AsyncFleetCoordinator:
         """
         import sys
         for mod in list(sys.modules.keys()):
-            if mod in ("profithelm", "prexvo", "gainhelm") or mod.startswith(("profithelm.", "prexvo.", "gainhelm.")):
+            if mod in ("profithelm", "prexvo", "gainhelm", "lienbond") or mod.startswith(("profithelm.", "prexvo.", "gainhelm.", "lienbond.")):
                 sys.modules.pop(mod, None)
 
     async def run_fleet_async(
@@ -2820,7 +2820,7 @@ class AutonomousLifecycleSupervisor:
             try:
                 from pseofactory.tenant_facts import TruthReconciliationEngine
                 reg = self.registry
-                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm"]
+                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm", "lienbond"]
                 for pid in target_ids:
                     try:
                         adp = reg.get_adapter(pid)
@@ -2987,7 +2987,7 @@ class AutonomousLifecycleSupervisor:
                     not dry_run
                     and "PYTEST_CURRENT_TEST" not in os.environ
                     and getattr(a, "repo_path", None)
-                    and pid in ("profithelm", "prexvo", "gainhelm")
+                    and pid in ("profithelm", "prexvo", "gainhelm", "lienbond")
                     and str(Path(a.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
                 ):
                     fl_path = Path(f"/tmp/{pid}_factory.lock")
@@ -3025,7 +3025,7 @@ class AutonomousLifecycleSupervisor:
                     t_repo = Path(a.repo_path)
                     if (
                         str(t_repo.resolve()).startswith("/home/ubuntuadmin/projects/")
-                        and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm")
+                        and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
                         and (t_repo / ".git").exists()
                     ):
                         lock_f = t_repo / "substrate_lock.json"
@@ -3426,7 +3426,7 @@ class SupervisorDaemon:
                 from pseofactory.maintenance import TenantRegistry
                 from pseofactory.tenant_facts import TruthReconciliationEngine
                 reg = TenantRegistry.default()
-                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm"]
+                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm", "lienbond"]
                 for pid in target_ids:
                     try:
                         adp = reg.get_adapter(pid)

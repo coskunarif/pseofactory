@@ -4999,6 +4999,8 @@ def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]
             prop_id = "prexvo"
         elif "https://gainhelm.com" in updated or "gainhelm.com" in updated:
             prop_id = "gainhelm"
+        elif "https://lienbond.com" in updated or "lienbond.com" in updated:
+            prop_id = "lienbond"
         else:
             prop_id = "profithelm"
 
@@ -5084,11 +5086,19 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
     if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
         pk_fallback = (
             _extract_attr(q_tag, "data-partner-key")
-            or ("splash_financial" if prop_id == "prexvo" else ("vanta_security" if prop_id == "gainhelm" else "ipx1031"))
+            or (
+                "splash_financial"
+                if prop_id == "prexvo"
+                else ("vanta_security" if prop_id == "gainhelm" else ("suretybonds_direct" if prop_id == "lienbond" else "ipx1031"))
+            )
         ).strip().lower()
         pname_fallback = (
             _extract_attr(q_tag, "data-partner-name")
-            or ("Splash Financial" if prop_id == "prexvo" else ("Vanta" if prop_id == "gainhelm" else "Verified Partner"))
+            or (
+                "Splash Financial"
+                if prop_id == "prexvo"
+                else ("Vanta" if prop_id == "gainhelm" else ("SuretyBonds.com" if prop_id == "lienbond" else "Verified Partner"))
+            )
         ).strip()
         fallback_cta_html = (
             f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '

@@ -196,6 +196,9 @@ class GSCRootCauseClassifier:
         elif "gainhelm" in url_low or str(meta.get("tenant_id") or "").lower() == "gainhelm":
             tenant = "gainhelm"
             statutory_framework = "AICPA SSAE 18 (SOC 2 Trust Services Criteria), 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2/3 (DFARS 252.204-7012), HIPAA 45 CFR Part 164, ISO/IEC 27001:2022, and PCI DSS v4.0"
+        elif "lienbond" in url_low or str(meta.get("tenant_id") or "").lower() == "lienbond":
+            tenant = "lienbond"
+            statutory_framework = "40 U.S.C. 3131-3134 Federal Miller Act, State Little Miller Acts, NCCI Workers' Compensation Manuals, and State Mechanics Lien Statutes"
         else:
             tenant = "profithelm"
             statutory_framework = "Internal Revenue Code Sections 1(j), 162, 168(k), 174, 179, 199A, 1031, 1250, 1401, and IRS Rev. Proc. 2025-2026 inflation-adjusted schedules"
@@ -1139,7 +1142,7 @@ class IndexingFeedbackLoop:
             self.base_dir = Path(base_dir).resolve() if base_dir else candidate_base
             self.dist_dir = Path(dist_dir).resolve() if dist_dir else (self.base_dir / "dist")
 
-        valid_tenants = {"profithelm", "prexvo", "gainhelm", "unassigned"}
+        valid_tenants = {"profithelm", "prexvo", "gainhelm", "lienbond", "unassigned"}
         t_space = self.property_id if self.property_id in valid_tenants else "unassigned"
         self.milestone_tracker = milestone_tracker or MilestoneTracker(tenant=t_space)
 
@@ -1765,7 +1768,7 @@ class IndexingFeedbackLoop:
                 query=q_str,
                 default_slug=str(rec_copy.get("slug") or ""),
             )
-            if self.property_id in ("profithelm", "prexvo", "gainhelm"):
+            if self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                 res_t = resolve_redirected_gsc_target(
                     target_url=t_url,
                     slug=slug,
@@ -1914,7 +1917,7 @@ class IndexingFeedbackLoop:
         brand = (
             "Prexvo"
             if self.property_id == "prexvo"
-            else ("GainHelm" if self.property_id == "gainhelm" else "ProfitHelm")
+            else ("GainHelm" if self.property_id == "gainhelm" else ("LienBond" if self.property_id == "lienbond" else "ProfitHelm"))
         )
         auth_tag = (
             "Title IV 34 CFR Part 685"
@@ -1922,7 +1925,11 @@ class IndexingFeedbackLoop:
             else (
                 "AICPA SSAE 18 & DoD 32 CFR Part 170"
                 if self.property_id == "gainhelm"
-                else "Internal Revenue Code 2026"
+                else (
+                    "40 U.S.C. 3131-3134 Miller Act & State Mechanics Lien Statutes"
+                    if self.property_id == "lienbond"
+                    else "Internal Revenue Code 2026"
+                )
             )
         )
 
@@ -2183,7 +2190,7 @@ class IndexingFeedbackLoop:
                 if not isinstance(spec, dict) or "title_rewrite" not in spec:
                     spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
                 t_url = str(cand.get("target_url") or spec.get("target_url") or "")
-                if self.property_id in ("profithelm", "prexvo", "gainhelm"):
+                if self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     res_c = resolve_redirected_gsc_target(
                         target_url=t_url,
                         slug=c_slug,
@@ -2245,7 +2252,7 @@ class IndexingFeedbackLoop:
                     continue
                 d_url = d.url
                 d_slug = _slug_from_url_or_query(target_url=d_url)
-                if self.property_id in ("profithelm", "prexvo", "gainhelm"):
+                if self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     res_d = resolve_redirected_gsc_target(
                         target_url=d_url,
                         slug=d_slug,

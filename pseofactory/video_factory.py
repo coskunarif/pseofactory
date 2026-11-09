@@ -85,6 +85,7 @@ def _in_pytest() -> bool:
         or os.getenv("PROFITHELM_IN_TEST") == "1"
         or os.getenv("PREXVO_IN_TEST") == "1"
         or os.getenv("GAINHELM_IN_TEST") == "1"
+        or os.getenv("LIENBOND_IN_TEST") == "1"
     )
 
 
@@ -3144,6 +3145,7 @@ def run_autonomous_video_pipeline(
     """
     from pseofactory.maintenance import (
         GAINHELM_DEFAULT_TOOLS,
+        LIENBOND_DEFAULT_TOOLS,
         PREXVO_DEFAULT_TOOLS,
         PROFITHELM_DEFAULT_TOOLS,
     )
@@ -3158,6 +3160,8 @@ def run_autonomous_video_pipeline(
             base_tools = list(PREXVO_DEFAULT_TOOLS)
         elif prop == "gainhelm":
             base_tools = list(GAINHELM_DEFAULT_TOOLS)
+        elif prop == "lienbond":
+            base_tools = list(LIENBOND_DEFAULT_TOOLS)
         else:
             base_tools = list(PROFITHELM_DEFAULT_TOOLS)
     else:

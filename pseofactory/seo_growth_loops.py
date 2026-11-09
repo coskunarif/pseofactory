@@ -760,7 +760,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     site_uri = f"sc-domain:{prop}.com"
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if live_gsc is None:
@@ -2252,7 +2252,7 @@ def discover_internal_linking_opportunities(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
 
     if not d_dir.is_dir():
         return {
@@ -2837,7 +2837,7 @@ def compile_search_opportunity_briefs(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
@@ -2945,7 +2945,7 @@ def compile_search_opportunity_briefs(
         seen_pq: Dict[str, Dict[str, Any]] = {}
         for pr in p_rows:
             qk = str(pr.get("query") or "").strip().lower()
-            if not qk or "site:" in qk or qk in ("ordermetrics", "profithelm", "prexvo", "gainhelm"):
+            if not qk or "site:" in qk or qk in ("ordermetrics", "profithelm", "prexvo", "gainhelm", "lienbond"):
                 continue
             if "crypto-tax-calculator" in c_path and "futures" in qk and "crypto" not in qk:
                 continue
@@ -3475,7 +3475,7 @@ def evaluate_content_portfolio_decisions(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
     decay_data = decay_report or identify_content_decay(prop, repo_root=root, consolidated_gsc=gsc_bundle, persist=False)
@@ -4715,7 +4715,7 @@ def compile_ai_citation_digital_pr_queue(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
@@ -5662,7 +5662,7 @@ def compile_technical_seo_sprint(
         try:
             comp_data = json.loads(comp_spike_file.read_text(encoding="utf-8"))
             if isinstance(comp_data, dict):
-                domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+                domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
                 for dom_mut in (comp_data.get("dom_structural_mutations") or [])[:5]:
                     if not isinstance(dom_mut, dict) or not dom_mut.get("target_slug"):
                         continue
@@ -5902,7 +5902,7 @@ def sync_real_gsc_baselines_to_recovery_ledger(
     """
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     ledger_path = root / ".agy" / "metric_recovery_ledger.json"
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(
@@ -6347,8 +6347,8 @@ def evaluate_closed_loop_cohort_reflection(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
-    brand = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else "ProfitHelm")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
+    brand = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else ("LienBond" if prop == "lienbond" else "ProfitHelm"))
     r_base = Path(runs_dir) if runs_dir else Path("/home/ubuntuadmin/projects/.agy/runs")
 
     # ------------------------------------------------------------------
@@ -7865,7 +7865,7 @@ def compile_quantitative_revenue_forecast(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
-    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+    domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     canonical_base = f"https://{domain}"
     now_iso = datetime.now(timezone.utc).isoformat()
 

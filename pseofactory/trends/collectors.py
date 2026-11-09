@@ -241,7 +241,7 @@ class GSCSearchConsoleCollector(BaseSuggestCollector):
     ):
         super().__init__("gsc_search_console", timeout=timeout, retries=retries)
         self.db_path = db_path
-        self.properties = properties or ["profithelm", "prexvo", "gainhelm"]
+        self.properties = properties or ["profithelm", "prexvo", "gainhelm", "lienbond"]
 
     def fetch_suggestions(self, query: str = "") -> List[str]:
         spikes = self.harvest_gsc_spikes(seed_filter=query)
@@ -658,6 +658,17 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "USD",
                 "AICPA-BENCHMARK",
                 {2024: 34000.0, 2025: 35500.0, 2026: 37000.0, 2027: 38500.0, 2028: 40000.0, 2029: 41600.0, 2030: 43200.0},
+            ),
+            (
+                "miller_act_federal_surety_threshold_usd",
+                "lienbond",
+                "US-FED",
+                "40 U.S.C. 3131-3134 Miller Act & State Mechanics Lien Statutes",
+                "miller_act_statutory_bond_threshold_usd",
+                "40 U.S.C. 3131 Miller Act Federal Construction Performance & Payment Bond Threshold",
+                "USD",
+                "TREASURY-CIRCULAR-570",
+                {2024: 150000.0, 2025: 150000.0, 2026: 150000.0, 2027: 150000.0, 2028: 150000.0, 2029: 150000.0, 2030: 150000.0},
             ),
         ]
         records = []

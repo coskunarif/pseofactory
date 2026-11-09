@@ -307,7 +307,7 @@ def _load_trend_db_cache() -> Dict[str, Any]:
             for kr in kw_rows:
                 qs_low = str(kr["query_slug"]).lower()
                 cp_low = str(kr["current_property_id"] or "").lower()
-                if cp_low in ("profithelm", "prexvo", "gainhelm"):
+                if cp_low in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     prop = cp_low
                 elif any(
                     k in qs_low
@@ -319,6 +319,11 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                     for k in ("soc-2", "cmmc", "sprs", "iso-27001", "hipaa", "pci-dss", "fedramp", "hitrust", "pentest", "cyber")
                 ):
                     prop = "gainhelm"
+                elif any(
+                    k in qs_low
+                    for k in ("surety-bond", "miller-act", "mechanics-lien", "license-bond", "workers-comp", "performance-bond", "payment-bond")
+                ):
+                    prop = "lienbond"
                 else:
                     prop = "profithelm"
                 keywords_by_prop.setdefault(prop, []).append(

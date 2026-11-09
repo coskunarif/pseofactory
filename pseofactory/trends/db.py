@@ -226,7 +226,7 @@ class TrendHistoryDB:
                     assignment_id TEXT PRIMARY KEY,
                     query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
                     cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
-                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'lienbond', 'unassigned')),
                     assignment_basis TEXT NOT NULL,
                     matched_existing_slug TEXT,
                     cannibalization_score REAL NOT NULL DEFAULT 0.0,
@@ -285,7 +285,7 @@ class TrendHistoryDB:
                     evaluation_id TEXT PRIMARY KEY,
                     query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
                     cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
-                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'lienbond', 'unassigned')),
                     jev_score REAL NOT NULL,
                     durable_prob REAL NOT NULL,
                     composite_profit_yield REAL NOT NULL,
@@ -541,7 +541,7 @@ class TrendHistoryDB:
                 """
                 CREATE TABLE IF NOT EXISTS statutory_economic_timeseries (
                     series_id TEXT NOT NULL,
-                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'shared', 'unassigned')),
+                    property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'lienbond', 'shared', 'unassigned')),
                     jurisdiction TEXT NOT NULL DEFAULT 'US-FED',
                     statutory_citation TEXT NOT NULL,
                     metric_key TEXT NOT NULL,
@@ -563,7 +563,7 @@ class TrendHistoryDB:
                 "CREATE INDEX IF NOT EXISTS idx_stat_econ_metric_key ON statutory_economic_timeseries(metric_key, effective_year ASC);"
             )
 
-            # Idempotent CHECK constraint migration for existing pre-GainHelm databases
+            # Idempotent CHECK constraint migration for existing pre-GainHelm / pre-LienBond databases
             for tbl_name, new_ddl, idx_ddls in (
                 (
                     "property_assignments",
@@ -572,7 +572,7 @@ class TrendHistoryDB:
                         assignment_id TEXT PRIMARY KEY,
                         query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
                         cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
-                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
+                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'lienbond', 'unassigned')),
                         assignment_basis TEXT NOT NULL,
                         matched_existing_slug TEXT,
                         cannibalization_score REAL NOT NULL DEFAULT 0.0,
@@ -593,7 +593,7 @@ class TrendHistoryDB:
                         evaluation_id TEXT PRIMARY KEY,
                         query_slug TEXT NOT NULL REFERENCES keyword_history(query_slug),
                         cycle_id TEXT NOT NULL REFERENCES crawl_cycles(cycle_id),
-                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'unassigned')),
+                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'lienbond', 'unassigned')),
                         jev_score REAL NOT NULL,
                         durable_prob REAL NOT NULL,
                         composite_profit_yield REAL NOT NULL,
@@ -616,7 +616,7 @@ class TrendHistoryDB:
                     """
                     CREATE TABLE statutory_economic_timeseries_new (
                         series_id TEXT NOT NULL,
-                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'shared', 'unassigned')),
+                        property_id TEXT NOT NULL CHECK(property_id IN ('prexvo', 'profithelm', 'gainhelm', 'lienbond', 'shared', 'unassigned')),
                         jurisdiction TEXT NOT NULL DEFAULT 'US-FED',
                         statutory_citation TEXT NOT NULL,
                         metric_key TEXT NOT NULL,
@@ -640,7 +640,7 @@ class TrendHistoryDB:
                     "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;",
                     (tbl_name,),
                 ).fetchone()
-                if row_ddl and row_ddl[0] and "'gainhelm'" not in str(row_ddl[0]):
+                if row_ddl and row_ddl[0] and ("'gainhelm'" not in str(row_ddl[0]) or "'lienbond'" not in str(row_ddl[0])):
                     conn.execute(f"DROP TABLE IF EXISTS {tbl_name}_new;")
                     conn.execute(new_ddl)
                     conn.execute(f"INSERT INTO {tbl_name}_new SELECT * FROM {tbl_name};")
@@ -2183,7 +2183,7 @@ class TrendHistoryDB:
         from archived statutory_economic_timeseries rows for compile-time workbench injection.
         """
         prop = str(property_id or "profithelm").strip().lower()
-        if prop not in ("profithelm", "prexvo", "gainhelm"):
+        if prop not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             prop = "profithelm"
         records = self.get_statutory_economic_timeseries(property_id=prop)
         if not any(r.property_id == prop for r in records):
@@ -2228,13 +2228,21 @@ class TrendHistoryDB:
             else (
                 "AICPA SSAE 18 Trust Services Criteria & DoD 32 CFR Part 170 CMMC 2.0"
                 if prop == "gainhelm"
-                else "IRC Section 179 and 26 U.S.C. 168(k) Statutory Depreciation Schedule"
+                else (
+                    "40 U.S.C. 3131-3134 Miller Act & State Mechanics Lien Statutes"
+                    if prop == "lienbond"
+                    else "IRC Section 179 and 26 U.S.C. 168(k) Statutory Depreciation Schedule"
+                )
             )
         )
         default_econ = (
             "BLS OEWS SOC 15-1212 Information Security Analysts Wage Dataset"
             if prop == "gainhelm"
-            else "FRED Series DGS10 and CPILFESL Longitudinal Macro Dataset"
+            else (
+                "U.S. Treasury Department Circular 570 & Census VIP Construction Spending Dataset"
+                if prop == "lienbond"
+                else "FRED Series DGS10 and CPILFESL Longitudinal Macro Dataset"
+            )
         )
         top_citation = str(ordered_series[0]["statutory_citation"]) if ordered_series else default_auth
         if prop == "profithelm" and "irc section" not in top_citation.lower():
@@ -2242,6 +2250,8 @@ class TrendHistoryDB:
         elif prop == "prexvo" and "title iv" not in top_citation.lower():
             top_citation = f"{top_citation} ({default_auth})"
         elif prop == "gainhelm" and "ssae 18" not in top_citation.lower() and "32 cfr" not in top_citation.lower():
+            top_citation = f"{top_citation} ({default_auth})"
+        elif prop == "lienbond" and "miller act" not in top_citation.lower() and "3131" not in top_citation.lower():
             top_citation = f"{top_citation} ({default_auth})"
         return {
             "property_id": prop,

@@ -322,7 +322,7 @@ def verify_manifest_ssr_metric_parity(
 
 def _normalize_title_tokens(title: str) -> Set[str]:
     """Normalizes title string into comparison tokens ignoring punctuation, brand suffixes, and years."""
-    t = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", str(title or ""), flags=re.IGNORECASE).strip()
+    t = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm|LienBond).*$", "", str(title or ""), flags=re.IGNORECASE).strip()
     t = re.sub(r"\b202[4-9]\b", "", t)
     t = re.sub(r"[^\w\s]", " ", t)
     words = {w.lower() for w in t.split() if len(w) > 1 and w.lower() not in ("and", "or", "the", "for", "with", "vs", "in", "of", "to")}
@@ -376,8 +376,8 @@ def _titles_match(title_a: str, title_b: str) -> bool:
         return False
     a_raw = html.unescape(str(title_a))
     b_raw = html.unescape(str(title_b))
-    a_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", a_raw, flags=re.IGNORECASE).strip()
-    b_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm).*$", "", b_raw, flags=re.IGNORECASE).strip()
+    a_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm|LienBond).*$", "", a_raw, flags=re.IGNORECASE).strip()
+    b_clean = re.sub(r"\s*[|\-]\s*(?:ProfitHelm|Prexvo|GainHelm|LienBond).*$", "", b_raw, flags=re.IGNORECASE).strip()
     a_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|0%\s+State(?:\s+Income)?\s+Tax|\d{4})\)", "", a_clean, flags=re.IGNORECASE).strip()
     b_clean = re.sub(r"\s*\((?:Title\s+IV(?:\s+Rules)?|IRC\s+Rules|Form\s+\d+[a-z]?|0%\s+State(?:\s+Income)?\s+Tax|\d{4})\)", "", b_clean, flags=re.IGNORECASE).strip()
     if a_clean.lower() == b_clean.lower():

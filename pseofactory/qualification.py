@@ -3633,7 +3633,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
             slugs_to_purge.add(clean_off)
 
     import sys
-    for mod_name in (f"{prop}.config", "profithelm.config", "prexvo.config", "gainhelm.config"):
+    for mod_name in (f"{prop}.config", "profithelm.config", "prexvo.config", "gainhelm.config", "lienbond.config"):
         cfg_mod = sys.modules.get(mod_name)
         if cfg_mod is not None:
             for attr_name in ("TOOLS", "DYNAMIC_TOOLS"):
@@ -4535,6 +4535,8 @@ def rollup_redirected_gsc_rows(
         prop = "prexvo"
     elif "gainhelm" in prop:
         prop = "gainhelm"
+    elif "lienbond" in prop:
+        prop = "lienbond"
     else:
         prop = "profithelm"
 
@@ -4759,12 +4761,12 @@ def reconcile_metric_recovery_ledger(
     prop = (
         "prexvo"
         if "prexvo" in prop_low
-        else ("gainhelm" if "gainhelm" in prop_low else "profithelm")
+        else ("gainhelm" if "gainhelm" in prop_low else ("lienbond" if "lienbond" in prop_low else "profithelm"))
     )
     domain = (
         "prexvo.com"
         if prop == "prexvo"
-        else ("gainhelm.com" if prop == "gainhelm" else "profithelm.com")
+        else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     )
     if prop == "profithelm":
         from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
@@ -4910,7 +4912,7 @@ def reconcile_factory_execution_log(
     prop = (
         "prexvo"
         if "prexvo" in prop_low
-        else ("gainhelm" if "gainhelm" in prop_low else "profithelm")
+        else ("gainhelm" if "gainhelm" in prop_low else ("lienbond" if "lienbond" in prop_low else "profithelm"))
     )
     log_path = root / ".agy" / "factory_execution_log.json"
     summary = {"queries_resolved": 0, "updated": False}
@@ -4977,7 +4979,7 @@ def reconcile_statutory_db_gsc_snapshots(
 
     root = Path(repo_root)
     comb_prop = f"{property_id or ''} {root.name}".lower()
-    prop = "prexvo" if "prexvo" in comb_prop else ("gainhelm" if "gainhelm" in comb_prop else "profithelm")
+    prop = "prexvo" if "prexvo" in comb_prop else ("gainhelm" if "gainhelm" in comb_prop else ("lienbond" if "lienbond" in comb_prop else "profithelm"))
     db_file = root / "profithelm" / "data" / "statutory.db"
     summary = {"rows_updated": 0, "queries_mapped": 0}
     if not db_file.is_file():
@@ -5086,7 +5088,7 @@ def sync_tenant_redirect_rollup_adapters(
     prop = (
         "prexvo"
         if "prexvo" in prop_low
-        else ("gainhelm" if "gainhelm" in prop_low else "profithelm")
+        else ("gainhelm" if "gainhelm" in prop_low else ("lienbond" if "lienbond" in prop_low else "profithelm"))
     )
     updated_files = 0
 

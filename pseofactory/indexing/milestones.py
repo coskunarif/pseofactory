@@ -247,7 +247,7 @@ class URLMilestoneRecord:
         }
 
 
-VALID_TENANTS: Set[str] = {"profithelm", "prexvo", "gainhelm", "unassigned"}
+VALID_TENANTS: Set[str] = {"profithelm", "prexvo", "gainhelm", "lienbond", "unassigned"}
 
 
 class MilestoneTracker:

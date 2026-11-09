@@ -1434,10 +1434,12 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
 
     ext_spec: Dict[str, Any] = {}
     gainhelm_slugs: set[str] = set()
+    lienbond_slugs: set[str] = set()
     try:
-        from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS, PROFITHELM_EXTENDED_TOOLS, GAINHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import PREXVO_EXTENDED_TOOLS, PROFITHELM_EXTENDED_TOOLS, GAINHELM_DEFAULT_TOOLS, LIENBOND_DEFAULT_TOOLS
         gainhelm_slugs = {str(t.get("slug", "")) for t in GAINHELM_DEFAULT_TOOLS if isinstance(t, dict)}
-        for item in list(PROFITHELM_EXTENDED_TOOLS) + list(PREXVO_EXTENDED_TOOLS) + list(GAINHELM_DEFAULT_TOOLS):
+        lienbond_slugs = {str(t.get("slug", "")) for t in LIENBOND_DEFAULT_TOOLS if isinstance(t, dict)}
+        for item in list(PROFITHELM_EXTENDED_TOOLS) + list(PREXVO_EXTENDED_TOOLS) + list(GAINHELM_DEFAULT_TOOLS) + list(LIENBOND_DEFAULT_TOOLS):
             if isinstance(item, dict) and item.get("slug") == slug:
                 ext_spec = item
                 break
@@ -1450,13 +1452,21 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         else (
             "gainhelm"
             if ("gainhelm" in str(property_id).lower() or slug in gainhelm_slugs)
-            else "profithelm"
+            else (
+                "lienbond"
+                if ("lienbond" in str(property_id).lower() or slug in lienbond_slugs)
+                else "profithelm"
+            )
         )
     )
     base_url = (
         "https://prexvo.com"
         if norm_prop == "prexvo"
-        else ("https://gainhelm.com" if norm_prop == "gainhelm" else POST_URL_BASE)
+        else (
+            "https://gainhelm.com"
+            if norm_prop == "gainhelm"
+            else ("https://lienbond.com" if norm_prop == "lienbond" else POST_URL_BASE)
+        )
     )
 
     curated = CURATED_TOOL_CALCULATION_PROOFS.get(slug)
@@ -2137,7 +2147,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             )
         )
     ).lower()
-    brand_label = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else "ProfitHelm")
+    brand_label = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else ("LienBond" if prop == "lienbond" else "ProfitHelm"))
     first_comment = f"Model your exact scenario live on {brand_label}: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
     teaser_content = _build_zero_link_teaser_content(text, platform="linkedin", brand=brand_label)
 
@@ -6826,7 +6836,7 @@ def generate_ghost_article(tool_or_slug: Any, property_id: str = "profithelm") -
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
-    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else "ProfitHelm")
+    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else ("LienBond" if norm_prop == "lienbond" else "ProfitHelm"))
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:32]))
     qa = _sanitize_distribution_text(
@@ -6909,7 +6919,7 @@ def generate_exact_match_github_gist(tool_or_slug: Any, property_id: str = "prof
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
-    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else "ProfitHelm")
+    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else ("LienBond" if norm_prop == "lienbond" else "ProfitHelm"))
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     out_fmt = proof["published_output_formatted"]
     sample_calc = proof["sample_calculation"]
@@ -8858,7 +8868,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         adapter = None
 
     if tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS, LIENBOND_DEFAULT_TOOLS
         from pseofactory.qualification import is_retired_or_consolidated_slug
         target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
         if not target_tools:
@@ -8873,6 +8883,8 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
             elif property_id == "gainhelm":
                 target_tools = list(GAINHELM_DEFAULT_TOOLS)
+            elif property_id == "lienbond":
+                target_tools = list(LIENBOND_DEFAULT_TOOLS)
             else:
                 target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
         target_tools = [
@@ -9167,7 +9179,11 @@ def prioritize_distribution_queue_by_referral_yield(
     from pseofactory.qualification import is_retired_or_consolidated_slug
 
     norm_prop = _normalize_property_id(property_id)
-    company_id = "106482194" if norm_prop == "prexvo" else ("106482195" if norm_prop == "gainhelm" else "143884102")
+    company_id = (
+        "106482194"
+        if norm_prop == "prexvo"
+        else ("106482195" if norm_prop == "gainhelm" else ("106482196" if norm_prop == "lienbond" else "143884102"))
+    )
 
     resolved_root: Optional[Path] = Path(repo_root).resolve() if repo_root else None
     if resolved_root is None:
@@ -9186,6 +9202,7 @@ def prioritize_distribution_queue_by_referral_yield(
             PROFITHELM_DEFAULT_TOOLS,
             PROFITHELM_EXTENDED_TOOLS,
             GAINHELM_DEFAULT_TOOLS,
+            LIENBOND_DEFAULT_TOOLS,
         )
         if norm_prop == "prexvo":
             raw_tools = list(PREXVO_DEFAULT_TOOLS)
@@ -9202,6 +9219,8 @@ def prioritize_distribution_queue_by_referral_yield(
                     seen_px.add(ext_slug)
         elif norm_prop == "gainhelm":
             raw_tools = list(GAINHELM_DEFAULT_TOOLS)
+        elif norm_prop == "lienbond":
+            raw_tools = list(LIENBOND_DEFAULT_TOOLS)
         else:
             raw_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
             seen_ph = {str(t.get("slug") if isinstance(t, dict) else t) for t in raw_tools}
@@ -9503,7 +9522,7 @@ def export_all_syndication_files(
     from pseofactory.qualification import is_retired_or_consolidated_slug
 
     if tools is None:
-        from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import TenantRegistry, PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS, LIENBOND_DEFAULT_TOOLS
         try:
             adapter = TenantRegistry.default().get_adapter(property_id)
             target_tools = adapter.tools if (adapter and adapter.tools) else None
@@ -9521,6 +9540,8 @@ def export_all_syndication_files(
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
             elif property_id == "gainhelm":
                 target_tools = list(GAINHELM_DEFAULT_TOOLS)
+            elif property_id == "lienbond":
+                target_tools = list(LIENBOND_DEFAULT_TOOLS)
             else:
                 target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
 
@@ -9705,7 +9726,11 @@ def export_all_syndication_files(
         # 9b. Root-level syndication discovery files required by GSC distribution readiness checks
         proof_obj = pack.get("calculation_proof") or _resolve_tool_calculation_proof(tool_spec, property_id=property_id)
         param_url = str(pack.get("parameterized_url") or proof_obj.get("parameterized_url") or pack.get("url") or "")
-        brand_label = "Prexvo" if property_id == "prexvo" else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
+        brand_label = (
+            "Prexvo"
+            if property_id == "prexvo"
+            else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
+        )
         root_linkedin_md = (
             f"# {tool_spec.get('title', slug)}\n\n"
             f"{pack['linkedin']['content']}\n\n"
@@ -9741,7 +9766,11 @@ def export_all_syndication_files(
             assert_youtube_transcript,
             assert_no_forbidden_dashes,
         )
-        brand_to_check = "Prexvo" if property_id == "prexvo" else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
+        brand_to_check = (
+            "Prexvo"
+            if property_id == "prexvo"
+            else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
+        )
         assert_youtube_title(yt_pack["title"], context=f"{slug} youtube title")
         assert_youtube_description(yt_pack["description"])
         assert_youtube_pinned_comment(pinned_comment)
@@ -9848,12 +9877,16 @@ def export_all_syndication_files(
     eff_base = (
         "https://prexvo.com"
         if property_id == "prexvo"
-        else ("https://gainhelm.com" if property_id == "gainhelm" else CANONICAL_BASE)
+        else (
+            "https://gainhelm.com"
+            if property_id == "gainhelm"
+            else ("https://lienbond.com" if property_id == "lienbond" else CANONICAL_BASE)
+        )
     )
     eff_brand = (
         "Prexvo"
         if property_id == "prexvo"
-        else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
+        else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
     )
     badge_items = [
         f"[![{eff_brand} Research](https://img.shields.io/badge/{eff_brand}-Statutory_Models-090d16?style=flat-square)]({eff_base}/)"
@@ -10509,13 +10542,15 @@ def dispatch_to_distribution_lead(
 
     target_tools = tools
     if target_tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS
+        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS, LIENBOND_DEFAULT_TOOLS
         target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
         if not target_tools:
             if property_id == "prexvo":
                 target_tools = list(PREXVO_DEFAULT_TOOLS)
             elif property_id == "gainhelm":
                 target_tools = list(GAINHELM_DEFAULT_TOOLS)
+            elif property_id == "lienbond":
+                target_tools = list(LIENBOND_DEFAULT_TOOLS)
             else:
                 target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
 
@@ -10589,7 +10624,11 @@ def dispatch_to_distribution_lead(
         )
 
         # Phase 2: Anti-slop content contract & outside truth-store assertion
-        brand_to_check = "Prexvo" if property_id == "prexvo" else ("GainHelm" if property_id == "gainhelm" else "ProfitHelm")
+        brand_to_check = (
+            "Prexvo"
+            if property_id == "prexvo"
+            else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
+        )
         for slug, pack in all_assets.items():
             if "reddit" in pack or "reddit_teardown" in pack:
                 raise ValueError(f"Reddit channel is prohibited in syndication pack for {slug}")
@@ -10890,7 +10929,11 @@ def dispatch_to_distribution_lead(
                 canon_base = (
                     "https://prexvo.com"
                     if property_id == "prexvo"
-                    else ("https://gainhelm.com" if property_id == "gainhelm" else "https://profithelm.com")
+                    else (
+                        "https://gainhelm.com"
+                        if property_id == "gainhelm"
+                        else ("https://lienbond.com" if property_id == "lienbond" else "https://profithelm.com")
+                    )
                 )
                 for slug, pack_obj in all_assets.items():
                     if slug not in seen_slugs:
