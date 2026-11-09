@@ -11465,18 +11465,183 @@ def sync_tenant_edge_redirect_function(
             except Exception:
                 pass
 
-    # Ensure functions/_middleware.js injects RFC 5988 canonical Link header on apex HTML responses
-    # when not already set by dist/_headers (covering leaf routes past Cloudflare's 100-rule _headers cap)
+    # Ensure functions/_middleware.js enforces www->apex 301 redirects, legacy GSC 301 redirects,
+    # non-apex noindex lockdown, and RFC 5988 canonical Link header on apex HTML responses.
+    apex_domain = (
+        "prexvo.com"
+        if prop_clean == "prexvo"
+        else ("gainhelm.com" if prop_clean == "gainhelm" else ("lienbond.com" if prop_clean == "lienbond" else "profithelm.com"))
+    )
     mw_file = repo / "functions" / "_middleware.js"
+    if not mw_file.is_file() and (repo / "functions").is_dir() and prop_clean == "lienbond":
+        default_lb_mw = (
+            "/**\n"
+            " * LienBond Cloudflare Pages Functions Middleware\n"
+            " * Enforces www-to-apex 301 canonical redirects, staging lockdown on *.pages.dev,\n"
+            " * and RFC 5988 canonical Link headers on HTML routes.\n"
+            " * Zero em-dashes. Zero en-dashes.\n"
+            " */\n\n"
+            "export async function onRequest(context) {\n"
+            "  const url = new URL(context.request.url);\n"
+            "  const hostname = url.hostname.toLowerCase();\n"
+            "  const pathname = url.pathname;\n\n"
+            f'  if (hostname === "www.{apex_domain}") {{\n'
+            f"    return Response.redirect(`https://{apex_domain}${{pathname}}${{url.search}}`, 301);\n"
+            "  }\n\n"
+            "  const edgeRedirects = {\n"
+            '    "/about": "/methodology/",\n'
+            '    "/about/": "/methodology/",\n'
+            '    "/privacy": "/disclaimers/",\n'
+            '    "/privacy/": "/disclaimers/",\n'
+            '    "/terms": "/disclaimers/",\n'
+            '    "/terms/": "/disclaimers/",\n'
+            "  };\n\n"
+            "  if (edgeRedirects[pathname]) {\n"
+            "    return Response.redirect(`${url.origin}${edgeRedirects[pathname]}`, 301);\n"
+            "  }\n\n"
+            "  const response = await context.next();\n\n"
+            "  if (response.status >= 300 && response.status < 400) {\n"
+            "    return response;\n"
+            "  }\n\n"
+            f'  const isApex = hostname === "{apex_domain}";\n'
+            '  const isNonApexDev = !isApex || hostname.endsWith(".pages.dev") || hostname.startsWith("preview.");\n\n'
+            "  if (isNonApexDev) {\n"
+            "    const newHeaders = new Headers(response.headers);\n"
+            '    newHeaders.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");\n'
+            '    newHeaders.set("Cache-Control", "no-store, no-cache, must-revalidate");\n'
+            "    const body = [204, 205, 304].includes(response.status) ? null : response.body;\n"
+            "    return new Response(body, {\n"
+            "      status: response.status,\n"
+            "      statusText: response.statusText,\n"
+            "      headers: newHeaders,\n"
+            "    });\n"
+            "  }\n\n"
+            "  return response;\n"
+            "}\n"
+        )
+        try:
+            mw_file.write_text(default_lb_mw, encoding="utf-8")
+            dist_needs_update = True
+        except Exception:
+            pass
+
     if mw_file.is_file():
         try:
             mw_orig = mw_file.read_text(encoding="utf-8")
-            apex_domain = (
-                "prexvo.com"
-                if prop_clean == "prexvo"
-                else ("gainhelm.com" if prop_clean == "gainhelm" else ("lienbond.com" if prop_clean == "lienbond" else "profithelm.com"))
+            mw_new = mw_orig
+            if "const hostname = url.hostname.toLowerCase();" not in mw_new and "const url = new URL(context.request.url);" in mw_new:
+                mw_new = mw_new.replace(
+                    "const url = new URL(context.request.url);\n",
+                    "const url = new URL(context.request.url);\n  const hostname = url.hostname.toLowerCase();\n",
+                    1,
+                )
+            www_guard = (
+                f'  if (hostname === "www.{apex_domain}") {{\n'
+                f"    return Response.redirect(`https://{apex_domain}${{pathname}}${{url.search}}`, 301);\n"
+                "  }\n"
             )
-            if "rel=\"canonical\"" not in mw_orig and "return response;\n}" in mw_orig:
+            if f'hostname === "www.{apex_domain}"' not in mw_new or f'const isApex = hostname === "{apex_domain}" || hostname === "www.{apex_domain}";' in mw_new:
+                mw_new = mw_new.replace(
+                    f'const isApex = hostname === "{apex_domain}" || hostname === "www.{apex_domain}";',
+                    f'const isApex = hostname === "{apex_domain}";',
+                )
+                if f'if (hostname === "www.{apex_domain}")' not in mw_new and "const pathname = url.pathname;\n" in mw_new:
+                    mw_new = mw_new.replace(
+                        "const pathname = url.pathname;\n",
+                        "const pathname = url.pathname;\n\n" + www_guard,
+                        1,
+                    )
+
+            if prop_clean == "gainhelm":
+                gh_gsc_redirects = [
+                    '    "/mobile-dispatch-board": "/tools/",',
+                    '    "/mobile-dispatch-board/": "/tools/",',
+                    '    "/plumbing-dispatch-software": "/tools/",',
+                    '    "/plumbing-dispatch-software/": "/tools/",',
+                    '    "/buildops-alternative": "/tools/",',
+                    '    "/buildops-alternative/": "/tools/",',
+                    '    "/jobber-alternative": "/tools/",',
+                    '    "/jobber-alternative/": "/tools/",',
+                    '    "/fieldedge-alternative": "/tools/",',
+                    '    "/fieldedge-alternative/": "/tools/",',
+                    '    "/servicetitan-alternative": "/tools/",',
+                    '    "/servicetitan-alternative/": "/tools/",',
+                    '    "/tree-service-dispatch-software": "/tools/",',
+                    '    "/tree-service-dispatch-software/": "/tools/",',
+                    '    "/landscaping-dispatch-software": "/tools/",',
+                    '    "/landscaping-dispatch-software/": "/tools/",',
+                    '    "/commercial-facilities-dispatch-software": "/tools/",',
+                    '    "/commercial-facilities-dispatch-software/": "/tools/",',
+                    '    "/field-service-scheduling": "/tools/",',
+                    '    "/field-service-scheduling/": "/tools/",',
+                    '    "/housecallpro-alternative": "/tools/",',
+                    '    "/housecallpro-alternative/": "/tools/",',
+                    '    "/locksmith-dispatch-software": "/tools/",',
+                    '    "/locksmith-dispatch-software/": "/tools/",',
+                    '    "/servicefusion-alternative": "/tools/",',
+                    '    "/servicefusion-alternative/": "/tools/",',
+                    '    "/hvac-dispatch-software": "/tools/",',
+                    '    "/hvac-dispatch-software/": "/tools/",',
+                    '    "/septic-service-dispatch-software": "/tools/",',
+                    '    "/septic-service-dispatch-software/": "/tools/",',
+                    '    "/appliance-repair-dispatch-software": "/tools/",',
+                    '    "/appliance-repair-dispatch-software/": "/tools/",',
+                    '    "/cleaning-dispatch-software": "/tools/",',
+                    '    "/cleaning-dispatch-software/": "/tools/",',
+                    '    "/emergency-restoration-dispatch-software": "/tools/",',
+                    '    "/emergency-restoration-dispatch-software/": "/tools/",',
+                    '    "/garage-door-dispatch-software": "/tools/",',
+                    '    "/garage-door-dispatch-software/": "/tools/",',
+                    '    "/hvac-dispatch-app-vs-spreadsheets": "/tools/",',
+                    '    "/hvac-dispatch-app-vs-spreadsheets/": "/tools/",',
+                    '    "/pool-service-dispatch-software": "/tools/",',
+                    '    "/pool-service-dispatch-software/": "/tools/",',
+                    '    "/electrical-dispatch-software": "/tools/",',
+                    '    "/electrical-dispatch-software/": "/tools/",',
+                    '    "/how-hvac-dispatch-apps-reduce-phone-tag": "/tools/",',
+                    '    "/how-hvac-dispatch-apps-reduce-phone-tag/": "/tools/",',
+                    '    "/pest-control-dispatch-software": "/tools/",',
+                    '    "/pest-control-dispatch-software/": "/tools/",',
+                    '    "/setup": "/tools/",',
+                    '    "/setup/": "/tools/",',
+                ]
+                if '"/mobile-dispatch-board"' not in mw_new and "const edgeRedirects = {\n" in mw_new:
+                    mw_new = mw_new.replace(
+                        "const edgeRedirects = {\n",
+                        "const edgeRedirects = {\n" + "\n".join(gh_gsc_redirects) + "\n",
+                        1,
+                    )
+            elif prop_clean == "profithelm":
+                ph_gsc_redirects = [
+                    '    "/tools/kalshi-prediction-market-arbitrage-strategy": "/tools/prediction-market-arbitrage-kelly-calculator/",',
+                    '    "/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-arbitrage-kelly-calculator/",',
+                    '    "/tools/query-two-buildable": "/tools/",',
+                    '    "/tools/query-two-buildable/": "/tools/",',
+                    '    "/tools/irs-2027-tax-rates": "/tools/irs-2027-tax-brackets/",',
+                    '    "/tools/irs-2027-tax-rates/": "/tools/irs-2027-tax-brackets/",',
+                    '    "/tools/section-1031-exchange-deferral": "/tools/section-1031-calculator/",',
+                    '    "/tools/section-1031-exchange-deferral/": "/tools/section-1031-calculator/",',
+                    '    "/tools/prediction-market-odds-scenario-comparison-model": "/tools/prediction-market-odds/",',
+                    '    "/tools/prediction-market-odds-scenario-comparison-model/": "/tools/prediction-market-odds/",',
+                    '    "/tools/saas-burn-multiple-benchmarks-2026": "/tools/saas-burn-multiple-runway/",',
+                    '    "/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-burn-multiple-runway/",',
+                    '    "/tools/section-1031-calculator-scenario-comparison-model": "/tools/section-1031-calculator/",',
+                    '    "/tools/section-1031-calculator-scenario-comparison-model/": "/tools/section-1031-calculator/",',
+                ]
+                if '"/tools/kalshi-prediction-market-arbitrage-strategy"' not in mw_new and "const legacySaaSRedirects = {\n" in mw_new:
+                    mw_new = mw_new.replace(
+                        "const legacySaaSRedirects = {\n",
+                        "const legacySaaSRedirects = {\n" + "\n".join(ph_gsc_redirects) + "\n",
+                        1,
+                    )
+
+            if "  return await context.next();\n}" in mw_new:
+                mw_new = mw_new.replace(
+                    "  return await context.next();\n}",
+                    "  const response = await context.next();\n  return response;\n}",
+                )
+
+            if "rel=\"canonical\"" not in mw_new and "return response;\n}" in mw_new:
                 canonical_fallback_snippet = (
                     "  if (response.status === 200 && !response.headers.get(\"Link\")) {\n"
                     "    const ct = (response.headers.get(\"Content-Type\") || \"\").toLowerCase();\n"
@@ -11492,13 +11657,13 @@ def sync_tenant_edge_redirect_function(
                     "  }\n\n"
                     "  return response;\n}"
                 )
-                mw_new = mw_orig.replace("  return response;\n}", canonical_fallback_snippet)
-                if mw_new != mw_orig:
-                    mw_file.write_text(mw_new, encoding="utf-8")
-                    dist_mw = repo / "dist" / "functions" / "_middleware.js"
-                    if dist_mw.parent.is_dir():
-                        dist_mw.write_text(mw_new, encoding="utf-8")
-                    dist_needs_update = True
+                mw_new = mw_new.replace("  return response;\n}", canonical_fallback_snippet)
+            if mw_new != mw_orig:
+                mw_file.write_text(mw_new, encoding="utf-8")
+                dist_mw = repo / "dist" / "functions" / "_middleware.js"
+                if dist_mw.parent.is_dir():
+                    dist_mw.write_text(mw_new, encoding="utf-8")
+                dist_needs_update = True
         except Exception:
             pass
 

@@ -566,12 +566,14 @@ def collect_local_arbitrage_truth(
         q_reason = str(c.get("qualification_reason") or "").strip()
         buyer_id = str(c.get("buyer_id") or "").strip()
         conv_id = str(c.get("id") or c.get("conversation_id") or "").strip()
+        hist_raw = str(c.get("history_json") or "")
+        is_seeded_in_hist = '"thread_source": "SEEDED_TEST_FIXTURE"' in hist_raw or '"thread_source":"SEEDED_TEST_FIXTURE"' in hist_raw
         is_live_row = (
             buyer_id.endswith("_live")
             or conv_id.endswith("_live")
             or (q_reason != "" and q_reason != "SEEDED_TEST_FIXTURE")
         )
-        if not is_live_row or q_reason == "SEEDED_TEST_FIXTURE":
+        if not is_live_row or q_reason == "SEEDED_TEST_FIXTURE" or (q_reason == "" and is_seeded_in_hist):
             seeded_fixtures += 1
             continue
         state = str(c.get("fsm_state") or c.get("state") or "").upper()

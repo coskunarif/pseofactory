@@ -3612,6 +3612,100 @@ class PushIndexer:
             "deleted_from_gsc": deleted_from_gsc,
         }
 
+    def _ensure_gsc_domain_verified(self, target_site: str, gsccli_bin: Optional[str] = None) -> bool:
+        """
+        Autonomously provisions a Google Site Verification DNS_TXT token in Cloudflare DNS
+        and verifies sc-domain:<domain> ownership in Google Search Console when unverified.
+        Zero em-dashes. Zero en-dashes.
+        """
+        bare_domain = str(target_site or "").replace("sc-domain:", "").replace("https://", "").replace("http://", "").strip("/").lower()
+        if not bare_domain or "." not in bare_domain:
+            return False
+        try:
+            import time
+            from pseofactory.infra_audit import _resolve_cloudflare_api_token
+            from google.oauth2 import service_account
+            from google.auth.transport.requests import Request
+
+            sa_path = Path("/home/ubuntuadmin/.config/gsc/service_account.json")
+            if not sa_path.is_file():
+                return False
+            cf_token = _resolve_cloudflare_api_token()
+            if not cf_token:
+                return False
+
+            if gsccli_bin:
+                subprocess.run([gsccli_bin, "sites", "add", f"sc-domain:{bare_domain}"], capture_output=True, text=True, timeout=15)
+
+            creds = service_account.Credentials.from_service_account_file(
+                str(sa_path),
+                scopes=[
+                    "https://www.googleapis.com/auth/siteverification",
+                    "https://www.googleapis.com/auth/webmasters",
+                ],
+            )
+            creds.refresh(Request())
+            g_token = creds.token
+
+            req_tok = urllib.request.Request(
+                "https://www.googleapis.com/siteVerification/v1/token",
+                data=json.dumps({
+                    "verificationMethod": "DNS_TXT",
+                    "site": {"identifier": bare_domain, "type": "INET_DOMAIN"},
+                }).encode("utf-8"),
+                headers={"Authorization": f"Bearer {g_token}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req_tok, timeout=15) as r:
+                txt_value = json.loads(r.read().decode("utf-8"))["token"]
+
+            req_z = urllib.request.Request(
+                f"https://api.cloudflare.com/client/v4/zones?name={bare_domain}",
+                headers={"Authorization": f"Bearer {cf_token}", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req_z, timeout=15) as r:
+                z_res = json.loads(r.read().decode("utf-8")).get("result") or []
+            if not z_res:
+                return False
+            zone_id = z_res[0]["id"]
+
+            req_list = urllib.request.Request(
+                f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records?type=TXT&name={bare_domain}",
+                headers={"Authorization": f"Bearer {cf_token}", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req_list, timeout=15) as r:
+                existing = json.loads(r.read().decode("utf-8")).get("result") or []
+
+            if not any(txt_value in rec.get("content", "") for rec in existing):
+                req_create = urllib.request.Request(
+                    f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records",
+                    data=json.dumps({
+                        "type": "TXT",
+                        "name": bare_domain,
+                        "content": f'"{txt_value}"',
+                        "ttl": 120,
+                    }).encode("utf-8"),
+                    headers={"Authorization": f"Bearer {cf_token}", "Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req_create, timeout=15) as r:
+                    json.loads(r.read().decode("utf-8"))
+                time.sleep(3)
+
+            req_ver = urllib.request.Request(
+                "https://www.googleapis.com/siteVerification/v1/webResource?verificationMethod=DNS_TXT",
+                data=json.dumps({
+                    "site": {"identifier": bare_domain, "type": "INET_DOMAIN"},
+                }).encode("utf-8"),
+                headers={"Authorization": f"Bearer {g_token}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req_ver, timeout=20) as r:
+                json.loads(r.read().decode("utf-8"))
+            return True
+        except Exception:
+            return False
+
     def submit_gsc_sitemaps(
         self,
         sitemaps: Optional[List[str]] = None,
@@ -3755,8 +3849,12 @@ class PushIndexer:
             if live and gsccli_bin:
                 try:
                     sm_proc = subprocess.run(sm_cmd, capture_output=True, text=True, timeout=15)
-                    status = "ACCEPTED" if sm_proc.returncode == 0 else "FAIL"
                     output_text = (sm_proc.stdout or "").strip() or (sm_proc.stderr or "").strip()
+                    if sm_proc.returncode != 0 and ("sufficient permission" in output_text.lower() or "unverified" in output_text.lower()):
+                        if self._ensure_gsc_domain_verified(target_site, gsccli_bin=gsccli_bin):
+                            sm_proc = subprocess.run(sm_cmd, capture_output=True, text=True, timeout=15)
+                            output_text = (sm_proc.stdout or "").strip() or (sm_proc.stderr or "").strip()
+                    status = "ACCEPTED" if sm_proc.returncode == 0 else "FAIL"
                 except Exception as ex:
                     status = "ERROR"
                     output_text = str(ex)
