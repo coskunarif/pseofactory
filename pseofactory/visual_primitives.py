@@ -5427,16 +5427,25 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         # Ensure primary KPI block (.kpi-block or #rap-subsidy-meter) sits at the top of .result-box before .calc-inline-cta
         cta_pos = updated.find('<div class="calc-inline-cta"')
         kpi_pos = updated.find('<div class="kpi-block"')
-        share_pos = updated.find('<div class="share-pro-container"')
-        if cta_pos != -1 and kpi_pos != -1 and share_pos != -1 and cta_pos < kpi_pos < share_pos:
-            kpi_slice = updated[kpi_pos:share_pos].strip()
+        kpi_end_candidates = [
+            pos
+            for pos in (
+                updated.find('<div id="calc-result-quick-unlock-bar"', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div class="calc-statutory-box"', kpi_pos if kpi_pos != -1 else 0),
+                updated.find('<div class="share-pro-container"', kpi_pos if kpi_pos != -1 else 0),
+            )
+            if pos != -1
+        ]
+        kpi_end = min(kpi_end_candidates) if kpi_end_candidates else -1
+        if cta_pos != -1 and kpi_pos != -1 and kpi_end != -1 and cta_pos < kpi_pos < kpi_end:
+            kpi_slice = updated[kpi_pos:kpi_end].strip()
             if kpi_slice and "calc-inline-cta" not in kpi_slice:
                 updated = (
                     updated[:cta_pos]
                     + kpi_slice
                     + "\n          "
                     + updated[cta_pos:kpi_pos]
-                    + updated[share_pos:]
+                    + updated[kpi_end:]
                 )
                 actions.append("result_box_kpi_first_order")
 

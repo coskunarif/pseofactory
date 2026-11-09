@@ -9511,7 +9511,22 @@ class RetroReflectionEngine:
                     '"dateModified": "2026-10-27"' in html_content
                     or '"dateModified":"2026-10-27"' in html_content
                     or 'placeholder="Work email address..."' in html_content
-                    or "autoPrevBtn" not in html_content
+            or "autoPrevBtn" not in html_content
+            or "primaryCalcIds" not in html_content
+            or (
+                'id="calc-result-quick-unlock-bar"' in html_content
+                and 'data-contextual-v2="1"' not in html_content
+            )
+            or (
+                '<div class="calc-inline-cta"' in html_content
+                and '<div class="kpi-block"' in html_content
+                and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="kpi-block"')
+            )
+            or (
+                '<div class="calc-inline-cta"' in html_content
+                and 'id="rap-subsidy-meter"' in html_content
+                and html_content.find('<div class="calc-inline-cta"') < html_content.find('id="rap-subsidy-meter"')
+            )
                 )
             )
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
@@ -13339,6 +13354,7 @@ class RetroReflectionEngine:
                 if (
                     is_real_tenant_repo
                     and synd_dir.is_dir()
+                    and property_id.lower() != "lienbond"
                     and not (property_id.lower() == "profithelm" and "profithelm.builder" in sys.modules)
                 ):
                     needs_synd_export = bool(retrofitted_paths) or any(
