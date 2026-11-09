@@ -1865,3 +1865,120 @@ def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_e
         assert not contam, f"Cross-property contamination in {prop_id} lead-capture.js: {contam}"
 
 
+def test_profithelm_tax_bracket_cro_direct_lead_isolation_and_above_fold_ux(tmp_path):
+    """
+    Verifies ProfitHelm tax-bracket CRO upgrades:
+    1. lookupEdgeLeadRecord isolates shared default lead_profithelm_direct records across tools
+       so a stale homepage (CA) KV record never bleeds into irs-2027-tax-brackets-new-york (NY),
+       and includes STATE-PTET in reconciliation_schedule.
+    2. normalize_html_visual_primitives differentiates .lead-capture-card duplicate Export (PDF)
+       headings into Free ... Cheat Sheet & Instant Summary, updates Work email placeholders to
+       Enter your email address..., hides duplicate stacked .inline-lead-box via CSS, and
+       auto-triggers #btn-preview-post-calc-workpaper on [data-checkout-nav="1"] click.
+    """
+    import json
+    import subprocess
+    from pseofactory.edge import generate_edge_lead_capture_function
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    fn_dir = tmp_path / "profithelm_cro"
+    api_dir = fn_dir / "functions" / "api"
+    api_dir.mkdir(parents=True)
+    (api_dir / "lead-capture.js").write_text(
+        generate_edge_lead_capture_function("profithelm"), encoding="utf-8"
+    )
+    pkg = fn_dir / "package.json"
+    pkg.write_text('{"type": "module"}\n', encoding="utf-8")
+
+    node_script = """
+    import("./functions/api/lead-capture.js").then(async (mod) => {
+      const kvStore = new Map();
+      // Pre-seed stale shared lead_profithelm_direct from homepage with state=CA
+      kvStore.set("lead_profithelm_direct", {
+        lead_id: "lead_profithelm_direct",
+        property_id: "profithelm",
+        tool_slug: "homepage",
+        state: "CA",
+        calculated_amount: 125000,
+        scenario_inputs: { "quote-intake-state": "CA" }
+      });
+      const mockEnv = {
+        PROFITHELM_LEADS: {
+          put: async (k, v) => kvStore.set(k, JSON.parse(v)),
+          list: async () => ({ keys: [] }),
+          get: async (k) => kvStore.get(k) || null
+        }
+      };
+      const res = await mod.onRequestGet({
+        request: new Request("https://profithelm.com/api/lead-capture?playbook=1&tool_slug=irs-2027-tax-brackets-new-york&amount=125000"),
+        env: mockEnv
+      });
+      const data = await res.json();
+      console.log(JSON.stringify(data));
+    });
+    """
+    proc = subprocess.run(
+        ["node", "-e", node_script],
+        cwd=fn_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout.strip())
+    assert payload["tool_slug"] == "irs-2027-tax-brackets-new-york"
+    assert payload["state"] == "NY"
+    assert payload["custom_parameter_ledger"]["inputs"] == {}
+    line_codes = [r["line_code"] for r in payload["reconciliation_schedule"]]
+    assert "STATE-PTET" in line_codes
+    ptet_row = next(r for r in payload["reconciliation_schedule"] if r["line_code"] == "STATE-PTET")
+    assert "(NY)" in ptet_row["line_item"]
+
+    sample_html = """<!DOCTYPE html>
+<html lang="en" data-theme="porcelain">
+<head><title>New York 2027 Tax Brackets</title></head>
+<body>
+<main class="container">
+  <h1>New York 2027 Tax Brackets</h1>
+  <div class="card result-card result-box">
+    <h2>Combined 2027 Tax Projection</h2>
+    <div class="output-value" data-baseline-output="12842">$12,842</div>
+    <div class="share-pro-container">
+      <div class="pro-hook-card">
+        <span><strong>ProfitHelm Pro:</strong> Export 2027 NY Marginal Tax Scenario (PDF)</span>
+        <a href="#lead-capture-form" class="pro-hook-link">Export Audit Workpaper &rarr;</a>
+      </div>
+      <div class="lead-capture-card">
+        <div>Export 2027 NY Marginal Tax Scenario (PDF)</div>
+        <form class="lead-capture-form" action="/api/lead-capture" method="POST">
+          <input type="email" name="email" required placeholder="Work email address...">
+          <button type="submit" class="btn-primary">Get Free Briefing &rarr;</button>
+        </form>
+      </div>
+    </div>
+    <div class="inline-lead-box">
+      <form class="lead-capture-form" action="/api/lead-capture" method="POST">
+        <input type="email" name="email" required placeholder="Work email...">
+        <button type="submit" class="btn-primary">Send Playbook</button>
+      </form>
+    </div>
+  </div>
+  <div id="post-calculation-upgrade-drawer" data-offer-price="49" data-offer-sku="ph_statutory_tax_audit_workpapers" data-tool-slug="irs-2027-tax-brackets-new-york"></div>
+</main>
+</body>
+</html>"""
+    healed_once, actions_once = normalize_html_visual_primitives(sample_html, is_tenant_porcelain=True)
+    assert "lead_capture_cheat_sheet_heading" in actions_once
+    assert "lead_capture_consumer_email_placeholder" in actions_once
+    assert "Free 2027 NY Marginal Tax Scenario Cheat Sheet &amp; Instant Summary" in healed_once
+    assert 'placeholder="Enter your email address..."' in healed_once
+    assert 'placeholder="Work email' not in healed_once
+    assert ".result-card .share-pro-container + .inline-lead-box" in healed_once
+    assert "autoPrevBtn" in healed_once
+
+    healed_twice, actions_twice = normalize_html_visual_primitives(healed_once, is_tenant_porcelain=True)
+    assert actions_twice == []
+    assert healed_twice == healed_once
+
+
+

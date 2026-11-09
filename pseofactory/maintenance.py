@@ -9497,7 +9497,12 @@ class RetroReflectionEngine:
             or _needs_page_structure_geo_normalization(html_content)
             or (
                 "PYTEST_CURRENT_TEST" not in os.environ
-                and ('"dateModified": "2026-10-27"' in html_content or '"dateModified":"2026-10-27"' in html_content)
+                and (
+                    '"dateModified": "2026-10-27"' in html_content
+                    or '"dateModified":"2026-10-27"' in html_content
+                    or 'placeholder="Work email address..."' in html_content
+                    or "autoPrevBtn" not in html_content
+                )
             )
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
         ):

@@ -3939,19 +3939,31 @@ function parseEdgeJsonParam(rawVal) {
 
 async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
   const mem = getMemoryBuffer();
+  const isDirectLead = String(leadId || "").endsWith("_direct");
+  let baseRecord = null;
   if (leadId) {
-    const foundMem = mem.find((r) => r && r.lead_id === leadId);
-    if (foundMem) return foundMem;
-    const kv = getLeadsKv(env);
-    if (kv && typeof kv.get === "function") {
-      try {
-        const kvRec = await kv.get(leadId, { type: "json" });
-        if (kvRec && typeof kvRec === "object") return kvRec;
-      } catch (_) {}
+    const foundMem = mem.find((r) => r && r.lead_id === leadId && (!isDirectLead || !toolSlug || !r.tool_slug || r.tool_slug === toolSlug));
+    if (foundMem) baseRecord = { ...foundMem };
+    if (!baseRecord) {
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.get === "function") {
+        try {
+          const kvRec = await kv.get(leadId, { type: "json" });
+          if (kvRec && typeof kvRec === "object" && (!isDirectLead || !toolSlug || !kvRec.tool_slug || kvRec.tool_slug === toolSlug)) {
+            baseRecord = { ...kvRec };
+          }
+        } catch (_) {}
+      }
     }
   }
   const parsedAmount = Number(amountParam);
   const safeAmount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? Math.round(parsedAmount * 100) / 100 : 125000;
+  if (baseRecord) {
+    if (Number.isFinite(parsedAmount) && parsedAmount > 0) baseRecord.calculated_amount = safeAmount;
+    if (toolSlug && toolSlug !== "general") baseRecord.tool_slug = toolSlug;
+    if (stateParam) baseRecord.state = String(stateParam).toUpperCase().slice(0, 2) || baseRecord.state;
+    return baseRecord;
+  }
   return {
     lead_id: leadId || "lead_lienbond_direct",
     property_id: "lienbond",
@@ -5561,19 +5573,31 @@ function parseEdgeJsonParam(rawVal) {
 
 async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
   const mem = getMemoryBuffer();
+  const isDirectLead = String(leadId || "").endsWith("_direct");
+  let baseRecord = null;
   if (leadId) {
-    const foundMem = mem.find((r) => r && r.lead_id === leadId);
-    if (foundMem) return foundMem;
-    const kv = getLeadsKv(env);
-    if (kv && typeof kv.get === "function") {
-      try {
-        const kvRec = await kv.get(leadId, { type: "json" });
-        if (kvRec && typeof kvRec === "object") return kvRec;
-      } catch (_) {}
+    const foundMem = mem.find((r) => r && r.lead_id === leadId && (!isDirectLead || !toolSlug || !r.tool_slug || r.tool_slug === toolSlug));
+    if (foundMem) baseRecord = { ...foundMem };
+    if (!baseRecord) {
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.get === "function") {
+        try {
+          const kvRec = await kv.get(leadId, { type: "json" });
+          if (kvRec && typeof kvRec === "object" && (!isDirectLead || !toolSlug || !kvRec.tool_slug || kvRec.tool_slug === toolSlug)) {
+            baseRecord = { ...kvRec };
+          }
+        } catch (_) {}
+      }
     }
   }
   const parsedAmount = Number(amountParam);
   const safeAmount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? Math.round(parsedAmount * 100) / 100 : 48500;
+  if (baseRecord) {
+    if (Number.isFinite(parsedAmount) && parsedAmount > 0) baseRecord.calculated_amount = safeAmount;
+    if (toolSlug && toolSlug !== "general") baseRecord.tool_slug = toolSlug;
+    if (stateParam) baseRecord.state = String(stateParam).toUpperCase().slice(0, 2) || baseRecord.state;
+    return baseRecord;
+  }
   return {
     lead_id: leadId || "lead_gainhelm_direct",
     property_id: "gainhelm",
@@ -7854,8 +7878,9 @@ function parseEdgeJsonParam(raw) {
 
 async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
   let baseRecord = null;
+  const isDirectLead = String(leadId || "").endsWith("_direct");
   for (const item of getMemoryBuffer()) {
-    if (item && item.lead_id === leadId) {
+    if (item && item.lead_id === leadId && (!isDirectLead || !toolSlug || !item.tool_slug || item.tool_slug === toolSlug)) {
       baseRecord = { ...item };
       break;
     }
@@ -7865,7 +7890,9 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
     if (kv && typeof kv.get === "function" && leadId) {
       try {
         const stored = await kv.get(leadId, { type: "json" });
-        if (stored && typeof stored === "object") baseRecord = { ...stored };
+        if (stored && typeof stored === "object" && (!isDirectLead || !toolSlug || !stored.tool_slug || stored.tool_slug === toolSlug)) {
+          baseRecord = { ...stored };
+        }
       } catch (_) {}
     }
   }
@@ -7884,6 +7911,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
       scenario_outputs: parsedOutputs || {},
     };
   } else {
+    if (toolSlug && toolSlug !== "general") baseRecord.tool_slug = toolSlug;
     if (Number.isFinite(parsedAmt) && parsedAmt > 0) {
       baseRecord.calculated_amount = parsedAmt;
       baseRecord.capital_band = deriveCapitalBand(parsedAmt);
@@ -9371,6 +9399,9 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     const estBase = Math.max(0, baseAmount - stdDed) * 0.24;
     const estOpt = Math.max(0, baseAmount - stdDed - qbiDed) * 0.22;
     const taxDelta = Math.max(0, estBase - estOpt);
+    const stateTaxBase = Math.round(Math.max(0, baseAmount - stdDed) * 0.0685 * 100) / 100;
+    const ptetShield = Math.round(stateTaxBase * 0.32 * 100) / 100;
+    const stateTaxOpt = Math.max(0, Math.round((stateTaxBase - ptetShield) * 100) / 100);
     reconciliationSchedule = [
       {
         line_code: "1040-L11",
@@ -9395,6 +9426,14 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
         baseline_value: fmtUsd(estBase),
         optimized_value: fmtUsd(estOpt),
         delta_impact: `-${fmtUsd(taxDelta)} Annual Tax Delta`,
+      },
+      {
+        line_code: "STATE-PTET",
+        line_item: `State Marginal Bracket & Notice 2020-75 PTET SALT Shield (${stateCode})`,
+        authority: "IRC Section 164(b)(6) & IRS Notice 2020-75",
+        baseline_value: fmtUsd(stateTaxBase),
+        optimized_value: fmtUsd(stateTaxOpt),
+        delta_impact: `-${fmtUsd(ptetShield)} PTET SALT Deduction Shield`,
       },
       {
         line_code: "2210-SH",
@@ -10056,8 +10095,9 @@ function parseEdgeJsonParam(raw) {
 
 async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
   let baseRecord = null;
+  const isDirectLead = String(leadId || "").endsWith("_direct");
   for (const item of getMemoryBuffer()) {
-    if (item && item.lead_id === leadId) {
+    if (item && item.lead_id === leadId && (!isDirectLead || !toolSlug || !item.tool_slug || item.tool_slug === toolSlug)) {
       baseRecord = { ...item };
       break;
     }
@@ -10067,7 +10107,9 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
     if (kv && typeof kv.get === "function" && leadId) {
       try {
         const stored = await kv.get(leadId, { type: "json" });
-        if (stored && typeof stored === "object") baseRecord = { ...stored };
+        if (stored && typeof stored === "object" && (!isDirectLead || !toolSlug || !stored.tool_slug || stored.tool_slug === toolSlug)) {
+          baseRecord = { ...stored };
+        }
       } catch (_) {}
     }
   }
@@ -10087,11 +10129,13 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
       scenario_outputs: parsedOutputs || {},
     };
   } else {
+    if (toolSlug && toolSlug !== "general") baseRecord.tool_slug = toolSlug;
     if (Number.isFinite(parsedAmt) && parsedAmt > 0) {
       baseRecord.calculated_amount = parsedAmt;
       baseRecord.capital_band = deriveCapitalBand(parsedAmt);
     }
     if (stateParam) baseRecord.state = resolvedState;
+    else if (resolvedState && resolvedState !== "US") baseRecord.state = resolvedState;
     else if (!baseRecord.state || baseRecord.state === "US") baseRecord.state = resolvedState;
     if (emailParam && !isPlaceholderCheckoutEmail(emailParam)) baseRecord.email = emailParam;
     if (parsedInputs) {

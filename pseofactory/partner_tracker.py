@@ -5928,6 +5928,9 @@ def synthesize_personalized_audit_workpaper(
         est_tax_baseline = round(taxable_baseline * 0.24, 2)
         est_tax_optimized = round(taxable_optimized * 0.22, 2)
         annual_tax_delta = max(0.0, est_tax_baseline - est_tax_optimized)
+        state_tax_base = round(taxable_baseline * 0.0685, 2)
+        ptet_shield = round(state_tax_base * 0.32, 2)
+        state_tax_opt = max(0.0, round(state_tax_base - ptet_shield, 2))
 
         reconciliation_schedule = [
             {
@@ -5953,6 +5956,14 @@ def synthesize_personalized_audit_workpaper(
                 "baseline_value": f"${est_tax_baseline:,.2f}",
                 "optimized_value": f"${est_tax_optimized:,.2f}",
                 "delta_impact": f"-${annual_tax_delta:,.2f} Annual Tax Delta",
+            },
+            {
+                "line_code": "STATE-PTET",
+                "line_item": f"State Marginal Bracket & Notice 2020-75 PTET SALT Shield ({state_code})",
+                "authority": "IRC Section 164(b)(6) & IRS Notice 2020-75",
+                "baseline_value": f"${state_tax_base:,.2f}",
+                "optimized_value": f"${state_tax_opt:,.2f}",
+                "delta_impact": f"-${ptet_shield:,.2f} PTET SALT Deduction Shield",
             },
             {
                 "line_code": "2210-SH",

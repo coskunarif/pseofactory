@@ -936,6 +936,9 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       gap: 10px;
       align-items: center;
     }
+    .result-card .share-pro-container + .inline-lead-box {
+      display: none !important;
+    }
     a[href]:focus, a[href]:focus-visible,
     button:focus, button:focus-visible,
     input:focus, input:focus-visible,
@@ -3450,11 +3453,37 @@ def _render_runtime_sync_events_js() -> str:
                 window.history.replaceState({}, "", (window.location ? window.location.pathname + window.location.search : "") + "#" + targetId);
               }
             } catch (hErr) {}
-            var focusEl = targetEl.querySelector
-              ? targetEl.querySelector('[data-checkout-trigger], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href]')
-              : null;
+            if (targetId === "partner-quote-intake-step" || hashLink.getAttribute("data-quote-jump") === "1") {
+              var qFormJump = document.getElementById("partner-quote-intake-form");
+              if (qFormJump && qFormJump.style.display === "none") {
+                qFormJump.style.display = "block";
+              }
+            }
+            if (targetId === "post-calculation-upgrade-drawer" || hashLink.getAttribute("data-checkout-nav") === "1") {
+              targetEl.setAttribute("data-upgrade-highlighted", "true");
+              var autoPrevBtn = document.getElementById("btn-preview-post-calc-workpaper");
+              var autoPrevSlot = document.getElementById("post-calc-workpaper-preview-slot");
+              if (autoPrevBtn && (!autoPrevSlot || !autoPrevSlot.children || autoPrevSlot.children.length === 0)) {
+                if (typeof autoPrevBtn.click === "function") {
+                  try { autoPrevBtn.click(); } catch (apErr) {}
+                }
+              }
+            }
+            var focusEl = null;
+            if (targetEl.querySelectorAll) {
+              var focusCands = targetEl.querySelectorAll('[data-checkout-trigger], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href]');
+              for (var fcIdx = 0; fcIdx < focusCands.length; fcIdx++) {
+                var fc = focusCands[fcIdx];
+                if (!fc.getClientRects || fc.getClientRects().length > 0) {
+                  focusEl = fc;
+                  break;
+                }
+              }
+            } else if (targetEl.querySelector) {
+              focusEl = targetEl.querySelector('[data-checkout-trigger], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href]');
+            }
             var nodeToFocus = focusEl || targetEl;
-            if (nodeToFocus === targetEl && !targetEl.hasAttribute("tabindex")) {
+            if (!targetEl.hasAttribute("tabindex")) {
               targetEl.setAttribute("tabindex", "-1");
             }
             targetEl.setAttribute("data-focused-target", "true");
@@ -3463,6 +3492,13 @@ def _render_runtime_sync_events_js() -> str:
                 nodeToFocus.focus({ preventScroll: true });
               } catch (fErr) {
                 nodeToFocus.focus();
+              }
+            }
+            if (document.activeElement !== nodeToFocus && !targetEl.contains(document.activeElement) && typeof targetEl.focus === "function") {
+              try {
+                targetEl.focus({ preventScroll: true });
+              } catch (tfErr) {
+                targetEl.focus();
               }
             }
           }
@@ -4982,6 +5018,29 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             updated = new_pro_doc
             actions.append("pro_hook_checkout_anchor")
 
+    if 'class="lead-capture-card"' in updated:
+        new_lc_doc = re.sub(
+            r'(<div\b[^>]*class=["\'][^"\']*\blead-capture-card\b[^"\']*["\'][^>]*>\s*<div[^>]*>)\s*Export\s+([^<]*?)\(PDF\)\s*(</div>)',
+            lambda m: f"{m.group(1)}Free {m.group(2).strip()} Cheat Sheet &amp; Instant Summary{m.group(3)}",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if new_lc_doc != updated:
+            updated = new_lc_doc
+            actions.append("lead_capture_cheat_sheet_heading")
+
+    if 'placeholder="Work email address..."' in updated or 'placeholder="Work email..."' in updated:
+        new_ph_doc = updated.replace(
+            'placeholder="Work email address..."',
+            'placeholder="Enter your email address..."',
+        ).replace(
+            'placeholder="Work email..."',
+            'placeholder="Enter your email address..."',
+        )
+        if new_ph_doc != updated:
+            updated = new_ph_doc
+            actions.append("lead_capture_consumer_email_placeholder")
+
     is_restricted_ps = 'data-restricted-public-service="true"' in updated
     has_quote_intake = 'id="partner-quote-intake-step"' in updated and not is_restricted_ps
     q_match = re.search(r'<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*>', updated, re.IGNORECASE)
@@ -5296,6 +5355,7 @@ def normalize_html_visual_primitives(
             or ".post-calc-upgrade-drawer" not in prim_body
             or ".tool-header.hero-section" not in prim_body
             or 'input[type="checkbox"].touch-target' not in prim_body
+            or ".share-pro-container + .inline-lead-box" not in prim_body
             or has_token_inversion
         )
         if needs_style_repair:
@@ -5664,6 +5724,7 @@ def normalize_html_visual_primitives(
                 or "data-offer-price-usd" not in sync_body
                 or "surety_lien" not in sync_body
                 or 'mode === "lienbond"' in sync_body
+                or "autoPrevBtn" not in sync_body
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
             )
             if needs_sync_repair:
