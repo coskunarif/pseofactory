@@ -2149,17 +2149,29 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     regulatory_disclosures_html = []
     if is_gainhelm:
-        regulatory_disclosures_html.append(
-            '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-            f'        {GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", "")}\n'
-            '      </p>'
-        )
+        gh_disc = (
+            GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer")
+            or GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer")
+            or ""
+        ).strip()
+        if gh_disc:
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                f'        {gh_disc}\n'
+                '      </p>'
+            )
     elif is_lienbond:
-        regulatory_disclosures_html.append(
-            '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-            f'        {LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer", "")}\n'
-            '      </p>'
-        )
+        lb_disc = (
+            LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer")
+            or LIENBOND_DISCLOSURES.get("statutory_compliance_disclaimer")
+            or ""
+        ).strip()
+        if lb_disc:
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                f'        {lb_disc}\n'
+                '      </p>'
+            )
     elif not is_prexvo:
         if cluster == PROFITHELM_TAX_CLUSTER or "tax" in slug.lower() or "tax" in query.lower() or "179" in slug:
             regulatory_disclosures_html.append(
@@ -2570,8 +2582,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         <p>Formula: <code>{formula}</code></p>
         <p>Evaluated Output Result: <strong class="output-value">{display_output}</strong></p>
         <p>Sample Calculation Methodology: {sample_calc}</p>
-        <div class="calculation-variant" id="variant-baseline" style="font-size: 13px; margin-top: 8px;">Baseline Statutory Schedule (= {display_output}, 100.0% baseline) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Compare Accelerated Stress Variant</a>)</div>
-        <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>{inline_calc_cta_html}
+        <div class="calculation-variant" id="variant-baseline" style="font-size: 13px; margin-top: 8px;">Baseline Statutory Schedule (= {display_output}, 100.0% baseline{"; Title IV RAP $65k AGI benchmark: $248.23/mo, $59,575.20 total" if is_prexvo else ""}) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Compare Accelerated Stress Variant</a>)</div>
+        <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress{"; Title IV RAP $95k AGI benchmark: $498.23/mo" if is_prexvo else ""}) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>{inline_calc_cta_html}
       </div>
 
       <figure>

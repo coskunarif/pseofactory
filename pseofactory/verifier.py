@@ -615,44 +615,88 @@ class SinglePassSEODocumentParser(HTMLParser):
                 return m.group(0)
         return ""
 
+    @staticmethod
+    def _fast_strip_style_and_scripts(data: str) -> str:
+        out = []
+        pos = 0
+        low = data.lower()
+        n = len(data)
+        while pos < n:
+            idx_st = low.find("<style", pos)
+            idx_sc = low.find("<script", pos)
+            if idx_st == -1 and idx_sc == -1:
+                out.append(data[pos:])
+                break
+            if idx_st != -1 and (idx_sc == -1 or idx_st < idx_sc):
+                out.append(data[pos:idx_st])
+                end_st = low.find("</style>", idx_st)
+                if end_st == -1:
+                    break
+                pos = end_st + 8
+            else:
+                out.append(data[pos:idx_sc])
+                tag_end = low.find(">", idx_sc)
+                end_sc = low.find("</script>", idx_sc)
+                if end_sc == -1:
+                    break
+                if tag_end != -1 and tag_end < end_sc:
+                    header_low = low[idx_sc : tag_end + 1]
+                    if "application/ld+json" in header_low or "application/json" in header_low:
+                        out.append(data[idx_sc : end_sc + 9])
+                pos = end_sc + 9
+        return "".join(out)
+
     @classmethod
     def _parse_fast_attrs(cls, attr_str: Optional[str]) -> List[Tuple[str, Optional[str]]]:
         if not attr_str:
             return []
-        from html import unescape as _html_unescape
         attrs: List[Tuple[str, Optional[str]]] = []
         for am in cls._FAST_ATTR_RE.finditer(attr_str):
             k, v1, v2, v3 = am.groups()
             val = v1 if v1 is not None else (v2 if v2 is not None else (v3 if v3 is not None else None))
             if val is not None and "&" in val:
-                val = _html_unescape(val)
+                val = html.unescape(val)
             attrs.append((k.lower(), val))
         return attrs
+
+    @classmethod
+    @functools.lru_cache(maxsize=256)
+    def _tokenize_seo_html_cached(cls, data: str) -> Tuple[Tuple[int, Any, Any, bool], ...]:
+        cleaned = cls._fast_strip_style_and_scripts(data)
+        ops: List[Tuple[int, Any, Any, bool]] = []
+        for m in cls._FAST_TOKEN_RE.finditer(cleaned):
+            s_attrs, s_body, slash_open, tag_raw, attr_str, slash_close, text_chunk = m.groups()
+            if tag_raw is not None:
+                tag = tag_raw.lower()
+                if slash_open:
+                    ops.append((1, tag, None, False))
+                else:
+                    ops.append((0, tag, cls._parse_fast_attrs(attr_str), bool(slash_close)))
+            elif text_chunk is not None:
+                if "&" in text_chunk:
+                    text_chunk = html.unescape(text_chunk)
+                ops.append((2, text_chunk, None, False))
+            elif s_attrs is not None:
+                ops.append((3, s_body, cls._parse_fast_attrs(s_attrs), False))
+        return tuple(ops)
 
     def feed(self, data: str) -> None:
         if len(data) <= 20000:
             super().feed(data)
             return
-        from html import unescape as _html_unescape
-        cleaned = self._FAST_STRIP_BLOCKS_RE.sub(self._strip_non_seo_cb, data)
-        for m in self._FAST_TOKEN_RE.finditer(cleaned):
-            s_attrs, s_body, slash_open, tag_raw, attr_str, slash_close, text_chunk = m.groups()
-            if tag_raw is not None:
-                tag = tag_raw.lower()
-                if slash_open:
-                    self.handle_endtag(tag)
-                else:
-                    self.handle_starttag(tag, self._parse_fast_attrs(attr_str))
-                    if slash_close:
-                        self.handle_endtag(tag)
-            elif text_chunk is not None:
-                if "&" in text_chunk:
-                    text_chunk = _html_unescape(text_chunk)
-                self.handle_data(text_chunk)
-            elif s_attrs is not None:
-                self.handle_starttag("script", self._parse_fast_attrs(s_attrs))
-                if s_body:
-                    self.handle_data(s_body)
+        for kind, a, b, c in self._tokenize_seo_html_cached(data):
+            if kind == 0:
+                self.handle_starttag(a, b)
+                if c:
+                    self.handle_endtag(a)
+            elif kind == 1:
+                self.handle_endtag(a)
+            elif kind == 2:
+                self.handle_data(a)
+            else:
+                self.handle_starttag("script", b)
+                if a:
+                    self.handle_data(a)
                 self.handle_endtag("script")
 
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):

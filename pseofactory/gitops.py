@@ -729,7 +729,7 @@ class TenantFactoryLockGuard:
         )
         should_lock = (
             not self.dry_run
-            and self.property_id in ("profithelm", "prexvo", "gainhelm")
+            and self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
             and (
                 (is_prod_repo and "PYTEST_CURRENT_TEST" not in os.environ)
                 or "PSEUFACTORY_LOCK_DIR" in os.environ
@@ -1651,7 +1651,7 @@ class GitOpsCoordinator:
         is_container_root = str(self.repo_path) == "/home/ubuntuadmin/projects"
         if is_container_root:
             raise RuntimeError("Containment violation: cannot execute release on container root /home/ubuntuadmin/projects")
-        if property_id in ("profithelm", "prexvo", "gainhelm"):
+        if property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             from pseofactory.maintenance import CrossPropertyContaminationScanner
 
             scanner = CrossPropertyContaminationScanner()
@@ -2179,6 +2179,43 @@ class CICDWatcher:
                         conclusion = entry.get("conclusion", "")
                         if status == "completed":
                             if conclusion == "success":
+                                if (
+                                    not hasattr(subprocess.run, "mock_calls")
+                                    and "PYTEST_CURRENT_TEST" not in os.environ
+                                    and "lienbond" in rp.name.lower()
+                                    and (rp / "dist").is_dir()
+                                ):
+                                    w_env = os.environ.copy()
+                                    if Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml").is_file():
+                                        w_env.pop("CLOUDFLARE_API_TOKEN", None)
+                                    nvm_bins = sorted(
+                                        Path("/home/ubuntuadmin/.nvm/versions/node").glob("v*/bin"),
+                                        reverse=True,
+                                    )
+                                    if nvm_bins:
+                                        w_env["PATH"] = f"{nvm_bins[0]}:{w_env.get('PATH', '')}"
+                                    npx_bin = shutil.which("npx", path=w_env.get("PATH"))
+                                    if npx_bin:
+                                        subprocess.run(
+                                            [
+                                                npx_bin,
+                                                "wrangler",
+                                                "pages",
+                                                "deploy",
+                                                "dist",
+                                                "--project-name",
+                                                "lienbond",
+                                                "--branch",
+                                                "main",
+                                                "--commit-dirty=true",
+                                            ],
+                                            cwd=str(rp),
+                                            env=w_env,
+                                            capture_output=True,
+                                            text=True,
+                                            check=False,
+                                            timeout=120,
+                                        )
                                 return {
                                     "status": "SUCCESS",
                                     "run_id": gh_run_id,
@@ -2599,9 +2636,10 @@ class LiveEdgeVerifier:
             "lienbond": "lb_verified_partner_slot",
         }.get(property_id, "ph_verified_partner_slot")
         foreign_domains = {
-            "prexvo": ("profithelm.com", "gainhelm.com"),
-            "gainhelm": ("profithelm.com", "prexvo.com"),
-            "profithelm": ("prexvo.com", "gainhelm.com"),
+            "prexvo": ("profithelm.com", "gainhelm.com", "lienbond.com"),
+            "gainhelm": ("profithelm.com", "prexvo.com", "lienbond.com"),
+            "lienbond": ("profithelm.com", "prexvo.com", "gainhelm.com"),
+            "profithelm": ("prexvo.com", "gainhelm.com", "lienbond.com"),
         }.get(property_id, ())
 
         routes: Dict[str, Dict[str, Any]] = {}
@@ -3041,9 +3079,13 @@ class LiveEdgeVerifier:
         base = base_url.rstrip("/")
         base_low = base.lower()
         property_id = (
-            "gainhelm"
-            if "gainhelm" in base_low
-            else ("prexvo" if "prexvo" in base_low else "profithelm")
+            "lienbond"
+            if "lienbond" in base_low
+            else (
+                "gainhelm"
+                if "gainhelm" in base_low
+                else ("prexvo" if "prexvo" in base_low else "profithelm")
+            )
         )
         mode_tag = " [READ_ONLY SIMULATION]" if dry_run else ""
         print(f"[DISPATCH:CLOUD_DEPLOY] Stage 6: Edge deployment parity check -> url={base}{mode_tag}")

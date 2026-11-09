@@ -1131,6 +1131,10 @@ class FactoryPipeline:
                                 line_s = line.strip()
                                 if line_s.startswith("/tools/"):
                                     existing_routes.append(line_s)
+                                elif line_s.startswith("# [edge-middleware-canonical] "):
+                                    r_cand = line_s.split("# [edge-middleware-canonical] ", 1)[1].strip()
+                                    if r_cand.startswith("/"):
+                                        existing_routes.append(r_cand)
                         except Exception:
                             pass
                     all_routes = list(dict.fromkeys(existing_routes + [route_path]))
@@ -2114,6 +2118,15 @@ def execute_autonomous_daily_trend_page_build(
                         ln_s = ln.strip()
                         if not ln.startswith((" ", "\t")) and ln_s.startswith("/"):
                             existing_routes.append(ln_s)
+                        elif ln_s.startswith("# [edge-middleware-canonical] "):
+                            r_cand = ln_s.split("# [edge-middleware-canonical] ", 1)[1].strip()
+                            if r_cand.startswith("/"):
+                                existing_routes.append(r_cand)
+                if tools_dir.is_dir():
+                    for hf_p in sorted(tools_dir.rglob("index.html")):
+                        rel_p = hf_p.relative_to(dist_dir).parent.as_posix().strip("/")
+                        if rel_p:
+                            existing_routes.append(f"/{rel_p}/")
                 all_routes = list(dict.fromkeys(existing_routes + [route_path]))
                 headers_file.write_text(
                     build_edge_headers(canonical_base=adp.canonical_base, routes=all_routes),
@@ -2184,11 +2197,14 @@ def execute_autonomous_daily_trend_page_build(
 
             try:
                 from pseofactory.maintenance import RetroReflectionEngine
+                from pseofactory.drift import write_substrate_lock
                 RetroReflectionEngine.retrofit_estate(
                     dist_dir=dist_dir,
                     property_id=t_id,
                     canonical_base=adp.canonical_base,
                 )
+                if repo_root and Path(repo_root).is_dir():
+                    write_substrate_lock(Path(repo_root))
             except Exception:
                 pass
 

@@ -5256,6 +5256,22 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         )
         actions.append("lead_capture_consumer_email_placeholder")
 
+    if 'id="partner-registration-drawer"' in updated:
+        spliced_reg_m = re.search(
+            r'      <div id="partner-registration-drawer" class="partner-registration-drawer"[\s\S]*?</form>\s*</div>\n',
+            updated,
+        )
+        if spliced_reg_m:
+            tail_after_reg = updated[spliced_reg_m.end() :].lstrip()
+            if not (
+                tail_after_reg.startswith('<div id="partner-quote-intake-step"')
+                or tail_after_reg.startswith('<div class="calc-inline-cta"')
+                or tail_after_reg.startswith('<div id="calc-result-quick-unlock-bar"')
+                or tail_after_reg.startswith("</section>")
+            ):
+                updated = updated[: spliced_reg_m.start()] + updated[spliced_reg_m.end() :]
+                actions.append("heal_spliced_partner_registration_drawer")
+
     if has_quote_intake and 'id="partner-registration-drawer"' not in updated:
         firm_ph = (
             "Vanguard Cyber Assurance CPA LLP"
@@ -5297,8 +5313,9 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             f'        </form>\n'
             f'      </div>\n'
         )
-        if q_match:
-            updated = updated[: q_match.start()] + partner_reg_html + updated[q_match.start() :]
+        q_match_cur = re.search(r'<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*>', updated, re.IGNORECASE)
+        if q_match_cur:
+            updated = updated[: q_match_cur.start()] + partner_reg_html + updated[q_match_cur.start() :]
             actions.append("partner_registration_drawer")
         else:
             aff_matches = list(
