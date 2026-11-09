@@ -1519,6 +1519,14 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         claim_key = "sprs_max_score"
         claim_val = 110
         q_params = {"headcount": 75, "grc_tier": 1, "audit_type": 2}
+    elif norm_prop == "lienbond":
+        formula = "round((payroll / 100.0) * class_rate * emr_factor, 2)"
+        inputs = {"payroll": 500000.0, "class_rate": 8.42, "emr_factor": 0.95}
+        published_output = 39995.0
+        sample_calc = "($500,000 payroll / 100) * $8.42 NCCI Class 5403 rate * 0.95 EMR = $39,995.00 annual workers compensation premium"
+        claim_key = "ncci_emr_unity_baseline"
+        claim_val = 1.0
+        q_params = {"payroll": 500000, "class_rate": 8.42, "emr": 0.95}
     else:
         domain = _classify_tool_domain(slug)
         if "1031" in slug or "like-kind" in slug:
@@ -1601,8 +1609,11 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
     elif norm_prop == "gainhelm":
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "AICPA SSAE 18 (AT-C Section 205), 32 CFR Part 170 (CMMC 2.0), and NIST SP 800-171 Rev 2")
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "BLS OEWS SOC 15-1212 Information Security Analysts and IBM Cost of a Data Breach Report")
+    elif norm_prop == "lienbond":
+        stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "NCCI Experience Rating Plan Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131 (Miller Act)")
+        econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "NCCI State Loss Cost Advisory Rate Schedules and BLS Construction & Extraction Wage Series")
     else:
-        cites = get_dual_dataset_citations(slug)
+        cites = get_dual_dataset_citations(slug, property_id=norm_prop)
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or cites["statutory_source"])
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or cites["economic_source"])
 
@@ -4296,14 +4307,20 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
         GAINHELM_DEFAULT_TOOLS,
         LIENBOND_DEFAULT_TOOLS,
     )
+    slug_tokens = set(tool_slug.split("-"))
+    if (
+        property_id == "lienbond"
+        or any(t.get("slug") == tool_slug for t in LIENBOND_DEFAULT_TOOLS)
+        or (property_id not in ("prexvo", "gainhelm", "profithelm") and any(tok in slug_tokens for tok in ("lien", "retainage", "surety", "emr", "ncci", "miller")))
+    ):
+        return {
+            "statutory_source": "NCCI Experience Rating Plan Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131 (Miller Act)",
+            "economic_source": "NCCI State Loss Cost Advisory Rate Schedules and BLS Construction & Extraction Wage Series",
+        }
     if (
         property_id == "prexvo"
         or any(t.get("slug") == tool_slug for t in PREXVO_DEFAULT_TOOLS)
-        or "rap" in tool_slug
-        or "ibr" in tool_slug
-        or "pslf" in tool_slug
-        or "paye" in tool_slug
-        or "tiered" in tool_slug
+        or any(tok in slug_tokens for tok in ("rap", "ibr", "pslf", "paye", "tiered"))
     ):
         return {
             "statutory_source": "Title IV Higher Education Act (34 CFR Part 685)",
@@ -7040,6 +7057,12 @@ def generate_social_syndication_pack(
         x_pack = _generate_gainhelm_x(tool, base_url)
         fb_pack = _generate_gainhelm_facebook(tool, base_url)
         first_comment = li_pack.get("first_comment", f"Model your exact scenario on GainHelm:\n{url}")
+    elif norm_prop == "lienbond":
+        base_url = f"https://lienbond.com/tools/{slug}/"
+        li_pack = _generate_lienbond_linkedin(tool, base_url)
+        x_pack = _generate_lienbond_x(tool, base_url)
+        fb_pack = _generate_lienbond_facebook(tool, base_url)
+        first_comment = li_pack.get("first_comment", f"Model your exact scenario on LienBond:\n{url}")
     elif include_citations:
         li_pack = generate_linkedin_company_post_with_citations(slug, stat_cite, econ_cite)
         x_pack = generate_x_post_with_citations(slug, stat_cite, econ_cite)
@@ -8854,6 +8877,273 @@ def _generate_gainhelm_regulatory_lead_magnet(tool: Dict[str, Any], url: str) ->
     return {"content": content, "target_url": deep_url}
 
 
+def _generate_lienbond_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_x_post
+    slug = tool["slug"]
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    out_fmt = proof["published_output_formatted"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=x&utm_medium=social&utm_campaign={slug}"
+    short_title = tool.get("short_title") or tool.get("title", slug)
+    x_hook = f"on {short_title}, verified underwriting math sets baseline output at {out_fmt} ({proof['sample_calculation'][:70]})."
+    raw_post = f"{x_hook}\n\nGrounded in NCCI Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131.\n{deep_url}"
+    clean_post = _sanitize_distribution_text(raw_post)
+    if len(clean_post) > 280:
+        clean_post = _sanitize_distribution_text(f"{short_title} verified baseline: {out_fmt}.\n{deep_url}")
+    if len(clean_post) > 280:
+        short_url = f"{url}{sep}{qs}&utm_source=x"
+        clean_post = _sanitize_distribution_text(f"{short_title}: {out_fmt}.\n{short_url}")
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = f"model your exact numbers on LienBond:\n{fc_url}"
+    teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="LienBond")
+    assert_x_post(clean_post)
+    assert_x_post(teaser_content)
+    return {
+        "platform": "x",
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "content": clean_post,
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "char_count": len(clean_post),
+        "character_count": len(clean_post),
+    }
+
+
+def _generate_lienbond_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_linkedin
+    from pseofactory.maintenance import DEFAULT_TENANT_LINKEDIN_IDS
+    company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("lienbond", "106482196")
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic commercial insurance and surety underwriting projections.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
+    raw_text = (
+        f"Deterministic underwriting modeling for {title} verifies a {out_fmt} benchmark outcome.\n\n"
+        f"{qa}\n\n"
+        f"Verified Calculation Proof:\n"
+        f"• {sample_calc} (Verified output: {out_fmt})\n"
+        f"• Statutory Authority: {proof['statutory_source']}\n"
+        f"• Empirical Benchmark: {proof['economic_source']}\n\n"
+        f"Model your exact scenario live on LienBond:\n"
+        f"{deep_url}\n\n"
+        f"#CommercialInsurance #SuretyBonds #WorkersComp #ConstructionRisk #LienBond"
+    )
+    clean_content = _sanitize_distribution_text(raw_text)
+    fc_url = _with_first_comment_utm(deep_url)
+    first_comment = (
+        f"Model your exact scenario on LienBond:\n{fc_url}\n\n"
+        f"Authority: {proof['statutory_source']}\n"
+        f"Benchmark: {proof['economic_source']}"
+    )
+    teaser_content = _build_zero_link_teaser_content(clean_content, platform="linkedin", brand="LienBond")
+    assert_linkedin(clean_content)
+    assert_linkedin(teaser_content)
+    return {
+        "platform": "linkedin",
+        "entity_type": "company",
+        "company_id": company_id,
+        "post_mode": "zero_link_teaser_plus_first_comment",
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "content": clean_content,
+        "teaser_content": teaser_content,
+        "first_comment": first_comment,
+        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}',
+        "char_count": len(clean_content),
+        "character_count": len(clean_content),
+        "status": "READY_FOR_BROADCAST",
+    }
+
+
+def _generate_lienbond_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes, assert_facebook_post
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic commercial insurance and surety underwriting projections.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
+    raw_text = (
+        f"Evaluating commercial underwriting and bond requirements for {title}? {sample_calc} (Verified output: {out_fmt}).\n\n"
+        f"{qa}\n\nRun your numbers on LienBond: {deep_url}"
+    )
+    clean_content = _sanitize_distribution_text(raw_text)
+    fc_url = _with_first_comment_utm(deep_url, platform="facebook")
+    first_comment = f"Interactive commercial insurance & surety scenario calculator on LienBond (pre-filled, zero login): {fc_url}"
+    teaser_content = _build_zero_link_teaser_content(clean_content, platform="facebook", brand="LienBond")
+    assert_no_forbidden_dashes(clean_content, context=f"{slug} facebook")
+    assert_facebook_post(teaser_content, first_comment, context=f"{slug} facebook teaser")
+    return {
+        "platform": "facebook",
+        "post_mode": "zero_link_teaser_plus_first_comment",
+        "content": clean_content,
+        "teaser_content": teaser_content,
+        "target_url": deep_url,
+        "first_comment_url": fc_url,
+        "first_comment": first_comment,
+    }
+
+
+def _generate_lienbond_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic commercial insurance and surety underwriting projections.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
+    text = (
+        f"How do commercial contractors and risk managers calculate statutory premiums and bond capacity for {title}?\n\n"
+        f"{qa}\n\n"
+        f"Verified Calculation Proof: {sample_calc} (Published output: {out_fmt}). "
+        f"Grounded in {proof['statutory_source']} and {proof['economic_source']}.\n\n"
+        f"Contractors and CFOs can run side-by-side underwriting projections on the free LienBond {title}: {deep_url}"
+    )
+    clean_text = _sanitize_distribution_text(text)
+    assert_no_forbidden_dashes(clean_text, context=f"{slug} quora")
+    return {"answer_markdown": clean_text, "url": deep_url}
+
+
+def _generate_lienbond_google_sites(tool: Dict[str, Any], url: str) -> str:
+    return _build_tenant_google_sites_entity_buffer_html(
+        tool=tool,
+        property_id="lienbond",
+        brand_name="LienBond",
+        badge_text="LienBond Commercial Underwriting & Surety Model - DR 97 Entity Buffer",
+    )
+
+
+def _generate_lienbond_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_linkedin, assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic commercial insurance and surety underwriting projections.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=linkedin_pulse&utm_medium=article&utm_campaign={slug}"
+    article = (
+        f"# {title}: Statutory Underwriting and Commercial Risk Guide\n\n"
+        f"{qa}\n\n"
+        f"Commercial contractors and risk teams evaluating underwriting costs under {proof['statutory_source']} "
+        f"must model statutory premium rates and bonding capacity alongside payroll and cost benchmarks from {proof['economic_source']}.\n\n"
+        f"### Verified Statutory Calculation Proof ({proof['scenario_label']})\n"
+        f"- Formula: `{proof['formula']}`\n"
+        f"- Inputs: `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- Verified Output: **{proof['published_output_formatted']}**\n"
+        f"- Walkthrough: {proof['sample_calculation']}\n\n"
+        f"## Quantitative Modeling and Tool Access\n\n"
+        f"To calculate exact NCCI experience modification factors, surety bond premiums, and statutory lien timelines, "
+        f"explore our deterministic tool on LienBond at {deep_url}.\n\n"
+        f"#CommercialInsurance #SuretyBonds #WorkersComp #ConstructionRisk #LienBond"
+    )
+    clean_article = _sanitize_distribution_text(article)
+    assert_linkedin(clean_article)
+    assert_no_forbidden_dashes(clean_article, context=f"{slug} pulse article")
+    return {
+        "platform": "linkedin_pulse",
+        "title": title,
+        "target_url": deep_url,
+        "content": clean_article,
+        "article_markdown": clean_article,
+        "char_count": len(clean_article),
+        "word_count": len(clean_article.split()),
+        "statutory_source": proof["statutory_source"],
+        "economic_source": proof["economic_source"],
+    }
+
+
+def _generate_lienbond_substack(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    qa = tool.get("quick_answer", f"The {title} model computes deterministic commercial insurance and surety underwriting projections.")
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    qs = proof["parameterized_query"]
+    sep = "&" if "?" in url else "?"
+    deep_url = f"{url}{sep}{qs}&utm_source=substack&utm_medium=article&utm_campaign={slug}"
+    sensitivity_rows = _build_sensitivity_markdown_rows(proof)
+    article = (
+        f"# Statutory Deep Dive: {title} ({proof['scenario_label']})\n\n"
+        f"{qa}\n\n"
+        f"An in-depth mathematical analysis of 2026 commercial insurance and surety frameworks under {proof['statutory_source']} "
+        f"and {proof['economic_source']}.\n\n"
+        f"## 1. Deterministic Calculation Proof\n\n"
+        f"{proof['sample_calculation']}\n\n"
+        f"- **Formula:** `{proof['formula']}`\n"
+        f"- **Inputs:** `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+        f"- **Verified Output:** **{proof['published_output_formatted']}**\n\n"
+        f"## 2. Multi-Scenario Sensitivity Matrix\n\n"
+        f"{sensitivity_rows}\n\n"
+        f"## 3. Interactive Verification\n\n"
+        f"Model your commercial underwriting scenario with pre-populated statutory parameters on LienBond: [{deep_url}]({deep_url})\n"
+    )
+    clean_article = _sanitize_distribution_text(article)
+    assert_no_forbidden_dashes(clean_article, context=f"{slug} substack")
+    return {
+        "platform": "substack",
+        "title": title,
+        "target_url": deep_url,
+        "content": clean_article,
+        "article_markdown": clean_article,
+        "char_count": len(clean_article),
+        "word_count": len(clean_article.split()),
+    }
+
+
+def _generate_lienbond_outreach(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    slug = tool["slug"]
+    title = tool.get("title", slug.replace("-", " ").title())
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    deep_url = proof["parameterized_url"]
+    pitch = (
+        f"Subject: 2026 Commercial Insurance & Surety Calculation Resource for Your Readers ({title})\n\n"
+        f"Dear Editor,\n\n"
+        f"Contractors and commercial risk managers budgeting for workers compensation class codes, surety bonds, and statutory liens "
+        f"need transparent NCCI and SFAA underwriting math.\n\n"
+        f"For example ({proof['scenario_label']}): {proof['sample_calculation']} "
+        f"(Verified output: {proof['published_output_formatted']}).\n\n"
+        f"We built an open, deterministic mathematical tool modeling these underwriting requirements on LienBond: {deep_url}\n\n"
+        f"Feel free to cite or link this resource in your construction risk and commercial insurance coverage.\n\n"
+        f"Best regards,\nLienBond Research Team"
+    )
+    clean_pitch = _sanitize_distribution_text(pitch)
+    assert_no_forbidden_dashes(clean_pitch, context=f"{slug} outreach")
+    return {"pitch_text": clean_pitch, "target_url": deep_url}
+
+
+def _generate_lienbond_newsletter_hook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    deep_url = proof["parameterized_url"]
+    content = _sanitize_distribution_text(
+        f"{proof['sample_calculation']} Model the 2026 commercial insurance and surety rules on LienBond: {deep_url}"
+    )
+    return {"content": content, "target_url": deep_url}
+
+
+def _generate_lienbond_regulatory_lead_magnet(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
+    proof = _resolve_tool_calculation_proof(tool, property_id="lienbond")
+    deep_url = proof["parameterized_url"]
+    content = _sanitize_distribution_text(
+        f"Download the 2026 Commercial Insurance & Surety Underwriting Workpaper Matrix ({proof['scenario_label']}: {proof['published_output_formatted']}): {deep_url}"
+    )
+    return {"content": content, "target_url": deep_url}
+
+
 def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:
     """
     Compiles complete syndication copy and calculation-backed proof payloads across all tools.
@@ -9020,6 +9310,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     eff_prop_norm = _normalize_property_id(property_id)
     for t in target_tools:
         slug = t["slug"]
+        base_url = f"https://lienbond.com/tools/{slug}/" if eff_prop_norm == "lienbond" else f"https://profithelm.com/tools/{slug}/"
         social_pack = generate_social_syndication_pack(t, property_id=eff_prop_norm)
         proof = social_pack["calculation_proof"]
         kw_matrix = expand_commercial_and_question_keywords(
@@ -9047,13 +9338,13 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             "youtube": social_pack["youtube"],
             "ghost": social_pack["ghost"],
             "github_gist": social_pack["github_gist"],
-            "google_sites": generate_parasite_google_sites_html(t),
-            "linkedin_pulse": generate_parasite_linkedin_pulse(t),
-            "substack_teardown": generate_parasite_substack_teardown(t),
-            "quora": generate_quora_thread_answer(slug),
-            "outreach_pitch": generate_backlink_outreach_pitch(slug),
-            "newsletter_hook": generate_newsletter_growth_hook(slug),
-            "regulatory_lead_magnet": generate_regulatory_lead_magnet_copy(slug),
+            "google_sites": _generate_lienbond_google_sites(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_google_sites_html(t),
+            "linkedin_pulse": _generate_lienbond_linkedin_pulse(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_linkedin_pulse(t),
+            "substack_teardown": _generate_lienbond_substack(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_substack_teardown(t),
+            "quora": _generate_lienbond_quora(t, base_url) if eff_prop_norm == "lienbond" else generate_quora_thread_answer(slug),
+            "outreach_pitch": _generate_lienbond_outreach(t, base_url) if eff_prop_norm == "lienbond" else generate_backlink_outreach_pitch(slug),
+            "newsletter_hook": _generate_lienbond_newsletter_hook(t, base_url) if eff_prop_norm == "lienbond" else generate_newsletter_growth_hook(slug),
+            "regulatory_lead_magnet": _generate_lienbond_regulatory_lead_magnet(t, base_url) if eff_prop_norm == "lienbond" else generate_regulatory_lead_magnet_copy(slug),
         }
     return distribution_pack
 
@@ -9096,6 +9387,16 @@ def _build_facebook_groups_catalog_entry(
         else:
             queries = ["SOC 2 Type II audit readiness", "ISO 27001 ISMS implementation", "B2B SaaS GRC automation and security"]
             group_names = ["SOC 2 & ISO 27001 GRC Compliance Leaders", "B2B SaaS CISO & Security Engineering Forum"]
+    elif norm_prop == "lienbond":
+        if "bond" in slug or "surety" in slug or "miller" in slug:
+            queries = ["commercial construction surety bonds", "contractor license bond underwriting", "Miller Act performance bond contractors"]
+            group_names = ["Commercial Construction & General Contractors Network", "Surety Bond & Construction Risk Management Forum"]
+        elif "lien" in slug:
+            queries = ["construction mechanics lien deadlines", "preliminary notice & contractor payment rights", "subcontractor credit & lien management"]
+            group_names = ["Construction Credit & Mechanics Lien Professionals", "General Contractors & Subcontractors Finance Network"]
+        else:
+            queries = ["workers compensation class codes & EMR", "commercial insurance underwriting & risk", "contractor payroll & workers comp audit"]
+            group_names = ["Commercial Insurance & Workers Comp Risk Managers", "Construction CFO & Contractor Operations Forum"]
     else:
         if "179" in slug or "vehicle" in slug or "equipment" in slug or "macrs" in slug:
             queries = ["small business equipment tax strategy", "Section 179 CPA & CFO forum", "commercial fleet & contractor finance"]
@@ -10673,6 +10974,8 @@ def dispatch_to_distribution_lead(
             sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
         elif property_id == "gainhelm":
             sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO hits $78,100.40 ($37k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS rate + $11.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
+        elif property_id == "lienbond":
+            sample_draft = first_pack["x"]["content"] if first_pack else "on $500k contractor payroll in class 5403 at $8.42 NCCI rate and 0.95 EMR, annual workers comp premium is $39,995.00: https://lienbond.com/tools/workers-compensation-class-code-rate-calculator-by-state/"
         else:
             sample_draft = first_pack["x"]["content"] if first_pack else "a $125k single filer in CA owes $18,734 in 2027 federal tax under OBBBA P.L. 119-21: https://profithelm.com/tools/irs-2027-tax-brackets/"
         voice_ok = False

@@ -6134,6 +6134,24 @@ def _normalize_spoke_and_synthesized_body_bloat(
         updated = fixed_rel
         changed = True
 
+    # Fix chopped entity labels from '&' split on 'R&D' and truncated CFR/EU descriptions
+    for _bad_frag, _good_frag in (
+        ("What Is The R Decision Framework?", "What Is The R&amp;D Tax Credit Decision Framework?"),
+        ("What Is the R Decision Framework?", "What Is the R&amp;D Tax Credit Decision Framework?"),
+        ("The R Decision Framework", "The R&amp;D Tax Credit Decision Framework"),
+        ("How do you calculate R?", "How do you calculate R&amp;D Tax Credits?"),
+        ("The R model provides", "The R&amp;D Tax Credit model provides"),
+        ("utilizing R demonstrates", "utilizing R&amp;D Tax Credit modeling demonstrates"),
+        ("Proprietary R Scenario Matrix", "Proprietary R&amp;D Tax Credit Scenario Matrix"),
+        ("SEC Final Rule 33-11216 (17 CFR.", "SEC Final Rule 33-11216 (17 CFR 229.106)."),
+        ("EU Digital Operational Resilience Act (Regulation.", "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554)."),
+        ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) &amp; EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
+        ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
+    ):
+        if _bad_frag in updated:
+            updated = updated.replace(_bad_frag, _good_frag)
+            changed = True
+
     # Replace tautological 'Statutory analysis and compliance guidelines for {H2}.' paragraphs
     if "Statutory analysis and compliance guidelines for " in updated:
         def _repl_tautological_desc(m: re.Match) -> str:
@@ -12685,6 +12703,25 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
+        # Sanitize any truncated CFR/EU descriptions or chopped short_titles in deployed_voids.json
+        if d.parent.is_dir():
+            for _dv_rel in ("content/deployed_voids.json", ".agy/deployed_voids.json"):
+                _dv_p = d.parent / _dv_rel
+                if _dv_p.is_file():
+                    try:
+                        _dv_raw = _dv_p.read_text(encoding="utf-8")
+                        _dv_upd = _dv_raw
+                        for _b, _g in (
+                            ("SEC Final Rule 33-11216 (17 CFR.", "SEC Final Rule 33-11216 (17 CFR 229.106)."),
+                            ("EU Digital Operational Resilience Act (Regulation.", "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554)."),
+                            ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
+                        ):
+                            _dv_upd = _dv_upd.replace(_b, _g)
+                        if _dv_upd != _dv_raw:
+                            _dv_p.write_text(_dv_upd, encoding="utf-8")
+                    except Exception:
+                        pass
+
         if len(cls._RETROFIT_HTML_CACHE) > 1024:
             cls._RETROFIT_HTML_CACHE.clear()
         scanned = 0
@@ -12774,6 +12811,7 @@ class RetroReflectionEngine:
             d / "static" / "js" / "app.js",
             d.parent / "static" / "js" / "app.js",
             d.parent / "profithelm" / "static" / "js" / "app.js",
+            d.parent / "profithelm" / "config.py",
             d.parent / "profithelm" / "interactive_calculator.py",
             d.parent / "profithelm" / "engine" / "tax_bracket.py",
             d.parent / "profithelm" / "engine" / "capital_gains.py",
@@ -12790,12 +12828,28 @@ class RetroReflectionEngine:
                         )
                         .replace('"head_of_household": 12700.0', '"head_of_household": 12900.0')
                         .replace('"head_of_household": 12700', '"head_of_household": 12900')
+                        .replace('spec["title"].split("&")[0]', 'spec["title"].split(" & ")[0]')
                     )
                     if healed_js != raw_js:
                         js_cand.write_text(healed_js, encoding="utf-8")
                         rel_js = js_cand.relative_to(d).as_posix() if js_cand.is_relative_to(d) else js_cand.name
                         if rel_js not in retrofitted_paths:
                             retrofitted_paths.append(rel_js)
+                except Exception:
+                    pass
+
+        for xml_cand in (d / "feed.xml",):
+            if xml_cand.is_file():
+                try:
+                    raw_xml = xml_cand.read_text(encoding="utf-8", errors="ignore")
+                    upd_xml = (
+                        raw_xml.replace("SEC Final Rule 33-11216 (17 CFR.", "SEC Final Rule 33-11216 (17 CFR 229.106).")
+                        .replace("EU Digital Operational Resilience Act (Regulation.", "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554).")
+                        .replace("NIST AI RMF 1.0 (15 U.S.C. 278h-1) &amp; EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1).")
+                        .replace("NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1).")
+                    )
+                    if upd_xml != raw_xml:
+                        xml_cand.write_text(upd_xml, encoding="utf-8")
                 except Exception:
                     pass
 
@@ -12807,6 +12861,24 @@ class RetroReflectionEngine:
             except Exception:
                 continue
             rel = html_file.relative_to(d).as_posix()
+            for _bf, _gf in (
+                ("What Is The R Decision Framework?", "What Is The R&amp;D Tax Credit Decision Framework?"),
+                ("What Is the R Decision Framework?", "What Is the R&amp;D Tax Credit Decision Framework?"),
+                ("The R Decision Framework", "The R&amp;D Tax Credit Decision Framework"),
+                ("How do you calculate R?", "How do you calculate R&amp;D Tax Credits?"),
+                ("The R model provides", "The R&amp;D Tax Credit model provides"),
+                ("utilizing R demonstrates", "utilizing R&amp;D Tax Credit modeling demonstrates"),
+                ("Proprietary R Scenario Matrix", "Proprietary R&amp;D Tax Credit Scenario Matrix"),
+                ("SEC Final Rule 33-11216 (17 CFR.", "SEC Final Rule 33-11216 (17 CFR 229.106)."),
+                ("EU Digital Operational Resilience Act (Regulation.", "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554)."),
+                ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) &amp; EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
+                ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
+            ):
+                if _bf in content:
+                    content = content.replace(_bf, _gf)
+                    html_file.write_text(content, encoding="utf-8")
+                    if rel not in retrofitted_paths:
+                        retrofitted_paths.append(rel)
             if not cls.is_tool_or_calculator_page(html_file, d, content):
                 if rel == "tools/index.html" and "data-partner-roster=" not in content and "</main>" in content:
                     if property_id.lower() == "prexvo":

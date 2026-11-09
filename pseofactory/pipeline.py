@@ -2156,14 +2156,19 @@ def execute_autonomous_daily_trend_page_build(
                             if min_b <= len(f"{prov_title} {pad_s}") <= max_b:
                                 prov_title = f"{prov_title} {pad_s}"
                                 break
-                prov_desc = f"Deterministic quantitative calculator for {c_query} under {candidate_spec['statutory_authority']}."
+                raw_auth = str(candidate_spec.get("statutory_authority") or "").strip()
+                prov_desc = f"Deterministic quantitative calculator for {c_query} under {raw_auth}."
                 if len(prov_desc) > 155:
-                    prov_desc = prov_desc[:154].rsplit(" ", 1)[0].rstrip(".,;:- ") + "."
+                    short_auth = raw_auth.split("(")[0].split("&")[0].strip().rstrip(".,;:- ")
+                    prov_desc = f"Deterministic quantitative calculator for {c_query} under {short_auth}."
+                if len(prov_desc) > 155:
+                    prov_desc = f"Deterministic quantitative calculator for {c_query}."
+                short_t = prov_title if len(prov_title) <= 28 else prov_title[:28].rsplit(" ", 1)[0].rstrip(".,;:-&| ")
                 prov_entry = {
                     "slug": c_slug,
                     "query": c_query,
                     "title": prov_title,
-                    "short_title": prov_title[:24].strip(),
+                    "short_title": short_t,
                     "description": prov_desc,
                     "primary_keyword": c_query.lower(),
                     "source": "p2_autonomous_daily_builder",
