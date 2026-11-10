@@ -11964,9 +11964,13 @@ def sync_tenant_edge_redirect_function(
                 mw_new = mw_new.replace("  return response;\n}", canonical_fallback_snippet)
             if mw_new != mw_orig:
                 mw_file.write_text(mw_new, encoding="utf-8")
-                dist_mw = repo / "dist" / "functions" / "_middleware.js"
-                if dist_mw.parent.is_dir():
-                    dist_mw.write_text(mw_new, encoding="utf-8")
+                dist_needs_update = True
+            dist_mw = repo / "dist" / "functions" / "_middleware.js"
+            if dist_mw.parent.is_dir() and (
+                not dist_mw.is_file()
+                or dist_mw.read_text(encoding="utf-8", errors="ignore") != mw_new
+            ):
+                dist_mw.write_text(mw_new, encoding="utf-8")
                 dist_needs_update = True
         except Exception:
             pass

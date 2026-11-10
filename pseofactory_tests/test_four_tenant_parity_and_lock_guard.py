@@ -430,6 +430,14 @@ def test_cloudflare_redirects_cap_and_middleware_sync_across_four_tenants(tmp_pa
     assert '"/tools/section-174-r-d-amortization-calculator/": "/tools/section-174-r-d-amortization-calculator-2026/"' in mw_txt
     assert "_matchedRedirectTarget" in mw_txt
 
+    # Even if a tenant build overwrites dist/functions/_middleware.js while functions/_middleware.js is unchanged,
+    # sync_tenant_edge_redirect_function must re-mirror functions/_middleware.js into dist/functions/_middleware.js.
+    dist_fn_dir = dist_dir / "functions"
+    dist_fn_dir.mkdir(parents=True, exist_ok=True)
+    (dist_fn_dir / "_middleware.js").write_text("// stale builder middleware\n", encoding="utf-8")
+    sync_tenant_edge_redirect_function(repo_dir, property_id="profithelm")
+    assert (dist_fn_dir / "_middleware.js").read_text(encoding="utf-8") == mw_txt
+
     # Verify MasterSEOVerifier gate passes with 0 dead chains and <= 95 active rules
     gate_res = MasterSEOVerifier(dist_dir=dist_dir, domain="profithelm.com").check_url_redirects_gate()
     assert gate_res["status"] == "PASS", gate_res["issues"]
