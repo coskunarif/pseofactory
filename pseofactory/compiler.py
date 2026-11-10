@@ -4114,26 +4114,19 @@ jobs:
     try:
         from pseofactory.drift import (
             compute_asset_fingerprint,
-            compute_dist_lock_metrics,
             compute_engine_hash,
             record_asset_ledger,
             record_engine_hash,
+            write_substrate_lock,
         )
 
         eng_hash = compute_engine_hash()
-        dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(dist)
-        lock_payload = {
-            "dist_fingerprint": dist_fp_hex,
-            "engine_hash": eng_hash,
-            "engine_sha256": eng_hash,
-            "property_id": "lienbond",
-            "substrate_hash": eng_hash,
-            "tenant": "lienbond",
-            "total_assets": total_dist_assets,
-        }
-        (root / "substrate_lock.json").write_text(
-            json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        write_substrate_lock(
+            root,
+            property_id="lienbond",
+            expected_hash=eng_hash,
+            dist_dir=dist,
+            sync_ledgers=False,
         )
         agy_dir = root / ".agy"
         agy_dir.mkdir(parents=True, exist_ok=True)

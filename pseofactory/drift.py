@@ -247,10 +247,14 @@ def write_substrate_lock(
     repo_root: Union[str, Path],
     property_id: Optional[str] = None,
     expected_hash: Optional[str] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
+    sync_ledgers: bool = True,
 ) -> Dict[str, Any]:
     """
-    Recomputes dist_fingerprint and total_assets for repo_root/dist and writes
-    repo_root/substrate_lock.json atomically.
+    Single canonical substrate_lock.json writer across pseofactory.
+    Normalizes compiled HTML in dist/, syncs freshness_audit_report.json and
+    .agy/engine_hash.json + .agy/asset_ledger.json (when present), and writes
+    repo_root/substrate_lock.json only when changed.
     Zero em-dashes. Zero en-dashes.
     """
     r_root = Path(repo_root).resolve()
@@ -258,16 +262,19 @@ def write_substrate_lock(
     existing: Dict[str, Any] = {}
     if lock_file.is_file():
         try:
-            existing = json.loads(lock_file.read_text(encoding="utf-8"))
+            loaded = json.loads(lock_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
         except Exception:
             existing = {}
-    pid = property_id or str(existing.get("property_id") or r_root.name.split("-")[0]).strip().lower()
-    dist_dir = r_root / "dist"
-    if dist_dir.is_dir():
+    raw_pid = property_id or str(existing.get("property_id") or existing.get("property") or r_root.name.split("-")[0]).strip().lower()
+    pid = "profithelm" if raw_pid in ("profithelm-platform", "factory") else raw_pid
+    eff_dist = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
+    if eff_dist.is_dir():
         try:
             from pseofactory.visual_primitives import normalize_html_visual_primitives
 
-            for html_f in sorted(dist_dir.rglob("*.html")):
+            for html_f in sorted(eff_dist.rglob("*.html")):
                 if not html_f.is_file():
                     continue
                 try:
@@ -290,15 +297,56 @@ def write_substrate_lock(
         except Exception:
             pass
     eh = expected_hash or compute_engine_hash()
-    fp, tot = compute_dist_lock_metrics(dist_dir)
-    payload = {
-        "dist_fingerprint": fp,
-        "engine_hash": eh,
-        "property_id": pid,
-        "substrate_hash": eh,
-        "total_assets": tot,
-    }
-    lock_file.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    freshness_f = r_root / "freshness_audit_report.json"
+    if freshness_f.is_file():
+        try:
+            f_data = json.loads(freshness_f.read_text(encoding="utf-8"))
+            if isinstance(f_data, dict):
+                if isinstance(f_data.get("merkle_drift"), dict):
+                    f_data["merkle_drift"]["substrate_hash"] = eh
+                    f_data["merkle_drift"]["drifted"] = False
+                f_data["substrate_hash"] = eh
+                f_txt = json.dumps(f_data, indent=2, sort_keys=True) + "\n"
+                if freshness_f.read_text(encoding="utf-8") != f_txt:
+                    freshness_f.write_text(f_txt, encoding="utf-8")
+        except Exception:
+            pass
+    fp, tot = compute_dist_lock_metrics(eff_dist)
+    payload = dict(existing)
+    if "property_id" not in payload and "property" not in payload:
+        payload["property_id"] = pid
+    elif property_id is not None:
+        payload["property_id"] = pid
+    payload["dist_fingerprint"] = fp
+    payload["engine_hash"] = eh
+    payload["substrate_hash"] = eh
+    payload["total_assets"] = tot
+    if "engine_sha256" in payload or pid == "lienbond":
+        payload["engine_sha256"] = eh
+    if "tenant" in payload or pid == "lienbond":
+        payload["tenant"] = pid
+    lock_txt = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if not lock_file.is_file() or lock_file.read_text(encoding="utf-8") != lock_txt:
+        lock_file.write_text(lock_txt, encoding="utf-8")
+    if sync_ledgers and eff_dist.is_dir():
+        agy_dir = r_root / ".agy"
+        eh_file = agy_dir / "engine_hash.json"
+        al_file = agy_dir / "asset_ledger.json"
+        if eh_file.is_file():
+            record_engine_hash(eh_file, hash_value=eh)
+        if al_file.is_file():
+            html_assets = sorted(
+                p
+                for p in eff_dist.glob("**/*")
+                if p.is_file()
+                and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+            )
+            asset_hashes = {
+                p.relative_to(eff_dist).as_posix(): compute_asset_fingerprint(p)
+                for p in html_assets
+            }
+            record_asset_ledger(al_file, asset_hashes=asset_hashes, engine_hash=eh)
     return payload
 
 

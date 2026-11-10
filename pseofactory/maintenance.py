@@ -4865,20 +4865,13 @@ class MaintenanceLifecycle:
                         if substrate_lock_path.is_file():
                             substrate_lock_existed = True
                             prior_substrate_lock = substrate_lock_path.read_text(encoding="utf-8")
-                        from pseofactory.drift import compute_dist_lock_metrics
+                        from pseofactory.drift import write_substrate_lock
 
-                        cur_sub_hash = compute_engine_hash()
-                        dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(adapter.dist_dir)
-                        lock_payload = {
-                            "property_id": adapter.property_id,
-                            "engine_hash": cur_sub_hash,
-                            "substrate_hash": cur_sub_hash,
-                            "dist_fingerprint": dist_fp_hex,
-                            "total_assets": total_dist_assets,
-                        }
-                        substrate_lock_path.write_text(
-                            json.dumps(lock_payload, indent=2, sort_keys=True) + "\n",
-                            encoding="utf-8",
+                        write_substrate_lock(
+                            t_repo,
+                            property_id=adapter.property_id,
+                            dist_dir=adapter.dist_dir,
+                            sync_ledgers=False,
                         )
                     except Exception as sl_err:
                         print(f"Warning: Failed to update substrate_lock.json for '{adapter.property_id}': {sl_err}")
@@ -4998,18 +4991,15 @@ class MaintenanceLifecycle:
                     and substrate_lock_path.is_file()
                 ):
                     try:
-                        from pseofactory.drift import compute_dist_lock_metrics
-                        post_fp_hex, post_total_assets = compute_dist_lock_metrics(adapter.dist_dir)
-                        post_lock_payload = {
-                            "property_id": adapter.property_id,
-                            "engine_hash": current_engine_hash,
-                            "substrate_hash": current_engine_hash,
-                            "dist_fingerprint": post_fp_hex,
-                            "total_assets": post_total_assets,
-                        }
-                        post_lock_text = json.dumps(post_lock_payload, indent=2, sort_keys=True) + "\n"
-                        if substrate_lock_path.read_text(encoding="utf-8") != post_lock_text:
-                            substrate_lock_path.write_text(post_lock_text, encoding="utf-8")
+                        from pseofactory.drift import write_substrate_lock
+
+                        write_substrate_lock(
+                            substrate_lock_path.parent,
+                            property_id=adapter.property_id,
+                            expected_hash=current_engine_hash,
+                            dist_dir=adapter.dist_dir,
+                            sync_ledgers=False,
+                        )
                     except Exception:
                         pass
                 if getattr(adapter, "repo_path", None) and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/"):
@@ -16327,21 +16317,14 @@ def reflect_and_recompile_all_assets(
                 t_repo = Path(adapter.repo_path)
                 if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                     try:
-                        from pseofactory.drift import compute_dist_lock_metrics
+                        from pseofactory.drift import write_substrate_lock
 
-                        cur_sub_hash = compute_engine_hash()
-                        exp_dist_fp, exp_total_assets = compute_dist_lock_metrics(adapter.dist_dir)
-                        lock_payload = {
-                            "property_id": adapter.property_id,
-                            "engine_hash": cur_sub_hash,
-                            "substrate_hash": cur_sub_hash,
-                            "dist_fingerprint": exp_dist_fp,
-                            "total_assets": exp_total_assets,
-                        }
-                        lock_text = json.dumps(lock_payload, indent=2, sort_keys=True) + "\n"
-                        lock_path = t_repo / "substrate_lock.json"
-                        if not lock_path.is_file() or lock_path.read_text(encoding="utf-8") != lock_text:
-                            lock_path.write_text(lock_text, encoding="utf-8")
+                        write_substrate_lock(
+                            t_repo,
+                            property_id=adapter.property_id,
+                            dist_dir=adapter.dist_dir,
+                            sync_ledgers=False,
+                        )
                     except Exception:
                         pass
 
@@ -16555,20 +16538,14 @@ def reflect_and_recompile_all_assets(
                         t_repo_l = Path(adapter.repo_path)
                         if (t_repo_l / ".git").exists() and t_repo_l.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                             try:
-                                from pseofactory.drift import compute_dist_lock_metrics
-                                cur_sub_h = compute_engine_hash()
-                                exp_d_fp, exp_t_assets = compute_dist_lock_metrics(adapter.dist_dir)
-                                lock_pl = {
-                                    "property_id": adapter.property_id,
-                                    "engine_hash": cur_sub_h,
-                                    "substrate_hash": cur_sub_h,
-                                    "dist_fingerprint": exp_d_fp,
-                                    "total_assets": exp_t_assets,
-                                }
-                                lock_txt = json.dumps(lock_pl, indent=2, sort_keys=True) + "\n"
-                                lock_p = t_repo_l / "substrate_lock.json"
-                                if not lock_p.is_file() or lock_p.read_text(encoding="utf-8") != lock_txt:
-                                    lock_p.write_text(lock_txt, encoding="utf-8")
+                                from pseofactory.drift import write_substrate_lock
+
+                                write_substrate_lock(
+                                    t_repo_l,
+                                    property_id=adapter.property_id,
+                                    dist_dir=adapter.dist_dir,
+                                    sync_ledgers=False,
+                                )
                             except Exception:
                                 pass
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)

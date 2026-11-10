@@ -202,3 +202,52 @@ def test_quick_unlock_balanced_div_replacement_never_clobbers_downstream_forms()
     assert "RAP vs. IBR vs. Standard amortization schedule" in healed
 
 
+def test_write_substrate_lock_preserves_lienbond_fields_and_syncs_ledgers_and_freshness(tmp_path: Path):
+    import json
+    from pseofactory.drift import write_substrate_lock
+
+    repo_dir = tmp_path / "lienbond"
+    custom_dist = tmp_path / "custom_dist" / "tools" / "contractor-license-bond-cost-calculator"
+    custom_dist.mkdir(parents=True)
+    repo_dir.mkdir(parents=True)
+
+    (custom_dist / "index.html").write_text(
+        '<!DOCTYPE html><html><head><style id="pseo-visual-primitives">/* stale */</style></head><body><h1>Bond</h1></body></html>',
+        encoding="utf-8",
+    )
+    (repo_dir / "freshness_audit_report.json").write_text(
+        json.dumps({"merkle_drift": {"drifted": True, "substrate_hash": "old"}, "substrate_hash": "old"}),
+        encoding="utf-8",
+    )
+    agy_dir = repo_dir / ".agy"
+    agy_dir.mkdir(parents=True)
+    (agy_dir / "engine_hash.json").write_text('{"engine_hash": "old"}\n', encoding="utf-8")
+    (agy_dir / "asset_ledger.json").write_text("{}\n", encoding="utf-8")
+
+    payload = write_substrate_lock(
+        repo_dir,
+        property_id="lienbond",
+        expected_hash="deadbeef1234",
+        dist_dir=tmp_path / "custom_dist",
+        sync_ledgers=True,
+    )
+    assert payload["property_id"] == "lienbond"
+    assert payload["tenant"] == "lienbond"
+    assert payload["engine_sha256"] == "deadbeef1234"
+    assert payload["engine_hash"] == "deadbeef1234"
+    assert payload["substrate_hash"] == "deadbeef1234"
+    assert payload["total_assets"] == 1
+
+    freshness = json.loads((repo_dir / "freshness_audit_report.json").read_text(encoding="utf-8"))
+    assert freshness["substrate_hash"] == "deadbeef1234"
+    assert freshness["merkle_drift"]["substrate_hash"] == "deadbeef1234"
+    assert freshness["merkle_drift"]["drifted"] is False
+
+    eh_data = json.loads((agy_dir / "engine_hash.json").read_text(encoding="utf-8"))
+    assert eh_data["engine_hash"] == "deadbeef1234"
+
+    al_data = json.loads((agy_dir / "asset_ledger.json").read_text(encoding="utf-8"))
+    assert "tools/contractor-license-bond-cost-calculator/index.html" in al_data["assets"]
+
+
+

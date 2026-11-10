@@ -495,87 +495,10 @@ def recompute_and_amend_tenant_lock_and_ledger(
         return False
 
     try:
-        from pseofactory.drift import (
-            compute_asset_fingerprint,
-            compute_dist_lock_metrics,
-            compute_engine_hash,
-            record_asset_ledger,
-            record_engine_hash,
-        )
+        from pseofactory.drift import write_substrate_lock
 
         sync_res = sync_tenant_test_isolation_guards(repo, property_id)
-        try:
-            from pseofactory.visual_primitives import normalize_html_visual_primitives
-
-            for html_f in sorted(dist_dir.rglob("*.html")):
-                if not html_f.is_file():
-                    continue
-                try:
-                    raw_html = html_f.read_text(encoding="utf-8")
-                except Exception:
-                    continue
-                if (
-                    'id="pseo-visual-primitives"' in raw_html
-                    or "id='pseo-visual-primitives'" in raw_html
-                    or 'id="calc-result-quick-unlock-bar"' in raw_html
-                    or "id='calc-result-quick-unlock-bar'" in raw_html
-                    or 'id="partner-quote-intake-step"' in raw_html
-                    or "id='partner-quote-intake-step'" in raw_html
-                    or 'class="calculator-card"' in raw_html
-                    or 'class="tool-header"' in raw_html
-                ):
-                    norm_html, _ = normalize_html_visual_primitives(raw_html)
-                    if norm_html != raw_html:
-                        html_f.write_text(norm_html, encoding="utf-8")
-        except Exception:
-            pass
-        cur_engine_hash = compute_engine_hash()
-        freshness_f = repo / "freshness_audit_report.json"
-        if freshness_f.is_file():
-            try:
-                f_data = json.loads(freshness_f.read_text(encoding="utf-8"))
-                if isinstance(f_data, dict):
-                    if isinstance(f_data.get("merkle_drift"), dict):
-                        f_data["merkle_drift"]["substrate_hash"] = cur_engine_hash
-                        f_data["merkle_drift"]["drifted"] = False
-                    f_data["substrate_hash"] = cur_engine_hash
-                    freshness_f.write_text(json.dumps(f_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            except Exception:
-                pass
-        dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(dist_dir)
-        try:
-            lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
-            if not isinstance(lock_data, dict):
-                lock_data = {}
-        except Exception:
-            lock_data = {}
-
-        if "property_id" not in lock_data and "property" not in lock_data:
-            lock_data["property_id"] = _normalize_property_id(property_id or repo.name)
-        lock_data["engine_hash"] = cur_engine_hash
-        lock_data["substrate_hash"] = cur_engine_hash
-        lock_data["dist_fingerprint"] = dist_fp_hex
-        lock_data["total_assets"] = total_dist_assets
-        lock_file.write_text(json.dumps(lock_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-        agy_dir = repo / ".agy"
-        eh_file = agy_dir / "engine_hash.json"
-        al_file = agy_dir / "asset_ledger.json"
-        if eh_file.is_file():
-            record_engine_hash(eh_file, hash_value=cur_engine_hash)
-        if al_file.is_file():
-            html_assets = sorted(
-                p
-                for p in dist_dir.glob("**/*")
-                if p.is_file()
-                and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
-                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-            )
-            asset_hashes = {
-                p.relative_to(dist_dir).as_posix(): compute_asset_fingerprint(p)
-                for p in html_assets
-            }
-            record_asset_ledger(al_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+        write_substrate_lock(repo, property_id=property_id, dist_dir=dist_dir, sync_ledgers=True)
 
         eff_env = dict(git_env) if git_env is not None else os.environ.copy()
         eff_env.setdefault("GIT_TERMINAL_PROMPT", "0")
@@ -6729,30 +6652,17 @@ def reconcile_workspace_tracking_state(
                                                             rolled_back_modified = True
                                     if (rp / "substrate_lock.json").is_file():
                                         try:
-                                            from pseofactory.drift import compute_dist_lock_metrics, compute_engine_hash
+                                            from pseofactory.drift import compute_engine_hash, write_substrate_lock
                                             sl_data = json.loads((rp / "substrate_lock.json").read_text(encoding="utf-8"))
                                             if isinstance(sl_data, dict):
-                                                sl_changed = False
                                                 if rolled_back_modified:
-                                                    cur_sub_hash = compute_engine_hash()
-                                                    dist_fp_hex, total_assets_cnt = compute_dist_lock_metrics(d_root)
-                                                    sl_data["engine_hash"] = cur_sub_hash
-                                                    sl_data["substrate_hash"] = cur_sub_hash
-                                                    sl_data["dist_fingerprint"] = dist_fp_hex
-                                                    sl_data["total_assets"] = total_assets_cnt
-                                                    sl_changed = True
+                                                    write_substrate_lock(rp, expected_hash=compute_engine_hash(), dist_dir=d_root)
                                                 elif (
                                                     sl_data.get("engine_hash")
                                                     and len(str(sl_data.get("engine_hash"))) == 64
                                                     and sl_data.get("substrate_hash") != sl_data.get("engine_hash")
                                                 ):
-                                                    sl_data["substrate_hash"] = sl_data["engine_hash"]
-                                                    sl_changed = True
-                                                if sl_changed:
-                                                    (rp / "substrate_lock.json").write_text(
-                                                        json.dumps(sl_data, indent=2, sort_keys=True) + "\n",
-                                                        encoding="utf-8",
-                                                    )
+                                                    write_substrate_lock(rp, expected_hash=str(sl_data["engine_hash"]), dist_dir=d_root)
                                         except Exception:
                                             pass
                             except Exception:
