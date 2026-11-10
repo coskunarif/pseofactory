@@ -5045,85 +5045,16 @@ def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]
     return updated, False
 
 
-def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[str]]:
-    """
-    Retrofits commercial calculator pages and navigation anchors:
-    1. Ensures <form class="lead-capture-form"> has id="lead-capture-form".
-    2. Rewrites stale ProfitHelm .pro-hook-card ("Get Pro ($49/mo)") to link to
-       #post-calculation-upgrade-drawer with the page's actual one-time workpaper price.
-    3. Injects #partner-registration-drawer (#partner-registration-form) on commercial calculator
-       pages with #partner-quote-intake-step (while strictly preserving non-commercial YMYL pages).
-    4. Injects #state-first-hero-bar (#quote-intake-hero-state) on commercial calculator pages.
-    5. Injects #hero-range-anchor (#hero-range-low, #hero-range-baseline, #hero-range-high)
-       into .hero-section on calculator pages with #saveable-decision-blueprint.
-    """
-    actions: List[str] = []
-    if 'class="lead-capture-form"' in updated and 'id="lead-capture-form"' not in updated:
-        updated = updated.replace(
-            '<form class="lead-capture-form"',
-            '<form id="lead-capture-form" class="lead-capture-form"',
-            1,
-        )
-        actions.append("playbook_lead_capture_form")
-
-    from pseofactory.competitor import US_51_JURISDICTIONS, resolve_state_code_from_slug
-
-    is_restricted_ps = 'data-restricted-public-service="true"' in updated
-    has_quote_intake = 'id="partner-quote-intake-step"' in updated and not is_restricted_ps
-    q_match = re.search(r'<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*>', updated, re.IGNORECASE)
-    q_tag = q_match.group(0) if q_match else ""
-    prop_id = (_extract_attr(q_tag, "data-property-id") or "").strip().lower()
-    if not prop_id:
-        if "prexvo.com" in updated:
-            prop_id = "prexvo"
-        elif "gainhelm.com" in updated:
-            prop_id = "gainhelm"
-        elif "lienbond.com" in updated:
-            prop_id = "lienbond"
-        else:
-            prop_id = "profithelm"
-    bp_match = re.search(r'<div\b[^>]*id=["\']saveable-decision-blueprint["\'][^>]*>', updated, re.IGNORECASE)
-    bp_tag = bp_match.group(0) if bp_match else ""
-    tool_slug = (
-        _extract_attr(q_tag, "data-tool-slug")
-        or _extract_attr(bp_tag, "data-blueprint-slug")
-        or "index"
-    ).strip().lower()
-    default_state = resolve_state_code_from_slug(tool_slug, prop_id)
-
-    if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
-        pk_fallback = (
-            _extract_attr(q_tag, "data-partner-key")
-            or (
-                "splash_financial"
-                if prop_id == "prexvo"
-                else ("vanta_security" if prop_id == "gainhelm" else ("suretybonds_direct" if prop_id == "lienbond" else "ipx1031"))
-            )
-        ).strip().lower()
-        pname_fallback = (
-            _extract_attr(q_tag, "data-partner-name")
-            or (
-                "Splash Financial"
-                if prop_id == "prexvo"
-                else ("Vanta" if prop_id == "gainhelm" else ("SuretyBonds.com" if prop_id == "lienbond" else "Verified Partner"))
-            )
-        ).strip()
-        fallback_cta_html = (
-            f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
-            f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
-            f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
-            f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
-            f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
-            f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
-            f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
-            f'      </div>\n'
-        )
-        q_pos = updated.find('<div id="partner-quote-intake-step"')
-        if q_pos != -1:
-            updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
-            actions.append("commercial_affiliate_cta_fallback")
-
+def _retrofit_pro_hook_and_lead_capture_cards(
+    updated: str,
+    *,
+    tool_slug: str,
+    default_state: str,
+    has_quote_intake: bool,
+    is_restricted_ps: bool,
+    actions: List[str],
+) -> str:
+    """Retrofits .pro-hook-card, sample schedule preview, and lead capture email placeholders."""
     if 'class="pro-hook-card"' in updated and 'id="post-calculation-upgrade-drawer"' in updated:
         upg_m = re.search(
             r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
@@ -5307,6 +5238,20 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         )
         actions.append("lead_capture_consumer_email_placeholder")
 
+    return updated
+
+
+def _retrofit_partner_reg_and_quick_unlock(
+    updated: str,
+    *,
+    prop_id: str,
+    tool_slug: str,
+    default_state: str,
+    has_quote_intake: bool,
+    q_tag: str,
+    actions: List[str],
+) -> str:
+    """Retrofits #partner-registration-drawer, #calc-result-quick-unlock-bar, KPI ordering, and $19 button."""
     if 'id="partner-registration-drawer"' in updated:
         spliced_reg_m = re.search(
             r'      <div id="partner-registration-drawer" class="partner-registration-drawer"[\s\S]*?</form>\s*</div>\n',
@@ -5387,190 +5332,205 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 )
                 actions.append("partner_registration_drawer")
 
-    if has_quote_intake:
-        raw_q_amt = _extract_attr(q_tag, "data-calculated-amount") or ""
-        try:
-            q_calc_amt: Optional[float] = float(raw_q_amt) if raw_q_amt else None
-        except ValueError:
-            q_calc_amt = None
-        from pseofactory.competitor import (
-            render_calc_result_quick_unlock_bar_html,
-            resolve_quick_unlock_contextual_copy,
-        )
+    if not has_quote_intake:
+        return updated
 
-        if 'id="calc-result-quick-unlock-bar"' not in updated and "id='calc-result-quick-unlock-bar'" not in updated:
-            quick_bar_html = render_calc_result_quick_unlock_bar_html(
-                slug=tool_slug,
-                property_id=prop_id,
-                baseline_amount=q_calc_amt,
-            )
-            if quick_bar_html:
-                stat_pos = updated.find('<div class="calc-statutory-box">')
-                if stat_pos != -1:
-                    updated = updated[:stat_pos] + quick_bar_html + "          " + updated[stat_pos:]
-                    actions.append("calc_result_quick_unlock_bar")
-                else:
-                    inline_cta_m = re.search(
-                        r'(<div\s+class=["\']calc-inline-cta["\'][^>]*>[\s\S]*?<a\s+[^>]*data-cta-slot=["\']calculator_result_inline["\'][^>]*>[\s\S]*?</a>\s*</div>)',
-                        updated,
-                        flags=re.IGNORECASE,
-                    )
-                    if inline_cta_m:
-                        ins_pos = inline_cta_m.end(1)
-                        updated = updated[:ins_pos] + "\n" + quick_bar_html + updated[ins_pos:]
-                        actions.append("calc_result_quick_unlock_bar")
-                    else:
-                        q_pos2 = updated.find('<div id="partner-quote-intake-step"')
-                        if q_pos2 != -1:
-                            updated = updated[:q_pos2] + quick_bar_html + updated[q_pos2:]
-                            actions.append("calc_result_quick_unlock_bar")
-        else:
-            quick_bar_html = render_calc_result_quick_unlock_bar_html(
-                slug=tool_slug,
-                property_id=prop_id,
-                baseline_amount=q_calc_amt,
-            )
-            if quick_bar_html:
-                qb_open_m = re.search(
-                    r'<div\b[^>]*\bid=["\']calc-result-quick-unlock-bar["\'][^>]*>',
-                    updated,
-                    flags=re.IGNORECASE,
-                )
-                if qb_open_m:
-                    qb_start = qb_open_m.start()
-                    qb_depth = 0
-                    qb_end = -1
-                    for div_tok in re.finditer(r"</?div\b[^>]*>", updated[qb_start:], flags=re.IGNORECASE):
-                        tok_str = div_tok.group(0).lower()
-                        if tok_str.startswith("</div"):
-                            qb_depth -= 1
-                            if qb_depth == 0:
-                                qb_end = qb_start + div_tok.end()
-                                break
-                        elif not tok_str.endswith("/>"):
-                            qb_depth += 1
-                    if qb_end > qb_start:
-                        updated_qb = updated[:qb_start] + quick_bar_html.strip() + updated[qb_end:]
-                        if updated_qb != updated:
-                            updated = updated_qb
-                            actions.append("calc_result_quick_unlock_bar_contextual_v2")
+    raw_q_amt = _extract_attr(q_tag, "data-calculated-amount") or ""
+    try:
+        q_calc_amt: Optional[float] = float(raw_q_amt) if raw_q_amt else None
+    except ValueError:
+        q_calc_amt = None
+    from pseofactory.competitor import (
+        render_calc_result_quick_unlock_bar_html,
+        resolve_quick_unlock_contextual_copy,
+    )
 
-        if 'id="variant-baseline"' in updated and 'id="variant-accelerated"' in updated:
-            healed_variants = re.sub(
-                r'(<div\s+class="calculation-variant"\s+id="variant-baseline"[^>]*>[^<]*<a\b[^>]*>Compare Standard Market Variant</a>\))\s*(<div\s+id="calc-result-quick-unlock-bar"[\s\S]*?)\s*</div>\s*(<div\s+class="calculation-variant"\s+id="variant-accelerated"[^>]*>[\s\S]*?</div>)',
-                r"\1</div>\n        \3\n          \2",
-                updated,
-                count=1,
-            )
-            if healed_variants != updated:
-                updated = healed_variants
-                actions.append("heal_variant_baseline_nesting")
-
-        # Ensure primary KPI block (.kpi-block or #rap-subsidy-meter) sits at the top of .result-box before .calc-inline-cta
-        cta_pos = updated.find('<div class="calc-inline-cta"')
-        kpi_pos = updated.find('<div class="kpi-block"')
-        kpi_end_candidates = [
-            pos
-            for pos in (
-                updated.find('<div id="calc-result-quick-unlock-bar"', kpi_pos if kpi_pos != -1 else 0),
-                updated.find('<div class="calc-statutory-box"', kpi_pos if kpi_pos != -1 else 0),
-                updated.find('<div class="share-pro-container"', kpi_pos if kpi_pos != -1 else 0),
-                updated.find('<div style="margin-top: 1rem;">', kpi_pos if kpi_pos != -1 else 0),
-                updated.find('<div class="lead-capture-card"', kpi_pos if kpi_pos != -1 else 0),
-            )
-            if pos != -1
-        ]
-        kpi_end = min(kpi_end_candidates) if kpi_end_candidates else -1
-        if cta_pos != -1 and kpi_pos != -1 and kpi_end != -1 and cta_pos < kpi_pos < kpi_end:
-            kpi_slice = updated[kpi_pos:kpi_end].strip()
-            if kpi_slice and "calc-inline-cta" not in kpi_slice:
-                updated = (
-                    updated[:cta_pos]
-                    + kpi_slice
-                    + "\n          "
-                    + updated[cta_pos:kpi_pos].rstrip()
-                    + updated[kpi_end:]
-                )
-                actions.append("result_box_kpi_first_order")
-
-        rap_meter_m = re.search(
-            r'<div\b[^>]*id=["\']rap-subsidy-meter["\'][^>]*>[\s\S]*?<div\s+class=["\']subsidy-meter-legend["\'][^>]*>[\s\S]*?</div>\s*</div>',
-            updated,
-            flags=re.IGNORECASE,
-        )
-        cta_pos2 = updated.find('<div class="calc-inline-cta"')
-        if rap_meter_m and cta_pos2 != -1 and cta_pos2 < rap_meter_m.start():
-            rap_slice = rap_meter_m.group(0).strip()
-            updated = (
-                updated[:cta_pos2]
-                + rap_slice
-                + "\n      "
-                + updated[cta_pos2 : rap_meter_m.start()].rstrip()
-                + updated[rap_meter_m.end() :]
-            )
-            actions.append("prexvo_subsidy_meter_first_order")
-
-        ctx_q_drawer = resolve_quick_unlock_contextual_copy(
+    if 'id="calc-result-quick-unlock-bar"' not in updated and "id='calc-result-quick-unlock-bar'" not in updated:
+        quick_bar_html = render_calc_result_quick_unlock_bar_html(
             slug=tool_slug,
             property_id=prop_id,
-            quick_price_int=19,
-            full_price_int=39 if prop_id == "prexvo" else (69 if prop_id == "lienbond" else (79 if prop_id == "gainhelm" else 49)),
+            baseline_amount=q_calc_amt,
         )
-        if 'id="btn-post-calc-quick-unlock-checkout"' in updated and "Instant PDF/CSV Statutory Worksheet ($19)" in updated:
-            updated = re.sub(
-                r'(<a\b[^>]*id=["\']btn-post-calc-quick-unlock-checkout["\'][^>]*>)Instant PDF/CSV Statutory Worksheet \(\$19\)(</a>)',
-                rf'\1{ctx_q_drawer["drawer_quick_btn_label"]}\2',
-                updated,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-            actions.append("post_calc_quick_unlock_button_contextual")
-
-        if (
-            'id="post-calculation-upgrade-drawer"' in updated
-            and 'id="btn-post-calc-quick-unlock-checkout"' not in updated
-        ):
-            quick_sku = (
-                "px_instant_repayment_worksheet_19"
-                if prop_id == "prexvo"
-                else (
-                    "gh_instant_compliance_worksheet_19"
-                    if prop_id == "gainhelm"
-                    else (
-                        "lb_instant_lien_bond_worksheet_19"
-                        if prop_id == "lienbond"
-                        else "ph_instant_statutory_worksheet_19"
-                    )
-                )
-            )
-            amt_int = int(round(q_calc_amt)) if q_calc_amt else 125000
-            if 'data-quick-unlock-sku=' not in updated:
-                updated = re.sub(
-                    r'(<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*?)(>)',
-                    rf'\1 data-quick-unlock-sku="{quick_sku}" data-quick-unlock-price="19"\2',
+        if quick_bar_html:
+            stat_pos = updated.find('<div class="calc-statutory-box">')
+            if stat_pos != -1:
+                updated = updated[:stat_pos] + quick_bar_html + "          " + updated[stat_pos:]
+                actions.append("calc_result_quick_unlock_bar")
+            else:
+                inline_cta_m = re.search(
+                    r'(<div\s+class=["\']calc-inline-cta["\'][^>]*>[\s\S]*?<a\s+[^>]*data-cta-slot=["\']calculator_result_inline["\'][^>]*>[\s\S]*?</a>\s*</div>)',
                     updated,
-                    count=1,
                     flags=re.IGNORECASE,
                 )
-            quick_btn_html = (
-                f'<a id="btn-post-calc-quick-unlock-checkout" '
-                f'href="/api/lead-capture?checkout=1&amp;sku={quick_sku}&amp;tool_slug={tool_slug}&amp;amount={amt_int}&amp;redirect=1" '
-                f'class="touch-target btn-primary post-calc-upgrade-btn" data-checkout-trigger="1" '
-                f'data-offer-sku="{quick_sku}" data-offer-price="19" data-cta-slot="post_calc_quick_unlock_cta" '
-                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; '
-                f'padding: 10px 18px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; '
-                f'font-size: 14px; text-decoration: none; cursor: pointer;">{ctx_q_drawer["drawer_quick_btn_label"]}</a>\n            '
+                if inline_cta_m:
+                    ins_pos = inline_cta_m.end(1)
+                    updated = updated[:ins_pos] + "\n" + quick_bar_html + updated[ins_pos:]
+                    actions.append("calc_result_quick_unlock_bar")
+                else:
+                    q_pos2 = updated.find('<div id="partner-quote-intake-step"')
+                    if q_pos2 != -1:
+                        updated = updated[:q_pos2] + quick_bar_html + updated[q_pos2:]
+                        actions.append("calc_result_quick_unlock_bar")
+    else:
+        quick_bar_html = render_calc_result_quick_unlock_bar_html(
+            slug=tool_slug,
+            property_id=prop_id,
+            baseline_amount=q_calc_amt,
+        )
+        if quick_bar_html:
+            qb_open_m = re.search(
+                r'<div\b[^>]*\bid=["\']calc-result-quick-unlock-bar["\'][^>]*>',
+                updated,
+                flags=re.IGNORECASE,
             )
-            updated, n_qbtn = re.subn(
-                r'(<a\b[^>]*id=["\']btn-post-calc-upgrade-checkout["\'][^>]*>)',
-                lambda m: quick_btn_html + m.group(1),
+            if qb_open_m:
+                qb_start = qb_open_m.start()
+                qb_depth = 0
+                qb_end = -1
+                for div_tok in re.finditer(r"</?div\b[^>]*>", updated[qb_start:], flags=re.IGNORECASE):
+                    tok_str = div_tok.group(0).lower()
+                    if tok_str.startswith("</div"):
+                        qb_depth -= 1
+                        if qb_depth == 0:
+                            qb_end = qb_start + div_tok.end()
+                            break
+                    elif not tok_str.endswith("/>"):
+                        qb_depth += 1
+                if qb_end > qb_start:
+                    updated_qb = updated[:qb_start] + quick_bar_html.strip() + updated[qb_end:]
+                    if updated_qb != updated:
+                        updated = updated_qb
+                        actions.append("calc_result_quick_unlock_bar_contextual_v2")
+
+    if 'id="variant-baseline"' in updated and 'id="variant-accelerated"' in updated:
+        healed_variants = re.sub(
+            r'(<div\s+class="calculation-variant"\s+id="variant-baseline"[^>]*>[^<]*<a\b[^>]*>Compare Standard Market Variant</a>\))\s*(<div\s+id="calc-result-quick-unlock-bar"[\s\S]*?)\s*</div>\s*(<div\s+class="calculation-variant"\s+id="variant-accelerated"[^>]*>[\s\S]*?</div>)',
+            r"\1</div>\n        \3\n          \2",
+            updated,
+            count=1,
+        )
+        if healed_variants != updated:
+            updated = healed_variants
+            actions.append("heal_variant_baseline_nesting")
+
+    # Ensure primary KPI block (.kpi-block or #rap-subsidy-meter) sits at the top of .result-box before .calc-inline-cta
+    cta_pos = updated.find('<div class="calc-inline-cta"')
+    kpi_pos = updated.find('<div class="kpi-block"')
+    kpi_end_candidates = [
+        pos
+        for pos in (
+            updated.find('<div id="calc-result-quick-unlock-bar"', kpi_pos if kpi_pos != -1 else 0),
+            updated.find('<div class="calc-statutory-box"', kpi_pos if kpi_pos != -1 else 0),
+            updated.find('<div class="share-pro-container"', kpi_pos if kpi_pos != -1 else 0),
+            updated.find('<div style="margin-top: 1rem;">', kpi_pos if kpi_pos != -1 else 0),
+            updated.find('<div class="lead-capture-card"', kpi_pos if kpi_pos != -1 else 0),
+        )
+        if pos != -1
+    ]
+    kpi_end = min(kpi_end_candidates) if kpi_end_candidates else -1
+    if cta_pos != -1 and kpi_pos != -1 and kpi_end != -1 and cta_pos < kpi_pos < kpi_end:
+        kpi_slice = updated[kpi_pos:kpi_end].strip()
+        if kpi_slice and "calc-inline-cta" not in kpi_slice:
+            updated = (
+                updated[:cta_pos]
+                + kpi_slice
+                + "\n          "
+                + updated[cta_pos:kpi_pos].rstrip()
+                + updated[kpi_end:]
+            )
+            actions.append("result_box_kpi_first_order")
+
+    rap_meter_m = re.search(
+        r'<div\b[^>]*id=["\']rap-subsidy-meter["\'][^>]*>[\s\S]*?<div\s+class=["\']subsidy-meter-legend["\'][^>]*>[\s\S]*?</div>\s*</div>',
+        updated,
+        flags=re.IGNORECASE,
+    )
+    cta_pos2 = updated.find('<div class="calc-inline-cta"')
+    if rap_meter_m and cta_pos2 != -1 and cta_pos2 < rap_meter_m.start():
+        rap_slice = rap_meter_m.group(0).strip()
+        updated = (
+            updated[:cta_pos2]
+            + rap_slice
+            + "\n      "
+            + updated[cta_pos2 : rap_meter_m.start()].rstrip()
+            + updated[rap_meter_m.end() :]
+        )
+        actions.append("prexvo_subsidy_meter_first_order")
+
+    ctx_q_drawer = resolve_quick_unlock_contextual_copy(
+        slug=tool_slug,
+        property_id=prop_id,
+        quick_price_int=19,
+        full_price_int=39 if prop_id == "prexvo" else (69 if prop_id == "lienbond" else (79 if prop_id == "gainhelm" else 49)),
+    )
+    if 'id="btn-post-calc-quick-unlock-checkout"' in updated and "Instant PDF/CSV Statutory Worksheet ($19)" in updated:
+        updated = re.sub(
+            r'(<a\b[^>]*id=["\']btn-post-calc-quick-unlock-checkout["\'][^>]*>)Instant PDF/CSV Statutory Worksheet \(\$19\)(</a>)',
+            rf'\1{ctx_q_drawer["drawer_quick_btn_label"]}\2',
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        actions.append("post_calc_quick_unlock_button_contextual")
+
+    if (
+        'id="post-calculation-upgrade-drawer"' in updated
+        and 'id="btn-post-calc-quick-unlock-checkout"' not in updated
+    ):
+        quick_sku = (
+            "px_instant_repayment_worksheet_19"
+            if prop_id == "prexvo"
+            else (
+                "gh_instant_compliance_worksheet_19"
+                if prop_id == "gainhelm"
+                else (
+                    "lb_instant_lien_bond_worksheet_19"
+                    if prop_id == "lienbond"
+                    else "ph_instant_statutory_worksheet_19"
+                )
+            )
+        )
+        amt_int = int(round(q_calc_amt)) if q_calc_amt else 125000
+        if 'data-quick-unlock-sku=' not in updated:
+            updated = re.sub(
+                r'(<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*?)(>)',
+                rf'\1 data-quick-unlock-sku="{quick_sku}" data-quick-unlock-price="19"\2',
                 updated,
                 count=1,
                 flags=re.IGNORECASE,
             )
-            if n_qbtn > 0:
-                actions.append("post_calc_quick_unlock_button")
+        quick_btn_html = (
+            f'<a id="btn-post-calc-quick-unlock-checkout" '
+            f'href="/api/lead-capture?checkout=1&amp;sku={quick_sku}&amp;tool_slug={tool_slug}&amp;amount={amt_int}&amp;redirect=1" '
+            f'class="touch-target btn-primary post-calc-upgrade-btn" data-checkout-trigger="1" '
+            f'data-offer-sku="{quick_sku}" data-offer-price="19" data-cta-slot="post_calc_quick_unlock_cta" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; '
+            f'padding: 10px 18px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; '
+            f'font-size: 14px; text-decoration: none; cursor: pointer;">{ctx_q_drawer["drawer_quick_btn_label"]}</a>\n            '
+        )
+        updated, n_qbtn = re.subn(
+            r'(<a\b[^>]*id=["\']btn-post-calc-upgrade-checkout["\'][^>]*>)',
+            lambda m: quick_btn_html + m.group(1),
+            updated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if n_qbtn > 0:
+            actions.append("post_calc_quick_unlock_button")
 
+    return updated
+
+
+def _retrofit_hero_range_and_jurisdiction_bars(
+    updated: str,
+    *,
+    tool_slug: str,
+    default_state: str,
+    has_quote_intake: bool,
+    us_jurisdictions: Any,
+    actions: List[str],
+) -> str:
+    """Retrofits #hero-range-anchor, #state-first-hero-bar, state selects, and GSC overlay container alignment."""
     has_hero_section = bool(
         re.search(r'<section\b[^>]*class=["\'][^"\']*\bhero-section\b[^"\']*["\'][^>]*>', updated, re.IGNORECASE)
     )
@@ -5643,7 +5603,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
     ):
         opts_str = "\n".join(
             f'            <option value="{sc}"{" selected" if sc == default_state else ""}>{sl}</option>'
-            for sc, sl in US_51_JURISDICTIONS
+            for sc, sl in us_jurisdictions
         )
         state_bar_html = (
             '        <div id="state-first-hero-bar" class="state-first-hero-bar" data-mechanic="state_first_hero_input" '
@@ -5669,7 +5629,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
     if has_quote_intake and tool_slug != "index":
         full_opts_14 = "\n".join(
             f'              <option value="{sc}"{" selected" if sc == default_state else ""}>{sl}</option>'
-            for sc, sl in US_51_JURISDICTIONS
+            for sc, sl in us_jurisdictions
         )
         for sel_id in ("quote-intake-hero-state", "quote-intake-state", "quote-intake-partner-reg-state"):
             sel_pat = re.compile(
@@ -5706,6 +5666,113 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 updated = relocated_doc
                 actions.append("relocate_gsc_overlay_into_container")
 
+    return updated
+
+
+def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[str]]:
+    """
+    Retrofits commercial calculator pages and navigation anchors:
+    1. Ensures <form class="lead-capture-form"> has id="lead-capture-form".
+    2. Rewrites stale ProfitHelm .pro-hook-card ("Get Pro ($49/mo)") to link to
+       #post-calculation-upgrade-drawer with the page's actual one-time workpaper price.
+    3. Injects #partner-registration-drawer (#partner-registration-form) on commercial calculator
+       pages with #partner-quote-intake-step (while strictly preserving non-commercial YMYL pages).
+    4. Injects #state-first-hero-bar (#quote-intake-hero-state) on commercial calculator pages.
+    5. Injects #hero-range-anchor (#hero-range-low, #hero-range-baseline, #hero-range-high)
+       into .hero-section on calculator pages with #saveable-decision-blueprint.
+    """
+    actions: List[str] = []
+    if 'class="lead-capture-form"' in updated and 'id="lead-capture-form"' not in updated:
+        updated = updated.replace(
+            '<form class="lead-capture-form"',
+            '<form id="lead-capture-form" class="lead-capture-form"',
+            1,
+        )
+        actions.append("playbook_lead_capture_form")
+
+    from pseofactory.competitor import US_51_JURISDICTIONS, resolve_state_code_from_slug
+
+    is_restricted_ps = 'data-restricted-public-service="true"' in updated
+    has_quote_intake = 'id="partner-quote-intake-step"' in updated and not is_restricted_ps
+    q_match = re.search(r'<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*>', updated, re.IGNORECASE)
+    q_tag = q_match.group(0) if q_match else ""
+    prop_id = (_extract_attr(q_tag, "data-property-id") or "").strip().lower()
+    if not prop_id:
+        if "prexvo.com" in updated:
+            prop_id = "prexvo"
+        elif "gainhelm.com" in updated:
+            prop_id = "gainhelm"
+        elif "lienbond.com" in updated:
+            prop_id = "lienbond"
+        else:
+            prop_id = "profithelm"
+    bp_match = re.search(r'<div\b[^>]*id=["\']saveable-decision-blueprint["\'][^>]*>', updated, re.IGNORECASE)
+    bp_tag = bp_match.group(0) if bp_match else ""
+    tool_slug = (
+        _extract_attr(q_tag, "data-tool-slug")
+        or _extract_attr(bp_tag, "data-blueprint-slug")
+        or "index"
+    ).strip().lower()
+    default_state = resolve_state_code_from_slug(tool_slug, prop_id)
+
+    if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
+        pk_fallback = (
+            _extract_attr(q_tag, "data-partner-key")
+            or (
+                "splash_financial"
+                if prop_id == "prexvo"
+                else ("vanta_security" if prop_id == "gainhelm" else ("suretybonds_direct" if prop_id == "lienbond" else "ipx1031"))
+            )
+        ).strip().lower()
+        pname_fallback = (
+            _extract_attr(q_tag, "data-partner-name")
+            or (
+                "Splash Financial"
+                if prop_id == "prexvo"
+                else ("Vanta" if prop_id == "gainhelm" else ("SuretyBonds.com" if prop_id == "lienbond" else "Verified Partner"))
+            )
+        ).strip()
+        fallback_cta_html = (
+            f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
+            f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
+            f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
+            f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
+            f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
+            f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
+            f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
+            f'      </div>\n'
+        )
+        q_pos = updated.find('<div id="partner-quote-intake-step"')
+        if q_pos != -1:
+            updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
+            actions.append("commercial_affiliate_cta_fallback")
+
+    updated = _retrofit_pro_hook_and_lead_capture_cards(
+        updated,
+        tool_slug=tool_slug,
+        default_state=default_state,
+        has_quote_intake=has_quote_intake,
+        is_restricted_ps=is_restricted_ps,
+        actions=actions,
+    )
+    updated = _retrofit_partner_reg_and_quick_unlock(
+        updated,
+        prop_id=prop_id,
+        tool_slug=tool_slug,
+        default_state=default_state,
+        has_quote_intake=has_quote_intake,
+        q_tag=q_tag,
+        actions=actions,
+    )
+    updated = _retrofit_hero_range_and_jurisdiction_bars(
+        updated,
+        tool_slug=tool_slug,
+        default_state=default_state,
+        has_quote_intake=has_quote_intake,
+        us_jurisdictions=US_51_JURISDICTIONS,
+        actions=actions,
+    )
     return updated, actions
 
 

@@ -737,10 +737,15 @@ class DepartmentHandoffChainVerifier:
             if stat_count < 1:
                 t_errs.append("statutory economic time-series dataset returned 0 records")
 
+            from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS as _SPAWNED_DECLS
+
             probe_spec = _CANONICAL_TENANT_PROBES.get(pid, {})
             probe_q = probe_spec.get("query", f"{pid} calculator")
             foreign_q = probe_spec.get("foreign_query", "")
-            assigned_raw = trend_runner.determine_property_assignment(probe_q)
+            assigned_raw = trend_runner.determine_property_assignment(
+                probe_q,
+                include_spawned=(pid in _SPAWNED_DECLS),
+            )
             assigned_prop = (
                 str(assigned_raw.get("property_id") or "")
                 if isinstance(assigned_raw, dict)
@@ -1105,9 +1110,17 @@ class DepartmentHandoffChainVerifier:
                 if getattr(adapter, "repo_path", None)
                 else Path(adapter.dist_dir).parent
             )
+            from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
+
+            spawned_dir_names = {
+                c.repo_dir_name for c in SPAWNED_TENANT_DECLARATIONS.values() if c.repo_dir_name
+            }
             is_prod_canonical_tenant = (
                 repo_path_cand.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
-                and repo_path_cand.name in list_canonical_repo_dir_names()
+                and (
+                    repo_path_cand.name in list_canonical_repo_dir_names()
+                    or repo_path_cand.name in spawned_dir_names
+                )
             )
             in_flight_build = False
             if is_prod_canonical_tenant and not self.strict_current_engine_hash:

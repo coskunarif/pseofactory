@@ -315,6 +315,296 @@ def test_idempotency_of_write_substrate_lock_on_lienbond_result_box_and_prexvo_r
     assert px_pass2 == px_pass1
 
 
+def test_cloudflare_redirects_cap_and_middleware_sync_across_four_tenants(tmp_path: Path):
+    import json
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+    from pseofactory.verifier import MasterSEOVerifier
+
+    # 1. Simulate a 162-line _redirects file (>100 Cloudflare Pages hard ceiling)
+    repo_dir = tmp_path / "profithelm-platform"
+    dist_dir = repo_dir / "dist"
+    (repo_dir / "functions" / "r").mkdir(parents=True)
+    (repo_dir / "content").mkdir(parents=True)
+    for route_rel in (
+        "index.html",
+        "about/index.html",
+        "privacy/index.html",
+        "tools/index.html",
+        "tools/section-179-calculator/index.html",
+        "tools/saas-runway-calculator/index.html",
+        "tools/section-1031-calculator/index.html",
+        "tools/prediction-market-odds/index.html",
+        "tools/section-174-r-d-amortization-calculator-2026/index.html",
+        "tools/section-301-import-tariff-landed-cost-calculator/index.html",
+    ):
+        p = dist_dir / route_rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("<!DOCTYPE html><html><body>OK</body></html>", encoding="utf-8")
+
+    raw_lines = [
+        "/methodology  /about/  301",
+        "/methodology/  /about/  301",
+        "/disclaimers  /privacy/  301",
+        "/disclaimers/  /privacy/  301",
+        "/terms  /privacy/  301",
+        "/terms/  /privacy/  301",
+        "/vs/ordermetrics  /tools/section-179-calculator/  301",
+        "/vs/ordermetrics/  /tools/section-179-calculator/  301",
+        "/vs/ordermetrics/*  /tools/section-179-calculator/  301",
+        "/vs/*  /tools/saas-runway-calculator/  301",
+    ]
+    for idx in range(74):
+        raw_lines.append(f"/tools/retired-calc-{idx}  /tools/  301")
+        raw_lines.append(f"/tools/retired-calc-{idx}/  /tools/  301")
+    raw_lines.extend(
+        [
+            "/tools/landed-cost-calculator  /tools/section-301-import-tariff-landed-cost-calculator/  301",
+            "/tools/landed-cost-calculator/  /tools/section-301-import-tariff-landed-cost-calculator/  301",
+            "/tools/section-174-r-d-amortization-calculator  /tools/section-174-r-d-amortization-calculator-2026/  301",
+            "/tools/section-174-r-d-amortization-calculator/  /tools/section-174-r-d-amortization-calculator-2026/  301",
+        ]
+    )
+    assert len(raw_lines) == 162
+    (dist_dir / "_redirects").write_text("\n".join(raw_lines) + "\n", encoding="utf-8")
+    (repo_dir / "content" / "redirects.json").write_text(
+        json.dumps(
+            {
+                "/tools/landed-cost-calculator": {
+                    "target": "/tools/section-301-import-tariff-landed-cost-calculator/",
+                    "status": 301,
+                },
+                "/tools/section-174-r-d-amortization-calculator": {
+                    "target": "/tools/section-174-r-d-amortization-calculator-2026/",
+                    "status": 301,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo_dir / "functions" / "_middleware.js").write_text(
+        "export async function onRequest(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        "  const hostname = url.hostname.toLowerCase();\n"
+        "  const pathname = url.pathname;\n"
+        "  const legacySaaSRedirects = {\n"
+        '    "/pricing": "/tools/saas-runway-calculator/",\n'
+        "  };\n"
+        "  if (legacySaaSRedirects[pathname]) {\n"
+        "    return Response.redirect(`${url.origin}${legacySaaSRedirects[pathname]}`, 301);\n"
+        "  }\n"
+        "  const response = await context.next();\n"
+        "  return response;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    # Raw 162-line _redirects must fail MasterSEOVerifier check_url_redirects_gate before compaction
+    raw_gate = MasterSEOVerifier(dist_dir=dist_dir, domain="profithelm.com").check_url_redirects_gate()
+    assert raw_gate["status"] == "FAIL"
+
+    sync_tenant_edge_redirect_function(repo_dir, property_id="profithelm")
+
+    compacted_txt = (dist_dir / "_redirects").read_text(encoding="utf-8")
+    non_comment_lines = [
+        ln for ln in compacted_txt.splitlines() if ln.strip() and not ln.strip().startswith("#")
+    ]
+    assert len(non_comment_lines) <= 95
+    assert "/vs/ordermetrics  /tools/section-179-calculator/  301" in compacted_txt
+    assert "/vs/ordermetrics/  /tools/section-179-calculator/  301" in compacted_txt
+    assert "/vs/ordermetrics/*  /tools/section-179-calculator/  301" in compacted_txt
+
+    from pseofactory.edge import (
+        EdgeConfigStandards,
+        compact_edge_redirects_to_cloudflare_cap,
+        parse_edge_redirects_rules,
+        validate_edge_redirects_file,
+    )
+
+    post_val = validate_edge_redirects_file(dist_dir / "_redirects")
+    assert post_val["status"] == "PASS", post_val["issues"]
+    assert post_val["active_rules_count"] <= EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES
+    assert post_val["total_rules_count"] == 162
+
+    mw_txt = (repo_dir / "functions" / "_middleware.js").read_text(encoding="utf-8")
+    assert '"/tools/landed-cost-calculator": "/tools/section-301-import-tariff-landed-cost-calculator/"' in mw_txt
+    assert '"/tools/section-174-r-d-amortization-calculator/": "/tools/section-174-r-d-amortization-calculator-2026/"' in mw_txt
+    assert "_matchedRedirectTarget" in mw_txt
+
+    # Verify MasterSEOVerifier gate passes with 0 dead chains and <= 95 active rules
+    gate_res = MasterSEOVerifier(dist_dir=dist_dir, domain="profithelm.com").check_url_redirects_gate()
+    assert gate_res["status"] == "PASS", gate_res["issues"]
+
+    # Verify all 4 workspace tenant dist/_redirects (when present) compact cleanly to <= 95 active rules with 0 dead chains
+    for t_dir, t_dom in (
+        ("profithelm-platform", "profithelm.com"),
+        ("prexvo", "prexvo.com"),
+        ("gainhelm", "gainhelm.com"),
+        ("lienbond", "lienbond.com"),
+    ):
+        real_dist = Path("/home/ubuntuadmin/projects") / t_dir / "dist"
+        real_red = real_dist / "_redirects"
+        if real_red.is_file():
+            comp = compact_edge_redirects_to_cloudflare_cap(real_red.read_text(encoding="utf-8"))
+            act = parse_edge_redirects_rules(comp, include_middleware_overflow=False)
+            tot = parse_edge_redirects_rules(comp, include_middleware_overflow=True)
+            assert len(act) <= 95, f"{t_dir} active rules {len(act)} > 95"
+            srcs = {s for s, _d, _c, _o in tot}
+            for src, dst, code, _ov in tot:
+                assert code == "301"
+                assert dst not in srcs, f"{t_dir} redirect chain {src} -> {dst}"
+                if dst.startswith("/") and "*" not in dst and ":" not in dst:
+                    dst_clean = dst.strip("/")
+                    dst_html = (real_dist / "index.html") if not dst_clean else (real_dist / dst_clean / "index.html")
+                    assert dst_html.is_file(), f"{t_dir} dead redirect target {src} -> {dst}"
+
+
+def test_lienbond_ci_deploy_syndication_and_metadata_parity(tmp_path: Path):
+    import json
+    from pseofactory.content_angles import expand_commercial_and_question_keywords
+    from pseofactory.distributor import export_all_syndication_files
+    from pseofactory.drift import write_substrate_lock
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+    lb_repo = tmp_path / "lienbond"
+    (lb_repo / "lienbond").mkdir(parents=True)
+    (lb_repo / ".github" / "workflows").mkdir(parents=True)
+    (lb_repo / ".github" / "workflows" / "ci.yml").write_text("name: old\n", encoding="utf-8")
+    (lb_repo / ".pseofactory.json").write_text('{"property_id": "lienbond"}\n', encoding="utf-8")
+    (lb_repo / "dist" / "tools" / "miller-act-performance-and-payment-bond-premium-calculator").mkdir(parents=True)
+    (lb_repo / "dist" / "index.html").write_text("<!DOCTYPE html><html><body>LienBond</body></html>", encoding="utf-8")
+    (lb_repo / "dist" / "tools" / "miller-act-performance-and-payment-bond-premium-calculator" / "index.html").write_text(
+        "<!DOCTYPE html><html><body>Miller Act</body></html>",
+        encoding="utf-8",
+    )
+
+    sync_tenant_test_isolation_guards(lb_repo)
+    lb_ci = (lb_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "runs-on: ubuntu-latest" in lb_ci
+    assert "runs-on: self-hosted" not in lb_ci
+    assert "pytest -q tests/" in lb_ci
+    assert "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" in lb_ci
+    assert "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}" in lb_ci
+    assert "CLOUDFLARE_ACCOUNT_ID: '8789c54bef2d281d4a8afb4df34f9878'" in lb_ci
+    assert "npx wrangler pages deploy dist --project-name=lienbond --branch=main" in lb_ci
+
+    kw_matrix = expand_commercial_and_question_keywords(
+        "miller act performance and payment bond premium calculator",
+        property_id="lienbond",
+    )
+    assert kw_matrix["property_id"] == "lienbond"
+    assert "40 U.S.C. 3131" in kw_matrix["authority_basis"]
+
+    synd_dir = lb_repo / "syndication"
+    synd_dir.mkdir(parents=True)
+    # Pre-seed contaminated ProfitHelm directory_manifest.json to verify clean overwrite
+    (synd_dir / "directory_manifest.json").write_text('{"base_manifest": {"name": "ProfitHelm"}}\n', encoding="utf-8")
+    export_all_syndication_files(
+        output_dir=synd_dir,
+        tools=[
+            {
+                "slug": "miller-act-performance-and-payment-bond-premium-calculator",
+                "title": "Miller Act Performance and Payment Bond Premium Calculator",
+                "primary_keyword": "miller act performance and payment bond premium calculator",
+                "category": "surety_bonds",
+            }
+        ],
+        property_id="lienbond",
+    )
+    dm = json.loads((synd_dir / "directory_manifest.json").read_text(encoding="utf-8"))
+    assert dm["base_manifest"]["name"] == "LienBond"
+    assert dm["base_manifest"]["social"]["linkedin_company_url"] == "https://www.linkedin.com/company/106482196"
+    assert "profithelm" not in json.dumps(dm).lower()
+
+    pack_path = synd_dir / "miller-act-performance-and-payment-bond-premium-calculator" / "syndication_pack.json"
+    pack_txt = pack_path.read_text(encoding="utf-8")
+    pack_data = json.loads(pack_txt)
+    assert pack_data["keyword_intent_matrix"]["property_id"] == "lienbond"
+    assert "profithelm" not in pack_txt.lower()
+    assert (synd_dir / "ai_benchmarks" / "ai_benchmarks_manifest.json").is_file()
+
+    write_substrate_lock(lb_repo, property_id="lienbond", expected_hash="cafebabe9999", sync_ledgers=True)
+    assert (lb_repo / "freshness_audit_report.json").is_file()
+    assert (lb_repo / "dist" / "ai-benchmarks" / "ai_benchmarks_manifest.json").is_file()
+    fresh = json.loads((lb_repo / "freshness_audit_report.json").read_text(encoding="utf-8"))
+    assert fresh["status"] == "PASS"
+    assert fresh["substrate_hash"] == "cafebabe9999"
+
+
+def test_youtube_upload_ledger_merges_into_uploaded_log_before_substrate_lock_hash(tmp_path: Path):
+    import json
+    from pseofactory.drift import compute_dist_lock_metrics, write_substrate_lock
+    from pseofactory.video_factory import _load_upload_idempotency_map, _save_upload_idempotency_record
+
+    repo_dir = tmp_path / "profithelm-platform"
+    videos_dir = repo_dir / "dist" / "videos"
+    videos_dir.mkdir(parents=True)
+    (repo_dir / "dist" / "index.html").write_text("<!DOCTYPE html><html><body>PH</body></html>", encoding="utf-8")
+    (videos_dir / "uploaded_log.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "existing-tool",
+                    "video_id": "abc123xyz",
+                    "title": "Existing Tool Video",
+                    "uploaded_at": "2026-11-08T18:00:00Z",
+                    "status": "uploaded_public",
+                    "url": "https://www.youtube.com/watch?v=abc123xyz",
+                    "caption_id": "cap-1",
+                    "pinned_comment_id": "pin-1",
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _save_upload_idempotency_record(
+        repo_dir,
+        "profithelm",
+        "1031-exchange-capital-gains-calculator",
+        {
+            "property_id": "profithelm",
+            "slug": "1031-exchange-capital-gains-calculator",
+            "video_id": "1Fx_mJRj9h0",
+            "video_url": "https://www.youtube.com/watch?v=1Fx_mJRj9h0",
+            "title": "1031 Exchange Capital Gains Calculator (2026 Rules)",
+            "privacy": "public",
+            "timestamp": "2026-11-10T18:00:12Z",
+            "caption_id": "cap-1031",
+            "pinned_comment_id": "pin-1031",
+        },
+    )
+    assert (repo_dir / ".agy" / "youtube_upload_ledger.json.lock").exists()
+
+    # Inject a foreign-prefixed record lacking inner property_id to verify strict key-prefix isolation
+    ledger_file = repo_dir / ".agy" / "youtube_upload_ledger.json"
+    ledger_data = json.loads(ledger_file.read_text(encoding="utf-8"))
+    ledger_data["uploads"]["gainhelm:soc-2-audit-cost-calculator"] = {
+        "slug": "soc-2-audit-cost-calculator",
+        "video_id": "ghForeign99",
+        "title": "SOC 2 Video",
+        "timestamp": "2026-11-10T18:05:00Z",
+    }
+    ledger_file.write_text(json.dumps(ledger_data, indent=2) + "\n", encoding="utf-8")
+
+    idemp_ph = _load_upload_idempotency_map(repo_dir, "profithelm")
+    assert "1031-exchange-capital-gains-calculator" in idemp_ph
+    assert "soc-2-audit-cost-calculator" not in idemp_ph
+
+    lock_payload = write_substrate_lock(repo_dir, property_id="profithelm", expected_hash="beef1234", sync_ledgers=True)
+    merged_log = json.loads((videos_dir / "uploaded_log.json").read_text(encoding="utf-8"))
+    slugs = [entry["slug"] for entry in merged_log]
+    assert slugs == ["existing-tool", "1031-exchange-capital-gains-calculator"]
+    assert merged_log[1]["video_id"] == "1Fx_mJRj9h0"
+    assert merged_log[1]["caption_id"] == "cap-1031"
+    assert merged_log[1]["pinned_comment_id"] == "pin-1031"
+
+    actual_fp, _ = compute_dist_lock_metrics(repo_dir / "dist")
+    assert lock_payload["dist_fingerprint"] == actual_fp
+
+
+
 
 
 

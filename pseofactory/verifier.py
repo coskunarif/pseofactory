@@ -2473,15 +2473,26 @@ class MasterSEOVerifier:
         rules_checked = 0
 
         if redirects_file.is_file():
+            from pseofactory.edge import EdgeConfigStandards
+
             content = redirects_file.read_text(encoding="utf-8", errors="ignore")
             redirect_sources: Set[str] = set()
             parsed_rules: List[Tuple[int, str, str, str]] = []
+            active_rules_count = 0
 
             for line_num, line in enumerate(content.splitlines(), start=1):
                 line_clean = line.strip()
-                if not line_clean or line_clean.startswith("#"):
+                if not line_clean:
+                    continue
+                is_overflow_comment = False
+                if line_clean.startswith("# [edge-middleware-redirect]"):
+                    line_clean = line_clean[len("# [edge-middleware-redirect]") :].strip()
+                    is_overflow_comment = True
+                elif line_clean.startswith("#"):
                     continue
                 rules_checked += 1
+                if not is_overflow_comment:
+                    active_rules_count += 1
                 parts = line_clean.split()
                 if len(parts) < 2 or len(parts) > 3:
                     issues.append(f"Malformed redirect rule at line {line_num}: '{line_clean}'")
@@ -2499,6 +2510,12 @@ class MasterSEOVerifier:
                     issues.append(f"Self-redirect loop detected at line {line_num}: '{src_path}' -> '{dst_path}'")
                 redirect_sources.add(src_path)
                 parsed_rules.append((line_num, src_path, dst_path, status_code))
+
+            if active_rules_count > EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES:
+                issues.append(
+                    f"Active _redirects rule count ({active_rules_count}) exceeds Cloudflare Pages cap "
+                    f"({EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES}); truncate risk on lines >100"
+                )
 
             is_full_build = (target / "index.html").is_file() and (target / "tools" / "index.html").is_file()
             sitemap_locs: Set[str] = set()
@@ -7197,7 +7214,11 @@ def _audit_redirects_and_sitemaps(
     if redirects_file.is_file():
         for line in redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines():
             s = line.strip()
-            if not s or s.startswith("#"):
+            if not s:
+                continue
+            if s.startswith("# [edge-middleware-redirect]"):
+                s = s[len("# [edge-middleware-redirect]") :].strip()
+            elif s.startswith("#"):
                 continue
             parts = s.split()
             if len(parts) >= 2:

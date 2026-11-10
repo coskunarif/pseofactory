@@ -1953,7 +1953,11 @@ class UnifiedBrowserAuditor:
             try:
                 for raw_line in redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines():
                     line = raw_line.strip()
-                    if not line or line.startswith("#"):
+                    if not line:
+                        continue
+                    if line.startswith("# [edge-middleware-redirect]"):
+                        line = line[len("# [edge-middleware-redirect]") :].strip()
+                    elif line.startswith("#"):
                         continue
                     parts = line.split()
                     if len(parts) >= 2:

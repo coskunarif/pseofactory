@@ -146,6 +146,7 @@ class FleetMonetizationDashboardData:
     recent_emails: List[Dict[str, Any]] = field(default_factory=list)
     mail_sync_status: Dict[str, Any] = field(default_factory=dict)
     gainhelm: Optional[PropertyReadinessReport] = None
+    lienbond: Optional[PropertyReadinessReport] = None
 
     def to_dict(self) -> Dict[str, Any]:
         out = {
@@ -158,6 +159,8 @@ class FleetMonetizationDashboardData:
         }
         if self.gainhelm is not None:
             out["gainhelm"] = self.gainhelm.to_dict()
+        if self.lienbond is not None:
+            out["lienbond"] = self.lienbond.to_dict()
         return out
 
 
@@ -268,21 +271,25 @@ class PartnerTrackingEngine:
             ph_eng = (_sync_data.get("profithelm") or {}).get("aggregation") or None
             px_eng = (_sync_data.get("prexvo") or {}).get("aggregation") or None
             gh_eng = (_sync_data.get("gainhelm") or {}).get("aggregation") or None
-        elif isinstance(engagement_metrics, dict) and any(k in engagement_metrics for k in ("profithelm", "prexvo", "gainhelm")) and "by_partner" not in engagement_metrics:
+            lb_eng = (_sync_data.get("lienbond") or {}).get("aggregation") or None
+        elif isinstance(engagement_metrics, dict) and any(k in engagement_metrics for k in ("profithelm", "prexvo", "gainhelm", "lienbond")) and "by_partner" not in engagement_metrics:
             ph_eng = engagement_metrics.get("profithelm")
             px_eng = engagement_metrics.get("prexvo")
             gh_eng = engagement_metrics.get("gainhelm")
+            lb_eng = engagement_metrics.get("lienbond")
         else:
             ph_eng = engagement_metrics
             px_eng = engagement_metrics
             gh_eng = engagement_metrics
+            lb_eng = engagement_metrics
 
         ph_report = self._evaluate_property("profithelm", classifications, engagement_metrics=ph_eng)
         px_report = self._evaluate_property("prexvo", classifications, engagement_metrics=px_eng)
         gh_report = self._evaluate_property("gainhelm", classifications, engagement_metrics=gh_eng)
+        lb_report = self._evaluate_property("lienbond", classifications, engagement_metrics=lb_eng)
 
         # 4. Enforce strict property isolation
-        self._assert_fleet_isolation(ph_report, px_report, gh_report)
+        self._assert_fleet_isolation(ph_report, px_report, gh_report, lb_report)
 
         # 5. Build recent emails summary
         recent_email_dicts = []
@@ -306,6 +313,7 @@ class PartnerTrackingEngine:
             recent_emails=recent_email_dicts,
             mail_sync_status=self.email_engine.load_state(),
             gainhelm=gh_report,
+            lienbond=lb_report,
         )
 
         return dashboard
@@ -901,13 +909,21 @@ class PartnerTrackingEngine:
         ph: PropertyReadinessReport,
         px: PropertyReadinessReport,
         gh: Optional[PropertyReadinessReport] = None,
+        lb: Optional[PropertyReadinessReport] = None,
     ) -> None:
         """Asserts strict property boundaries and bans cross-property partner mixing."""
         ph_keys = {p.key for p in ph.partners}
         px_keys = {p.key for p in px.partners}
         gh_keys = {p.key for p in gh.partners} if gh is not None else set()
+        lb_keys = {p.key for p in lb.partners} if lb is not None else set()
 
-        overlap = ph_keys.intersection(px_keys) | ph_keys.intersection(gh_keys) | px_keys.intersection(gh_keys)
+        overlap = (
+            ph_keys.intersection(px_keys)
+            | ph_keys.intersection(gh_keys)
+            | px_keys.intersection(gh_keys)
+            | lb_keys.intersection(px_keys)
+            | lb_keys.intersection(gh_keys)
+        )
         if overlap:
             raise ValueError(
                 f"Strict isolation violation: Cross-property partner mixing detected! Overlapping keys: {overlap}"
@@ -3392,7 +3408,10 @@ class PartnerTrackingEngine:
             if redirects_file.is_file():
                 try:
                     for line in redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines():
-                        parts = line.strip().split()
+                        s_line = line.strip()
+                        if s_line.startswith("# [edge-middleware-redirect]"):
+                            s_line = s_line[len("# [edge-middleware-redirect]") :].strip()
+                        parts = s_line.split()
                         if len(parts) >= 2 and parts[0].startswith("/"):
                             redirect_targets[parts[0].rstrip("/")] = parts[1].strip()
                 except Exception:

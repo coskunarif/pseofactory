@@ -5021,6 +5021,50 @@ def sync_tenant_test_isolation_guards(
                     workflows_dir.mkdir(parents=True, exist_ok=True)
                     ci_yml_path.write_text(desired_gh_ci, encoding="utf-8")
                     updated_files.append(str(ci_yml_path))
+            elif (repo / "lienbond").is_dir() and (ci_yml_path.is_file() or (repo / ".pseofactory.json").is_file()):
+                desired_lb_ci = (
+                    "name: LienBond CI & Cloudflare Pages Deploy\n\n"
+                    "on:\n"
+                    "  push:\n"
+                    "    branches: [ main ]\n"
+                    "  pull_request:\n"
+                    "    branches: [ main ]\n"
+                    "  workflow_dispatch:\n\n"
+                    "concurrency:\n"
+                    "  group: ${{ github.workflow }}-${{ github.ref }}\n"
+                    "  cancel-in-progress: true\n\n"
+                    "jobs:\n"
+                    "  verify:\n"
+                    "    name: Verify LienBond Estate & Deploy to Cloudflare Pages\n"
+                    "    runs-on: ubuntu-latest\n"
+                    "    steps:\n"
+                    "      - name: Checkout Repository\n"
+                    "        uses: actions/checkout@v4\n\n"
+                    "      - name: Set up Python\n"
+                    "        uses: actions/setup-python@v5\n"
+                    "        with:\n"
+                    "          python-version: '3.12'\n\n"
+                    "      - name: Install Test Runner\n"
+                    "        run: pip install pytest\n\n"
+                    "      - name: Run LienBond Estate Tests\n"
+                    "        run: pytest -q tests/\n\n"
+                    "      - name: Set up Node.js\n"
+                    "        if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
+                    "        uses: actions/setup-node@v4\n"
+                    "        with:\n"
+                    "          node-version: '22'\n\n"
+                    "      - name: Deploy to Cloudflare Pages Edge\n"
+                    "        if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
+                    "        env:\n"
+                    "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
+                    "          CLOUDFLARE_ACCOUNT_ID: '8789c54bef2d281d4a8afb4df34f9878'\n"
+                    "        run: npx wrangler pages deploy dist --project-name=lienbond --branch=main --commit-dirty=true\n"
+                )
+                cur_lb_ci = ci_yml_path.read_text(encoding="utf-8") if ci_yml_path.is_file() else ""
+                if cur_lb_ci != desired_lb_ci:
+                    workflows_dir.mkdir(parents=True, exist_ok=True)
+                    ci_yml_path.write_text(desired_lb_ci, encoding="utf-8")
+                    updated_files.append(str(ci_yml_path))
             if (
                 (repo / ".git").exists()
                 and (repo / "dist" / "catalog.json").is_file()

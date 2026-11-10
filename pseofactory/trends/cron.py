@@ -109,14 +109,14 @@ class TrendCronRunner:
         self.noise_filter = noise_filter or NoiseFilter()
         self.scanner = scanner or CrossPropertyContaminationScanner()
 
-    def determine_property_assignment(self, query: str) -> Dict[str, Any]:
+    def determine_property_assignment(self, query: str, include_spawned: bool = False) -> Dict[str, Any]:
         """
         Routes query to a registered property tenant or unassigned via declarative
         statutory intent tokens. Scans for cross-property token contamination.
         Zero em-dashes. Zero en-dashes.
         """
         assert_no_forbidden_dashes(query, "determine_property_assignment.query")
-        matched_map = match_tenant_statutory_intent(query)
+        matched_map = match_tenant_statutory_intent(query, include_spawned=include_spawned)
         matched_props = [p for p, flag in matched_map.items() if flag]
         if len(matched_props) == 1:
             target_prop = matched_props[0]

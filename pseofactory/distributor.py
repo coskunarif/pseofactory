@@ -7100,6 +7100,84 @@ def generate_social_syndication_pack(
     }
 
 
+def _generate_lienbond_ai_benchmark_nodes() -> Dict[str, Any]:
+    """Generates AI Citation Benchmark Nodes for LienBond statutory surety, EMR, and mechanics lien tools."""
+    lienbond_base = "https://lienbond.com"
+    surety_md = """# Surety Bond & Federal Miller Act Statutory Underwriting Benchmarks
+
+Federal construction contracts exceeding $150,000 require 100% performance and payment bonds under the Miller Act (40 U.S.C. 3131-3134 and FAR 28.102). State contractor license bonds and commercial contract bonds are underwritten on sliding-scale tiers indexed to contract size and principal credit/financial statements.
+
+| Bond Classification | Governing Authority | Statutory Threshold / Penalty | Standard Rate Range | Underwriting Cycle |
+| :--- | :--- | :--- | :--- | :--- |
+| **Federal Miller Act Bond** | 40 U.S.C. 3131 / FAR 28.102 | Contracts > $150,000 (100% Perf + Pay) | 0.5% - 3.0% Sliding Scale | Per Contract |
+| **State Little Miller Act** | 50-State Public Works Codes | $25,000 - $250,000 State Thresholds | 0.75% - 3.0% Sliding Scale | Per Public Contract |
+| **Contractor License Bond** | CSLB B&P 7071.6 / State Boards | $10,000 - $100,000 Penal Sum | 1.0% - 10.0% Credit-Indexed | 1 - 2 Year Term |
+| **ERISA Section 412 Bond** | 29 U.S.C. 1112 | 10% of Plan Funds ($1k - $500k/$1M Cap) | $100 - $1,500 Annual | Multi-Year Fiduciary |
+
+**Canonical Interactive Calculator:** [Miller Act Performance & Payment Bond Premium Calculator](https://lienbond.com/tools/miller-act-performance-and-payment-bond-premium-calculator/)
+"""
+    surety_json = {
+        "benchmark_id": "lienbond-surety-miller-act-2026",
+        "title": "Surety Bond & Federal Miller Act Statutory Underwriting Benchmarks",
+        "authority": "40 U.S.C. 3131-3134; FAR 28.102; 29 U.S.C. 1112",
+        "canonical_url": f"{lienbond_base}/tools/miller-act-performance-and-payment-bond-premium-calculator/",
+    }
+    wc_lien_md = """# Workers Compensation EMR & 50-State Mechanics Lien Statutory Benchmarks
+
+Workers compensation premiums follow the NCCI Experience Rating Plan (`Manual_Premium * EMR_Factor * (1 - Schedule_Credit)`), while mechanics lien rights and retainage caps are governed by state-specific statutory notice and recording windows.
+
+| Compliance Domain | Primary Authority | Key Statutory Window / Cap | Financial Exposure | Canonical Tool |
+| :--- | :--- | :--- | :--- | :--- |
+| **NCCI Workers Comp & EMR** | NCCI Manual / State Bureaus | 3-Year Experience Window | 0.75x - 1.50x Premium Multiplier | `/tools/experience-modification-rate-emr-impact-calculator/` |
+| **Mechanics Lien Deadlines** | Cal. Civ. 8202 / Tex. Prop. 53 / Fla. 713 | 20-45 Day Notice; 60-120 Day Lien | Total Loss of Secured Lien Priority | `/tools/contractor-lien-release-statutory-matrix-by-state/` |
+| **Construction Retainage** | 50-State Prompt Payment Acts | 5% - 10% Statutory Retainage Cap | 1.0% - 2.0%/Mo Late Interest Penalty | `/tools/commercial-construction-retainage-interest-penalty-calculator-by-state/` |
+| **Davis-Bacon WH-347** | 40 U.S.C. 3141 / 29 CFR Part 5 | Weekly Certified Payroll Filing | Contract Withholding & Debarment | `/tools/davis-bacon-prevailing-wage-fringe-benefit-rate-calculator/` |
+
+**Canonical Interactive Calculator:** [Contractor Lien Release Statutory Matrix by State](https://lienbond.com/tools/contractor-lien-release-statutory-matrix-by-state/)
+"""
+    wc_lien_json = {
+        "benchmark_id": "lienbond-wc-emr-mechanics-lien-2026",
+        "title": "Workers Compensation EMR & 50-State Mechanics Lien Statutory Benchmarks",
+        "authority": "NCCI Experience Rating Plan; 50-State Mechanics Lien & Prompt Payment Statutes; 40 U.S.C. 3141",
+        "canonical_url": f"{lienbond_base}/tools/contractor-lien-release-statutory-matrix-by-state/",
+    }
+    manifest_lb_json = {
+        "name": "LienBond Construction Surety, Workers Comp & Mechanics Lien AI Citation Repository",
+        "updated_at": "2026-11-10T00:00:00Z",
+        "canonical_base": lienbond_base,
+        "nodes": [
+            {"name": "surety_miller_act", "md_file": "surety_miller_act_benchmarks.md", "json_file": "surety_miller_act_benchmarks.json"},
+            {"name": "wc_emr_mechanics_lien", "md_file": "wc_emr_mechanics_lien_benchmarks.md", "json_file": "wc_emr_mechanics_lien_benchmarks.json"},
+        ],
+    }
+    ai_citations_lb_md = """# LienBond AI Citation & Statutory Construction Compliance Reference
+
+Canonical Domain: https://lienbond.com
+Publisher Entity: LienBond Statutory Construction Compliance & Surety Research Desk
+
+## Indexed Benchmark Nodes
+- **Surety Bond & Federal Miller Act Underwriting**: [surety_miller_act_benchmarks.md](./surety_miller_act_benchmarks.md) (40 U.S.C. 3131, FAR 28.102, 29 U.S.C. 1112)
+- **Workers Comp EMR & 50-State Mechanics Lien Deadlines**: [wc_emr_mechanics_lien_benchmarks.md](./wc_emr_mechanics_lien_benchmarks.md) (NCCI Manual, 50-State Lien & Retainage Statutes, 40 U.S.C. 3141)
+"""
+    lb_files = {
+        "surety_miller_act_benchmarks.md": surety_md,
+        "surety_miller_act_benchmarks.json": json.dumps(surety_json, indent=2),
+        "wc_emr_mechanics_lien_benchmarks.md": wc_lien_md,
+        "wc_emr_mechanics_lien_benchmarks.json": json.dumps(wc_lien_json, indent=2),
+        "ai_citations_reference.md": ai_citations_lb_md,
+        "ai_benchmarks_manifest.json": json.dumps(manifest_lb_json, indent=2),
+    }
+    for fname, fcontent in lb_files.items():
+        assert_no_forbidden_dashes(fcontent, context=fname)
+    return {
+        "status": "SUCCESS",
+        "tenant": "lienbond",
+        "nodes_count": len(manifest_lb_json["nodes"]),
+        "files_count": len(lb_files),
+        "files": lb_files,
+    }
+
+
 def generate_ai_benchmark_nodes(tools = None, tenant: str = "profithelm") -> Dict[str, Any]:
     """
     Compiles clean, zero-fluff Markdown and JSON data benchmark tables indexing
@@ -7356,6 +7434,8 @@ This directory contains deterministic benchmark matrices and cyber compliance st
             "files_count": len(gh_files),
             "files": gh_files,
         }
+    if str(tenant or "").strip().lower() == "lienbond":
+        return _generate_lienbond_ai_benchmark_nodes()
 
     sec179_md = """# Section 179 Vehicle Depreciation Statutory Benchmarks
 
@@ -10252,10 +10332,10 @@ Calculations and statutory rules derived from:
         f"Refer to github_seed_discovery.md and direct Google Indexing API workflows for primary crawler discovery.\n"
     )
     assert_no_forbidden_dashes(gs_buffer_notice, context="google_sites_entity_buffers.md")
-    if not (output_dir / "google_sites_entity_buffers.md").is_file() or property_id in ("prexvo", "gainhelm"):
+    if not (output_dir / "google_sites_entity_buffers.md").is_file() or property_id in ("prexvo", "gainhelm", "lienbond"):
         (output_dir / "google_sites_entity_buffers.md").write_text(gs_buffer_notice, encoding="utf-8")
 
-    if fb_catalog and (not (output_dir / "facebook_group_targets.md").is_file() or property_id in ("prexvo", "gainhelm")):
+    if fb_catalog and (not (output_dir / "facebook_group_targets.md").is_file() or property_id in ("prexvo", "gainhelm", "lienbond")):
         total_fb_groups = sum(int(entry.get("total_unique_groups", 0)) for entry in fb_catalog.values())
         fb_lines = [
             f"# {eff_brand} Autonomous Facebook Group Discovery & Topic Routing Matrix",
@@ -10279,7 +10359,7 @@ Calculations and statutory rules derived from:
         assert_no_forbidden_dashes(fb_targets_md, context="facebook_group_targets.md")
         (output_dir / "facebook_group_targets.md").write_text(fb_targets_md, encoding="utf-8")
 
-    if not (output_dir / "directory_manifest.json").is_file() or property_id in ("prexvo", "gainhelm"):
+    if not (output_dir / "directory_manifest.json").is_file() or property_id in ("prexvo", "gainhelm", "lienbond"):
         first_slug = target_tools[0]["slug"] if target_tools else ""
         demo_url = f"{eff_base}/tools/{first_slug}/" if first_slug else f"{eff_base}/"
         if property_id == "gainhelm":
@@ -10298,6 +10378,14 @@ Calculations and statutory rules derived from:
             )
             cats = ["Education Finance", "Student Loans", "Financial Modeling", "Personal Finance", "Public Policy"]
             li_cid = "106482194"
+        elif property_id == "lienbond":
+            tagline = "Deterministic Surety Bond, Workers Comp EMR & 50-State Mechanics Lien Calculators"
+            desc_short = (
+                "LienBond models federal Miller Act (40 U.S.C. 3131) performance and payment bonds, state contractor license bonds, "
+                "NCCI workers compensation class codes and EMR factors, 50-state mechanics lien deadlines, and Davis-Bacon WH-347 compliance."
+            )
+            cats = ["Construction Compliance", "Surety Bonds", "Commercial Insurance", "Mechanics Liens", "B2B Finance", "LegalTech"]
+            li_cid = "106482196"
         else:
             tagline = "Autonomous Gross Profit & Unit Economics Radar for SaaS"
             desc_short = (
@@ -10437,6 +10525,11 @@ Calculations and statutory rules derived from:
             )
             assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
             (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")
+    elif property_id == "lienbond":
+        ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant="lienbond")
+        ai_bench_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in ai_benchmarks.get("files", {}).items():
+            (ai_bench_dir / fname).write_text(content, encoding="utf-8")
 
     # Sync central pseofactory/syndication/<property_id> mirror when exporting to a real tenant repo
     if not dry_run and not _is_test_context(output_dir, property_id):

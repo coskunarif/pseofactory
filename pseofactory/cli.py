@@ -71,9 +71,14 @@ def cmd_audit(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     if getattr(args, "department_handoffs", False):
-        from pseofactory.supervisor import verify_department_handoff_chain
+        from pseofactory.supervisor import CANONICAL_TENANTS, verify_department_handoff_chain
+        from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
 
-        rep = verify_department_handoff_chain(persist=False)
+        handoff_props = list(CANONICAL_TENANTS)
+        for sp_id, sp_decl in SPAWNED_TENANT_DECLARATIONS.items():
+            if sp_id not in handoff_props and sp_decl.repo_root and Path(sp_decl.repo_root).is_dir():
+                handoff_props.append(sp_id)
+        rep = verify_department_handoff_chain(property_ids=handoff_props, persist=False)
         if getattr(args, "json", False):
             print(json.dumps(rep, indent=2))
         else:
@@ -843,7 +848,17 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     from pseofactory.supervisor import AutonomousLifecycleSupervisor, verify_department_handoff_chain
 
     if getattr(args, "verify_handoffs", False):
-        rep = verify_department_handoff_chain(persist=not getattr(args, "dry_run", False))
+        from pseofactory.supervisor import CANONICAL_TENANTS
+        from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
+
+        handoff_props = list(CANONICAL_TENANTS)
+        for sp_id, sp_decl in SPAWNED_TENANT_DECLARATIONS.items():
+            if sp_id not in handoff_props and sp_decl.repo_root and Path(sp_decl.repo_root).is_dir():
+                handoff_props.append(sp_id)
+        rep = verify_department_handoff_chain(
+            property_ids=handoff_props,
+            persist=not getattr(args, "dry_run", False),
+        )
         if getattr(args, "json", False):
             print(json.dumps(rep, indent=2))
         else:

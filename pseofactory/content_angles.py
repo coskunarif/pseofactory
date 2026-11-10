@@ -1305,6 +1305,8 @@ def expand_commercial_and_question_keywords(
         prop = "prexvo"
     elif "gainhelm" in prop:
         prop = "gainhelm"
+    elif "lienbond" in prop:
+        prop = "lienbond"
     else:
         prop = "profithelm"
 
@@ -1387,6 +1389,35 @@ def expand_commercial_and_question_keywords(
             f"can cloud shared responsibility inheritance lower {base_topic} scope",
             f"what penalties apply if an enterprise fails {base_topic} requirements",
             f"how to calculate internal security labor at 95 dollars per hour for {base_topic}",
+        ]
+    elif prop == "lienbond":
+        statutory_tag = "40 usc 3131 miller act ncci 50 state mechanics lien"
+        authority_label = "40 U.S.C. 3131 (Miller Act), NCCI Workers Comp Manual, and 50-State Mechanics Lien Statutes"
+        commercial_templates = [
+            f"{base_topic} calculator",
+            f"2026 {base_topic} statutory rate schedule",
+            f"{base_topic} surety bond premium quote model",
+            f"{base_topic} 50 state statutory deadline matrix",
+            f"{base_topic} credit score tier underwriting table",
+            f"{base_topic} miller act 40 usc 3131 estimator",
+            f"{base_topic} ncci class code and emr worksheet",
+            f"{base_topic} retainage interest penalty calculator",
+            f"{base_topic} davis bacon wh 347 compliance tool",
+            f"{base_topic} commercial contractor cost breakdown",
+        ]
+        question_templates = [
+            f"how much does {base_topic} cost for a commercial contractor in 2026",
+            f"when is a 100 percent performance and payment bond required for {base_topic}",
+            f"how does credit score or financial statement tier affect {base_topic} rates",
+            f"what are the statutory preliminary notice deadlines for {base_topic}",
+            f"how does an ncci emr factor above 1.00 impact {base_topic}",
+            f"what is the exact 40 usc 3131 or state statutory formula for {base_topic}",
+            f"when do statutory prompt payment interest penalties accrue on {base_topic}",
+            f"should a subcontractor file aconditional or unconditional waiver for {base_topic}",
+            f"how do davis bacon fringe benefits apply to overtime in {base_topic}",
+            f"what minimum bond penalty cap applies to {base_topic}",
+            f"can certified cpa workpapers lower surety underwriting rates for {base_topic}",
+            f"how to calculate state specific filing windows and penalties for {base_topic}",
         ]
     else:
         statutory_tag = "irc 26 cfr statutory schedule"

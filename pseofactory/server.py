@@ -139,7 +139,11 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         for line in raw_lines:
             stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
+            if not stripped:
+                continue
+            if stripped.startswith("# [edge-middleware-redirect]"):
+                stripped = stripped[len("# [edge-middleware-redirect]") :].strip()
+            elif stripped.startswith("#"):
                 continue
             tokens = stripped.split()
             if len(tokens) < 2:

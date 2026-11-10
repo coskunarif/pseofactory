@@ -341,21 +341,26 @@ class FactoryPipeline:
         """
         from pseofactory.tenant_facts import (
             CANONICAL_TENANT_DECLARATIONS,
+            SPAWNED_TENANT_DECLARATIONS,
             match_tenant_statutory_intent,
         )
 
         assert_no_forbidden_dashes(query, "determine_property_assignment.query")
         q_lower = query.lower().strip()
-        matched_map = match_tenant_statutory_intent(query)
+        include_spawned = bool(
+            explicit_tenant and explicit_tenant.lower().strip() in SPAWNED_TENANT_DECLARATIONS
+        )
+        matched_map = match_tenant_statutory_intent(query, include_spawned=include_spawned)
+        all_decls = {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}
 
         if explicit_tenant:
             tenant_norm = explicit_tenant.lower().strip()
-            if tenant_norm in CANONICAL_TENANT_DECLARATIONS:
+            if tenant_norm in all_decls:
                 foreign = self.scanner.scan_text(query, tenant_norm)
                 for other_id, other_hit in matched_map.items():
                     if other_id == tenant_norm or not other_hit:
                         continue
-                    other_contract = CANONICAL_TENANT_DECLARATIONS[other_id]
+                    other_contract = all_decls[other_id]
                     matched_tok = next(
                         (tok for tok in other_contract.statutory_intent_tokens if tok in q_lower),
                         None,

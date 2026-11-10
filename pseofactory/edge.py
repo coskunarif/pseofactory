@@ -25,6 +25,7 @@ class EdgeConfigStandards:
     """Standardized edge caching directives and machine content types."""
 
     MAX_CLOUDFLARE_HEADERS_RULES: int = 95
+    MAX_CLOUDFLARE_REDIRECTS_RULES: int = 95
     STATIC_CACHE: str = "public, max-age=31536000, immutable"
     HTML_MACHINE_CACHE: str = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
     ERROR_CACHE: str = "no-store"
@@ -324,6 +325,219 @@ def compact_edge_headers_to_cloudflare_cap(
             out_lines.append("")
 
     return "\n".join(out_lines).rstrip() + "\n"
+
+
+_GOVERNANCE_REDIRECT_SOURCES: Set[str] = {
+    "/methodology",
+    "/methodology/",
+    "/about",
+    "/about/",
+    "/privacy",
+    "/privacy/",
+    "/disclaimers",
+    "/disclaimers/",
+    "/terms",
+    "/terms/",
+    "/terms-of-service",
+    "/terms-of-service/",
+    "/privacy-policy",
+    "/privacy-policy/",
+}
+
+
+def parse_edge_redirects_rules(
+    content: str,
+    include_middleware_overflow: bool = True,
+) -> List[Tuple[str, str, str, bool]]:
+    """
+    Parses Cloudflare Pages _redirects rules into (src, dst, status_code, is_overflow).
+    Supports both active rule lines and '# [edge-middleware-redirect] <src> <dst> <code'
+    overflow lines handled by functions/_middleware.js.
+    """
+    parsed: List[Tuple[str, str, str, bool]] = []
+    for raw_line in content.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        is_overflow = False
+        if stripped.startswith("# [edge-middleware-redirect]"):
+            if not include_middleware_overflow:
+                continue
+            stripped = stripped[len("# [edge-middleware-redirect]") :].strip()
+            is_overflow = True
+        elif stripped.startswith("#"):
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2:
+            src = parts[0].strip()
+            dst = parts[1].strip()
+            code = parts[2].strip() if len(parts) >= 3 else "301"
+            parsed.append((src, dst, code, is_overflow))
+    return parsed
+
+
+def compact_edge_redirects_to_cloudflare_cap(
+    content: str,
+    max_active_rules: int = EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES,
+) -> str:
+    """
+    Compacts an existing dist/_redirects file so active non-comment rule lines never exceed
+    max_active_rules (<= 95, safely under Cloudflare Pages' hard 100-rule limit).
+    Prioritizes:
+      0. Governance routes (/methodology, /about, /privacy, /disclaimers, /terms, etc.)
+      1. Wildcard/splat rules and /vs/ordermetrics* rules
+      2. Canonical slashless base paths (/tools/foo)
+      3. Trailing-slash duplicate paths (/tools/foo/)
+    Overflow rules beyond max_active_rules are preserved as '# [edge-middleware-redirect]'
+    annotations and served with HTTP 301 at the edge by functions/_middleware.js.
+    """
+    parsed = parse_edge_redirects_rules(content, include_middleware_overflow=True)
+    if not parsed:
+        return content
+
+    deduped: Dict[str, Tuple[str, str]] = {}
+    order: List[str] = []
+    for src, dst, code, _is_ov in parsed:
+        if not src.startswith("/"):
+            continue
+        if src not in deduped:
+            deduped[src] = (dst, code)
+            order.append(src)
+
+    if not order:
+        return content
+
+    def _redirect_priority(src_path: str) -> int:
+        if src_path in _GOVERNANCE_REDIRECT_SOURCES:
+            return 0
+        if "*" in src_path or ":" in src_path or src_path.startswith("/vs/ordermetrics"):
+            return 1
+        if src_path != "/" and not src_path.endswith("/"):
+            return 2
+        return 3
+
+    sorted_sources = [
+        s for _, s in sorted(enumerate(order), key=lambda item: (_redirect_priority(item[1]), item[0]))
+    ]
+    out_lines: List[str] = []
+    active_count = 0
+    for src in sorted_sources:
+        dst, code = deduped[src]
+        if active_count < max_active_rules:
+            out_lines.append(f"{src}  {dst}  {code}")
+            active_count += 1
+        else:
+            out_lines.append(f"# [edge-middleware-redirect] {src}  {dst}  {code}")
+
+    result = "\n".join(out_lines).rstrip() + "\n"
+    assert_no_forbidden_dashes(result, "compact_edge_redirects_to_cloudflare_cap")
+    return result
+
+
+def validate_edge_redirects_file(
+    redirects_path: Union[str, Path],
+    max_active_rules: int = EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES,
+) -> Dict[str, Any]:
+    """
+    Validates compiled dist/_redirects against Cloudflare Pages' 100-rule truncation limit
+    (enforcing <= max_active_rules active non-comment rules) and checks basic rule syntax.
+    """
+    rp = Path(redirects_path)
+    issues: List[str] = []
+    if not rp.is_file():
+        return {
+            "status": "FAIL",
+            "redirects_path": str(rp),
+            "active_rules_count": 0,
+            "total_rules_count": 0,
+            "violations_count": 1,
+            "issues": [f"Redirects file not found: {rp}"],
+        }
+    content = rp.read_text(encoding="utf-8", errors="ignore")
+    active_rules = parse_edge_redirects_rules(content, include_middleware_overflow=False)
+    all_rules = parse_edge_redirects_rules(content, include_middleware_overflow=True)
+    if len(active_rules) > max_active_rules:
+        issues.append(
+            f"Active _redirects rule count ({len(active_rules)}) exceeds Cloudflare Pages cap ({max_active_rules})"
+        )
+    all_sources = {src for src, _dst, _code, _ov in all_rules}
+    for src, dst, _code, _ov in all_rules:
+        if src != "/" and src.rstrip("/") == dst.rstrip("/"):
+            issues.append(f"Self-redirect detected in _redirects: {src} -> {dst}")
+        elif dst != "/" and dst in all_sources:
+            issues.append(f"Redirect chain detected in _redirects: {src} -> {dst}")
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "redirects_path": str(rp),
+        "active_rules_count": len(active_rules),
+        "total_rules_count": len(all_rules),
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
+def _sync_middleware_redirect_table(
+    mw_text: str,
+    extra_exact_redirects: Dict[str, str],
+) -> str:
+    """
+    Synchronizes exact 301 redirect mappings into functions/_middleware.js
+    (legacySaaSRedirects or edgeRedirects) and ensures trailing-slash-normalized lookup.
+    """
+    obj_match = re.search(
+        r"(  const (legacySaaSRedirects|edgeRedirects) = \{\n)([\s\S]*?)(  \};)",
+        mw_text,
+    )
+    if not obj_match:
+        return mw_text
+
+    var_name = obj_match.group(2)
+    body_text = obj_match.group(3)
+    entry_pat = re.compile(r'^\s*"([^"]+)"\s*:\s*"([^"]+)"\s*,?\s*$')
+    merged_entries: Dict[str, str] = {}
+    entry_order: List[str] = []
+    for raw_line in body_text.splitlines():
+        em = entry_pat.match(raw_line)
+        if em:
+            k, v = em.group(1), em.group(2)
+            if k not in merged_entries:
+                entry_order.append(k)
+            merged_entries[k] = v
+
+    for k, v in extra_exact_redirects.items():
+        if not k.startswith("/") or "*" in k or ":" in k or k == "/":
+            continue
+        if k.rstrip("/") == v.rstrip("/"):
+            continue
+        if k not in merged_entries:
+            entry_order.append(k)
+        merged_entries[k] = v
+
+    rendered_lines = [f'    "{k}": "{merged_entries[k]}",' for k in entry_order]
+    new_obj_block = obj_match.group(1) + "\n".join(rendered_lines) + "\n" + obj_match.group(4)
+    updated = mw_text[: obj_match.start()] + new_obj_block + mw_text[obj_match.end() :]
+
+    norm_lookup_block = (
+        f'  const _normRedirectPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;\n'
+        f'  const _matchedRedirectTarget = {var_name}[pathname] || {var_name}[_normRedirectPath] || {var_name}[_normRedirectPath + "/"];\n'
+        f"  if (_matchedRedirectTarget) {{\n"
+        f"    return Response.redirect(`${{url.origin}}${{_matchedRedirectTarget}}`, 301);\n"
+        f"  }}"
+    )
+    exact_if_pat = re.compile(
+        rf"  if \({re.escape(var_name)}\[pathname\]\) \{{\n"
+        rf"    return Response\.redirect\(`\$\{{url\.origin\}}\$\{{{re.escape(var_name)}\[pathname\]\}}`, 301\);\n"
+        rf"  \}}"
+    )
+    if "_matchedRedirectTarget" not in updated:
+        if exact_if_pat.search(updated):
+            updated = exact_if_pat.sub(lambda _m: norm_lookup_block, updated, count=1)
+        else:
+            anchor = new_obj_block + "\n"
+            if anchor in updated:
+                updated = updated.replace(anchor, anchor + "\n" + norm_lookup_block + "\n", 1)
+
+    return updated
 
 
 class HostHygieneAuditor:
@@ -11472,6 +11686,16 @@ def sync_tenant_edge_redirect_function(
                     dist_needs_update = True
             except Exception:
                 pass
+        redirects_file = dist_dir / "_redirects"
+        if redirects_file.is_file():
+            try:
+                orig_redirects = redirects_file.read_text(encoding="utf-8")
+                compacted_redirects = compact_edge_redirects_to_cloudflare_cap(orig_redirects)
+                if compacted_redirects != orig_redirects:
+                    redirects_file.write_text(compacted_redirects, encoding="utf-8")
+                    dist_needs_update = True
+            except Exception:
+                pass
 
     # Ensure functions/_middleware.js enforces www->apex 301 redirects, legacy GSC 301 redirects,
     # non-apex noindex lockdown, and RFC 5988 canonical Link header on apex HTML responses.
@@ -11669,6 +11893,51 @@ def sync_tenant_edge_redirect_function(
                         '    "/tools/saas-burn-multiple-runway/": "/tools/saas-runway-calculator/",\n',
                         1,
                     )
+
+            extra_mw_redirects: Dict[str, str] = {}
+            content_redirects_json = repo / "content" / "redirects.json"
+            if content_redirects_json.is_file():
+                try:
+                    raw_rj = json.loads(content_redirects_json.read_text(encoding="utf-8"))
+                    if isinstance(raw_rj, dict):
+                        for r_src, r_info in raw_rj.items():
+                            r_dst = r_info.get("target") if isinstance(r_info, dict) else r_info
+                            r_code = int(r_info.get("status", 301)) if isinstance(r_info, dict) else 301
+                            if (
+                                isinstance(r_src, str)
+                                and isinstance(r_dst, str)
+                                and r_code in (301, 302, 307, 308)
+                                and r_src.startswith("/")
+                                and "*" not in r_src
+                                and ":" not in r_src
+                            ):
+                                base_src = r_src.rstrip("/")
+                                if base_src and not (dist_dir / base_src.lstrip("/") / "index.html").is_file():
+                                    extra_mw_redirects[base_src] = r_dst
+                                    extra_mw_redirects[base_src + "/"] = r_dst
+                except Exception:
+                    pass
+            dist_redirects_file = dist_dir / "_redirects"
+            if dist_redirects_file.is_file():
+                try:
+                    for r_src, r_dst, r_code_str, _is_ov in parse_edge_redirects_rules(
+                        dist_redirects_file.read_text(encoding="utf-8", errors="ignore"),
+                        include_middleware_overflow=True,
+                    ):
+                        if (
+                            r_code_str in ("301", "302", "307", "308")
+                            and r_src.startswith("/")
+                            and "*" not in r_src
+                            and ":" not in r_src
+                            and r_src != "/"
+                        ):
+                            base_src = r_src.rstrip("/")
+                            if base_src and not (dist_dir / base_src.lstrip("/") / "index.html").is_file():
+                                extra_mw_redirects[base_src] = r_dst
+                                extra_mw_redirects[base_src + "/"] = r_dst
+                except Exception:
+                    pass
+            mw_new = _sync_middleware_redirect_table(mw_new, extra_mw_redirects)
 
             if "  return await context.next();\n}" in mw_new:
                 mw_new = mw_new.replace(

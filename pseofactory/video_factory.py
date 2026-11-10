@@ -513,8 +513,9 @@ def _load_upload_idempotency_map(
                 for key, val in entries.items():
                     if not isinstance(val, dict):
                         continue
-                    v_prop = _normalize_property_id(str(val.get("property_id") or prop))
-                    v_slug = str(val.get("slug") or key.split(":")[-1]).strip()
+                    inferred_prop = key.split(":", 1)[0] if ":" in str(key) else prop
+                    v_prop = _normalize_property_id(str(val.get("property_id") or inferred_prop))
+                    v_slug = str(val.get("slug") or str(key).split(":")[-1]).strip()
                     vid = str(val.get("video_id") or "").strip()
                     if v_prop == prop and v_slug and vid and vid != "unknown":
                         records[v_slug] = val
@@ -607,22 +608,144 @@ def _save_upload_idempotency_record(
         if central_p not in target_paths:
             target_paths.append(central_p)
 
+    import fcntl
+
     for l_path in target_paths:
-        data: Dict[str, Any] = {"uploads": {}, "updated_at": datetime.now(timezone.utc).isoformat()}
-        if l_path.is_file():
-            try:
-                loaded = json.loads(l_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    data = loaded
-            except Exception:
-                pass
-        uploads_map = data.setdefault("uploads", {})
-        uploads_map[key] = dict(record)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         l_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_f = l_path.with_suffix(".tmp")
-        tmp_f.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp_f.replace(l_path)
+        lock_path = l_path.parent / f"{l_path.name}.lock"
+        with open(lock_path, "a+", encoding="utf-8") as lock_fd:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            try:
+                data: Dict[str, Any] = {"uploads": {}, "updated_at": datetime.now(timezone.utc).isoformat()}
+                if l_path.is_file():
+                    try:
+                        loaded = json.loads(l_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded, dict):
+                            data = loaded
+                    except Exception:
+                        pass
+                uploads_map = data.setdefault("uploads", {})
+                uploads_map[key] = dict(record)
+                data["updated_at"] = datetime.now(timezone.utc).isoformat()
+                tmp_f = l_path.with_suffix(".tmp")
+                tmp_f.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                tmp_f.replace(l_path)
+            finally:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+
+
+def sync_uploaded_log_from_ledger(
+    repo_root: Union[str, Path],
+    property_id: str,
+    dist_dir: Optional[Union[str, Path]] = None,
+) -> bool:
+    """
+    Deterministically merges any missing YouTube upload records from gitignored
+    `<repo_root>/.agy/youtube_upload_ledger.json` into `<dist_dir>/videos/uploaded_log.json`
+    before substrate_lock.json hashes `dist/`.
+    Returns True if `dist/videos/uploaded_log.json` was created or updated.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import fcntl
+
+    r_root = Path(repo_root).resolve()
+    eff_dist = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
+    ledger_path = r_root / ".agy" / "youtube_upload_ledger.json"
+    uploaded_log_path = eff_dist / "videos" / "uploaded_log.json"
+    if not ledger_path.is_file() or not uploaded_log_path.is_file():
+        return False
+
+    prop = _normalize_property_id(property_id)
+    lock_path = ledger_path.parent / f"{ledger_path.name}.lock"
+    ledger_uploads: Dict[str, Any] = {}
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lock_fd:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_SH)
+            try:
+                raw_ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+                if isinstance(raw_ledger, dict) and isinstance(raw_ledger.get("uploads"), dict):
+                    ledger_uploads = raw_ledger["uploads"]
+            finally:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        return False
+
+    if not ledger_uploads:
+        return False
+
+    try:
+        orig_log_text = uploaded_log_path.read_text(encoding="utf-8")
+        raw_log = json.loads(orig_log_text)
+        if not isinstance(raw_log, list):
+            return False
+    except Exception:
+        return False
+
+    existing_by_slug: Dict[str, Dict[str, Any]] = {}
+    ordered_items: List[Dict[str, Any]] = []
+    for item in raw_log:
+        if not isinstance(item, dict):
+            continue
+        s_val = str(item.get("slug") or "").strip()
+        if not s_val or s_val in existing_by_slug:
+            continue
+        cloned = dict(item)
+        existing_by_slug[s_val] = cloned
+        ordered_items.append(cloned)
+
+    new_candidates: List[Dict[str, Any]] = []
+    mutated = False
+    for key, val in sorted(ledger_uploads.items()):
+        if not isinstance(val, dict):
+            continue
+        inferred_prop = key.split(":", 1)[0] if ":" in str(key) else prop
+        v_prop = _normalize_property_id(str(val.get("property_id") or inferred_prop))
+        if v_prop != prop:
+            continue
+        v_slug = str(val.get("slug") or str(key).split(":")[-1]).strip()
+        vid = str(val.get("video_id") or "").strip()
+        if not v_slug or not vid or vid == "unknown":
+            continue
+        uploaded_at = str(val.get("uploaded_at") or val.get("timestamp") or "").strip()
+        video_url = str(val.get("url") or val.get("video_url") or f"https://www.youtube.com/watch?v={vid}").strip()
+        title = str(val.get("title") or v_slug).strip()
+        status_str = str(val.get("status") or ("uploaded_public" if str(val.get("privacy") or "public") == "public" else "uploaded")).strip()
+        cap_id = val.get("caption_id")
+        pin_id = val.get("pinned_comment_id")
+        if v_slug in existing_by_slug:
+            cur = existing_by_slug[v_slug]
+            if not cur.get("caption_id") and cap_id:
+                cur["caption_id"] = cap_id
+                mutated = True
+            if not cur.get("pinned_comment_id") and pin_id:
+                cur["pinned_comment_id"] = pin_id
+                mutated = True
+            continue
+        entry: Dict[str, Any] = {
+            "slug": v_slug,
+            "video_id": vid,
+            "title": title,
+            "uploaded_at": uploaded_at,
+            "status": status_str,
+            "url": video_url,
+            "caption_id": cap_id if cap_id else None,
+            "pinned_comment_id": pin_id if pin_id else None,
+        }
+        new_candidates.append(entry)
+        existing_by_slug[v_slug] = entry
+        mutated = True
+
+    if not mutated:
+        return False
+
+    new_candidates.sort(key=lambda item: (str(item.get("uploaded_at") or ""), str(item.get("slug") or "")))
+    merged_list = ordered_items + new_candidates
+    rendered = json.dumps(merged_list, indent=2) + "\n"
+    if rendered == orig_log_text:
+        return False
+    uploaded_log_path.write_text(rendered, encoding="utf-8")
+    return True
 
 
 def evaluate_page_video_eligibility(

@@ -1810,7 +1810,10 @@ LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
         "workers comp",
         "workers compensation",
         "class code",
-        "emr",
+        "ncci emr",
+        "emr factor",
+        "emr impact",
+        "emr rate",
         "experience modification",
         "erisa fidelity",
         "fidelity bond",
@@ -2000,6 +2003,11 @@ def _sync_derived_tenant_registries() -> None:
     for pid, contract in SPAWNED_TENANT_DECLARATIONS.items():
         CANONICAL_TENANT_HOSTS[pid] = contract.domain
         CANONICAL_TENANT_CONFIGS[pid] = contract.to_tenant_config_dict()
+        if contract.linkedin_company_id:
+            DEFAULT_TENANT_LINKEDIN_IDS[pid] = contract.linkedin_company_id
+        TENANT_CATEGORY_SEED_TAXONOMY[pid] = {
+            k: list(v) for k, v in contract.category_seed_taxonomy.items()
+        }
         TENANT_VIDEO_BRANDING[pid] = dict(contract.video_branding)
         TENANT_FLAGSHIP_ANCHOR_SLUGS[pid] = tuple(contract.flagship_anchor_slugs)
         TENANT_SMOKE_PROBES[pid] = dict(contract.default_smoke_probe)
@@ -2114,10 +2122,10 @@ def get_tenant_contract(
     )
 
 
-def match_tenant_statutory_intent(query: str) -> Dict[str, bool]:
+def match_tenant_statutory_intent(query: str, include_spawned: bool = False) -> Dict[str, bool]:
     """
     Evaluates a search query against all registered tenants' statutory_intent_tokens
-    in TENANT_STATUTORY_INTENT_TOKENS.
+    in TENANT_STATUTORY_INTENT_TOKENS (plus SPAWNED_TENANT_DECLARATIONS when include_spawned=True).
     """
     q_lower = (query or "").lower().strip()
     matched: Dict[str, bool] = {}
@@ -2126,6 +2134,10 @@ def match_tenant_statutory_intent(query: str) -> Dict[str, bool]:
         if not hit and pid == "profithelm" and ("1031" in q_lower and "exchange" in q_lower):
             hit = True
         matched[pid] = hit
+    if include_spawned:
+        for pid, contract in SPAWNED_TENANT_DECLARATIONS.items():
+            if pid not in matched:
+                matched[pid] = any(tok in q_lower for tok in contract.statutory_intent_tokens)
     return matched
 
 

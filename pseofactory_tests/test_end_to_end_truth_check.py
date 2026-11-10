@@ -2996,7 +2996,8 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
     assert "host_alt =" in (ph_pkg / "gsc_adapter.py").read_text(encoding="utf-8")
     assert "and not extra_tools" in (ph_pkg / "builder.py").read_text(encoding="utf-8")
     ph_fac_txt = (ph_pkg / "factory.py").read_text(encoding="utf-8")
-    assert "compute_dist_lock_metrics" in ph_fac_txt
+    assert "write_substrate_lock" in ph_fac_txt
+    assert "sync_ledgers=True" in ph_fac_txt
     assert '"git", "add", "-f", "dist/", "machine_endpoints/", ".agy/runs/"' in ph_fac_txt
     assert '"substrate_lock.json"' in ph_fac_txt
     assert 'auto_stage_overlays=not os.getenv("PYTEST_CURRENT_TEST")' in ph_fac_txt
@@ -3026,7 +3027,8 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
     px_ci_txt = (px_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert px_ci_txt.index("Execute Full Test Suite") < px_ci_txt.index("Verify Compiled Static Distribution & Statutory Audit")
     px_fac_txt = (px_pkg / "factory.py").read_text(encoding="utf-8")
-    assert "compute_dist_lock_metrics" in px_fac_txt
+    assert "write_substrate_lock" in px_fac_txt
+    assert "sync_ledgers=True" in px_fac_txt
     assert '"content/deployed_voids.json"' in px_fac_txt
     assert '"substrate_lock.json"' in px_fac_txt
 
