@@ -262,8 +262,35 @@ def write_substrate_lock(
         except Exception:
             existing = {}
     pid = property_id or str(existing.get("property_id") or r_root.name.split("-")[0]).strip().lower()
+    dist_dir = r_root / "dist"
+    if dist_dir.is_dir():
+        try:
+            from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+            for html_f in sorted(dist_dir.rglob("*.html")):
+                if not html_f.is_file():
+                    continue
+                try:
+                    raw_html = html_f.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                if (
+                    'id="pseo-visual-primitives"' in raw_html
+                    or "id='pseo-visual-primitives'" in raw_html
+                    or 'id="calc-result-quick-unlock-bar"' in raw_html
+                    or "id='calc-result-quick-unlock-bar'" in raw_html
+                    or 'id="partner-quote-intake-step"' in raw_html
+                    or "id='partner-quote-intake-step'" in raw_html
+                    or 'class="calculator-card"' in raw_html
+                    or 'class="tool-header"' in raw_html
+                ):
+                    norm_html, _ = normalize_html_visual_primitives(raw_html)
+                    if norm_html != raw_html:
+                        html_f.write_text(norm_html, encoding="utf-8")
+        except Exception:
+            pass
     eh = expected_hash or compute_engine_hash()
-    fp, tot = compute_dist_lock_metrics(r_root / "dist")
+    fp, tot = compute_dist_lock_metrics(dist_dir)
     payload = {
         "dist_fingerprint": fp,
         "engine_hash": eh,

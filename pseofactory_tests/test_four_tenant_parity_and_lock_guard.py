@@ -181,3 +181,24 @@ def test_recompute_tenant_lock_enforces_visual_primitive_and_quick_unlock_parity
     actual_fp, _ = compute_dist_lock_metrics(repo_dir / "dist")
     assert lock_data["dist_fingerprint"] == actual_fp
 
+
+def test_quick_unlock_balanced_div_replacement_never_clobbers_downstream_forms():
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    # Bar without inner </form>, followed by downstream #partner-quote-intake-form
+    raw_html = (
+        '<!DOCTYPE html><html><head><style id="pseo-visual-primitives">/* stale */</style></head><body>'
+        '<div id="partner-quote-intake-step" data-property-id="prexvo" data-tool-slug="grad-plus-borrowing-cap-calculator" data-calculated-amount="65000">'
+        '<div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" data-contextual-v2="1">'
+        '<div class="nested-header"><div>Legacy form-less quick bar with RAP vs. IBR vs. Refinance amortization schedule</div></div>'
+        "</div>"
+        '<div class="important-downstream-section"><form id="partner-quote-intake-form"><button type="submit">Get Quote</button></form></div>'
+        "</div></body></html>"
+    )
+    healed, _ = normalize_html_visual_primitives(raw_html)
+    assert "important-downstream-section" in healed
+    assert 'id="partner-quote-intake-form"' in healed
+    assert "RAP vs. IBR vs. Refinance amortization schedule" not in healed
+    assert "RAP vs. IBR vs. Standard amortization schedule" in healed
+
+

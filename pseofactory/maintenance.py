@@ -988,19 +988,25 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             f"    if hasattr(mod, 'build_asset'):\n"
             f"        mod.build_asset({repr(slug)}, target_file={repr(str(target_file) if target_file else None)})\n"
             f"        sys.exit(0)\n"
-            f"    elif hasattr(mod, 'build_tool_page') and hasattr(mod, 'TOOLS') and ({repr(str(self._dist_dir / 'index.html'))}):\n"
+            f"    elif hasattr(mod, 'TOOLS') and ({repr(str(self._dist_dir / 'index.html'))}):\n"
             f"        from pathlib import Path\n"
             f"        dist_p = Path({repr(str(self._dist_dir))})\n"
             f"        matched = [t for t in getattr(mod, 'TOOLS', []) if isinstance(t, dict) and t.get('slug') == {repr(slug)}]\n"
-            f"        if matched and (dist_p / 'index.html').is_file():\n"
-            f"            mod.build_tool_page(matched[0])\n"
-            f"            t_html = dist_p / 'tools' / {repr(slug)} / 'index.html'\n"
-            f"            if t_html.is_file():\n"
-            f"                from pseofactory.maintenance import RetroReflectionEngine\n"
-            f"                raw_h = t_html.read_text(encoding='utf-8')\n"
-            f"                upd_h, _ = RetroReflectionEngine.retrofit_html(raw_h, {repr(self._property_id)}, slug={repr(slug)}, dist_dir=dist_p)\n"
-            f"                if upd_h != raw_h:\n"
-            f"                    t_html.write_text(upd_h, encoding='utf-8')\n"
+            f"        if (dist_p / 'index.html').is_file():\n"
+            f"            if matched:\n"
+            f"                if hasattr(mod, 'build_tool_page'):\n"
+            f"                    mod.build_tool_page(matched[0])\n"
+            f"                elif hasattr(mod, 'render_generic_tool_page'):\n"
+            f"                    t_dir = dist_p / 'tools' / {repr(slug)}\n"
+            f"                    t_dir.mkdir(parents=True, exist_ok=True)\n"
+            f"                    (t_dir / 'index.html').write_text(mod.render_generic_tool_page(matched[0]), encoding='utf-8')\n"
+            f"                t_html = dist_p / 'tools' / {repr(slug)} / 'index.html'\n"
+            f"                if t_html.is_file():\n"
+            f"                    from pseofactory.maintenance import RetroReflectionEngine\n"
+            f"                    raw_h = t_html.read_text(encoding='utf-8')\n"
+            f"                    upd_h, _ = RetroReflectionEngine.retrofit_html(raw_h, {repr(self._property_id)}, slug={repr(slug)}, dist_dir=dist_p)\n"
+            f"                    if upd_h != raw_h:\n"
+            f"                        t_html.write_text(upd_h, encoding='utf-8')\n"
             f"            sys.exit(0)\n"
             f"    if hasattr(mod, 'build_all'):\n"
             f"        try:\n"
@@ -4641,9 +4647,18 @@ class MaintenanceLifecycle:
                     continue
                 else:
                     try:
-                        adapter.build_asset(slug=b_slug)
-                    except TypeError:
-                        adapter.build_asset(b_slug)
+                        try:
+                            adapter.build_asset(slug=b_slug)
+                        except TypeError:
+                            adapter.build_asset(b_slug)
+                    except (SubprocessCrashError, LockContentionError):
+                        if is_prod_subproc_tenant and (Path(adapter.repo_path) / ".git").exists():
+                            subprocess.run(
+                                ["git", "-C", str(adapter.repo_path), "checkout", "-q", "HEAD", "--", "dist"],
+                                capture_output=True,
+                                check=False,
+                                timeout=15,
+                            )
                     if is_prod_subproc_tenant and not getattr(adapter, "_build_asset_command", None):
                         prod_full_build_done = True
 

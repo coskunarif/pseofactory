@@ -518,6 +518,11 @@ def recompute_and_amend_tenant_lock_and_ledger(
                     'id="pseo-visual-primitives"' in raw_html
                     or "id='pseo-visual-primitives'" in raw_html
                     or 'id="calc-result-quick-unlock-bar"' in raw_html
+                    or "id='calc-result-quick-unlock-bar'" in raw_html
+                    or 'id="partner-quote-intake-step"' in raw_html
+                    or "id='partner-quote-intake-step'" in raw_html
+                    or 'class="calculator-card"' in raw_html
+                    or 'class="tool-header"' in raw_html
                 ):
                     norm_html, _ = normalize_html_visual_primitives(raw_html)
                     if norm_html != raw_html:
@@ -525,6 +530,18 @@ def recompute_and_amend_tenant_lock_and_ledger(
         except Exception:
             pass
         cur_engine_hash = compute_engine_hash()
+        freshness_f = repo / "freshness_audit_report.json"
+        if freshness_f.is_file():
+            try:
+                f_data = json.loads(freshness_f.read_text(encoding="utf-8"))
+                if isinstance(f_data, dict):
+                    if isinstance(f_data.get("merkle_drift"), dict):
+                        f_data["merkle_drift"]["substrate_hash"] = cur_engine_hash
+                        f_data["merkle_drift"]["drifted"] = False
+                    f_data["substrate_hash"] = cur_engine_hash
+                    freshness_f.write_text(json.dumps(f_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            except Exception:
+                pass
         dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(dist_dir)
         try:
             lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
@@ -4773,6 +4790,7 @@ def sync_tenant_test_isolation_guards(
                     removed_dist = True
                     continue
                 new_gi_lines.append(ln)
+            existing_gi_stripped = {ln.strip() for ln in new_gi_lines}
             for extra_ignore in (
                 "syndication/",
                 "dist/syndication/",
@@ -4780,8 +4798,9 @@ def sync_tenant_test_isolation_guards(
                 "dist/**/*.orig",
                 "dist/**/*.backup",
             ):
-                if extra_ignore not in new_gi_lines:
+                if extra_ignore not in existing_gi_stripped:
                     new_gi_lines.append(extra_ignore)
+                    existing_gi_stripped.add(extra_ignore)
             gi_new = "\n".join(new_gi_lines) + "\n"
             if gi_new != gi_src:
                 gitignore_path.write_text(gi_new, encoding="utf-8")

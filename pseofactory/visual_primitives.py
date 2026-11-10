@@ -5398,7 +5398,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             resolve_quick_unlock_contextual_copy,
         )
 
-        if 'id="calc-result-quick-unlock-bar"' not in updated:
+        if 'id="calc-result-quick-unlock-bar"' not in updated and "id='calc-result-quick-unlock-bar'" not in updated:
             quick_bar_html = render_calc_result_quick_unlock_bar_html(
                 slug=tool_slug,
                 property_id=prop_id,
@@ -5431,16 +5431,29 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 baseline_amount=q_calc_amt,
             )
             if quick_bar_html:
-                updated_qb, n_qb = re.subn(
-                    r'<div\b[^>]*id=["\']calc-result-quick-unlock-bar["\'][^>]*>[\s\S]*?</form>\s*<div[^>]*>[\s\S]*?</div>\s*</div>',
-                    quick_bar_html.strip(),
+                qb_open_m = re.search(
+                    r'<div\b[^>]*\bid=["\']calc-result-quick-unlock-bar["\'][^>]*>',
                     updated,
-                    count=1,
                     flags=re.IGNORECASE,
                 )
-                if n_qb > 0 and updated_qb != updated:
-                    updated = updated_qb
-                    actions.append("calc_result_quick_unlock_bar_contextual_v2")
+                if qb_open_m:
+                    qb_start = qb_open_m.start()
+                    qb_depth = 0
+                    qb_end = -1
+                    for div_tok in re.finditer(r"</?div\b[^>]*>", updated[qb_start:], flags=re.IGNORECASE):
+                        tok_str = div_tok.group(0).lower()
+                        if tok_str.startswith("</div"):
+                            qb_depth -= 1
+                            if qb_depth == 0:
+                                qb_end = qb_start + div_tok.end()
+                                break
+                        elif not tok_str.endswith("/>"):
+                            qb_depth += 1
+                    if qb_end > qb_start:
+                        updated_qb = updated[:qb_start] + quick_bar_html.strip() + updated[qb_end:]
+                        if updated_qb != updated:
+                            updated = updated_qb
+                            actions.append("calc_result_quick_unlock_bar_contextual_v2")
 
         # Ensure primary KPI block (.kpi-block or #rap-subsidy-meter) sits at the top of .result-box before .calc-inline-cta
         cta_pos = updated.find('<div class="calc-inline-cta"')
