@@ -504,6 +504,26 @@ def recompute_and_amend_tenant_lock_and_ledger(
         )
 
         sync_res = sync_tenant_test_isolation_guards(repo, property_id)
+        try:
+            from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+            for html_f in sorted(dist_dir.rglob("*.html")):
+                if not html_f.is_file():
+                    continue
+                try:
+                    raw_html = html_f.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                if (
+                    'id="pseo-visual-primitives"' in raw_html
+                    or "id='pseo-visual-primitives'" in raw_html
+                    or 'id="calc-result-quick-unlock-bar"' in raw_html
+                ):
+                    norm_html, _ = normalize_html_visual_primitives(raw_html)
+                    if norm_html != raw_html:
+                        html_f.write_text(norm_html, encoding="utf-8")
+        except Exception:
+            pass
         cur_engine_hash = compute_engine_hash()
         dist_fp_hex, total_dist_assets = compute_dist_lock_metrics(dist_dir)
         try:
@@ -4753,14 +4773,19 @@ def sync_tenant_test_isolation_guards(
                     removed_dist = True
                     continue
                 new_gi_lines.append(ln)
-            if removed_dist:
-                for extra_ignore in ("dist/syndication/", "dist/**/*.tmp", "dist/**/*.orig", "dist/**/*.backup"):
-                    if extra_ignore not in new_gi_lines:
-                        new_gi_lines.append(extra_ignore)
-                gi_new = "\n".join(new_gi_lines) + "\n"
-                if gi_new != gi_src:
-                    gitignore_path.write_text(gi_new, encoding="utf-8")
-                    updated_files.append(str(gitignore_path))
+            for extra_ignore in (
+                "syndication/",
+                "dist/syndication/",
+                "dist/**/*.tmp",
+                "dist/**/*.orig",
+                "dist/**/*.backup",
+            ):
+                if extra_ignore not in new_gi_lines:
+                    new_gi_lines.append(extra_ignore)
+            gi_new = "\n".join(new_gi_lines) + "\n"
+            if gi_new != gi_src:
+                gitignore_path.write_text(gi_new, encoding="utf-8")
+                updated_files.append(str(gitignore_path))
         except Exception:
             pass
 

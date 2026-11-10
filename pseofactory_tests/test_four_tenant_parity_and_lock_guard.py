@@ -130,3 +130,54 @@ def test_milestone_tracker_and_action_bus_support_lienbond(tmp_path: Path):
         partner_sharing_consent=True,
     )
     assert item.property_id == "lienbond"
+
+
+def test_recompute_tenant_lock_enforces_visual_primitive_and_quick_unlock_parity_and_gitignore(tmp_path: Path):
+    import json
+    import subprocess
+    from pseofactory.drift import compute_dist_lock_metrics
+    from pseofactory.gitops import recompute_and_amend_tenant_lock_and_ledger
+
+    repo_dir = tmp_path / "mock_profithelm"
+    tool_dir = repo_dir / "dist" / "tools" / "irs-2027-tax-brackets"
+    tool_dir.mkdir(parents=True)
+
+    (repo_dir / ".pseofactory.json").write_text('{"property_id": "profithelm"}\n', encoding="utf-8")
+    (repo_dir / "substrate_lock.json").write_text('{"property_id": "profithelm"}\n', encoding="utf-8")
+    (repo_dir / ".gitignore").write_text("__pycache__/\n.agy/\n", encoding="utf-8")
+
+    stale_html = (
+        '<!DOCTYPE html><html><head><style id="pseo-visual-primitives">/* stale */</style></head><body>'
+        '<div id="partner-quote-intake-step" data-property-id="profithelm" data-tool-slug="irs-2027-tax-brackets" data-calculated-amount="125000"></div>'
+        '<div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" data-contextual-v2="1">'
+        '<div>Get Your 2027 2027 Federal &amp; State + Federal Tax Bracket &amp; W-4 Paycheck Plan</div>'
+        '<form id="inline-worksheet-capture-form"><button id="btn-inline-worksheet-submit" style="white-space: nowrap;">Send</button></form>'
+        '<div><a id="btn-calc-result-quick-unlock" style="white-space: nowrap;">Unlock</a></div>'
+        "</div></body></html>"
+    )
+    index_f = tool_dir / "index.html"
+    index_f.write_text(stale_html, encoding="utf-8")
+
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=True, capture_output=True)
+
+    ok = recompute_and_amend_tenant_lock_and_ledger(repo_dir, property_id="profithelm", amend=False)
+    assert ok is True
+
+    gi_txt = (repo_dir / ".gitignore").read_text(encoding="utf-8")
+    assert "syndication/" in gi_txt
+    assert "dist/syndication/" in gi_txt
+
+    healed_html = index_f.read_text(encoding="utf-8")
+    assert "2027 2027 " not in healed_html
+    assert "#btn-calc-result-quick-unlock," in healed_html
+    assert 'id="btn-calc-result-quick-unlock"' in healed_html
+    assert "white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;" in healed_html
+
+    lock_data = json.loads((repo_dir / "substrate_lock.json").read_text(encoding="utf-8"))
+    actual_fp, _ = compute_dist_lock_metrics(repo_dir / "dist")
+    assert lock_data["dist_fingerprint"] == actual_fp
+

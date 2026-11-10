@@ -5424,7 +5424,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                         if q_pos2 != -1:
                             updated = updated[:q_pos2] + quick_bar_html + updated[q_pos2:]
                             actions.append("calc_result_quick_unlock_bar")
-        elif 'data-contextual-v2="1"' not in updated:
+        else:
             quick_bar_html = render_calc_result_quick_unlock_bar_html(
                 slug=tool_slug,
                 property_id=prop_id,
