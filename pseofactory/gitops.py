@@ -23,10 +23,11 @@ import threading
 import concurrent.futures
 import urllib.request
 import urllib.error
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Set, Optional, Union
+from typing import Dict, Any, Generator, List, Set, Optional, Union
 
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.tenant_facts import (
@@ -721,6 +722,7 @@ class TenantFactoryLockGuard:
         self.lock_path = lock_dir / f"{self.property_id}_factory.lock"
         self._fd: Optional[Any] = None
         self.acquired = False
+        self._clean_dist_on_entry = False
 
     def __enter__(self) -> "TenantFactoryLockGuard":
         is_prod_repo = (
@@ -758,6 +760,19 @@ class TenantFactoryLockGuard:
                     return self
                 time.sleep(0.1)
 
+        if self.acquired and self.repo_path is not None and (self.repo_path / ".git").exists():
+            try:
+                st_proc = subprocess.run(
+                    ["git", "-C", str(self.repo_path), "status", "--porcelain", "--", "dist"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self._clean_dist_on_entry = st_proc.returncode == 0 and not st_proc.stdout.strip()
+            except Exception:
+                self._clean_dist_on_entry = False
+
         if self.acquired:
             os.environ[f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK"] = "1"
             os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
@@ -766,6 +781,29 @@ class TenantFactoryLockGuard:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if (
+            exc_type is not None
+            and self.acquired
+            and self._clean_dist_on_entry
+            and not self.dry_run
+            and self.repo_path is not None
+            and (self.repo_path / ".git").exists()
+        ):
+            try:
+                subprocess.run(
+                    ["git", "-C", str(self.repo_path), "checkout", "-q", "HEAD", "--", "dist"],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+                subprocess.run(
+                    ["git", "-C", str(self.repo_path), "clean", "-fdq", "--", "dist"],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+            except Exception:
+                pass
         os.environ.pop(f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK", None)
         if self._fd is not None:
             try:
@@ -779,6 +817,53 @@ class TenantFactoryLockGuard:
                 pass
             self._fd = None
             self.acquired = False
+
+
+@contextmanager
+def isolated_worktree(
+    repo_path: Union[str, Path],
+    branch_prefix: str = "agy-wt-tenant",
+) -> Generator[Path, None, None]:
+    """
+    Creates an isolated git worktree for concurrent compilation or verification and
+    guarantees worktree and temporary branch cleanup on exit.
+    Zero em-dashes. Zero en-dashes.
+    """
+    repo = Path(repo_path).resolve()
+    if not (repo / ".git").exists():
+        yield repo
+        return
+    wt_id = f"{branch_prefix}-{os.getpid()}-{int(time.time() * 1000) % 1000000}"
+    wt_dir = Path(tempfile.mkdtemp(prefix=f"{wt_id}-"))
+    wt_created = False
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "--detach", str(wt_dir), "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            wt_created = True
+            yield wt_dir
+        else:
+            yield repo
+    finally:
+        if wt_created:
+            try:
+                subprocess.run(
+                    ["git", "-C", str(repo), "worktree", "remove", "--force", str(wt_dir)],
+                    capture_output=True,
+                    check=False,
+                    timeout=15,
+                )
+            except Exception:
+                pass
+        try:
+            shutil.rmtree(wt_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 class GitOpsCoordinator:
@@ -4684,6 +4769,7 @@ def sync_tenant_test_isolation_guards(
     if ph_builder_py.is_file():
         try:
             pb_src = ph_builder_py.read_text(encoding="utf-8")
+            pb_new = pb_src
             old_orphan_cond = "    for existing_file in manifests_dir.glob(\"*.json\"):\n        if existing_file.stem not in active_manifest_slugs:"
             new_orphan_cond = (
                 "    for existing_file in manifests_dir.glob(\"*.json\"):\n"
@@ -4692,9 +4778,62 @@ def sync_tenant_test_isolation_guards(
                 "            and not existing_file.stem.startswith((\"irs-2027-tax-brackets-\", \"section-1031-calculator-\", \"section-179-calculator-\"))\n"
                 "        ):"
             )
-            if old_orphan_cond in pb_src:
-                ph_builder_py.write_text(pb_src.replace(old_orphan_cond, new_orphan_cond, 1), encoding="utf-8")
+            if old_orphan_cond in pb_new:
+                pb_new = pb_new.replace(old_orphan_cond, new_orphan_cond, 1)
+            old_b_title = '    title = str(tool.get("title", slug.replace("-", " ").title()))\n'
+            new_b_title = (
+                '    title = str(tool.get("title", slug.replace("-", " ").title()))\n'
+                '    title = re.sub(r"\\bR\\s+D\\b", "R&D", title)\n'
+            )
+            if old_b_title in pb_new and 're.sub(r"\\bR\\s+D\\b", "R&D", title)' not in pb_new:
+                pb_new = pb_new.replace(old_b_title, new_b_title, 1)
+            old_b_clean = '                    clean_name = d_slug.replace("-", " ").title()\n'
+            new_b_clean = '                    clean_name = re.sub(r"\\bR\\s+D\\b", "R&D", d_slug.replace("-", " ").title())\n'
+            if old_b_clean in pb_new:
+                pb_new = pb_new.replace(old_b_clean, new_b_clean, 1)
+            old_b_raw = '        raw_title = tool.get("title", "")\n'
+            new_b_raw = (
+                '        raw_title = re.sub(r"\\bR\\s+D\\b", "R&D", tool.get("title", ""))\n'
+                '        tool["title"] = raw_title\n'
+            )
+            if old_b_raw in pb_new:
+                pb_new = pb_new.replace(old_b_raw, new_b_raw, 1)
+            old_b_st = '        st = tool.get("short_title", "")\n'
+            new_b_st = (
+                '        st = re.sub(r"\\bR\\s+D\\b", "R&D", tool.get("short_title", ""))\n'
+                '        tool["short_title"] = st\n'
+            )
+            if old_b_st in pb_new:
+                pb_new = pb_new.replace(old_b_st, new_b_st, 1)
+            if pb_new != pb_src:
+                ph_builder_py.write_text(pb_new, encoding="utf-8")
                 updated_files.append(str(ph_builder_py))
+        except Exception:
+            pass
+
+    # 4d. Normalize 'r-d' slug synthesis in profithelm/config.py so R&D tools never produce chopped 'R D' headings
+    ph_config_py = repo / "profithelm" / "config.py"
+    if ph_config_py.is_file():
+        try:
+            pc_src = ph_config_py.read_text(encoding="utf-8")
+            old_cfg_title = (
+                '    spec["slug"] = slug\n'
+                '    spec.setdefault("title", slug.replace("-", " ").title())\n'
+                '    spec.setdefault("short_title", spec["title"].split(" & ")[0].split(":")[0].strip())\n'
+            )
+            new_cfg_title = (
+                '    spec["slug"] = slug\n'
+                '    _default_title = re.sub(r"\\bR\\s+D\\b", "R&D", slug.replace("-", " ").title())\n'
+                '    spec.setdefault("title", _default_title)\n'
+                '    if re.search(r"\\bR\\s+D\\b", str(spec.get("title", ""))):\n'
+                '        spec["title"] = re.sub(r"\\bR\\s+D\\b", "R&D", str(spec["title"]))\n'
+                '    spec.setdefault("short_title", spec["title"].split(" & ")[0].split(":")[0].strip())\n'
+                '    if re.search(r"\\bR\\s+D\\b", str(spec.get("short_title", ""))):\n'
+                '        spec["short_title"] = re.sub(r"\\bR\\s+D\\b", "R&D", str(spec["short_title"]))\n'
+            )
+            if old_cfg_title in pc_src:
+                ph_config_py.write_text(pc_src.replace(old_cfg_title, new_cfg_title, 1), encoding="utf-8")
+                updated_files.append(str(ph_config_py))
         except Exception:
             pass
 

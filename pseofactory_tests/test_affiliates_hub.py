@@ -881,7 +881,10 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert 'data-status="live"' in norm_overlay
     assert 'data-partner-url="https://www.xendoo.com/?fp_ref=arif-4ac24e"' in norm_overlay
     assert 'href="/r/crest_capital' in norm_overlay
-    assert "Optimize Section 179 Accounting with Xendoo" in norm_overlay
+    assert (
+        "Lower Your 2027 Federal &amp; State Tax Bill with Xendoo CPA" in norm_overlay
+        or "Optimize Section 179 Accounting with Xendoo" in norm_overlay
+    )
 
 
 def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():

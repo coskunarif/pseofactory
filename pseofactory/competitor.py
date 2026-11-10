@@ -5010,7 +5010,7 @@ def resolve_quick_unlock_contextual_copy(
             "heading": "Get Your Custom 2026 SAVE-to-RAP vs. IBR Payment &amp; Forgiveness Plan",
             "badge": "Month-by-Month PDF/CSV + Free Email Summary",
             "summary": (
-                "Unlocks month-by-month RAP vs. IBR vs. Refinance amortization schedule, "
+                "Unlocks month-by-month RAP vs. IBR vs. Standard amortization schedule, "
                 "Married Filing Separately (MFS) tax break-even table, and servicer switch checklist."
             ),
             "email_label": "Email Address for Free Payment Calculation Summary",
@@ -5052,7 +5052,7 @@ def resolve_quick_unlock_contextual_copy(
         }
 
     if "tax-bracket" in s_low or "tax-rate" in s_low:
-        loc = state_label if state_label else "2027 Federal &amp; State"
+        loc = state_label if state_label else "Federal &amp; State"
         return {
             "heading": f"Get Your 2027 {loc} + Federal Tax Bracket &amp; W-4 Paycheck Plan",
             "badge": "W-4 &amp; 1040-ES PDF/CSV + Free Email Summary",
@@ -5197,12 +5197,12 @@ def render_calc_result_quick_unlock_bar_html(
         f'            <form id="inline-worksheet-capture-form" class="lead-capture-form inline-worksheet-capture-form" action="/api/lead-capture" method="POST" data-offer-sku="{quick_sku}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px;" novalidate>\n'
         f'              <label for="inline-worksheet-email" style="display: block; width: 100%; font-size: 12px; font-weight: 600; margin-bottom: 2px; color: var(--text, #334155);">{ctx_q["email_label"]}</label>\n'
         f'              <input type="email" id="inline-worksheet-email" name="email" placeholder="Enter email for free calculation summary..." aria-label="{ctx_q["email_label"]}" required class="touch-target" style="flex: 1; min-width: 190px; min-height: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border, #cbd5e1); background: var(--card-bg, #ffffff); color: var(--text, #0f172a);" />\n'
-        f'              <button type="submit" id="btn-inline-worksheet-submit" class="touch-target btn-secondary" data-cta-slot="inline_free_worksheet_email_cta" style="min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 700; font-size: 13.5px; border: none; cursor: pointer; white-space: nowrap;">{ctx_q["email_btn"]}</button>\n'
+        f'              <button type="submit" id="btn-inline-worksheet-submit" class="touch-target btn-secondary" data-cta-slot="inline_free_worksheet_email_cta" style="min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 700; font-size: 13.5px; border: none; cursor: pointer; white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;">{ctx_q["email_btn"]}</button>\n'
         f'              <div id="inline-worksheet-capture-status" class="lead-capture-status-readout" role="status" aria-live="polite" style="width: 100%; font-size: 12.5px; font-weight: 600;"></div>\n'
         f'            </form>\n'
         f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border, #cbd5e1);">\n'
-        f'              <a id="btn-calc-result-quick-unlock" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: nowrap;">{ctx_q["quick_btn_label"]}</a>\n'
-        f'              <a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent, #1d4ed8); text-decoration: underline; white-space: nowrap;">{ctx_q["full_link_label"]}</a>\n'
+        f'              <a id="btn-calc-result-quick-unlock" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;">{ctx_q["quick_btn_label"]}</a>\n'
+        f'              <a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent, #1d4ed8); text-decoration: underline; white-space: normal; max-width: 100%; box-sizing: border-box;">{ctx_q["full_link_label"]}</a>\n'
         f'            </div>\n'
         f'          </div>\n'
     )

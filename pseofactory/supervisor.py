@@ -2818,6 +2818,7 @@ class AutonomousLifecycleSupervisor:
             except Exception:
                 pass
             try:
+                from pseofactory.gitops import TenantFactoryLockGuard
                 from pseofactory.tenant_facts import TruthReconciliationEngine
                 reg = self.registry
                 target_ids = property_ids or ["gainhelm", "prexvo", "profithelm", "lienbond"]
@@ -2825,11 +2826,20 @@ class AutonomousLifecycleSupervisor:
                     try:
                         adp = reg.get_adapter(pid)
                         if adp and adp.dist_dir and adp.dist_dir.is_dir():
-                            TruthReconciliationEngine.reconcile_estate_assets(
-                                dist_dir=adp.dist_dir,
-                                property_id=pid,
-                                repo_root=getattr(adp, "repo_path", None) or adp.dist_dir.parent,
-                            )
+                            t_repo = getattr(adp, "repo_path", None) or adp.dist_dir.parent
+                            with TenantFactoryLockGuard(
+                                pid,
+                                repo_path=t_repo,
+                                dry_run=dry_run,
+                                non_blocking=True,
+                            ) as lock_guard:
+                                if not lock_guard.acquired:
+                                    continue
+                                TruthReconciliationEngine.reconcile_estate_assets(
+                                    dist_dir=adp.dist_dir,
+                                    property_id=pid,
+                                    repo_root=t_repo,
+                                )
                     except Exception:
                         pass
             except Exception:

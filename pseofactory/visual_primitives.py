@@ -941,6 +941,14 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
     .result-card #calc-result-quick-unlock-bar ~ .pro-hook-card {
       display: none !important;
     }
+    #btn-calc-result-quick-unlock,
+    #btn-inline-worksheet-submit,
+    .calc-result-quick-unlock-bar a,
+    .calc-result-quick-unlock-bar button {
+      white-space: normal !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+    }
     a[href]:focus, a[href]:focus-visible,
     button:focus, button:focus-visible,
     input:focus, input:focus-visible,
@@ -5764,8 +5772,12 @@ def normalize_html_visual_primitives(
             or 'input[type="checkbox"].touch-target' not in prim_body
             or ".share-pro-container + .inline-lead-box" not in prim_body
             or "#calc-result-quick-unlock-bar ~ .pro-hook-card" not in prim_body
+            or "#btn-calc-result-quick-unlock" not in prim_body
             or has_token_inversion
         )
+        if "2027 2027 " in updated:
+            updated = updated.replace("2027 2027 ", "2027 ")
+            repaired.append("duplicate_year_label")
         if needs_style_repair:
             updated = re.sub(
                 r'\s*<style[^>]*id=["\']pseo-visual-primitives["\'][^>]*>[\s\S]*?</style>',

@@ -4,7 +4,11 @@ from pathlib import Path
 from pseofactory.action_bus import HumanActionBus
 from pseofactory.contracts import assert_youtube_transcript
 from pseofactory.distributor import _generate_youtube_transcript
-from pseofactory.gitops import TenantFactoryLockGuard, reconcile_workspace_tracking_state
+from pseofactory.gitops import (
+    TenantFactoryLockGuard,
+    isolated_worktree,
+    reconcile_workspace_tracking_state,
+)
 from pseofactory.indexing.milestones import MilestoneTracker
 from pseofactory.trends.db import TrendHistoryDB
 
@@ -74,6 +78,40 @@ def test_tenant_factory_lock_guard_exports_env_marker(tmp_path: Path, monkeypatc
     with TenantFactoryLockGuard("lienbond", timeout=5.0):
         assert os.environ.get(env_key) == "1"
     assert os.environ.get(env_key) is None
+
+
+def test_isolated_worktree_and_lock_guard_rollback_on_exception(tmp_path: Path, monkeypatch):
+    import subprocess
+    repo_dir = tmp_path / "mock_tenant"
+    dist_dir = repo_dir / "dist"
+    dist_dir.mkdir(parents=True)
+    index_f = dist_dir / "index.html"
+    index_f.write_text("<html>clean</html>", encoding="utf-8")
+
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=True, capture_output=True)
+
+    with isolated_worktree(repo_dir) as wt_path:
+        assert wt_path != repo_dir
+        assert (wt_path / "dist" / "index.html").read_text(encoding="utf-8") == "<html>clean</html>"
+        (wt_path / "dist" / "index.html").write_text("<html>worktree-edit</html>", encoding="utf-8")
+        assert index_f.read_text(encoding="utf-8") == "<html>clean</html>"
+    assert not wt_path.exists()
+
+    monkeypatch.setenv("PSEUFACTORY_LOCK_DIR", str(tmp_path))
+    try:
+        with TenantFactoryLockGuard("lienbond", repo_path=repo_dir, timeout=5.0):
+            index_f.write_text("<html>partial-corrupt-write</html>", encoding="utf-8")
+            (dist_dir / "orphan.html").write_text("orphan", encoding="utf-8")
+            raise RuntimeError("simulated mid-build failure")
+    except RuntimeError:
+        pass
+
+    assert index_f.read_text(encoding="utf-8") == "<html>clean</html>"
+    assert not (dist_dir / "orphan.html").exists()
 
 
 def test_milestone_tracker_and_action_bus_support_lienbond(tmp_path: Path):

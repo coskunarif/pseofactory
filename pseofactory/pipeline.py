@@ -2053,6 +2053,7 @@ def execute_autonomous_daily_trend_page_build(
 
         built_ts = datetime.now(timezone.utc).isoformat()
         dist_dir = Path(adp.dist_dir)
+        repo_root = getattr(adp, "repo_path", None) or dist_dir.parent
         out_html_path = dist_dir / "tools" / c_slug / "index.html"
         out_manifest_path = dist_dir / "manifests" / f"{c_slug}.json"
 
@@ -2062,156 +2063,164 @@ def execute_autonomous_daily_trend_page_build(
             html_out = html_out.replace('href="/disclaimers/"', 'href="/privacy/"').replace("href='/disclaimers/'", "href='/privacy/'")
 
         if not dry_run:
-            out_html_path.parent.mkdir(parents=True, exist_ok=True)
-            out_html_path.write_text(html_out, encoding="utf-8")
-            out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            out_manifest_path.write_text(json.dumps(manifest_out, indent=2) + "\n", encoding="utf-8")
+            from pseofactory.gitops import TenantFactoryLockGuard
+            with TenantFactoryLockGuard(
+                t_id,
+                repo_path=repo_root,
+                dry_run=dry_run,
+                non_blocking=True,
+            ) as lock_guard:
+                if not lock_guard.acquired:
+                    continue
+                out_html_path.parent.mkdir(parents=True, exist_ok=True)
+                out_html_path.write_text(html_out, encoding="utf-8")
+                out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                out_manifest_path.write_text(json.dumps(manifest_out, indent=2) + "\n", encoding="utf-8")
 
-            # Link in dist/tools/index.html and dist/index.html so zero orphan pages exist
-            for hub_rel in ("tools/index.html", "index.html"):
-                hub_file = dist_dir / hub_rel
-                if hub_file.is_file():
-                    try:
-                        hub_html = hub_file.read_text(encoding="utf-8")
-                        if f"/tools/{c_slug}/" not in hub_html:
-                            link_Html = (
-                                f'\n      <div class="card" style="margin-top:12px;">'
-                                f'<a href="/tools/{c_slug}/" class="touch-target" '
-                                f'style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;font-weight:600;">'
-                                f'{raw_title}</a></div>\n'
-                            )
-                            if "</main>" in hub_html:
-                                hub_html = hub_html.replace("</main>", link_Html + "</main>", 1)
-                            elif "</body>" in hub_html:
-                                hub_html = hub_html.replace("</body>", link_Html + "</body>", 1)
-                            hub_file.write_text(hub_html, encoding="utf-8")
-                    except Exception:
-                        pass
+                # Link in dist/tools/index.html and dist/index.html so zero orphan pages exist
+                for hub_rel in ("tools/index.html", "index.html"):
+                    hub_file = dist_dir / hub_rel
+                    if hub_file.is_file():
+                        try:
+                            hub_html = hub_file.read_text(encoding="utf-8")
+                            if f"/tools/{c_slug}/" not in hub_html:
+                                link_Html = (
+                                    f'\n      <div class="card" style="margin-top:12px;">'
+                                    f'<a href="/tools/{c_slug}/" class="touch-target" '
+                                    f'style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;font-weight:600;">'
+                                    f'{raw_title}</a></div>\n'
+                                )
+                                if "</main>" in hub_html:
+                                    hub_html = hub_html.replace("</main>", link_Html + "</main>", 1)
+                                elif "</body>" in hub_html:
+                                    hub_html = hub_html.replace("</body>", link_Html + "</body>", 1)
+                                hub_file.write_text(hub_html, encoding="utf-8")
+                        except Exception:
+                            pass
 
-            # Link in sitemap-leaves.xml / sitemap.xml
-            loc_url = f"{adp.canonical_base.rstrip('/')}/tools/{c_slug}/"
-            for sm_name in ("sitemap-leaves.xml", "sitemap.xml"):
-                sm_file = dist_dir / sm_name
-                if sm_file.is_file():
-                    try:
-                        sm_txt = sm_file.read_text(encoding="utf-8")
-                        if loc_url not in sm_txt and "</urlset>" in sm_txt:
-                            url_entry = (
-                                f"  <url>\n"
-                                f"    <loc>{loc_url}</loc>\n"
-                                f"    <lastmod>{date_str}</lastmod>\n"
-                                f"  </url>\n"
-                            )
-                            sm_txt = sm_txt.replace("</urlset>", url_entry + "</urlset>", 1)
-                            sm_file.write_text(sm_txt, encoding="utf-8")
-                    except Exception:
-                        pass
+                # Link in sitemap-leaves.xml / sitemap.xml
+                loc_url = f"{adp.canonical_base.rstrip('/')}/tools/{c_slug}/"
+                for sm_name in ("sitemap-leaves.xml", "sitemap.xml"):
+                    sm_file = dist_dir / sm_name
+                    if sm_file.is_file():
+                        try:
+                            sm_txt = sm_file.read_text(encoding="utf-8")
+                            if loc_url not in sm_txt and "</urlset>" in sm_txt:
+                                url_entry = (
+                                    f"  <url>\n"
+                                    f"    <loc>{loc_url}</loc>\n"
+                                    f"    <lastmod>{date_str}</lastmod>\n"
+                                    f"  </url>\n"
+                                )
+                                sm_txt = sm_txt.replace("</urlset>", url_entry + "</urlset>", 1)
+                                sm_file.write_text(sm_txt, encoding="utf-8")
+                        except Exception:
+                            pass
 
-            # Update dist/_headers
-            try:
-                from pseofactory.edge import build_edge_headers
-                headers_file = dist_dir / "_headers"
-                route_path = f"/tools/{c_slug}/"
-                existing_routes: List[str] = []
-                if headers_file.is_file():
-                    for ln in headers_file.read_text(encoding="utf-8").splitlines():
-                        ln_s = ln.strip()
-                        if not ln.startswith((" ", "\t")) and ln_s.startswith("/"):
-                            existing_routes.append(ln_s)
-                        elif ln_s.startswith("# [edge-middleware-canonical] "):
-                            r_cand = ln_s.split("# [edge-middleware-canonical] ", 1)[1].strip()
-                            if r_cand.startswith("/"):
-                                existing_routes.append(r_cand)
-                if tools_dir.is_dir():
-                    for hf_p in sorted(tools_dir.rglob("index.html")):
-                        rel_p = hf_p.relative_to(dist_dir).parent.as_posix().strip("/")
-                        if rel_p:
-                            existing_routes.append(f"/{rel_p}/")
-                all_routes = list(dict.fromkeys(existing_routes + [route_path]))
-                headers_file.write_text(
-                    build_edge_headers(canonical_base=adp.canonical_base, routes=all_routes),
-                    encoding="utf-8",
-                )
-            except Exception:
-                pass
+                # Update dist/_headers
+                try:
+                    from pseofactory.edge import build_edge_headers
+                    headers_file = dist_dir / "_headers"
+                    route_path = f"/tools/{c_slug}/"
+                    existing_routes: List[str] = []
+                    if headers_file.is_file():
+                        for ln in headers_file.read_text(encoding="utf-8").splitlines():
+                            ln_s = ln.strip()
+                            if not ln.startswith((" ", "\t")) and ln_s.startswith("/"):
+                                existing_routes.append(ln_s)
+                            elif ln_s.startswith("# [edge-middleware-canonical] "):
+                                r_cand = ln_s.split("# [edge-middleware-canonical] ", 1)[1].strip()
+                                if r_cand.startswith("/"):
+                                    existing_routes.append(r_cand)
+                    if tools_dir.is_dir():
+                        for hf_p in sorted(tools_dir.rglob("index.html")):
+                            rel_p = hf_p.relative_to(dist_dir).parent.as_posix().strip("/")
+                            if rel_p:
+                                existing_routes.append(f"/{rel_p}/")
+                    all_routes = list(dict.fromkeys(existing_routes + [route_path]))
+                    headers_file.write_text(
+                        build_edge_headers(canonical_base=adp.canonical_base, routes=all_routes),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
 
-            # Register provenance in tenant repository so future builds preserve the tool
-            repo_root = getattr(adp, "repo_path", None) or dist_dir.parent
-            if repo_root and Path(repo_root).is_dir():
-                r_root = Path(repo_root)
-                prov_title = raw_title
-                if t_id in ("gainhelm", "prexvo", "lienbond"):
-                    brand_sfx = f" | {adp.brand_name}"
-                    max_b = 60 - len(brand_sfx)
-                    min_b = 50 - len(brand_sfx)
-                    if len(prov_title) > max_b:
-                        prov_title = prov_title[:max_b].rsplit(" ", 1)[0].rstrip(" |-&")
-                        if len(prov_title) < min_b and "calculator" not in prov_title.lower():
-                            for pad_s in ("Cost Model", "Calculator", "Model"):
+                # Register provenance in tenant repository so future builds preserve the tool
+                if repo_root and Path(repo_root).is_dir():
+                    r_root = Path(repo_root)
+                    prov_title = raw_title
+                    if t_id in ("gainhelm", "prexvo", "lienbond"):
+                        brand_sfx = f" | {adp.brand_name}"
+                        max_b = 60 - len(brand_sfx)
+                        min_b = 50 - len(brand_sfx)
+                        if len(prov_title) > max_b:
+                            prov_title = prov_title[:max_b].rsplit(" ", 1)[0].rstrip(" |-&")
+                            if len(prov_title) < min_b and "calculator" not in prov_title.lower():
+                                for pad_s in ("Cost Model", "Calculator", "Model"):
+                                    if min_b <= len(f"{prov_title} {pad_s}") <= max_b:
+                                        prov_title = f"{prov_title} {pad_s}"
+                                        break
+                        elif len(prov_title) < min_b:
+                            for pad_s in ("Compliance Cost Model", "Calculation Engine", "Cost Model", "Engine"):
                                 if min_b <= len(f"{prov_title} {pad_s}") <= max_b:
                                     prov_title = f"{prov_title} {pad_s}"
                                     break
-                    elif len(prov_title) < min_b:
-                        for pad_s in ("Compliance Cost Model", "Calculation Engine", "Cost Model", "Engine"):
-                            if min_b <= len(f"{prov_title} {pad_s}") <= max_b:
-                                prov_title = f"{prov_title} {pad_s}"
-                                break
-                raw_auth = str(candidate_spec.get("statutory_authority") or "").strip()
-                prov_desc = f"Deterministic quantitative calculator for {c_query} under {raw_auth}."
-                if len(prov_desc) > 155:
-                    short_auth = raw_auth.split("(")[0].split("&")[0].strip().rstrip(".,;:- ")
-                    prov_desc = f"Deterministic quantitative calculator for {c_query} under {short_auth}."
-                if len(prov_desc) > 155:
-                    prov_desc = f"Deterministic quantitative calculator for {c_query}."
-                short_t = prov_title if len(prov_title) <= 28 else prov_title[:28].rsplit(" ", 1)[0].rstrip(".,;:-&| ")
-                prov_entry = {
-                    "slug": c_slug,
-                    "query": c_query,
-                    "title": prov_title,
-                    "short_title": short_t,
-                    "description": prov_desc,
-                    "primary_keyword": c_query.lower(),
-                    "source": "p2_autonomous_daily_builder",
-                    "statutory_authority": candidate_spec.get("statutory_authority", ""),
-                    "economic_dataset": candidate_spec.get("economic_dataset", ""),
-                    "model_name": candidate_spec.get("model_name", ""),
-                    "formula": candidate_spec.get("formula", ""),
-                    "inputs": dict(candidate_spec.get("inputs") or {}),
-                    "published_output": compiled_res.get("published_output", candidate_spec.get("published_output", 0.0)),
-                    "sample_calculation": candidate_spec.get("sample_calculation", ""),
-                    "calculation_manifest": dict(manifest_out) if isinstance(manifest_out, dict) else {},
-                    "verified_at": built_ts,
-                }
-                dv_targets = (
-                    [r_root / ".agy" / "deployed_voids.json"]
-                    if t_id == "profithelm"
-                    else [r_root / "content" / "deployed_voids.json"]
-                )
-                for dv_f in dv_targets:
-                    try:
-                        dv_list = []
-                        if dv_f.is_file():
-                            loaded_dv = json.loads(dv_f.read_text(encoding="utf-8"))
-                            if isinstance(loaded_dv, list):
-                                dv_list = [d for d in loaded_dv if isinstance(d, dict) and d.get("slug") != c_slug]
-                        dv_list.append(prov_entry)
-                        dv_f.parent.mkdir(parents=True, exist_ok=True)
-                        dv_f.write_text(json.dumps(dv_list, indent=2) + "\n", encoding="utf-8")
-                    except Exception:
-                        pass
+                    raw_auth = str(candidate_spec.get("statutory_authority") or "").strip()
+                    prov_desc = f"Deterministic quantitative calculator for {c_query} under {raw_auth}."
+                    if len(prov_desc) > 155:
+                        short_auth = raw_auth.split("(")[0].split("&")[0].strip().rstrip(".,;:- ")
+                        prov_desc = f"Deterministic quantitative calculator for {c_query} under {short_auth}."
+                    if len(prov_desc) > 155:
+                        prov_desc = f"Deterministic quantitative calculator for {c_query}."
+                    short_t = prov_title if len(prov_title) <= 28 else prov_title[:28].rsplit(" ", 1)[0].rstrip(".,;:-&| ")
+                    prov_entry = {
+                        "slug": c_slug,
+                        "query": c_query,
+                        "title": prov_title,
+                        "short_title": short_t,
+                        "description": prov_desc,
+                        "primary_keyword": c_query.lower(),
+                        "source": "p2_autonomous_daily_builder",
+                        "statutory_authority": candidate_spec.get("statutory_authority", ""),
+                        "economic_dataset": candidate_spec.get("economic_dataset", ""),
+                        "model_name": candidate_spec.get("model_name", ""),
+                        "formula": candidate_spec.get("formula", ""),
+                        "inputs": dict(candidate_spec.get("inputs") or {}),
+                        "published_output": compiled_res.get("published_output", candidate_spec.get("published_output", 0.0)),
+                        "sample_calculation": candidate_spec.get("sample_calculation", ""),
+                        "calculation_manifest": dict(manifest_out) if isinstance(manifest_out, dict) else {},
+                        "verified_at": built_ts,
+                    }
+                    dv_targets = (
+                        [r_root / ".agy" / "deployed_voids.json"]
+                        if t_id == "profithelm"
+                        else [r_root / "content" / "deployed_voids.json"]
+                    )
+                    for dv_f in dv_targets:
+                        try:
+                            dv_list = []
+                            if dv_f.is_file():
+                                loaded_dv = json.loads(dv_f.read_text(encoding="utf-8"))
+                                if isinstance(loaded_dv, list):
+                                    dv_list = [d for d in loaded_dv if isinstance(d, dict) and d.get("slug") != c_slug]
+                            dv_list.append(prov_entry)
+                            dv_f.parent.mkdir(parents=True, exist_ok=True)
+                            dv_f.write_text(json.dumps(dv_list, indent=2) + "\n", encoding="utf-8")
+                        except Exception:
+                            pass
 
-            try:
-                from pseofactory.maintenance import RetroReflectionEngine
-                from pseofactory.drift import write_substrate_lock
-                RetroReflectionEngine.retrofit_estate(
-                    dist_dir=dist_dir,
-                    property_id=t_id,
-                    canonical_base=adp.canonical_base,
-                )
-                if repo_root and Path(repo_root).is_dir():
-                    write_substrate_lock(Path(repo_root))
-            except Exception:
-                pass
+                try:
+                    from pseofactory.maintenance import RetroReflectionEngine
+                    from pseofactory.drift import write_substrate_lock
+                    RetroReflectionEngine.retrofit_estate(
+                        dist_dir=dist_dir,
+                        property_id=t_id,
+                        canonical_base=adp.canonical_base,
+                    )
+                    if repo_root and Path(repo_root).is_dir():
+                        write_substrate_lock(Path(repo_root))
+                except Exception:
+                    pass
 
         item["status"] = "BUILT"
         item["built_at"] = built_ts

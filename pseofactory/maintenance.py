@@ -6136,6 +6136,10 @@ def _normalize_spoke_and_synthesized_body_bloat(
 
     # Fix chopped entity labels from '&' split on 'R&D' and truncated CFR/EU descriptions
     for _bad_frag, _good_frag in (
+        ("R D Tax Credit", "R&amp;D Tax Credit"),
+        ("R D tax credit", "R&amp;D tax credit"),
+        ("What Is The R D ", "What Is The R&amp;D "),
+        ("What Is the R D ", "What Is the R&amp;D "),
         ("What Is The R Decision Framework?", "What Is The R&amp;D Tax Credit Decision Framework?"),
         ("What Is the R Decision Framework?", "What Is the R&amp;D Tax Credit Decision Framework?"),
         ("The R Decision Framework", "The R&amp;D Tax Credit Decision Framework"),
@@ -12862,6 +12866,10 @@ class RetroReflectionEngine:
                 continue
             rel = html_file.relative_to(d).as_posix()
             for _bf, _gf in (
+                ("R D Tax Credit", "R&amp;D Tax Credit"),
+                ("R D tax credit", "R&amp;D tax credit"),
+                ("What Is The R D ", "What Is The R&amp;D "),
+                ("What Is the R D ", "What Is the R&amp;D "),
                 ("What Is The R Decision Framework?", "What Is The R&amp;D Tax Credit Decision Framework?"),
                 ("What Is the R Decision Framework?", "What Is the R&amp;D Tax Credit Decision Framework?"),
                 ("The R Decision Framework", "The R&amp;D Tax Credit Decision Framework"),
