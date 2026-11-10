@@ -282,5 +282,39 @@ def test_no_copy_oscillation_between_reposition_and_normalize_and_no_inline_lock
         assert norm_html == rep_html, f"Copy oscillation detected between reposition and normalize for {slug}"
 
 
+def test_idempotency_of_write_substrate_lock_on_lienbond_result_box_and_prexvo_rap_meter():
+    from pseofactory.affiliates import normalize_html_callout_message_match
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    lb_html = (
+        '<!DOCTYPE html><html><head><title>LienBond</title><link rel="canonical" href="https://lienbond.com/" /></head><body>'
+        '<div id="partner-quote-intake-step" data-property-id="lienbond" data-tool-slug="contractor-license-bond-cost-calculator-by-credit-score" data-calculated-amount="125000"></div>'
+        '<div class="result-box"><p><strong class="output-value" data-baseline-output="375.0">375</strong></p>'
+        '<div class="calculation-variant" id="variant-baseline">Preferred Credit Tier Schedule ($375.00 = 1.5% rate) (<a href="#variant-accelerated">Compare Standard Market Variant</a>)'
+        '\n          <div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" data-contextual-v2="1"><div>old</div></div>\n'
+        '<div class="pro-hook-card"><span>Pro</span></div></div>'
+        '<div class="calculation-variant" id="variant-accelerated">Standard Market Indemnity Variant (<a href="#variant-baseline">Return</a>)</div>'
+        '</div><section class="affiliates-section"><a href="/r/simply_business">Simply Business</a></section></body></html>'
+    )
+    pass1, _ = normalize_html_visual_primitives(lb_html)
+    pass1 = normalize_html_callout_message_match(pass1, property_id="lienbond")
+    pass2, _ = normalize_html_visual_primitives(pass1)
+    pass2 = normalize_html_callout_message_match(pass2, property_id="lienbond")
+    assert pass2 == pass1
+    assert 'Compare Standard Market Variant</a>)</div>' in pass2
+
+    px_html = (
+        '<!DOCTYPE html><html><head><title>Prexvo RAP</title><link rel="canonical" href="https://prexvo.com/tools/grad-plus-borrowing-cap-calculator/" /></head><body>'
+        '<div class="calc-results-column"><h3 class="calc-column-title">Results</h3>\n'
+        '      <div class="subsidy-meter-wrap" id="rap-subsidy-meter"><div class="subsidy-meter-legend">Legend</div></div>\n'
+        '      <div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar">Bar</div>\n'
+        '</div><section class="refinance-partner-section"><a href="/r/splash_financial">Splash</a></section></body></html>'
+    )
+    px_pass1 = normalize_html_callout_message_match(px_html, property_id="prexvo")
+    px_pass2 = normalize_html_callout_message_match(px_pass1, property_id="prexvo")
+    assert px_pass2 == px_pass1
+
+
+
 
 

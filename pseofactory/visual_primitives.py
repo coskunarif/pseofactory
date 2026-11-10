@@ -5455,6 +5455,17 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                             updated = updated_qb
                             actions.append("calc_result_quick_unlock_bar_contextual_v2")
 
+        if 'id="variant-baseline"' in updated and 'id="variant-accelerated"' in updated:
+            healed_variants = re.sub(
+                r'(<div\s+class="calculation-variant"\s+id="variant-baseline"[^>]*>[^<]*<a\b[^>]*>Compare Standard Market Variant</a>\))\s*(<div\s+id="calc-result-quick-unlock-bar"[\s\S]*?)\s*</div>\s*(<div\s+class="calculation-variant"\s+id="variant-accelerated"[^>]*>[\s\S]*?</div>)',
+                r"\1</div>\n        \3\n          \2",
+                updated,
+                count=1,
+            )
+            if healed_variants != updated:
+                updated = healed_variants
+                actions.append("heal_variant_baseline_nesting")
+
         # Ensure primary KPI block (.kpi-block or #rap-subsidy-meter) sits at the top of .result-box before .calc-inline-cta
         cta_pos = updated.find('<div class="calc-inline-cta"')
         kpi_pos = updated.find('<div class="kpi-block"')
@@ -5477,7 +5488,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                     updated[:cta_pos]
                     + kpi_slice
                     + "\n          "
-                    + updated[cta_pos:kpi_pos]
+                    + updated[cta_pos:kpi_pos].rstrip()
                     + updated[kpi_end:]
                 )
                 actions.append("result_box_kpi_first_order")
@@ -5494,7 +5505,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 updated[:cta_pos2]
                 + rap_slice
                 + "\n      "
-                + updated[cta_pos2 : rap_meter_m.start()]
+                + updated[cta_pos2 : rap_meter_m.start()].rstrip()
                 + updated[rap_meter_m.end() :]
             )
             actions.append("prexvo_subsidy_meter_first_order")

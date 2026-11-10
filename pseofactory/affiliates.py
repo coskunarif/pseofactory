@@ -6518,11 +6518,13 @@ def normalize_html_callout_message_match(
             r'(<div\s+class=["\']calculator-grid["\']>.*?<div\s+class=["\']card["\']>.*?<div\s+class=["\'][^"\']*\bcard\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcard-header\b[^"\']*["\'][^>]*>.*?</div>)',
             r'(<div\s+class=["\'][^"\']*calc-outputs-panel[^"\']*["\'][^>]*>\s*<div\s+class=["\']calc-panel-header["\'][^>]*>.*?</div>)',
             r'(<div\s+class=["\'][^"\']*calc-results-column[^"\']*["\'][^>]*>\s*<h3\s+class=["\']calc-column-title["\'][^>]*>.*?</h3>)',
-            r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</div\b).)*?)(\s*<div\s+class=["\'][^"\']*\bpro-hook-card\b)',
-            r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>.*?)(</div>)',
+            r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</section\b).)*?)(\n?[ \t]*<div\s+(?:id=["\']calc-result-quick-unlock-bar["\']|class=["\'][^"\']*\bpro-hook-card\b))',
+            r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</div\b).)*?)(</div>)',
         ):
             if re.search(pat, updated, re.S | re.I):
-                if "result-box" in pat:
+                if "calc-result-quick-unlock-bar" in pat:
+                    updated = re.sub(pat, rf"\g<1>{inline_cta_html}\g<2>", updated, count=1, flags=re.S | re.I)
+                elif "result-box" in pat:
                     updated = re.sub(pat, rf"\g<1>{inline_cta_html}\n      \g<2>", updated, count=1, flags=re.S | re.I)
                 else:
                     updated = re.sub(pat, rf"\g<1>{inline_cta_html}", updated, count=1, flags=re.S | re.I)
@@ -6549,7 +6551,7 @@ def normalize_html_callout_message_match(
                     updated[:cta_pos]
                     + kpi_slice
                     + "\n          "
-                    + updated[cta_pos:kpi_pos]
+                    + updated[cta_pos:kpi_pos].rstrip()
                     + updated[kpi_end:]
                 )
         rap_meter_m = re.search(
@@ -6564,7 +6566,7 @@ def normalize_html_callout_message_match(
                 updated[:cta_pos2]
                 + rap_slice
                 + "\n      "
-                + updated[cta_pos2 : rap_meter_m.start()]
+                + updated[cta_pos2 : rap_meter_m.start()].rstrip()
                 + updated[rap_meter_m.end() :]
             )
         if injected_inline and "</head>" in updated:
@@ -7954,8 +7956,8 @@ def reposition_affiliate_placements_from_gsc_signals(
             )
         else:
             for r_pat in (
-                r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</div\b).)*?)(\s*<div\s+class=["\'][^"\']*\bpro-hook-card\b)',
-                r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>.*?)(</div>)',
+                r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</section\b).)*?)(\n?[ \t]*<div\s+(?:id=["\']calc-result-quick-unlock-bar["\']|class=["\'][^"\']*\bpro-hook-card\b))',
+                r'(<div\s+class=["\'][^"\']*\bresult-box\b[^"\']*["\'][^>]*>(?:(?!</div\b).)*?)(</div>)',
                 r'(<div\s+class=["\'][^"\']*\bresult-card\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcard-header\b[^"\']*["\']>.*?</div>)',
                 r'(<div\s+class=["\'][^"\']*\bcalc-outputs-panel\b[^"\']*["\'][^>]*>\s*<div\s+class=["\'][^"\']*\bcalc-panel-header\b[^"\']*["\']>.*?</div>)',
                 r'(<div\s+class=["\'][^"\']*\bcalc-results-column\b[^"\']*["\'][^>]*>.*?)(</div>)',
@@ -7963,7 +7965,15 @@ def reposition_affiliate_placements_from_gsc_signals(
                 r'(<div\s+class=["\'][^"\']*\bcalc-results\b[^"\']*["\'][^>]*>.*?)(</div>)',
             ):
                 if re.search(r_pat, updated, flags=re.S | re.I):
-                    if "result-box" in r_pat:
+                    if "calc-result-quick-unlock-bar" in r_pat:
+                        updated = re.sub(
+                            r_pat,
+                            rf"\g<1>\n          {new_inline_div}\g<2>",
+                            updated,
+                            count=1,
+                            flags=re.S | re.I,
+                        )
+                    elif "result-box" in r_pat:
                         updated = re.sub(
                             r_pat,
                             rf"\g<1>\n          {new_inline_div}\n      \g<2>",
@@ -7996,7 +8006,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                     updated[:cta_pos_m]
                     + kpi_slice_m
                     + "\n          "
-                    + updated[cta_pos_m:kpi_pos_m]
+                    + updated[cta_pos_m:kpi_pos_m].rstrip()
                     + updated[kpi_end_m:]
                 )
         rap_meter_m2 = re.search(
@@ -8011,7 +8021,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 updated[:cta_pos_m2]
                 + rap_slice_m2
                 + "\n      "
-                + updated[cta_pos_m2 : rap_meter_m2.start()]
+                + updated[cta_pos_m2 : rap_meter_m2.start()].rstrip()
                 + updated[rap_meter_m2.end() :]
             )
 
