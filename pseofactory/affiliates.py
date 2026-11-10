@@ -5668,6 +5668,7 @@ def normalize_html_callout_message_match(
                 partner_key=pk,
                 p_obj=partner,
                 slug=page_slug,
+                vertical_family=page_v_fam,
                 property_id=prop,
             )
             return (ctx_copy["name"], ctx_copy["cta_text"], partner.default_url)
@@ -5724,6 +5725,19 @@ def normalize_html_callout_message_match(
         page_slug = raw_t[:60].strip("-") or "calculator"
     else:
         page_slug = "calculator"
+
+    page_v_fam = ""
+    try:
+        page_v_fam = str(
+            classify_asset_archetype_and_intent(
+                property_id=prop,
+                slug=page_slug,
+                html_content=html,
+            ).get("vertical_family")
+            or ""
+        )
+    except Exception:
+        page_v_fam = ""
 
     def _build_r_href(pk: str, subid_suffix: str, cta_slot: str) -> str:
         safe_s = html_lib.escape(page_slug)
@@ -5832,7 +5846,7 @@ def normalize_html_callout_message_match(
 
     # Strip any prior idempotent inline calculator CTA and fold compaction style
     updated = re.sub(
-        r'\s*<style\s+id=["\']pseo-inline-cta-fold["\'][^>]*>.*?</style>',
+        r'[ \t]*<style\s+id=["\']pseo-inline-cta-fold["\'][^>]*>.*?</style>\n?',
         "",
         updated,
         flags=re.S | re.I,
@@ -5873,7 +5887,7 @@ def normalize_html_callout_message_match(
             return sec_html
         old_pk = pk_match.group(1).lower()
         pk = old_pk
-        if has_estate_structure:
+        if has_estate_structure and not ("data-gsc-tier=" in sec_html and old_pk in registry):
             if prop == "prexvo":
                 if (
                     'data-restricted-public-service="true"' not in sec_html
@@ -6108,6 +6122,7 @@ def normalize_html_callout_message_match(
                     partner_key=pk,
                     p_obj=p_obj,
                     slug=page_slug,
+                    vertical_family=page_v_fam,
                     property_id=prop,
                 )
                 slot = "calculator_primary_cta" if pk == "splash_financial" else "partner_matrix_card"
@@ -6264,6 +6279,7 @@ def normalize_html_callout_message_match(
                 partner_key=pk,
                 p_obj=p_obj,
                 slug=page_slug,
+                vertical_family=page_v_fam,
                 property_id=prop,
             )
             eff_st = _effective_dom_status(pk, p_obj)
@@ -6446,6 +6462,7 @@ def normalize_html_callout_message_match(
             partner_key=primary_inline_pk,
             p_obj=p_inline,
             slug=page_slug,
+            vertical_family=page_v_fam,
             property_id=prop,
         )
         safe_badge = html_lib.escape(ctx_in["badge"])
@@ -7507,7 +7524,23 @@ def resolve_contextual_partner_offer_copy(
             except Exception:
                 state_label = ""
 
-            if "tax-bracket" in s_low or "tax-rate" in s_low or v_fam == "federal_state_tax_brackets":
+            if any(tok in s_low for tok in ("1099", "s-corp", "self-employment", "qbi", "199a", "estimated-tax", "quarterly", "pass-through")):
+                badge = "1099 & S-Corp Tax Reduction CPA"
+                name = "Xendoo S-Corp & 1099 CPA Tax Advisory"
+                description = (
+                    "Cut self-employment and pass-through taxes with S-Corp reasonable salary optimization, "
+                    "IRC Section 199A QBI deduction tracking, and quarterly CPA filings."
+                )
+                cta_text = "Cut Your 1099 & S-Corp Taxes with Xendoo CPA"
+            elif any(tok in s_low for tok in ("174", "r-and-d", "r-d-", "camt", "280g", "amt", "corporate", "saas", "runway", "qsbs", "1202")):
+                badge = "Corporate & R&D Tax Compliance CPA"
+                name = "Xendoo Corporate & R&D Tax CPA"
+                description = (
+                    "Automate IRC Section 174 R&D capitalization schedules, Form 6765 credit claims, "
+                    "and corporate tax provision workpapers with a dedicated CPA team."
+                )
+                cta_text = "Review Your Corporate Tax Shield with Xendoo CPA"
+            elif "tax-bracket" in s_low or "tax-rate" in s_low or v_fam == "federal_state_tax_brackets":
                 loc = f"{state_label} & Federal" if state_label else "2027 Federal & State"
                 short_loc = state_label if state_label else "Federal & State"
                 badge = f"{loc} CPA Tax Shield"
@@ -7517,22 +7550,6 @@ def resolve_contextual_partner_offer_copy(
                     "S-Corp and Notice 2020-75 PTET SALT shield elections, and monthly catch-up bookkeeping."
                 )
                 cta_text = f"Lower Your 2027 {short_loc} Tax Bill with Xendoo CPA"
-            elif any(tok in s_low for tok in ("1099", "s-corp", "self-employment", "qbi", "199a", "estimated-tax", "quarterly", "pass-through")):
-                badge = "1099 & S-Corp Tax Reduction CPA"
-                name = "Xendoo S-Corp & 1099 CPA Tax Advisory"
-                description = (
-                    "Cut self-employment and pass-through taxes with S-Corp reasonable salary optimization, "
-                    "IRC Section 199A QBI deduction tracking, and quarterly CPA filings."
-                )
-                cta_text = "Cut Your 1099 & S-Corp Taxes with Xendoo CPA"
-            elif any(tok in s_low for tok in ("174", "r-and-d", "camt", "280g", "amt", "corporate", "saas", "runway", "qsbs", "1202")):
-                badge = "Corporate & R&D Tax Compliance CPA"
-                name = "Xendoo Corporate & R&D Tax CPA"
-                description = (
-                    "Automate IRC Section 174 R&D capitalization schedules, Form 6765 credit claims, "
-                    "and corporate tax provision workpapers with a dedicated CPA team."
-                )
-                cta_text = "Review Your Corporate Tax Shield with Xendoo CPA"
             else:
                 badge = "Commercial Financials & Business Tax CPA"
                 name = "Xendoo Business Tax & CPA Bookkeeping"
@@ -8172,6 +8189,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             flags=re.S | re.I,
         )
 
+    updated = normalize_html_callout_message_match(updated, property_id=prop)
     after_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', updated, flags=re.I)))
     after_primary = str(slot_plan.get("promoted_partner_key") or "")
 

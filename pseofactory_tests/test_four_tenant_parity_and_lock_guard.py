@@ -250,4 +250,37 @@ def test_write_substrate_lock_preserves_lienbond_fields_and_syncs_ledgers_and_fr
     assert "tools/contractor-license-bond-cost-calculator/index.html" in al_data["assets"]
 
 
+def test_no_copy_oscillation_between_reposition_and_normalize_and_no_inline_lock_templates():
+    from pseofactory.affiliates import (
+        normalize_html_callout_message_match,
+        reposition_affiliate_placements_from_gsc_signals,
+    )
+    import pseofactory.gitops as gitops_mod
+
+    gitops_src = Path(gitops_mod.__file__).read_text(encoding="utf-8")
+    assert '(BASE_DIR / "substrate_lock.json").write_text(' not in gitops_src
+
+    for slug, title in (
+        ("tcja-sunset-capital-gains", "TCJA Sunset Capital Gains Tax Calculator"),
+        ("irs-interest-calculator-2027", "IRS Underpayment & Overpayment Interest Calculator 2027"),
+        ("r-d-tax-credit-for-game-development-calculator", "R&D Tax Credit for Game Development Calculator"),
+        ("section-199a-qbi-phaseout-wage-limit-calculator", "Section 199A QBI Deduction Phaseout & W-2 Wage Limit Calculator"),
+        ("section-280g-golden-parachute-excise-tax-safe-harbor-calculator", "Section 280G Golden Parachute Safe Harbor Calculator"),
+    ):
+        sample_html = (
+            f'<!DOCTYPE html><html><head><title>{title}</title>'
+            f'<link rel="canonical" href="https://profithelm.com/tools/{slug}/" /></head><body>'
+            f'<h1>{title}</h1>'
+            '<div class="result-card"><div class="card-header"><h2 class="card-title">Projected Output</h2></div></div>'
+            '<section class="affiliate-section affiliates-section"><a href="/r/crest_capital">Xendoo</a></section>'
+            '<section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="profithelm" data-partner="crest_capital">'
+            '<h3 class="section-subtitle">Recommended Partner Solution</h3><a href="/r/crest_capital">CTA</a></section>'
+            "</body></html>"
+        )
+        rep_html, _ = reposition_affiliate_placements_from_gsc_signals(sample_html, property_id="profithelm", slug=slug)
+        norm_html = normalize_html_callout_message_match(rep_html, property_id="profithelm")
+        assert norm_html == rep_html, f"Copy oscillation detected between reposition and normalize for {slug}"
+
+
+
 

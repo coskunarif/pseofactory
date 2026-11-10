@@ -272,6 +272,7 @@ def write_substrate_lock(
     eff_dist = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
     if eff_dist.is_dir():
         try:
+            from pseofactory.affiliates import normalize_html_callout_message_match
             from pseofactory.visual_primitives import normalize_html_visual_primitives
 
             for html_f in sorted(eff_dist.rglob("*.html")):
@@ -281,19 +282,24 @@ def write_substrate_lock(
                     raw_html = html_f.read_text(encoding="utf-8")
                 except Exception:
                     continue
+                norm_html = raw_html
                 if (
-                    'id="pseo-visual-primitives"' in raw_html
-                    or "id='pseo-visual-primitives'" in raw_html
-                    or 'id="calc-result-quick-unlock-bar"' in raw_html
-                    or "id='calc-result-quick-unlock-bar'" in raw_html
-                    or 'id="partner-quote-intake-step"' in raw_html
-                    or "id='partner-quote-intake-step'" in raw_html
-                    or 'class="calculator-card"' in raw_html
-                    or 'class="tool-header"' in raw_html
+                    'id="pseo-visual-primitives"' in norm_html
+                    or "id='pseo-visual-primitives'" in norm_html
+                    or 'id="calc-result-quick-unlock-bar"' in norm_html
+                    or "id='calc-result-quick-unlock-bar'" in norm_html
+                    or 'id="partner-quote-intake-step"' in norm_html
+                    or "id='partner-quote-intake-step'" in norm_html
+                    or 'class="calculator-card"' in norm_html
+                    or 'class="tool-header"' in norm_html
+                    or 'class="site-header"' in norm_html
+                    or 'name="viewport"' in norm_html
                 ):
-                    norm_html, _ = normalize_html_visual_primitives(raw_html)
-                    if norm_html != raw_html:
-                        html_f.write_text(norm_html, encoding="utf-8")
+                    norm_html, _ = normalize_html_visual_primitives(norm_html)
+                if "/r/" in norm_html or "overlay-partner-offer" in norm_html:
+                    norm_html = normalize_html_callout_message_match(norm_html, property_id=pid)
+                if norm_html != raw_html:
+                    html_f.write_text(norm_html, encoding="utf-8")
         except Exception:
             pass
     eh = expected_hash or compute_engine_hash()
