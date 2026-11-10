@@ -476,17 +476,139 @@ def validate_edge_redirects_file(
     }
 
 
+def _collect_tenant_middleware_redirects(
+    repo: Path,
+    dist_dir: Path,
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Collects exact 301 redirect rules and wildcard splat prefix rules from
+    content/redirects.json and dist/_redirects so functions/_middleware.js
+    handles both exact and prefix rules with full specificity parity.
+    """
+    exact_redirects: Dict[str, str] = {}
+    prefix_redirects: Dict[str, str] = {}
+    content_redirects_json = repo / "content" / "redirects.json"
+    if content_redirects_json.is_file():
+        try:
+            raw_rj = json.loads(content_redirects_json.read_text(encoding="utf-8"))
+            if isinstance(raw_rj, dict):
+                for r_src, r_info in raw_rj.items():
+                    r_dst = r_info.get("target") if isinstance(r_info, dict) else r_info
+                    r_code = int(r_info.get("status", 301)) if isinstance(r_info, dict) else 301
+                    if (
+                        isinstance(r_src, str)
+                        and isinstance(r_dst, str)
+                        and r_code in (301, 302, 307, 308)
+                        and r_src.startswith("/")
+                        and "*" not in r_src
+                        and ":" not in r_src
+                    ):
+                        base_src = r_src.rstrip("/")
+                        if base_src and not (dist_dir / base_src.lstrip("/") / "index.html").is_file():
+                            exact_redirects[base_src] = r_dst
+                            exact_redirects[base_src + "/"] = r_dst
+        except Exception:
+            pass
+
+    dist_redirects_file = dist_dir / "_redirects"
+    parsed_rules: List[Tuple[str, str, str, bool]] = []
+    if dist_redirects_file.is_file():
+        try:
+            parsed_rules = parse_edge_redirects_rules(
+                dist_redirects_file.read_text(encoding="utf-8", errors="ignore"),
+                include_middleware_overflow=True,
+            )
+        except Exception:
+            parsed_rules = []
+
+    for r_src, r_dst, r_code_str, _is_ov in parsed_rules:
+        if (
+            r_code_str in ("301", "302", "307", "308")
+            and r_src.startswith("/")
+            and "*" not in r_src
+            and ":" not in r_src
+            and r_src != "/"
+        ):
+            base_src = r_src.rstrip("/")
+            if base_src and not (dist_dir / base_src.lstrip("/") / "index.html").is_file():
+                exact_redirects[base_src] = r_dst
+                exact_redirects[base_src + "/"] = r_dst
+
+    for r_src, r_dst, r_code_str, _is_ov in parsed_rules:
+        if (
+            r_code_str in ("301", "302", "307", "308")
+            and r_src.startswith("/")
+            and r_src.endswith("/*")
+            and "*" not in r_src[:-2]
+            and ":" not in r_src
+            and r_src != "/*"
+        ):
+            prefix_key = r_src[:-1]
+            prefix_redirects[prefix_key] = r_dst
+            base_prefix = prefix_key.rstrip("/")
+            if (
+                base_prefix
+                and base_prefix not in exact_redirects
+                and not (dist_dir / base_prefix.lstrip("/") / "index.html").is_file()
+            ):
+                exact_redirects[base_prefix] = r_dst
+                exact_redirects[base_prefix + "/"] = r_dst
+
+    return exact_redirects, prefix_redirects
+
+
 def _sync_middleware_redirect_table(
     mw_text: str,
     extra_exact_redirects: Dict[str, str],
+    extra_prefix_redirects: Optional[Dict[str, str]] = None,
+    apex_domain: Optional[str] = None,
 ) -> str:
     """
-    Synchronizes exact 301 redirect mappings into functions/_middleware.js
-    (legacySaaSRedirects or edgeRedirects) and ensures trailing-slash-normalized lookup.
+    Synchronizes exact and prefix 301 redirect mappings into functions/_middleware.js,
+    sorting prefix rules longest-first, preserving query strings, and resolving redirects
+    prior to www-to-apex canonicalization so legacy www URLs redirect in a single 301 hop.
     """
+    eff_apex = apex_domain
+    if not eff_apex:
+        apex_m = re.search(r'hostname === "(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})"', mw_text)
+        if apex_m:
+            eff_apex = apex_m.group(1)
+
+    working = mw_text
+    if eff_apex:
+        early_www_pat = re.compile(
+            rf'\n*  if \(hostname === "www\.{re.escape(eff_apex)}"\) \{{\n'
+            rf'    return Response\.redirect\(`https://{re.escape(eff_apex)}\$\{{pathname\}}\$\{{url\.search\}}`, 301\);\n'
+            rf'  \}}\n*'
+        )
+        probe_m = re.search(r"  const (legacySaaSRedirects|edgeRedirects) = \{\n", working)
+        if probe_m:
+            working = early_www_pat.sub("\n\n", working[: probe_m.start()]) + working[probe_m.start() :]
+
+    prefix_pair_pat = re.compile(r'\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]')
+    merged_prefixes: Dict[str, str] = {}
+    prefix_order: List[str] = []
+    for pm in re.finditer(r"const legacyPrefixTargets = \[([\s\S]*?)\];", working):
+        for pair_m in prefix_pair_pat.finditer(pm.group(1)):
+            pk, pv = pair_m.group(1), pair_m.group(2)
+            norm_pk = pk if pk.endswith("/") else pk + "/"
+            if norm_pk not in merged_prefixes:
+                prefix_order.append(norm_pk)
+            merged_prefixes[norm_pk] = pv
+    for pk, pv in (extra_prefix_redirects or {}).items():
+        if not pk.startswith("/"):
+            continue
+        norm_pk = pk if pk.endswith("/") else pk + "/"
+        if norm_pk not in merged_prefixes:
+            prefix_order.append(norm_pk)
+        merged_prefixes[norm_pk] = pv
+    sorted_prefixes = [
+        pk for _, pk in sorted(enumerate(prefix_order), key=lambda item: (-len(item[1]), item[0]))
+    ]
+
     obj_match = re.search(
         r"(  const (legacySaaSRedirects|edgeRedirects) = \{\n)([\s\S]*?)(  \};)",
-        mw_text,
+        working,
     )
     if not obj_match:
         return mw_text
@@ -515,29 +637,84 @@ def _sync_middleware_redirect_table(
 
     rendered_lines = [f'    "{k}": "{merged_entries[k]}",' for k in entry_order]
     new_obj_block = obj_match.group(1) + "\n".join(rendered_lines) + "\n" + obj_match.group(4)
-    updated = mw_text[: obj_match.start()] + new_obj_block + mw_text[obj_match.end() :]
 
-    norm_lookup_block = (
-        f'  const _normRedirectPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;\n'
-        f'  const _matchedRedirectTarget = {var_name}[pathname] || {var_name}[_normRedirectPath] || {var_name}[_normRedirectPath + "/"];\n'
-        f"  if (_matchedRedirectTarget) {{\n"
-        f"    return Response.redirect(`${{url.origin}}${{_matchedRedirectTarget}}`, 301);\n"
-        f"  }}"
+    post_part = working[obj_match.end() :]
+    post_part = re.sub(
+        r"\n*  // \[BEGIN_EDGE_REDIRECT_DISPATCH\][\s\S]*?  // \[END_EDGE_REDIRECT_DISPATCH\]\n*",
+        "\n",
+        post_part,
     )
-    exact_if_pat = re.compile(
-        rf"  if \({re.escape(var_name)}\[pathname\]\) \{{\n"
-        rf"    return Response\.redirect\(`\$\{{url\.origin\}}\$\{{{re.escape(var_name)}\[pathname\]\}}`, 301\);\n"
-        rf"  \}}"
+    post_part = re.sub(
+        r"\n*  const _normRedirectPath = [\s\S]*?  if \(_matchedRedirectTarget\) \{\n    return Response\.redirect\([^\n]+\);\n  \}\n*",
+        "\n",
+        post_part,
     )
-    if "_matchedRedirectTarget" not in updated:
-        if exact_if_pat.search(updated):
-            updated = exact_if_pat.sub(lambda _m: norm_lookup_block, updated, count=1)
-        else:
-            anchor = new_obj_block + "\n"
-            if anchor in updated:
-                updated = updated.replace(anchor, anchor + "\n" + norm_lookup_block + "\n", 1)
+    post_part = re.sub(
+        rf"\n*  if \({re.escape(var_name)}\[pathname\]\) \{{\n    return Response\.redirect\([^\n]+\);\n  \}}\n*",
+        "\n",
+        post_part,
+    )
+    post_part = re.sub(
+        r"\n*  const legacyPrefixTargets = \[[\s\S]*?\];\n  for \(const \[prefix, target\] of legacyPrefixTargets\) \{\n    if \(pathname\.startsWith\(prefix\)\) \{\n      return Response\.redirect\([^\n]+\);\n    \}\n  \}\n*",
+        "\n",
+        post_part,
+    )
 
-    return updated
+    origin_expr = (
+        f'hostname === "www.{eff_apex}" ? "https://{eff_apex}" : url.origin'
+        if eff_apex
+        else "url.origin"
+    )
+    dispatch_lines = [
+        "  // [BEGIN_EDGE_REDIRECT_DISPATCH]",
+        f"  const _canonicalOrigin = {origin_expr};",
+        '  const _normRedirectPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;',
+    ]
+    if sorted_prefixes:
+        dispatch_lines.append(
+            f'  let _matchedRedirectTarget = {var_name}[pathname] || {var_name}[_normRedirectPath] || {var_name}[_normRedirectPath + "/"] || null;'
+        )
+        dispatch_lines.append("  if (!_matchedRedirectTarget) {")
+        dispatch_lines.append("    const legacyPrefixTargets = [")
+        for pk in sorted_prefixes:
+            dispatch_lines.append(f'      ["{pk}", "{merged_prefixes[pk]}"],')
+        dispatch_lines.extend(
+            [
+                "    ];",
+                "    for (const [prefix, target] of legacyPrefixTargets) {",
+                "      if (pathname.startsWith(prefix)) {",
+                "        _matchedRedirectTarget = target;",
+                "        break;",
+                "      }",
+                "    }",
+                "  }",
+            ]
+        )
+    else:
+        dispatch_lines.append(
+            f'  const _matchedRedirectTarget = {var_name}[pathname] || {var_name}[_normRedirectPath] || {var_name}[_normRedirectPath + "/"] || null;'
+        )
+    dispatch_lines.extend(
+        [
+            "  if (_matchedRedirectTarget) {",
+            '    const _redirectQs = url.search.length > 1 ? (_matchedRedirectTarget.includes("?") ? "&" + url.search.slice(1) : url.search) : "";',
+            '    const _destBase = _matchedRedirectTarget.startsWith("http") ? _matchedRedirectTarget : `${_canonicalOrigin}${_matchedRedirectTarget}`;',
+            "    return Response.redirect(`${_destBase}${_redirectQs}`, 301);",
+            "  }",
+        ]
+    )
+    if eff_apex:
+        dispatch_lines.extend(
+            [
+                f'  if (hostname === "www.{eff_apex}") {{',
+                f"    return Response.redirect(`https://{eff_apex}${{pathname}}${{url.search}}`, 301);",
+                "  }",
+            ]
+        )
+    dispatch_lines.append("  // [END_EDGE_REDIRECT_DISPATCH]")
+
+    dispatch_block = "\n".join(dispatch_lines)
+    return working[: obj_match.start()] + new_obj_block + "\n\n" + dispatch_block + "\n\n" + post_part.lstrip("\n")
 
 
 class HostHygieneAuditor:
@@ -11772,17 +11949,11 @@ def sync_tenant_edge_redirect_function(
                 f"    return Response.redirect(`https://{apex_domain}${{pathname}}${{url.search}}`, 301);\n"
                 "  }\n"
             )
-            if f'hostname === "www.{apex_domain}"' not in mw_new or f'const isApex = hostname === "{apex_domain}" || hostname === "www.{apex_domain}";' in mw_new:
+            if f'const isApex = hostname === "{apex_domain}" || hostname === "www.{apex_domain}";' in mw_new:
                 mw_new = mw_new.replace(
                     f'const isApex = hostname === "{apex_domain}" || hostname === "www.{apex_domain}";',
                     f'const isApex = hostname === "{apex_domain}";',
                 )
-                if f'if (hostname === "www.{apex_domain}")' not in mw_new and "const pathname = url.pathname;\n" in mw_new:
-                    mw_new = mw_new.replace(
-                        "const pathname = url.pathname;\n",
-                        "const pathname = url.pathname;\n\n" + www_guard,
-                        1,
-                    )
 
             if prop_clean == "gainhelm":
                 gh_gsc_redirects = [
@@ -11894,50 +12065,22 @@ def sync_tenant_edge_redirect_function(
                         1,
                     )
 
-            extra_mw_redirects: Dict[str, str] = {}
-            content_redirects_json = repo / "content" / "redirects.json"
-            if content_redirects_json.is_file():
-                try:
-                    raw_rj = json.loads(content_redirects_json.read_text(encoding="utf-8"))
-                    if isinstance(raw_rj, dict):
-                        for r_src, r_info in raw_rj.items():
-                            r_dst = r_info.get("target") if isinstance(r_info, dict) else r_info
-                            r_code = int(r_info.get("status", 301)) if isinstance(r_info, dict) else 301
-                            if (
-                                isinstance(r_src, str)
-                                and isinstance(r_dst, str)
-                                and r_code in (301, 302, 307, 308)
-                                and r_src.startswith("/")
-                                and "*" not in r_src
-                                and ":" not in r_src
-                            ):
-                                base_src = r_src.rstrip("/")
-                                if base_src and not (dist_dir / base_src.lstrip("/") / "index.html").is_file():
-                                    extra_mw_redirects[base_src] = r_dst
-                                    extra_mw_redirects[base_src + "/"] = r_dst
-                except Exception:
-                    pass
-            dist_redirects_file = dist_dir / "_redirects"
-            if dist_redirects_file.is_file():
-                try:
-                    for r_src, r_dst, r_code_str, _is_ov in parse_edge_redirects_rules(
-                        dist_redirects_file.read_text(encoding="utf-8", errors="ignore"),
-                        include_middleware_overflow=True,
-                    ):
-                        if (
-                            r_code_str in ("301", "302", "307", "308")
-                            and r_src.startswith("/")
-                            and "*" not in r_src
-                            and ":" not in r_src
-                            and r_src != "/"
-                        ):
-                            base_src = r_src.rstrip("/")
-                            if base_src and not (dist_dir / base_src.lstrip("/") / "index.html").is_file():
-                                extra_mw_redirects[base_src] = r_dst
-                                extra_mw_redirects[base_src + "/"] = r_dst
-                except Exception:
-                    pass
-            mw_new = _sync_middleware_redirect_table(mw_new, extra_mw_redirects)
+            extra_mw_redirects, extra_prefix_redirects = _collect_tenant_middleware_redirects(
+                repo=repo,
+                dist_dir=dist_dir,
+            )
+            mw_new = _sync_middleware_redirect_table(
+                mw_new,
+                extra_mw_redirects,
+                extra_prefix_redirects=extra_prefix_redirects,
+                apex_domain=apex_domain,
+            )
+            if f'if (hostname === "www.{apex_domain}")' not in mw_new and "const pathname = url.pathname;\n" in mw_new:
+                mw_new = mw_new.replace(
+                    "const pathname = url.pathname;\n",
+                    "const pathname = url.pathname;\n\n" + www_guard,
+                    1,
+                )
 
             if "  return await context.next();\n}" in mw_new:
                 mw_new = mw_new.replace(

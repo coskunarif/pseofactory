@@ -612,6 +612,151 @@ def test_youtube_upload_ledger_merges_into_uploaded_log_before_substrate_lock_ha
     assert lock_payload["dist_fingerprint"] == actual_fp
 
 
+def test_middleware_prefix_specificity_query_preservation_single_hop_and_corrupt_ledger_fail_closed(
+    tmp_path: Path,
+):
+    import json
+    import subprocess
+    import pytest
+    from pseofactory.edge import sync_tenant_edge_redirect_function
+    from pseofactory.video_factory import _save_upload_idempotency_record
+
+    repo_dir = tmp_path / "profithelm-platform"
+    dist_dir = repo_dir / "dist"
+    (repo_dir / "functions" / "r").mkdir(parents=True)
+    for rel in (
+        "index.html",
+        "tools/index.html",
+        "tools/section-179-calculator/index.html",
+        "tools/saas-runway-calculator/index.html",
+        "tools/section-301-import-tariff-landed-cost-calculator/index.html",
+    ):
+        hp = dist_dir / rel
+        hp.parent.mkdir(parents=True, exist_ok=True)
+        hp.write_text("<!DOCTYPE html><html><body>OK</body></html>", encoding="utf-8")
+
+    (dist_dir / "_redirects").write_text(
+        "/vs/ordermetrics  /tools/section-179-calculator/  301\n"
+        "/vs/ordermetrics/  /tools/section-179-calculator/  301\n"
+        "/vs/ordermetrics/*  /tools/section-179-calculator/  301\n"
+        "/vs/*  /tools/saas-runway-calculator/  301\n"
+        "/tools/landed-cost-calculator  /tools/section-301-import-tariff-landed-cost-calculator/  301\n",
+        encoding="utf-8",
+    )
+    (repo_dir / "functions" / "_middleware.js").write_text(
+        "export async function onRequest(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        "  const hostname = url.hostname.toLowerCase();\n"
+        "  const pathname = url.pathname;\n\n"
+        '  if (hostname === "www.profithelm.com") {\n'
+        "    return Response.redirect(`https://profithelm.com${pathname}${url.search}`, 301);\n"
+        "  }\n\n"
+        "  const legacySaaSRedirects = {\n"
+        '    "/pricing": "/tools/saas-runway-calculator/",\n'
+        "  };\n\n"
+        '  const _normRedirectPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;\n'
+        '  const _matchedRedirectTarget = legacySaaSRedirects[pathname] || legacySaaSRedirects[_normRedirectPath] || legacySaaSRedirects[_normRedirectPath + "/"];\n'
+        "  if (_matchedRedirectTarget) {\n"
+        "    return Response.redirect(`${url.origin}${_matchedRedirectTarget}`, 301);\n"
+        "  }\n\n"
+        "  const legacyPrefixTargets = [\n"
+        '    ["/vs/", "/tools/saas-runway-calculator/"],\n'
+        "  ];\n"
+        "  for (const [prefix, target] of legacyPrefixTargets) {\n"
+        "    if (pathname.startsWith(prefix)) {\n"
+        "      return Response.redirect(`${url.origin}${target}`, 301);\n"
+        "    }\n"
+        "  }\n\n"
+        "  const response = await context.next();\n"
+        "  return response;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    sync_tenant_edge_redirect_function(repo_dir, property_id="profithelm")
+    mw_path = repo_dir / "functions" / "_middleware.js"
+    first_pass = mw_path.read_text(encoding="utf-8")
+
+    # Idempotency check on second pass
+    sync_tenant_edge_redirect_function(repo_dir, property_id="profithelm")
+    assert mw_path.read_text(encoding="utf-8") == first_pass
+
+    node_probe = f"""
+import {{ onRequest }} from {json.dumps(mw_path.as_uri())};
+
+async function evalReq(rawUrl) {{
+  const res = await onRequest({{
+    request: new Request(rawUrl),
+    next: async () => new Response("<html>OK</html>", {{ status: 200, headers: {{ "Content-Type": "text/html" }} }}),
+  }});
+  return {{ status: res.status, location: res.headers.get("location") }};
+}}
+
+const out = {{
+  ordermetricsSubpath: await evalReq("https://profithelm.com/vs/ordermetrics/sample"),
+  ordermetricsWithUtm: await evalReq("https://profithelm.com/vs/ordermetrics/sample?utm_source=linkedin&utm_medium=cpc"),
+  vsGenericWithUtm: await evalReq("https://profithelm.com/vs/other-tool?utm_source=x"),
+  exactWithUtm: await evalReq("https://profithelm.com/tools/landed-cost-calculator?utm_source=gsc&utm_campaign=nov"),
+  wwwLegacyExactSingleHop: await evalReq("https://www.profithelm.com/tools/landed-cost-calculator?utm_source=gsc"),
+  wwwLegacyPrefixSingleHop: await evalReq("https://www.profithelm.com/vs/ordermetrics/sample?ref=nav"),
+  wwwCanonicalSingleHop: await evalReq("https://www.profithelm.com/tools/section-179-calculator/?ref=nav"),
+  apexCanonicalPass: await evalReq("https://profithelm.com/tools/section-179-calculator/"),
+}};
+console.log(JSON.stringify(out));
+"""
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", node_probe],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    results = json.loads(proc.stdout.strip())
+    assert results["ordermetricsSubpath"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/section-179-calculator/",
+    }
+    assert results["ordermetricsWithUtm"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/section-179-calculator/?utm_source=linkedin&utm_medium=cpc",
+    }
+    assert results["vsGenericWithUtm"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/saas-runway-calculator/?utm_source=x",
+    }
+    assert results["exactWithUtm"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/section-301-import-tariff-landed-cost-calculator/?utm_source=gsc&utm_campaign=nov",
+    }
+    assert results["wwwLegacyExactSingleHop"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/section-301-import-tariff-landed-cost-calculator/?utm_source=gsc",
+    }
+    assert results["wwwLegacyPrefixSingleHop"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/section-179-calculator/?ref=nav",
+    }
+    assert results["wwwCanonicalSingleHop"] == {
+        "status": 301,
+        "location": "https://profithelm.com/tools/section-179-calculator/?ref=nav",
+    }
+    assert results["apexCanonicalPass"]["status"] == 200
+
+    # Corrupt non-empty youtube_upload_ledger.json must fail closed without wiping existing bytes
+    corrupt_ledger = repo_dir / ".agy" / "youtube_upload_ledger.json"
+    corrupt_ledger.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_payload = '{"uploads": {"profithelm:keep-me": {"video_id": "abc"}} BROKEN'
+    corrupt_ledger.write_text(corrupt_payload, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Corrupt non-empty YouTube upload ledger"):
+        _save_upload_idempotency_record(
+            repo_root=repo_dir,
+            property_id="profithelm",
+            slug="new-tool",
+            record={"slug": "new-tool", "video_id": "xyz987"},
+        )
+    assert corrupt_ledger.read_text(encoding="utf-8") == corrupt_payload
+
+
+
 
 
 

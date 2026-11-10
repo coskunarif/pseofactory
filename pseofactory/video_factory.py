@@ -617,14 +617,23 @@ def _save_upload_idempotency_record(
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             try:
                 data: Dict[str, Any] = {"uploads": {}, "updated_at": datetime.now(timezone.utc).isoformat()}
-                if l_path.is_file():
+                if l_path.is_file() and l_path.stat().st_size > 0:
                     try:
                         loaded = json.loads(l_path.read_text(encoding="utf-8"))
-                        if isinstance(loaded, dict):
-                            data = loaded
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Corrupt non-empty YouTube upload ledger at {l_path}: {exc}"
+                        ) from exc
+                    if not isinstance(loaded, dict):
+                        raise RuntimeError(
+                            f"Corrupt non-empty YouTube upload ledger at {l_path}: expected JSON object"
+                        )
+                    data = loaded
                 uploads_map = data.setdefault("uploads", {})
+                if not isinstance(uploads_map, dict):
+                    raise RuntimeError(
+                        f"Corrupt non-empty YouTube upload ledger at {l_path}: expected 'uploads' dict"
+                    )
                 uploads_map[key] = dict(record)
                 data["updated_at"] = datetime.now(timezone.utc).isoformat()
                 tmp_f = l_path.with_suffix(".tmp")
