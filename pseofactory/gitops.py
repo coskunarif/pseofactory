@@ -2659,10 +2659,94 @@ class LiveEdgeVerifier:
         )
         return cleaned
 
+    TENANT_PARTNER_PROBE_COHORTS: Dict[str, Tuple[str, ...]] = {
+        "profithelm": ("mercury", "xendoo", "lawdepot"),
+        "prexvo": ("splash_financial", "credible", "lendkey"),
+        "gainhelm": ("vanta_security", "drata_compliance", "sprinto_compliance"),
+        "lienbond": ("suretybonds_direct", "simply_business", "thimble_contractor"),
+    }
+
+    @classmethod
+    def resolve_tenant_partner_probe_cohort(
+        cls,
+        property_id: str,
+        dist_dir: Optional[Union[str, Path]] = None,
+    ) -> Tuple[str, ...]:
+        """
+        Resolves the deterministic non-declined /r/<partner> probe cohort for a tenant.
+        When dist_dir contains a compiled Cloudflare Pages redirect function
+        (functions/r/[partner].js or functions/r/[[partner]].js), filters or extracts
+        non-declined route slugs from that worker so LiveEdgeVerifier never probes
+        foreign or declined routes.
+        Zero em-dashes. Zero en-dashes.
+        """
+        prop_clean = (property_id or "").strip().lower()
+        canonical_cohort = cls.TENANT_PARTNER_PROBE_COHORTS.get(prop_clean, ())
+
+        worker_slugs: List[str] = []
+        if dist_dir is not None:
+            d_path = Path(dist_dir)
+            candidate_files: List[Path] = [
+                d_path / "functions" / "r" / "[partner].js",
+                d_path / "functions" / "r" / "[[partner]].js",
+            ]
+            if d_path.name == "dist":
+                candidate_files.extend(
+                    (
+                        d_path.parent / "functions" / "r" / "[partner].js",
+                        d_path.parent / "functions" / "r" / "[[partner]].js",
+                    )
+                )
+            entry_re = re.compile(
+                r'^\s*"?([a-z0-9_]+)"?\s*:\s*\{(?P<body>[\s\S]*?)\n\s*\}',
+                re.MULTILINE,
+            )
+            declined_states = {
+                "declined",
+                "rejected",
+                "terminated",
+                "revoked",
+                "expired",
+                "suspended",
+                "inactive",
+            }
+            for cand in candidate_files:
+                if not cand.is_file():
+                    continue
+                try:
+                    js_src = cand.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                for m in entry_re.finditer(js_src):
+                    slug = m.group(1).strip().lower()
+                    body = m.group("body")
+                    if "defaultUrl:" not in body and '"defaultUrl":' not in body:
+                        continue
+                    st_m = re.search(r'"?status"?\s*:\s*"([^"]+)"', body)
+                    st_val = st_m.group(1).strip().lower() if st_m else ""
+                    if st_val not in declined_states and slug not in worker_slugs:
+                        worker_slugs.append(slug)
+                if worker_slugs:
+                    break
+
+        if worker_slugs:
+            matched = tuple(s for s in canonical_cohort if s in worker_slugs)
+            if matched:
+                if len(matched) < 3:
+                    extras = tuple(s for s in worker_slugs if s not in matched)[: 3 - len(matched)]
+                    return matched + extras
+                return matched
+            return tuple(worker_slugs[:3])
+
+        if canonical_cohort:
+            return canonical_cohort
+        return ("mercury", "xendoo")
+
     def verify_edge_functions(
         self,
         base_url: str,
         property_id: str,
+        dist_dir: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Probes live Cloudflare Pages Functions endpoints for tenant isolation and route parity:
@@ -2672,7 +2756,7 @@ class LiveEdgeVerifier:
         4. POST /api/lead-capture with X-Pseofactory-Test: 1 (synthetic test mode, persisted=false)
         5. GET /api/checkout?format=json (HTTP 200/503 JSON, tenant isolation)
         6. GET /api/lead-fulfillment (HTTP 402 payment_required gate)
-        7. GET /r/<partner> (HTTP 302 affiliate redirect)
+        7. GET /r/<partner>?synthetic_test=1 (HTTP 302 affiliate redirect, telemetry suppressed)
         Zero em-dashes. Zero en-dashes.
         """
         base = base_url.rstrip("/")
@@ -2681,12 +2765,7 @@ class LiveEdgeVerifier:
             "User-Agent": ua,
             "X-Pseofactory-Test": "1",
         }
-        partner_cohort = {
-            "prexvo": ("splash_financial", "sofi_refi", "earnest"),
-            "gainhelm": ("vanta_security", "drata_compliance", "sprinto_compliance"),
-            "lienbond": ("simply_business", "suretybonds_direct", "lawdepot"),
-            "profithelm": ("mercury", "simply_business", "lawdepot"),
-        }.get(property_id, ("mercury", "simply_business"))
+        partner_cohort = self.resolve_tenant_partner_probe_cohort(property_id, dist_dir=dist_dir)
         slot_sku = {
             "prexvo": "px_verified_partner_slot",
             "gainhelm": "gh_verified_partner_slot",
@@ -2961,7 +3040,7 @@ class LiveEdgeVerifier:
         opener = urllib.request.build_opener(_NoRedirect)
         for p_key in partner_cohort:
             r_path = f"/r/{p_key}"
-            r_url = f"{base}{r_path}"
+            r_url = f"{base}{r_path}?synthetic_test=1"
             req7 = urllib.request.Request(r_url, headers=base_headers, method="GET")
             t0 = time.time()
             c7 = 0
@@ -3445,7 +3524,7 @@ class LiveEdgeVerifier:
 
         edge_functions_audit: Optional[Dict[str, Any]] = None
         if should_sample_tools and not dry_run:
-            edge_functions_audit = self.verify_edge_functions(base, property_id)
+            edge_functions_audit = self.verify_edge_functions(base, property_id, dist_dir=dist_dir)
             if edge_functions_audit.get("status") != "PASS":
                 all_passed = False
                 fn_err = "; ".join((edge_functions_audit.get("issues") or [])[:3])

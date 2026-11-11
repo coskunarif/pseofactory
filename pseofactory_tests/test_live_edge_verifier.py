@@ -606,4 +606,187 @@ def test_verify_edge_functions_accepts_canonical_operator_mailbox_and_auth_requi
         server.server_close()
 
 
+def test_live_edge_verifier_tenant_partner_route_selection_and_synthetic_telemetry_suppression(tmp_path: Path):
+    """10. LiveEdgeVerifier selects tenant-isolated non-declined partner routes across all 4 tenants and sends synthetic_test=1 + X-Pseofactory-Test: 1."""
+    import http.server
+    import json
+    import threading
+    from urllib.parse import parse_qs, urlparse
+    from pseofactory.edge import generate_edge_redirect_function
+
+    expected_cohorts = {
+        "profithelm": ("mercury", "xendoo", "lawdepot"),
+        "prexvo": ("splash_financial", "credible", "lendkey"),
+        "gainhelm": ("vanta_security", "drata_compliance", "sprinto_compliance"),
+        "lienbond": ("suretybonds_direct", "simply_business", "thimble_contractor"),
+    }
+    for prop_id, exp_cohort in expected_cohorts.items():
+        assert LiveEdgeVerifier.resolve_tenant_partner_probe_cohort(prop_id) == exp_cohort
+        if prop_id != "profithelm":
+            assert "lawdepot" not in exp_cohort
+        assert "sofi_refi" not in exp_cohort
+        assert "earnest" not in exp_cohort
+        assert "next_insurance_b2b" not in exp_cohort
+
+        # Also verify against compiled functions/r/[partner].js inside a tenant dist_dir
+        prop_dist = tmp_path / prop_id / "dist"
+        r_dir = prop_dist / "functions" / "r"
+        r_dir.mkdir(parents=True, exist_ok=True)
+        (r_dir / "[partner].js").write_text(generate_edge_redirect_function(prop_id), encoding="utf-8")
+        assert LiveEdgeVerifier.resolve_tenant_partner_probe_cohort(prop_id, dist_dir=prop_dist) == exp_cohort
+
+    # Verify dynamic extraction from functions/r/[[partner]].js filters out declined partners
+    custom_dist = tmp_path / "custom_tenant" / "dist"
+    custom_r_dir = custom_dist / "functions" / "r"
+    custom_r_dir.mkdir(parents=True, exist_ok=True)
+    (custom_r_dir / "[[partner]].js").write_text(
+        """
+        const CATALOG = {
+          declined_offer: {
+            defaultUrl: "https://example.com/declined",
+            status: "declined",
+          },
+          suretybonds_direct: {
+            defaultUrl: "https://www.suretybondsdirect.com/",
+            status: "pending",
+          },
+          simply_business: {
+            defaultUrl: "https://www.simplybusiness.com/",
+            status: "pending",
+          },
+        };
+        """,
+        encoding="utf-8",
+    )
+    resolved_custom = LiveEdgeVerifier.resolve_tenant_partner_probe_cohort("custom_tenant", dist_dir=custom_dist)
+    assert resolved_custom == ("suretybonds_direct", "simply_business")
+    assert "declined_offer" not in resolved_custom
+    assert "lawdepot" not in resolved_custom
+
+    # Verify LienBond edge function probing passes when /r/lawdepot is 404 and enforces synthetic_test=1 + X-Pseofactory-Test: 1
+    captured_redirects = []
+
+    class _IsolatedLienBondHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            return
+
+        def _send_json(self, code: int, body: dict):
+            raw = json.dumps(body).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            if parsed.path.startswith("/r/"):
+                slug = parsed.path[len("/r/") :].strip("/")
+                captured_redirects.append(
+                    {
+                        "slug": slug,
+                        "synthetic_query": qs.get("synthetic_test"),
+                        "synthetic_header": self.headers.get("X-Pseofactory-Test"),
+                    }
+                )
+                if slug in ("suretybonds_direct", "simply_business", "thimble_contractor"):
+                    self.send_response(302)
+                    self.send_header("Location", f"https://lienbond.com/tools/bond-calc/?p={slug}")
+                    self.end_headers()
+                    return
+                self._send_json(404, {"ok": False, "error": "foreign_or_unknown_partner"})
+                return
+            if parsed.path == "/api/lead-fulfillment":
+                self._send_json(402, {"ok": False, "status": "payment_required", "settled": False})
+                return
+            if parsed.path == "/api/checkout":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "checkout_session_ready",
+                        "property_id": "lienbond",
+                        "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    },
+                )
+                return
+            if parsed.path == "/api/lead-capture":
+                if qs.get("playbook") == ["1"]:
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "status": "playbook_ready",
+                            "property_id": "lienbond",
+                            "reconciliation_schedule": [1, 2, 3],
+                        },
+                    )
+                    return
+                if qs.get("checkout") == ["1"]:
+                    sku = (qs.get("sku") or ["lb_surety_bond_underwriting_kit"])[0]
+                    price = 299.0 if sku == "lb_verified_partner_slot" else 49.0
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "status": "checkout_session_ready",
+                            "checkout_mode": "stripe_live_session",
+                            "checkout_url": "https://checkout.stripe.com/c/pay/cs_live_lb",
+                            "property_id": "lienbond",
+                            "offer_sku": sku,
+                            "offer_price_usd": price,
+                            "stripe_display_name": "LienBond",
+                            "stripe_merchant_email": "arif.coskun@profithelm.com",
+                        },
+                    )
+                    return
+                self._send_json(200, {"ok": True, "auth_required": True})
+                return
+            self._send_json(404, {"ok": False})
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or "0")
+            body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            if body.get("intent") == "partner_registration":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "partner_registered",
+                        "offer_sku": "lb_verified_partner_slot",
+                        "offer_price_usd": 299.0,
+                        "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    },
+                )
+                return
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "synthetic_test": True,
+                    "persisted": False,
+                    "property_id": "lienbond",
+                    "stripe_merchant_email": "arif.coskun@profithelm.com",
+                },
+            )
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _IsolatedLienBondHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        verifier = LiveEdgeVerifier(timeout=5.0, retries=1)
+        res = verifier.verify_edge_functions(base_url, property_id="lienbond", dist_dir=tmp_path / "lienbond" / "dist")
+        assert res["status"] == "PASS", res
+        assert res["issues"] == []
+        assert [c["slug"] for c in captured_redirects] == ["suretybonds_direct", "simply_business", "thimble_contractor"]
+        for c in captured_redirects:
+            assert c["synthetic_query"] == ["1"]
+            assert c["synthetic_header"] == "1"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 
