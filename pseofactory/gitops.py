@@ -2745,6 +2745,12 @@ class LiveEdgeVerifier:
                     parsed = None
             return code, body, parsed, lat_ms
 
+        canonical_operator_mailbox = "arif.coskun@profithelm.com"
+
+        def _has_foreign_domain(raw_text: str) -> bool:
+            scrubbed = (raw_text or "").lower().replace(canonical_operator_mailbox, "")
+            return any(fd in scrubbed for fd in foreign_domains)
+
         # 1. GET /api/lead-capture
         c1, b1, j1, l1 = _req_json("/api/lead-capture", "GET", None, (200,))
         j1_meta_str = (
@@ -2756,8 +2762,11 @@ class LiveEdgeVerifier:
             c1 == 200
             and isinstance(j1, dict)
             and j1.get("ok") is True
-            and j1.get("property_id") == property_id
-            and not any(fd in j1_meta_str for fd in foreign_domains)
+            and (
+                j1.get("property_id") == property_id
+                or (j1.get("auth_required") is True and j1.get("property_id") in (None, property_id))
+            )
+            and not _has_foreign_domain(j1_meta_str)
         )
         routes["GET /api/lead-capture"] = {
             "status": "PASS" if r1_ok else "FAIL",
@@ -2777,7 +2786,7 @@ class LiveEdgeVerifier:
             and j2.get("property_id") == property_id
             and isinstance(j2.get("reconciliation_schedule"), list)
             and len(j2.get("reconciliation_schedule") or []) >= 3
-            and not any(fd in b2.lower() for fd in foreign_domains)
+            and not _has_foreign_domain(b2)
         )
         routes["GET /api/lead-capture?playbook=1"] = {
             "status": "PASS" if r2_ok else "FAIL",
@@ -2805,8 +2814,12 @@ class LiveEdgeVerifier:
             and chk_mode3 in ("stripe_live_session", "edge_checkout_rail")
             and bool(chk_url3)
             and j3.get("property_id") == property_id
-            and (not merchant_email or merchant_email.endswith(f"@{property_id}.com"))
-            and not any(fd in b3.lower() for fd in foreign_domains)
+            and (
+                not merchant_email
+                or merchant_email.endswith(f"@{property_id}.com")
+                or merchant_email.lower() == canonical_operator_mailbox
+            )
+            and not _has_foreign_domain(b3)
         )
         routes["GET /api/lead-capture?checkout=1&format=json"] = {
             "status": "PASS" if r3_ok else "FAIL",
@@ -2859,7 +2872,7 @@ class LiveEdgeVerifier:
             and j4.get("synthetic_test") is True
             and j4.get("persisted") is False
             and j4.get("property_id") == property_id
-            and not any(fd in b4.lower() for fd in foreign_domains)
+            and not _has_foreign_domain(b4)
         )
         routes["POST /api/lead-capture"] = {
             "status": "PASS" if r4_ok else "FAIL",
@@ -2914,7 +2927,7 @@ class LiveEdgeVerifier:
             and isinstance(j5, dict)
             and j5.get("status") == "checkout_session_ready"
             and j5.get("property_id") == property_id
-            and not any(fd in b5.lower() for fd in foreign_domains)
+            and not _has_foreign_domain(b5)
         )
         routes["GET /api/checkout?format=json"] = {
             "status": "PASS" if r5_ok else "FAIL",

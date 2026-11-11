@@ -478,3 +478,132 @@ def test_live_edge_verifier_full_monetization_checkout_and_partner_slot_matrix(t
             assert all(routes_map[rk]["status"] == "PASS" for rk in redir_keys)
 
 
+def test_verify_edge_functions_accepts_canonical_operator_mailbox_and_auth_required_health_while_failing_foreign_domain_leaks():
+    import http.server
+    import json
+    import threading
+    from urllib.parse import parse_qs, urlparse
+
+    leak_mode = {"inject_foreign_url": False}
+
+    class _HardenedPrexvoHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            return
+
+        def _send_json(self, code: int, body: dict):
+            raw = json.dumps(body).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            if parsed.path.startswith("/r/"):
+                self.send_response(302)
+                self.send_header("Location", "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/")
+                self.end_headers()
+                return
+            if parsed.path == "/api/lead-fulfillment":
+                self._send_json(402, {"ok": False, "status": "payment_required", "settled": False})
+                return
+            if parsed.path == "/api/checkout":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "checkout_session_ready",
+                        "property_id": "prexvo",
+                        "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    },
+                )
+                return
+            if parsed.path == "/api/lead-capture":
+                if qs.get("playbook") == ["1"]:
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "status": "playbook_ready",
+                            "property_id": "prexvo",
+                            "reconciliation_schedule": [1, 2, 3],
+                        },
+                    )
+                    return
+                if qs.get("checkout") == ["1"]:
+                    sku = (qs.get("sku") or ["px_refi_amortization_decision_audit"])[0]
+                    price = 299.0 if sku == "px_verified_partner_slot" else 39.0
+                    cancel_url = (
+                        "https://profithelm.com/leak/"
+                        if leak_mode["inject_foreign_url"]
+                        else "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/"
+                    )
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "status": "checkout_session_ready",
+                            "checkout_mode": "stripe_live_session",
+                            "checkout_url": "https://checkout.stripe.com/c/pay/cs_live_test",
+                            "cancel_url": cancel_url,
+                            "property_id": "prexvo",
+                            "offer_sku": sku,
+                            "offer_price_usd": price,
+                            "stripe_display_name": "Prexvo",
+                            "stripe_merchant_email": "arif.coskun@profithelm.com",
+                        },
+                    )
+                    return
+                # Hardened unauthenticated synthetic health response (no property_id)
+                self._send_json(200, {"ok": True, "auth_required": True})
+                return
+            self._send_json(404, {"ok": False})
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or "0")
+            body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            if body.get("intent") == "partner_registration":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "partner_registered",
+                        "offer_sku": "px_verified_partner_slot",
+                        "offer_price_usd": 299.0,
+                        "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    },
+                )
+                return
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "synthetic_test": True,
+                    "persisted": False,
+                    "property_id": "prexvo",
+                    "stripe_merchant_email": "arif.coskun@profithelm.com",
+                },
+            )
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _HardenedPrexvoHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        verifier = LiveEdgeVerifier(timeout=5.0, retries=1)
+        res_ok = verifier.verify_edge_functions(base_url, property_id="prexvo")
+        assert res_ok["status"] == "PASS", res_ok
+        assert res_ok["issues"] == []
+
+        leak_mode["inject_foreign_url"] = True
+        res_leak = verifier.verify_edge_functions(base_url, property_id="prexvo")
+        assert res_leak["status"] == "FAIL"
+        assert any("GET /api/lead-capture?checkout=1&format=json failed" in i for i in res_leak["issues"])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+
