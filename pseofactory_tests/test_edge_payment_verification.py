@@ -475,6 +475,46 @@ def test_verify_tenant_edge_functions_parity_enforces_dist_functions_and_obbba_a
     assert '"post-TCJA sunset" in al_dist_txt' in maint_src
 
 
+def test_lienbond_homepage_declined_next_insurance_heals_cleanly_in_callout_normalization(tmp_path):
+    from pseofactory.affiliates import (
+        audit_callout_destination_message_match,
+        normalize_html_callout_message_match,
+    )
+    from pseofactory.maintenance import _has_stale_pending_status
+
+    stale_lienbond_home = (
+        '<!doctype html><html lang="en"><head><link rel="canonical" href="https://lienbond.com/"></head>'
+        "<body><main>"
+        "<table><tbody><tr>"
+        "<td><strong>Next Insurance</strong></td>"
+        "<td>NCCI Class-Code Contractor Workers Compensation &amp; General Liability COI</td>"
+        '<td><a href="/r/next_insurance_b2b?source_tool=homepage&amp;subid=homepage_card_2&amp;cta_slot=partner_matrix_card" '
+        'rel="noopener sponsored nofollow" target="_blank" data-status="declined" '
+        'data-partner="next_insurance_b2b" data-tool="homepage" data-subid="homepage_card" '
+        'data-cta-slot="partner_matrix_card">Bind Workers Comp &amp; Download Live COI with Next Insurance</a></td>'
+        "</tr></tbody></table>"
+        '<div id="partner-quote-intake-step" data-partner-key="next_insurance_b2b"></div>'
+        "</main></body></html>"
+    )
+    assert _has_stale_pending_status(stale_lienbond_home, "lienbond") is True
+
+    healed = normalize_html_callout_message_match(stale_lienbond_home, property_id="lienbond")
+    assert "next_insurance_b2b" not in healed
+    assert 'href="/r/simply_business?' in healed
+    assert 'data-partner="simply_business"' in healed
+    assert 'data-partner-key="simply_business"' in healed
+    assert 'data-status="pending"' in healed
+    assert _has_stale_pending_status(healed, "lienbond") is False
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text(healed, encoding="utf-8")
+    audit_res = audit_callout_destination_message_match(dist_dir, "lienbond")
+    assert audit_res["status"] == "PASS"
+    assert audit_res["mismatch_count"] == 0
+
+
+
 
 
 

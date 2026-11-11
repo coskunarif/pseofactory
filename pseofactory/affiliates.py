@@ -5735,6 +5735,26 @@ def normalize_html_callout_message_match(
                     "Optimize Section 179 Accounting with Xendoo",
                 )
             )
+    elif prop == "lienbond":
+        if (
+            'data-partner="next_insurance_b2b"' in updated
+            or "/r/next_insurance_b2b" in updated
+            or 'data-partner-key="next_insurance_b2b"' in updated
+        ):
+            updated = (
+                updated.replace("<td><strong>Next Insurance</strong></td>", "<td><strong>Simply Business</strong></td>")
+                .replace(
+                    "Bind Workers Comp &amp; Download Live COI with Next Insurance",
+                    "Compare Contractor Workers Comp &amp; GL Quotes via Simply Business",
+                )
+                .replace(
+                    "Bind Workers Comp & Download Live COI with Next Insurance",
+                    "Compare Contractor Workers Comp & GL Quotes via Simply Business",
+                )
+                .replace('data-partner="next_insurance_b2b"', 'data-partner="simply_business"')
+                .replace('data-partner-key="next_insurance_b2b"', 'data-partner-key="simply_business"')
+                .replace("/r/next_insurance_b2b", "/r/simply_business")
+            )
 
     def _replace_overlay_section(match: re.Match) -> str:
         sec_html = match.group(0)
