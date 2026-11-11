@@ -13,13 +13,14 @@ from __future__ import annotations
 import hashlib
 import html as html_lib
 import json
+import math
 import os
 import re
 import time
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.supervisor import AtomicStateLedger
 from pseofactory.tenant_facts import (
@@ -44,6 +45,8 @@ EXPECTED_CTR_CURVE: Dict[int, float] = {
 }
 
 DEFAULT_REMEDIATION_QUEUE_PATH = Path("/home/ubuntuadmin/projects/.agy/gsc_remediation_queue.json")
+MIN_EMPIRICAL_EVAL_IMPRESSIONS: int = 15
+MIN_POST_OVERLAY_MATURE_DAYS: int = 7
 
 
 def _strip_forbidden_dashes(text: str) -> str:
@@ -4636,10 +4639,26 @@ def compile_remediation_overlay_spec(
     meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label)
     quick_answer = _normalize_quick_answer_40_60_words(heading_label, tenant_id=resolved_tenant, slug=slug)
 
-    pos = float(candidate.get("position", 10.0) or 10.0)
-    impr = int(float(candidate.get("impressions", 100) or 100))
-    clicks = int(float(candidate.get("clicks", 0) or 0))
-    ctr = float(candidate.get("ctr", 0.02) or 0.02)
+    pos = (
+        float(candidate["position"])
+        if ("position" in candidate and candidate.get("position") is not None and float(candidate["position"]) > 0.0)
+        else 10.0
+    )
+    impr = (
+        int(float(candidate["impressions"]))
+        if ("impressions" in candidate and candidate.get("impressions") is not None)
+        else 100
+    )
+    clicks = (
+        int(float(candidate["clicks"]))
+        if ("clicks" in candidate and candidate.get("clicks") is not None)
+        else 0
+    )
+    ctr = (
+        float(candidate["ctr"])
+        if ("ctr" in candidate and candidate.get("ctr") is not None)
+        else (round(clicks / float(impr), 4) if impr > 0 else 0.02)
+    )
     anomaly_type = str(candidate.get("anomaly_type") or candidate.get("classification") or "STRIKING_DISTANCE_QUERY")
     action_type = str(candidate.get("action_type") or "REFACTOR_PAGE")
 
@@ -4962,6 +4981,16 @@ def compile_remediation_overlay_spec(
         "baseline_impressions": impr,
         "baseline_clicks": clicks,
         "baseline_ctr": ctr,
+        **(
+            {"baseline_source": str(candidate["baseline_source"])}
+            if candidate.get("baseline_source")
+            else {}
+        ),
+        **(
+            {"baseline_window_days": int(candidate["baseline_window_days"])}
+            if candidate.get("baseline_window_days") is not None
+            else {}
+        ),
         "title_rewrite": title_rewrite,
         "title": title_rewrite,
         "meta_description": meta_description,
@@ -7177,6 +7206,455 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
     return spec_to_write, True
 
 
+def _slice_daily_path_metrics(
+    daily_for_path: Dict[str, Any],
+    s_iso: str,
+    e_iso: str,
+    mode: str,
+) -> Dict[str, Any]:
+    """
+    Aggregates daily (date, page) buckets for a canonical path over [s_iso .. e_iso]
+    for either 'direct' or 'rolled_up' mode with impression-weighted position.
+    """
+    tot_clk = 0
+    tot_imp = 0
+    w_pos = 0.0
+    pos_w = 0
+    red_imp = 0
+    red_clk = 0
+    for dt_k, day_obj in (daily_for_path or {}).items():
+        if not isinstance(day_obj, dict):
+            continue
+        dt_str = str(dt_k)[:10]
+        if not (s_iso <= dt_str <= e_iso):
+            continue
+        m_obj = day_obj.get(mode)
+        if not isinstance(m_obj, dict):
+            continue
+        imp_v = max(0, int(float(m_obj.get("impressions", 0) or 0)))
+        clk_v = max(0, int(float(m_obj.get("clicks", 0) or 0)))
+        pos_v = float(m_obj.get("position", 100.0) or 100.0)
+        tot_imp += imp_v
+        tot_clk += clk_v
+        if imp_v > 0:
+            w_pos += pos_v * imp_v
+            pos_w += imp_v
+        red_imp += max(0, int(float(m_obj.get("redirected_impressions", 0) or 0)))
+        red_clk += max(0, int(float(m_obj.get("redirected_clicks", 0) or 0)))
+    if tot_imp > 0:
+        avg_pos = round(w_pos / float(max(1, pos_w)), 2) if pos_w > 0 else 50.0
+        ctr_val = round(tot_clk / float(tot_imp), 4)
+        out: Dict[str, Any] = {
+            "clicks": tot_clk,
+            "impressions": tot_imp,
+            "ctr": ctr_val,
+            "position": avg_pos,
+        }
+    else:
+        out = {
+            "clicks": 0,
+            "impressions": 0,
+            "ctr": 0.0,
+            "position": 100.0,
+        }
+    if mode == "rolled_up":
+        out["redirected_impressions"] = red_imp
+        out["redirected_clicks"] = red_clk
+    return out
+
+
+def _is_statistically_significant_ctr_drop(
+    base_clicks: int,
+    base_impr: int,
+    curr_clicks: int,
+    curr_impr: int,
+    z_threshold: float = -1.645,
+    min_base_clicks: int = 3,
+) -> bool:
+    """
+    Pooled two-proportion z-test (one-sided alpha = 0.05 -> z <= -1.645) with
+    min_base_clicks >= 3 floor so small-sample Poisson click variance (e.g. 1/41 -> 0/41
+    or 5/44 -> 3/71) never causes false CTR rollbacks while true click collapses
+    (e.g. 4/18 -> 0/25, z = -2.47) are caught.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if base_clicks < min_base_clicks or base_impr <= 0 or curr_impr <= 0:
+        return False
+    p_base = min(1.0, float(base_clicks) / float(base_impr))
+    p_curr = min(1.0, float(curr_clicks) / float(curr_impr))
+    if p_curr >= p_base:
+        return False
+    p_pool = min(
+        0.999999,
+        max(1e-9, float(base_clicks + curr_clicks) / float(base_impr + curr_impr)),
+    )
+    se = math.sqrt(p_pool * (1.0 - p_pool) * (1.0 / float(base_impr) + 1.0 / float(curr_impr)))
+    if se <= 0.0:
+        return False
+    z_score = (p_curr - p_base) / se
+    return bool(z_score <= z_threshold)
+
+
+def resolve_causal_overlay_page_metrics(
+    overlay_data: Dict[str, Any],
+    canon_slug: str,
+    multidim_telemetry: Optional[Dict[str, Any]],
+    canonical_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Resolves pre- vs post-overlay page-level metrics for an overlay:
+      1. When daily (date, page) telemetry is synced AND overlay_data['created_at'] (D_0) is valid:
+         - Excludes [D_0 .. D_0 + 2d] as the 3-day deploy and GSC settlement buffer.
+         - If settled post-overlay days N_post < MIN_POST_OVERLAY_MATURE_DAYS (7): marks
+           is_immature = True while still resolving the true pre-overlay [D_0 - 28d .. D_0 - 1d]
+           baseline (never overwriting baseline_* with post-overlay current_perf).
+         - For 7 <= N_post <= 28: compares matched-length [D_0 - N_post .. D_0 - 1d] against
+           [D_0 + 3d .. D_max].
+         - For extended monitoring (D_max > D_0 + 30d): keeps baseline strictly anchored at
+           [D_0 - 28d .. D_0 - 1d] against rolling 28d [D_max - 27d .. D_max].
+      2. Falls back cleanly to fixed page_windows_by_path (prior_28d_baseline vs recent_28d)
+         when unit test fixtures omit daily series or created_at.
+      3. Separates direct canonical rank/traffic from 301-rolled-up consolidation volume,
+         including the 0 < dir_base_impr < MIN_EMPIRICAL_EVAL_IMPRESSIONS <= rol_base_impr
+         consolidation boundary.
+    Zero em-dashes. Zero en-dashes.
+    """
+    empty_res: Dict[str, Any] = {
+        "used_page_level": False,
+        "has_causal_daily": False,
+        "is_immature": False,
+        "n_post_days": 0,
+        "baseline_window_days": 0,
+        "baseline_metrics": {},
+        "current_metrics": {},
+        "current_synced": False,
+        "baseline_source_tag": "",
+        "is_healthy_301_consolidation": False,
+        "recent_7d_clicks": None,
+    }
+    if not isinstance(multidim_telemetry, dict):
+        return empty_res
+
+    page_daily_by_path = multidim_telemetry.get("page_daily_by_path")
+    page_daily_meta = multidim_telemetry.get("page_daily_meta")
+    page_windows_by_path = multidim_telemetry.get("page_windows_by_path")
+    page_windows_synced = set(multidim_telemetry.get("page_windows_synced") or [])
+
+    if not isinstance(page_daily_by_path, dict):
+        page_daily_by_path = {}
+    if not isinstance(page_daily_meta, dict):
+        page_daily_meta = {}
+    if not isinstance(page_windows_by_path, dict):
+        page_windows_by_path = {}
+
+    path_cands: List[str] = []
+    if canonical_path:
+        cp_norm = (str(canonical_path).strip().rstrip("/") or "/").lower()
+        if cp_norm not in path_cands:
+            path_cands.append(cp_norm)
+    clean_slug = str(canon_slug or "").strip().strip("/").lower()
+    if clean_slug:
+        for cand_p in (f"/tools/{clean_slug}", f"/{clean_slug}"):
+            if cand_p not in path_cands:
+                path_cands.append(cand_p)
+
+    raw_created = str((overlay_data or {}).get("created_at") or "").strip()
+    d0_date: Optional[date] = None
+    if len(raw_created) >= 10:
+        try:
+            d0_date = datetime.strptime(raw_created[:10], "%Y-%m-%d").date()
+        except Exception:
+            d0_date = None
+
+    daily_synced = bool(page_daily_meta.get("synced"))
+    max_date_str = str(page_daily_meta.get("max_date") or "").strip()
+    min_date_str = str(page_daily_meta.get("min_date") or "").strip()
+    query_start_str = str(page_daily_meta.get("query_start_date") or "").strip()
+    if not max_date_str and page_daily_by_path:
+        all_dt_keys: List[str] = []
+        for p_map in page_daily_by_path.values():
+            if isinstance(p_map, dict):
+                all_dt_keys.extend(str(dk)[:10] for dk in p_map.keys() if len(str(dk)) >= 10)
+        if all_dt_keys:
+            max_date_str = max(all_dt_keys)
+            min_date_str = min(all_dt_keys)
+            daily_synced = True
+
+    d_max: Optional[date] = None
+    if max_date_str and len(max_date_str) >= 10:
+        try:
+            d_max = datetime.strptime(max_date_str[:10], "%Y-%m-%d").date()
+        except Exception:
+            d_max = None
+
+    has_causal_daily = bool(daily_synced and d0_date is not None and d_max is not None)
+    has_fixed_windows = bool(page_windows_by_path or page_windows_synced)
+    if not has_causal_daily and not has_fixed_windows:
+        return empty_res
+
+    is_immature = False
+    n_post_days = 0
+    recent_7d_clicks: Optional[int] = None
+    current_synced = False
+    dir_base: Dict[str, Any] = {}
+    dir_curr: Dict[str, Any] = {}
+    rol_base: Dict[str, Any] = {}
+    rol_curr: Dict[str, Any] = {}
+    preserve_persisted_baseline = False
+
+    if has_causal_daily and d0_date is not None and d_max is not None:
+        daily_entry: Dict[str, Any] = {}
+        for pc in path_cands:
+            if pc in page_daily_by_path and isinstance(page_daily_by_path[pc], dict):
+                daily_entry = page_daily_by_path[pc]
+                break
+        post_first = d0_date + timedelta(days=3)
+        initial_post_last = d0_date + timedelta(days=30)
+        if d_max < post_first:
+            n_post_days = 0
+            is_immature = True
+            post_slice: Optional[Tuple[date, date]] = None
+            pre_slice = (d0_date - timedelta(days=28), d0_date - timedelta(days=1))
+        elif d_max <= initial_post_last:
+            post_end = d_max
+            n_post_days = (post_end - post_first).days + 1
+            post_slice = (post_first, post_end)
+            if n_post_days < MIN_POST_OVERLAY_MATURE_DAYS:
+                is_immature = True
+                pre_slice = (d0_date - timedelta(days=28), d0_date - timedelta(days=1))
+            else:
+                is_immature = False
+                pre_slice = (d0_date - timedelta(days=n_post_days), d0_date - timedelta(days=1))
+        else:
+            post_end = d_max
+            n_post_days = 28
+            is_immature = False
+            post_slice = (d_max - timedelta(days=27), d_max)
+            pre_slice = (d0_date - timedelta(days=28), d0_date - timedelta(days=1))
+
+        pre_days = (pre_slice[1] - pre_slice[0]).days + 1
+        pre_s_iso, pre_e_iso = pre_slice[0].isoformat(), pre_slice[1].isoformat()
+        dir_base = _slice_daily_path_metrics(daily_entry, pre_s_iso, pre_e_iso, "direct")
+        rol_base = _slice_daily_path_metrics(daily_entry, pre_s_iso, pre_e_iso, "rolled_up")
+
+        horizon_eroded = bool(
+            (len(query_start_str) >= 10 and pre_s_iso < query_start_str[:10])
+            or (not query_start_str and min_date_str and pre_e_iso < min_date_str[:10])
+        )
+        if horizon_eroded:
+            existing_src = str((overlay_data or {}).get("baseline_source") or "").upper()
+            existing_imp = int(float((overlay_data or {}).get("baseline_impressions", 0) or 0))
+            existing_win_days = int(float((overlay_data or {}).get("baseline_window_days", 0) or 0))
+            has_persisted_emp = (
+                existing_src.startswith("GSC_EMPIRICAL_CAUSAL_")
+                or existing_src == "ZERO_IMPRESSION_EMPIRICAL"
+                or (existing_src.startswith("GSC_EMPIRICAL_") and existing_imp > 0)
+            )
+            if has_persisted_emp and (existing_win_days >= pre_days or existing_imp > 0):
+                preserve_persisted_baseline = True
+
+        if post_slice is not None:
+            post_s_iso, post_e_iso = post_slice[0].isoformat(), post_slice[1].isoformat()
+            dir_curr = _slice_daily_path_metrics(daily_entry, post_s_iso, post_e_iso, "direct")
+            rol_curr = _slice_daily_path_metrics(daily_entry, post_s_iso, post_e_iso, "rolled_up")
+            current_synced = True
+            r7_start = max(post_slice[0], post_slice[1] - timedelta(days=6)).isoformat()
+            r7_dir = _slice_daily_path_metrics(daily_entry, r7_start, post_e_iso, "direct")
+            r7_rol = _slice_daily_path_metrics(daily_entry, r7_start, post_e_iso, "rolled_up")
+        else:
+            dir_curr = {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": 100.0}
+            rol_curr = {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": 100.0, "redirected_impressions": 0, "redirected_clicks": 0}
+            current_synced = False
+            r7_dir = {"clicks": 0}
+            r7_rol = {"clicks": 0}
+    else:
+        pre_days = 28
+        pw_entry: Dict[str, Any] = {}
+        for pc in path_cands:
+            if pc in page_windows_by_path and isinstance(page_windows_by_path[pc], dict):
+                pw_entry = page_windows_by_path[pc]
+                break
+        dir_base = dict(((pw_entry.get("prior_28d_baseline") or {}).get("direct")) or {})
+        dir_curr = dict(((pw_entry.get("recent_28d") or {}).get("direct")) or {})
+        rol_base = dict(((pw_entry.get("prior_28d_baseline") or {}).get("rolled_up")) or {})
+        rol_curr = dict(((pw_entry.get("recent_28d") or {}).get("rolled_up")) or {})
+        current_synced = bool(
+            "recent_28d" in page_windows_synced
+            or any(isinstance(v, dict) and "recent_28d" in v for v in page_windows_by_path.values())
+        )
+        r7_dir = {}
+        r7_rol = {}
+
+    if preserve_persisted_baseline:
+        p_imp = int(float((overlay_data or {}).get("baseline_impressions", 0) or 0))
+        p_clk = int(float((overlay_data or {}).get("baseline_clicks", 0) or 0))
+        p_pos = float((overlay_data or {}).get("baseline_position", 50.0) or 50.0)
+        p_ctr = float((overlay_data or {}).get("baseline_ctr", 0.0) or 0.0)
+        p_src = str((overlay_data or {}).get("baseline_source") or "GSC_EMPIRICAL_CAUSAL_DIRECT")
+        p_win_days = int(float((overlay_data or {}).get("baseline_window_days", pre_days) or pre_days))
+        use_rol = "301_ROLLUP" in p_src.upper()
+        base_m = {"clicks": p_clk, "impressions": p_imp, "ctr": p_ctr, "position": p_pos} if p_imp > 0 else {}
+        curr_m = dict(rol_curr if use_rol else dir_curr)
+        if has_causal_daily and current_synced:
+            recent_7d_clicks = int((r7_rol if use_rol else r7_dir).get("clicks", 0) or 0)
+        return {
+            "used_page_level": True,
+            "has_causal_daily": has_causal_daily,
+            "is_immature": is_immature,
+            "n_post_days": n_post_days,
+            "baseline_window_days": p_win_days,
+            "baseline_metrics": base_m,
+            "current_metrics": curr_m,
+            "current_synced": current_synced,
+            "baseline_source_tag": p_src,
+            "is_healthy_301_consolidation": False,
+            "recent_7d_clicks": recent_7d_clicks,
+        }
+
+    dir_base_impr = int(dir_base.get("impressions", 0) or 0)
+    rol_base_impr = int(rol_base.get("impressions", 0) or 0)
+    dir_curr_impr = int(dir_curr.get("impressions", 0) or 0)
+    rol_curr_impr = int(rol_curr.get("impressions", 0) or 0)
+    is_healthy_301_consolidation = False
+
+    if dir_base_impr >= MIN_EMPIRICAL_EVAL_IMPRESSIONS:
+        base_m = dict(dir_base)
+        curr_m = dict(dir_curr)
+        emp_src = "GSC_EMPIRICAL_CAUSAL_DIRECT" if has_causal_daily else "GSC_EMPIRICAL_PAGE_DIRECT"
+        if has_causal_daily and current_synced:
+            recent_7d_clicks = int(r7_dir.get("clicks", 0) or 0)
+    elif dir_base_impr == 0 and rol_base_impr > 0:
+        base_m = dict(rol_base)
+        curr_m = dict(rol_curr)
+        emp_src = "GSC_EMPIRICAL_CAUSAL_301_ROLLUP" if has_causal_daily else "GSC_EMPIRICAL_PAGE_301_ROLLUP"
+        if has_causal_daily and current_synced:
+            recent_7d_clicks = int(r7_rol.get("clicks", 0) or 0)
+    elif 0 < dir_base_impr < MIN_EMPIRICAL_EVAL_IMPRESSIONS <= rol_base_impr:
+        # Secondary Bug 1: Canonical has <15 direct baseline impr while 301-rolled-up total >=15.
+        # Evaluate total consolidation volume on rolled_up so volume collapses (e.g. 200 -> 0) roll back,
+        # while avoiding false rollbacks from dying 301 source URLs when >=50% volume holds and canonical holds/grows.
+        base_m = dict(rol_base)
+        curr_m = dict(rol_curr)
+        emp_src = "GSC_EMPIRICAL_CAUSAL_301_ROLLUP" if has_causal_daily else "GSC_EMPIRICAL_PAGE_301_ROLLUP"
+        if rol_curr_impr >= 0.5 * float(rol_base_impr):
+            if dir_curr_impr > 0:
+                curr_m["position"] = dir_curr.get("position", curr_m.get("position", 50.0))
+            rol_base_clicks = int(rol_base.get("clicks", 0) or 0)
+            rol_curr_clicks = int(rol_curr.get("clicks", 0) or 0)
+            dir_base_pos = float(dir_base.get("position", 50.0) or 50.0)
+            dir_curr_pos = float(dir_curr.get("position", 100.0) or 100.0)
+            if (
+                (rol_curr_clicks - rol_base_clicks) >= 0
+                and dir_curr_impr >= dir_base_impr
+                and dir_curr_pos <= max(20.0, dir_base_pos + 8.0)
+            ):
+                is_healthy_301_consolidation = True
+        if has_causal_daily and current_synced:
+            recent_7d_clicks = int(r7_rol.get("clicks", 0) or 0)
+    elif dir_base_impr > 0:
+        base_m = dict(dir_base)
+        curr_m = dict(dir_curr)
+        emp_src = "GSC_EMPIRICAL_CAUSAL_DIRECT" if has_causal_daily else "GSC_EMPIRICAL_PAGE_DIRECT"
+        if has_causal_daily and current_synced:
+            recent_7d_clicks = int(r7_dir.get("clicks", 0) or 0)
+    else:
+        base_m = {}
+        curr_m = dict(dir_curr if dir_curr_impr > 0 else rol_curr)
+        emp_src = "ZERO_IMPRESSION_EMPIRICAL"
+        if has_causal_daily and current_synced:
+            recent_7d_clicks = int((r7_dir if dir_curr_impr > 0 else r7_rol).get("clicks", 0) or 0)
+
+    return {
+        "used_page_level": True,
+        "has_causal_daily": has_causal_daily,
+        "is_immature": is_immature,
+        "n_post_days": n_post_days,
+        "baseline_window_days": pre_days,
+        "baseline_metrics": base_m,
+        "current_metrics": curr_m,
+        "current_synced": current_synced,
+        "baseline_source_tag": emp_src,
+        "is_healthy_301_consolidation": is_healthy_301_consolidation,
+        "recent_7d_clicks": recent_7d_clicks,
+    }
+
+
+def _backfill_missing_overlay_body_fields(
+    overlay_data: Dict[str, Any],
+    slug: str,
+    query: str,
+    base_pos: float,
+    base_impr: int,
+    prop: str,
+) -> bool:
+    """
+    Deterministically synthesizes any missing body or metadata fields via
+    compile_remediation_overlay_spec while strictly preserving existing/restored
+    title_rewrite, secondary_title_modifier, created_at, locked_until, and baseline_*.
+    """
+    required_body_keys = (
+        "title_rewrite",
+        "meta_description",
+        "quick_answer",
+        "h2_headings",
+        "preset_scenarios",
+        "comparison_rows",
+        "faq_schema",
+        "faq_entries",
+        "autonomous_citation_assertions",
+    )
+    if all(bool(overlay_data.get(k)) for k in required_body_keys):
+        if overlay_data.get("title_rewrite") and not overlay_data.get("title"):
+            overlay_data["title"] = overlay_data["title_rewrite"]
+            return True
+        return False
+    changed = False
+    try:
+        canon_dom = (
+            "https://prexvo.com"
+            if prop == "prexvo"
+            else (
+                "https://gainhelm.com"
+                if prop == "gainhelm"
+                else ("https://lienbond.com" if prop == "lienbond" else "https://profithelm.com")
+            )
+        )
+        healed_spec = compile_remediation_overlay_spec(
+            {
+                "slug": slug,
+                "target_url": overlay_data.get("target_url") or f"{canon_dom}/tools/{slug}/",
+                "query": query,
+                "position": base_pos,
+                "impressions": max(1, base_impr),
+            },
+            tenant_id=prop,
+        )
+        for heal_k in (
+            "title_rewrite",
+            "title",
+            "description",
+            "meta_description",
+            "quick_answer",
+            "h2_headings",
+            "preset_scenarios",
+            "comparison_rows",
+            "faq_schema",
+            "faq_entries",
+            "faq_additions",
+            "autonomous_citation_assertions",
+            "ai_mode_decision_matrix",
+        ):
+            if not overlay_data.get(heal_k) and healed_spec.get(heal_k):
+                overlay_data[heal_k] = healed_spec[heal_k]
+                changed = True
+        if overlay_data.get("title_rewrite") and overlay_data.get("title") != overlay_data["title_rewrite"]:
+            overlay_data["title"] = overlay_data["title_rewrite"]
+            changed = True
+    except Exception:
+        pass
+    return changed
+
+
 def evaluate_expired_overlays(
     site_url: Optional[str] = None,
     days_threshold: int = 28,
@@ -7185,14 +7663,17 @@ def evaluate_expired_overlays(
     default_base_dir: Optional[Path] = None,
     baseline_queries: Optional[List[Dict[str, Any]]] = None,
     persist: bool = True,
+    multidim_telemetry: Optional[Dict[str, Any]] = None,
+    live_gsc: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Closed-Loop Outcome Evaluation Engine for expired measurement locks and emergency rollbacks.
-    Compares post-overlay position, CTR, and click performance against empirical baseline
-    metrics across both content/overlays and .agy/overlays.
-    Automatically rolls back degraded overlays (status=DEGRADED_ROLLED_BACK), including immediate
-    emergency rollback during active locks for Page-1 dropouts and severe rank/impression regressions,
-    strips synthetic 160-impression fallbacks, and confirms accretive overlays (status=ACCRETIVE_CONFIRMED).
+    Compares post-overlay position, CTR, and click performance against causal pre-created_at
+    empirical baseline metrics across both content/overlays and .agy/overlays.
+    Automatically rolls back degraded overlays (status=DEGRADED_ROLLED_BACK), restricts mid-lock
+    emergency rollbacks to severe clickless collapses, strips synthetic 160-impression fallbacks,
+    self-heals false-positive rollbacks (including re-synthesizing missing body blocks), and
+    confirms accretive overlays (status=ACCRETIVE_CONFIRMED).
     Zero em-dashes. Zero en-dashes.
     """
     root = Path(base_dir) if base_dir else (default_base_dir or Path.cwd())
@@ -7229,10 +7710,13 @@ def evaluate_expired_overlays(
         if "prexvo" in comb_site_root
         else ("gainhelm" if "gainhelm" in comb_site_root else ("lienbond" if "lienbond" in comb_site_root else "profithelm"))
     )
+    explicit_live_queries_passed = live_queries is not None
+    explicit_baseline_queries_passed = baseline_queries is not None
     in_pytest = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("PROFITHELM_IN_TEST") == "1"
     if in_pytest and not str(root.resolve()).startswith("/tmp"):
         persist = False
         live_queries = None
+        explicit_live_queries_passed = False
     veh_slug_set = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
     paths_by_slug: Dict[str, List[Path]] = {}
@@ -7246,21 +7730,83 @@ def evaluate_expired_overlays(
         reconcile_metric_recovery_ledger(root, property_id=prop)
         return results
 
+    eff_multidim: Dict[str, Any] = dict(multidim_telemetry) if isinstance(multidim_telemetry, dict) else {}
+    page_windows_by_path: Dict[str, Dict[str, Any]] = dict(eff_multidim.get("page_windows_by_path") or {})
+    page_windows_synced: Set[str] = set(eff_multidim.get("page_windows_synced") or [])
+    page_daily_by_path: Dict[str, Any] = dict(eff_multidim.get("page_daily_by_path") or {})
+    page_daily_meta: Dict[str, Any] = dict(eff_multidim.get("page_daily_meta") or {})
+
+    def _has_any_page_truth() -> bool:
+        return bool(
+            page_daily_by_path
+            or page_daily_meta.get("synced")
+            or page_windows_by_path
+            or page_windows_synced
+        )
+
     live_by_query: Dict[str, Dict[str, Any]] = {}
     live_rows_by_path: Dict[str, List[Dict[str, Any]]] = {}
     baseline_rows_by_path: Dict[str, List[Dict[str, Any]]] = {}
-    if not in_pytest and (live_queries is None or baseline_queries is None):
+    if not explicit_live_queries_passed and (not in_pytest or live_gsc is True):
         try:
             from pseofactory.seo_growth_loops import load_consolidated_gsc_query_rows
-            cons_q = load_consolidated_gsc_query_rows(property_id=prop, repo_root=root, live_gsc=True)
+
+            cons_q = load_consolidated_gsc_query_rows(
+                property_id=prop,
+                repo_root=root,
+                live_gsc=True if live_gsc is None else bool(live_gsc),
+                multidim_telemetry=eff_multidim if eff_multidim else None,
+            )
             cons_curr = list(cons_q.get("current_rows") or [])
             cons_base = list(cons_q.get("baseline_rows") or [])
-            if cons_curr and (live_queries is None or baseline_queries is None):
+            if cons_curr and live_queries is None:
                 live_queries = cons_curr
             if baseline_queries is None:
                 baseline_queries = cons_base
+            if not _has_any_page_truth():
+                md_cons = cons_q.get("multidimensional_telemetry")
+                if isinstance(md_cons, dict):
+                    eff_multidim = dict(md_cons)
+                    page_windows_by_path = dict(md_cons.get("page_windows_by_path") or {})
+                    page_windows_synced = set(md_cons.get("page_windows_synced") or [])
+                    page_daily_by_path = dict(md_cons.get("page_daily_by_path") or {})
+                    page_daily_meta = dict(md_cons.get("page_daily_meta") or {})
         except Exception:
             pass
+    elif (
+        not explicit_live_queries_passed
+        and not _has_any_page_truth()
+        and in_pytest
+        and str(root.resolve()).startswith("/tmp")
+    ):
+        local_tel_f = root / ".agy" / "gsc_lifecycle_telemetry.json"
+        local_tdb_f = root / "pseofactory" / "trends" / "data" / "trend_history.db"
+        sib_tdb_f = root.parent / "trend_history.db"
+        if local_tel_f.is_file() or local_tdb_f.is_file() or sib_tdb_f.is_file():
+            try:
+                from pseofactory.seo_growth_loops import harvest_and_sync_gsc_multidimensional_telemetry
+
+                iso_db = (
+                    local_tdb_f
+                    if local_tdb_f.is_file()
+                    else (sib_tdb_f if sib_tdb_f.is_file() else (root / ".agy" / "_iso_empty_tdb.sqlite"))
+                )
+                md_local = harvest_and_sync_gsc_multidimensional_telemetry(
+                    property_id=prop,
+                    repo_root=root,
+                    db_path=iso_db,
+                    live_gsc=False,
+                    persist=False,
+                )
+                if isinstance(md_local, dict):
+                    eff_multidim = dict(md_local)
+                    page_windows_by_path = dict(md_local.get("page_windows_by_path") or {})
+                    page_windows_synced = set(md_local.get("page_windows_synced") or [])
+                    page_daily_by_path = dict(md_local.get("page_daily_by_path") or {})
+                    page_daily_meta = dict(md_local.get("page_daily_meta") or {})
+            except Exception:
+                pass
+
     if live_queries:
         rollup_res = rollup_redirected_gsc_rows(live_queries, property_id=prop, repo_root=root)
         dedup_live_rows = list(rollup_res.get("rows") or live_queries)
@@ -7273,7 +7819,7 @@ def evaluate_expired_overlays(
                     live_by_query[q] = item
             c_path = str(item.get("canonical_path") or "").strip()
             if c_path:
-                live_rows_by_path.setdefault(c_path.rstrip("/") or "/", []).append(item)
+                live_rows_by_path.setdefault((c_path.rstrip("/") or "/").lower(), []).append(item)
     if baseline_queries:
         base_rollup_res = rollup_redirected_gsc_rows(baseline_queries, property_id=prop, repo_root=root)
         for b_item in list(base_rollup_res.get("rows") or baseline_queries):
@@ -7281,12 +7827,28 @@ def evaluate_expired_overlays(
                 continue
             b_path = str(b_item.get("canonical_path") or "").strip()
             if b_path:
-                baseline_rows_by_path.setdefault(b_path.rstrip("/") or "/", []).append(b_item)
+                baseline_rows_by_path.setdefault((b_path.rstrip("/") or "/").lower(), []).append(b_item)
+
+    has_any_page_truth_loaded = _has_any_page_truth()
+    is_synthetic_query_mode = bool(
+        (explicit_live_queries_passed or explicit_baseline_queries_passed)
+        and multidim_telemetry is None
+        and not live_gsc
+    )
+
+    def _sync_write_paths(stem_s: str, existing_paths: List[Path]) -> List[Path]:
+        out_paths = list(existing_paths)
+        for sync_dir in candidate_dirs:
+            if sync_dir.is_dir():
+                cand_p = sync_dir / f"{stem_s}.json"
+                if cand_p not in out_paths:
+                    out_paths.append(cand_p)
+        return out_paths
 
     now = datetime.now(timezone.utc)
     for stem_slug in sorted(paths_by_slug.keys()):
-        slug_paths = paths_by_slug[stem_slug]
-        overlay_path = slug_paths[0]
+        slug_paths = _sync_write_paths(stem_slug, paths_by_slug[stem_slug])
+        overlay_path = paths_by_slug[stem_slug][0]
         try:
             overlay_data = json.loads(overlay_path.read_text(encoding="utf-8"))
         except Exception:
@@ -7302,7 +7864,8 @@ def evaluate_expired_overlays(
         if is_retired_or_consolidated_slug(slug, prop):
             for p_ret in slug_paths:
                 try:
-                    p_ret.unlink()
+                    if p_ret.is_file():
+                        p_ret.unlink()
                 except Exception:
                     pass
             continue
@@ -7356,14 +7919,21 @@ def evaluate_expired_overlays(
         )
 
         anom_up = str(overlay_data.get("anomaly_type") or "").upper()
-        base_src = str(overlay_data.get("baseline_source") or "")
+        base_src = str(overlay_data.get("baseline_source") or "").upper()
+        already_empirical_src = (
+            (base_src.startswith("GSC_EMPIRICAL_") and base_src != "GSC_EMPIRICAL_REBASED")
+            or base_src == "ZERO_IMPRESSION_EMPIRICAL"
+        )
         is_synthetic_baseline = (
-            anom_up in ("CRAWL_BUDGET_SIGNAL_LAG", "CANONICAL_TEMPLATE_DEFECT", "OUTBOUND_YIELD_OPTIMIZATION")
-            or (base_impr == 160 and base_pos == 10.0 and base_clicks == 0)
-            or ("/" in slug and base_impr in (138, 161, 169, 378, 531, 1055))
-            or (
-                not in_pytest
-                and base_impr in (50, 60, 100, 138, 160, 161, 169, 220, 240, 290, 378, 420, 510, 531, 640, 700, 1120, 1210)
+            not already_empirical_src
+            and (
+                anom_up in ("CRAWL_BUDGET_SIGNAL_LAG", "CANONICAL_TEMPLATE_DEFECT", "OUTBOUND_YIELD_OPTIMIZATION")
+                or (base_impr == 160 and base_pos == 10.0 and base_clicks == 0)
+                or ("/" in slug and base_impr in (138, 161, 169, 378, 531, 1055))
+                or (
+                    not in_pytest
+                    and base_impr in (50, 60, 100, 138, 160, 161, 169, 220, 240, 290, 378, 420, 510, 531, 640, 700, 1120, 1210)
+                )
             )
         )
 
@@ -7377,94 +7947,214 @@ def evaluate_expired_overlays(
         c_p = str(res_ov.get("canonical_path") or "").rstrip("/") or "/"
         if "/" in slug and not c_p.endswith(slug):
             c_p = f"/tools/{slug}"
+        c_p = (c_p.rstrip("/") or "/").lower()
+
+        explicit_overlay_eval = overlay_data.get("post_eval_metrics") or overlay_data.get("current_metrics")
+        has_page_window_telemetry = bool(
+            not is_synthetic_query_mode
+            and not explicit_overlay_eval
+            and has_any_page_truth_loaded
+        )
 
         query_crossed_page_one = False
-        if not in_pytest and baseline_rows_by_path:
-            if c_p in baseline_rows_by_path:
-                b_rows = baseline_rows_by_path[c_p]
-                b_tot_impr = sum(max(0, int(float(r.get("impressions", 0) or 0))) for r in b_rows)
-                b_tot_clicks = sum(max(0, int(float(r.get("clicks", 0) or 0))) for r in b_rows)
-                b_w_pos = sum(float(r.get("position", 50.0) or 50.0) * max(1, int(float(r.get("impressions", 0) or 0))) for r in b_rows)
-                if b_tot_impr > 0:
-                    base_impr = b_tot_impr
-                    base_clicks = b_tot_clicks
-                    base_pos = round(b_w_pos / float(b_tot_impr), 2)
-                    base_ctr = round(b_tot_clicks / float(b_tot_impr), 4) if b_tot_clicks > 0 else 0.0
-                    is_synthetic_baseline = False
-                    if (
-                        overlay_data.get("baseline_impressions") != base_impr
-                        or overlay_data.get("baseline_position") != base_pos
-                        or overlay_data.get("baseline_source") != "GSC_EMPIRICAL_ROLLUP"
-                    ):
-                        overlay_data["baseline_impressions"] = base_impr
-                        overlay_data["baseline_position"] = base_pos
-                        overlay_data["baseline_clicks"] = base_clicks
-                        overlay_data["baseline_ctr"] = base_ctr
-                        overlay_data["baseline_source"] = "GSC_EMPIRICAL_ROLLUP"
-                        ov_dirty = True
-                # Check if any primary query on this route dropped off Page 1 (<= 10.0 -> > 10.5)
-                if c_p in live_rows_by_path:
-                    c_q_map = {
-                        str(r.get("query") or "").strip().lower(): r
-                        for r in live_rows_by_path[c_p]
-                        if isinstance(r, dict)
+        used_page_level_telemetry = False
+        is_immature_post_window = False
+        is_healthy_301_consolidation = False
+        recent_7d_clicks: Optional[int] = None
+        current_perf: Dict[str, Any] = dict(explicit_overlay_eval) if isinstance(explicit_overlay_eval, dict) else {}
+
+        if has_page_window_telemetry:
+            causal_res = resolve_causal_overlay_page_metrics(
+                overlay_data=overlay_data,
+                canon_slug=slug,
+                multidim_telemetry=eff_multidim,
+                canonical_path=c_p,
+            )
+            used_page_level_telemetry = bool(causal_res.get("used_page_level"))
+            is_immature_post_window = bool(causal_res.get("is_immature"))
+            is_healthy_301_consolidation = bool(causal_res.get("is_healthy_301_consolidation"))
+            recent_7d_clicks = causal_res.get("recent_7d_clicks")
+            base_m = dict(causal_res.get("baseline_metrics") or {})
+            curr_m = dict(causal_res.get("current_metrics") or {})
+            emp_src = str(causal_res.get("baseline_source_tag") or "")
+            curr_synced = bool(causal_res.get("current_synced"))
+            base_win_days = int(causal_res.get("baseline_window_days") or 28)
+
+            if base_m and int(base_m.get("impressions", 0) or 0) > 0:
+                base_impr = int(base_m.get("impressions", 0) or 0)
+                base_clicks = int(base_m.get("clicks", 0) or 0)
+                base_pos = round(float(base_m.get("position", 50.0) or 50.0), 2)
+                base_ctr = (
+                    round(base_clicks / float(base_impr), 4)
+                    if base_clicks > 0
+                    else round(float(base_m.get("ctr", 0.0) or 0.0), 4)
+                )
+                is_synthetic_baseline = False
+                if (
+                    overlay_data.get("baseline_impressions") != base_impr
+                    or overlay_data.get("baseline_position") != base_pos
+                    or overlay_data.get("baseline_clicks") != base_clicks
+                    or overlay_data.get("baseline_source") != emp_src
+                    or overlay_data.get("baseline_window_days") != base_win_days
+                ):
+                    overlay_data["baseline_impressions"] = base_impr
+                    overlay_data["baseline_position"] = base_pos
+                    overlay_data["baseline_clicks"] = base_clicks
+                    overlay_data["baseline_ctr"] = base_ctr
+                    overlay_data["baseline_source"] = emp_src
+                    overlay_data["baseline_window_days"] = base_win_days
+                    ov_dirty = True
+
+                curr_m_impr = int(curr_m.get("impressions", 0) or 0)
+                if curr_m_impr > 0:
+                    curr_m_clk = int(curr_m.get("clicks", 0) or 0)
+                    current_perf = {
+                        "impressions": curr_m_impr,
+                        "clicks": curr_m_clk,
+                        "position": round(float(curr_m.get("position", base_pos) or base_pos), 2),
+                        "ctr": (
+                            round(curr_m_clk / float(curr_m_impr), 4)
+                            if curr_m_clk > 0
+                            else round(float(curr_m.get("ctr", 0.0) or 0.0), 4)
+                        ),
                     }
-                    for br in b_rows:
-                        bq = str(br.get("query") or "").strip().lower()
-                        b_qp = float(br.get("position", 100.0) or 100.0)
-                        b_qi = int(float(br.get("impressions", 0) or 0))
-                        if bq in c_q_map and b_qp <= 10.0 and b_qi >= 10:
-                            c_qp = float(c_q_map[bq].get("position", 100.0) or 100.0)
-                            if c_qp > 10.5 and (c_qp - b_qp) >= 1.5:
-                                query_crossed_page_one = True
-                                break
-            elif slug not in ("contractor-surety-bond-cost-calculator", "tcja-sunset-capital-gains"):
-                is_synthetic_baseline = True
-
-        current_perf = overlay_data.get("post_eval_metrics") or overlay_data.get("current_metrics")
-        if not current_perf:
-            matched_live_rows: List[Dict[str, Any]] = []
-            if not in_pytest and live_rows_by_path:
-                if c_p in live_rows_by_path:
-                    matched_live_rows.extend(live_rows_by_path[c_p])
+                elif curr_synced:
+                    current_perf = {
+                        "impressions": 0,
+                        "clicks": 0,
+                        "position": 100.0,
+                        "ctr": 0.0,
+                    }
+                else:
+                    current_perf = {}
             else:
-                # Roll up across primary query, grouped_queries, and canonical path matches
-                candidate_qs: List[str] = []
-                for q_cand in [query] + list(overlay_data.get("grouped_queries") or []):
-                    q_low = str(q_cand or "").strip().lower()
-                    if q_low and q_low not in candidate_qs:
-                        candidate_qs.append(q_low)
-                for q_low in candidate_qs:
-                    if q_low in live_by_query:
-                        matched_live_rows.append(live_by_query[q_low])
-                if not matched_live_rows and live_rows_by_path and c_p in live_rows_by_path:
-                    matched_live_rows.extend(live_rows_by_path[c_p])
+                # Zero pre-overlay impressions empirically observed in GSC page truth:
+                # keep baseline_impressions = 0 (ZERO_IMPRESSION_EMPIRICAL) and NEVER overwrite
+                # baseline_* with post-overlay current_perf!
+                is_synthetic_baseline = False
+                base_impr = 0
+                base_clicks = 0
+                base_ctr = 0.0
+                if (
+                    overlay_data.get("baseline_impressions") != 0
+                    or overlay_data.get("baseline_clicks") != 0
+                    or overlay_data.get("baseline_source") != "ZERO_IMPRESSION_EMPIRICAL"
+                    or overlay_data.get("baseline_window_days") != base_win_days
+                ):
+                    overlay_data["baseline_impressions"] = 0
+                    overlay_data["baseline_clicks"] = 0
+                    overlay_data["baseline_ctr"] = 0.0
+                    overlay_data["baseline_source"] = "ZERO_IMPRESSION_EMPIRICAL"
+                    overlay_data["baseline_window_days"] = base_win_days
+                    ov_dirty = True
+                curr_m_impr = int(curr_m.get("impressions", 0) or 0)
+                if curr_m_impr > 0:
+                    curr_m_clk = int(curr_m.get("clicks", 0) or 0)
+                    current_perf = {
+                        "impressions": curr_m_impr,
+                        "clicks": curr_m_clk,
+                        "position": round(float(curr_m.get("position", 50.0) or 50.0), 2),
+                        "ctr": (
+                            round(curr_m_clk / float(curr_m_impr), 4)
+                            if curr_m_clk > 0
+                            else round(float(curr_m.get("ctr", 0.0) or 0.0), 4)
+                        ),
+                    }
+                elif curr_synced:
+                    current_perf = {
+                        "impressions": 0,
+                        "clicks": 0,
+                        "position": 100.0,
+                        "ctr": 0.0,
+                    }
+                else:
+                    current_perf = {}
+        else:
+            if (not in_pytest or explicit_baseline_queries_passed) and baseline_rows_by_path:
+                if c_p in baseline_rows_by_path:
+                    b_rows = baseline_rows_by_path[c_p]
+                    b_tot_impr = sum(max(0, int(float(r.get("impressions", 0) or 0))) for r in b_rows)
+                    b_tot_clicks = sum(max(0, int(float(r.get("clicks", 0) or 0))) for r in b_rows)
+                    b_w_pos = sum(float(r.get("position", 50.0) or 50.0) * max(1, int(float(r.get("impressions", 0) or 0))) for r in b_rows)
+                    if b_tot_impr > 0:
+                        base_impr = b_tot_impr
+                        base_clicks = b_tot_clicks
+                        base_pos = round(b_w_pos / float(b_tot_impr), 2)
+                        base_ctr = round(b_tot_clicks / float(b_tot_impr), 4) if b_tot_clicks > 0 else 0.0
+                        is_synthetic_baseline = False
+                        if (
+                            overlay_data.get("baseline_impressions") != base_impr
+                            or overlay_data.get("baseline_position") != base_pos
+                            or overlay_data.get("baseline_source") != "GSC_EMPIRICAL_ROLLUP"
+                        ):
+                            overlay_data["baseline_impressions"] = base_impr
+                            overlay_data["baseline_position"] = base_pos
+                            overlay_data["baseline_clicks"] = base_clicks
+                            overlay_data["baseline_ctr"] = base_ctr
+                            overlay_data["baseline_source"] = "GSC_EMPIRICAL_ROLLUP"
+                            ov_dirty = True
+                    # Check if any primary query on this route dropped off Page 1 (<= 10.0 -> > 10.5)
+                    if c_p in live_rows_by_path:
+                        c_q_map = {
+                            str(r.get("query") or "").strip().lower(): r
+                            for r in live_rows_by_path[c_p]
+                            if isinstance(r, dict)
+                        }
+                        for br in b_rows:
+                            bq = str(br.get("query") or "").strip().lower()
+                            b_qp = float(br.get("position", 100.0) or 100.0)
+                            b_qi = int(float(br.get("impressions", 0) or 0))
+                            if bq in c_q_map and b_qp <= 10.0 and b_qi >= MIN_EMPIRICAL_EVAL_IMPRESSIONS:
+                                c_qp = float(c_q_map[bq].get("position", 100.0) or 100.0)
+                                if c_qp > 10.5 and (c_qp - b_qp) >= 1.5:
+                                    query_crossed_page_one = True
+                                    break
+                elif not in_pytest and slug not in ("contractor-surety-bond-cost-calculator", "tcja-sunset-capital-gains"):
+                    is_synthetic_baseline = True
 
-            if len(matched_live_rows) == 1:
-                current_perf = matched_live_rows[0]
-            elif len(matched_live_rows) > 1:
-                tot_impr = 0
-                tot_clicks = 0
-                w_pos_sum = 0.0
-                w_ctr_sum = 0.0
-                for mr in matched_live_rows:
-                    m_impr = max(0, int(float(mr.get("impressions", 0) or 0)))
-                    m_clicks = max(0, int(float(mr.get("clicks", 0) or 0)))
-                    m_pos = float(mr.get("position", base_pos) or base_pos)
-                    m_ctr = float(mr.get("ctr", 0.0) or 0.0)
-                    tot_impr += m_impr
-                    tot_clicks += m_clicks
-                    w_pos_sum += m_pos * max(m_impr, 1)
-                    w_ctr_sum += m_ctr * max(m_impr, 1)
-                denom = max(tot_impr, len(matched_live_rows))
-                current_perf = {
-                    "impressions": tot_impr,
-                    "clicks": tot_clicks,
-                    "position": round(w_pos_sum / float(denom), 2),
-                    "ctr": round(tot_clicks / float(tot_impr), 4) if (tot_impr > 0 and tot_clicks > 0) else round(w_ctr_sum / float(denom), 4),
-                }
-            else:
-                current_perf = {}
+            if not current_perf:
+                matched_live_rows: List[Dict[str, Any]] = []
+                if not in_pytest and live_rows_by_path:
+                    if c_p in live_rows_by_path:
+                        matched_live_rows.extend(live_rows_by_path[c_p])
+                else:
+                    # Roll up across primary query, grouped_queries, and canonical path matches
+                    candidate_qs: List[str] = []
+                    for q_cand in [query] + list(overlay_data.get("grouped_queries") or []):
+                        q_low = str(q_cand or "").strip().lower()
+                        if q_low and q_low not in candidate_qs:
+                            candidate_qs.append(q_low)
+                    for q_low in candidate_qs:
+                        if q_low in live_by_query:
+                            matched_live_rows.append(live_by_query[q_low])
+                    if not matched_live_rows and live_rows_by_path and c_p in live_rows_by_path:
+                        matched_live_rows.extend(live_rows_by_path[c_p])
+
+                if len(matched_live_rows) == 1:
+                    current_perf = matched_live_rows[0]
+                elif len(matched_live_rows) > 1:
+                    tot_impr = 0
+                    tot_clicks = 0
+                    w_pos_sum = 0.0
+                    w_ctr_sum = 0.0
+                    for mr in matched_live_rows:
+                        m_impr = max(0, int(float(mr.get("impressions", 0) or 0)))
+                        m_clicks = max(0, int(float(mr.get("clicks", 0) or 0)))
+                        m_pos = float(mr.get("position", base_pos) or base_pos)
+                        m_ctr = float(mr.get("ctr", 0.0) or 0.0)
+                        tot_impr += m_impr
+                        tot_clicks += m_clicks
+                        w_pos_sum += m_pos * max(m_impr, 1)
+                        w_ctr_sum += m_ctr * max(m_impr, 1)
+                    denom = max(tot_impr, len(matched_live_rows))
+                    current_perf = {
+                        "impressions": tot_impr,
+                        "clicks": tot_clicks,
+                        "position": round(w_pos_sum / float(denom), 2),
+                        "ctr": round(tot_clicks / float(tot_impr), 4) if (tot_impr > 0 and tot_clicks > 0) else round(w_ctr_sum / float(denom), 4),
+                    }
+                else:
+                    current_perf = {}
 
         min_live_pos = min(
             (float(r.get("position", 100.0) or 100.0) for r in live_rows_by_path.get(c_p, [])),
@@ -7472,6 +8162,7 @@ def evaluate_expired_overlays(
         )
         if (
             not in_pytest
+            and not has_page_window_telemetry
             and not baseline_rows_by_path
             and current_perf
             and min_live_pos <= base_pos + 1.0
@@ -7534,96 +8225,247 @@ def evaluate_expired_overlays(
         clicks_delta = curr_clicks - base_clicks
         impr_pct_delta = ((curr_impr - base_impr) / float(base_impr) * 100.0) if base_impr > 0 else 0.0
 
-        has_empirical_eval = bool(current_perf) and not is_synthetic_baseline and base_impr > 0
+        has_empirical_eval = (
+            bool(current_perf)
+            and not is_synthetic_baseline
+            and not is_immature_post_window
+            and base_impr >= MIN_EMPIRICAL_EVAL_IMPRESSIONS
+        )
         is_page_one_dropout = has_empirical_eval and (
             (base_pos <= 10.0 and curr_pos > 10.5 and pos_delta >= 1.5)
             or query_crossed_page_one
         )
         is_severe_rank_regression = has_empirical_eval and pos_delta >= 10.0
-        is_severe_impr_drop = has_empirical_eval and base_impr >= 20 and impr_pct_delta <= -50.0 and pos_delta > 0.0
-        emergency_rollback = is_page_one_dropout or is_severe_rank_regression or is_severe_impr_drop
-
-        is_degraded = (
-            emergency_rollback
-            or pos_delta > 2.0
-            or (base_clicks > 0 and ctr_delta < -0.01)
-            or (clicks_delta < 0 and ctr_delta < -0.005)
-            or (base_impr >= 10 and impr_pct_delta <= -25.0)
+        is_severe_impr_drop = (
+            has_empirical_eval
+            and base_impr >= MIN_EMPIRICAL_EVAL_IMPRESSIONS
+            and impr_pct_delta <= -50.0
+            and pos_delta > 0.0
         )
 
-        if was_rolled_back and not is_expired and locked and not emergency_rollback and not is_degraded:
+        exp_curr_ctr = expected_ctr_for_position(curr_pos)
+        ctr_below_curve = curr_ctr < exp_curr_ctr
+
+        # Ship-Blocker 3 + Poisson CTR Significance: Separate Simpson's paradox query-reach expansion,
+        # rank-jump winners, and small-sample Poisson click variance from genuine degradation.
+        significant_ctr_drop = _is_statistically_significant_ctr_drop(
+            base_clicks=base_clicks,
+            base_impr=base_impr,
+            curr_clicks=curr_clicks,
+            curr_impr=curr_impr,
+        )
+        is_query_reach_expansion = bool(
+            used_page_level_telemetry
+            and curr_impr > 0
+            and not significant_ctr_drop
+            and (impr_pct_delta >= 15.0 or (curr_impr - base_impr) >= 10)
+        )
+        is_page1_steady_or_growing = bool(
+            used_page_level_telemetry
+            and curr_impr > 0
+            and curr_pos <= 10.5
+            and impr_pct_delta >= 0.0
+            and not significant_ctr_drop
+        )
+        is_rank_jump_winner = bool(
+            curr_impr > 0
+            and pos_delta <= -3.0
+            and curr_pos <= 12.0
+            and not significant_ctr_drop
+        )
+        is_protected_growth_signal = bool(
+            is_query_reach_expansion
+            or is_page1_steady_or_growing
+            or is_rank_jump_winner
+            or is_healthy_301_consolidation
+        )
+
+        ctr_degraded = bool(
+            pos_delta > -2.0
+            and ctr_below_curve
+            and significant_ctr_drop
+            and (
+                (base_clicks > 0 and ctr_delta < -0.01 and clicks_delta <= 0)
+                or (clicks_delta < 0 and ctr_delta < -0.005)
+            )
+        )
+        impr_degraded = bool(
+            impr_pct_delta <= -35.0
+            or (impr_pct_delta <= -25.0 and (curr_clicks == 0 or ctr_below_curve))
+        )
+        rank_degraded = bool(is_page_one_dropout or is_severe_rank_regression or pos_delta > 2.0)
+
+        is_degraded = bool(
+            has_empirical_eval
+            and not is_protected_growth_signal
+            and (rank_degraded or ctr_degraded or impr_degraded)
+        )
+
+        if used_page_level_telemetry:
+            # Mid-lock emergency circuit breaker requires clickless collapse + severe rank/impr loss.
+            no_active_click_protection = bool(
+                (recent_7d_clicks is None or recent_7d_clicks == 0)
+                and (curr_clicks == 0 or (base_clicks >= 5 and curr_clicks <= int(0.2 * base_clicks)))
+            )
+            severe_page_loss = bool(
+                curr_impr == 0
+                or (impr_pct_delta <= -50.0 and pos_delta >= 8.0)
+                or (pos_delta >= 10.0 and impr_pct_delta <= -20.0)
+                or (is_page_one_dropout and impr_pct_delta <= -25.0)
+            )
+            emergency_rollback = bool(
+                has_empirical_eval
+                and is_degraded
+                and no_active_click_protection
+                and severe_page_loss
+            )
+        else:
+            emergency_rollback = bool(
+                has_empirical_eval
+                and is_degraded
+                and (is_page_one_dropout or is_severe_rank_regression or is_severe_impr_drop)
+            )
+
+        was_emergency_aborted_mid_lock = bool(
+            was_rolled_back
+            and overlay_data.get("emergency_lock_override")
+            and not is_expired
+            and locked
+        )
+        should_self_heal = bool(
+            was_rolled_back
+            and (
+                (not emergency_rollback and not is_degraded)
+                or (was_emergency_aborted_mid_lock and not emergency_rollback)
+            )
+        )
+        just_self_healed = False
+
+        if should_self_heal:
             overlay_data["status"] = "ACTIVE_LOCKED"
             if overlay_data.get("rolled_back_title_rewrite") and not overlay_data.get("title_rewrite"):
                 overlay_data["title_rewrite"] = overlay_data.pop("rolled_back_title_rewrite")
             if overlay_data.get("rolled_back_modifier") and not overlay_data.get("secondary_title_modifier"):
                 overlay_data["secondary_title_modifier"] = overlay_data.pop("rolled_back_modifier")
-            for rb_k in ("rolled_back_at", "rollback_reason", "emergency_lock_override"):
+            for rb_extra in (
+                "secondary_title_modifier",
+                "meta_description",
+                "quick_answer",
+                "h2_headings",
+                "preset_scenarios",
+                "comparison_rows",
+                "faq_schema",
+                "faq_entries",
+                "faq_additions",
+                "autonomous_citation_assertions",
+            ):
+                rb_bk = f"rolled_back_{rb_extra}"
+                if overlay_data.get(rb_bk) and not overlay_data.get(rb_extra):
+                    overlay_data[rb_extra] = overlay_data.pop(rb_bk)
+                else:
+                    overlay_data.pop(rb_bk, None)
+            for rb_k in (
+                "rolled_back_at",
+                "rollback_reason",
+                "emergency_lock_override",
+                "rolled_back_title_rewrite",
+                "rolled_back_modifier",
+            ):
                 overlay_data.pop(rb_k, None)
+            _backfill_missing_overlay_body_fields(
+                overlay_data=overlay_data,
+                slug=slug,
+                query=query,
+                base_pos=base_pos,
+                base_impr=base_impr,
+                prop=prop,
+            )
+            overlay_data["baseline_impressions"] = base_impr
+            overlay_data["baseline_position"] = base_pos
+            overlay_data["current_impressions"] = int(curr_impr)
+            overlay_data["current_clicks"] = int(curr_clicks)
+            overlay_data["current_ctr"] = round(float(curr_ctr), 4)
+            overlay_data["current_position"] = round(float(curr_pos), 2)
+            overlay_data["position_delta"] = round(pos_delta, 2)
+            overlay_data["impressions_pct_delta"] = round(impr_pct_delta, 2)
+            if is_expired or not locked:
+                eff_lock_days = max(1, int(days_threshold)) if int(days_threshold) > 0 else 28
+                new_lock_until = (now + timedelta(days=eff_lock_days)).isoformat()
+                overlay_data["locked_until"] = new_lock_until
+                lock_until_str = new_lock_until
+                locked = True
+                is_expired = False
             was_rolled_back = False
+            just_self_healed = True
             ov_dirty = True
 
-        if not is_expired and locked and not emergency_rollback and not was_rolled_back:
-            if (
-                not overlay_data.get("quick_answer")
-                or not overlay_data.get("preset_scenarios")
-                or not overlay_data.get("h2_headings")
-                or not overlay_data.get("faq_entries")
+        def _refresh_informational_current_fields() -> bool:
+            if not current_perf:
+                return False
+            if not (
+                used_page_level_telemetry
+                or any(
+                    k_inf in overlay_data
+                    for k_inf in ("current_impressions", "current_clicks", "current_ctr", "current_position")
+                )
             ):
-                try:
-                    canon_dom = (
-                        "https://prexvo.com"
-                        if prop == "prexvo"
-                        else (
-                            "https://gainhelm.com"
-                            if prop == "gainhelm"
-                            else ("https://lienbond.com" if prop == "lienbond" else "https://profithelm.com")
-                        )
-                    )
-                    healed_spec = compile_remediation_overlay_spec(
-                        {
-                            "slug": slug,
-                            "target_url": overlay_data.get("target_url") or f"{canon_dom}/tools/{slug}/",
-                            "query": query,
-                            "position": base_pos,
-                            "impressions": max(1, base_impr),
-                        },
-                        tenant_id=prop,
-                    )
-                    for heal_k in (
-                        "title_rewrite",
-                        "title",
-                        "description",
-                        "meta_description",
-                        "quick_answer",
-                        "h2_headings",
-                        "preset_scenarios",
-                        "comparison_rows",
-                        "faq_schema",
-                        "faq_entries",
-                        "faq_additions",
-                    ):
-                        if not overlay_data.get(heal_k) and healed_spec.get(heal_k):
-                            overlay_data[heal_k] = healed_spec[heal_k]
-                            ov_dirty = True
-                except Exception:
-                    pass
+                return False
+            c_imp_v = int(curr_impr)
+            c_clk_v = int(curr_clicks)
+            c_ctr_v = round(float(curr_ctr), 4)
+            c_pos_v = round(float(curr_pos), 2)
+            p_del_v = round(pos_delta, 2)
+            i_del_v = round(impr_pct_delta, 2)
+            changed_inf = False
+            for k_inf, v_inf in (
+                ("current_impressions", c_imp_v),
+                ("current_clicks", c_clk_v),
+                ("current_ctr", c_ctr_v),
+                ("current_position", c_pos_v),
+            ):
+                if overlay_data.get(k_inf) != v_inf:
+                    overlay_data[k_inf] = v_inf
+                    changed_inf = True
+            if "position_delta" in overlay_data and overlay_data.get("position_delta") != p_del_v:
+                overlay_data["position_delta"] = p_del_v
+                changed_inf = True
+            if "impressions_pct_delta" in overlay_data and overlay_data.get("impressions_pct_delta") != i_del_v:
+                overlay_data["impressions_pct_delta"] = i_del_v
+                changed_inf = True
+            return changed_inf
+
+        if not is_expired and locked and not emergency_rollback and not was_rolled_back:
+            if _backfill_missing_overlay_body_fields(
+                overlay_data=overlay_data,
+                slug=slug,
+                query=query,
+                base_pos=base_pos,
+                base_impr=base_impr,
+                prop=prop,
+            ):
+                ov_dirty = True
+            if _refresh_informational_current_fields():
+                ov_dirty = True
             early_flagged = bool(is_degraded and has_empirical_eval)
             if early_flagged:
-                overlay_data["early_regression_flagged"] = True
-                overlay_data["early_regression_at"] = now.isoformat()
-                overlay_data["early_regression_reason"] = (
+                er_reason = (
                     f"Early regression observed during lock window: rank delta {pos_delta:+.2f}, impr delta {impr_pct_delta:+.1f}%"
                 )
-                ov_dirty = True
+                if not overlay_data.get("early_regression_flagged") or overlay_data.get("early_regression_reason") != er_reason:
+                    overlay_data["early_regression_flagged"] = True
+                    overlay_data["early_regression_at"] = str(overlay_data.get("early_regression_at") or now.isoformat())
+                    overlay_data["early_regression_reason"] = er_reason
+                    ov_dirty = True
             elif overlay_data.get("early_regression_flagged"):
                 overlay_data.pop("early_regression_flagged", None)
                 overlay_data.pop("early_regression_at", None)
                 overlay_data.pop("early_regression_reason", None)
                 ov_dirty = True
             if persist:
-                if ov_dirty:
+                if ov_dirty or any(not p_w.is_file() for p_w in slug_paths):
                     for p_write in slug_paths:
                         try:
+                            p_write.parent.mkdir(parents=True, exist_ok=True)
                             p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
                         except Exception:
                             pass
@@ -7652,8 +8494,24 @@ def evaluate_expired_overlays(
                         if html_target.is_file():
                             try:
                                 raw_h = html_target.read_text(encoding="utf-8")
-                                if 'id="gsc-striking-overlay"' not in raw_h and 'class="gsc-remediation-overlay"' not in raw_h:
-                                    inj_h = inject_overlay_into_html(raw_h, overlay_data)
+                                needs_full_reinject = bool(
+                                    just_self_healed
+                                    or (
+                                        'id="gsc-striking-overlay"' not in raw_h
+                                        and 'class="gsc-remediation-overlay"' not in raw_h
+                                    )
+                                    or (
+                                        overlay_data.get("h2_headings")
+                                        and 'class="overlay-section overlay-headings' not in raw_h
+                                    )
+                                )
+                                if needs_full_reinject:
+                                    base_h = (
+                                        rollback_degraded_overlay_from_html(raw_h, overlay_data)
+                                        if (just_self_healed and 'id="gsc-striking-overlay"' in raw_h)
+                                        else raw_h
+                                    )
+                                    inj_h = inject_overlay_into_html(base_h, overlay_data)
                                     if inj_h != raw_h:
                                         html_target.write_text(inj_h, encoding="utf-8")
                             except Exception:
@@ -7688,6 +8546,20 @@ def evaluate_expired_overlays(
                 overlay_data["rolled_back_title_rewrite"] = overlay_data.get("title_rewrite")
             if overlay_data.get("secondary_title_modifier"):
                 overlay_data["rolled_back_modifier"] = overlay_data.get("secondary_title_modifier")
+                overlay_data["rolled_back_secondary_title_modifier"] = overlay_data.get("secondary_title_modifier")
+            for rb_save_k in (
+                "meta_description",
+                "quick_answer",
+                "h2_headings",
+                "preset_scenarios",
+                "comparison_rows",
+                "faq_schema",
+                "faq_entries",
+                "faq_additions",
+                "autonomous_citation_assertions",
+            ):
+                if overlay_data.get(rb_save_k):
+                    overlay_data[f"rolled_back_{rb_save_k}"] = overlay_data.get(rb_save_k)
             overlay_data["status"] = "DEGRADED_ROLLED_BACK"
             overlay_data["rolled_back_at"] = now.isoformat()
             overlay_data["emergency_lock_override"] = bool((emergency_rollback or overlay_data.get("emergency_lock_override")) and not is_expired and locked)
@@ -7721,6 +8593,7 @@ def evaluate_expired_overlays(
             if persist:
                 for p_write in slug_paths:
                     try:
+                        p_write.parent.mkdir(parents=True, exist_ok=True)
                         p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
                     except Exception:
                         pass
@@ -7769,7 +8642,9 @@ def evaluate_expired_overlays(
             results["summary"]["DEGRADED_ROLLED_BACK"] += 1
         elif (
             not is_synthetic_baseline
+            and not is_immature_post_window
             and curr_impr > 0
+            and max(base_impr, curr_impr) >= MIN_EMPIRICAL_EVAL_IMPRESSIONS
             and (
                 pos_delta < -0.5
                 or ctr_delta > 0.005
@@ -7782,12 +8657,26 @@ def evaluate_expired_overlays(
                 )
             )
         ):
-            overlay_data["status"] = "ACCRETIVE_CONFIRMED"
-            overlay_data["confirmed_at"] = now.isoformat()
-            overlay_data.pop("early_regression_flagged", None)
-            if persist:
+            was_already_confirmed = (
+                str(overlay_data.get("status") or "").upper() == "ACCRETIVE_CONFIRMED"
+                and bool(overlay_data.get("confirmed_at"))
+            )
+            if overlay_data.get("status") != "ACCRETIVE_CONFIRMED":
+                overlay_data["status"] = "ACCRETIVE_CONFIRMED"
+                ov_dirty = True
+            if not was_already_confirmed:
+                overlay_data["confirmed_at"] = str(overlay_data.get("confirmed_at") or now.isoformat())
+                ov_dirty = True
+            for stale_ek in ("early_regression_flagged", "early_regression_at", "early_regression_reason"):
+                if stale_ek in overlay_data:
+                    overlay_data.pop(stale_ek, None)
+                    ov_dirty = True
+            if _refresh_informational_current_fields():
+                ov_dirty = True
+            if persist and (ov_dirty or any(not p_w.is_file() for p_w in slug_paths)):
                 for p_write in slug_paths:
                     try:
+                        p_write.parent.mkdir(parents=True, exist_ok=True)
                         p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
                     except Exception:
                         pass
@@ -7811,6 +8700,15 @@ def evaluate_expired_overlays(
             results["accretive"].append(eval_item)
             results["summary"]["ACCRETIVE"] += 1
         else:
+            if _refresh_informational_current_fields():
+                ov_dirty = True
+            if persist and (ov_dirty or any(not p_w.is_file() for p_w in slug_paths)):
+                for p_write in slug_paths:
+                    try:
+                        p_write.parent.mkdir(parents=True, exist_ok=True)
+                        p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
             eval_item = {
                 "slug": slug,
                 "status": "MONITORING",

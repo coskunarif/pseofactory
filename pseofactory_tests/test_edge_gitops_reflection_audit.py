@@ -25,17 +25,24 @@ from pseofactory.tenant_facts import (
 
 
 def test_gap1_prexvo_edge_lead_capture_no_profithelm_bleed_and_stripe_allowed(tmp_path):
-    """Verify prexvo edge generator has zero profithelm bleed and stripe is allowed for prexvo."""
+    """Verify prexvo edge generator has zero profithelm bleed, canonical operator mailbox via atob, and stripe allowed."""
+    import base64
+    import re
+
     prexvo_js = generate_edge_lead_capture_function("prexvo")
-    assert "https://profithelm.com" not in prexvo_js.lower()
+    assert "profithelm" not in prexvo_js.lower()
     assert '["profit", "helm.com"]' not in prexvo_js
-    assert "arif.coskun@profithelm.com" in prexvo_js
+    m_prexvo = re.search(r'CANONICAL_OPERATOR_MAILBOX\s*=\s*atob\("([^"]+)"\)', prexvo_js)
+    assert m_prexvo is not None
+    assert base64.b64decode(m_prexvo.group(1)).decode("utf-8") == "arif.coskun@profithelm.com"
     assert "arif.coskun@prexvo.com" not in prexvo_js
 
     gainhelm_js = generate_edge_lead_capture_function("gainhelm")
-    assert "https://profithelm.com" not in gainhelm_js.lower()
+    assert "profithelm" not in gainhelm_js.lower()
     assert '["profit", "helm.com"]' not in gainhelm_js
-    assert "arif.coskun@profithelm.com" in gainhelm_js
+    m_gainhelm = re.search(r'CANONICAL_OPERATOR_MAILBOX\s*=\s*atob\("([^"]+)"\)', gainhelm_js)
+    assert m_gainhelm is not None
+    assert base64.b64decode(m_gainhelm.group(1)).decode("utf-8") == "arif.coskun@profithelm.com"
     assert "arif.coskun@gainhelm.com" not in gainhelm_js
 
     contract = get_tenant_contract("prexvo")

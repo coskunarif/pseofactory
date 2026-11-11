@@ -726,6 +726,50 @@ class GSCQueryPageWindowRecord:
 
 
 @dataclass
+class GSCPageWindowRecord:
+    """Time-windowed page-only Search Console telemetry snapshot (-d page) preserving privacy-thresholded traffic."""
+    property_id: str
+    window_key: str
+    page: str
+    clicks: int = 0
+    impressions: int = 0
+    ctr: float = 0.0
+    position: float = 0.0
+    window_start_date: str = ""
+    window_end_date: str = ""
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCPageWindowRecord.property_id")
+        assert_no_forbidden_dashes(self.window_key, "GSCPageWindowRecord.window_key")
+        assert_no_forbidden_dashes(self.page, "GSCPageWindowRecord.page")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GSCPageDailyRecord:
+    """Daily page-level Search Console telemetry (-d date -d page) for causal pre/post overlay evaluation."""
+    property_id: str
+    metric_date: str
+    page: str
+    clicks: int = 0
+    impressions: int = 0
+    ctr: float = 0.0
+    position: float = 0.0
+    recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self):
+        assert_no_forbidden_dashes(self.property_id, "GSCPageDailyRecord.property_id")
+        assert_no_forbidden_dashes(self.metric_date, "GSCPageDailyRecord.metric_date")
+        assert_no_forbidden_dashes(self.page, "GSCPageDailyRecord.page")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class GSCUrlInspectionRecord:
     """Granular URL Inspection coverage and rich-result/mobile-usability state from Search Console."""
     property_id: str

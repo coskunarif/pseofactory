@@ -127,13 +127,21 @@ class HumanActionBus:
         ledger_path: Optional[Any] = None,
     ):
         eff_path = bus_path or ledger_path
-        self.bus_path = str(eff_path) if eff_path else os.path.join(
+        default_bus_p = os.path.join(
             os.path.dirname(__file__), "..", ".agy", "human_action_bus.json"
         )
+        self.bus_path = str(eff_path) if eff_path else default_bus_p
+        self._is_default_bus_path = (
+            os.path.abspath(self.bus_path) == os.path.abspath(default_bus_p)
+        )
         self.hub = hub
+        self._needs_migration_save = False
         self._ensure_dir()
         self.items: Dict[str, ActionItem] = self._load()
         self._recompute_revenue_priority_ranks()
+        if self._needs_migration_save:
+            self.save()
+            self._needs_migration_save = False
 
     def _ensure_dir(self) -> None:
         dir_name = os.path.dirname(os.path.abspath(self.bus_path))
@@ -147,9 +155,20 @@ class HumanActionBus:
                     data = json.load(f)
                 items_dict = {}
                 valid_fields = set(ActionItem.__dataclass_fields__.keys())
-                for k, v in data.get("actions", {}).items():
-                    if str(k).startswith("act-email-pers-"):
+                raw_actions = data.get("actions", {})
+                for k, v in raw_actions.items():
+                    src_eid = str((v or {}).get("source_email_id") or "")
+                    act_id_val = str((v or {}).get("action_id") or "")
+                    if str(k).startswith("act-email-pers-") or act_id_val.startswith("act-email-pers-"):
+                        self._needs_migration_save = True
                         continue
+                    if src_eid.startswith("pers-"):
+                        self._needs_migration_save = True
+                        if str((v or {}).get("status") or "") in ("REJECTED", "RESOLVED", "CONFIRMED"):
+                            v = dict(v)
+                            v["source_email_id"] = ""
+                        else:
+                            continue
                     filtered_v = {fk: fv for fk, fv in v.items() if fk in valid_fields}
                     item = ActionItem(**filtered_v)
                     if (
@@ -165,10 +184,14 @@ class HumanActionBus:
                         item.property_id = "lienbond"
                         item.action_id = new_key
                         k = new_key
+                        self._needs_migration_save = True
                     if item.estimated_monthly_revenue_impact_usd <= 0.0:
                         self._compute_and_apply_revenue_impact(item)
                     self._assert_item_invariants(item)
                     items_dict[k] = item
+                meta_total = (data.get("bus_metadata") or {}).get("total_items")
+                if meta_total != len(items_dict):
+                    self._needs_migration_save = True
                 return items_dict
             except Exception:
                 pass
@@ -367,7 +390,8 @@ class HumanActionBus:
                 bool(c.email_id)
                 and c.email_id != existing.source_email_id
                 and not is_older_numeric_email
-                and existing.status != "PENDING_OPERATOR"
+                and existing.status not in ("PENDING_OPERATOR", "REJECTED")
+                and c.classification_type != "INBOUND_PITCH"
                 and any("partner manager question" in r.lower() for r in (c.missing_requirements or []))
             )
             if has_new_question:

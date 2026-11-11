@@ -34,6 +34,8 @@ from pseofactory.trends.models import (
     AlgorithmicCeilingAnalysis,
     CeilingThresholdSpec,
     GSCDeviceMetricRecord,
+    GSCPageWindowRecord,
+    GSCPageDailyRecord,
     GSCSearchAppearanceRecord,
     GSCQueryPageWindowRecord,
     GSCUrlInspectionRecord,
@@ -504,6 +506,51 @@ class TrendHistoryDB:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_gsc_qp_windows_prop_query ON gsc_query_page_windows(property_id, window_key, query);"
+            )
+
+            # 14b. gsc_page_windows
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_page_windows (
+                    property_id TEXT NOT NULL,
+                    window_key TEXT NOT NULL,
+                    page TEXT NOT NULL,
+                    clicks INTEGER NOT NULL DEFAULT 0 CHECK(clicks >= 0),
+                    impressions INTEGER NOT NULL DEFAULT 0 CHECK(impressions >= 0),
+                    ctr REAL NOT NULL DEFAULT 0.0 CHECK(ctr >= 0.0 AND ctr <= 1.0),
+                    position REAL NOT NULL DEFAULT 0.0 CHECK(position >= 0.0),
+                    window_start_date TEXT NOT NULL DEFAULT '',
+                    window_end_date TEXT NOT NULL DEFAULT '',
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, window_key, page)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_page_windows_prop_win ON gsc_page_windows(property_id, window_key, impressions DESC);"
+            )
+
+            # 14c. gsc_page_daily
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gsc_page_daily (
+                    property_id TEXT NOT NULL,
+                    metric_date TEXT NOT NULL,
+                    page TEXT NOT NULL,
+                    clicks INTEGER NOT NULL DEFAULT 0 CHECK(clicks >= 0),
+                    impressions INTEGER NOT NULL DEFAULT 0 CHECK(impressions >= 0),
+                    ctr REAL NOT NULL DEFAULT 0.0 CHECK(ctr >= 0.0 AND ctr <= 1.0),
+                    position REAL NOT NULL DEFAULT 0.0 CHECK(position >= 0.0),
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (property_id, metric_date, page)
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_page_daily_prop_date ON gsc_page_daily(property_id, metric_date, impressions DESC);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gsc_page_daily_prop_page ON gsc_page_daily(property_id, page, metric_date);"
             )
 
             # 15. gsc_url_inspection_states
@@ -1781,7 +1828,7 @@ class TrendHistoryDB:
                         recorded_at=str(item.get("recorded_at") or now_iso),
                     )
                 )
-                if not rec.query and not rec.page:
+                if not rec.query:
                     continue
                 cur.execute(
                     """
@@ -1864,6 +1911,331 @@ class TrendHistoryDB:
             )
             for r in rows
         ]
+
+    def upsert_gsc_page_windows(
+        self,
+        records: List[Union[GSCPageWindowRecord, Dict[str, Any]]],
+        replace_window: bool = False,
+    ) -> int:
+        """Idempotently upserts time-windowed page-only (-d page) telemetry snapshots."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        parsed_records: List[GSCPageWindowRecord] = []
+        for item in records:
+            rec = (
+                item
+                if isinstance(item, GSCPageWindowRecord)
+                else GSCPageWindowRecord(
+                    property_id=str(item.get("property_id", "")),
+                    window_key=str(item.get("window_key", "recent_28d")),
+                    page=str(item.get("page", "")),
+                    clicks=max(0, int(float(item.get("clicks", 0) or 0))),
+                    impressions=max(0, int(float(item.get("impressions", 0) or 0))),
+                    ctr=max(0.0, min(1.0, float(item.get("ctr", 0.0) or 0.0))),
+                    position=max(0.0, float(item.get("position", 0.0) or 0.0)),
+                    window_start_date=str(item.get("window_start_date", "")),
+                    window_end_date=str(item.get("window_end_date", "")),
+                    recorded_at=str(item.get("recorded_at") or now_iso),
+                )
+            )
+            if rec.page:
+                parsed_records.append(rec)
+        if not parsed_records:
+            return 0
+        count = 0
+        with self.transaction() as cur:
+            if replace_window:
+                replaced_pairs = {(r.property_id, r.window_key) for r in parsed_records}
+                for p_id, w_key in replaced_pairs:
+                    cur.execute(
+                        "DELETE FROM gsc_page_windows WHERE property_id = ? AND window_key = ?;",
+                        (p_id, w_key),
+                    )
+            for rec in parsed_records:
+                cur.execute(
+                    """
+                    INSERT INTO gsc_page_windows (
+                        property_id, window_key, page,
+                        clicks, impressions, ctr, position,
+                        window_start_date, window_end_date, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(property_id, window_key, page) DO UPDATE SET
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        position = excluded.position,
+                        window_start_date = excluded.window_start_date,
+                        window_end_date = excluded.window_end_date,
+                        recorded_at = excluded.recorded_at;
+                    """,
+                    (
+                        rec.property_id,
+                        rec.window_key,
+                        rec.page,
+                        rec.clicks,
+                        rec.impressions,
+                        rec.ctr,
+                        rec.position,
+                        rec.window_start_date,
+                        rec.window_end_date,
+                        rec.recorded_at,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_gsc_page_windows(
+        self,
+        property_id: str,
+        window_key: str = "recent_28d",
+        page: Optional[str] = None,
+    ) -> List[GSCPageWindowRecord]:
+        """Retrieves persisted time-windowed page-only (-d page) telemetry snapshots."""
+        conn = self.get_connection()
+        if page is not None:
+            rows = conn.execute(
+                """
+                SELECT property_id, window_key, page,
+                       clicks, impressions, ctr, position,
+                       window_start_date, window_end_date, recorded_at
+                FROM gsc_page_windows
+                WHERE property_id = ? AND window_key = ? AND page = ?
+                ORDER BY impressions DESC, clicks DESC;
+                """,
+                (str(property_id), str(window_key), str(page)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT property_id, window_key, page,
+                       clicks, impressions, ctr, position,
+                       window_start_date, window_end_date, recorded_at
+                FROM gsc_page_windows
+                WHERE property_id = ? AND window_key = ?
+                ORDER BY impressions DESC, clicks DESC;
+                """,
+                (str(property_id), str(window_key)),
+            ).fetchall()
+        return [
+            GSCPageWindowRecord(
+                property_id=r["property_id"],
+                window_key=r["window_key"],
+                page=r["page"],
+                clicks=int(r["clicks"]),
+                impressions=int(r["impressions"]),
+                ctr=float(r["ctr"]),
+                position=float(r["position"]),
+                window_start_date=r["window_start_date"],
+                window_end_date=r["window_end_date"],
+                recorded_at=r["recorded_at"],
+            )
+            for r in rows
+        ]
+
+    def upsert_gsc_page_daily(
+        self,
+        records: List[Union[GSCPageDailyRecord, Dict[str, Any]]],
+        replace_property: bool = False,
+        min_replace_date: Optional[str] = None,
+    ) -> int:
+        """Idempotently upserts daily page-level (-d date -d page) Search Console telemetry."""
+        if not records:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        parsed_records: List[GSCPageDailyRecord] = []
+        for item in records:
+            rec = (
+                item
+                if isinstance(item, GSCPageDailyRecord)
+                else GSCPageDailyRecord(
+                    property_id=str(item.get("property_id", "")),
+                    metric_date=str(item.get("metric_date") or item.get("date") or ""),
+                    page=str(item.get("page", "")),
+                    clicks=max(0, int(float(item.get("clicks", 0) or 0))),
+                    impressions=max(0, int(float(item.get("impressions", 0) or 0))),
+                    ctr=max(0.0, min(1.0, float(item.get("ctr", 0.0) or 0.0))),
+                    position=max(0.0, float(item.get("position", 0.0) or 0.0)),
+                    recorded_at=str(item.get("recorded_at") or now_iso),
+                )
+            )
+            if rec.metric_date and rec.page:
+                parsed_records.append(rec)
+        if not parsed_records:
+            return 0
+        count = 0
+        with self.transaction() as cur:
+            if replace_property:
+                replaced_props = {r.property_id for r in parsed_records if r.property_id}
+                for p_id in replaced_props:
+                    if min_replace_date:
+                        cur.execute(
+                            "DELETE FROM gsc_page_daily WHERE property_id = ? AND metric_date >= ?;",
+                            (p_id, str(min_replace_date)),
+                        )
+                    else:
+                        cur.execute(
+                            "DELETE FROM gsc_page_daily WHERE property_id = ?;",
+                            (p_id,),
+                        )
+            for rec in parsed_records:
+                cur.execute(
+                    """
+                    INSERT INTO gsc_page_daily (
+                        property_id, metric_date, page,
+                        clicks, impressions, ctr, position, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(property_id, metric_date, page) DO UPDATE SET
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        position = excluded.position,
+                        recorded_at = excluded.recorded_at;
+                    """,
+                    (
+                        rec.property_id,
+                        rec.metric_date,
+                        rec.page,
+                        rec.clicks,
+                        rec.impressions,
+                        rec.ctr,
+                        rec.position,
+                        rec.recorded_at,
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_gsc_page_daily(
+        self,
+        property_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page: Optional[str] = None,
+    ) -> List[GSCPageDailyRecord]:
+        """Retrieves persisted daily page-level (-d date -d page) Search Console telemetry."""
+        conn = self.get_connection()
+        clauses = ["property_id = ?"]
+        params: List[Any] = [str(property_id)]
+        if start_date:
+            clauses.append("metric_date >= ?")
+            params.append(str(start_date))
+        if end_date:
+            clauses.append("metric_date <= ?")
+            params.append(str(end_date))
+        if page is not None:
+            clauses.append("page = ?")
+            params.append(str(page))
+        where_sql = " AND ".join(clauses)
+        rows = conn.execute(
+            f"""
+            SELECT property_id, metric_date, page,
+                   clicks, impressions, ctr, position, recorded_at
+            FROM gsc_page_daily
+            WHERE {where_sql}
+            ORDER BY metric_date ASC, impressions DESC, clicks DESC;
+            """,
+            tuple(params),
+        ).fetchall()
+        return [
+            GSCPageDailyRecord(
+                property_id=r["property_id"],
+                metric_date=r["metric_date"],
+                page=r["page"],
+                clicks=int(r["clicks"]),
+                impressions=int(r["impressions"]),
+                ctr=float(r["ctr"]),
+                position=float(r["position"]),
+                recorded_at=r["recorded_at"],
+            )
+            for r in rows
+        ]
+
+    def delete_gsc_page_daily(
+        self,
+        property_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> int:
+        """Deletes persisted daily page-level rows for a property across an optional date range."""
+        clauses = ["property_id = ?"]
+        params: List[Any] = [str(property_id)]
+        if start_date:
+            clauses.append("metric_date >= ?")
+            params.append(str(start_date))
+        if end_date:
+            clauses.append("metric_date <= ?")
+            params.append(str(end_date))
+        where_sql = " AND ".join(clauses)
+        with self.transaction() as cur:
+            cur.execute(f"DELETE FROM gsc_page_daily WHERE {where_sql};", tuple(params))
+            return int(cur.rowcount or 0)
+
+    def delete_gsc_page_windows(
+        self,
+        property_id: str,
+        window_keys: Optional[List[str]] = None,
+    ) -> int:
+        """Deletes persisted page-window rows for a property across optional window keys."""
+        with self.transaction() as cur:
+            if window_keys:
+                deleted = 0
+                for wk in window_keys:
+                    cur.execute(
+                        "DELETE FROM gsc_page_windows WHERE property_id = ? AND window_key = ?;",
+                        (str(property_id), str(wk)),
+                    )
+                    deleted += int(cur.rowcount or 0)
+                return deleted
+            cur.execute("DELETE FROM gsc_page_windows WHERE property_id = ?;", (str(property_id),))
+            return int(cur.rowcount or 0)
+
+    def delete_gsc_query_page_windows(
+        self,
+        property_id: str,
+        window_keys: Optional[List[str]] = None,
+    ) -> int:
+        """Deletes persisted query-page window rows for a property across optional window keys."""
+        with self.transaction() as cur:
+            if window_keys:
+                deleted = 0
+                for wk in window_keys:
+                    cur.execute(
+                        "DELETE FROM gsc_query_page_windows WHERE property_id = ? AND window_key = ?;",
+                        (str(property_id), str(wk)),
+                    )
+                    deleted += int(cur.rowcount or 0)
+                return deleted
+            cur.execute("DELETE FROM gsc_query_page_windows WHERE property_id = ?;", (str(property_id),))
+            return int(cur.rowcount or 0)
+
+    def delete_gsc_search_appearance_metrics(self, property_id: str) -> int:
+        """Deletes persisted search-appearance rows for a property."""
+        with self.transaction() as cur:
+            cur.execute("DELETE FROM gsc_search_appearance_metrics WHERE property_id = ?;", (str(property_id),))
+            return int(cur.rowcount or 0)
+
+    def delete_gsc_device_metrics(
+        self,
+        property_id: str,
+        page_only: bool = False,
+        property_wide_only: bool = False,
+    ) -> int:
+        """Deletes persisted device metric rows for a property."""
+        with self.transaction() as cur:
+            if page_only:
+                cur.execute(
+                    "DELETE FROM gsc_device_metrics WHERE property_id = ? AND page != '' AND query = '';",
+                    (str(property_id),),
+                )
+            elif property_wide_only:
+                cur.execute(
+                    "DELETE FROM gsc_device_metrics WHERE property_id = ? AND page = '' AND query = '';",
+                    (str(property_id),),
+                )
+            else:
+                cur.execute("DELETE FROM gsc_device_metrics WHERE property_id = ?;", (str(property_id),))
+            return int(cur.rowcount or 0)
 
     def upsert_gsc_url_inspection_states(
         self,

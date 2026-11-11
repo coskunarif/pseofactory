@@ -14174,6 +14174,7 @@ def _execute_autonomous_downstream_chain(
         daily_gsc_records = None
         consolidated_live_queries = None
         multidim_telemetry = None
+        cons_res = None
         if not in_pytest:
             use_live_gsc = None if not defer_live_indexing else False
             try:
@@ -14199,9 +14200,11 @@ def _execute_autonomous_downstream_chain(
                     property_id=adapter.property_id,
                     repo_root=repo_root,
                     live_gsc=bool(not defer_live_indexing),
+                    multidim_telemetry=multidim_telemetry,
                 )
                 consolidated_live_queries = list(cons_res.get("current_rows") or [])
             except Exception:
+                cons_res = None
                 consolidated_live_queries = None
 
         inspector = DailyIndexingInspector(
@@ -14237,20 +14240,24 @@ def _execute_autonomous_downstream_chain(
                     }
             m_ledger_file.parent.mkdir(parents=True, exist_ok=True)
             m_ledger_file.write_text(json.dumps(m_data, indent=2), encoding="utf-8")
-            if consolidated_live_queries:
+            if consolidated_live_queries or cons_res:
                 try:
                     sync_real_gsc_baselines_to_recovery_ledger(
                         property_id=adapter.property_id,
                         repo_root=repo_root,
                         discovered_tools=discovered_tools,
                         live_queries=consolidated_live_queries,
+                        consolidated_gsc=cons_res,
+                        multidim_telemetry=multidim_telemetry,
                     )
                 except Exception:
                     pass
             overlay_eval_res = evaluate_expired_overlays(
                 site_url=f"sc-domain:{adapter.property_id}.com",
                 base_dir=repo_root,
-                live_queries=consolidated_live_queries,
+                live_queries=None if multidim_telemetry else consolidated_live_queries,
+                multidim_telemetry=multidim_telemetry,
+                live_gsc=bool(not defer_live_indexing) if not in_pytest else False,
             )
             try:
                 from pseofactory.qualification import (
@@ -14274,6 +14281,8 @@ def _execute_autonomous_downstream_chain(
                         live_queries=consolidated_live_queries,
                         apply_overlays=True,
                         persist=True,
+                        live_gsc=bool(not defer_live_indexing),
+                        multidim_telemetry=multidim_telemetry,
                     )
                     summary["seo_workflows_status"] = wf_res.get("status", "PASS")
                     summary["seo_workflows_executed"] = wf_res.get("workflows_executed", 8)

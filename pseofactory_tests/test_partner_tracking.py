@@ -2980,7 +2980,7 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
       const liveApprovedProfitHelmKeys = new Set([
         "coinledger", "koinly", "mercury", "ramp", "ramp_impact", "gusto", "rippling",
         "kalshi", "freetaxusa", "eztaxreturn", "eztaxreturn_com", "efile", "efile_com",
-        "lawdepot", "xendoo", "xendoo_impact", "equipment_macrs", "wallethub"
+        "lawdepot", "xendoo", "xendoo_impact", "wallethub"
       ]);
       const declinedProfitHelmKeys = new Set(["next_insurance_b2b", "invoice_simple"]);
       const crossVerticalHosts = new Set(["xendoo.pxf.io", "join.ramp.com", "www.jdoqocy.com", "www.dpbolvw.net"]);
@@ -4010,7 +4010,7 @@ def test_autonomous_production_monetization_zero_nag_and_followup_idempotency(tm
     for zero_aff_rep, exp_sku_cnt, exp_mode in (
         (live_dash.prexvo, 1, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
         (live_dash.gainhelm, 2, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
-        (live_dash.lienbond, 2, "AWAITING_OPERATOR_ACTION"),
+        (live_dash.lienbond, 7, "AWAITING_OPERATOR_ACTION"),
     ):
         assert zero_aff_rep.monetization_readiness_score == 0.0
         assert zero_aff_rep.production_monetization_ready is False

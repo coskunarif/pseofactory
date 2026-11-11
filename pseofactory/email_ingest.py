@@ -274,6 +274,14 @@ def _is_automated_sender(sender_email: str, sender_name: str = "") -> bool:
 
 _URL_IN_TEXT_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _REPLY_ATTRIBUTION_RE = re.compile(r"^on .+ wrote:$", re.IGNORECASE)
+_THREAD_DIVIDER_RE = re.compile(
+    r"^(?:_{8,}|-{5,}\s*(?:original message|forwarded message)\s*-{5,})$",
+    re.IGNORECASE,
+)
+_MIME_ENVELOPE_HEADER_RE = re.compile(
+    r"^(?:(?:date|from|to|cc|sent|subject|content-type|content-transfer-encoding):\s|\[\d+\]\s+text/)",
+    re.IGNORECASE,
+)
 _FOOTER_BOILERPLATE_TOKENS: Tuple[str, ...] = (
     "unsubscribe",
     "manage preferences",
@@ -307,7 +315,19 @@ def _has_human_partner_question(
     if subject and "?" in subject:
         candidate_lines.append(subject)
     if body_snippet and "?" in body_snippet:
-        candidate_lines.extend(body_snippet.splitlines())
+        seen_body_prose = False
+        for b_line in body_snippet.splitlines():
+            b_stripped = b_line.strip()
+            if not b_stripped:
+                continue
+            if _THREAD_DIVIDER_RE.match(b_stripped) or _REPLY_ATTRIBUTION_RE.match(b_stripped):
+                break
+            if seen_body_prose and re.match(r"^from:\s+.+@", b_stripped, re.IGNORECASE):
+                break
+            if not seen_body_prose and _MIME_ENVELOPE_HEADER_RE.match(b_stripped):
+                continue
+            seen_body_prose = True
+            candidate_lines.append(b_line)
     if not candidate_lines:
         return False, ""
 
@@ -316,8 +336,8 @@ def _has_human_partner_question(
         stripped = raw_line.strip()
         if not stripped or stripped.startswith(">"):
             continue
-        if _REPLY_ATTRIBUTION_RE.match(stripped):
-            continue
+        if _REPLY_ATTRIBUTION_RE.match(stripped) or _THREAD_DIVIDER_RE.match(stripped):
+            break
         line_low = stripped.lower()
         if any(tok in line_low for tok in _FOOTER_BOILERPLATE_TOKENS):
             continue
@@ -404,6 +424,7 @@ class EmailIngestionEngine:
         )
         self.min_poll_interval = min_poll_interval
         self.himalaya_bin = himalaya_bin
+        self._last_envelope_fetch_ok = False
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
@@ -423,7 +444,7 @@ class EmailIngestionEngine:
 
     def save_state(self, state: Dict[str, Any]) -> None:
         state["last_updated"] = datetime.now(timezone.utc).isoformat()
-        tmp_path = f"{self.state_path}.tmp"
+        tmp_path = f"{self.state_path}.{os.getpid()}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
             f.flush()
@@ -440,7 +461,7 @@ class EmailIngestionEngine:
         return {"messages": {}, "classifications": []}
 
     def save_cache(self, cache: Dict[str, Any]) -> None:
-        tmp_path = f"{self.cache_path}.tmp"
+        tmp_path = f"{self.cache_path}.{os.getpid()}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(cache, f, indent=2)
             f.flush()
@@ -478,6 +499,7 @@ class EmailIngestionEngine:
             "last_polled_at": datetime.now(timezone.utc).isoformat(),
             "last_polled_ts": time.time(),
             "last_success": success,
+            "last_status": "OK" if success else "ERROR",
             "last_error": error,
         }
         self.save_state(state)
@@ -502,6 +524,7 @@ class EmailIngestionEngine:
         extra_args: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Fetches envelopes from himalaya Zoho account with rate limiting."""
+        self._last_envelope_fetch_ok = False
         allowed, remaining = self.can_poll("zoho", force=force)
         if not allowed:
             return []
@@ -524,6 +547,7 @@ class EmailIngestionEngine:
         try:
             data = json.loads(stdout)
             envelopes = data.get("envelopes", [])
+            self._last_envelope_fetch_ok = True
             self.record_poll("zoho", success=True)
             return envelopes
         except Exception as exc:
@@ -568,9 +592,8 @@ class EmailIngestionEngine:
 
         page_sz = int(limit) if limit and limit > 0 else 200
         envelopes = self.fetch_zoho_envelopes(mailbox="Inbox", page_size=page_sz, force=True)
-        zoho_poll_status = (self.load_state().get("accounts", {}).get("zoho", {}) or {}).get("last_status")
-        if not envelopes and cached_dict and zoho_poll_status == "ERROR":
-            # On fetch failure, preserve and return cached messages intact
+        if not envelopes and cached_dict and not self._last_envelope_fetch_ok:
+            # On fetch failure or offline test guard, preserve and return cached messages intact
             return [
                 EmailMessage(**m) for m in cached_dict.values()
                 if m.get("account") == "zoho"
@@ -914,6 +937,32 @@ class EmailIngestionEngine:
         self.save_cache(cache)
         return ingested
 
+    @staticmethod
+    def _decommission_default_personal_inbox_split_brain() -> None:
+        """
+        Ensures canonical .agy/personal_inbox.json is an empty JSON list ([]), eliminating
+        deprecated personal/Gmail split-brain records while guaranteeing clean-checkout parity.
+        """
+        default_personal = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", ".agy", "personal_inbox.json")
+        )
+        os.makedirs(os.path.dirname(default_personal), exist_ok=True)
+        needs_write = True
+        if os.path.isfile(default_personal):
+            try:
+                with open(default_personal, "r", encoding="utf-8") as fh:
+                    if json.load(fh) == []:
+                        needs_write = False
+            except Exception:
+                needs_write = True
+        if needs_write:
+            tmp_p = f"{default_personal}.{os.getpid()}.tmp"
+            with open(tmp_p, "w", encoding="utf-8") as fh:
+                fh.write("[]\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_p, default_personal)
+
     def ingest_personal(
         self,
         fixture_path: Optional[str] = None,
@@ -925,7 +974,16 @@ class EmailIngestionEngine:
         Never polls himalaya -a personal or mindball and never loads .agy/personal_inbox.json by default.
         All live partnership correspondence uses arif.coskun@profithelm.com via himalaya -a zoho.
         """
-        if not fixture_path or not os.path.isfile(fixture_path):
+        if not fixture_path:
+            self._decommission_default_personal_inbox_split_brain()
+            try:
+                from pseofactory.partner_tracker import ensure_canonical_agy_monetization_state
+
+                ensure_canonical_agy_monetization_state()
+            except Exception:
+                pass
+            return []
+        if not os.path.isfile(fixture_path):
             return []
 
         cache = self.load_cache()
@@ -2422,21 +2480,55 @@ class EmailIngestionEngine:
                     reg_obj = _VENDOR_REG.get(f"{v_prop}:{v_key}") or _VENDOR_REG.get(v_key)
                     v_cat = reg_obj.category if reg_obj else "PARTNER_PROGRAM"
 
-                    is_v_declined = any(
+                    body_no_urls = _URL_IN_TEXT_RE.sub(" ", combined_text)
+                    is_card_or_tx_decline = any(
                         tok in combined_text
                         for tok in (
-                            "declined",
-                            "not approved",
-                            "unable to approve",
-                            "cannot approve",
-                            "unfortunately we cannot",
-                            "unfortunately, we cannot",
-                            "not a fit",
-                            "application was rejected",
-                            "request was rejected",
+                            "declined card",
+                            "card transaction",
+                            "card was declined",
+                            "transaction declined",
+                            "transaction was declined",
+                            "payment declined",
+                            "charge declined",
                         )
                     )
-                    is_v_approved = not is_v_declined and any(
+                    is_informational_vendor_notice = any(
+                        tok in combined_text
+                        for tok in (
+                            "you don't need to take any action",
+                            "you do not need to take any action",
+                            "no action required",
+                            "no action is needed",
+                            "sweep agreement",
+                            "download the mercury app",
+                            "review a declined card transaction",
+                            "agent controls",
+                            "this email contains an advertisement",
+                        )
+                    )
+                    is_spam_auto_blast = mbx_lower == "spam" and _is_automated_sender(
+                        msg.sender_email, msg.sender_name
+                    )
+                    suppress_partner_state = is_informational_vendor_notice or is_spam_auto_blast
+
+                    is_v_declined = not suppress_partner_state and (
+                        ("declined" in combined_text and not is_card_or_tx_decline)
+                        or any(
+                            tok in combined_text
+                            for tok in (
+                                "not approved",
+                                "unable to approve",
+                                "cannot approve",
+                                "unfortunately we cannot",
+                                "unfortunately, we cannot",
+                                "not a fit",
+                                "application was rejected",
+                                "request was rejected",
+                            )
+                        )
+                    )
+                    is_v_approved = not suppress_partner_state and not is_v_declined and any(
                         tok in combined_text
                         for tok in (
                             "approved",
@@ -2455,24 +2547,28 @@ class EmailIngestionEngine:
                             "partner link is active",
                         )
                     )
-                    has_v_q, v_q_req = _has_human_partner_question(
-                        msg.sender_email, msg.sender_name, msg.subject, msg.body_snippet
+                    has_v_q, v_q_req = (
+                        (False, "")
+                        if suppress_partner_state or mbx_lower in ("notification", "newsletter", "spam")
+                        else _has_human_partner_question(
+                            msg.sender_email, msg.sender_name, msg.subject, msg.body_snippet
+                        )
                     )
                     is_v_onboarding = (
-                        not is_v_declined
+                        not suppress_partner_state
+                        and not is_v_declined
                         and not is_v_approved
                         and (
                             has_v_q
+                            or bool(re.search(r"\bw-?9\b", body_no_urls))
                             or any(
-                                tok in combined_text
+                                tok in body_no_urls
                                 for tok in (
                                     "action required",
                                     "complete your",
                                     "complete onboarding",
                                     "fill out",
                                     "sign the",
-                                    "w-9",
-                                    "w9",
                                     "tax form",
                                     "questionnaire",
                                     "schedule a call",
@@ -2484,7 +2580,8 @@ class EmailIngestionEngine:
                         )
                     )
                     is_v_submitted = (
-                        not is_v_declined
+                        not suppress_partner_state
+                        and not is_v_declined
                         and not is_v_approved
                         and not is_v_onboarding
                         and any(
@@ -2711,11 +2808,36 @@ class EmailIngestionEngine:
             src_msg = msg_by_id.get(c.email_id)
             if (
                 not src_msg
-                or (src_msg.mailbox or "").strip().lower() == "sent"
+                or (src_msg.mailbox or "").strip().lower() in ("sent", "notification", "newsletter", "spam")
                 or (src_msg.sender_email or "").strip().lower() == "arif.coskun@profithelm.com"
-                or c.classification_type == "APPLICATION_DECLINED"
+                or c.classification_type in ("APPLICATION_DECLINED", "INBOUND_PITCH")
             ):
                 continue
+            if c.classification_type == "GENERAL_INQUIRY":
+                msg_low = f"{src_msg.subject or ''} {src_msg.body_snippet or ''}".lower()
+                is_html_marketing_drip = (
+                    "unsubscribe" in msg_low or "<!doctype html" in msg_low
+                ) and not any(
+                    kw in msg_low
+                    for kw in (
+                        "affiliate",
+                        "partner",
+                        "referral",
+                        "commission",
+                        "placement",
+                        "application",
+                        "cj",
+                        "impact",
+                        "firstpromoter",
+                        "partnerstack",
+                        "profithelm",
+                        "prexvo",
+                        "gainhelm",
+                        "lienbond",
+                    )
+                )
+                if is_html_marketing_drip:
+                    continue
             has_q, q_req = _has_human_partner_question(
                 src_msg.sender_email, src_msg.sender_name, src_msg.subject, src_msg.body_snippet
             )
