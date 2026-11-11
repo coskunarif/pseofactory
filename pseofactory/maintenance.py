@@ -1212,7 +1212,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
                 env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
-                res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=600)
+                res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=1200)
                 if res.returncode == 0:
                     try:
                         RetroReflectionEngine.sync_tenant_publisher_prerequisites(
@@ -1240,10 +1240,10 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             except (LockContentionError, SubprocessCrashError):
                 raise
             except subprocess.TimeoutExpired as te:
-                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 600s"
+                stderr_tail = (te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or ""))[-2048:] if te.stderr else "Timeout expired after 1200s"
                 stdout_tail = (te.stdout.decode("utf-8", errors="replace") if isinstance(te.stdout, bytes) else str(te.stdout or ""))[-2048:] if te.stdout else ""
                 raise SubprocessCrashError(
-                    f"Isolated builder for '{self._property_id}' timed out after 600s",
+                    f"Isolated builder for '{self._property_id}' timed out after 1200s",
                     returncode=124,
                     stderr_tail=stderr_tail,
                     stdout_tail=stdout_tail,
@@ -15025,7 +15025,7 @@ def reflect_and_recompile_all_assets(
                     al_dist_f = Path(adapter.dist_dir) / "tools" / "irs-2027-tax-brackets" / "alabama" / "index.html"
                     if al_dist_f.is_file():
                         al_dist_txt = al_dist_f.read_text(encoding="utf-8", errors="ignore")
-                        if "sunset_standard_deduction" in al_dist_txt or "$7,903" in al_dist_txt:
+                        if "sunset_standard_deduction" in al_dist_txt or "post-TCJA sunset" in al_dist_txt:
                             source_sync_changed = True
 
                 ph_builder_file = Path(adapter.repo_path) / "profithelm" / "builder.py"
@@ -16160,6 +16160,19 @@ def reflect_and_recompile_all_assets(
             elif isinstance(adapter, SubprocessPropertyAdapter):
                 # Estate already passes structural audits; preserve or retrofit compiled dist/ in-place
                 recompiled_count = max(report.total_assets_checked, 1)
+
+            if (
+                should_run_full_build
+                and getattr(adapter, "repo_path", None)
+                and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
+                and (Path(adapter.repo_path) / "functions" / "r").is_dir()
+                and not is_foreign_pytest
+            ):
+                try:
+                    from pseofactory.edge import sync_tenant_edge_redirect_function
+                    sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
+                except Exception:
+                    pass
 
             # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,
             # and heal any legacy cross-vertical polluted overlay specs in .agy/overlays/

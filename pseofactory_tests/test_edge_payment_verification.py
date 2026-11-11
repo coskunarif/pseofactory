@@ -436,5 +436,45 @@ def test_partner_tracker_checkout_session_sets_per_brand_display_name(tenant):
     assert diag["bank_payout_settlement"]["webhook_status"] == "disabled"
 
 
+def test_verify_tenant_edge_functions_parity_enforces_dist_functions_and_obbba_alabama_guard(tmp_path):
+    from pathlib import Path
+    from pseofactory.edge import (
+        sync_tenant_edge_redirect_function,
+        verify_tenant_edge_functions_parity,
+    )
+
+    repo = tmp_path / "profithelm-platform"
+    (repo / "functions" / "r").mkdir(parents=True)
+    (repo / "dist" / "functions" / "r").mkdir(parents=True)
+    (repo / "dist" / "functions" / "api").mkdir(parents=True)
+
+    sync_tenant_edge_redirect_function(repo, property_id="profithelm")
+    ok, reasons = verify_tenant_edge_functions_parity(repo, "profithelm")
+    assert ok is True, reasons
+    assert '"branding_settings[display_name]": "ProfitHelm"' in (
+        repo / "dist" / "functions" / "api" / "lead-capture.js"
+    ).read_text(encoding="utf-8")
+
+    # Simulate a tenant build overwriting dist/functions/api/lead-capture.js with stale JS
+    (repo / "dist" / "functions" / "api" / "lead-capture.js").write_text(
+        '// stale lead-capture without branding_settings\n', encoding="utf-8"
+    )
+    ok_stale, reasons_stale = verify_tenant_edge_functions_parity(repo, "profithelm")
+    assert ok_stale is False
+    assert any("dist/functions/api/lead-capture.js" in r for r in reasons_stale)
+
+    # Re-sync heals dist/functions/api/lead-capture.js back to exact parity
+    sync_tenant_edge_redirect_function(repo, property_id="profithelm")
+    ok_healed, reasons_healed = verify_tenant_edge_functions_parity(repo, "profithelm")
+    assert ok_healed is True, reasons_healed
+
+    maint_src = (
+        Path(__file__).resolve().parent.parent / "pseofactory" / "maintenance.py"
+    ).read_text(encoding="utf-8")
+    assert '"$7,903" in al_dist_txt' not in maint_src
+    assert '"post-TCJA sunset" in al_dist_txt' in maint_src
+
+
+
 
 

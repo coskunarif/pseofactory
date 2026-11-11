@@ -13084,25 +13084,38 @@ def verify_tenant_edge_functions_parity(
     hub: Optional[Any] = None,
 ) -> Tuple[bool, List[str]]:
     """
-    Verifies that all 5 edge function files in repo_path/functions/ match pseofactory.edge
-    byte-for-byte. Returns (is_aligned, reasons).
+    Verifies that all 5 edge function files in repo_path/functions/ (and repo_path/dist/functions/
+    when present) match pseofactory.edge byte-for-byte. Returns (is_aligned, reasons).
     Zero em-dashes. Zero en-dashes.
     """
     repo = Path(repo_path)
     expected_map = get_expected_edge_functions_map(property_id, hub=hub)
     reasons: List[str] = []
+    has_dist_functions = (repo / "dist" / "functions").is_dir()
     for rel_path, expected_src in expected_map.items():
         fpath = repo / rel_path
         if not fpath.is_file():
             reasons.append(f"{property_id}: missing {rel_path}")
-            continue
-        try:
-            actual_src = fpath.read_text(encoding="utf-8")
-        except Exception as exc:
-            reasons.append(f"{property_id}: unreadable {rel_path} ({exc})")
-            continue
-        if actual_src != expected_src:
-            reasons.append(f"{property_id}: {rel_path} byte mismatch against pseofactory.edge")
+        else:
+            try:
+                actual_src = fpath.read_text(encoding="utf-8")
+                if actual_src != expected_src:
+                    reasons.append(f"{property_id}: {rel_path} byte mismatch against pseofactory.edge")
+            except Exception as exc:
+                reasons.append(f"{property_id}: unreadable {rel_path} ({exc})")
+
+        if has_dist_functions:
+            dist_rel = f"dist/{rel_path}"
+            dist_fpath = repo / dist_rel
+            if not dist_fpath.is_file():
+                reasons.append(f"{property_id}: missing {dist_rel}")
+            else:
+                try:
+                    dist_actual = dist_fpath.read_text(encoding="utf-8")
+                    if dist_actual != expected_src:
+                        reasons.append(f"{property_id}: {dist_rel} byte mismatch against pseofactory.edge")
+                except Exception as exc:
+                    reasons.append(f"{property_id}: unreadable {dist_rel} ({exc})")
     return len(reasons) == 0, reasons
 
 
