@@ -2429,3 +2429,84 @@ def test_monitoring_current_metrics_refresh_and_idempotent_confirmed_at(
     )
     assert il_path.read_text(encoding="utf-8") == il_c1_raw
     assert tx_path.read_text(encoding="utf-8") == tx_c1_raw
+
+
+def test_sync_tenant_test_isolation_guards_aligns_prexvo_and_profithelm_monetization_contracts(
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies sync_tenant_test_isolation_guards updates downstream Prexvo and ProfitHelm
+    contract files (declined partner suppression, TELEMETRY_EXPORT_SECRET roundtrip, and
+    approved Xendoo Section 179 route) idempotently during reflect.
+    """
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+    px_root = tmp_path / "prexvo"
+    (px_root / "prexvo").mkdir(parents=True, exist_ok=True)
+    (px_root / "tests").mkdir(parents=True, exist_ok=True)
+    (px_root / "prexvo" / "freshness.py").write_text(
+        '        if status in ("live", "pending"):\n'
+        "            live_partners += 1\n"
+        '        elif status == "pending_p2":\n'
+        "            suppressed_partners += 1\n",
+        encoding="utf-8",
+    )
+    (px_root / "tests" / "test_affiliate_routes.py").write_text(
+        '    assert report["total_partners"] == 5\n'
+        '    assert report["live_partners"] == 5\n'
+        '    assert report["suppressed_partners"] == 0\n'
+        '    assert data["total_partners"] == 5\n'
+        '    assert data["live_partners"] == 5\n'
+        '    assert data["suppressed_partners"] == 0\n'
+        "    for p_key in PREXVO_AFFILIATES.keys():\n"
+        "        assert f'/r/{p_key}' in matrix_html\n"
+        '    for p_key in list(PREXVO_AFFILIATES.keys()) + ["sofi_refi", "laurel_road", "juno"]:\n'
+        "        edge_res = simulate_edge_redirect(p_key)\n"
+        '        assert edge_res["status"] == 302\n'
+        '        assert edge_res["location"] != EDUCATIONAL_CALCULATOR_URL\n'
+        '        assert "prexvo.com" not in edge_res["location"].split("?")[0]\n'
+        '        assert "ref=prexvo" in edge_res["location"]\n'
+        '        assert edge_res["has_tracking"] is True\n'
+        '        assert "noindex, nofollow" in edge_res["headers"]["X-Robots-Tag"]\n'
+        '        assert "no-cache" in edge_res["headers"]["Cache-Control"]\n',
+        encoding="utf-8",
+    )
+
+    ph_root = tmp_path / "profithelm-platform"
+    (ph_root / "profithelm").mkdir(parents=True, exist_ok=True)
+    (ph_root / "tests").mkdir(parents=True, exist_ok=True)
+    (ph_root / "tests" / "test_audit_closed_loop_upgrades.py").write_text(
+        "      const env = {\n"
+        "        PROFITHELM_TELEMETRY_KV: {\n"
+        "          put: async (k, v) => { storedKV[k] = v; },\n"
+        "          list: async () => ({ keys: Object.keys(storedKV).map(k => ({ name: k })), list_complete: true }),\n"
+        "          get: async (k) => storedKV[k]\n"
+        "        }\n"
+        "      };\n"
+        '      const getReq = new Request("https://profithelm.com/api/telemetry");\n',
+        encoding="utf-8",
+    )
+    (ph_root / "tests" / "test_multi_engine_ranking_benchmark.py").write_text(
+        '    assert res["affiliate_route"]["partner_key"] == "crest_capital"\n',
+        encoding="utf-8",
+    )
+
+    res_px = sync_tenant_test_isolation_guards(px_root, "prexvo")
+    res_ph = sync_tenant_test_isolation_guards(ph_root, "profithelm")
+    assert res_px["updated_files"] == 2
+    assert res_ph["updated_files"] == 2
+    assert 'status in ("pending_p2", "declined")' in (px_root / "prexvo" / "freshness.py").read_text(encoding="utf-8")
+    assert "suppressed_keys" in (px_root / "tests" / "test_affiliate_routes.py").read_text(encoding="utf-8")
+    assert 'TELEMETRY_EXPORT_SECRET: "test_secret_123"' in (
+        ph_root / "tests" / "test_audit_closed_loop_upgrades.py"
+    ).read_text(encoding="utf-8")
+    assert 'Bearer test_secret_123' in (
+        ph_root / "tests" / "test_audit_closed_loop_upgrades.py"
+    ).read_text(encoding="utf-8")
+    assert '== "xendoo"' in (
+        ph_root / "tests" / "test_multi_engine_ranking_benchmark.py"
+    ).read_text(encoding="utf-8")
+
+    # Idempotency check
+    assert sync_tenant_test_isolation_guards(px_root, "prexvo")["updated_files"] == 0
+    assert sync_tenant_test_isolation_guards(ph_root, "profithelm")["updated_files"] == 0
