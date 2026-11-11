@@ -7945,6 +7945,13 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
     - labeled data-status="pending" although the registry says that partner is live,
     - labeled data-status="live" although the registry says that partner is pending/declined,
     - or links to a declined partner (/r/<pk>) or to an uncontracted partner on a property with live offers."""
+    prop = (property_id or "").strip().lower()
+    if prop == "lienbond" and (
+        "SuretyBonds.com" in content
+        or "EMR Audit Packet ($89)" in content
+        or "Next Insurance" in content
+    ):
+        return True
     if 'href="/r/' not in content and "href='/r/" not in content and "data-status=" not in content:
         return False
     try:
@@ -13041,7 +13048,18 @@ class RetroReflectionEngine:
                     html_file.write_text(content, encoding="utf-8")
                     if rel not in retrofitted_paths:
                         retrofitted_paths.append(rel)
-                if "/r/" in content or "overlay-partner-offer" in content:
+                if (
+                    "/r/" in content
+                    or "overlay-partner-offer" in content
+                    or (
+                        property_id.lower() == "lienbond"
+                        and (
+                            "SuretyBonds.com" in content
+                            or "Next Insurance" in content
+                            or "EMR Audit Packet ($89)" in content
+                        )
+                    )
+                ):
                     try:
                         from pseofactory.affiliates import normalize_html_callout_message_match
                         norm_non_tool = normalize_html_callout_message_match(content, property_id=property_id)
@@ -13324,7 +13342,18 @@ class RetroReflectionEngine:
                     stamped_any = True
                 if stamped_any and "gsc_lifecycle_telemetry_stamp" not in repaired:
                     repaired.append("gsc_lifecycle_telemetry_stamp")
-            if "/r/" in updated_html or "overlay-partner-offer" in updated_html:
+            if (
+                "/r/" in updated_html
+                or "overlay-partner-offer" in updated_html
+                or (
+                    property_id.lower() == "lienbond"
+                    and (
+                        "SuretyBonds.com" in updated_html
+                        or "Next Insurance" in updated_html
+                        or "EMR Audit Packet ($89)" in updated_html
+                    )
+                )
+            ):
                 try:
                     from pseofactory.affiliates import normalize_html_callout_message_match
                     norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)

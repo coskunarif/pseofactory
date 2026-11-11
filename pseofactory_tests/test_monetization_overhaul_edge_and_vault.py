@@ -1607,3 +1607,105 @@ def test_round2_redteam_micro_gaps_subdomains_lienbond_skus_suretybonds_and_gene
     assert out["body"]["cancel_url"].startswith("https://profithelm.com/tools/section-179-calculator/?")
     assert out["stripeParams"][0]["success_url"].startswith("https://profithelm.com/tools/section-179-calculator/?")
     assert out["stripeParams"][0]["cancel_url"].startswith("https://profithelm.com/tools/section-179-calculator/?")
+
+
+def test_lienbond_retro_reflection_copy_parity_heals_index_and_disclaimers_to_pass(tmp_path: Path) -> None:
+    """
+    Regression test for LienBond in-place retro-reflection copy parity:
+    1. normalize_html_callout_message_match(..., property_id='lienbond') normalizes:
+       - 'SuretyBonds.com' -> 'SuretyBondsDirect.com'
+       - 'EMR Audit Packet ($89)' -> 'EMR Audit Packet ($49)'
+       - 'Next Insurance, ' -> '' and ', Next Insurance' -> ''
+       even on non-tool pages without /r/ links (disclaimers, methodology, 404).
+    2. _has_stale_pending_status(content, 'lienbond') flags all 3 drifts as True
+       and returns False once normalized.
+    3. RetroReflectionEngine.audit_estate + retrofit_estate heals both index.html
+       and disclaimers/index.html to PASS with zero residual drift.
+    """
+    from pseofactory.affiliates import normalize_html_callout_message_match
+    from pseofactory.maintenance import RetroReflectionEngine, _has_stale_pending_status
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    raw_index_snippet = (
+        '<!doctype html><html lang="en"><head>'
+        '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>LienBond | Contractor Surety Bond &amp; Statutory Lien Calculators</title>'
+        '<meta name="description" content="Treasury Circular 570 surety bond, workers comp EMR, and statutory mechanics lien calculators.">'
+        '<link rel="canonical" href="https://lienbond.com/">'
+        '</head><body><main>'
+        '<h1>Contractor Surety Bond &amp; Statutory Lien Calculators</h1>'
+        '<table><tbody><tr>'
+        '<td><strong>SuretyBonds.com</strong></td>'
+        '<td><a href="/r/suretybonds_direct?source_tool=homepage&amp;subid=homepage_card_1&amp;cta_slot=calculator_primary_cta" '
+        'data-partner="suretybonds_direct" data-status="live" data-company-brand="SuretyBonds.com" '
+        'rel="noopener sponsored nofollow" target="_blank">Instant State License or Performance Bond Quote at SuretyBonds.com</a></td>'
+        '</tr></tbody></table>'
+        '<p><a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1">'
+        'Download NCCI Class Code &amp; EMR Audit Packet ($89)</a></p>'
+        '<p>TCPA consent for SuretyBonds.com, Simply Business, Next Insurance, Thimble, and Levelset, '
+        'or Simply Business, Next Insurance.</p>'
+        '</main><footer><p>FTC disclosure: Simply Business, SuretyBonds.com, Next Insurance, Thimble, Jobber, or Levelset.</p></footer>'
+        '</body></html>'
+    )
+    raw_disclaimers_snippet = (
+        '<!doctype html><html lang="en"><head>'
+        '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Legal Disclaimers &amp; Statutory Compliance Notice | LienBond</title>'
+        '<meta name="description" content="Statutory compliance disclaimers and FTC partner disclosures for LienBond calculators.">'
+        '<link rel="canonical" href="https://lienbond.com/disclaimers/">'
+        '</head><body><main>'
+        '<h1>Legal Disclaimers &amp; Statutory Compliance Notice</h1>'
+        '<p>LienBond may earn referral compensation from verified partner links (such as Simply Business, '
+        'SuretyBonds.com, Next Insurance, Thimble, Jobber, or Levelset) at no additional cost to you.</p>'
+        '</main><footer><p>Editorial contact: arif.coskun@profithelm.com</p></footer>'
+        '</body></html>'
+    )
+
+    # 1. Direct unit checks on _has_stale_pending_status and normalize_html_callout_message_match
+    assert _has_stale_pending_status("<td>SuretyBonds.com</td>", "lienbond") is True
+    assert _has_stale_pending_status("<a href='/api/lead-capture'>EMR Audit Packet ($89)</a>", "lienbond") is True
+    assert _has_stale_pending_status("<p>Simply Business, Next Insurance, Thimble</p>", "lienbond") is True
+    assert _has_stale_pending_status("<p>Simply Business, SuretyBondsDirect.com, Thimble</p>", "lienbond") is False
+
+    norm_idx = normalize_html_callout_message_match(raw_index_snippet, property_id="lienbond")
+    assert "SuretyBonds.com" not in norm_idx
+    assert "SuretyBondsDirect.com" in norm_idx
+    assert "EMR Audit Packet ($89)" not in norm_idx
+    assert "EMR Audit Packet ($49)" in norm_idx
+    assert "Next Insurance" not in norm_idx
+    assert _has_stale_pending_status(norm_idx, "lienbond") is False
+
+    norm_disc = normalize_html_callout_message_match(raw_disclaimers_snippet, property_id="lienbond")
+    assert "SuretyBonds.com" not in norm_disc
+    assert "SuretyBondsDirect.com" in norm_disc
+    assert "Next Insurance" not in norm_disc
+    assert _has_stale_pending_status(norm_disc, "lienbond") is False
+
+    # 2. End-to-end RetroReflectionEngine audit_estate -> retrofit_estate -> audit_estate
+    dist_dir = tmp_path / "lienbond_dist"
+    (dist_dir / "disclaimers").mkdir(parents=True, exist_ok=True)
+    prim_idx, _ = normalize_html_visual_primitives(raw_index_snippet, is_tenant_porcelain=True)
+    prim_disc, _ = normalize_html_visual_primitives(raw_disclaimers_snippet, is_tenant_porcelain=True)
+    (dist_dir / "index.html").write_text(prim_idx, encoding="utf-8")
+    (dist_dir / "disclaimers" / "index.html").write_text(prim_disc, encoding="utf-8")
+
+    pre_audit = RetroReflectionEngine.audit_estate(dist_dir, "lienbond")
+    assert pre_audit["status"] != "PASS"
+    assert "index.html" in pre_audit["stale_pages"]
+    assert "disclaimers/index.html" in pre_audit["stale_pages"]
+
+    RetroReflectionEngine.retrofit_estate(dist_dir, "lienbond", canonical_base="https://lienbond.com")
+
+    healed_idx = (dist_dir / "index.html").read_text(encoding="utf-8")
+    healed_disc = (dist_dir / "disclaimers" / "index.html").read_text(encoding="utf-8")
+    for healed_doc in (healed_idx, healed_disc):
+        assert "SuretyBonds.com" not in healed_doc
+        assert "SuretyBondsDirect.com" in healed_doc
+        assert "EMR Audit Packet ($89)" not in healed_doc
+        assert "Next Insurance" not in healed_doc
+    assert "EMR Audit Packet ($49)" in healed_idx
+
+    post_audit = RetroReflectionEngine.audit_estate(dist_dir, "lienbond")
+    assert post_audit["status"] == "PASS", f"Expected PASS after retrofit_estate, got: {post_audit}"
+    assert post_audit["stale_pages"] == {}
+

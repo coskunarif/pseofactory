@@ -4895,7 +4895,7 @@ def render_partner_quote_intake_html(
             "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
             "project jurisdiction state, and bond/payroll band with matched Treasury-listed surety underwriters, "
             "commercial workers compensation carriers, and statutory lien service partners (including SuretyBondsDirect.com, "
-            "Simply Business, Next Insurance, Thimble, and Levelset) to prepare a customized underwriting quote."
+            "Simply Business, Thimble, and Levelset) to prepare a customized underwriting quote."
         )
         btn_text = "Request Instant Surety & Insurance Quote"
     else:

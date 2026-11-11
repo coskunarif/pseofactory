@@ -5231,7 +5231,7 @@ EXPECTED_PARTNER_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
     "first_american": ("first american",),
     "first_american_1031": ("first american",),
     "simply_business": ("simply business",),
-    "suretybonds_direct": ("suretybondsdirect", "suretybonds"),
+    "suretybonds_direct": ("suretybondsdirect", "suretybonds direct"),
     "next_insurance_b2b": ("next insurance",),
     "invoice_simple": ("invoice simple",),
     "national_funding_med": ("national funding",),
@@ -5257,7 +5257,7 @@ EXPECTED_PARTNER_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
 }
 
 FORBIDDEN_REPLACED_BRAND_TOKENS: Dict[str, Tuple[str, ...]] = {
-    "suretybonds_direct": ("lawdepot", "hiscox"),
+    "suretybonds_direct": ("lawdepot", "hiscox", "suretybonds.com"),
     "simply_business": ("lawdepot", "hiscox"),
     "next_insurance_b2b": ("lawdepot", "hiscox"),
     "crest_capital": ("xendoo", "alt lending", "taxact"),
@@ -5492,10 +5492,17 @@ def normalize_html_callout_message_match(
     """
     import html as html_lib
 
-    if not html or ("/r/" not in html and "overlay-partner-offer" not in html):
+    if not html:
         return html
 
     prop = (property_id or "profithelm").strip().lower()
+    has_lienbond_copy_drift = prop == "lienbond" and (
+        "SuretyBonds.com" in html
+        or "EMR Audit Packet ($89)" in html
+        or "Next Insurance" in html
+    )
+    if "/r/" not in html and "overlay-partner-offer" not in html and not has_lienbond_copy_drift:
+        return html
     registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES))
     fallback_copy: Dict[str, Tuple[str, str, str]] = {}
     if prop == "profithelm":
@@ -5755,6 +5762,20 @@ def normalize_html_callout_message_match(
                 .replace('data-partner-key="next_insurance_b2b"', 'data-partner-key="simply_business"')
                 .replace("/r/next_insurance_b2b", "/r/simply_business")
             )
+        updated = (
+            updated.replace("SuretyBonds.com", "SuretyBondsDirect.com")
+            .replace("EMR Audit Packet ($89)", "EMR Audit Packet ($49)")
+            .replace("Next Insurance, ", "")
+            .replace(", Next Insurance", "")
+        )
+        if preserved_gsc_inline_block:
+            preserved_gsc_inline_block = (
+                preserved_gsc_inline_block.replace("SuretyBonds.com", "SuretyBondsDirect.com")
+                .replace("Next Insurance, ", "")
+                .replace(", Next Insurance", "")
+            )
+        if "/r/" not in updated and "overlay-partner-offer" not in updated:
+            return updated
 
     def _replace_overlay_section(match: re.Match) -> str:
         sec_html = match.group(0)
