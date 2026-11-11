@@ -7809,9 +7809,9 @@ def diagnose_stripe_merchant_readiness(execute_live: bool = False) -> Dict[str, 
             "currency": "usd",
             "payout_schedule_interval": "daily",
             "payout_delay_days": 2,
-            "webhook_endpoint_id": "we_verified_coachloop",
+            "webhook_endpoint_id": "we_1T7R8gIq0ckFsf5jfX3AKZ06",
             "webhook_url": "https://api.thecoachloop.com/api/webhooks/stripe",
-            "webhook_status": "enabled",
+            "webhook_status": "disabled",
         },
         "live_vs_simulated_breakdown": {
             "cloudflare_pages_edge_worker": "LIVE_PRODUCTION",
@@ -7826,6 +7826,21 @@ def diagnose_stripe_merchant_readiness(execute_live: bool = False) -> Dict[str, 
             "Export STRIPE_SECRET_KEY and run `python3 -m pseofactory.cli lead-monitor --sync-pages-secrets --verify-providers` to bind the rotated key onto profithelm and prexvo Cloudflare Pages projects.",
         ],
     }
+
+
+_STRIPE_CHECKOUT_BRAND_TITLES: Dict[str, str] = {
+    "profithelm": "ProfitHelm",
+    "prexvo": "Prexvo",
+    "gainhelm": "GainHelm",
+    "lienbond": "LienBond",
+}
+
+_STRIPE_CHECKOUT_STATEMENT_SUFFIXES: Dict[str, str] = {
+    "profithelm": "PROFITHELM",
+    "prexvo": "PREXVO",
+    "gainhelm": "GAINHELM",
+    "lienbond": "LIENBOND",
+}
 
 
 def create_stripe_checkout_session(
@@ -7859,6 +7874,9 @@ def create_stripe_checkout_session(
     if not email_clean or "@" not in email_clean:
         raise ValueError("A valid customer_email is required to create a Stripe Checkout session.")
 
+    brand_display_name = _STRIPE_CHECKOUT_BRAND_TITLES.get(prop_clean) or prop_clean.capitalize()
+    statement_suffix = _STRIPE_CHECKOUT_STATEMENT_SUFFIXES.get(prop_clean) or brand_display_name.upper()[:22]
+
     eff_lead_id = (lead_id or f"lead_{prop_clean}_{hashlib.sha256(email_clean.encode()).hexdigest()[:10]}").strip()
     offer = resolve_lead_monetization_offer(
         property_id=prop_clean,
@@ -7878,6 +7896,8 @@ def create_stripe_checkout_session(
         "success_url": offer["success_url"],
         "cancel_url": offer["cancel_url"],
         "line_items[0][quantity]": "1",
+        "branding_settings[display_name]": brand_display_name,
+        "payment_intent_data[statement_descriptor_suffix]": statement_suffix,
         "metadata[lead_id]": eff_lead_id,
         "metadata[property_id]": prop_clean,
         "metadata[tool_slug]": slug_clean,
@@ -7906,6 +7926,7 @@ def create_stripe_checkout_session(
         "lead_id": eff_lead_id,
         "customer_email": email_clean,
         "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
+        "stripe_display_name": brand_display_name,
         "stripe_publishable_key_present": bool(creds.get("publishable_key")),
         "stripe_credential_status": "configured_ready" if eff_key else "secret_key_missing_rotation_required",
         "offer_sku": offer["offer_sku"],
@@ -7935,7 +7956,7 @@ def create_stripe_checkout_session(
         "diagnostic_telemetry": {
             "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
             "merchant_email": creds.get("merchant_email", "arif.coskun@profithelm.com"),
-            "display_name": creds.get("display_name", "CoachOS"),
+            "display_name": brand_display_name,
             "device_name": creds.get("device_name", "IN-PF4HYA85"),
             "cli_key_expires_at": creds.get("cli_key_expires_at", "2026-06-03"),
             "credential_status": "configured_ready" if eff_key else "secret_key_missing_rotation_required",

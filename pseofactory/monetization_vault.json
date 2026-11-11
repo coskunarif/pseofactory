@@ -28,7 +28,13 @@
       "name": "Stripe",
       "account_id": "acct_1T6fSTIq0ckFsf5j",
       "merchant_email": "arif.coskun@profithelm.com",
-      "display_name": "CoachOS",
+      "display_name": "ProfitHelm LLC",
+      "checkout_display_names": {
+        "profithelm": "ProfitHelm",
+        "prexvo": "Prexvo",
+        "gainhelm": "GainHelm",
+        "lienbond": "LienBond"
+      },
       "cli_key_expires_at": "2026-06-03",
       "enabled": true,
       "billing_mode": "payment",
@@ -37,7 +43,9 @@
       "details_submitted": true,
       "external_bank_account": "MERCURY, PARTNERING WITH CHOICE BANK (Routing 091311229, Account ****1395)",
       "payout_schedule": "Automatic daily payouts (2 business day rolling delay)",
+      "webhook_endpoint_id": "we_1T7R8gIq0ckFsf5jfX3AKZ06",
       "webhook_url": "https://api.thecoachloop.com/api/webhooks/stripe",
+      "webhook_status": "disabled",
       "fulfillment_engine": "personalized_statutory_workpaper_and_csv_bundle",
       "digital_products": {
         "ph_1031_boot_replacement_workpapers": {
@@ -168,7 +176,7 @@
         }
       },
       "settlement_verification": "direct_checkout_session_lookup",
-      "webhook_url_status": "UNVERIFIED_SHARED_COACHOS_ENDPOINT: not used for settlement; edge verifies cs_live sessions directly via GET /v1/checkout/sessions/{id}"
+      "webhook_url_status": "DISABLED_ON_STRIPE: endpoint we_1T7R8gIq0ckFsf5jfX3AKZ06 (https://api.thecoachloop.com/api/webhooks/stripe) disabled on acct_1T6fSTIq0ckFsf5j (status=disabled); settlement continues via direct edge GET /v1/checkout/sessions/{id} verification"
     },
     "impact": {
       "name": "Impact.com",

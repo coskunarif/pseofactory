@@ -323,4 +323,115 @@ def test_on_request_post_accepts_mock_request_without_url_property(tmp_path, ten
     assert out["body"]["ok"] is True
 
 
+ALL_BRAND_TENANTS = {
+    "profithelm": ("ProfitHelm", "PROFITHELM", "section-1031-calculator"),
+    "prexvo": ("Prexvo", "PREXVO", "student-loan-refinance-break-even-calculator"),
+    "gainhelm": ("GainHelm", "GAINHELM", "soc-2-audit-cost-calculator"),
+    "lienbond": ("LienBond", "LIENBOND", "contractor-license-bond-cost-calculator-by-credit-score"),
+}
+
+
+@pytest.mark.parametrize("tenant", sorted(ALL_BRAND_TENANTS))
+def test_edge_checkout_emits_per_brand_display_name_without_contamination(tmp_path, tenant):
+    from pathlib import Path
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    from pseofactory.maintenance import CrossPropertyContaminationScanner
+
+    expected_brand, expected_suffix, slug = ALL_BRAND_TENANTS[tenant]
+    js = generate_edge_lead_capture_function(tenant)
+
+    assert_no_forbidden_dashes(js, context=f"edge lead-capture {tenant}")
+    assert "CoachOS" not in js
+    assert f'const stripeDisplayName = "{expected_brand}";' in js
+    assert f'"branding_settings[display_name]": "{expected_brand}"' in js
+    assert f'"payment_intent_data[statement_descriptor_suffix]": "{expected_suffix}"' in js
+
+    scanner = CrossPropertyContaminationScanner()
+    assert scanner.scan_text(js, tenant) == []
+    for other_tenant, (other_brand, _, _) in ALL_BRAND_TENANTS.items():
+        if other_tenant != tenant:
+            assert other_brand not in js
+            assert other_brand.lower() not in js.lower()
+
+    mod = tmp_path / f"{tenant}_brand_checkout.mjs"
+    mod.write_text(js, encoding="utf-8")
+    script = textwrap.dedent(
+        f"""
+        const mod = await import({json.dumps(str(mod))});
+        let capturedParams = null;
+        globalThis.fetch = async (url, init) => {{
+          const u = String(url);
+          if (u.endsWith("/v1/checkout/sessions")) {{
+            capturedParams = Object.fromEntries(new URLSearchParams(String(init && init.body || "")));
+            return new Response(
+              JSON.stringify({{
+                id: "cs_live_BRAND_TEST",
+                url: "https://checkout.stripe.com/c/pay/cs_live_BRAND_TEST"
+              }}),
+              {{ status: 200 }}
+            );
+          }}
+          return new Response("{{}}", {{ status: 500 }});
+        }};
+        const res = await mod.onRequestGet({{
+          request: new Request(
+            "https://{tenant}.com/api/lead-capture?checkout=1&lead_id=lead_{tenant}_brand&tool_slug={slug}&format=json"
+          ),
+          env: {{ STRIPE_SECRET_KEY: "sk_live_mock" }}
+        }});
+        const body = await res.json();
+        console.log(JSON.stringify({{ status: res.status, body, capturedParams }}));
+        """
+    )
+    runner = tmp_path / f"run_{tenant}_brand_checkout.mjs"
+    runner.write_text(script, encoding="utf-8")
+    proc = subprocess.run(["node", str(runner)], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["status"] == 200
+    assert out["capturedParams"]["branding_settings[display_name]"] == expected_brand
+    assert out["capturedParams"]["payment_intent_data[statement_descriptor_suffix]"] == expected_suffix
+    assert out["body"]["stripe_display_name"] == expected_brand
+    if "diagnostic_telemetry" in out["body"]:
+        assert out["body"]["diagnostic_telemetry"]["display_name"] == expected_brand
+
+    vault_path = Path(__file__).resolve().parent.parent / "pseofactory" / "monetization_vault.json"
+    vault_raw = vault_path.read_text(encoding="utf-8")
+    assert_no_forbidden_dashes(vault_raw, context="monetization_vault.json")
+    vault = json.loads(vault_raw)
+    stripe_vault = vault["master_networks"]["stripe"]
+    assert stripe_vault["checkout_display_names"][tenant] == expected_brand
+    assert stripe_vault["webhook_endpoint_id"] == "we_1T7R8gIq0ckFsf5jfX3AKZ06"
+    assert stripe_vault["webhook_status"] == "disabled"
+    assert "we_1T7R8gIq0ckFsf5jfX3AKZ06" in stripe_vault["webhook_url_status"]
+    assert "status=disabled" in stripe_vault["webhook_url_status"]
+    assert "GET /v1/checkout/sessions/{id}" in stripe_vault["webhook_url_status"]
+
+
+@pytest.mark.parametrize("tenant", sorted(ALL_BRAND_TENANTS))
+def test_partner_tracker_checkout_session_sets_per_brand_display_name(tenant):
+    from pseofactory.partner_tracker import (
+        create_stripe_checkout_session,
+        diagnose_stripe_merchant_readiness,
+    )
+
+    expected_brand, expected_suffix, slug = ALL_BRAND_TENANTS[tenant]
+    sess = create_stripe_checkout_session(
+        property_id=tenant,
+        tool_slug=slug,
+        customer_email=f"buyer@{tenant}-client.io",
+        lead_id=f"lead_{tenant}_brand_py",
+        execute_live=False,
+    )
+    assert sess["request_payload"]["branding_settings[display_name]"] == expected_brand
+    assert sess["request_payload"]["payment_intent_data[statement_descriptor_suffix]"] == expected_suffix
+    assert sess["stripe_display_name"] == expected_brand
+    assert sess["diagnostic_telemetry"]["display_name"] == expected_brand
+
+    diag = diagnose_stripe_merchant_readiness(execute_live=False)
+    assert diag["bank_payout_settlement"]["webhook_endpoint_id"] == "we_1T7R8gIq0ckFsf5jfX3AKZ06"
+    assert diag["bank_payout_settlement"]["webhook_status"] == "disabled"
+
+
+
 

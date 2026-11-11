@@ -5043,7 +5043,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@lienbond.com";
-  const stripeDisplayName = "CoachOS";
+  const stripeDisplayName = "LienBond";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/contractor-license-bond-cost-calculator-by-credit-score/";
@@ -5074,6 +5074,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "line_items[0][price_data][product_data][name]": offer.title,
         "line_items[0][price_data][product_data][description]": `LienBond Construction Statutory Filing & Audit Packet (${offer.statutory_authority})`,
         "line_items[0][quantity]": "1",
+        "branding_settings[display_name]": "LienBond",
         "payment_intent_data[statement_descriptor_suffix]": "LIENBOND",
         "metadata[lead_id]": leadId,
         "metadata[workpaper_id]": `wp_${leadId}`,
@@ -6691,7 +6692,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@gainhelm.com";
-  const stripeDisplayName = "CoachOS";
+  const stripeDisplayName = "GainHelm";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/soc-2-audit-cost-calculator/";
@@ -6722,6 +6723,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "line_items[0][price_data][product_data][name]": offer.title,
         "line_items[0][price_data][product_data][description]": `GainHelm Statutory Workpaper & Execution Packet (${offer.statutory_authority})`,
         "line_items[0][quantity]": "1",
+        "branding_settings[display_name]": "GainHelm",
         "payment_intent_data[statement_descriptor_suffix]": "GAINHELM",
         "metadata[lead_id]": leadId,
         "metadata[workpaper_id]": `wp_${leadId}`,
@@ -8436,7 +8438,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@prexvo.com";
-  const stripeDisplayName = "CoachOS";
+  const stripeDisplayName = "Prexvo";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/student-loan-refinance-break-even-calculator/";
@@ -8509,6 +8511,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "line_items[0][price_data][product_data][name]": activeOffer.title,
       "line_items[0][price_data][product_data][description]": `Prexvo Statutory Decision Audit & Execution Packet (${activeOffer.statutory_authority})`,
       "line_items[0][quantity]": "1",
+      "branding_settings[display_name]": "Prexvo",
       "payment_intent_data[statement_descriptor_suffix]": "PREXVO",
       "metadata[lead_id]": leadId,
       "metadata[workpaper_id]": `wp_${leadId}`,
@@ -10676,7 +10679,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@profithelm.com";
-  const stripeDisplayName = "CoachOS";
+  const stripeDisplayName = "ProfitHelm";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const toolPath = resolveCanonicalToolPath(toolSlug);
@@ -10749,6 +10752,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "line_items[0][price_data][product_data][name]": spec.offerTitle,
       "line_items[0][price_data][product_data][description]": `ProfitHelm Statutory Tax & Capital Workpaper Packet (${spec.statutoryAuthority})`,
       "line_items[0][quantity]": "1",
+      "branding_settings[display_name]": "ProfitHelm",
       "payment_intent_data[statement_descriptor_suffix]": "PROFITHELM",
       "metadata[lead_id]": leadId,
       "metadata[workpaper_id]": `wp_${leadId}`,
