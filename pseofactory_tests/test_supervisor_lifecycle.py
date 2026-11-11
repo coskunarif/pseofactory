@@ -692,7 +692,7 @@ def test_department_handoff_contracts_and_three_tenant_unification(tmp_path: Pat
     from pseofactory.gsc_remediation import compile_remediation_overlay_spec
     from pseofactory.maintenance import sync_tenant_pseofactory_marker
 
-    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm")
+    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm", "lienbond")
     assert tuple(CANONICAL_DEPARTMENT_CONTRACTS.keys()) == DEPARTMENT_STAGES
 
     for idx, stage_name in enumerate(DEPARTMENT_STAGES, start=1):
@@ -717,7 +717,7 @@ def test_department_handoff_contracts_and_three_tenant_unification(tmp_path: Pat
         persist=True,
     )
     assert sm_dict["overall_status"] == "PASS"
-    assert sm_dict["tenants_managed"] == ["profithelm", "prexvo", "gainhelm"]
+    assert sm_dict["tenants_managed"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
     assert set(sm_dict["contracts"].keys()) == set(DEPARTMENT_STAGES)
 
     hb_path = tmp_path / "heartbeat.json"
@@ -1016,10 +1016,10 @@ def test_declarative_tenant_registration_contract_derives_all_downstream_loops(t
     # 1. Verify top-level exports and shared identity across all downstream modules
     assert hasattr(pseofactory, "DeclarativeTenantContract")
     assert hasattr(pseofactory, "CANONICAL_TENANT_DECLARATIONS")
-    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm"}
-    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm")
-    assert ACTIVE_TENANT_DOMAINS == ("profithelm.com", "prexvo.com", "gainhelm.com")
-    assert set(ACTIVE_ROUTABLE_ZONE_IDS.keys()) >= {"profithelm.com", "prexvo.com", "gainhelm.com"}
+    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
+    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm", "lienbond")
+    assert ACTIVE_TENANT_DOMAINS == ("profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com")
+    assert set(ACTIVE_ROUTABLE_ZONE_IDS.keys()) >= {"profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com"}
 
     assert MAINT_TENANT_CONFIGS is CANONICAL_TENANT_CONFIGS
     assert DIST_LINKEDIN_IDS is DEFAULT_TENANT_LINKEDIN_IDS
@@ -1152,7 +1152,7 @@ def test_declarative_tenant_registration_contract_derives_all_downstream_loops(t
         unregister_declarative_tenant("tariffhelm")
 
     assert "tariffhelm" not in CANONICAL_TENANT_DECLARATIONS
-    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
 
 def test_spoke_overlay_routing_geo_meta_and_partial_success_streak(tmp_path):

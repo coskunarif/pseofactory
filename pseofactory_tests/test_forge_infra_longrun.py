@@ -86,10 +86,12 @@ const postData = await postResp.json();
 // Clear in-memory buffer to prove onRequestGet reads from KV metadata
 globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
 
-const getReq = new Request("https://profithelm.com/api/telemetry?limit=50");
+const getReq = new Request("https://profithelm.com/api/telemetry?limit=50", {{
+  headers: {{ "x-telemetry-secret": "tel_sec_123" }},
+}});
 const getResp = await onRequestGet({{
   request: getReq,
-  env: {{ PROFITHELM_TELEMETRY_KV: mockKv }},
+  env: {{ PROFITHELM_TELEMETRY_KV: mockKv, TELEMETRY_EXPORT_SECRET: "tel_sec_123" }},
 }});
 const getData = await getResp.json();
 
@@ -110,8 +112,10 @@ const quotaExhaustedKv = {{
 }};
 
 const quotaResp = await onRequestGet({{
-  request: new Request("https://profithelm.com/api/telemetry"),
-  env: {{ PROFITHELM_TELEMETRY_KV: quotaExhaustedKv }},
+  request: new Request("https://profithelm.com/api/telemetry", {{
+    headers: {{ "x-telemetry-secret": "tel_sec_123" }},
+  }}),
+  env: {{ PROFITHELM_TELEMETRY_KV: quotaExhaustedKv, TELEMETRY_EXPORT_SECRET: "tel_sec_123" }},
 }});
 const quotaData = await quotaResp.json();
 
@@ -219,8 +223,10 @@ await postResp.json();
 globalThis.__PROFITHELM_LEADS_MEM__ = [];
 
 const getResp = await onRequestGet({{
-  request: new Request("https://profithelm.com/api/lead-capture?limit=25"),
-  env: {{ PROFITHELM_LEADS: mockKv }},
+  request: new Request("https://profithelm.com/api/lead-capture?limit=25", {{
+    headers: {{ "x-telemetry-secret": "lead_sec_123" }},
+  }}),
+  env: {{ PROFITHELM_LEADS: mockKv, TELEMETRY_EXPORT_SECRET: "lead_sec_123" }},
 }});
 const getData = await getResp.json();
 

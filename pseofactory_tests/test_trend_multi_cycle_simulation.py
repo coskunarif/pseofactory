@@ -97,7 +97,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
         # 5. Sustained unassigned niche candidate: Day 1 appearance
         {
             "id": "spike-d1-05",
-            "query": "contractor lien release statutory matrix by state",
+            "query": "ltl freight density and nmfc class calculator",
             "source": "google_suggest",
             "velocity": 55.0,
             "acceleration": 14.0,
@@ -166,7 +166,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
         # Sustained unassigned niche: streak 2
         {
             "id": "spike-d2-05",
-            "query": "contractor lien release statutory matrix by state",
+            "query": "ltl freight density and nmfc class calculator",
             "source": "google_suggest",
             "velocity": 62.0,
             "acceleration": 18.0,
@@ -219,7 +219,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
         # Sustained unassigned niche: streak 3
         {
             "id": "spike-d3-05",
-            "query": "contractor lien release statutory matrix by state",
+            "query": "ltl freight density and nmfc class calculator",
             "source": "google_suggest",
             "velocity": 70.0,
             "acceleration": 22.0,
@@ -269,7 +269,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
     # Check Ephemeral viral spike is held in MONITOR, NOT proposed
     mon_queries = [m["query"] for m in res1["monitored"]]
     assert "viral fidget gadget 2026" in mon_queries
-    assert "contractor lien release statutory matrix by state" in mon_queries
+    assert "ltl freight density and nmfc class calculator" in mon_queries
 
     with TrendHistoryDB(db_file) as db:
         gadget_rec = db.get_keyword_history("viral-fidget-gadget-2026")
@@ -277,7 +277,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
         assert gadget_rec.consecutive_cycles_count == 1
         assert gadget_rec.status == "candidate"
 
-        niche_rec1 = db.get_keyword_history("contractor-lien-release-statutory-matrix-by-state")
+        niche_rec1 = db.get_keyword_history("ltl-freight-density-and-nmfc-class-calculator")
         assert niche_rec1 is not None
         assert niche_rec1.consecutive_cycles_count == 1
         assert niche_rec1.status == "candidate"
@@ -296,7 +296,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
         assert gadget_rec2.total_cycles_count == 1
 
         # Sustained niche was seen in Day 2: streak becomes 2
-        niche_rec2 = db.get_keyword_history("contractor-lien-release-statutory-matrix-by-state")
+        niche_rec2 = db.get_keyword_history("ltl-freight-density-and-nmfc-class-calculator")
         assert niche_rec2.consecutive_cycles_count == 2
         assert niche_rec2.total_cycles_count == 2
         assert niche_rec2.status == "observed"
@@ -310,7 +310,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
     # CRITICAL: Day 3 reaches streak >= 3 and unlocks PROPOSE_NEW_APP
     assert len(res3["proposals"]) == 1
     proposal = res3["proposals"][0]
-    assert proposal["cluster_slug"] == "contractor-lien-release-statutory-matrix-by-state"
+    assert proposal["cluster_slug"] == "ltl-freight-density-and-nmfc-class-calculator"
     assert proposal["consecutive_cycles_sustained"] == 3
     assert proposal["mean_composite_yield"] >= 70.0
     assert proposal["treg_stability_index"] >= 0.80
@@ -319,13 +319,13 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
     assert "blueprint" in proposal["proposal_spec"]
 
     with TrendHistoryDB(db_file) as db:
-        niche_rec3 = db.get_keyword_history("contractor-lien-release-statutory-matrix-by-state")
+        niche_rec3 = db.get_keyword_history("ltl-freight-density-and-nmfc-class-calculator")
         assert niche_rec3.consecutive_cycles_count == 3
         assert niche_rec3.status == "action_ready"
 
         db_proposals = db.get_niche_proposals(status="PROPOSED")
         assert len(db_proposals) == 1
-        assert db_proposals[0].cluster_slug == "contractor-lien-release-statutory-matrix-by-state"
+        assert db_proposals[0].cluster_slug == "ltl-freight-density-and-nmfc-class-calculator"
 
         # Check total observations count before replay
         conn = db.get_connection()
@@ -348,7 +348,7 @@ def test_three_cycle_simulation_and_ephemeral_gating(tmp_path: Path):
         assert eval_count_after == eval_count_before
 
         # Invariant: streak count remains 3 (not incremented on replay)
-        niche_replay = db.get_keyword_history("contractor-lien-release-statutory-matrix-by-state")
+        niche_replay = db.get_keyword_history("ltl-freight-density-and-nmfc-class-calculator")
         assert niche_replay.consecutive_cycles_count == 3
         assert niche_replay.total_cycles_count == 3
 

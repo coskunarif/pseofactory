@@ -151,7 +151,7 @@ def test_edge_lead_capture_partner_registration_across_all_three_tenants(tmp_pat
             f"""
 import {{ onRequestPost, onRequestGet }} from "./lead_capture_{prop}.mjs";
 
-const env = {{}};
+const env = {{ TELEMETRY_EXPORT_SECRET: "slot_sec_123" }};
 const postReq = new Request("https://{prop}.com/api/lead-capture", {{
   method: "POST",
   headers: {{ "Content-Type": "application/json" }},
@@ -166,7 +166,10 @@ const postReq = new Request("https://{prop}.com/api/lead-capture", {{
 const postRes = await onRequestPost({{ request: postReq, env }});
 const postJson = await postRes.json();
 
-const getReq = new Request("https://{prop}.com/api/lead-capture", {{ method: "GET" }});
+const getReq = new Request("https://{prop}.com/api/lead-capture", {{
+  method: "GET",
+  headers: {{ "x-telemetry-secret": "slot_sec_123" }}
+}});
 const getRes = await onRequestGet({{ request: getReq, env }});
 const getJson = await getRes.json();
 
@@ -379,7 +382,15 @@ def test_partner_slot_299_checkout_and_ux_navigation_retrofits(tmp_path: Path) -
     from pseofactory.visual_primitives import normalize_html_visual_primitives
 
     ph_redirect_js = generate_edge_redirect_function("profithelm")
-    assert 'simply_business: {\n    defaultUrl: "https://www.simplybusiness.com/",\n    directContractUrl: "https://www.jdoqocy.com/click-101906407-16985242",' in ph_redirect_js
+    assert 'lawdepot: {\n    defaultUrl: "https://www.jdoqocy.com/click-101906407-16985242",\n    directContractUrl: "https://www.jdoqocy.com/click-101906407-16985242",' in ph_redirect_js
+    assert (
+        'simply_business: {\n'
+        '    defaultUrl: "https://www.simplybusiness.com/",\n'
+        '    envVar: "AFFILIATE_SIMPLY_BUSINESS_URL",\n'
+        '    statusEnvVar: "AFFILIATE_SIMPLY_BUSINESS_STATUS",\n'
+        '    status: "pending",\n'
+        '    isDirect: false,'
+    ) in ph_redirect_js
 
     for idx, (prop, slug, expected_sku) in enumerate(
         (

@@ -1892,26 +1892,30 @@ class UnifiedBrowserAuditor:
     })()"""
 
     JS_CHECK_RESIZE_AND_INTERACTION_CLS = """new Promise(resolve => {
-        let cls = 0.0;
-        const observer = new PerformanceObserver(list => {
-            for (const entry of list.getEntries()) {
-                if (!entry.hadRecentInput) cls += entry.value;
-            }
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                let cls = 0.0;
+                const observer = new PerformanceObserver(list => {
+                    for (const entry of list.getEntries()) {
+                        if (!entry.hadRecentInput) cls += entry.value;
+                    }
+                });
+                try {
+                    observer.observe({ type: 'layout-shift', buffered: false });
+                } catch(e) {}
+                const inputs = Array.from(document.querySelectorAll('[data-calc-input], input:not([type=hidden]), select'));
+                inputs.slice(0, 3).forEach(el => {
+                    try {
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    } catch(e) {}
+                });
+                setTimeout(() => {
+                    try { observer.disconnect(); } catch(e) {}
+                    resolve(Math.round(cls * 1000) / 1000);
+                }, 120);
+            });
         });
-        try {
-            observer.observe({ type: 'layout-shift', buffered: false });
-        } catch(e) {}
-        const inputs = Array.from(document.querySelectorAll('[data-calc-input], input:not([type=hidden]), select'));
-        inputs.slice(0, 3).forEach(el => {
-            try {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch(e) {}
-        });
-        setTimeout(() => {
-            try { observer.disconnect(); } catch(e) {}
-            resolve(Math.round(cls * 1000) / 1000);
-        }, 120);
     })"""
 
     def __init__(
@@ -2266,6 +2270,8 @@ class UnifiedBrowserAuditor:
             {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
             msg_id=msg_counter[0],
         )
+        msg_counter[0] += 1
+        await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
         for _ in range(25):

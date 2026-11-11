@@ -45,10 +45,10 @@ from pseofactory.tenant_facts import TenantFactStore
 def test_multi_engine_benchmarks_cover_profithelm_and_prexvo():
     """Verifies search positions and higher-ranked competitors across Google, Bing, and DuckDuckGo."""
     all_reports = benchmark_all_properties()
-    assert set(all_reports.keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert set(all_reports.keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
     store = TenantFactStore.get_instance()
-    for prop in ("profithelm", "prexvo", "gainhelm"):
+    for prop in ("profithelm", "prexvo", "gainhelm", "lienbond"):
         report = all_reports[prop]
         assert report["property_id"] == prop
         assert tuple(report["supported_engines"]) == SUPPORTED_SEARCH_ENGINES
@@ -168,7 +168,7 @@ def test_upgraded_compiler_profithelm_b2b_and_tax_pages():
             "published_output": 400000.0,
             "sample_calculation": "Cost 400,000 under cap 1,220,000 gives 400,000 deduction",
             "canonical_base": "https://profithelm.com",
-            "expected_partner": "crest_capital",
+            "expected_partner": "xendoo",
         },
         {
             "query": "1031 exchange boot calculation model",
@@ -182,7 +182,7 @@ def test_upgraded_compiler_profithelm_b2b_and_tax_pages():
             "published_output": 475000.0,
             "sample_calculation": "Relinquished basis 450,000 plus recognized gain 25,000 yields 475,000",
             "canonical_base": "https://profithelm.com",
-            "expected_partner": "ipx1031",
+            "expected_partner": "lawdepot",
         },
         {
             "query": "crypto staking tax form 8949 calculator",

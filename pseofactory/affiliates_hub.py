@@ -97,6 +97,24 @@ DEFAULT_PARTNERSTACK_API_KEY = os.environ.get("PARTNERSTACK_API_KEY", "5ZyfW4zFo
 DEFAULT_STRIPE_ACCOUNT_ID = os.environ.get("STRIPE_ACCOUNT_ID", "acct_1T6fSTIq0ckFsf5j")
 SOVRN_REDIRECT_BASE = "https://redirect.viglink.com"
 
+# Authoritative verified tracking URLs for ProfitHelm's 13 live approved partner contracts.
+# Uses live ProfitHelm LLC CJ Property ID 101906407.
+AUTHORITATIVE_EDGE_REDIRECT_URLS: Dict[str, str] = {
+    "coinledger": "https://coinledger.io/?fpr=arif-554004",
+    "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+    "mercury": "https://mercury.com/r/profithelm-llc",
+    "rippling": "https://try.rippling.com/mcfo1m09qiwt",
+    "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
+    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
+    "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+    "kalshi": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+    "efile_com": "https://www.jdoqocy.com/click-101906407-11917161",
+    "eztaxreturn_com": "https://www.dpbolvw.net/click-101906407-15704796",
+    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
+    "lawdepot": "https://www.jdoqocy.com/click-101906407-16985242",
+}
+
 # Slugs and patterns recognized as direct high-bounty partner tools for ProfitHelm
 PROFITHELM_DIRECT_SLUGS: Set[str] = {
     "crypto-tax-calculator",
@@ -158,30 +176,83 @@ class MonetizationHub:
         self._rebuild_partner_vault_index()
 
     def _rebuild_partner_vault_index(self) -> None:
-        """Populates self._vault[property_id][partner_key] from self.vault_data."""
+        """
+        Populates self._vault[property_id][partner_key] from self.vault_data without
+        overwriting newer category updates with stale partners entries.
+        """
         props = self.vault_data.get("properties", {}) if isinstance(self.vault_data, dict) else {}
         for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             prop_map = self._vault.setdefault(prop_id, {})
+            prop_map.clear()
             prop_data = props.get(prop_id, {})
             if not isinstance(prop_data, dict):
                 continue
-            categories = prop_data.get("categories", {})
-            if isinstance(categories, dict):
-                for cat_k, cat_v in categories.items():
-                    if isinstance(cat_v, dict):
-                        pk = cat_v.get("primary_partner")
-                        if pk:
-                            prop_map[pk] = {
-                                "status": cat_v.get("status", ""),
-                                "url": cat_v.get("direct_url", ""),
-                                "direct_url": cat_v.get("direct_url", ""),
-                                "category": cat_k,
-                            }
             partners = prop_data.get("partners", {})
             if isinstance(partners, dict):
                 for pk, pv in partners.items():
                     if isinstance(pv, dict):
-                        prop_map[pk] = dict(pv)
+                        entry = dict(pv)
+                        resolved_url = str(entry.get("url") or entry.get("direct_url") or "").strip()
+                        if resolved_url:
+                            entry.setdefault("url", resolved_url)
+                            entry.setdefault("direct_url", resolved_url)
+                        prop_map[pk] = entry
+            categories = prop_data.get("categories", {})
+            if isinstance(categories, dict):
+                for cat_k, cat_v in categories.items():
+                    if not isinstance(cat_v, dict):
+                        continue
+                    pk = cat_v.get("primary_partner")
+                    if not pk:
+                        continue
+                    cat_updated = str(cat_v.get("updated_at") or cat_v.get("last_synced_at") or "").strip()
+                    cat_status = str(cat_v.get("status") or "").strip()
+                    cat_url = str(cat_v.get("direct_url") or cat_v.get("url") or "").strip()
+                    existing = prop_map.get(pk)
+                    if existing is None:
+                        prop_map[pk] = {
+                            "status": cat_status,
+                            "url": cat_url,
+                            "direct_url": cat_url,
+                            "category": cat_k,
+                            **({"updated_at": cat_updated} if cat_updated else {}),
+                        }
+                    else:
+                        part_updated = str(existing.get("updated_at") or existing.get("last_synced_at") or "").strip()
+                        existing.setdefault("category", cat_k)
+                        if cat_updated and (not part_updated or cat_updated >= part_updated):
+                            if cat_status:
+                                existing["status"] = cat_status
+                            if cat_url:
+                                existing["url"] = cat_url
+                                existing["direct_url"] = cat_url
+                            existing["category"] = cat_k
+                            existing["updated_at"] = cat_updated
+                            if isinstance(partners, dict) and isinstance(partners.get(pk), dict):
+                                if cat_status:
+                                    partners[pk]["status"] = cat_status
+                                if cat_url:
+                                    partners[pk]["url"] = cat_url
+                                    partners[pk]["direct_url"] = cat_url
+                                partners[pk]["updated_at"] = cat_updated
+                            roster_tiers = prop_data.get("roster_tiers")
+                            if isinstance(roster_tiers, dict) and cat_status:
+                                t_tier = (
+                                    "live_revenue_ready"
+                                    if cat_status in ("live", "active_direct")
+                                    else ("declined" if cat_status == "declined" else "awaiting_vendor_response")
+                                )
+                                for t_k, t_list in list(roster_tiers.items()):
+                                    if isinstance(t_list, list):
+                                        roster_tiers[t_k] = [m for m in t_list if m != pk]
+                                roster_tiers.setdefault(t_tier, [])
+                                if pk not in roster_tiers[t_tier]:
+                                    roster_tiers[t_tier].append(pk)
+                        elif not existing.get("status") and cat_status:
+                            existing["status"] = cat_status
+                            if cat_url and not existing.get("url"):
+                                existing["url"] = cat_url
+                                existing["direct_url"] = cat_url
 
     def _load_vault(self) -> Dict[str, Any]:
         """Loads vault JSON or provides fallback defaults."""
@@ -350,12 +421,17 @@ class MonetizationHub:
         """
         Returns counts of active direct partners, pending partners, and master key availability.
         """
-        active_count = sum(1 for p in AFFILIATE_REGISTRY.values() if p.status == "live")
+        seen_partner_objs: Dict[int, AffiliatePartner] = {}
+        for reg_map in (PROFITHELM_AFFILIATES, PREXVO_AFFILIATES, GAINHELM_AFFILIATES, LIENBOND_AFFILIATES):
+            for p_obj in reg_map.values():
+                seen_partner_objs[id(p_obj)] = p_obj
+        unique_partners = list(seen_partner_objs.values())
+        active_count = sum(1 for p in unique_partners if p.status == "live")
         pending_count = sum(
-            1 for p in AFFILIATE_REGISTRY.values()
+            1 for p in unique_partners
             if p.status in ("pending", "pending_expansion", "pending_p2")
         )
-        total_count = len(AFFILIATE_REGISTRY)
+        total_count = len(unique_partners)
 
         sovrn_key = self.sovrn_domain_key
         sovrn_api = self.sovrn_api_key
@@ -464,7 +540,8 @@ class MonetizationHub:
 
         if program_data is None and partner_key is not None:
             pk_clean = partner_key.strip().lower()
-            p_obj = AFFILIATE_REGISTRY.get(pk_clean)
+            prop_affiliates = get_affiliates_for_property(prop_clean)
+            p_obj = prop_affiliates.get(pk_clean) or AFFILIATE_REGISTRY.get(pk_clean)
             if not category:
                 if prop_clean == "prexvo":
                     category = "STUDENT_LOAN_REFINANCE"
@@ -490,6 +567,7 @@ class MonetizationHub:
         # Extract fields with aliases
         program_key = (
             program_data.get("program_key")
+            or program_data.get("partner_key")
             or program_data.get("key")
             or program_data.get("partner")
             or ""
@@ -500,7 +578,8 @@ class MonetizationHub:
             or ""
         ).strip()
         direct_url = (
-            program_data.get("direct_url")
+            program_data.get("tracking_url")
+            or program_data.get("direct_url")
             or program_data.get("url")
             or program_data.get("link")
             or program_data.get("target_url")
@@ -514,12 +593,52 @@ class MonetizationHub:
 
         if not program_key:
             raise ValueError("Missing required program key in program_data.")
+        if not raw_status:
+            raise ValueError("Missing required status in program_data.")
+
+        _non_live_termination_statuses = ("declined", "rejected", "terminated", "revoked", "expired", "suspended")
+        if raw_status in _non_live_termination_statuses and (not category or not direct_url):
+            target_lookup_prop = "profithelm" if prop_clean == "exchange1031" else prop_clean
+            existing_prop_sec = self.vault_data.get("properties", {}).get(target_lookup_prop, {})
+            existing_p = (existing_prop_sec.get("partners") or {}).get(program_key) if isinstance(existing_prop_sec, dict) else None
+            if isinstance(existing_p, dict):
+                if not category:
+                    category = str(existing_p.get("category") or "").strip()
+                if not direct_url:
+                    direct_url = str(existing_p.get("direct_url") or existing_p.get("url") or "").strip()
+            if (not category or not direct_url) and isinstance(existing_prop_sec, dict):
+                for c_k, c_v in (existing_prop_sec.get("categories") or {}).items():
+                    if isinstance(c_v, dict) and c_v.get("primary_partner") == program_key:
+                        if not category:
+                            category = str(c_k).strip()
+                        if not direct_url:
+                            direct_url = str(c_v.get("direct_url") or "").strip()
+                        break
+            if not category or not direct_url:
+                reg_lookup = (
+                    PREXVO_AFFILIATES
+                    if target_lookup_prop == "prexvo"
+                    else (
+                        GAINHELM_AFFILIATES
+                        if target_lookup_prop == "gainhelm"
+                        else (LIENBOND_AFFILIATES if target_lookup_prop == "lienbond" else PROFITHELM_AFFILIATES)
+                    )
+                )
+                reg_obj = reg_lookup.get(program_key)
+                if reg_obj is not None:
+                    if not category:
+                        category = (
+                            "STUDENT_LOAN_REFINANCE"
+                            if target_lookup_prop == "prexvo"
+                            else str(reg_obj.category or "GENERAL").upper().replace(" ", "_").replace("&", "AND")
+                        )
+                    if not direct_url:
+                        direct_url = str(reg_obj.default_url or "").strip()
+
         if not category:
             raise ValueError("Missing required category in program_data.")
         if not direct_url:
             raise ValueError("Missing required direct_url in program_data.")
-        if not raw_status:
-            raise ValueError("Missing required status in program_data.")
 
         # Typography assertions on network and all string fields in program_data
         assert_no_forbidden_dashes(network, context="network identifier")
@@ -591,51 +710,149 @@ class MonetizationHub:
                     f"Strict isolation violation: Non-cyber partner '{program_key}' is prohibited on GainHelm."
                 )
 
-        # Direct 1031 exchange preservation gate
+        # LienBond contractor surety & lien isolation gate
+        if prop_clean == "lienbond":
+            if (
+                program_key in STUDENT_LOAN_PARTNER_KEYS
+                or program_key in PREXVO_AFFILIATES
+                or program_key in GAINHELM_AFFILIATES
+                or (program_key in PROFITHELM_AFFILIATES and program_key not in LIENBOND_AFFILIATES)
+            ):
+                raise ValueError(
+                    f"Strict isolation violation: Foreign tenant partner '{program_key}' is prohibited on LienBond."
+                )
+
+        # Direct 1031 exchange preservation gate (never wrap with Sovrn Viglink)
         if category == "SECTION_1031_EXCHANGE" or program_key == "ipx1031":
             if "redirect.viglink.com" in direct_url.lower() or "sovrn" in direct_url.lower():
                 raise ValueError("1031 exchange direct link must not be wrapped with Sovrn Viglink redirect.")
-            normalized_status = "active_direct"
-        else:
-            if raw_status in ("approved", "active", "active_direct", "live"):
-                normalized_status = "live" if raw_status == "live" else "active_direct"
-            elif raw_status in ("pending", "in_review", "pending_p2"):
-                normalized_status = raw_status if raw_status == "pending_p2" else "pending"
-            else:
-                normalized_status = raw_status
 
-        # Ledger update
-        prop_section = self.vault_data.setdefault("properties", {}).setdefault(prop_clean, {})
+        if raw_status in ("approved", "active", "active_direct", "live"):
+            if category == "SECTION_1031_EXCHANGE" or program_key == "ipx1031":
+                normalized_status = "live" if raw_status == "live" else "active_direct"
+            else:
+                normalized_status = "live" if raw_status == "live" else "active_direct"
+        elif raw_status in ("pending", "in_review", "pending_p2", "awaiting_response"):
+            normalized_status = "pending_p2" if raw_status == "pending_p2" else "pending"
+        elif raw_status in ("declined", "rejected", "terminated", "revoked", "expired", "suspended"):
+            normalized_status = "declined"
+        else:
+            normalized_status = raw_status
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        target_vault_prop = "profithelm" if prop_clean == "exchange1031" else prop_clean
+
+        # Atomic ledger update across categories, partners, and roster_tiers (idempotent on unchanged fields)
+        prop_section = self.vault_data.setdefault("properties", {}).setdefault(target_vault_prop, {})
         categories_dict = prop_section.setdefault("categories", {})
         cat_entry = categories_dict.setdefault(category, {})
+
+        bounty = program_data.get("bounty")
+        fallback_partner = program_data.get("fallback_partner")
+        cta_text = program_data.get("cta_text")
+        name = program_data.get("name")
+        badge = program_data.get("badge")
+
+        cat_changed = (
+            cat_entry.get("primary_partner") != program_key
+            or cat_entry.get("direct_url") != direct_url
+            or cat_entry.get("status") != normalized_status
+            or (bool(bounty) and cat_entry.get("bounty") != bounty)
+            or (bool(fallback_partner) and cat_entry.get("fallback_partner") != fallback_partner)
+            or (bool(cta_text) and cat_entry.get("cta_text") != cta_text)
+            or (bool(name) and cat_entry.get("name") != name)
+            or (bool(badge) and cat_entry.get("badge") != badge)
+            or "updated_at" not in cat_entry
+        )
 
         cat_entry["primary_partner"] = program_key
         cat_entry["direct_url"] = direct_url
         cat_entry["status"] = normalized_status
+        if cat_changed:
+            cat_entry["updated_at"] = now_iso
 
-        bounty = program_data.get("bounty")
         if bounty:
             cat_entry["bounty"] = bounty
-        fallback_partner = program_data.get("fallback_partner")
         if fallback_partner:
             cat_entry["fallback_partner"] = fallback_partner
-        cta_text = program_data.get("cta_text")
         if cta_text:
             cat_entry["cta_text"] = cta_text
-        name = program_data.get("name")
         if name:
             cat_entry["name"] = name
-        badge = program_data.get("badge")
         if badge:
             cat_entry["badge"] = badge
 
-        target_vault_prop = "profithelm" if prop_clean == "exchange1031" else prop_clean
-        self._vault.setdefault(target_vault_prop, {})[program_key] = {
-            "status": normalized_status,
-            "url": direct_url,
-            "direct_url": direct_url,
-            "category": category,
-        }
+        for other_cat_key, other_cat_entry in categories_dict.items():
+            if (
+                other_cat_key != category
+                and isinstance(other_cat_entry, dict)
+                and other_cat_entry.get("primary_partner") == program_key
+            ):
+                other_changed = (
+                    other_cat_entry.get("direct_url") != direct_url
+                    or other_cat_entry.get("status") != normalized_status
+                    or "updated_at" not in other_cat_entry
+                )
+                other_cat_entry["direct_url"] = direct_url
+                other_cat_entry["status"] = normalized_status
+                if other_changed:
+                    other_cat_entry["updated_at"] = now_iso
+
+        if normalized_status in ("live", "active_direct"):
+            target_tier = "live_revenue_ready"
+        elif normalized_status == "declined":
+            target_tier = "declined"
+        else:
+            target_tier = "awaiting_vendor_response"
+
+        partners_dict = prop_section.setdefault("partners", {})
+        partner_entry = partners_dict.setdefault(program_key, {})
+        if not isinstance(partner_entry, dict):
+            partner_entry = {}
+            partners_dict[program_key] = partner_entry
+        partner_changed = (
+            partner_entry.get("status") != normalized_status
+            or partner_entry.get("url") != direct_url
+            or partner_entry.get("direct_url") != direct_url
+            or partner_entry.get("category") != category
+            or partner_entry.get("network") != network
+            or partner_entry.get("pipeline_tier") != target_tier
+            or (bool(bounty) and partner_entry.get("commission") != bounty)
+            or (bool(name) and partner_entry.get("name") != name)
+            or "updated_at" not in partner_entry
+        )
+        partner_entry["status"] = normalized_status
+        partner_entry["url"] = direct_url
+        partner_entry["direct_url"] = direct_url
+        partner_entry["category"] = category
+        partner_entry["network"] = network
+        partner_entry["pipeline_tier"] = target_tier
+        if partner_changed:
+            partner_entry["updated_at"] = now_iso
+        if bounty:
+            partner_entry["commission"] = bounty
+        if name:
+            partner_entry["name"] = name
+
+        roster_tiers = prop_section.setdefault("roster_tiers", {})
+        if not isinstance(roster_tiers, dict):
+            roster_tiers = {}
+            prop_section["roster_tiers"] = roster_tiers
+        for required_tier in ("live_revenue_ready", "awaiting_vendor_response", "declined"):
+            if not isinstance(roster_tiers.get(required_tier), list):
+                roster_tiers[required_tier] = []
+        for tier_name, tier_members in list(roster_tiers.items()):
+            if isinstance(tier_members, list):
+                roster_tiers[tier_name] = [m for m in tier_members if m != program_key]
+        if program_key not in roster_tiers[target_tier]:
+            roster_tiers[target_tier].append(program_key)
+
+        if prop_clean == "exchange1031":
+            exch_section = self.vault_data.setdefault("properties", {}).setdefault("exchange1031", {})
+            exch_cats = exch_section.setdefault("categories", {})
+            exch_cats[category] = dict(cat_entry)
+
+        self._vault.setdefault(target_vault_prop, {})[program_key] = dict(partner_entry)
 
         if save:
             self.save_vault()
@@ -670,6 +887,7 @@ class MonetizationHub:
                 # Check if payload itself is a single program item
                 if (
                     "program_key" in payload
+                    or "partner_key" in payload
                     or "key" in payload
                     or "partner" in payload
                 ) and (
@@ -705,7 +923,18 @@ class MonetizationHub:
                 or ""
             ).strip().lower()
 
-            if item_status in ("approved", "active", "active_direct", "live"):
+            if item_status in (
+                "approved",
+                "active",
+                "active_direct",
+                "live",
+                "declined",
+                "rejected",
+                "terminated",
+                "revoked",
+                "expired",
+                "suspended",
+            ):
                 try:
                     self.sync_partner_program(
                         network=target_network,
@@ -740,59 +969,144 @@ class MonetizationHub:
     def get_direct_contract_upgrades(self, property_id: str = "profithelm") -> Dict[str, str]:
         """
         Extracts verified network-tracked direct contract URLs from the monetization vault
-        (such as impact_tracking_url, cj_approved_tracking_url, cj_approved_lawdepot_tracking_url,
-        and approved_tracking_url) so the edge redirect function automatically promotes newly
-        approved contracts without manual hardcoding.
+        for approved live partners only. Enforces strict brand-to-link intent matching so
+        competitor or cross-vertical bait-and-switches are never injected, and prunes any
+        partner whose vault status is non-live (declined, pending, terminated, revoked, expired, suspended).
         """
+        from urllib.parse import urlsplit
+
         prop_clean = (property_id or "profithelm").strip().lower()
         target_prop = "profithelm" if prop_clean == "exchange1031" else prop_clean
         upgrades: Dict[str, str] = {}
         if target_prop == "profithelm":
-            upgrades.update(
-                {
-                    "koinly": "https://koinly.io/?fpr=arif-4c0b88",
-                    "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-                    "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
-                    "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
-                    "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-                    "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
-                    "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
-                    "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
-                    "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
-                }
-            )
-        # GainHelm: no GRC partner (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt) has an
-        # approved affiliate contract. Unrelated approved B2B links (Ramp, LawDepot, Xendoo) must
-        # never be attached to GRC keys, so only vault-approved GRC tracking URLs flow through.
+            upgrades.update(AUTHORITATIVE_EDGE_REDIRECT_URLS)
+
         prop_section = self.vault_data.get("properties", {}).get(target_prop, {})
         partners_dict = prop_section.get("partners", {}) if isinstance(prop_section, dict) else {}
-        for p_key, p_meta in partners_dict.items():
-            if not isinstance(p_meta, dict):
+        vault_prop_map = self._vault.get(target_prop, {}) if isinstance(self._vault, dict) else {}
+
+        alias_to_canonical = {
+            "efile": "efile_com",
+            "eztaxreturn": "eztaxreturn_com",
+            "ramp_impact": "ramp",
+            "xendoo_impact": "xendoo",
+            "surety_bonds": "suretybonds_direct",
+            "next_insurance": "next_insurance_b2b",
+            "thimble": "thimble_contractor",
+            "jobber": "jobber_field_service",
+            "levelset": "levelset_lien_filing",
+            "vanta": "vanta_security",
+            "vanta_compliance": "vanta_security",
+            "drata": "drata_compliance",
+            "sprinto": "sprinto_compliance",
+            "sprinto_grc": "sprinto_compliance",
+            "thoropass": "thoropass_audit",
+            "coalition": "coalition_cyber_insurance",
+            "cobalt": "cobalt_pentest",
+            "sofi_refi": "sofi",
+            "sofi_student_refi": "sofi",
+            "earnest_refi": "earnest",
+            "earnest_student_refi": "earnest",
+            "lendkey_refi": "lendkey",
+            "credible_refi": "credible",
+            "credible_student_loans": "credible",
+        }
+        non_live_statuses = {
+            "declined",
+            "rejected",
+            "pending",
+            "pending_p2",
+            "in_review",
+            "awaiting_response",
+            "terminated",
+            "revoked",
+            "expired",
+            "suspended",
+            "inactive",
+        }
+        live_statuses = {"live", "active_direct", "approved", "active"}
+
+        url_fields = (
+            "approved_tracking_url",
+            "impact_tracking_url",
+            "impact_verified_tracking_url",
+            "cj_approved_tracking_url",
+            "cj_approved_lawdepot_tracking_url",
+            "direct_url",
+            "url",
+        )
+
+        # Merge live tracking URLs from both partners_dict and in-memory self._vault[target_prop]
+        for source_map in (partners_dict, vault_prop_map):
+            if not isinstance(source_map, dict):
                 continue
-            for url_field in (
-                "approved_tracking_url",
-                "impact_tracking_url",
-                "impact_verified_tracking_url",
-                "cj_approved_tracking_url",
-                "cj_approved_lawdepot_tracking_url",
-            ):
-                cand = str(p_meta.get(url_field) or "").strip()
-                if cand and validate_affiliate_url(cand):
-                    upgrades[p_key] = cand
-                    break
-            ft_cand = str(p_meta.get("cj_approved_freetaxusa_tracking_url") or "").strip()
-            if ft_cand and validate_affiliate_url(ft_cand):
-                upgrades["freetaxusa"] = ft_cand
-            wh_cand = str(p_meta.get("cj_approved_wallethub_tracking_url") or "").strip()
-            if wh_cand and validate_affiliate_url(wh_cand):
-                upgrades["wallethub"] = wh_cand
-        # Intent gate: a partner key may only resolve to its own approved tracking link.
-        return filter_intent_matched_contracts(upgrades)
+            for p_key, p_meta in source_map.items():
+                if not isinstance(p_meta, dict):
+                    continue
+                p_status = str(p_meta.get("status") or "").strip().lower()
+                if p_status not in live_statuses:
+                    continue
+                for url_field in url_fields:
+                    cand = str(p_meta.get(url_field) or "").strip()
+                    if cand and validate_affiliate_url(cand):
+                        upgrades[p_key] = cand
+                        break
+
+        # Prune any seeded or merged partner key whose authoritative vault entry is non-live
+        for pk in list(upgrades.keys()):
+            canon_pk = alias_to_canonical.get(pk, pk)
+            v_entry = (
+                vault_prop_map.get(pk)
+                if isinstance(vault_prop_map, dict) and isinstance(vault_prop_map.get(pk), dict)
+                else (
+                    vault_prop_map.get(canon_pk)
+                    if isinstance(vault_prop_map, dict) and isinstance(vault_prop_map.get(canon_pk), dict)
+                    else (
+                        partners_dict.get(pk)
+                        if isinstance(partners_dict, dict) and isinstance(partners_dict.get(pk), dict)
+                        else (partners_dict.get(canon_pk) if isinstance(partners_dict, dict) else None)
+                    )
+                )
+            )
+            if isinstance(v_entry, dict):
+                v_st = str(v_entry.get("status") or "").strip().lower()
+                if v_st in non_live_statuses or (v_st and v_st not in live_statuses):
+                    upgrades.pop(pk, None)
+
+        filtered = filter_intent_matched_contracts(upgrades)
+        if target_prop == "gainhelm":
+            gh_brand_tokens = {
+                "vanta_security": "vanta",
+                "vanta": "vanta",
+                "vanta_compliance": "vanta",
+                "drata_compliance": "drata",
+                "drata": "drata",
+                "sprinto_compliance": "sprinto",
+                "sprinto": "sprinto",
+                "sprinto_grc": "sprinto",
+                "thoropass_audit": "thoropass",
+                "thoropass": "thoropass",
+                "coalition_cyber_insurance": "coalition",
+                "coalition": "coalition",
+                "cobalt_pentest": "cobalt",
+                "cobalt": "cobalt",
+            }
+            for pk, cand_url in upgrades.items():
+                if pk in filtered:
+                    continue
+                b_tok = gh_brand_tokens.get(pk, "")
+                host_low = (urlsplit(cand_url).hostname or "").lower()
+                cand_low = cand_url.lower()
+                if (
+                    b_tok
+                    and b_tok in host_low
+                    and not any(
+                        foreign_tok in cand_low
+                        for foreign_tok in ("/7932737/", "101906407", "101725461", "arif-", "profithelm-llc", "mcfo1m09qiwt")
+                    )
+                ):
+                    filtered[pk] = cand_url
+        return filtered
 
     def _is_direct_profithelm_tool(self, tool_slug: str) -> bool:
         """Determines if a tool slug is explicitly mapped to a direct ProfitHelm partner."""
@@ -880,7 +1194,100 @@ class MonetizationHub:
         key_clean = (partner_key or "").strip().lower()
         slug_clean = (calculator_slug or tool_slug or "").strip().lower()
         vault_prop_key = "profithelm" if prop_clean == "exchange1031" else prop_clean
-        prop_vault_overrides = dict(self._vault.get(vault_prop_key, {}))
+        raw_vault_overrides = dict(self._vault.get(vault_prop_key, {}))
+        prop_partners_data = (
+            self.vault_data.get("properties", {}).get(vault_prop_key, {}).get("partners", {})
+            if isinstance(self.vault_data, dict)
+            else {}
+        )
+        prop_vault_overrides: Dict[str, Dict[str, Any]] = {}
+        if isinstance(prop_partners_data, dict):
+            for pk_ov, pv_ov in prop_partners_data.items():
+                if isinstance(pv_ov, dict):
+                    prop_vault_overrides[pk_ov] = dict(pv_ov)
+        for pk_ov, pv_ov in raw_vault_overrides.items():
+            if isinstance(pv_ov, dict):
+                merged_ov = dict(prop_vault_overrides.get(pk_ov, {}))
+                merged_ov.update(pv_ov)
+                prop_vault_overrides[pk_ov] = merged_ov
+
+        declined_like_statuses = {"declined", "rejected", "terminated", "revoked", "expired", "suspended", "inactive"}
+        pending_like_statuses = {"pending", "pending_p2", "in_review", "awaiting_response"}
+        live_like_statuses = {"live", "active_direct", "approved", "active"}
+        for pk_ov, pv_ov in prop_vault_overrides.items():
+            st_ov = str(pv_ov.get("status") or "").strip().lower()
+            if st_ov in declined_like_statuses:
+                pv_ov["status"] = "declined"
+
+        clean_brand_homepages = {
+            "ramp": "https://ramp.com/",
+            "ramp_impact": "https://ramp.com/",
+            "xendoo": "https://www.xendoo.com/",
+            "xendoo_impact": "https://www.xendoo.com/",
+            "gusto": "https://gusto.com/",
+            "rippling": "https://www.rippling.com/",
+            "mercury": "https://mercury.com/",
+            "coinledger": "https://coinledger.io/",
+            "koinly": "https://koinly.io/",
+            "kalshi": "https://kalshi.com/",
+            "efile": "https://www.efile.com/",
+            "efile_com": "https://www.efile.com/",
+            "eztaxreturn": "https://www.eztaxreturn.com/",
+            "eztaxreturn_com": "https://www.eztaxreturn.com/",
+            "freetaxusa": "https://www.freetaxusa.com/",
+            "wallethub": "https://wallethub.com/",
+            "lawdepot": "https://www.lawdepot.com/",
+        }
+
+        def _apply_vault_partner_truth(
+            route_dict: Dict[str, Any],
+            p_obj_ref: Optional[Any],
+            categories_map: Dict[str, Any],
+            allow_cat_meta: bool = False,
+        ) -> None:
+            r_pk = str(route_dict.get("partner") or "").strip().lower()
+            ov_meta = prop_vault_overrides.get(r_pk)
+            ov_st = str(ov_meta.get("status") or "").strip().lower() if isinstance(ov_meta, dict) else ""
+            matched_cat = None
+            if isinstance(categories_map, dict):
+                for _ck, cv in categories_map.items():
+                    if isinstance(cv, dict) and cv.get("primary_partner") == r_pk:
+                        matched_cat = cv
+                        break
+            cat_st = str(matched_cat.get("status") or "").strip().lower() if isinstance(matched_cat, dict) else ""
+            effective_st = ov_st or cat_st
+            if effective_st in declined_like_statuses:
+                route_dict["status"] = "declined"
+                route_dict["url"] = clean_brand_homepages.get(
+                    r_pk, str(getattr(p_obj_ref, "default_url", "") or route_dict.get("url") or "")
+                )
+            elif effective_st in pending_like_statuses:
+                route_dict["status"] = "pending_p2" if effective_st == "pending_p2" else "pending"
+                route_dict["url"] = clean_brand_homepages.get(
+                    r_pk, str(getattr(p_obj_ref, "default_url", "") or route_dict.get("url") or "")
+                )
+            elif effective_st in live_like_statuses:
+                live_u = ""
+                if isinstance(ov_meta, dict):
+                    live_u = str(
+                        ov_meta.get("approved_tracking_url")
+                        or ov_meta.get("url")
+                        or ov_meta.get("direct_url")
+                        or ""
+                    ).strip()
+                if not live_u and isinstance(matched_cat, dict):
+                    live_u = str(matched_cat.get("direct_url") or "").strip()
+                if live_u:
+                    route_dict["url"] = live_u
+                route_dict["status"] = "live" if effective_st == "live" else "active_direct"
+                if allow_cat_meta and isinstance(matched_cat, dict):
+                    if matched_cat.get("cta_text"):
+                        route_dict["cta_text"] = matched_cat["cta_text"]
+                    if matched_cat.get("name"):
+                        route_dict["name"] = matched_cat["name"]
+                        route_dict["partner_name"] = matched_cat["name"]
+                    if matched_cat.get("badge"):
+                        route_dict["badge"] = matched_cat["badge"]
 
         # Strict isolation check for Prexvo
         if prop_clean == "prexvo":
@@ -940,20 +1347,8 @@ class MonetizationHub:
                     value_tier=value_tier,
                 )
 
-            # Check if vault has active update for Prexvo partner
-            px_override = prop_vault_overrides.get(route["partner"])
-            if isinstance(px_override, dict) and px_override.get("status") in ("active_direct", "live"):
-                ov_url = px_override.get("url") or px_override.get("direct_url")
-                if ov_url:
-                    route["url"] = ov_url
-                    route["status"] = px_override["status"]
             px_categories = self.vault_data.get("properties", {}).get("prexvo", {}).get("categories", {})
-            for cat_k, cat_v in px_categories.items():
-                if cat_v.get("primary_partner") == route["partner"]:
-                    if cat_v.get("status") in ("active_direct", "live") and cat_v.get("direct_url"):
-                        route["url"] = cat_v["direct_url"]
-                        route["status"] = cat_v["status"]
-                    break
+            _apply_vault_partner_truth(route, partner_obj, px_categories)
 
             if partner_obj:
                 route["bounty_est"] = partner_obj.bounty_est
@@ -1001,19 +1396,8 @@ class MonetizationHub:
             )
             partner_obj = GAINHELM_AFFILIATES.get(route["partner"])
 
-            gh_override = prop_vault_overrides.get(route["partner"])
-            if isinstance(gh_override, dict) and gh_override.get("status") in ("active_direct", "live"):
-                ov_url = gh_override.get("url") or gh_override.get("direct_url")
-                if ov_url:
-                    route["url"] = ov_url
-                    route["status"] = gh_override["status"]
             gh_categories = self.vault_data.get("properties", {}).get("gainhelm", {}).get("categories", {})
-            for cat_k, cat_v in gh_categories.items():
-                if cat_v.get("primary_partner") == route["partner"]:
-                    if cat_v.get("status") in ("active_direct", "live") and cat_v.get("direct_url"):
-                        route["url"] = cat_v["direct_url"]
-                        route["status"] = cat_v["status"]
-                    break
+            _apply_vault_partner_truth(route, partner_obj, gh_categories)
 
             if partner_obj:
                 route["bounty_est"] = partner_obj.bounty_est
@@ -1036,6 +1420,7 @@ class MonetizationHub:
                 or key_clean in PREXVO_AFFILIATES
                 or key_clean in GAINHELM_PARTNER_KEYS
                 or key_clean in GAINHELM_AFFILIATES
+                or (key_clean and key_clean in PROFITHELM_AFFILIATES and key_clean not in LIENBOND_AFFILIATES)
             ):
                 raise ValueError(
                     f"Strict isolation violation: Foreign tenant partner '{key_clean}' is prohibited on LienBond."
@@ -1061,6 +1446,8 @@ class MonetizationHub:
                 value_tier=value_tier,
             )
             partner_obj = LIENBOND_AFFILIATES.get(route["partner"])
+            lb_categories = self.vault_data.get("properties", {}).get("lienbond", {}).get("categories", {})
+            _apply_vault_partner_truth(route, partner_obj, lb_categories)
             if partner_obj:
                 route["bounty_est"] = partner_obj.bounty_est
                 route["bounty_score"] = score_partner_yield(partner_obj, route["status"])
@@ -1145,10 +1532,15 @@ class MonetizationHub:
                             matched_vault_cat = cat_v
                             break
 
+        matched_cat_pk = str(matched_vault_cat.get("primary_partner") or key_clean or "").strip().lower() if isinstance(matched_vault_cat, dict) else ""
+        matched_cat_ov = prop_vault_overrides.get(matched_cat_pk) if matched_cat_pk else None
+        matched_cat_ov_st = str(matched_cat_ov.get("status") or "").strip().lower() if isinstance(matched_cat_ov, dict) else ""
         vault_is_active = bool(
             matched_vault_cat
             and matched_vault_cat.get("status") in ("active_direct", "live")
             and matched_vault_cat.get("direct_url")
+            and matched_cat_ov_st not in declined_like_statuses
+            and matched_cat_ov_st not in pending_like_statuses
         )
 
         if not is_explicit_fallback:
@@ -1212,27 +1604,8 @@ class MonetizationHub:
                     value_tier=value_tier,
                 )
 
-            # Check direct _vault partner override
-            ov_entry = prop_vault_overrides.get(route["partner"])
-            if isinstance(ov_entry, dict) and ov_entry.get("status") in ("active_direct", "live"):
-                ov_url = ov_entry.get("url") or ov_entry.get("direct_url")
-                if ov_url:
-                    route["url"] = ov_url
-                    route["status"] = ov_entry["status"]
-
-            # If matched_vault_cat is active in vault, override url and status
-            if vault_is_active and matched_vault_cat:
-                route["url"] = matched_vault_cat["direct_url"]
-                route["status"] = matched_vault_cat["status"]
-                if matched_vault_cat.get("cta_text"):
-                    route["cta_text"] = matched_vault_cat["cta_text"]
-                if matched_vault_cat.get("name"):
-                    route["name"] = matched_vault_cat["name"]
-                    route["partner_name"] = matched_vault_cat["name"]
-                if matched_vault_cat.get("badge"):
-                    route["badge"] = matched_vault_cat["badge"]
-
             partner_obj = PROFITHELM_AFFILIATES.get(route["partner"])
+            _apply_vault_partner_truth(route, partner_obj, prop_categories, allow_cat_meta=True)
             if partner_obj:
                 route["bounty_est"] = partner_obj.bounty_est
                 route["bounty_score"] = score_partner_yield(partner_obj, route["status"])
@@ -1554,12 +1927,13 @@ class MonetizationHub:
                     sovrn_summary["configured"] = True
                     sovrn_summary["api_verified"] = True
 
-        from pseofactory.affiliates import GAINHELM_AFFILIATES
+        from pseofactory.affiliates import GAINHELM_AFFILIATES, LIENBOND_AFFILIATES
         live_links_verified: List[Dict[str, Any]] = []
         for prop_id, registry_map in (
             ("profithelm", PROFITHELM_AFFILIATES),
             ("prexvo", PREXVO_AFFILIATES),
             ("gainhelm", GAINHELM_AFFILIATES),
+            ("lienbond", LIENBOND_AFFILIATES),
         ):
             prop_vault = self._vault.get(prop_id, {})
             for p_key, p_obj in registry_map.items():

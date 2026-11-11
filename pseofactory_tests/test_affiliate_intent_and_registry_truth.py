@@ -171,8 +171,12 @@ def test_sync_prexvo_affiliate_status_compat(tmp_path):
         encoding="utf-8",
     )
     assert sync_fn(tmp_path) is True
-    assert 'in ("live", "pending", "declined")' in builder.read_text(encoding="utf-8")
-    assert 'not in ("live", "pending", "declined")' in freshness.read_text(encoding="utf-8")
+    builder_txt = builder.read_text(encoding="utf-8")
+    freshness_txt = freshness.read_text(encoding="utf-8")
+    assert 'in ("live", "pending")' in builder_txt
+    assert 'not in ("live", "pending")' in freshness_txt
+    assert "declined" not in builder_txt
+    assert "declined" not in freshness_txt
 
 
 def test_profithelm_factory_pipeline_test_sync_adds_top_level_pytest_import():

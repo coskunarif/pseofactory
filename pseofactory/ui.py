@@ -86,8 +86,16 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     ph = data.profithelm
     px = data.prexvo
     gh = getattr(data, "gainhelm", None)
+    lb = getattr(data, "lienbond", None)
     actions = data.all_action_items
     emails = data.recent_emails
+
+    prop_display_map = {
+        "profithelm": "ProfitHelm",
+        "prexvo": "Prexvo",
+        "gainhelm": "GainHelm",
+        "lienbond": "LienBond",
+    }
 
     pending_actions = [a for a in actions if a.status == "PENDING_OPERATOR"]
     resolved_actions = [a for a in actions if a.status != "PENDING_OPERATOR"]
@@ -103,7 +111,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     else:
         for idx, it in enumerate(pending_actions, start=1):
             sev_class = f"badge-{it.severity.lower()}"
-            prop_badge = "ProfitHelm" if it.property_id == "profithelm" else ("GainHelm" if it.property_id == "gainhelm" else "Prexvo")
+            prop_badge = prop_display_map.get(it.property_id, it.property_id.capitalize())
             deadline_markup = f'<div class="action-deadline">Deadline: {html.escape(it.deadline)}</div>' if it.deadline else ""
             reqs_markup = "".join(f"<li>{html.escape(r)}</li>" for r in it.missing_requirements)
             rev_impact = float(getattr(it, "estimated_monthly_revenue_impact_usd", 0.0) or 0.0)
@@ -189,10 +197,33 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
                 <td class="col-reqs">{reqs}</td>
             </tr>
             """)
-    gh_readiness_score = gh.monetization_readiness_score if gh is not None else 100.0
-    gh_active_count = gh.active_partners_count if gh is not None else 5
-    gh_total_count = gh.total_registered_partners if gh is not None else 5
+    gh_readiness_score = gh.monetization_readiness_score if gh is not None else 0.0
+    gh_active_count = gh.active_partners_count if gh is not None else 0
+    gh_total_count = gh.total_registered_partners if gh is not None else 0
     gh_awaiting_count = gh.awaiting_response_count if gh is not None else 0
+
+    # Build Partner Rows for LienBond
+    lb_rows = []
+    if lb is not None:
+        for p in lb.partners:
+            status_badge = _render_status_badge(p.operational_status)
+            reqs = "<br>".join(html.escape(r) for r in p.missing_requirements) if p.missing_requirements else "<span class=\"text-muted\">None (Complete)</span>"
+            link_markup = f'<a href="{html.escape(p.destination_url)}" target="_blank" rel="noopener sponsored nofollow" class="partner-link">Open Partner URL</a>' if p.destination_url else '<span class="text-muted">Not Configured</span>'
+            lb_rows.append(f"""
+            <tr>
+                <td class="col-name"><strong>{html.escape(p.name)}</strong></td>
+                <td class="col-cat">{html.escape(p.category)}</td>
+                <td class="col-net">{html.escape(p.network)}</td>
+                <td class="col-bounty">{html.escape(p.bounty_est)}</td>
+                <td class="col-status">{status_badge}</td>
+                <td class="col-link">{link_markup}</td>
+                <td class="col-reqs">{reqs}</td>
+            </tr>
+            """)
+    lb_readiness_score = lb.monetization_readiness_score if lb is not None else 0.0
+    lb_active_count = lb.active_partners_count if lb is not None else 0
+    lb_total_count = lb.total_registered_partners if lb is not None else 0
+    lb_awaiting_count = lb.awaiting_response_count if lb is not None else 0
 
     # Build recent email items
     email_rows = []
@@ -212,7 +243,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
     resolved_rows = []
     for r in resolved_actions:
         res_date = r.resolved_at[:16].replace("T", " ") if r.resolved_at else "Confirmed"
-        prop_label = "ProfitHelm" if r.property_id == "profithelm" else ("GainHelm" if r.property_id == "gainhelm" else "Prexvo")
+        prop_label = prop_display_map.get(r.property_id, r.property_id.capitalize())
         resolved_rows.append(f"""
         <tr>
             <td class="col-date">{html.escape(res_date)}</td>
@@ -593,6 +624,9 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
         .action-card[data-property="gainhelm"] {{
             border-left-color: var(--success);
         }}
+        .action-card[data-property="lienbond"] {{
+            border-left-color: var(--warning);
+        }}
         .action-card-header {{
             display: flex;
             justify-content: space-between;
@@ -842,6 +876,14 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-header">
+                    <span class="kpi-label">LienBond Readiness</span>
+                    <span class="badge badge-property" style="background:var(--warning-subtle);color:var(--warning);border-color:var(--warning-border);">LienBond</span>
+                </div>
+                <div class="kpi-value">{lb_readiness_score}%</div>
+                <div class="kpi-meta">{lb_active_count} Live Active / {lb_total_count} Total Partners</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-header">
                     <span class="kpi-label">Operator Action Items</span>
                     <span class="badge badge-followup">{len(pending_actions)} Pending</span>
                 </div>
@@ -851,10 +893,10 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-label">Awaiting Partner Response</span>
-                    <span class="badge badge-awaiting">{ph.awaiting_response_count + px.awaiting_response_count + gh_awaiting_count} Awaiting</span>
+                    <span class="badge badge-awaiting">{ph.awaiting_response_count + px.awaiting_response_count + gh_awaiting_count + lb_awaiting_count} Awaiting</span>
                 </div>
-                <div class="kpi-value">{ph.awaiting_response_count + px.awaiting_response_count + gh_awaiting_count}</div>
-                <div class="kpi-meta">Applications Submitted (e.g. Gusto on Impact.com)</div>
+                <div class="kpi-value">{ph.awaiting_response_count + px.awaiting_response_count + gh_awaiting_count + lb_awaiting_count}</div>
+                <div class="kpi-meta">Applications Submitted Across All 4 Properties</div>
             </div>
         </div>
 
@@ -870,6 +912,7 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
                     <button class="tab-btn" onclick="filterActions('profithelm', event)">ProfitHelm</button>
                     <button class="tab-btn" onclick="filterActions('prexvo', event)">Prexvo</button>
                     <button class="tab-btn" onclick="filterActions('gainhelm', event)">GainHelm</button>
+                    <button class="tab-btn" onclick="filterActions('lienbond', event)">LienBond</button>
                 </div>
             </div>
             <div class="action-list" id="action-list-container">
@@ -973,14 +1016,46 @@ def render_light_interface(data: FleetMonetizationDashboardData) -> str:
             </div>
         </section>
 
+        <!-- Section 3C: LienBond Monetization Registry -->
+        <section class="section" id="section-lienbond">
+            <div class="section-header">
+                <div class="section-title-group">
+                    <h2>LienBond Partner Matrix & Surety Compliance Readiness</h2>
+                    <p>Commercial contractor surety bonds, statutory mechanics lien notices, NCCI workers compensation EMR, and Davis-Bacon WH-347 partners.</p>
+                </div>
+                <span class="badge badge-property">FTC Disclosure Compliant</span>
+            </div>
+            <div class="standing-card">
+                <strong>Standing Policy:</strong> LienBond is an independent construction surety, workers compensation, and statutory lien compliance publisher. FTC publisher disclosures are strictly required across all monetized calculators. Sub-affiliate aggregator redirects are strictly prohibited.
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="col-name">Partner Name</th>
+                            <th class="col-cat">Category</th>
+                            <th class="col-net">Network</th>
+                            <th class="col-bounty">Bounty / Comm</th>
+                            <th class="col-status">Operational Status</th>
+                            <th class="col-link">Target URL</th>
+                            <th class="col-reqs">Missing Requirements</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {"".join(lb_rows)}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- Section 4: Live Email Correspondence Log -->
         <section class="section">
             <div class="section-header">
                 <div class="section-title-group">
                     <h2>Inbound Correspondence Stream</h2>
-                    <p>Recent inbound correspondence from himalaya CLI (arif.coskun@profithelm.com) and personal inbox.</p>
+                    <p>Recent inbound correspondence from himalaya Zoho CLI (arif.coskun@profithelm.com).</p>
                 </div>
-                <span class="badge badge-subtle">Himalaya IMAP & Personal Cache</span>
+                <span class="badge badge-subtle">Himalaya Zoho IMAP</span>
             </div>
             <div class="table-wrap">
                 <table>

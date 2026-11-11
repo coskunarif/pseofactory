@@ -689,6 +689,16 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
     .table-wrap > table, .calc-matrix-table-wrap > table, .pseo-table-wrap > table {
       min-width: 600px;
     }
+    #stateful-scenario-comparator, .serp-scenario-comparator {
+      contain: style layout;
+    }
+    #stateful-scenario-comparator table, .serp-scenario-comparator-table {
+      table-layout: fixed !important;
+    }
+    #stateful-scenario-comparator td, #stateful-scenario-comparator th,
+    .serp-scenario-comparator-table td, .serp-scenario-comparator-table th {
+      height: 56px;
+    }
     table th, table td,
     .calculation-table th, .calculation-table td,
     .statutory-pitfalls-table th, .statutory-pitfalls-table td,
@@ -5729,7 +5739,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             or (
                 "Splash Financial"
                 if prop_id == "prexvo"
-                else ("Vanta" if prop_id == "gainhelm" else ("SuretyBonds.com" if prop_id == "lienbond" else "Verified Partner"))
+                else ("Vanta" if prop_id == "gainhelm" else ("SuretyBondsDirect.com" if prop_id == "lienbond" else "Verified Partner"))
             )
         ).strip()
         fallback_cta_html = (
@@ -5864,6 +5874,7 @@ def normalize_html_visual_primitives(
             or ".share-pro-container + .inline-lead-box" not in prim_body
             or "#calc-result-quick-unlock-bar ~ .pro-hook-card" not in prim_body
             or "#btn-calc-result-quick-unlock" not in prim_body
+            or ".serp-scenario-comparator-table" not in prim_body
             or has_token_inversion
         )
         if "2027 2027 " in updated:

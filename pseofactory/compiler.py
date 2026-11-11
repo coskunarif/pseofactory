@@ -96,7 +96,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 60500.0,
         "sample_calculation": "Annual payroll of $500,000 at 8.65% combined FICA/FUTA/SUTA plus $3.45 per $100 workers comp rate yields $60,500 employer burden",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "simply_business",
+        "expected_partner": "rippling",
     },
     {
         "query": "contractor license and performance surety bond cost calculator",
@@ -110,7 +110,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 750.0,
         "sample_calculation": "Statutory $50,000 contractor license bond at a 1.5% standard credit tier underwriting rate yields a $750 annual bond premium",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "suretybonds_direct",
+        "expected_partner": "rippling",
     },
     {
         "query": "equipment lease vs buy section 179 cash flow arbitrage calculator",
@@ -124,7 +124,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 18000.0,
         "sample_calculation": "Financing $180,000 of qualifying equipment generates $57,600 in Year-1 Section 179 tax savings against $39,600 in payments for $18,000 positive Year-1 cash flow",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "crest_capital",
+        "expected_partner": "xendoo",
     },
     {
         "query": "medical and dental equipment section 179 tax deduction roi calculator",
@@ -138,7 +138,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 148500.0,
         "sample_calculation": "Clinical CBCT imaging system costing $150,000 yields $96,000 annual procedure net billings plus $52,500 Year-1 Section 179 tax savings for $148,500 first-year return",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "national_funding_med",
+        "expected_partner": "xendoo",
     },
     {
         "query": "commercial heavy vehicle section 179 gvwr 6000 lbs deduction calculator",
@@ -152,7 +152,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 29925.0,
         "sample_calculation": "Work truck over 6,000 lbs GVWR costing $95,000 at 90% business use in the 35% bracket yields $29,925 in Year-1 cash tax savings",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "crest_capital",
+        "expected_partner": "xendoo",
     },
     {
         "query": "section 301 import tariff and customs duty landed cost calculator",
@@ -166,7 +166,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 160966.0,
         "sample_calculation": "FOB shipment of $120,000 subject to 28.5% combined HTSUS and Section 301 duty plus $6,766 freight and CBP MPF/HMF fees ($528.40 MPF + $237.50 HMF) yields $160,966 total landed cost",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "freightos_marketplace",
+        "expected_partner": "rippling",
     },
     {
         "query": "invoice factoring fee vs business line of credit effective apr calculator",
@@ -180,7 +180,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 2500.0,
         "sample_calculation": "Factoring a $100,000 commercial invoice at a 2.5% discount fee costs $2,500 (20.28% annualized APR across a 45-day net collection cycle)",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "otr_solutions_factoring",
+        "expected_partner": "rippling",
     },
     {
         "query": "r and d tax credit irc section 41 and section 174 amortization calculator",
@@ -997,7 +997,7 @@ def _render_compiler_monetization_and_guardrail_html(
         default_pk = (
             "vanta_security"
             if is_gainhelm
-            else ("suretybonds_direct" if is_lienbond else "crest_capital")
+            else ("suretybonds_direct" if is_lienbond else "xendoo")
         )
         try:
             route = get_affiliate_route(prop_id, slug)
@@ -1006,7 +1006,7 @@ def _render_compiler_monetization_and_guardrail_html(
 
         primary_offer = roster_info.get("primary_offer") or {}
         is_greenfield_vertical_mismatch = (
-            route.get("partner_key") == "turbotax"
+            route.get("partner_key") in ("turbotax", "efile_com", "eztaxreturn_com", "freetaxusa", "taxslayer")
             and roster_info.get("vertical_family") not in ("federal_state_tax_brackets", "sales_tax_1099_nexus")
         )
         if primary_offer.get("partner_key") and (
@@ -1018,14 +1018,14 @@ def _render_compiler_monetization_and_guardrail_html(
                 route = get_affiliate_route(prop_id, slug, partner_key=partner_key)
             except ValueError:
                 pass
-            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Vanta" if is_gainhelm else ("SuretyBonds.com" if is_lienbond else "Xendoo")))
+            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Vanta" if is_gainhelm else ("SuretyBondsDirect" if is_lienbond else "Xendoo")))
             cta_text = str(primary_offer.get("cta_text") or route.get("cta_text", "Explore Partner"))
-            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.kqzyfj.com/click-101707560-14021242" if is_lienbond else "https://www.xendoo.com/")))
+            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.suretybondsdirect.com/" if is_lienbond else "https://www.xendoo.com/")))
         else:
             partner_key = route.get("partner_key", default_pk)
-            partner_name = route.get("partner_name", "Vanta Automated GRC" if is_gainhelm else ("SuretyBonds.com Commercial Surety Desk" if is_lienbond else "Xendoo Section 179 & Business Tax Accounting"))
+            partner_name = route.get("partner_name", "Vanta Automated GRC" if is_gainhelm else ("SuretyBondsDirect Commercial Surety Desk" if is_lienbond else "Xendoo Section 179 & Business Tax Accounting"))
             cta_text = route.get("cta_text", "Automate Audit Readiness with Vanta" if is_gainhelm else ("Bind Instant Surety Bond Quote" if is_lienbond else "Optimize Section 179 Accounting with Xendoo"))
-            raw_url = route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.kqzyfj.com/click-101707560-14021242" if is_lienbond else "https://www.xendoo.com/"))
+            raw_url = route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.suretybondsdirect.com/" if is_lienbond else "https://www.xendoo.com/"))
         url = (
             raw_url
             if route.get("status") in ("live", "active_direct") and not str(raw_url).startswith("/r/")
@@ -1426,7 +1426,7 @@ def _build_compiled_json_ld_graph(
                 "contactPoint": {
                     "@type": "ContactPoint",
                     "contactType": "editorial",
-                    "email": f"editorial@{canonical_base.replace('https://', '').replace('http://', '').strip('/')}",
+                    "email": "arif.coskun@profithelm.com",
                 },
                 "sameAs": [
                     "https://www.linkedin.com/company/106482196",
@@ -1461,7 +1461,7 @@ def _build_compiled_json_ld_graph(
                     }
                 ],
                 "telephone": "+1-509-204-5500",
-                "email": f"editorial@{canonical_base.replace('https://', '').replace('http://', '').strip('/')}",
+                "email": "arif.coskun@profithelm.com",
                 "priceRange": "$$",
                 "areaServed": {"@type": "Country", "name": "United States"},
             },
@@ -2218,9 +2218,22 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         )
     )
     disclosures_html_block = ("\n" + "\n".join(regulatory_disclosures_html)) if regulatory_disclosures_html else ""
+    default_gsc_token = (
+        "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
+        if is_lienbond
+        else (
+            "Elwe-MFi7Z8hEE7ybiGr8xXBqSv87dF_ZMpqkhCDlQ8"
+            if is_gainhelm
+            else (
+                "At5f9a2APEkZhsFx0LICFC5R-TNKsXxzNsbG5YhUoIA"
+                if "prexvo" in str(canonical_base or "").lower()
+                else "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
+            )
+        )
+    )
     gsc_token = (
         str(candidate_spec.get("gsc_verification_token") or "").strip()
-        or os.environ.get("GSC_VERIFICATION_TOKEN", "google-site-verification-verified-2026")
+        or os.environ.get("GSC_VERIFICATION_TOKEN", default_gsc_token)
     )
     raw_meta_desc = (
         str(candidate_spec.get("description") or "").strip()
@@ -2673,7 +2686,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
         <a href="{'/' + ('about' if 'profithelm' in str(canonical_base or '').lower() else 'methodology') + '/'}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
         <a href="{'/' + ('privacy' if 'profithelm' in str(canonical_base or '').lower() else 'disclaimers') + '/'}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
-        <a href="mailto:editorial@{canonical_base.replace('https://', '').replace('http://', '').strip('/')}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
+        <a href="mailto:arif.coskun@profithelm.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
       <p style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">{brand_org_name} Editorial Policy: All calculations are deterministic and verified by statutory models.</p>
@@ -2883,7 +2896,7 @@ def _build_lienbond_support_page_html(
                     "contactPoint": {
                         "@type": "ContactPoint",
                         "contactType": "editorial",
-                        "email": "editorial@lienbond.com",
+                        "email": "arif.coskun@profithelm.com",
                     },
                     "sameAs": [
                         "https://www.linkedin.com/company/106482196",
@@ -2971,7 +2984,7 @@ def _build_lienbond_support_page_html(
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
         <a href="/methodology/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
         <a href="/disclaimers/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
-        <a href="mailto:editorial@lienbond.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
+        <a href="mailto:arif.coskun@profithelm.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
       <p style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">LienBond Editorial Policy: All calculations are deterministic and verified by statutory models.</p>
@@ -3017,7 +3030,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     for d in (dist, tools_dir, manifests_dir, disclaimers_dir, methodology_dir, css_dir, static_css_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    gsc_token = "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q"
+    gsc_token = "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
     style_css_content = """
 :root {
   --bg: #07090e;
@@ -3397,14 +3410,14 @@ th { background-color: var(--bg-elevated); }
           </thead>
           <tbody>
             <tr>
-              <td><strong>SuretyBonds.com</strong></td>
+              <td><strong>SuretyBondsDirect</strong></td>
               <td>Treasury Circular 570 Contractor License, Bid &amp; AIA A312 Performance Bonds</td>
-              <td><a href="/r/suretybonds_direct?source_tool=homepage&amp;subid=homepage_card_1&amp;cta_slot=calculator_primary_cta" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">Get Your Instant State License or Performance Bond Quote at SuretyBonds.com</a></td>
+              <td><a href="/r/suretybonds_direct?source_tool=homepage&amp;subid=homepage_card_1&amp;cta_slot=calculator_primary_cta" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">Get Your Instant State License or Performance Bond Quote at SuretyBondsDirect</a></td>
             </tr>
             <tr>
-              <td><strong>Next Insurance</strong></td>
+              <td><strong>Simply Business</strong></td>
               <td>NCCI Class-Code Contractor Workers Compensation &amp; General Liability COI</td>
-              <td><a href="/r/next_insurance_b2b?source_tool=homepage&amp;subid=homepage_card_2&amp;cta_slot=partner_matrix_card" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">Bind Workers Comp &amp; Download Live COI with Next Insurance</a></td>
+              <td><a href="/r/simply_business?source_tool=homepage&amp;subid=homepage_card_2&amp;cta_slot=partner_matrix_card" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">Compare Contractor Workers Comp &amp; GL Quotes via Simply Business</a></td>
             </tr>
             <tr>
               <td><strong>Levelset</strong></td>
@@ -3416,7 +3429,7 @@ th { background-color: var(--bg-elevated); }
       </div>
       <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
         <a href="/api/lead-capture?checkout=1&amp;sku=lb_surety_lien_wh347_packet&amp;tool_slug=contractor-license-bond-cost-calculator-by-credit-score&amp;redirect=1" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;border-radius:8px;background:#10b981;color:#07090e;font-weight:700;text-decoration:none;">Download 50-State Lien, AIA A312 &amp; WH-347 Packet ($79)</a>
-        <a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);font-weight:700;text-decoration:none;">Download NCCI Class Code &amp; EMR Audit Packet ($89)</a>
+        <a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);font-weight:700;text-decoration:none;">Download NCCI Class Code &amp; EMR Audit Packet ($49)</a>
       </div>
     </aside>
 
@@ -3441,7 +3454,7 @@ th { background-color: var(--bg-elevated); }
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
         <a href="/methodology/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
         <a href="/disclaimers/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
-        <a href="mailto:editorial@lienbond.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
+        <a href="mailto:arif.coskun@profithelm.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
       <p style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">LienBond Editorial Policy: All calculations are deterministic and verified by statutory models.</p>
@@ -3779,12 +3792,12 @@ CANONICAL_BASE = "https://lienbond.com"
 # Cloudflare KV Binding for Durable LienBond Click & Calculation Telemetry
 [[kv_namespaces]]
 binding = "LIENBOND_TELEMETRY_KV"
-id = "d7e2021ef7cf47eea4ae382742481e75"
+id = "802b129f39344707898e156494aff45d"
 
 # Cloudflare KV Binding for LienBond Consented Surety, Workers Comp & Lien Filing Quote Leads
 [[kv_namespaces]]
 binding = "LIENBOND_LEADS"
-id = "d7e2021ef7cf47eea4ae382742481e75"
+id = "c6885b9faff44e3abbb91cadebf137a9"
 """
     (root / "wrangler.toml").write_text(wrangler_toml, encoding="utf-8")
 

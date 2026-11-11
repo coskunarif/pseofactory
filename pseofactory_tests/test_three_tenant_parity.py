@@ -27,8 +27,8 @@ from pseofactory.trends.models import TregDurabilityResult, TrendCandidate
 
 
 def test_canonical_tenant_registry_includes_all_three_tenants() -> None:
-    assert tuple(CANONICAL_TENANT_IDS) == ("profithelm", "prexvo", "gainhelm")
-    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert tuple(CANONICAL_TENANT_IDS) == ("profithelm", "prexvo", "gainhelm", "lienbond")
+    assert set(CANONICAL_TENANT_DECLARATIONS.keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
 
 def test_determine_property_assignment_disambiguates_across_all_three_tenants() -> None:

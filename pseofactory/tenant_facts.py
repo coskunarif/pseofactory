@@ -1918,9 +1918,9 @@ LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
     ),
 )
 
-SPAWNED_TENANT_DECLARATIONS: Dict[str, DeclarativeTenantContract] = {
-    "lienbond": LIENBOND_TENANT_CONTRACT,
-}
+CANONICAL_TENANT_DECLARATIONS["lienbond"] = LIENBOND_TENANT_CONTRACT
+
+SPAWNED_TENANT_DECLARATIONS: Dict[str, DeclarativeTenantContract] = {}
 
 CANONICAL_TENANT_IDS: List[str] = []
 CANONICAL_TENANT_DOMAINS: List[str] = []
@@ -2001,10 +2001,13 @@ def _sync_derived_tenant_registries() -> None:
         REPO_DIR_TO_PROPERTY_ID[pid] = pid
 
     for pid, contract in SPAWNED_TENANT_DECLARATIONS.items():
+        if pid in CANONICAL_TENANT_DECLARATIONS:
+            continue
         CANONICAL_TENANT_HOSTS[pid] = contract.domain
         CANONICAL_TENANT_CONFIGS[pid] = contract.to_tenant_config_dict()
         if contract.linkedin_company_id:
             DEFAULT_TENANT_LINKEDIN_IDS[pid] = contract.linkedin_company_id
+        TENANT_STATUTORY_INTENT_TOKENS[pid] = list(contract.statutory_intent_tokens)
         TENANT_CATEGORY_SEED_TAXONOMY[pid] = {
             k: list(v) for k, v in contract.category_seed_taxonomy.items()
         }
@@ -2416,10 +2419,14 @@ class TenantFactStore:
                         f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
                     )
 
-        # 3. Cross-tenant boundary isolation
+        # 3. Cross-tenant boundary isolation (exempting verified parent-entity Zoho mailbox & Stripe legal name)
+        boundary_scan_lower = text_lower
+        if tenant_norm != "profithelm":
+            boundary_scan_lower = re.sub(r"arif\.coskun@profithelm\.com", "", boundary_scan_lower)
+            boundary_scan_lower = re.sub(r"\bprofithelm\s+llc\b", "", boundary_scan_lower)
         for token in profile.cross_tenant_forbidden_tokens:
             tok_l = token.lower()
-            if tok_l in text_lower and re.search(rf"(?<![a-z0-9]){re.escape(tok_l)}(?![a-z0-9])", text_lower):
+            if tok_l in boundary_scan_lower and re.search(rf"(?<![a-z0-9]){re.escape(tok_l)}(?![a-z0-9])", boundary_scan_lower):
                 violations.append(
                     f"Cross-tenant contamination on {profile.brand_name}: found forbidden boundary token '{token}'"
                 )

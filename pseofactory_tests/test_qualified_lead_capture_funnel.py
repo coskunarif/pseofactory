@@ -74,7 +74,7 @@ def test_threshold_evaluation_across_verticals_and_frictionless_sub_threshold():
     high_179 = evaluate_lead_quote_threshold("profithelm", "section-179-calculator", 120000)
     assert high_179["qualifies_for_quote_intake"] is True
     assert high_179["qualifies_for_action_bus_dispatch"] is True
-    assert high_179["primary_partner_key"] == "crest_capital"
+    assert high_179["primary_partner_key"] == "xendoo"
 
     # 3. Invoice Factoring: $50,000+ threshold
     sub_fac = evaluate_lead_quote_threshold("profithelm", "invoice-factoring-cost-apr-calculator", 35000)
@@ -285,7 +285,7 @@ def test_lead_ingestion_persists_ledger_and_dispatches_100k_leads_to_human_actio
         leads_ledger_path=leads_path,
     )
     assert high_tax_res["action_bus_dispatched"] is True
-    assert high_tax_res["partner_key"] == "turbotax"
+    assert high_tax_res["partner_key"] == "efile_com"
     assert "E-file" in high_tax_res["partner_rep_desk"]
 
     # 6. $140,000 Prexvo Student Loan Refinance lead -> dispatches to Splash Financial on HumanActionBus
@@ -307,7 +307,7 @@ def test_lead_ingestion_persists_ledger_and_dispatches_100k_leads_to_human_actio
     assert len(captured) == 5
     pending_bus_items = bus.get_pending_items()
     partner_keys_on_bus = {it.partner_key for it in pending_bus_items}
-    assert {"otr_solutions_factoring", "ipx1031", "turbotax", "splash_financial"}.issubset(partner_keys_on_bus)
+    assert {"otr_solutions_factoring", "ipx1031", "efile_com", "splash_financial"}.issubset(partner_keys_on_bus)
 
 
 def test_edge_lead_capture_function_generation_and_tenant_sync(tmp_path):
@@ -531,6 +531,7 @@ def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
         import("./functions/api/lead-capture.js").then(async mod => {{
           const kvStore = new Map();
           const mockEnv = {{
+            TELEMETRY_EXPORT_SECRET: "funnel_sec_123",
             PROFITHELM_LEADS: {{
               put: async (k, v) => kvStore.set(k, JSON.parse(v)),
               list: async ({{ prefix }}) => ({{
@@ -557,7 +558,7 @@ def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
 
           const getReq = {{
             url: "https://{prop_id}.com/api/lead-capture?limit=50",
-            headers: new Headers()
+            headers: new Headers({{ "x-telemetry-secret": "funnel_sec_123" }})
           }};
           const getRes = await mod.onRequestGet({{ request: getReq, env: mockEnv }});
           const getData = await getRes.json();
@@ -658,6 +659,7 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
           }};
 
           const mockEnv = {{
+            TELEMETRY_EXPORT_SECRET: "funnel_sec_123",
             EMAIL_PRIMARY_RAIL: "zeptomail",
             ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_token",
             NANGO_SECRET_KEY: "mock_nango_secret",
@@ -686,7 +688,7 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
             url: "https://{prop_id}.com/api/lead-capture",
             headers: new Headers({{ "content-type": "application/json" }}),
             json: async () => ({{
-              email: "cfo@freightfleet-logistics.com",
+              email: "jane.doe@acme-llc.com",
               state: "TX",
               calculated_amount: 175000,
               partner_sharing_consent: true,
@@ -698,7 +700,7 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
 
           const getReq = {{
             url: "https://{prop_id}.com/api/lead-capture?limit=50",
-            headers: new Headers()
+            headers: new Headers({{ "x-telemetry-secret": "funnel_sec_123" }})
           }};
           const getRes = await mod.onRequestGet({{ request: getReq, env: mockEnv }});
           const getData = await getRes.json();
@@ -1365,7 +1367,7 @@ console.log(JSON.stringify({{ chkData, ffData }}));
         assert out["chkData"]["ok"] is False
         assert out["chkData"]["status"] == "checkout_unavailable"
         assert out["chkData"]["stripe_account_id"] == "acct_1T6fSTIq0ckFsf5j"
-        expected_merchant_email = f"arif.coskun@{prop_id}.com"
+        expected_merchant_email = "arif.coskun@profithelm.com"
         assert out["chkData"]["stripe_merchant_email"] == expected_merchant_email
         assert out["chkData"]["reservation_captured"] is True
         assert out["chkData"]["reservation_id"] == "rsv_lead_custom_1"
@@ -1494,7 +1496,7 @@ console.log(JSON.stringify({{ capChk, taxChk, capFf, pxChk }}));
     assert len(audit_rep["catalog_skus"]) == 6
     assert all(item["checkout_ready"] and item["fulfillment_ready"] for item in audit_rep["catalog_skus"].values())
     assert audit_rep["ymyl_public_service_isolation"]["isolated"] is True
-    assert audit_rep["outbound_affiliate_attribution"]["profithelm"]["total_routes"] == 22
+    assert audit_rep["outbound_affiliate_attribution"]["profithelm"]["total_routes"] == 29
     assert audit_rep["outbound_affiliate_attribution"]["prexvo"]["total_routes"] == 5
 
 
@@ -1595,7 +1597,7 @@ def test_ui_ux_e2e_repro_gate(tmp_path):
 
         # 1c. Verify canonical partner redirects match affiliates.py / edge.py (zero hardcoded drift)
         expected_partner_prefixes = {
-            "ipx1031": "https://www.ipx1031.com/start-an-exchange/",
+            "ipx1031": "https://www.ipx1031.com/",
             "mercury": "https://mercury.com/r/profithelm-llc",
             "kalshi": "https://kalshi.pxf.io/",
             "coinledger": "https://coinledger.io/?fpr=arif-554004",
@@ -1762,6 +1764,7 @@ def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_e
           }};
 
           const mockEnv = {{
+            TELEMETRY_EXPORT_SECRET: "funnel_sec_123",
             NANGO_SECRET_KEY: "mock_nango_secret",
             NANGO_CONNECTION_ID: "mock_nango_conn",
             ZOHO_MAIL_ACCOUNT_ID: "676891000000008002",
@@ -1821,7 +1824,9 @@ def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_e
           const fulfillData = await fulfillRes.json();
 
           const listRes = await mod.onRequestGet({{
-            request: new Request("https://{prop_id}.com/api/lead-capture?limit=50"),
+            request: new Request("https://{prop_id}.com/api/lead-capture?limit=50", {{
+              headers: {{ "x-telemetry-secret": "funnel_sec_123" }}
+            }}),
             env: mockEnv
           }});
           const listData = await listRes.json();

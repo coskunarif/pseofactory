@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
-    "version": "1.0.0",
-    "updated_at": "2026-10-19T23:25:00+00:00",
+    "version": "1.1.0",
+    "updated_at": "2026-11-11T00:25:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -35,7 +35,8 @@
         "gainhelm": "GainHelm",
         "lienbond": "LienBond"
       },
-      "cli_key_expires_at": "2026-06-03",
+      "cli_key_expires_at": null,
+      "cli_key_status": "Live standard secret key provisioned on Cloudflare Pages; legacy 90-day CLI key retired",
       "enabled": true,
       "billing_mode": "payment",
       "charges_enabled": true,
@@ -48,6 +49,26 @@
       "webhook_status": "disabled",
       "fulfillment_engine": "personalized_statutory_workpaper_and_csv_bundle",
       "digital_products": {
+        "ph_instant_statutory_worksheet_19": {
+          "sku": "ph_instant_statutory_worksheet_19",
+          "property_id": "profithelm",
+          "vertical": "b2b_tax_advisory",
+          "title": "ProfitHelm Instant Statutory Tax & CPA Reconciliation Worksheet",
+          "price_usd": 19.0,
+          "price_cents": 1900,
+          "currency": "usd",
+          "statutory_authority": "26 U.S.C. Section 1, IRC Section 199A, and IRS Rev. Proc. 2025-32",
+          "trend_timeseries_ids": [
+            "irs_sec199a_qbi",
+            "ssa_fica_wage_base",
+            "fred_cpilfesl_inflation"
+          ],
+          "deliverables": [
+            "Personalized Statutory Tax & Bracket Reconciliation Worksheet (HTML/PDF)",
+            "5-Point Marginal Rate & Safe-Harbor Sensitivity Schedule (CSV)",
+            "Signed Scenario Calculation Manifest (JSON)"
+          ]
+        },
         "ph_1031_boot_replacement_workpapers": {
           "sku": "ph_1031_boot_replacement_workpapers",
           "property_id": "profithelm",
@@ -133,6 +154,25 @@
             "Signed Borrower Scenario Audit Manifest & Cosigner Release Checklist (JSON)"
           ]
         },
+        "gh_instant_compliance_worksheet_19": {
+          "sku": "gh_instant_compliance_worksheet_19",
+          "property_id": "gainhelm",
+          "vertical": "b2b_cyber_compliance",
+          "title": "GainHelm Instant Security Control & Audit Cost Worksheet",
+          "price_usd": 19.0,
+          "price_cents": 1900,
+          "currency": "usd",
+          "statutory_authority": "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024",
+          "trend_timeseries_ids": [
+            "dod_32cfr170_cmmc_controls",
+            "iso_27006_stage2_days"
+          ],
+          "deliverables": [
+            "Personalized Security Control & Auditor-Day Cost Worksheet (HTML/PDF)",
+            "5-Point Audit Scope & Remediation Budget Schedule (CSV)",
+            "Signed GRC Scenario Calculation Manifest (JSON)"
+          ]
+        },
         "gh_soc2_cmmc_audit_workpapers": {
           "sku": "gh_soc2_cmmc_audit_workpapers",
           "property_id": "gainhelm",
@@ -173,6 +213,140 @@
             "5-Point Breach Notification, Forensics & Multi-Framework Control Overlap Schedule (CSV)",
             "Signed Enterprise Security Governance Audit Manifest (JSON)"
           ]
+        },
+        "lb_instant_lien_bond_worksheet_19": {
+          "sku": "lb_instant_lien_bond_worksheet_19",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Instant Statutory Bond, EMR & Lien Deadline Worksheet",
+          "price_usd": 19.0,
+          "price_cents": 1900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Section 3131, U.S. Treasury Circular 570, and NCCI Experience Rating Plan",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "ncci_emr_split_point"
+          ],
+          "deliverables": [
+            "Personalized Statutory Surety Bond, Workers Comp EMR & Lien Deadline Worksheet (HTML/PDF)",
+            "5-Point Indemnity & Payroll Sensitivity Schedule (CSV)",
+            "Signed Construction Compliance Calculation Manifest (JSON)"
+          ]
+        },
+        "lb_surety_bond_underwriting_kit": {
+          "sku": "lb_surety_bond_underwriting_kit",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Federal Miller Act & State License Surety Bond Underwriting Kit",
+          "price_usd": 49.0,
+          "price_cents": 4900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Section 3131 (Miller Act), FAR 28.102, and U.S. Treasury Circular 570",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "census_vip_construction"
+          ],
+          "deliverables": [
+            "Personalized AIA Document A312 & Treasury Circular 570 Underwriting Workpaper (HTML/PDF)",
+            "Sliding-Scale Bond Penal Sum & Working Capital Indemnity Schedule (CSV)",
+            "Signed Surety Broker Submission & WIP Schedule Manifest (JSON)"
+          ]
+        },
+        "lb_workers_comp_emr_audit_kit": {
+          "sku": "lb_workers_comp_emr_audit_kit",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond NCCI Workers Compensation Class Code & EMR Audit Workpaper Kit",
+          "price_usd": 49.0,
+          "price_cents": 4900,
+          "currency": "usd",
+          "statutory_authority": "NCCI Experience Rating Plan Manual and Basic Manual for Workers Compensation",
+          "trend_timeseries_ids": [
+            "ncci_emr_split_point",
+            "bls_construction_injury_rate"
+          ],
+          "deliverables": [
+            "Personalized NCCI 4-Digit Class Code Payroll Allocation & EMR Split-Point Workpaper (HTML/PDF)",
+            "3-Year Experience Period Loss Sensitivity & Premium Audit Schedule (CSV)",
+            "Signed Ghost-Policy / Subcontractor COI Verification Checklist (JSON)"
+          ]
+        },
+        "lb_workers_comp_emr_audit_packet": {
+          "sku": "lb_workers_comp_emr_audit_packet",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond NCCI Class Code & EMR Audit Packet",
+          "price_usd": 49.0,
+          "price_cents": 4900,
+          "currency": "usd",
+          "statutory_authority": "NCCI Experience Rating Plan Manual and State Workers Compensation Rating Bureaus",
+          "trend_timeseries_ids": [
+            "ncci_emr_split_point",
+            "bls_construction_injury_rate"
+          ],
+          "deliverables": [
+            "Personalized NCCI Class Code Rate & EMR Surcharge Reconciliation Packet (HTML/PDF)",
+            "5-Point Payroll & Experience Modification Factor Schedule (CSV)",
+            "Signed Carrier Audit Defense & Subcontractor COI Manifest (JSON)"
+          ]
+        },
+        "lb_wh347_certified_payroll_packet": {
+          "sku": "lb_wh347_certified_payroll_packet",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Federal Davis-Bacon Form WH-347 Certified Payroll & Fringe Packet",
+          "price_usd": 59.0,
+          "price_cents": 5900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Section 3141 (Davis-Bacon Act) and 29 CFR Part 5",
+          "trend_timeseries_ids": [
+            "dol_whd_prevailing_wage",
+            "bls_eci_construction"
+          ],
+          "deliverables": [
+            "Personalized DOL Form WH-347 Statement of Compliance & Annualized Fringe Offset Workpaper (HTML/PDF)",
+            "Weekly Trade Classification Base Rate, Fringe Credit & Overtime Schedule (CSV)",
+            "Signed Contracting Officer Certified Payroll Audit Manifest (JSON)"
+          ]
+        },
+        "lb_mechanics_lien_waiver_packet": {
+          "sku": "lb_mechanics_lien_waiver_packet",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond 50-State Statutory Mechanics Lien Deadline & Waiver Filing Packet",
+          "price_usd": 69.0,
+          "price_cents": 6900,
+          "currency": "usd",
+          "statutory_authority": "Cal. Civ. Code Sections 8132-8416, Tex. Prop. Code Ch. 53, and Fla. Stat. Section 713.06",
+          "trend_timeseries_ids": [
+            "census_vip_construction",
+            "sfaa_surety_loss_ratio"
+          ],
+          "deliverables": [
+            "Personalized 50-State Preliminary Notice, Lien Recording Window & Statutory Waiver Matrix (HTML/PDF)",
+            "Project Milestone Furnishing Date, Retainage Interest & County Recorder Deadline Schedule (CSV)",
+            "Signed Conditional / Unconditional Progress & Final Waiver Checklist (JSON)"
+          ]
+        },
+        "lb_surety_lien_wh347_packet": {
+          "sku": "lb_surety_lien_wh347_packet",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Complete 50-State Mechanics Lien, AIA A312 Surety & WH-347 Master Packet",
+          "price_usd": 79.0,
+          "price_cents": 7900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Sections 3131 & 3141, U.S. Treasury Circular 570, and 50-State Mechanics Lien Statutes",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "ncci_emr_split_point",
+            "census_vip_construction"
+          ],
+          "deliverables": [
+            "Personalized 50-State Mechanics Lien Waiver, AIA A312 Penal Sum & WH-347 Compliance Master Workpaper (HTML/PDF)",
+            "Integrated Surety Indemnity, NCCI EMR & Prevailing Wage Reconciliation Schedule (CSV)",
+            "Signed General Contractor & Subcontractor Statutory Filing Binder (JSON)"
+          ]
         }
       },
       "settlement_verification": "direct_checkout_session_lookup",
@@ -192,7 +366,7 @@
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
-      "active_advertiser_contracts": 1,
+      "active_advertiser_contracts": 4,
       "live_active_contracts_count": 4,
       "live_active_contracts": [
         {
@@ -242,7 +416,7 @@
           "realized_commission_usd": 0.0
         }
       ],
-      "pending_advertiser_contracts": 17,
+      "pending_advertiser_contracts": 14,
       "live_pending_advertiser_contracts": 14,
       "verified_clicks": 8,
       "raw_clicks": 19,
@@ -269,7 +443,7 @@
       "sync_mechanism": "CDP_DOM_BALANCE_AND_ZOHO_EMAIL_INGEST",
       "auth_status": "DOM_BALANCE_VERIFIED_BACKEND_SESSION_EXPIRED_RELOGIN_REQUIRED",
       "is_authenticated_and_syncing": false,
-      "pending_advertiser_applications": 28,
+      "pending_advertiser_applications": 23,
       "live_pending_advertiser_applications": 23,
       "active_joined_advertisers_count": 5,
       "verified_clicks": 31,
@@ -377,7 +551,7 @@
       "categories": {
         "STARTUP_BANKING": {
           "primary_partner": "mercury",
-          "fallback_partner": "rho",
+          "fallback_partner": "wallethub",
           "direct_url": "https://mercury.com/r/profithelm-llc",
           "status": "live",
           "bounty": "$250"
@@ -397,7 +571,7 @@
           "fallback_partner": "mercury",
           "direct_url": "https://join.ramp.com/c/7932737/3981015/51436",
           "status": "live",
-          "bounty": "$500"
+          "bounty": "$100-$4000"
         },
         "DIGITAL_ASSETS": {
           "primary_partner": "coinledger",
@@ -407,24 +581,38 @@
           "bounty": "$35-$90"
         },
         "TAX_INTELLIGENCE": {
-          "primary_partner": "turbotax",
-          "fallback_partner": "taxslayer",
-          "direct_url": "https://turbotax.intuit.com/",
-          "status": "pending",
-          "bounty": "$45-$120"
+          "primary_partner": "efile_com",
+          "fallback_partner": "eztaxreturn_com",
+          "direct_url": "https://www.jdoqocy.com/click-101906407-11917161",
+          "status": "live",
+          "bounty": "30%-40%"
+        },
+        "ACCOUNTING_ADVISORY": {
+          "primary_partner": "xendoo",
+          "fallback_partner": "gusto",
+          "direct_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+          "status": "live",
+          "bounty": "$500"
+        },
+        "LEGAL_ENTITY_DOCS": {
+          "primary_partner": "lawdepot",
+          "fallback_partner": "wallethub",
+          "direct_url": "https://www.jdoqocy.com/click-101906407-16985242",
+          "status": "live",
+          "bounty": "30%"
         },
         "COMMERCIAL_REAL_ESTATE": {
           "primary_partner": "crest_capital",
-          "fallback_partner": "ipx1031",
-          "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
-          "status": "live",
+          "fallback_partner": "national_funding_med",
+          "direct_url": "https://www.crestcapital.com/",
+          "status": "pending",
           "bounty": "$250-$500"
         },
         "SECTION_1031_EXCHANGE": {
           "primary_partner": "ipx1031",
           "fallback_partner": "exeter1031",
-          "direct_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
-          "status": "active_direct",
+          "direct_url": "https://www.ipx1031.com/",
+          "status": "pending",
           "bounty": "$250-$750"
         },
         "MARKET_ARBITRAGE": {
@@ -432,7 +620,7 @@
           "fallback_partner": "interactive_brokers",
           "direct_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
           "status": "live",
-          "bounty": "$40-$150"
+          "bounty": "$40"
         }
       },
       "agentic_api_programs": {
@@ -440,80 +628,48 @@
           "provider": "Sovrn Commerce (VigLink Redirect & Merchant API)",
           "auth": "Secret Key + Site Domain Key (0a5ac1bfe04034bff021b394f5e71d90)",
           "redirect_endpoint": "https://redirect.viglink.com?key=0a5ac1bfe04034bff021b394f5e71d90&u=",
-          "role": "Instant programmatic monetization wrapper across 70,000+ merchants; eliminates dead clicks on all pending/stalled direct applications"
+          "role": "Programmatic monetization wrapper on ProfitHelm only; never used for cross-vertical brand swaps"
         },
         "partnerstack_api_v2": {
           "provider": "PartnerStack Partnerships REST API v2",
           "endpoint": "https://api.partnerstack.com/api/v2/partnerships",
           "active_partners": [
-            "rippling",
-            "mercury"
+            "rippling"
           ],
           "live_verified_clicks": 678,
-          "network_marketplace_status": "Declined on stck_sHqgUkyEIAPgiL (cooldown until 2026-10-23T00:00:00Z; 4 marketplace program applications on hold; direct invite Rippling part_jp9R0iYpPGriHu is Active with 678 clicks)",
+          "network_marketplace_status": "Direct invite Rippling part_jp9R0iYpPGriHu is Active; Mercury is direct in-house referral https://mercury.com/r/profithelm-llc",
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
           "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",
-          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling; 182 verified clicks recorded in PartnerStack Performance Overview)"
+          "role": "Agentic B2B SaaS link retrieval and commission telemetry ($600 SQO + $1,000 Closed Won on Rippling)"
         },
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
           "active_partners": [
-            "coinledger (fpr=arif-554004, PayPal payout arif.coskun@profithelm.com Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 6 clicks recorded)",
-            "koinly (via=A4FABF09 on app.koinly.io/affiliate + FirstPromoter fpr=arif-4c0b88 in Newsletter #1588 on 2026-10-20; PayPal payout arif.coskun@profithelm.com saved and verified via HTTP 200 on app.koinly.io/affiliate; 3 clicks recorded)",
-            "crest_capital (xendoo fp_ref=arif-4ac24e, PayPal payout arif.coskun@profithelm.com verified via code 679553 in Newsletter #1576; 1 verified click recorded on FirstPromoter dashboard; live route upgraded to Impact #16354 at $500 CPA)"
+            "coinledger (fpr=arif-554004, 25% recurring commission, PayPal payout arif.coskun@profithelm.com verified)",
+            "koinly (fpr=arif-4c0b88, 20% one-time first purchase commission per Inbox #1071, PayPal payout arif.coskun@profithelm.com verified)"
           ],
           "verified_clicks": 10,
-          "role": "Instant token-based SaaS/tax referral tracking (25-30% recurring commission on CoinLedger/Koinly + $250 cash reward per referred client on Xendoo)"
+          "role": "Token-based crypto tax referral tracking (25% recurring on CoinLedger + 20% one-time first purchase on Koinly per Inbox #1071; Xendoo promoted to Impact #16354 at $500 CPA)"
         },
         "impact_rest_api": {
           "provider": "Impact.com Publisher REST API",
           "account_id": "7932737",
           "active_campaigns": [
-            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770; 5 verified clicks / 11 raw clicks recorded including referring domain profithelm.com)",
-            "xendoo (#16354 - Contract Active since 2026-10-19, $500.00 CPA per Onboarded Client via https://xendoo.pxf.io/c/7932737/1357375/16354; 1 raw click recorded)",
-            "gusto (#15154 - Contract Active since 2026-10-19 via Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com, $200-$300 CPA per sale via https://gusto.pxf.io/c/7932737/1226287/15154)",
-            "ramp (#51436 - Contract Active since 2026-10-21 via Zoho Newsletter #1591, $100.00-$4,000.00 Closed Won / $50.00-$2,000.00 SQL via https://join.ramp.com/c/7932737/3981015/51436)"
-          ],
-          "submitted_campaigns": [
-            "gusto (#15154 - uContractId 30477112, Inbox #967 + publisher intro Sent #271 to noelle.hyra@gusto.com)",
-            "next_insurance_b2b (#14516 / ERGO NEXT - uContractId 30639514, Inbox #982 & Marketplace PENDING_CAMPAIGN_APPROVAL)",
-            "sofi (#11190 / #8084 - uContractId 30703716, Inbox #988 + publisher intro Sent #273 to cfels@lqdigital.com)",
-            "national_funding_med (#15709 / IO 400810 - uContractId 30704393)",
-            "splash_financial (#9516 - uContractId 30704415, $300 Closed Loan + publisher intro Sent #272 to pleimkuehler@splashfinancial.com)",
-            "credible (#3874 / IO 25024 - uContractId 30704420)",
-            "invoice_simple (#24994 / IO 325053 - uContractId 30704430)",
-            "lendkey (#3276 / IO 20978 - uContractId 30704425, $250 Loan Disbursed + publisher intro Sent #274 to accounting@lendkey.com)",
-            "surepayroll (#16532 / IO 153438 - uContractId 30704472)",
-            "stax (#15236 / IO 126473 - uContractId 30704485, $500 Closed Won)",
-            "groundfloor (#11975 / IO 84162 - uContractId 30704492, $100 Invest + Sent #262)",
-            "zacks (#39258 / IO 332588 - uContractId 30704498, $120 Online Sale)",
-            "dlp_capital (#20525 / IO 191764 - uContractId 30704453, $250 Lead + Sent #263)",
-            "simply_business (#49719 / uContractId 30704352 & #50138 / uContractId 30705037 + Zendesk Ticket #6270665 in Inbox #990)",
-            "ramp (#51436 - uContractId 30705021, $100-$4,000 Closed Won / $50-$2,000 SQL + publisher intro Sent #270 to affiliate@ramp.com)",
-            "xendoo (#16354 - uContractId 30705024, $500 Onboarded + Sent #261 + Sent #269 to lil.roberts@xendoo.com + FirstPromoter LIVE fp_ref=arif-4ac24e)",
-            "relay (#28490 - uContractId 30705031, $100-$200 Funded Account)"
+            "kalshi (#37770 - Contract Active since 2026-10-17, $40.00 CPA via https://kalshi.pxf.io/c/7932737/3078072/37770)",
+            "xendoo (#16354 - Contract Active since 2026-10-19, $500.00 CPA per Onboarded Client via https://xendoo.pxf.io/c/7932737/1357375/16354)",
+            "gusto (#15154 - Contract Active since 2026-10-19, $200-$300 CPA per sale via https://gusto.pxf.io/c/7932737/1226287/15154)",
+            "ramp (#51436 - Contract Active since 2026-10-21, $100.00-$4,000.00 Closed Won / $50.00-$2,000.00 SQL via https://join.ramp.com/c/7932737/3981015/51436)"
           ],
           "role": "Programmatic contract status polling and Insertion Order verification",
-          "member_id": "8871615",
-          "platform_approval_state": "ACTIVE (Kalshi #37770 Contract Active at https://kalshi.pxf.io/c/7932737/3078072/37770 with 3 verified clicks + 17 Pending Advertiser Contracts across Account 7932737 / Member 8871615; Identity COMPLETE; Comply Exchange Form W-9 submitted under Confirmation Code L5CBN6)",
-          "discovered_promo_signup_campaigns": [
-            "sofi (#11190 - https://app.impact.com/campaign-promo-signup/SoFi.brand)",
-            "lendkey (#3276 - https://app.impact.com/campaign-promo-signup/LendKey.brand)",
-            "invoice_simple (#24994 - https://app.impact.com/campaign-promo-signup/Invoice-Simple.brand)",
-            "dlp_capital (#20525 - https://app.impact.com/campaign-promo-signup/DLP-Capital.brand)",
-            "surepayroll (#16532 - https://app.impact.com/campaign-promo-signup/SurePayroll.brand)",
-            "stax (#15236 - https://app.impact.com/campaign-promo-signup/Stax.brand)",
-            "groundfloor (#11975 - https://app.impact.com/campaign-promo-signup/Groundfloor-Finance.brand)",
-            "zacks (#39258 - https://app.impact.com/campaign-promo-signup/Zacks-Investment-Research.brand)",
-            "ramp (#51436 - Impact Brand Marketplace)",
-            "xendoo (#16354 - Impact Brand Marketplace)",
-            "relay (#28490 - Impact Brand Marketplace)"
-          ]
+          "member_id": "8871615"
         },
         "dub_partners_api": {
           "provider": "Dub Partners API",
           "endpoint": "https://api.dub.co/partners",
-          "role": "API-first shortlink attribution and programmatic B2B SaaS partner link provisioning"
+          "enabled": false,
+          "is_authenticated_and_syncing": false,
+          "auth_status": "UNCONFIGURED",
+          "role": "Unconfigured optional partner API"
         }
       },
       "roster_tiers": {
@@ -521,29 +677,38 @@
           "coinledger",
           "koinly",
           "rippling",
-          "ipx1031",
           "mercury",
           "kalshi",
-          "crest_capital",
-          "gusto"
+          "gusto",
+          "ramp",
+          "xendoo",
+          "efile_com",
+          "eztaxreturn_com",
+          "freetaxusa",
+          "wallethub",
+          "lawdepot"
         ],
         "answered_action_required": [
           "rho",
           "stripe"
         ],
         "awaiting_vendor_response": [
-          "ramp",
+          "ipx1031",
+          "crest_capital",
           "exeter1031",
           "first_american",
           "turbotax",
           "taxslayer",
           "simply_business",
-          "next_insurance_b2b",
           "national_funding_med",
           "otr_solutions_factoring",
           "freightos_marketplace",
           "suretybonds_direct",
           "interactive_brokers"
+        ],
+        "declined": [
+          "next_insurance_b2b",
+          "invoice_simple"
         ],
         "unapplied_expansion_queue": []
       },
@@ -551,32 +716,37 @@
         "coinledger": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
+          "portal_key": "firstpromoter",
           "url": "https://coinledger.io/?fpr=arif-554004",
           "direct_url": "https://coinledger.io/?fpr=arif-554004",
           "edge_route": "/r/coinledger",
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
+          "commission_est": "25% recurring",
           "bounty": "$35-$90",
-          "payout_method": "PayPal (arif.coskun@profithelm.com - Selected and verified on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods)",
-          "correspondence_status": "Approved & Live (FirstPromoter token fpr=arif-554004 verified active via /r/coinledger -> https://coinledger.io/?fpr=arif-554004; PayPal payout arif.coskun@profithelm.com Selected on 2026-10-19 at https://affiliates.coinledger.io/my-payouts/payout-methods; 4 clicks recorded)"
+          "payout_method": "PayPal (arif.coskun@profithelm.com - verified)",
+          "correspondence_status": "Approved & Live (FirstPromoter token fpr=arif-554004 verified active via /r/coinledger)"
         },
         "koinly": {
           "status": "live",
           "is_fallback_partner": true,
           "pipeline_tier": "live_revenue_ready",
+          "portal_key": "firstpromoter",
           "url": "https://koinly.io/?fpr=arif-4c0b88",
           "direct_url": "https://koinly.io/?fpr=arif-4c0b88",
           "edge_route": "/r/koinly",
           "category": "DIGITAL_ASSETS",
           "network": "FirstPromoter",
-          "bounty": "$40-$100",
+          "commission_est": "20% one-time first purchase",
+          "bounty": "20% one-time first purchase",
           "firstpromoter_welcome_url": "https://koinly.io/?fpr=arif-4c0b88",
-          "payout_method": "PayPal (arif.coskun@profithelm.com - verified and saved via HTTP 200 on app.koinly.io/affiliate)",
-          "correspondence_status": "Approved & Live (Secondary Digital Assets Partner; FirstPromoter token fpr=arif-4c0b88 verified active via /r/koinly -> https://koinly.io/?fpr=arif-4c0b88 + FirstPromoter welcome link received in Newsletter #1588 & Inbox #1007 on 2026-10-20; placement & 20% commission terms confirmed by Gorkem Bereket in Inbox #1045 & #1071 on 2026-11-02; PayPal payout arif.coskun@profithelm.com verified on app.koinly.io/affiliate; 3 clicks recorded)"
+          "payout_method": "PayPal (arif.coskun@profithelm.com - verified)",
+          "correspondence_status": "Approved & Live (FirstPromoter fpr=arif-4c0b88; 20% one-time first purchase commission confirmed in Inbox #1071)"
         },
         "rippling": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
+          "portal_key": "partnerstack",
           "url": "https://try.rippling.com/mcfo1m09qiwt",
           "direct_url": "https://try.rippling.com/mcfo1m09qiwt",
           "edge_route": "/r/rippling",
@@ -586,62 +756,24 @@
           "partnership_key": "part_jp9R0iYpPGriHu",
           "stack_key": "stck_lZgJHub85wwvkX",
           "tos_status": "active",
-          "correspondence_status": "Approved & Live (Newsletter #1552 Welcome, #1562 October Newsletter & #1568 Commission Structure from Erica Grodin on 2026-10-15; $600 SQO + $1,000 Closed Won = $1,600 via https://try.rippling.com/mcfo1m09qiwt; 28 verified clicks recorded in PartnerStack dashboard)"
-        },
-        "ipx1031": {
-          "status": "active_direct",
-          "pipeline_tier": "live_revenue_ready",
-          "url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
-          "direct_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
-          "edge_route": "/r/ipx1031",
-          "category": "SECTION_1031_EXCHANGE",
-          "network": "In-House Direct",
-          "bounty": "$250-$750",
-          "correspondence_status": "Active Direct Referral Route & Partnership Inquiry Sent (Live UTM route /r/ipx1031 -> https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator + formal referral partnership inquiry Sent #259 to info@ipx1031.com on 2026-10-17T07:39Z)"
+          "correspondence_status": "Approved & Live on PartnerStack ($600 SQO + $1,000 Closed Won via https://try.rippling.com/mcfo1m09qiwt)"
         },
         "mercury": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
+          "portal_key": "direct",
           "url": "https://mercury.com/r/profithelm-llc",
           "direct_url": "https://mercury.com/r/profithelm-llc",
-          "cj_approved_wallethub_tracking_url": "https://www.jdoqocy.com/click-101906407-16952385",
           "edge_route": "/r/mercury",
           "category": "STARTUP_BANKING",
-          "network": "PartnerStack / In-House",
+          "network": "In-House Direct",
           "bounty": "$250",
-          "correspondence_status": "Approved & Live (Customer referral link https://mercury.com/r/profithelm-llc extracted from app.mercury.com + Mercury Partnerships form submitted 2026-10-14 per Inbox #978 & Sent #236; $250 bonus on $10K deposit within 90 days; CJ Affiliate WalletHub / Evolution Finance #7238333 / #6002798 approved on 2026-10-23 via Notification #857 with tracking link https://www.jdoqocy.com/click-101906407-16952385)"
-        },
-        "rho": {
-          "status": "awaiting_response",
-          "pipeline_tier": "answered_action_required",
-          "url": "https://rho.co/",
-          "direct_url": "https://rho.co/",
-          "edge_route": "/r/rho",
-          "category": "CORPORATE_SPEND",
-          "network": "In-House Direct",
-          "bounty": "$500-$1000",
-          "correspondence_status": "Answered, Portal Submitted & Confirmed (Inbox #974 on 2026-10-14; form submitted on rho.co/partners 2026-10-14T08:37Z; follow-up Sent #253 on 2026-10-16T22:56Z; confirmed by Hawk at Rho Client Service in Inbox #989 on 2026-10-17T06:09Z under ticket [P6E9MZ-W3N0M], awaiting partner tracking link)",
-          "active_fallback_merchant": "mercury",
-          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
-          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/rho"
-        },
-        "stripe": {
-          "status": "requires_followup",
-          "pipeline_tier": "answered_action_required",
-          "url": "https://stripe.com/",
-          "direct_url": "https://stripe.com/",
-          "edge_route": "/r/stripe",
-          "category": "B2B_PAYMENTS",
-          "network": "In-House Direct",
-          "bounty": "$150-$300",
-          "correspondence_status": "Answered / Gated (Inbox #971 from partner-ecosystem@stripe.com on 2026-10-12): Requires $1M+ USD annual volume and Stripe Connect integration",
-          "active_fallback_merchant": "mercury",
-          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
-          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/stripe"
+          "correspondence_status": "Approved & Live direct in-house customer referral link https://mercury.com/r/profithelm-llc ($250 bonus on $10K deposit within 90 days)"
         },
         "gusto": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
+          "portal_key": "impact",
           "url": "https://gusto.pxf.io/c/7932737/1226287/15154",
           "direct_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
           "impact_tracking_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
@@ -650,41 +782,168 @@
           "network": "Impact.com",
           "campaign_id": "15154",
           "bounty": "$200-$300",
-          "correspondence_status": "Approved & Live on Impact.com (Inbox #1003 & #1004 on 2026-10-19T19:14Z from noelle.hyra@gusto.com confirming approval to Gusto Campaign #15154 on Impact Account 7932737 / Branded Account 3161796 after Inbox #967 & Sent #271; Verified Insertion Order Payout: $200.00-$300.00 USD per Sale via https://gusto.pxf.io/c/7932737/1226287/15154; CJ Affiliate ADP #5275573 & Intuit Small Business #2271086 pending on CID 8101803 per Sent #265)"
+          "correspondence_status": "Approved & Live on Impact.com (Campaign #15154, $200-$300 CPA per valid US SMB sale)"
         },
         "ramp": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
+          "portal_key": "impact",
           "url": "https://join.ramp.com/c/7932737/3981015/51436",
           "direct_url": "https://join.ramp.com/c/7932737/3981015/51436",
           "impact_verified_tracking_url": "https://join.ramp.com/c/7932737/3981015/51436",
           "impact_ad_id": "3981015",
           "edge_route": "/r/ramp",
           "category": "CORPORATE_SPEND",
-          "network": "Impact.com / In-House",
+          "network": "Impact.com",
           "campaign_id": "51436",
           "bounty": "$100-$4000",
-          "correspondence_status": "Impact Marketplace Application Approved in Newsletter #1591 on 2026-10-21T14:54:06Z & Live Tracking Link Extracted (Impact Account 7932737 Campaign #51436 Ramp uContractId 30705021 Active since 2026-10-21 [$100-$4,000 Closed Won / $50-$2,000 SQL] via Ad #3981015 https://join.ramp.com/c/7932737/3981015/51436 wired at /r/ramp; direct Sent #237 + ramp.com/technology-partnerships form + Sent #254 + publisher intro Sent #270 to affiliate@ramp.com)",
-          "active_fallback_merchant": "mercury",
-          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
-          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/ramp",
-          "contract_status": "approved_impact_51436"
+          "contract_status": "approved_impact_51436",
+          "correspondence_status": "Approved & Live on Impact.com (Campaign #51436 approved 2026-10-21 in Newsletter #1591 via https://join.ramp.com/c/7932737/3981015/51436)"
         },
-        "crest_capital": {
+        "xendoo": {
           "status": "live",
           "pipeline_tier": "live_revenue_ready",
-          "url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
-          "direct_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+          "portal_key": "impact",
+          "url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+          "direct_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
           "impact_tracking_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
           "impact_short_link": "https://xendoo.pxf.io/2Rq2rg",
+          "firstpromoter_backup_url": "https://www.xendoo.com/?fp_ref=arif-4ac24e",
+          "edge_route": "/r/xendoo",
+          "category": "ACCOUNTING_ADVISORY",
+          "network": "Impact.com",
+          "campaign_id": "16354",
+          "commission_est": "$500 CPA",
+          "bounty": "$500",
+          "contract_status": "approved_impact_16354",
+          "correspondence_status": "Approved & Live on Impact.com (Campaign #16354 at $500.00 USD CPA per Onboarded Client via https://xendoo.pxf.io/c/7932737/1357375/16354, promoted over FirstPromoter $250 tier)"
+        },
+        "kalshi": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "portal_key": "impact",
+          "url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+          "direct_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+          "edge_route": "/r/kalshi",
+          "category": "MARKET_ARBITRAGE",
+          "network": "Impact.com",
+          "campaign_id": "37770",
+          "bounty": "$40",
+          "correspondence_status": "Approved & Live on Impact.com (Campaign #37770, $40.00 USD CPA per Trade)"
+        },
+        "efile_com": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "portal_key": "cj_affiliate",
+          "url": "https://www.jdoqocy.com/click-101906407-11917161",
+          "direct_url": "https://www.jdoqocy.com/click-101906407-11917161",
+          "edge_route": "/r/efile_com",
+          "category": "TAX_INTELLIGENCE",
+          "network": "CJ Affiliate",
+          "cj_advertiser_id": "4355234",
+          "bounty": "30%-40%",
+          "correspondence_status": "Approved & Live on CJ Affiliate (Advertiser #4355234 on PID 101906407, 30%-40% commission)"
+        },
+        "eztaxreturn_com": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "portal_key": "cj_affiliate",
+          "url": "https://www.dpbolvw.net/click-101906407-15704796",
+          "direct_url": "https://www.dpbolvw.net/click-101906407-15704796",
+          "edge_route": "/r/eztaxreturn_com",
+          "category": "TAX_INTELLIGENCE",
+          "network": "CJ Affiliate",
+          "cj_advertiser_id": "6874782",
+          "bounty": "15% new / 5% returning",
+          "correspondence_status": "Approved & Live on CJ Affiliate (Advertiser #6874782 on PID 101906407, Inbox #1074)"
+        },
+        "freetaxusa": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "portal_key": "cj_affiliate",
+          "url": "https://www.jdoqocy.com/click-101906407-12306188",
+          "direct_url": "https://www.jdoqocy.com/click-101906407-12306188",
+          "edge_route": "/r/freetaxusa",
+          "category": "TAX_INTELLIGENCE",
+          "network": "CJ Affiliate",
+          "cj_advertiser_id": "4526117",
+          "bounty": "10%-20%",
+          "correspondence_status": "Approved & Live on CJ Affiliate (Advertiser #4526117 on PID 101906407)"
+        },
+        "wallethub": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "portal_key": "cj_affiliate",
+          "url": "https://www.jdoqocy.com/click-101906407-16952385",
+          "direct_url": "https://www.jdoqocy.com/click-101906407-16952385",
+          "edge_route": "/r/wallethub",
+          "category": "STARTUP_BANKING",
+          "network": "CJ Affiliate",
+          "cj_advertiser_id": "6002798",
+          "bounty": "$50",
+          "correspondence_status": "Approved & Live on CJ Affiliate (Advertiser #6002798 on PID 101906407, $50 CPA)"
+        },
+        "lawdepot": {
+          "status": "live",
+          "pipeline_tier": "live_revenue_ready",
+          "portal_key": "cj_affiliate",
+          "url": "https://www.jdoqocy.com/click-101906407-16985242",
+          "direct_url": "https://www.jdoqocy.com/click-101906407-16985242",
+          "edge_route": "/r/lawdepot",
+          "category": "LEGAL_ENTITY_DOCS",
+          "network": "CJ Affiliate",
+          "cj_advertiser_id": "4544498",
+          "bounty": "30%",
+          "correspondence_status": "Approved & Live on CJ Affiliate (Advertiser #4544498 on PID 101906407, 30% orders / $6.50 trial)"
+        },
+        "ipx1031": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.ipx1031.com/",
+          "direct_url": "https://www.ipx1031.com/",
+          "edge_route": "/r/ipx1031",
+          "category": "SECTION_1031_EXCHANGE",
+          "network": "In-House Direct",
+          "bounty": "$250-$750",
+          "contract_status": "uncontracted_inquiry_sent",
+          "correspondence_status": "Uncontracted partnership inquiry sent (#259 to info@ipx1031.com on 2026-10-17); awaiting formal referral agreement"
+        },
+        "crest_capital": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.crestcapital.com/",
+          "direct_url": "https://www.crestcapital.com/",
           "edge_route": "/r/crest_capital",
           "category": "COMMERCIAL_REAL_ESTATE",
-          "network": "FirstPromoter / Impact.com",
+          "network": "In-House Direct",
           "bounty": "$250-$500",
-          "correspondence_status": "Approved & Live on FirstPromoter AND Impact.com (Newsletter #1575 Welcome & #1576 PayPal payout verification code 679553 for arif.coskun@profithelm.com; FirstPromoter token fp_ref=arif-4ac24e active at https://www.xendoo.com/?fp_ref=arif-4ac24e at $250 cash reward per referred client + Impact #16354 uContractId 30705024 APPROVED on 2026-10-19 at $500.00 USD CPA per Onboarded client via https://xendoo.pxf.io/c/7932737/1357375/16354)"
+          "contract_status": "uncontracted",
+          "correspondence_status": "Uncontracted equipment financing vendor (Sent #260 inquiry; never mapped to Xendoo bookkeeping)"
+        },
+        "rho": {
+          "status": "pending",
+          "pipeline_tier": "answered_action_required",
+          "url": "https://rho.co/",
+          "direct_url": "https://rho.co/",
+          "edge_route": "/r/rho",
+          "category": "CORPORATE_SPEND",
+          "network": "In-House Direct",
+          "bounty": "$500-$1000",
+          "correspondence_status": "Portal submitted under ticket [P6E9MZ-W3N0M]; awaiting partner tracking link"
+        },
+        "stripe": {
+          "status": "pending",
+          "pipeline_tier": "answered_action_required",
+          "url": "https://stripe.com/",
+          "direct_url": "https://stripe.com/",
+          "edge_route": "/r/stripe",
+          "category": "B2B_PAYMENTS",
+          "network": "In-House Direct",
+          "bounty": "$150-$300",
+          "correspondence_status": "Gated on $1M+ USD annual volume and Stripe Connect integration (Inbox #971)"
         },
         "exeter1031": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.exeterco.com/",
           "direct_url": "https://www.exeterco.com/",
@@ -692,13 +951,10 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #243 on 2026-10-13 + Sent #257 on 2026-10-16T22:56Z to ask@exeterco.com; Impact DLP Capital #20525 IO #191764 uContractId 30704453 submitted on 2026-10-17T07:30Z + direct follow-up Sent #263 to info@dlpcapital.com on 2026-10-18)",
-          "active_fallback_merchant": "ipx1031",
-          "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
-          "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/exeter1031"
+          "correspondence_status": "Application submitted (Sent #243 & #257 to ask@exeterco.com); awaiting response"
         },
         "first_american": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.firstexchange.com/",
           "direct_url": "https://www.firstexchange.com/",
@@ -706,60 +962,34 @@
           "category": "SECTION_1031_EXCHANGE",
           "network": "In-House Direct",
           "bounty": "$300-$800",
-          "correspondence_status": "Application Submitted & Followed Up (Sent #244 on 2026-10-13 + Sent #256 on 2026-10-16T22:56Z to 1031@firstam.com; Impact Groundfloor Finance #11975 IO #84162 uContractId 30704492 submitted on 2026-10-17T07:30Z + direct follow-up Sent #262 to hela@katalystcomms.com on 2026-10-18)",
-          "active_fallback_merchant": "ipx1031",
-          "active_fallback_url": "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator",
-          "active_fallback_payout": "$250-$750 direct referral + Sovrn Commerce /r/first_american"
+          "correspondence_status": "Application submitted (Sent #244 & #256 to 1031@firstam.com); awaiting response"
         },
         "turbotax": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://turbotax.intuit.com/",
           "direct_url": "https://turbotax.intuit.com/",
-          "cj_approved_tracking_url": "https://www.jdoqocy.com/click-101906407-11917161",
-          "cj_approved_alternate_url": "https://www.dpbolvw.net/click-101906407-11917165",
-          "cj_approved_advertiser": "E-file.com (#4355234 - 30%-40% paid tax prep sale + $1.40 free return, 120-day cookie)",
           "edge_route": "/r/turbotax",
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$45-$120",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + E-file.com (#4355234) Approved on 2026-10-19 (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z after IRS Form W-9 [EIN ******1423] and Direct Deposit ACH [Routing *****1229, Account ********1395] confirmed via Inbox #991, #992, #995 & #996; E-file.com CJ Advertiser ID #4355234 approved via Notification #846 & Inbox #999 from Aaron Rosenthal [aaron@e-file.com] with tracking link https://www.jdoqocy.com/click-101906407-11917161 at 30%-40% commission / 120-day cookie; TurboTax #1905878 & TaxAct #4110283 pending; wrapped via Sovrn Commerce /r/turbotax)",
-          "cj_advertiser_id": "4110283",
-          "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
+          "cj_advertiser_id": "1905878",
+          "correspondence_status": "Pending CJ Affiliate application (#1905878)"
         },
         "taxslayer": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.taxslayer.com/",
           "direct_url": "https://www.taxslayer.com/",
-          "cj_approved_tracking_url": "https://www.dpbolvw.net/click-101906407-15704796",
-          "cj_approved_freetaxusa_tracking_url": "https://www.jdoqocy.com/click-101906407-12306188",
-          "cj_approved_promo_10_off_url": "https://www.anrdoezrs.net/click-101906407-15719586",
-          "cj_approved_promo_20_off_url": "https://www.anrdoezrs.net/click-101906407-17230749",
-          "cj_approved_advertiser": "ezTaxReturn.com (#6874782 - 15% new customer / 5% returning customer, 90-day cookie)",
           "edge_route": "/r/taxslayer",
           "category": "TAX_INTELLIGENCE",
           "network": "CJ Affiliate",
           "bounty": "$30-$60",
-          "correspondence_status": "CJ Publisher Account 9/9 Onboarded & Active + ezTaxReturn.com (#6874782) & FreeTaxUSA (#4526117 / #1722649) Approved (Company CID 7792582 / Publisher ID 8101803 / Live PID 101906407 ACTIVE on 2026-10-18T09:36:19Z confirmed via Inbox #991, #992, #995 & #996; ezTaxReturn.com CJ Advertiser ID #6874782 approved via Notification #848 & confirmed directly by Allwyn Symon [allwyn.symon@ezTaxReturn.com] in Inbox #1074 on 2026-11-06 with tracking link https://www.dpbolvw.net/click-101906407-15704796 + FreeTaxUSA CJ Advertiser ID #4526117 approved on 2026-10-21 via Notification #851 with tracking link https://www.jdoqocy.com/click-101906407-12306188 wired at /r/freetaxusa; TaxSlayer CJ Advertiser ID #5273914 pending)",
           "cj_advertiser_id": "5273914",
-          "direct_apply_url": "https://members.cj.com/member/8101803/publisher/advertisers/findAdvertisers.cj"
-        },
-        "kalshi": {
-          "status": "live",
-          "pipeline_tier": "live_revenue_ready",
-          "url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-          "direct_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-          "edge_route": "/r/kalshi",
-          "category": "MARKET_ARBITRAGE",
-          "network": "Impact.com",
-          "campaign_id": "37770",
-          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Kalshi.brand",
-          "bounty": "$40-$150",
-          "correspondence_status": "Approved & Live on Impact.com (Account 7932737; Campaign #37770 Kalshi Contract Active since 2026-10-17 with pendAdvContracts transition 2 -> 3 -> Active; live tracking URL https://kalshi.pxf.io/c/7932737/3078072/37770 verified at $40.00 USD CPA with Deep Linking enabled and 3 verified clicks recorded on Impact dashboard including referring domain profithelm.com)"
+          "correspondence_status": "Pending CJ Affiliate application (#5273914)"
         },
         "interactive_brokers": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.interactivebrokers.com/",
           "direct_url": "https://www.interactivebrokers.com/",
@@ -767,10 +997,10 @@
           "category": "MARKET_ARBITRAGE",
           "network": "In-House Direct",
           "bounty": "$100-$200",
-          "correspondence_status": "Application Submitted (Sent #252 to publishers@interactivebrokers.com on 2026-10-16T22:56Z for IBKR CPC Publisher Program discovered at https://www.interactivebrokers.com/en/general/about/affiliate-programs.php, bypassing retail Refer-a-Friend personal KYC; Impact Zacks Investment Research #39258 IO #332588 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 11 -> 12)"
+          "correspondence_status": "Application submitted (Sent #252 to publishers@interactivebrokers.com)"
         },
         "simply_business": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.simplybusiness.com/",
           "direct_url": "https://www.simplybusiness.com/",
@@ -779,42 +1009,48 @@
           "network": "Impact.com",
           "campaign_id": "49719",
           "applied_io_id": "368837",
-          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Simply-Business.brand",
           "bounty": "$30-$100",
-          "correspondence_status": "Impact Marketplace Application Confirmed in Portal + CJ Affiliate Submitted + Zendesk Ticket Confirmed (Impact Account #7932737 Campaign #49719 Simply Business [$30.00 RFQ Quoted] & Campaign #50138 Simply Business Creator verified in PENDING_CAMPAIGN_APPROVAL + CJ Affiliate Simply Business US #5808859 [3m EPC $1,349.01] & Hiscox Small Business Insurance #4165310 [$15.00 Lead] submitted on CID 8101803 + Zendesk Ticket ID 6270665 in Inbox #990)"
+          "correspondence_status": "Pending Impact (#49719) & CJ (#5808859) review"
         },
         "suretybonds_direct": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
-          "url": "https://www.suretybonds.com/",
-          "direct_url": "https://www.suretybonds.com/",
-          "cj_approved_lawdepot_tracking_url": "https://www.jdoqocy.com/click-101906407-16985242",
-          "cj_approved_lawdepot_llc_url": "https://www.jdoqocy.com/click-101906407-16995515",
-          "cj_approved_lawdepot_terms": "LawDepot (#4544498 - 30% Subscription & One-Time Orders | $6.50 Free Trial | $35 Incorporation CA | $5 Online Notary US, 120-day cookie)",
+          "url": "https://www.suretybondsdirect.com/",
+          "direct_url": "https://www.suretybondsdirect.com/",
           "edge_route": "/r/suretybonds_direct",
           "category": "COMMERCIAL_SURETY",
           "network": "In-House Direct",
           "bounty": "$75-$300",
-          "correspondence_status": "Application Submitted & Receipt Confirmed + CJ LawDepot (#4544498) Approved (Sent #251 to customercare@suretybonds.com on 2026-10-16T22:56Z; confirmed by SuretyBonds.com Customer Care in Inbox #987 on 2026-10-17T05:56Z + CJ Affiliate Hiscox Small Business Insurance #4165310 & Simply Business US #5808859 submitted on CID 8101803 + LawDepot CJ Advertiser ID #4544498 approved on 2026-10-19 via Notification #847 with tracking link https://www.jdoqocy.com/click-101906407-16985242; awaiting SuretyBonds agency referral tracking URL)"
+          "correspondence_status": "Pending agency referral tracking link (Inbox #1070 referral program; never swapped to LawDepot)"
         },
         "next_insurance_b2b": {
-          "status": "awaiting_response",
-          "pipeline_tier": "awaiting_vendor_response",
+          "status": "declined",
+          "pipeline_tier": "declined",
           "url": "https://www.nextinsurance.com/",
           "direct_url": "https://www.nextinsurance.com/",
           "edge_route": "/r/next_insurance_b2b",
           "category": "COMMERCIAL_INSURANCE",
           "network": "Impact.com",
           "campaign_id": "14516",
-          "direct_apply_url": "https://app.impact.com/campaign-campaign-info-v2/Next-Insurance.brand",
           "bounty": "$25-$150",
-          "correspondence_status": "Impact Marketplace Application Confirmed by Email in Inbox #982 on 2026-10-14T23:02Z and Declined in Inbox #1009 on 2026-10-22T21:54Z (ERGO NEXT Insurance Campaign #14516 / #15709 declined due to Impact site-size filter; covered at edge by first-party $49 Commercial Capital Audit Stripe checkout SKU plus active Sovrn Commerce fallback via /r/next_insurance_b2b)",
-          "active_fallback_merchant": "mercury",
-          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
-          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/next_insurance_b2b"
+          "contract_status": "declined_impact",
+          "correspondence_status": "Declined on Impact Campaign #14516 in Inbox #1009 on 2026-10-22"
+        },
+        "invoice_simple": {
+          "status": "declined",
+          "pipeline_tier": "declined",
+          "url": "https://www.invoicesimple.com/",
+          "direct_url": "https://www.invoicesimple.com/",
+          "edge_route": "/r/invoice_simple",
+          "category": "B2B_PAYMENTS",
+          "network": "Impact.com",
+          "campaign_id": "24994",
+          "bounty": "$50",
+          "contract_status": "declined_impact",
+          "correspondence_status": "Declined on Impact Campaign #24994 in Inbox #1025 on 2026-10-23"
         },
         "national_funding_med": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.nationalfunding.com/",
           "direct_url": "https://www.nationalfunding.com/",
@@ -823,12 +1059,11 @@
           "network": "Impact.com",
           "campaign_id": "15709",
           "applied_io_id": "400810",
-          "direct_apply_url": "https://app.impact.com/campaign-promo-signup/National-Funding.brand",
           "bounty": "5% of loan amount",
-          "correspondence_status": "Impact Application Confirmed in Portal (Account 7932737; Campaign #15709 National Funding IO #400810 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 3 -> 4; Insertion Order payout: 5% of Loan Amount per Loan Received; active Sovrn Commerce fallback via /r/national_funding_med)"
+          "correspondence_status": "Pending Impact Campaign #15709 review"
         },
         "otr_solutions_factoring": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.otrsolutions.com/",
           "direct_url": "https://www.otrsolutions.com/",
@@ -836,13 +1071,10 @@
           "category": "CORPORATE_FINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$450",
-          "correspondence_status": "Application Submitted, Qualification Questionnaire Answered in Full & Confirmed Under Internal Review (Completed Become a Partner form at https://otrsolutions.com/become-a-partner/ via FormAssembly processor https://otrassessment.tfaforms.net/api_v2/workflow/processor [tfa_dbFormId=23, tfa_dbVersionId=37] on 2026-10-16T22:50Z and re-verified on 2026-10-23 + confirmation email Sent #250 to wade.fenton@otrsolutions.com per Inbox #983 & #984 + replied to Wade Fenton's Inbox #998 on 2026-10-19T16:25:21Z + answered all 7 qualification questions from Inbox #1005 via Sent #278 on 2026-10-20T17:34:43Z + Wade Fenton confirmed in Inbox #1030 on 2026-10-26T11:10:52Z that OTR Solutions is reviewing internally; Invoice Simple #24994 declined in Inbox #1025 on 2026-10-23; edge route /r/otr_solutions_factoring actively upgrades to approved Ramp Impact #51436 contract https://join.ramp.com/c/7932737/3981015/51436)",
-          "active_fallback_merchant": "mercury",
-          "active_fallback_url": "https://mercury.com/r/profithelm-llc",
-          "active_fallback_payout": "$250 referral bonus + Sovrn Commerce /r/otr_solutions_factoring"
+          "correspondence_status": "Under internal review by OTR Solutions (Inbox #1030)"
         },
         "freightos_marketplace": {
-          "status": "awaiting_response",
+          "status": "pending",
           "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.freightos.com/",
           "direct_url": "https://www.freightos.com/",
@@ -850,7 +1082,7 @@
           "category": "CUSTOMS_TRADE_FINANCE",
           "network": "Impact.com",
           "bounty": "$50-$200",
-          "correspondence_status": "Application Submitted (Completed partner/referral inquiry form at https://www.freightos.com/contact-us/ via https://www.freightos.com/partners/ on 2026-10-16T22:50Z; confirmed with \"Thanks for contacting us! We will get in touch with you shortly.\"; Impact Invoice Simple #24994 IO #325053 also submitted on 2026-10-17T07:30Z with pendAdvContracts transition 6 -> 7)"
+          "correspondence_status": "Partner inquiry submitted on freightos.com/partners"
         }
       }
     },
@@ -862,35 +1094,37 @@
       "categories": {
         "STUDENT_LOAN_REFINANCE": {
           "primary_partner": "splash_financial",
-          "fallback_partner": "sofi",
+          "fallback_partner": "lendkey",
           "direct_url": "https://www.splashfinancial.com/",
-          "status": "live",
+          "status": "pending",
           "bounty": "$300"
         },
         "STUDENT_LOAN_COMPARISON": {
           "primary_partner": "credible",
-          "fallback_partner": "earnest",
-          "direct_url": "https://www.credible.com/",
-          "status": "live",
+          "fallback_partner": "splash_financial",
+          "direct_url": "https://www.credible.com/refinance-student-loans",
+          "status": "pending",
           "bounty": "$75-$150"
         }
       },
       "roster_tiers": {
-        "live_revenue_ready": [
+        "live_revenue_ready": [],
+        "answered_action_required": [],
+        "awaiting_vendor_response": [
           "splash_financial",
-          "sofi",
           "credible",
-          "earnest",
           "lendkey"
         ],
-        "answered_action_required": [],
-        "awaiting_vendor_response": [],
+        "declined": [
+          "sofi",
+          "earnest"
+        ],
         "unapplied_expansion_queue": []
       },
       "partners": {
         "splash_financial": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.splashfinancial.com/",
           "direct_url": "https://www.splashfinancial.com/",
           "edge_route": "/r/splash_financial",
@@ -900,29 +1134,29 @@
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Splash-Financial.brand",
           "bounty": "$300",
           "gate_1_verified_payout": "$300.00 USD per SLR Closed Loan",
-          "correspondence_status": "Live Lending Marketplace & Impact Application Confirmed (Impact Campaign #9516 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 4 -> 5 + direct follow-up Sent #247 & #258 to contact@splashfinancial.com + publisher intro Sent #272 to pleimkuehler@splashfinancial.com; verified Insertion Order payout $300.00 USD per Closed Loan passes Gate 1 >= $45; active outbound route /r/splash_financial)",
+          "correspondence_status": "Pending Impact Campaign #9516 review (Sent #247, #258, #272)",
           "contract_status": "pending_impact_review"
         },
         "sofi": {
           "status": "declined",
-          "pipeline_tier": "no_approved_contract",
-          "url": "https://www.sofi.com/",
-          "direct_url": "https://www.sofi.com/",
+          "pipeline_tier": "declined",
+          "url": "https://www.sofi.com/refinance-student-loan/",
+          "direct_url": "https://www.sofi.com/refinance-student-loan/",
           "edge_route": "/r/sofi",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "Impact.com",
           "bounty": "$120",
           "gate_1_verified_payout": "$120.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Lending Destination & Impact Correspondence Reconciled (Inbox #988 on 2026-10-17T06:01Z from notifications@app.impact.com confirming application to SoFi Campaign #11190 / #8084 on Account 7932737 + publisher intro Sent #273 to cfels@lqdigital.com & Sent #275 to affiliates@sofi.com + Impact campaign request declined in Inbox #1031 on 2026-10-26T13:11:59Z; covered on Prexvo by first-party $39 Refinance & Amortization Decision Audit Stripe checkout plus pending Splash Financial #9516 and LendKey #3276 contracts; passes Gate 1 >= $45; active outbound route /r/sofi)",
+          "correspondence_status": "Declined on Impact Campaign #11190 in Inbox #1031 on 2026-10-26",
           "campaign_id": "11190",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/SoFi.brand",
           "contract_status": "declined_impact"
         },
         "credible": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
-          "url": "https://www.credible.com/",
-          "direct_url": "https://www.credible.com/",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.credible.com/refinance-student-loans",
+          "direct_url": "https://www.credible.com/refinance-student-loans",
           "edge_route": "/r/credible",
           "category": "STUDENT_LOAN_COMPARISON",
           "network": "Impact.com",
@@ -931,34 +1165,34 @@
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/Credible.brand",
           "bounty": "$75-$150",
           "gate_1_verified_payout": "$75.00 USD per Closed Loan - Refinancing",
-          "correspondence_status": "Live Multi-Lender Marketplace & Impact Application Submitted (Impact Campaign #3874 IO #25024 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 5 -> 6; absent from Impact Sent Invites on 2026-10-20 and awaiting marketplace re-verification; verified Insertion Order payout $75.00 USD per Closed Loan - Refinancing passes Gate 1 >= $45; active outbound route /r/credible)",
+          "correspondence_status": "Pending Impact Campaign #3874 review",
           "contract_status": "pending_impact_review"
         },
         "earnest": {
           "status": "declined",
-          "pipeline_tier": "no_approved_contract",
-          "url": "https://www.earnest.com/",
-          "direct_url": "https://www.earnest.com/",
+          "pipeline_tier": "declined",
+          "url": "https://www.earnest.com/student-loan-refinancing",
+          "direct_url": "https://www.earnest.com/student-loan-refinancing",
           "edge_route": "/r/earnest",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "In-House Direct",
           "bounty": "$150-$200",
           "gate_1_verified_payout": "$150.00-$200.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Custom-Term Lending Marketplace & Direct Partner Application Submitted (Impact Campaign #11739 declined per Inbox #994 on 2026-10-17; completed https://www.earnest.com/partner-sign-up on 2026-10-16T22:50Z with \"Success - Form submitted successfully.\"; covered on Prexvo by primary Splash Financial #9516 / SoFi #11190 / LendKey #3276; passes Gate 1 >= $45; active outbound route /r/earnest)",
+          "correspondence_status": "Declined on Impact Campaign #11739 in Inbox #994 on 2026-10-17",
           "direct_apply_url": "https://www.earnest.com/partner-sign-up",
           "contract_status": "declined_impact"
         },
         "lendkey": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
-          "url": "https://www.lendkey.com/",
-          "direct_url": "https://www.lendkey.com/",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.lendkey.com/student-loan-refinancing/",
+          "direct_url": "https://www.lendkey.com/student-loan-refinancing/",
           "edge_route": "/r/lendkey",
           "category": "STUDENT_LOAN_REFINANCE",
           "network": "Impact.com",
           "bounty": "$100-$150",
           "gate_1_verified_payout": "$100.00-$150.00 USD per Funded Refinance Loan",
-          "correspondence_status": "Live Credit Union & Community Bank Lending Marketplace & Impact Application Confirmed (Impact Campaign #3276 IO #20978 submitted via e1s1 promo-signup on 2026-10-17T07:30Z with verified pendAdvContracts transition 7 -> 8 + publisher intro Sent #274 to accounting@lendkey.com; passes Gate 1 >= $45; active outbound route /r/lendkey)",
+          "correspondence_status": "Pending Impact Campaign #3276 review (Sent #274)",
           "campaign_id": "3276",
           "applied_io_id": "20978",
           "direct_apply_url": "https://app.impact.com/campaign-promo-signup/LendKey.brand",
@@ -976,26 +1210,28 @@
           "primary_partner": "vanta_security",
           "fallback_partner": "drata_compliance",
           "direct_url": "https://www.vanta.com/products/soc-2",
-          "status": "live",
+          "status": "pending",
           "bounty": "$350"
         },
         "BUNDLED_GRC_ATTESTATION": {
           "primary_partner": "thoropass_audit",
           "fallback_partner": "sprinto_compliance",
           "direct_url": "https://www.thoropass.com/solutions",
-          "status": "live",
+          "status": "pending",
           "bounty": "$325"
         },
         "CYBER_LIABILITY_AND_PENTEST": {
           "primary_partner": "coalition_cyber_insurance",
           "fallback_partner": "cobalt_pentest",
           "direct_url": "https://www.coalitioninc.com/cyber-insurance",
-          "status": "live",
+          "status": "pending",
           "bounty": "$250-$275"
         }
       },
       "roster_tiers": {
-        "live_revenue_ready": [
+        "live_revenue_ready": [],
+        "answered_action_required": [],
+        "awaiting_vendor_response": [
           "vanta_security",
           "drata_compliance",
           "sprinto_compliance",
@@ -1003,81 +1239,199 @@
           "coalition_cyber_insurance",
           "cobalt_pentest"
         ],
-        "answered_action_required": [],
-        "awaiting_vendor_response": [],
+        "declined": [],
         "unapplied_expansion_queue": []
       },
       "partners": {
         "vanta_security": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.vanta.com/products/soc-2",
           "direct_url": "https://www.vanta.com/products/soc-2",
           "edge_route": "/r/vanta_security",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
           "bounty": "$350",
-          "correspondence_status": "Live Enterprise GRC Automation Destination (/r/vanta_security)",
+          "correspondence_status": "Pending GRC partner program onboarding (/r/vanta_security)",
           "contract_status": "no_approved_contract"
         },
         "drata_compliance": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://drata.com/",
           "direct_url": "https://drata.com/",
           "edge_route": "/r/drata_compliance",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
           "bounty": "$300",
-          "correspondence_status": "Live Continuous GRC & CMMC/SOC 2 Destination (/r/drata_compliance)",
+          "correspondence_status": "Pending GRC partner program onboarding (/r/drata_compliance)",
           "contract_status": "no_approved_contract"
         },
         "sprinto_compliance": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://sprinto.com/",
           "direct_url": "https://sprinto.com/",
           "edge_route": "/r/sprinto_compliance",
           "category": "ENTERPRISE_GRC_AUTOMATION",
           "network": "PartnerStack",
           "bounty": "$225-$350",
-          "correspondence_status": "Live Cloud SaaS Compliance Automation Destination (/r/sprinto_compliance)",
+          "correspondence_status": "Pending GRC partner program onboarding (/r/sprinto_compliance)",
           "contract_status": "no_approved_contract"
         },
         "thoropass_audit": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.thoropass.com/solutions",
           "direct_url": "https://www.thoropass.com/solutions",
           "edge_route": "/r/thoropass_audit",
           "category": "BUNDLED_GRC_ATTESTATION",
           "network": "PartnerStack",
           "bounty": "$325",
-          "correspondence_status": "Live Integrated GRC + Licensed CPA/QSA Audit Destination (/r/thoropass_audit)",
+          "correspondence_status": "Pending GRC partner program onboarding (/r/thoropass_audit)",
           "contract_status": "no_approved_contract"
         },
         "coalition_cyber_insurance": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.coalitioninc.com/cyber-insurance",
           "direct_url": "https://www.coalitioninc.com/cyber-insurance",
           "edge_route": "/r/coalition_cyber_insurance",
           "category": "CYBER_LIABILITY_AND_PENTEST",
           "network": "Impact.com",
           "bounty": "$250",
-          "correspondence_status": "Live Active Cyber Liability & Breach Response Destination (/r/coalition_cyber_insurance)",
+          "correspondence_status": "Pending cyber insurance partner program onboarding (/r/coalition_cyber_insurance)",
           "contract_status": "no_approved_contract"
         },
         "cobalt_pentest": {
           "status": "pending",
-          "pipeline_tier": "no_approved_contract",
+          "pipeline_tier": "awaiting_vendor_response",
           "url": "https://www.cobalt.io/",
           "direct_url": "https://www.cobalt.io/",
           "edge_route": "/r/cobalt_pentest",
           "category": "CYBER_LIABILITY_AND_PENTEST",
           "network": "PartnerStack",
           "bounty": "$275",
-          "correspondence_status": "Live CREST & OSCP Offensive Security PtaaS Destination (/r/cobalt_pentest)",
+          "correspondence_status": "Pending PtaaS partner program onboarding (/r/cobalt_pentest)",
+          "contract_status": "no_approved_contract"
+        }
+      }
+    },
+    "lienbond": {
+      "name": "LienBond",
+      "property_id": "lienbond",
+      "fallback_enabled": false,
+      "default_fallback_url": "https://lienbond.com",
+      "categories": {
+        "CONTRACTOR_SURETY_BONDS": {
+          "primary_partner": "suretybonds_direct",
+          "fallback_partner": "simply_business",
+          "direct_url": "https://www.suretybondsdirect.com/",
+          "status": "pending",
+          "bounty": "$150-$225"
+        },
+        "WORKERS_COMP_INSURANCE": {
+          "primary_partner": "simply_business",
+          "fallback_partner": "thimble_contractor",
+          "direct_url": "https://www.simplybusiness.com/",
+          "status": "pending",
+          "bounty": "$160-$210"
+        },
+        "MECHANICS_LIEN_FILING": {
+          "primary_partner": "levelset_lien_filing",
+          "fallback_partner": "jobber_field_service",
+          "direct_url": "https://www.levelset.com/mechanics-lien/",
+          "status": "pending",
+          "bounty": "$165-$215"
+        }
+      },
+      "roster_tiers": {
+        "live_revenue_ready": [],
+        "answered_action_required": [],
+        "awaiting_vendor_response": [
+          "simply_business",
+          "suretybonds_direct",
+          "thimble_contractor",
+          "jobber_field_service",
+          "levelset_lien_filing"
+        ],
+        "declined": [
+          "next_insurance_b2b"
+        ],
+        "unapplied_expansion_queue": []
+      },
+      "partners": {
+        "simply_business": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.simplybusiness.com/",
+          "direct_url": "https://www.simplybusiness.com/",
+          "edge_route": "/r/simply_business",
+          "category": "WORKERS_COMP_INSURANCE",
+          "network": "Impact.com",
+          "bounty": "$160-$210",
+          "correspondence_status": "Pending Impact (#49719) & CJ (#5808859) review",
+          "contract_status": "no_approved_contract"
+        },
+        "suretybonds_direct": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.suretybondsdirect.com/",
+          "direct_url": "https://www.suretybondsdirect.com/",
+          "edge_route": "/r/suretybonds_direct",
+          "category": "CONTRACTOR_SURETY_BONDS",
+          "network": "In-House Direct",
+          "bounty": "$150-$225",
+          "correspondence_status": "Pending SuretyBondsDirect agency referral onboarding (never routed to LawDepot)",
+          "contract_status": "no_approved_contract"
+        },
+        "next_insurance_b2b": {
+          "status": "declined",
+          "pipeline_tier": "declined",
+          "url": "https://www.nextinsurance.com/",
+          "direct_url": "https://www.nextinsurance.com/",
+          "edge_route": "/r/next_insurance_b2b",
+          "category": "WORKERS_COMP_INSURANCE",
+          "network": "Impact.com",
+          "campaign_id": "14516",
+          "bounty": "$140-$180",
+          "correspondence_status": "Declined on Impact Campaign #14516 in Inbox #1009 on 2026-10-22",
+          "contract_status": "declined_impact"
+        },
+        "thimble_contractor": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.thimble.com/",
+          "direct_url": "https://www.thimble.com/",
+          "edge_route": "/r/thimble_contractor",
+          "category": "WORKERS_COMP_INSURANCE",
+          "network": "Impact.com",
+          "bounty": "$110-$145",
+          "correspondence_status": "Pending contractor insurance partner onboarding (/r/thimble_contractor)",
+          "contract_status": "no_approved_contract"
+        },
+        "jobber_field_service": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://getjobber.com/",
+          "direct_url": "https://getjobber.com/",
+          "edge_route": "/r/jobber_field_service",
+          "category": "MECHANICS_LIEN_FILING",
+          "network": "PartnerStack",
+          "bounty": "$150-$185",
+          "correspondence_status": "Pending contractor SaaS partner onboarding (/r/jobber_field_service)",
+          "contract_status": "no_approved_contract"
+        },
+        "levelset_lien_filing": {
+          "status": "pending",
+          "pipeline_tier": "awaiting_vendor_response",
+          "url": "https://www.levelset.com/mechanics-lien/",
+          "direct_url": "https://www.levelset.com/mechanics-lien/",
+          "edge_route": "/r/levelset_lien_filing",
+          "category": "MECHANICS_LIEN_FILING",
+          "network": "In-House Direct",
+          "bounty": "$165-$215",
+          "correspondence_status": "Pending mechanics lien partner onboarding (/r/levelset_lien_filing)",
           "contract_status": "no_approved_contract"
         }
       }

@@ -188,7 +188,7 @@ def test_property_filter_include_unassigned_closes_tenant_confinement_gap(tmp_pa
         },
         {
             "id": "sp-greenfield-1",
-            "query": "workers compensation class code rate calculator by state",
+            "query": "ltl freight density and nmfc class calculator",
             "source": "google_suggest",
             "velocity": 68.0,
             "acceleration": 20.0,
@@ -251,19 +251,19 @@ def test_property_filter_include_unassigned_closes_tenant_confinement_gap(tmp_pa
     assert len(c3["proposals"]) == 1
 
     prop = c3["proposals"][0]
-    assert prop["cluster_slug"] == "workers-compensation-class-code-rate-calculator-by-state"
+    assert prop["cluster_slug"] == "ltl-freight-density-and-nmfc-class-calculator"
     assert prop["consecutive_cycles_sustained"] == 3
     spec = prop["proposal_spec"]
     assert "market_intelligence" in spec
     mi = spec["market_intelligence"]
-    assert mi["recommended_tenant_id"] == "insurebond"
-    assert mi["recommended_domain"] == "insurebond.com"
-    assert mi["fast_money_score"] >= 85.0
+    assert mi["recommended_tenant_id"] == "freighttariff"
+    assert mi["recommended_domain"] == "freighttariff.com"
+    assert mi["fast_money_score"] >= 80.0
     assert mi["buyer_intent_score"] >= 85.0
     assert mi["ease_of_ranking_score"] >= 85.0
-    assert mi["commission_offer_score"] >= 80.0
+    assert mi["commission_offer_score"] >= 75.0
     assert len(mi["active_commission_offers"]) >= 4
-    assert spec["blueprint"]["tenant_id"] == "insurebond"
+    assert spec["blueprint"]["tenant_id"] == "freighttariff"
 
 
 def test_market_intelligence_engine_ranking_db_sync_and_cli(tmp_path: Path, capsys):

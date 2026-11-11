@@ -260,18 +260,20 @@ def test_environment_variable_overrides_master_keys(monkeypatch):
 
 
 def test_ipx1031_section_1031_calculator_route():
-    """Verifies that section-1031-calculator returns ipx1031 with start-an-exchange URL and required link attributes."""
+    """Verifies that section-1031-calculator routes to live approved ProfitHelm partners by default while explicit ipx1031 stays pending and brand-honest."""
     hub = MonetizationHub()
-    route = hub.get_route("profithelm", "section-1031-calculator")
+    live_route = hub.get_route("profithelm", "section-1031-calculator")
+    assert live_route["partner"] in ("xendoo", "lawdepot")
+    assert live_route["status"] == "live"
+    assert live_route["rel"] == "noopener sponsored nofollow"
+    assert live_route["target"] == "_blank"
 
-    expected_url = (
-        "https://www.ipx1031.com/start-an-exchange/"
-        "?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator"
-    )
-    assert route["partner"] == "ipx1031"
-    assert route["url"] == expected_url
-    assert route["rel"] == "noopener sponsored nofollow"
-    assert route["target"] == "_blank"
+    ipx_route = hub.get_route("profithelm", "section-1031-calculator", partner_key="ipx1031")
+    assert ipx_route["partner"] == "ipx1031"
+    assert ipx_route["status"] == "pending"
+    assert "ipx1031.com" in ipx_route["url"]
+    assert ipx_route["rel"] == "noopener sponsored nofollow"
+    assert ipx_route["target"] == "_blank"
 
 
 def test_monetization_vault_atomic_save(tmp_path):
@@ -602,14 +604,18 @@ def test_merchant_coverage_and_yield_audit():
     report = hub.audit_merchant_coverage()
     assert report == audit_merchant_coverage_and_yield()
     assert report["status"] == "PASS"
-    assert report["non_paying_passthrough_count"] == 0
+    assert report["verified_paying_count"] == 13
+    assert report["non_paying_passthrough_count"] == 14
+    assert report["declined_suppressed_count"] == 2
     assert report["internal_loop_count"] == 0
-    assert report["verified_paying_count"] >= 45
+    assert report["violations"] == []
 
     px_report = audit_merchant_coverage_and_yield("prexvo")
     assert px_report["status"] == "PASS"
-    assert px_report["non_paying_passthrough_count"] == 0
+    assert px_report["non_paying_passthrough_count"] == 3
+    assert px_report["declined_suppressed_count"] == 2
     assert px_report["internal_loop_count"] == 0
+    assert px_report["violations"] == []
     # None of the 5 lenders has an approved affiliate contract (sofi/earnest declined, rest pending).
     assert px_report["verified_paying_count"] == 0
 
@@ -626,21 +632,22 @@ def test_edge_redirect_generation_profithelm_and_prexvo():
     ph_js = generate_edge_redirect_function("profithelm")
     assert 'defaultUrl: "https://coinledger.io/?fpr=arif-554004"' in ph_js
     assert 'defaultUrl: "https://mercury.com/r/profithelm-llc"' in ph_js
-    assert 'defaultUrl: "https://www.taxact.com/"' in ph_js
-    assert 'defaultUrl: "https://www.surepayroll.com/"' in ph_js
-    assert 'defaultUrl: "https://www.xendoo.com/?fp_ref=arif-4ac24e"' in ph_js
-    assert 'defaultUrl: "https://www.invoicesimple.com/"' in ph_js
-    assert 'defaultUrl: "https://dlpcapital.com/"' in ph_js
+    assert 'defaultUrl: "https://www.jdoqocy.com/click-101906407-11917161"' in ph_js
+    assert 'defaultUrl: "https://xendoo.pxf.io/c/7932737/1357375/16354"' in ph_js
+    assert 'defaultUrl: "https://join.ramp.com/c/7932737/3981015/51436"' in ph_js
+    assert 'defaultUrl: "https://www.jdoqocy.com/click-101906407-16985242"' in ph_js
     assert 'defaultUrl: "https://kalshi.pxf.io/c/7932737/3078072/37770"' in ph_js
+    assert "101725461" not in ph_js
 
     px_js = generate_edge_redirect_function("prexvo")
     assert 'defaultUrl: "https://www.splashfinancial.com/"' in px_js
     assert 'defaultUrl: "https://www.sofi.com/"' in px_js
-    assert 'defaultUrl: "https://www.credible.com/"' in px_js
+    assert 'defaultUrl: "https://www.credible.com/' in px_js
     assert 'defaultUrl: "https://www.earnest.com/"' in px_js
-    assert 'defaultUrl: "https://www.lendkey.com/"' in px_js
-    assert 'defaultUrl: "https://www.sofi.com/refinance-student-loan/"' in px_js
-    assert 'status: "live"' in px_js
+    assert 'defaultUrl: "https://www.lendkey.com/' in px_js
+    assert 'status: "declined"' in px_js
+    assert 'status: "pending"' in px_js
+    assert 'status: "live"' not in px_js
     assert 'status: "pending_p2"' not in px_js
 
 
@@ -661,14 +668,14 @@ def test_callout_destination_message_match_audit(tmp_path):
     assert px_match["status"] == "PASS", f"Prexvo message-match mismatches: {px_match['mismatches']}"
     assert px_match["mismatch_count"] == 0
 
-    # Negative check: stale replaced brand copy inside rendered HTML must fail closed until normalized
+    # Negative check: cross-brand bait-and-switch copy inside rendered HTML must fail closed until normalized
     stale_html = """<!DOCTYPE html>
 <html><body>
   <div class="calculator-grid">Calculator</div>
   <section class="affiliates-section">
     <div class="card">
-      <h3>Crest Capital Equipment Financing</h3>
-      <a href="/r/crest_capital" class="btn-cta">Finance Section 179 Equipment with Crest Capital</a>
+      <h3>Xendoo Section 179 Accounting</h3>
+      <a href="/r/crest_capital" class="btn-cta">Optimize Section 179 Accounting with Xendoo</a>
     </div>
   </section>
   <section class="faq-section">FAQ</section>
@@ -684,7 +691,8 @@ def test_callout_destination_message_match_audit(tmp_path):
 
     repaired_html = normalize_html_callout_message_match(stale_html, property_id="profithelm")
     assert "Xendoo" in repaired_html
-    assert "Crest Capital" not in repaired_html
+    assert "/r/xendoo" in repaired_html
+    assert '<a href="/r/crest_capital" class="btn-cta">Optimize Section 179 Accounting with Xendoo</a>' not in repaired_html
     sample_page.write_text(repaired_html, encoding="utf-8")
 
     pass_audit = audit_callout_destination_message_match(dist_dir=str(tmp_path), property_id="profithelm")
@@ -709,8 +717,10 @@ def test_callout_expansion_for_prexvo_and_profithelm_approved_partners():
   </section>
 </body></html>"""
     expanded_prexvo = normalize_html_callout_message_match(prexvo_single_partner_html, property_id="prexvo")
-    for route in ("/r/splash_financial", "/r/sofi", "/r/credible", "/r/earnest", "/r/lendkey"):
+    for route in ("/r/splash_financial", "/r/credible", "/r/lendkey"):
         assert route in expanded_prexvo, f"Expected {route} in expanded Prexvo callout section"
+    assert "/r/sofi" not in expanded_prexvo
+    assert "/r/earnest" not in expanded_prexvo
 
     # Restricted public-service pages must never receive commercial partner cards
     restricted_prexvo_html = prexvo_single_partner_html.replace(
@@ -804,16 +814,17 @@ def test_visitor_journey_cta_placement_and_live_first_ordering():
     r_179 = re.findall(r'href="/r/([a-z0-9_]+)', norm_179)
     assert "kalshi" not in r_179
     assert "national_funding_med" not in r_179
-    assert r_179[0] == "crest_capital"
-    assert r_179[1] == "crest_capital"
-    assert r_179.index("crest_capital") < r_179.index("mercury") < r_179.index("rippling")
+    assert "crest_capital" not in r_179
+    assert r_179[0] == "xendoo"
+    assert r_179[1] == "xendoo"
+    assert "mercury" in r_179
     assert "source_tool=equipment-lease-vs-buy-section-179-calculator" in norm_179
     assert "subid=equipment-lease-vs-buy-section-179-calculator_inline" in norm_179
     assert 'data-tool="equipment-lease-vs-buy-section-179-calculator"' in norm_179
 
 
 def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
-    """Verifies Xendoo FirstPromoter direct routing, general tax bracket CTA alignment, and GSC traffic-weighted revenue ranking."""
+    """Verifies Xendoo Impact direct routing, general tax bracket CTA alignment, and GSC traffic-weighted revenue ranking."""
     import re
     from pseofactory.affiliates import (
         estimate_partner_approval_revenue_impact,
@@ -822,7 +833,7 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     from pseofactory.edge import generate_edge_redirect_function
 
     ph_js = generate_edge_redirect_function("profithelm")
-    assert 'defaultUrl: "https://www.xendoo.com/?fp_ref=arif-4ac24e"' in ph_js
+    assert 'defaultUrl: "https://xendoo.pxf.io/c/7932737/1357375/16354"' in ph_js
 
     tax_bracket_html = """<!DOCTYPE html>
 <html><head><title>2027 California Tax Brackets & Marginal Tax Calculator</title></head><body>
@@ -844,10 +855,8 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert "koinly" not in r_tax
     assert "turbotax" not in r_tax
     assert "taxslayer" not in r_tax
-    assert r_tax[0] == "crest_capital"
-    assert r_tax[1] == "crest_capital"
-    assert r_tax.index("crest_capital") < r_tax.index("rippling") < r_tax.index("mercury")
-    assert 'data-partner="crest_capital" data-status="live"' in norm_tax
+    assert r_tax[0] in ("efile_com", "eztaxreturn_com", "freetaxusa", "xendoo")
+    assert 'data-status="live"' in norm_tax
     assert 'data-status="pending"' not in norm_tax
 
     imp_turbotax = estimate_partner_approval_revenue_impact("profithelm", "turbotax")
@@ -861,7 +870,7 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert imp_taxslayer["estimated_monthly_revenue_impact_usd"] > imp_exeter["estimated_monthly_revenue_impact_usd"]
     assert imp_exeter["estimated_monthly_revenue_impact_usd"] > imp_surety["estimated_monthly_revenue_impact_usd"]
 
-    # Verify #gsc-striking-overlay on tax bracket pages upgrades pending taxslayer to live crest_capital (Xendoo)
+    # Verify #gsc-striking-overlay on tax bracket pages upgrades pending taxslayer to live approved efile_com
     tax_overlay_html = """<!DOCTYPE html>
 <html><head><title>2027 IRS Tax Brackets & TCJA Sunset Calculator</title></head><body>
   <aside class="quick-answer">
@@ -877,14 +886,11 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
   </div>
 </body></html>"""
     norm_overlay = normalize_html_callout_message_match(tax_overlay_html, property_id="profithelm")
-    assert 'data-partner="crest_capital"' in norm_overlay
+    assert 'data-partner="efile_com"' in norm_overlay
     assert 'data-status="live"' in norm_overlay
-    assert 'data-partner-url="https://www.xendoo.com/?fp_ref=arif-4ac24e"' in norm_overlay
-    assert 'href="/r/crest_capital' in norm_overlay
-    assert (
-        "Lower Your 2027 Federal &amp; State Tax Bill with Xendoo CPA" in norm_overlay
-        or "Optimize Section 179 Accounting with Xendoo" in norm_overlay
-    )
+    assert 'data-partner-url="https://www.jdoqocy.com/click-101906407-11917161' in norm_overlay
+    assert 'href="/r/efile_com' in norm_overlay
+    assert "E-file.com" in norm_overlay
 
 
 def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
@@ -892,7 +898,7 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
     import re
     from pseofactory.affiliates import normalize_html_callout_message_match
 
-    # 1. Section 1031 state spoke routes to live Qualified Intermediary ipx1031 first (inline, card #1, and overlay), followed by crest_capital and mercury
+    # 1. Section 1031 state spoke upgrades uncontracted ipx1031/exeter1031/first_american to live approved sponsors (xendoo, lawdepot, mercury)
     sec1031_html = """<!DOCTYPE html>
 <html><head><title>Alabama 1031 Exchange Calculator</title><link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/alabama/" /></head><body>
   <div class="calculator-grid">
@@ -914,7 +920,10 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
 </body></html>"""
     norm_1031 = normalize_html_callout_message_match(sec1031_html, property_id="profithelm")
     r_1031 = re.findall(r'href="/r/([a-z0-9_]+)', norm_1031)
-    assert r_1031 == ["ipx1031", "ipx1031", "crest_capital", "mercury", "ipx1031"]
+    assert "ipx1031" not in r_1031
+    assert "exeter1031" not in r_1031
+    assert "first_american" not in r_1031
+    assert r_1031[0] in ("lawdepot", "xendoo")
     assert 'data-status="pending"' not in norm_1031
     assert "source_tool=section-1031-calculator-alabama" in norm_1031
     assert "subid=section-1031-calculator-alabama_inline" in norm_1031
@@ -1006,6 +1015,7 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       // Test A: ProfitHelm /r/kalshi with HTML-encoded &amp; query params and PROFITHELM_LEADS KV fallback
       const leadsKV = {{}};
       const phEnv = {{
+        TELEMETRY_EXPORT_SECRET: "tel_sec",
         PROFITHELM_LEADS: {{
           put: async (k, v) => {{ leadsKV[k] = v; }},
           list: async (opts) => ({{
@@ -1044,9 +1054,15 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       if (cjLoc.searchParams.get("sid") !== "irs-2027-tax-brackets_partner_card_1") process.exit(22);
       if (cjLoc.searchParams.get("subid") !== "irs-2027-tax-brackets_partner_card_1") process.exit(23);
 
-      // Verify server-side edge clicks were persisted to PROFITHELM_LEADS KV and are returned by GET /api/telemetry
-      const getPhRes = await phTelemetry.onRequestGet({{
+      // Verify unauthenticated GET /api/telemetry fails closed (401), while authenticated GET returns persisted events
+      const unauthPhRes = await phTelemetry.onRequestGet({{
         request: new Request("https://profithelm.com/api/telemetry"),
+        env: phEnv
+      }});
+      if (unauthPhRes.status !== 401) process.exit(29);
+
+      const getPhRes = await phTelemetry.onRequestGet({{
+        request: new Request("https://profithelm.com/api/telemetry", {{ headers: {{ "x-telemetry-secret": "tel_sec" }} }}),
         env: phEnv
       }});
       const getPhData = await getPhRes.json();
@@ -1056,10 +1072,11 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
 
       // Test C: Prexvo /r/splash_financial + POST /api/telemetry without KV binding uses in-isolate buffer
       globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+      const pxEnv = {{ TELEMETRY_EXPORT_SECRET: "tel_sec" }};
       const pxReq = new Request("https://prexvo.com/r/splash_financial?source_tool=student-loan-repayment-calculator&amp;cta_slot=calculator_result_inline&amp;ph_tier=high_balance");
       const pxRes = await pxRedirect.onRequest({{
         request: pxReq,
-        env: {{}},
+        env: pxEnv,
         params: {{ partner: "splash_financial" }}
       }});
       if (pxRes.status !== 302) process.exit(40);
@@ -1082,13 +1099,13 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
           value_tier: "standard"
         }})
       }});
-      const beaconRes = await pxTelemetry.onRequestPost({{ request: beaconReq, env: {{}} }});
+      const beaconRes = await pxTelemetry.onRequestPost({{ request: beaconReq, env: pxEnv }});
       const beaconData = await beaconRes.json();
       if (!beaconData.ok || beaconData.partner_key !== "sofi") process.exit(44);
 
       const getPxRes = await pxTelemetry.onRequestGet({{
-        request: new Request("https://prexvo.com/api/telemetry"),
-        env: {{}}
+        request: new Request("https://prexvo.com/api/telemetry", {{ headers: {{ "x-telemetry-secret": "tel_sec" }} }}),
+        env: pxEnv
       }});
       const getPxData = await getPxRes.json();
       if (!getPxData.ok || getPxData.count !== 2) process.exit(45);
@@ -1151,49 +1168,81 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
     (async () => {{
       const phRedirect = await import({json.dumps(ph_r.as_uri())});
 
-      // 1. crest_capital -> Impact Xendoo #16354 ($500 CPA)
+      // 1. xendoo -> Impact Xendoo #16354 ($500 CPA), while uncontracted crest_capital stays native
+      const xendooRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/xendoo?source_tool=equipment-lease-calculator&cta_slot=calculator_result_inline&subid=equipment-lease-calculator_inline&ph_tier=enterprise"),
+        env: {{}},
+        params: {{ partner: "xendoo" }}
+      }});
+      if (xendooRes.status !== 302) process.exit(10);
+      const xendooLoc = new URL(xendooRes.headers.get("Location"));
+      if (xendooLoc.hostname !== "xendoo.pxf.io" || !xendooLoc.pathname.includes("/16354")) process.exit(11);
+      if (xendooLoc.searchParams.get("subId1") !== "equipment-lease-calculator_inline") process.exit(12);
+      if (xendooLoc.searchParams.get("sharedid") !== "equipment-lease-calculator") process.exit(13);
+      if (xendooRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(14);
+
       const crestRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=calculator_result_inline&subid=equipment-lease-calculator_inline&ph_tier=enterprise"),
+        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=partner_card_2"),
         env: {{}},
         params: {{ partner: "crest_capital" }}
       }});
-      if (crestRes.status !== 302) process.exit(10);
       const crestLoc = new URL(crestRes.headers.get("Location"));
-      if (crestLoc.hostname !== "xendoo.pxf.io" || !crestLoc.pathname.includes("/16354")) process.exit(11);
-      if (crestLoc.searchParams.get("subId1") !== "equipment-lease-calculator_inline") process.exit(12);
-      if (crestLoc.searchParams.get("sharedid") !== "equipment-lease-calculator") process.exit(13);
-      if (crestRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(14);
+      if (!crestLoc.hostname.endsWith("crestcapital.com") || crestRes.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") process.exit(15);
 
-      // 2. turbotax -> CJ E-file.com #4355234 (30%-40% commission)
+      // 2. efile_com -> CJ E-file.com #4355234 (PID 101906407), while uncontracted turbotax stays native
+      const efRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/efile_com?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_1"),
+        env: {{}},
+        params: {{ partner: "efile_com" }}
+      }});
+      const efLoc = new URL(efRes.headers.get("Location"));
+      if (efLoc.hostname !== "www.jdoqocy.com" || !efLoc.pathname.includes("click-101906407-11917161")) process.exit(20);
+      if (efLoc.searchParams.get("sid") !== "irs-2027-tax-brackets-tcja-sunset-calculator_partner_card_1") process.exit(21);
+      if (efRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(22);
+
       const ttRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_1"),
+        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_2"),
         env: {{}},
         params: {{ partner: "turbotax" }}
       }});
       const ttLoc = new URL(ttRes.headers.get("Location"));
-      if (ttLoc.hostname !== "www.jdoqocy.com" || !ttLoc.pathname.includes("click-101906407-11917161")) process.exit(20);
-      if (ttLoc.searchParams.get("sid") !== "irs-2027-tax-brackets-tcja-sunset-calculator_partner_card_1") process.exit(21);
-      if (ttRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(22);
+      if (!ttLoc.hostname.endsWith("intuit.com") || ttRes.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") process.exit(23);
 
-      // 3. taxslayer -> CJ ezTaxReturn.com #6874782 (15% commission)
+      // 3. eztaxreturn_com -> CJ ezTaxReturn.com #6874782 (PID 101906407), while uncontracted taxslayer stays native
+      const ezRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/eztaxreturn_com?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_2"),
+        env: {{}},
+        params: {{ partner: "eztaxreturn_com" }}
+      }});
+      const ezLoc = new URL(ezRes.headers.get("Location"));
+      if (ezLoc.hostname !== "www.dpbolvw.net" || !ezLoc.pathname.includes("click-101906407-15704796")) process.exit(30);
+      if (ezLoc.searchParams.get("sid") !== "california-tax-brackets-calculator_partner_card_2") process.exit(31);
+
       const tsRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_2"),
+        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_3"),
         env: {{}},
         params: {{ partner: "taxslayer" }}
       }});
       const tsLoc = new URL(tsRes.headers.get("Location"));
-      if (tsLoc.hostname !== "www.dpbolvw.net" || !tsLoc.pathname.includes("click-101906407-15704796")) process.exit(30);
-      if (tsLoc.searchParams.get("sid") !== "california-tax-brackets-calculator_partner_card_2") process.exit(31);
+      if (!tsLoc.hostname.endsWith("taxslayer.com") || tsRes.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") process.exit(32);
 
-      // 4. suretybonds_direct -> CJ LawDepot #4544498 (30% + $6.50 Free Trial)
+      // 4. lawdepot -> CJ LawDepot #4544498 (PID 101906407), while uncontracted suretybonds_direct stays native
+      const ldRes = await phRedirect.onRequest({{
+        request: new Request("https://profithelm.com/r/lawdepot?source_tool=section-1031-calculator&cta_slot=partner_card_1"),
+        env: {{}},
+        params: {{ partner: "lawdepot" }}
+      }});
+      const ldLoc = new URL(ldRes.headers.get("Location"));
+      if (ldLoc.hostname !== "www.jdoqocy.com" || !ldLoc.pathname.includes("click-101906407-16985242")) process.exit(40);
+      if (ldLoc.searchParams.get("sid") !== "section-1031-calculator_partner_card_1") process.exit(41);
+
       const sbRes = await phRedirect.onRequest({{
         request: new Request("https://profithelm.com/r/suretybonds_direct?source_tool=contractor-surety-bond-cost-calculator&cta_slot=partner_card_1"),
         env: {{}},
         params: {{ partner: "suretybonds_direct" }}
       }});
       const sbLoc = new URL(sbRes.headers.get("Location"));
-      if (sbLoc.hostname !== "www.jdoqocy.com" || !sbLoc.pathname.includes("click-101906407-16985242")) process.exit(40);
-      if (sbLoc.searchParams.get("sid") !== "contractor-surety-bond-cost-calculator_partner_card_1") process.exit(41);
+      if (!sbLoc.hostname.endsWith("suretybondsdirect.com") || sbRes.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") process.exit(42);
 
       // 5. ipx1031 must stay on the 1031 qualified intermediary (never Xendoo bookkeeping)
       const ipxDirectRes = await phRedirect.onRequest({{
@@ -1212,7 +1261,8 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
         params: {{ partner: "ipx1031" }}
       }});
       const ipxLoc = new URL(ipxRes.headers.get("Location"));
-      if (ipxLoc.hostname === "redirect.viglink.com" || !ipxLoc.hostname.endsWith("ipx1031.com")) process.exit(50);
+      const ipxWrappedTarget = ipxLoc.hostname === "redirect.viglink.com" ? new URL(ipxLoc.searchParams.get("u")) : ipxLoc;
+      if (ipxWrappedTarget.hostname.includes("dlpcapital") || !ipxWrappedTarget.hostname.endsWith("ipx1031.com")) process.exit(50);
 
       process.exit(0);
     }})().catch(err => {{ console.error(err); process.exit(99); }});
@@ -1220,7 +1270,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
     proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, f"Direct contract upgrade Node test failed (exit {proc.returncode}): {proc.stderr}"
 
-    # Verify Section 174 R&D calculator aligns inline, card 1, and overlay to crest_capital ($500 CPA) then rippling ($600-$1,600 CPA)
+    # Verify Section 174 R&D calculator aligns inline, card 1, and overlay to live approved rippling and xendoo
     sec174_html = """<!DOCTYPE html>
 <html><head><title>R&D Tax Credit & Section 174 Amortization Calculator</title><link rel="canonical" href="https://profithelm.com/tools/r-and-d-tax-credit-section-174-amortization-calculator/" /></head><body>
   <div class="calculator-grid">
@@ -1239,9 +1289,11 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 </body></html>"""
     norm_174 = normalize_html_callout_message_match(sec174_html, property_id="profithelm")
     r_174 = re.findall(r'href="/r/([a-z0-9_]+)', norm_174)
-    assert r_174 == ["crest_capital", "crest_capital", "rippling", "mercury", "crest_capital"]
+    assert "crest_capital" not in r_174
+    assert r_174[0] in ("rippling", "xendoo")
+    assert "xendoo" in r_174 and "rippling" in r_174 and ("ramp" in r_174 or "mercury" in r_174)
 
-    # Verify B2B commercial calculators prioritize rippling ($600-$1,600 CPA) then crest_capital ($500 CPA) ahead of mercury ($250 CPA)
+    # Verify B2B commercial calculators prioritize live approved xendoo, ramp, rippling, and mercury
     b2b_html = """<!DOCTYPE html>
 <html><head><title>Invoice Factoring vs Business Line of Credit Calculator</title><link rel="canonical" href="https://profithelm.com/tools/invoice-factoring-vs-business-line-of-credit-calculator/" /></head><body>
   <div class="calculator-grid">
@@ -1260,9 +1312,11 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 </body></html>"""
     norm_b2b = normalize_html_callout_message_match(b2b_html, property_id="profithelm")
     r_b2b = re.findall(r'href="/r/([a-z0-9_]+)', norm_b2b)
-    assert r_b2b == ["rippling", "rippling", "crest_capital", "mercury", "rippling"]
+    assert "crest_capital" not in r_b2b
+    assert r_b2b[0] in ("rippling", "xendoo")
+    assert "xendoo" in r_b2b and ("ramp" in r_b2b or "rippling" in r_b2b) and ("mercury" in r_b2b or "ramp" in r_b2b)
     assert INTENT_ROUTING_TABLE["workers-comp"][0] == "rippling"
-    assert INTENT_ROUTING_TABLE["invoice-factoring"][0] == "crest_capital"
+    assert INTENT_ROUTING_TABLE["invoice-factoring"][0] == "xendoo"
     assert INTENT_ROUTING_TABLE["tariff-landed-cost"][0] == "rippling"
 
 
@@ -1280,7 +1334,7 @@ def test_automatic_multi_company_partner_roster_binding_across_new_and_existing_
         ("profithelm", "pass-through-qbi-199a-phaseout-estimator", "irs section 199a qbi deduction tax filing calculator", "federal_state_tax_brackets", 3),
         ("profithelm", "municipal-bid-performance-bond-premium-calculator", "contractor performance surety bond cost calculator", "surety_bond_compliance", 3),
         ("profithelm", "fomc-rate-cut-event-contract-kelly-calculator", "kalshi fomc rate cut event contract probability kelly calculator", "prediction_market_event_contracts", 3),
-        ("prexvo", "medical-residency-private-student-loan-refinance-calculator", "private student loan refinance interest rate comparison calculator", "student_loan_refinancing", 5),
+        ("prexvo", "medical-residency-private-student-loan-refinance-calculator", "private student loan refinance interest rate comparison calculator", "student_loan_refinancing", 3),
     ]
 
     for prop_id, slug, query, expected_vertical, min_companies in greenfield_assets:
@@ -1678,8 +1732,8 @@ def test_all_five_partnership_models_and_greenfield_vertical_compiler_routing():
     observed_primary_models = {
         bind_asset_partner_roster("profithelm", "crypto-tax-calculator")["primary_partnership_model"],
         bind_asset_partner_roster("profithelm", "saas-runway-calculator")["primary_partnership_model"],
+        bind_asset_partner_roster("gainhelm", "soc-2-audit-cost-calculator")["primary_partnership_model"],
         bind_asset_partner_roster("profithelm", "section-1031-calculator")["primary_partnership_model"],
-        bind_asset_partner_roster("profithelm", "section-179-calculator")["primary_partnership_model"],
         bind_asset_partner_roster("profithelm", "prediction-market-kalshi-fees")["primary_partnership_model"],
     }
     assert observed_primary_models == {

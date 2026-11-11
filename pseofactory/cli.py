@@ -214,7 +214,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
     if property_id == "all":
         all_passed = True
         reports_dict: Dict[str, Any] = {}
-        for p_id in CANONICAL_TENANT_IDS:
+        all_tenant_ids = list(dict.fromkeys(list(CANONICAL_TENANT_IDS) + ["lienbond"]))
+        for p_id in all_tenant_ids:
             adp = reg.get_adapter(p_id)
             rep = audit_property_assets(
                 property_id=p_id,
@@ -1396,6 +1397,7 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                         ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
                         ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
                         ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
+                        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond")),
                     ):
                         if repo_p.is_dir():
                             try:
@@ -1414,7 +1416,7 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                 if args.json:
                     print(json.dumps(auto_report, indent=2))
                 else:
-                    print("Autonomous Monetization Sync Complete [profithelm, prexvo, gainhelm]")
+                    print("Autonomous Monetization Sync Complete [profithelm, prexvo, gainhelm, lienbond]")
                     print(f"  Status:           {lifecycle_rep.get('status')}")
                     print(f"  Messages Polled:  {lifecycle_rep.get('ingested_messages_count')}")
                     print(f"  Classifications:  {lifecycle_rep.get('classifications_count')}")
@@ -1465,7 +1467,7 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
 
 def cmd_partner_sync(args: argparse.Namespace) -> int:
     """
-    Executes automated email checking across zoho and personal inboxes,
+    Executes automated email checking via Zoho Himalaya (arif.coskun@profithelm.com),
     reconciles partner applications, and routes operator action items.
     Zero em-dashes. Zero en-dashes.
     """
@@ -1491,10 +1493,13 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
             ph = dashboard.profithelm
             px = dashboard.prexvo
             gh = getattr(dashboard, "gainhelm", None)
+            lb = getattr(dashboard, "lienbond", None)
             print(f"  ProfitHelm Active Partners: {ph.active_partners_count} / {ph.total_registered_partners} (Direct Readiness: {ph.monetization_readiness_score}% | Production Ready: {ph.production_monetization_score}% | Live SKUs: {ph.sellable_assets_live_count})")
             print(f"  Prexvo Active Partners:     {px.active_partners_count} / {px.total_registered_partners} (Direct Readiness: {px.monetization_readiness_score}% | Production Ready: {px.production_monetization_score}% | Live SKUs: {px.sellable_assets_live_count})")
             if gh is not None:
                 print(f"  GainHelm Active Partners:   {gh.active_partners_count} / {gh.total_registered_partners} (Direct Readiness: {gh.monetization_readiness_score}% | Production Ready: {gh.production_monetization_score}% | Live SKUs: {gh.sellable_assets_live_count})")
+            if lb is not None:
+                print(f"  LienBond Active Partners:   {lb.active_partners_count} / {lb.total_registered_partners} (Direct Readiness: {lb.monetization_readiness_score}% | Production Ready: {lb.production_monetization_score}% | Live SKUs: {lb.sellable_assets_live_count})")
             pending_count = sum(1 for it in dashboard.all_action_items if it.status == "PENDING_OPERATOR")
             print(f"  Human Action Bus Items:     {pending_count} pending operator confirmation")
             prereq_st = (lifecycle_sync.get("publisher_prerequisites_and_compliance") or {}).get("status", "PASS")
@@ -1512,7 +1517,7 @@ def cmd_partner_sync(args: argparse.Namespace) -> int:
 
 def cmd_partner_status(args: argparse.Namespace) -> int:
     """
-    Displays actionable application status and monetization readiness across ProfitHelm and Prexvo.
+    Displays actionable application status and monetization readiness across ProfitHelm, Prexvo, GainHelm, and LienBond.
     Optionally exports the minimal modern light interface HTML.
     Zero em-dashes. Zero en-dashes.
     """
@@ -1535,7 +1540,7 @@ def cmd_partner_status(args: argparse.Namespace) -> int:
         if getattr(args, "json", False):
             res = dashboard.to_dict()
             prop_filter = getattr(args, "property", None)
-            if prop_filter:
+            if prop_filter and prop_filter.strip().lower() != "all":
                 p_clean = prop_filter.strip().lower()
                 res = res.get(p_clean, res)
             print(json.dumps(res, indent=2))
@@ -1549,6 +1554,8 @@ def cmd_partner_status(args: argparse.Namespace) -> int:
             reports.append(dashboard.prexvo)
         if (not prop_filter or prop_filter.lower() in ("all", "gainhelm")) and getattr(dashboard, "gainhelm", None) is not None:
             reports.append(dashboard.gainhelm)
+        if (not prop_filter or prop_filter.lower() in ("all", "lienbond")) and getattr(dashboard, "lienbond", None) is not None:
+            reports.append(dashboard.lienbond)
 
         for r in reports:
             print(f"=== {r.property_name} Production Monetization: {r.production_monetization_score}% [{r.autonomous_mode_status}] (Direct Affiliate Contracts: {r.monetization_readiness_score}%) ===")
@@ -1590,7 +1597,9 @@ def cmd_partner_action(args: argparse.Namespace) -> int:
     action_subcmd = getattr(args, "action_command", "list")
 
     if action_subcmd == "list":
-        pending = bus.get_pending_items(property_id=getattr(args, "property", None))
+        raw_prop = getattr(args, "property", None)
+        eff_prop = None if (not raw_prop or raw_prop.strip().lower() == "all") else raw_prop.strip().lower()
+        pending = bus.get_pending_items(property_id=eff_prop)
         if getattr(args, "json", False):
             print(json.dumps([it.to_dict() for it in pending], indent=2))
         else:
@@ -2164,13 +2173,13 @@ def build_parser() -> argparse.ArgumentParser:
     """Builds argument parser for pseofactory CLI commands."""
     parser = argparse.ArgumentParser(
         prog="pseofactory",
-        description="Unified Programmatic SEO Substrate for ProfitHelm, Prexvo, and GainHelm Software Factories",
+        description="Unified Programmatic SEO Substrate for ProfitHelm, Prexvo, GainHelm, and LienBond Software Factories",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # cycle
     p_cycle = subparsers.add_parser("cycle", help="Execute complete autonomous release cycle across property or fleet")
-    p_cycle.add_argument("--property", type=str, default=None, help="Optional property ID (profithelm, prexvo, gainhelm, or all)")
+    p_cycle.add_argument("--property", type=str, default=None, help="Optional property ID (profithelm, prexvo, gainhelm, lienbond, or all)")
     p_cycle.add_argument("--dry-run", action="store_true", help="Dry-run audit mode without committing or pushing")
     p_cycle.add_argument("--timeout", type=int, default=300, help="Timeout in seconds for CI watcher")
     p_cycle.add_argument("--skip-ci", action="store_true", help="Skip remote CI/CD quality gate watching")
@@ -2179,7 +2188,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # audit
     p_audit = subparsers.add_parser("audit", help="Audit static assets against engine baselines")
-    p_audit.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, or all)")
+    p_audit.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, lienbond, or all)")
     p_audit.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory to audit")
     p_audit.add_argument("--browser", action="store_true", help="Audit static distribution using live Chrome DevTools Protocol (CDP)")
     p_audit.add_argument("--no-browser", action="store_true", help="Skip live Chrome DevTools Protocol (CDP) interactive audit during default audit")
@@ -2187,12 +2196,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--cdp-port", type=int, default=9222, help="Chrome DevTools Protocol port (default: 9222)")
     p_audit.add_argument("--fail-closed", action="store_true", help="Fail closed if Chrome CDP port is unreachable")
     p_audit.add_argument("--check-engine-drift", action="store_true", help="Audit engine hash drift against state file")
-    p_audit.add_argument("--department-handoffs", action="store_true", help="Verify end-to-end 6-department handoff contracts across all 3 tenants")
+    p_audit.add_argument("--department-handoffs", action="store_true", help="Verify end-to-end 6-department handoff contracts across all 4 tenants")
     p_audit.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # maintain
     p_maintain = subparsers.add_parser("maintain", help="Execute closed-loop maintenance lifecycle on a property")
-    p_maintain.add_argument("--property", type=str, default="prexvo", help="Property ID (profithelm, prexvo, gainhelm, or all)")
+    p_maintain.add_argument("--property", type=str, default="prexvo", help="Property ID (profithelm, prexvo, gainhelm, lienbond, or all)")
     p_maintain.add_argument("--dry-run", action="store_true", help="Dry-run maintenance audit without writing changes")
     p_maintain.add_argument("--force", action="store_true", help="Force rebuild even if no drift detected")
     p_maintain.add_argument("--fast", action="store_true", help="Enable fast mode: aggressive polling intervals and concurrency")
@@ -2315,7 +2324,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--property",
         type=str,
         default="profithelm",
-        help="Target property identifier (profithelm, prexvo, gainhelm)",
+        help="Target property identifier (profithelm, prexvo, gainhelm, lienbond)",
     )
     p_sync.add_argument(
         "--dry-run",
@@ -2374,10 +2383,10 @@ def build_parser() -> argparse.ArgumentParser:
     # partner-sync
     p_psync = subparsers.add_parser(
         "partner-sync",
-        help="Automated correspondence check via himalaya CLI and personal inbox to update partner readiness",
+        help="Automated correspondence check via himalaya Zoho CLI (arif.coskun@profithelm.com) to update partner readiness",
     )
     p_psync.add_argument("--force", action="store_true", help="Bypass poll rate-limit interval to query mail server directly")
-    p_psync.add_argument("--personal-fixture", type=str, default=None, help="Path to optional personal inbox fixture JSON")
+    p_psync.add_argument("--personal-fixture", type=str, default=None, help="Optional legacy test fixture JSON path (deprecated)")
     p_psync.add_argument("--falsify", action="store_true", help="Execute live revenue and partner connection falsification audit")
     p_psync.add_argument("--execute-followups", action="store_true", help="Dispatch autonomous partner follow-ups via Zoho OAuth")
     p_psync.add_argument("--json", action="store_true", help="Output result as JSON")
@@ -2387,7 +2396,7 @@ def build_parser() -> argparse.ArgumentParser:
         "partner-status",
         help="Display actionable affiliate application status, readiness scores, and action bus items",
     )
-    p_pstat.add_argument("--property", type=str, default=None, help="Optional property filter (profithelm, prexvo, gainhelm, all)")
+    p_pstat.add_argument("--property", type=str, default=None, help="Optional property filter (profithelm, prexvo, gainhelm, lienbond, all)")
     p_pstat.add_argument("--html", type=str, default=None, help="Export minimal modern light interface to specified HTML path")
     p_pstat.add_argument("--force-poll", "--force", dest="force_poll", action="store_true", help="Bypass poll rate-limit interval to query mail server directly")
     p_pstat.add_argument("--json", action="store_true", help="Output result as JSON")
@@ -2399,7 +2408,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pact.add_argument("action_command", choices=["list", "approve", "reject", "resolve"], help="Action operation")
     p_pact.add_argument("--action-id", type=str, default=None, help="Target action item identifier")
-    p_pact.add_argument("--property", type=str, default=None, help="Optional property filter for listing")
+    p_pact.add_argument("--property", type=str, default=None, help="Optional property filter for listing (profithelm, prexvo, gainhelm, lienbond, all)")
     p_pact.add_argument("--notes", type=str, default="", help="Operator notes for decision audit log")
     p_pact.add_argument("--operator", type=str, default="operator", help="Operator name or identifier")
     p_pact.add_argument("--json", action="store_true", help="Output result as JSON")
@@ -2419,7 +2428,7 @@ def build_parser() -> argparse.ArgumentParser:
         "indexing-preflight",
         help="Execute automated indexing preflight inspection and crawl budget partition",
     )
-    p_preflight.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, or all)")
+    p_preflight.add_argument("--property", type=str, default=None, help="Property ID (profithelm, prexvo, gainhelm, lienbond, or all)")
     p_preflight.add_argument("--urls", nargs="*", default=None, help="Explicit URLs to inspect")
     p_preflight.add_argument("--sitemap", type=str, default=None, help="Path or URL to sitemap.xml")
     p_preflight.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory")
@@ -2439,10 +2448,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--interval", type=float, default=3600.0, help="Loop interval in seconds (default: 3600)")
     p_sup.add_argument("--daemon", action="store_true", help="Run supervisor continuously as a daemon")
     p_sup.add_argument("--run-once", action="store_true", help="Run single lifecycle cycle and exit")
-    p_sup.add_argument("--property", type=str, default=None, help="Restrict supervisor to specific property ID (profithelm, prexvo, gainhelm, or all)")
+    p_sup.add_argument("--property", type=str, default=None, help="Restrict supervisor to specific property ID (profithelm, prexvo, gainhelm, lienbond, or all)")
     p_sup.add_argument("--force", action="store_true", help="Force rebuild and verification regardless of drift")
     p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
-    p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 3 tenants")
+    p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 4 tenants")
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
     p_sup.add_argument("--budget", type=float, default=float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0")), help="Execution budget in seconds (default: 2400)")
@@ -2452,7 +2461,7 @@ def build_parser() -> argparse.ArgumentParser:
         "gsc-ceiling",
         help="Analyze 480-day Search Console trajectory and detect algorithmic glass ceilings",
     )
-    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo", "gainhelm", "all"], help="Target property identifier")
+    p_ceiling.add_argument("--property", type=str, default="profithelm", choices=["profithelm", "prexvo", "gainhelm", "lienbond", "all"], help="Target property identifier")
     p_ceiling.add_argument("--days", type=int, default=480, help="Historical time series lookback days (default: 480)")
     p_ceiling.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing historical GSC records")
     p_ceiling.add_argument("--ceiling-threshold", type=float, default=0.35, help="Algorithmic ceiling dampening threshold (default: 0.35)")

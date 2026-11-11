@@ -569,8 +569,8 @@ console.log(JSON.stringify({{
         "https://profithelm.com/tools/section-179-calculator/ford-super-duty-f250/?checkout_status=success"
     )
     assert out["pbPostState"] == "TX"
-    assert out["pbPostPartner"] == "ipx1031"
-    assert out["pbPostRedirect"].startswith("/r/ipx1031")
+    assert out["pbPostPartner"] == "lawdepot"
+    assert out["pbPostRedirect"].startswith("/r/lawdepot")
     assert out["pbPostCancel"].startswith(
         "https://profithelm.com/tools/section-1031-calculator/texas/?checkout_status=cancelled"
     )

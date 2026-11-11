@@ -1617,14 +1617,33 @@ def generate_edge_redirect_function(
     active_hub = hub if hub is not None else MonetizationHub()
 
     if prop_clean == "lienbond":
+        lb_vault = getattr(active_hub, "_vault", {}).get("lienbond", {}) if active_hub else {}
         lb_direct_upgrades: Dict[str, str] = {}
         if hasattr(active_hub, "get_direct_contract_upgrades"):
             lb_direct_upgrades.update(active_hub.get_direct_contract_upgrades("lienbond"))
+        _lb_declined = {"declined", "rejected", "terminated", "revoked", "expired", "suspended", "inactive"}
+        _lb_live = {"live", "active_direct", "approved", "active"}
+        _lb_pending = {"pending", "pending_p2", "in_review", "awaiting_response"}
+
+        def _lb_state(k_name: str, canon_k: str, base_st: str) -> Tuple[str, bool, str]:
+            ve = (
+                lb_vault.get(k_name)
+                if isinstance(lb_vault, dict) and isinstance(lb_vault.get(k_name), dict)
+                else (lb_vault.get(canon_k) if isinstance(lb_vault, dict) else None)
+            )
+            vst = str(ve.get("status") or "").strip().lower() if isinstance(ve, dict) else ""
+            if vst in _lb_declined or (base_st == "declined" and vst not in _lb_live and vst not in _lb_pending):
+                return ("declined", False, "")
+            if vst in _lb_live or (base_st == "live" and vst not in _lb_pending):
+                vu = str(ve.get("approved_tracking_url") or ve.get("url") or ve.get("direct_url") or "").strip() if isinstance(ve, dict) else ""
+                cu = lb_direct_upgrades.get(k_name) or lb_direct_upgrades.get(canon_k) or (vu if vu and is_intent_matched(canon_k, vu) else "")
+                return ("live", True, cu)
+            return ("pending_p2" if vst == "pending_p2" else "pending", False, "")
+
         lienbond_catalog_entries: List[str] = []
         for k, p_obj in LIENBOND_AFFILIATES.items():
-            status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
+            status_val, lb_is_direct, direct_contract_url = _lb_state(k, p_obj.key, p_obj.status or "pending")
             status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
-            direct_contract_url = lb_direct_upgrades.get(k) or lb_direct_upgrades.get(p_obj.key)
             extra_contract_line = f'    directContractUrl: "{direct_contract_url}",\n' if direct_contract_url else ""
             lienbond_catalog_entries.append(
                 f'  {k}: {{\n'
@@ -1633,6 +1652,7 @@ def generate_edge_redirect_function(
                 f'    envVar: "{p_obj.env_var}",\n'
                 f'    statusEnvVar: "{status_env}",\n'
                 f'    status: "{status_val}",\n'
+                f'    isDirect: {"true" if lb_is_direct else "false"},\n'
                 f'  }},'
             )
         lienbond_aliases = {
@@ -1649,7 +1669,7 @@ def generate_edge_redirect_function(
                 "next_insurance_b2b",
             ),
             "thimble": (
-                "https://www.thimble.com/contractor-insurance",
+                "https://www.thimble.com/",
                 "AFFILIATE_THIMBLE_CONTRACTOR_URL",
                 "AFFILIATE_THIMBLE_CONTRACTOR_STATUS",
                 "thimble_contractor",
@@ -1669,7 +1689,8 @@ def generate_edge_redirect_function(
         }
         for alias_k, (alias_url, alias_env, alias_status_env, canonical_k) in lienbond_aliases.items():
             if alias_k not in LIENBOND_AFFILIATES:
-                lb_alias_contract = lb_direct_upgrades.get(alias_k) or lb_direct_upgrades.get(canonical_k) or ""
+                base_lb_alias = LIENBOND_AFFILIATES[canonical_k].status if canonical_k in LIENBOND_AFFILIATES else "pending"
+                alias_status_val, lb_alias_direct, lb_alias_contract = _lb_state(alias_k, canonical_k, base_lb_alias)
                 lb_alias_extra = (
                     f'    directContractUrl: "{lb_alias_contract}",\n' if lb_alias_contract else ""
                 )
@@ -1679,22 +1700,8 @@ def generate_edge_redirect_function(
                     f'{lb_alias_extra}'
                     f'    envVar: "{alias_env}",\n'
                     f'    statusEnvVar: "{alias_status_env}",\n'
-                    f'    status: "live",\n'
-                    f'  }},'
-                )
-        for hk, h_url, h_env in (
-            ("ramp", "https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL"),
-            ("lawdepot", "https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
-            ("xendoo", "https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_URL"),
-        ):
-            if hk not in LIENBOND_AFFILIATES:
-                lienbond_catalog_entries.append(
-                    f'  {hk}: {{\n'
-                    f'    defaultUrl: "{h_url}",\n'
-                    f'    directContractUrl: "{h_url}",\n'
-                    f'    envVar: "{h_env}",\n'
-                    f'    statusEnvVar: "{h_env[:-4]}_STATUS",\n'
-                    f'    status: "live",\n'
+                    f'    status: "{alias_status_val}",\n'
+                    f'    isDirect: {"true" if lb_alias_direct else "false"},\n'
                     f'  }},'
                 )
         lienbond_catalog_block = "\n".join(lienbond_catalog_entries)
@@ -1777,7 +1784,6 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
     const kv =
       env &&
       (env.LIENBOND_TELEMETRY_KV ||
-        env.LIENBOND_LEADS ||
         env.TELEMETRY_KV ||
         null);
     if (kv && typeof kv.put === "function") {{
@@ -1844,13 +1850,34 @@ function isSafeAndCompliantUrl(urlStr) {{
 export async function onRequest(context) {{
   const {{ request, env, params }} = context;
   const rawPartner = (params.partner || "").trim().toLowerCase();
-  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
   if (!partnerConfig) {{
     return new Response("Partner not found", {{
       status: 404,
       headers: {{
         "Cache-Control": "private, no-cache, no-store, must-revalidate",
         "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  const envStatus =
+    env && partnerConfig.statusEnvVar && env[partnerConfig.statusEnvVar]
+      ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
+      : null;
+  const effectiveStatus = envStatus || partnerConfig.status || "pending";
+  if (
+    effectiveStatus === "declined" ||
+    effectiveStatus === "rejected" ||
+    effectiveStatus === "pending_p2"
+  ) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "declined_partner_blocked",
       }},
     }});
   }}
@@ -1865,6 +1892,21 @@ export async function onRequest(context) {{
       partnerConfig.directContractUrl &&
       partnerConfig.directContractUrl.trim().length > 0
   );
+  const blockUnapproved = Boolean(
+    env && String(env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  );
+  if (!hasDirectConfig && !hasDirectContract && effectiveStatus !== "live" && blockUnapproved) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+      }},
+    }});
+  }}
   const rawTargetUrl = (
     hasDirectConfig
       ? envUrl
@@ -2002,14 +2044,36 @@ export async function onRequest(context) {{
 
     if prop_clean == "gainhelm":
         # No GRC partner has an approved affiliate contract: never swap in unrelated B2B links.
+        gh_vault = getattr(active_hub, "_vault", {}).get("gainhelm", {}) if active_hub else {}
         gh_direct_upgrades: Dict[str, str] = {}
         if hasattr(active_hub, "get_direct_contract_upgrades"):
             gh_direct_upgrades.update(active_hub.get_direct_contract_upgrades("gainhelm"))
+        _gh_declined = {"declined", "rejected", "terminated", "revoked", "expired", "suspended", "inactive"}
+        _gh_live = {"live", "active_direct", "approved", "active"}
+        _gh_pending = {"pending", "pending_p2", "in_review", "awaiting_response"}
+
+        def _gh_state(k_name: str, canon_k: str, base_st: str) -> Tuple[str, bool, str]:
+            ve = (
+                gh_vault.get(k_name)
+                if isinstance(gh_vault, dict) and isinstance(gh_vault.get(k_name), dict)
+                else (gh_vault.get(canon_k) if isinstance(gh_vault, dict) else None)
+            )
+            vst = str(ve.get("status") or "").strip().lower() if isinstance(ve, dict) else ""
+            if vst in _gh_declined or (base_st == "declined" and vst not in _gh_live and vst not in _gh_pending):
+                return ("declined", False, "")
+            if vst in _gh_live or (base_st == "live" and vst not in _gh_pending):
+                cu = gh_direct_upgrades.get(k_name) or gh_direct_upgrades.get(canon_k) or ""
+                if not cu and isinstance(ve, dict):
+                    vu = str(ve.get("approved_tracking_url") or ve.get("url") or ve.get("direct_url") or "").strip()
+                    if vu and is_intent_matched(canon_k, vu):
+                        cu = vu
+                return ("live", True, cu)
+            return ("pending_p2" if vst == "pending_p2" else "pending", False, "")
+
         gainhelm_catalog_entries: List[str] = []
         for k, p_obj in GAINHELM_AFFILIATES.items():
-            status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
+            status_val, gh_is_direct, direct_contract_url = _gh_state(k, p_obj.key, p_obj.status or "pending")
             status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
-            direct_contract_url = gh_direct_upgrades.get(k) or gh_direct_upgrades.get(p_obj.key)
             extra_contract_line = f'    directContractUrl: "{direct_contract_url}",\n' if direct_contract_url else ""
             gainhelm_catalog_entries.append(
                 f'  {k}: {{\n'
@@ -2018,6 +2082,7 @@ export async function onRequest(context) {{
                 f'    envVar: "{p_obj.env_var}",\n'
                 f'    statusEnvVar: "{status_env}",\n'
                 f'    status: "{status_val}",\n'
+                f'    isDirect: {"true" if gh_is_direct else "false"},\n'
                 f'  }},'
             )
         gainhelm_aliases = {
@@ -2072,7 +2137,8 @@ export async function onRequest(context) {{
         }
         for alias_k, (alias_url, alias_env, alias_status_env, canonical_k) in gainhelm_aliases.items():
             if alias_k not in GAINHELM_AFFILIATES:
-                gh_alias_contract = gh_direct_upgrades.get(alias_k) or gh_direct_upgrades.get(canonical_k) or ""
+                base_gh_alias = GAINHELM_AFFILIATES[canonical_k].status if canonical_k in GAINHELM_AFFILIATES else "pending"
+                gh_alias_status, gh_alias_direct, gh_alias_contract = _gh_state(alias_k, canonical_k, base_gh_alias)
                 gh_alias_extra = (
                     f'    directContractUrl: "{gh_alias_contract}",\n' if gh_alias_contract else ""
                 )
@@ -2082,24 +2148,8 @@ export async function onRequest(context) {{
                     f'{gh_alias_extra}'
                     f'    envVar: "{alias_env}",\n'
                     f'    statusEnvVar: "{alias_status_env}",\n'
-                    f'    status: "live",\n'
-                    f'  }},'
-                )
-        # Honest, explicitly named non-GRC rails (corporate spend, legal documents, bookkeeping).
-        # These resolve to the brand they are named for, never to a GRC vendor key.
-        for hk, h_url, h_env in (
-            ("ramp", "https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL"),
-            ("lawdepot", "https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
-            ("xendoo", "https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_URL"),
-        ):
-            if hk not in GAINHELM_AFFILIATES:
-                gainhelm_catalog_entries.append(
-                    f'  {hk}: {{\n'
-                    f'    defaultUrl: "{h_url}",\n'
-                    f'    directContractUrl: "{h_url}",\n'
-                    f'    envVar: "{h_env}",\n'
-                    f'    statusEnvVar: "{h_env[:-4]}_STATUS",\n'
-                    f'    status: "live",\n'
+                    f'    status: "{gh_alias_status}",\n'
+                    f'    isDirect: {"true" if gh_alias_direct else "false"},\n'
                     f'  }},'
                 )
         gainhelm_catalog_block = "\n".join(gainhelm_catalog_entries)
@@ -2182,7 +2232,6 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
     const kv =
       env &&
       (env.GAINHELM_TELEMETRY_KV ||
-        env.GAINHELM_LEADS ||
         env.TELEMETRY_KV ||
         null);
     if (kv && typeof kv.put === "function") {{
@@ -2249,13 +2298,34 @@ function isSafeAndCompliantUrl(urlStr) {{
 export async function onRequest(context) {{
   const {{ request, env, params }} = context;
   const rawPartner = (params.partner || "").trim().toLowerCase();
-  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
   if (!partnerConfig) {{
     return new Response("Partner not found", {{
       status: 404,
       headers: {{
         "Cache-Control": "private, no-cache, no-store, must-revalidate",
         "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  const envStatus =
+    env && partnerConfig.statusEnvVar && env[partnerConfig.statusEnvVar]
+      ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
+      : null;
+  const effectiveStatus = envStatus || partnerConfig.status || "pending";
+  if (
+    effectiveStatus === "declined" ||
+    effectiveStatus === "rejected" ||
+    effectiveStatus === "pending_p2"
+  ) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "declined_partner_blocked",
       }},
     }});
   }}
@@ -2270,6 +2340,21 @@ export async function onRequest(context) {{
       partnerConfig.directContractUrl &&
       partnerConfig.directContractUrl.trim().length > 0
   );
+  const blockUnapproved = Boolean(
+    env && String(env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  );
+  if (!hasDirectConfig && !hasDirectContract && effectiveStatus !== "live" && blockUnapproved) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+      }},
+    }});
+  }}
   const rawTargetUrl = (
     hasDirectConfig
       ? envUrl
@@ -2406,16 +2491,35 @@ export async function onRequest(context) {{
         return gainhelm_js
 
     if prop_clean == "prexvo":
+        px_vault = getattr(active_hub, "_vault", {}).get("prexvo", {}) if active_hub else {}
         prexvo_direct_upgrades = (
             active_hub.get_direct_contract_upgrades("prexvo")
             if hasattr(active_hub, "get_direct_contract_upgrades")
             else {}
         )
+        _px_declined = {"declined", "rejected", "terminated", "revoked", "expired", "suspended", "inactive"}
+        _px_live = {"live", "active_direct", "approved", "active"}
+        _px_pending = {"pending", "pending_p2", "in_review", "awaiting_response"}
+
+        def _px_state(k_name: str, canon_k: str, base_st: str) -> Tuple[str, bool, str]:
+            ve = (
+                px_vault.get(k_name)
+                if isinstance(px_vault, dict) and isinstance(px_vault.get(k_name), dict)
+                else (px_vault.get(canon_k) if isinstance(px_vault, dict) else None)
+            )
+            vst = str(ve.get("status") or "").strip().lower() if isinstance(ve, dict) else ""
+            if vst in _px_declined or (base_st == "declined" and vst not in _px_live and vst not in _px_pending):
+                return ("declined", False, "")
+            if vst in _px_live or (base_st == "live" and vst not in _px_pending):
+                vu = str(ve.get("approved_tracking_url") or ve.get("url") or ve.get("direct_url") or "").strip() if isinstance(ve, dict) else ""
+                cu = prexvo_direct_upgrades.get(k_name) or prexvo_direct_upgrades.get(canon_k) or (vu if vu and is_intent_matched(canon_k, vu) else "")
+                return ("live", True, cu)
+            return ("pending_p2" if vst == "pending_p2" else "pending", False, "")
+
         prexvo_catalog_entries: List[str] = []
         for k, p_obj in PREXVO_AFFILIATES.items():
-            status_val = p_obj.status if p_obj.status in ("live", "pending_p2") else "live"
+            status_val, px_is_direct, px_direct_contract = _px_state(k, p_obj.key, p_obj.status or "pending")
             status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
-            px_direct_contract = prexvo_direct_upgrades.get(k) or ""
             px_extra = f'    directContractUrl: "{px_direct_contract}",\n' if px_direct_contract else ""
             prexvo_catalog_entries.append(
                 f'  {k}: {{\n'
@@ -2424,6 +2528,7 @@ export async function onRequest(context) {{
                 f'    envVar: "{p_obj.env_var}",\n'
                 f'    statusEnvVar: "{status_env}",\n'
                 f'    status: "{status_val}",\n'
+                f'    isDirect: {"true" if px_is_direct else "false"},\n'
                 f'  }},'
             )
         prexvo_aliases = {
@@ -2431,56 +2536,67 @@ export async function onRequest(context) {{
                 "https://www.sofi.com/refinance-student-loan/",
                 "AFFILIATE_SOFI_URL",
                 "AFFILIATE_SOFI_STATUS",
+                "sofi",
             ),
             "sofi_student_refi": (
                 "https://www.sofi.com/refinance-student-loan/",
                 "AFFILIATE_SOFI_URL",
                 "AFFILIATE_SOFI_STATUS",
+                "sofi",
             ),
             "earnest_student_refi": (
                 "https://www.earnest.com/student-loan-refinancing",
                 "AFFILIATE_EARNEST_URL",
                 "AFFILIATE_EARNEST_STATUS",
+                "earnest",
             ),
             "earnest_refi": (
                 "https://www.earnest.com/student-loan-refinancing",
                 "AFFILIATE_EARNEST_URL",
                 "AFFILIATE_EARNEST_STATUS",
+                "earnest",
             ),
             "lendkey_refi": (
                 "https://www.lendkey.com/student-loan-refinancing/",
                 "AFFILIATE_LENDKEY_URL",
                 "AFFILIATE_LENDKEY_STATUS",
+                "lendkey",
             ),
             "credible_student_loans": (
                 "https://www.credible.com/refinance-student-loans",
                 "AFFILIATE_CREDIBLE_URL",
                 "AFFILIATE_CREDIBLE_STATUS",
+                "credible",
             ),
             "credible_refi": (
                 "https://www.credible.com/refinance-student-loans",
                 "AFFILIATE_CREDIBLE_URL",
                 "AFFILIATE_CREDIBLE_STATUS",
+                "credible",
             ),
             "edvestin": (
-                "https://edvestinu.com/refinance-student-loans/",
+                "https://edvestinu.com/refinance/",
                 "AFFILIATE_EDVESTIN_URL",
                 "AFFILIATE_EDVESTIN_STATUS",
+                "edvestin",
             ),
             "laurel_road": (
                 "https://www.laurelroad.com/student-loan-refinancing/",
                 "AFFILIATE_LAUREL_ROAD_URL",
                 "AFFILIATE_LAUREL_ROAD_STATUS",
+                "laurel_road",
             ),
             "juno": (
-                "https://joinjuno.com/student-loan-refinancing",
+                "https://joinjuno.com/",
                 "AFFILIATE_JUNO_URL",
                 "AFFILIATE_JUNO_STATUS",
+                "juno",
             ),
         }
-        for alias_k, (alias_url, alias_env, alias_status_env) in prexvo_aliases.items():
+        for alias_k, (alias_url, alias_env, alias_status_env, canonical_k) in prexvo_aliases.items():
             if alias_k not in PREXVO_AFFILIATES:
-                px_alias_contract = prexvo_direct_upgrades.get(alias_k) or ""
+                base_px_alias = PREXVO_AFFILIATES[canonical_k].status if canonical_k in PREXVO_AFFILIATES else "pending"
+                px_alias_status, px_alias_direct, px_alias_contract = _px_state(alias_k, canonical_k, base_px_alias)
                 px_alias_extra = (
                     f'    directContractUrl: "{px_alias_contract}",\n' if px_alias_contract else ""
                 )
@@ -2490,7 +2606,8 @@ export async function onRequest(context) {{
                     f'{px_alias_extra}'
                     f'    envVar: "{alias_env}",\n'
                     f'    statusEnvVar: "{alias_status_env}",\n'
-                    f'    status: "live",\n'
+                    f'    status: "{px_alias_status}",\n'
+                    f'    isDirect: {"true" if px_alias_direct else "false"},\n'
                     f'  }},'
                 )
         prexvo_catalog_block = "\n".join(prexvo_catalog_entries)
@@ -2581,7 +2698,6 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
     const kv =
       env &&
       (env.PREXVO_TELEMETRY_KV ||
-        env.PREXVO_LEADS ||
         env.TELEMETRY_KV ||
         null);
     if (kv && typeof kv.put === "function") {{
@@ -2694,7 +2810,7 @@ export async function onRequest(context) {{
   const {{ request, env, params }} = context;
   const rawPartner = (params.partner || "").trim().toLowerCase();
 
-  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
   if (!partnerConfig) {{
     return new Response("Partner not found", {{
       status: 404,
@@ -2709,10 +2825,17 @@ export async function onRequest(context) {{
     env && partnerConfig.statusEnvVar && env[partnerConfig.statusEnvVar]
       ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
       : null;
-  const effectiveStatus = envStatus || partnerConfig.status;
+  const effectiveStatus = envStatus || partnerConfig.status || "pending";
 
-  if (effectiveStatus !== "live") {{
-    return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL);
+  if (
+    effectiveStatus === "declined" ||
+    effectiveStatus === "rejected" ||
+    effectiveStatus === "pending_p2"
+  ) {{
+    return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL, {{
+      "X-Edge-Partner": rawPartner,
+      "X-Edge-Contract-Tier": "declined_partner_blocked",
+    }});
   }}
 
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
@@ -2848,101 +2971,39 @@ export async function onRequest(context) {{
     prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
     sovrn_key = getattr(active_hub, "sovrn_domain_key", "0a5ac1bfe04034bff021b394f5e71d90")
 
-    direct_contract_upgrades = {
-        "coinledger": "https://coinledger.io/?fpr=arif-554004",
-        "koinly": "https://koinly.io/?fpr=arif-4c0b88",
-        "mercury": "https://mercury.com/r/profithelm-llc",
-        "rho": "https://mercury.com/r/profithelm-llc",
-        "brex": "https://mercury.com/r/profithelm-llc",
-        "bluevine_checking": "https://mercury.com/r/profithelm-llc",
-        "wealthfront": "https://mercury.com/r/profithelm-llc",
-        "valley_bank": "https://mercury.com/r/profithelm-llc",
-        "public_com": "https://mercury.com/r/profithelm-llc",
-        "quontic_bank": "https://mercury.com/r/profithelm-llc",
-        "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
-        "surepayroll": "https://gusto.pxf.io/c/7932737/1226287/15154",
-        "guideline": "https://gusto.pxf.io/c/7932737/1226287/15154",
-        "capitalize": "https://gusto.pxf.io/c/7932737/1226287/15154",
-        "rippling": "https://try.rippling.com/mcfo1m09qiwt",
-        "deel": "https://try.rippling.com/mcfo1m09qiwt",
-        "simply_business": "https://www.jdoqocy.com/click-101906407-16985242",
-        "crest_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "equipment_macrs": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "bench": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "bench_accounting": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "pilot": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "xendoo_impact": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "collective_scorp": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "ipx1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "exeter1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "first_american": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "first_american_1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "dlp_capital": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "groundfloor": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "avaliable_1031": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "madison_specs_cost_seg": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "national_funding_med": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "national_funding": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "stripe_tax": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "avalara": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "tax1099": "https://xendoo.pxf.io/c/7932737/1357375/16354",
-        "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
-        "ramp_impact": "https://join.ramp.com/c/7932737/3981015/51436",
-        "stripe": "https://join.ramp.com/c/7932737/3981015/51436",
-        "stax_payments": "https://join.ramp.com/c/7932737/3981015/51436",
-        "alt_lending": "https://join.ramp.com/c/7932737/3981015/51436",
-        "viva_finance": "https://join.ramp.com/c/7932737/3981015/51436",
-        "otr_solutions_factoring": "https://join.ramp.com/c/7932737/3981015/51436",
-        "freightos_marketplace": "https://join.ramp.com/c/7932737/3981015/51436",
-        "flexport": "https://join.ramp.com/c/7932737/3981015/51436",
-        "invoice_simple": "https://join.ramp.com/c/7932737/3981015/51436",
-        "turbotax": "https://www.jdoqocy.com/click-101906407-11917161",
-        "taxact": "https://www.jdoqocy.com/click-101906407-11917161",
-        "taxact_business": "https://www.jdoqocy.com/click-101906407-11917161",
-        "file_com_tax": "https://www.jdoqocy.com/click-101906407-11917161",
-        "efile": "https://www.jdoqocy.com/click-101906407-11917161",
-        "efile_com": "https://www.jdoqocy.com/click-101906407-11917161",
-        "taxslayer": "https://www.dpbolvw.net/click-101906407-15704796",
-        "eztaxreturn": "https://www.dpbolvw.net/click-101906407-15704796",
-        "eztaxreturn_com": "https://www.dpbolvw.net/click-101906407-15704796",
-        "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
-        "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
-        "suretybonds_direct": "https://www.jdoqocy.com/click-101906407-16985242",
-        "next_insurance_b2b": "https://www.jdoqocy.com/click-101906407-16985242",
-        "hiscox": "https://www.jdoqocy.com/click-101906407-16985242",
-        "lawdepot": "https://www.jdoqocy.com/click-101906407-16985242",
-        "legalzoom": "https://www.jdoqocy.com/click-101906407-16985242",
-        "kalshi": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-        "interactive_brokers": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-        "zacks": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-        "moby": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-        "taxbit": "https://coinledger.io/?fpr=arif-554004",
-    }
     if hasattr(active_hub, "get_direct_contract_upgrades"):
-        direct_contract_upgrades.update(active_hub.get_direct_contract_upgrades("profithelm"))
+        direct_contract_upgrades = dict(active_hub.get_direct_contract_upgrades("profithelm"))
+        if "xendoo" in direct_contract_upgrades:
+            direct_contract_upgrades.setdefault("xendoo_impact", direct_contract_upgrades["xendoo"])
+        if "ramp" in direct_contract_upgrades:
+            direct_contract_upgrades.setdefault("ramp_impact", direct_contract_upgrades["ramp"])
+        if "efile_com" in direct_contract_upgrades:
+            direct_contract_upgrades.setdefault("efile", direct_contract_upgrades["efile_com"])
+        if "eztaxreturn_com" in direct_contract_upgrades:
+            direct_contract_upgrades.setdefault("eztaxreturn", direct_contract_upgrades["eztaxreturn_com"])
+    else:
+        direct_contract_upgrades = {
+            "coinledger": "https://coinledger.io/?fpr=arif-554004",
+            "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+            "mercury": "https://mercury.com/r/profithelm-llc",
+            "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
+            "rippling": "https://try.rippling.com/mcfo1m09qiwt",
+            "xendoo": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+            "xendoo_impact": "https://xendoo.pxf.io/c/7932737/1357375/16354",
+            "ramp": "https://join.ramp.com/c/7932737/3981015/51436",
+            "ramp_impact": "https://join.ramp.com/c/7932737/3981015/51436",
+            "efile": "https://www.jdoqocy.com/click-101906407-11917161",
+            "efile_com": "https://www.jdoqocy.com/click-101906407-11917161",
+            "eztaxreturn": "https://www.dpbolvw.net/click-101906407-15704796",
+            "eztaxreturn_com": "https://www.dpbolvw.net/click-101906407-15704796",
+            "freetaxusa": "https://www.jdoqocy.com/click-101906407-12306188",
+            "wallethub": "https://www.jdoqocy.com/click-101906407-16952385",
+            "lawdepot": "https://www.jdoqocy.com/click-101906407-16985242",
+            "kalshi": "https://kalshi.pxf.io/c/7932737/3078072/37770",
+        }
     # Intent gate: drop every cross-brand / cross-vertical swap (e.g. ipx1031 -> Xendoo bookkeeping).
     direct_contract_upgrades = filter_intent_matched_contracts(direct_contract_upgrades)
-    sovrn_fallback_upgrades = {
-        "ipx1031": "https://dlpcapital.com/",
-        "exeter1031": "https://dlpcapital.com/",
-        "first_american": "https://www.groundfloor.us/",
-        "first_american_1031": "https://www.groundfloor.us/",
-        "national_funding_med": "https://staxpayments.com/",
-        "national_funding": "https://staxpayments.com/",
-        "stripe": "https://staxpayments.com/",
-        "otr_solutions_factoring": "https://www.invoicesimple.com/",
-        "freightos_marketplace": "https://www.invoicesimple.com/",
-        "flexport": "https://www.invoicesimple.com/",
-        "invoice_simple": "https://www.invoicesimple.com/",
-        "simply_business": "https://www.simplybusiness.com/",
-        "next_insurance_b2b": "https://www.nextinsurance.com/",
-        "interactive_brokers": "https://www.zacks.com/",
-    }
-    # 1031 exchange partners must never be wrapped onto an unrelated lender's site.
-    sovrn_fallback_upgrades = {
-        k: v for k, v in sovrn_fallback_upgrades.items() if k not in BLOCKED_SOVRN_FALLBACK_KEYS
-    }
+    sovrn_fallback_upgrades: Dict[str, str] = {}
 
     preferred_order = [
         "coinledger",
@@ -2954,8 +3015,14 @@ export async function onRequest(context) {{
         "rho",
         "gusto",
         "rippling",
+        "xendoo",
         "crest_capital",
         "equipment_macrs",
+        "efile_com",
+        "eztaxreturn_com",
+        "freetaxusa",
+        "wallethub",
+        "lawdepot",
         "turbotax",
         "taxslayer",
         "kalshi",
@@ -2969,75 +3036,152 @@ export async function onRequest(context) {{
         if k not in ordered_keys:
             ordered_keys.append(k)
 
+    _ph_declined = {"declined", "rejected", "terminated", "revoked", "expired", "suspended", "inactive"}
+    _ph_live = {"live", "active_direct", "approved", "active"}
+    _ph_pending = {"pending", "pending_p2", "in_review", "awaiting_response"}
+    _ph_clean_homepages = {
+        "ramp": "https://ramp.com/",
+        "ramp_impact": "https://ramp.com/",
+        "xendoo": "https://www.xendoo.com/",
+        "xendoo_impact": "https://www.xendoo.com/",
+        "gusto": "https://gusto.com/",
+        "rippling": "https://www.rippling.com/",
+        "mercury": "https://mercury.com/",
+        "coinledger": "https://coinledger.io/",
+        "koinly": "https://koinly.io/",
+        "kalshi": "https://kalshi.com/",
+        "efile": "https://www.efile.com/",
+        "efile_com": "https://www.efile.com/",
+        "eztaxreturn": "https://www.eztaxreturn.com/",
+        "eztaxreturn_com": "https://www.eztaxreturn.com/",
+        "freetaxusa": "https://www.freetaxusa.com/",
+        "wallethub": "https://wallethub.com/",
+        "lawdepot": "https://www.lawdepot.com/",
+    }
+
     catalog_entries: List[str] = []
     for k in ordered_keys:
         p_obj = PROFITHELM_AFFILIATES[k]
-        v_entry = prop_vault.get(p_obj.key, {}) if isinstance(prop_vault, dict) else {}
+        v_entry = (
+            prop_vault.get(k)
+            if isinstance(prop_vault, dict) and isinstance(prop_vault.get(k), dict)
+            else (prop_vault.get(p_obj.key, {}) if isinstance(prop_vault, dict) else {})
+        )
         v_status = str(v_entry.get("status") or "").strip().lower()
         verified_meta = SOVRN_VERIFIED_PAYING_MERCHANTS.get(k, {})
-        is_direct = bool(
-            verified_meta.get("is_direct")
-            or p_obj.status == "live"
-            or v_status in ("live", "active_direct")
+        is_declined = (v_status in _ph_declined) or (
+            p_obj.status == "declined" and v_status not in _ph_live and v_status not in _ph_pending
         )
-        v_url = str(v_entry.get("url") or v_entry.get("direct_url") or "").strip()
-        if verified_meta.get("verified_url"):
-            default_url = str(verified_meta["verified_url"]).strip()
-        elif is_direct and v_url:
+        is_direct = bool(
+            not is_declined
+            and v_status not in _ph_pending
+            and (
+                verified_meta.get("is_direct")
+                or p_obj.status == "live"
+                or v_status in _ph_live
+            )
+        )
+        status_val = (
+            "declined"
+            if is_declined
+            else (
+                "live"
+                if is_direct
+                else (
+                    "pending_p2"
+                    if v_status == "pending_p2"
+                    else ("pending" if v_status in _ph_pending else (p_obj.status if p_obj.status != "live" else "pending"))
+                )
+            )
+        )
+        status_env = p_obj.env_var[:-4] + "_STATUS" if p_obj.env_var.endswith("_URL") else f"AFFILIATE_{k.upper()}_STATUS"
+        v_url = str(v_entry.get("approved_tracking_url") or v_entry.get("url") or v_entry.get("direct_url") or "").strip()
+        if is_direct and v_url and is_intent_matched(k, v_url):
             default_url = v_url
+        elif verified_meta.get("verified_url") and is_direct:
+            default_url = str(verified_meta["verified_url"]).strip()
+        elif not is_direct and k in _ph_clean_homepages:
+            default_url = _ph_clean_homepages[k]
         else:
             default_url = p_obj.default_url
-        direct_contract_url = direct_contract_upgrades.get(k) or direct_contract_upgrades.get(p_obj.key)
-        sovrn_fallback_url = sovrn_fallback_upgrades.get(k) or sovrn_fallback_upgrades.get(p_obj.key)
-        if sovrn_fallback_url:
-            is_direct = False
+        direct_contract_url = (
+            (direct_contract_upgrades.get(k) or direct_contract_upgrades.get(p_obj.key))
+            if is_direct
+            else None
+        )
         is_direct_js = "true" if is_direct else "false"
         extra_lines = ""
         if direct_contract_url:
             extra_lines += f'    directContractUrl: "{direct_contract_url}",\n'
-        if sovrn_fallback_url:
-            extra_lines += f'    sovrnFallbackUrl: "{sovrn_fallback_url}",\n'
         catalog_entries.append(
             f'  {k}: {{\n'
             f'    defaultUrl: "{default_url}",\n'
             f'{extra_lines}'
             f'    envVar: "{p_obj.env_var}",\n'
+            f'    statusEnvVar: "{status_env}",\n'
+            f'    status: "{status_val}",\n'
             f'    isDirect: {is_direct_js},\n'
             f'  }},'
         )
 
     extended_fallback_catalog = {
-        "brex": "AFFILIATE_BREX_URL",
-        "flexport": "AFFILIATE_FLEXPORT_URL",
-        "wealthfront": "AFFILIATE_WEALTHFRONT_URL",
-        "bench": "AFFILIATE_BENCH_URL",
-        "pilot": "AFFILIATE_PILOT_URL",
-        "guideline": "AFFILIATE_GUIDELINE_URL",
-        "stripe_tax": "AFFILIATE_STRIPE_TAX_URL",
-        "deel": "AFFILIATE_DEEL_URL",
-        "taxbit": "AFFILIATE_TAXBIT_URL",
-        "freetaxusa": "AFFILIATE_FREETAXUSA_URL",
-        "public_com": "AFFILIATE_PUBLIC_COM_URL",
-        "avalara": "AFFILIATE_AVALARA_URL",
-        "national_funding": "AFFILIATE_NATIONAL_FUNDING_MED_URL",
+        "brex": ("AFFILIATE_BREX_URL", "https://www.brex.com/"),
+        "flexport": ("AFFILIATE_FLEXPORT_URL", "https://www.flexport.com/"),
+        "wealthfront": ("AFFILIATE_WEALTHFRONT_URL", "https://www.wealthfront.com/"),
+        "bench": ("AFFILIATE_BENCH_URL", "https://www.bench.co/"),
+        "pilot": ("AFFILIATE_PILOT_URL", "https://pilot.com/"),
+        "guideline": ("AFFILIATE_GUIDELINE_URL", "https://www.guideline.com/"),
+        "stripe_tax": ("AFFILIATE_STRIPE_TAX_URL", "https://stripe.com/tax"),
+        "deel": ("AFFILIATE_DEEL_URL", "https://www.deel.com/"),
+        "taxbit": ("AFFILIATE_TAXBIT_URL", "https://taxbit.com/"),
+        "public_com": ("AFFILIATE_PUBLIC_COM_URL", "https://public.com/"),
+        "avalara": ("AFFILIATE_AVALARA_URL", "https://www.avalara.com/"),
+        "national_funding": ("AFFILIATE_NATIONAL_FUNDING_MED_URL", "https://www.nationalfunding.com/"),
+        "next_insurance_b2b": ("AFFILIATE_NEXT_INSURANCE_URL", "https://www.nextinsurance.com/"),
+        "invoice_simple": ("AFFILIATE_INVOICE_SIMPLE_URL", "https://www.invoicesimple.com/"),
+        "taxact": ("AFFILIATE_TAXACT_URL", "https://www.taxact.com/"),
+        "taxact_business": ("AFFILIATE_TAXACT_BUSINESS_URL", "https://www.taxact.com/business-taxes"),
+        "tax1099": ("AFFILIATE_TAX1099_URL", "https://www.tax1099.com/"),
+        "file_com_tax": ("AFFILIATE_FILE_COM_TAX_URL", "https://www.file.com/"),
+        "hiscox": ("AFFILIATE_HISCOX_URL", "https://www.hiscox.com/"),
+        "alt_lending": ("AFFILIATE_ALT_LENDING_URL", "https://www.nationalfunding.com/"),
+        "viva_finance": ("AFFILIATE_VIVA_FINANCE_URL", "https://www.vivacf.net/"),
+        "dlp_capital": ("AFFILIATE_DLP_CAPITAL_URL", "https://dlpre.com/"),
+        "groundfloor": ("AFFILIATE_GROUNDFLOOR_URL", "https://www.groundfloor.com/"),
+        "stax_payments": ("AFFILIATE_STAX_PAYMENTS_URL", "https://staxpayments.com/"),
+        "surepayroll": ("AFFILIATE_SUREPAYROLL_URL", "https://www.surepayroll.com/"),
+        "capitalize": ("AFFILIATE_CAPITALIZE_URL", "https://www.hicapitalize.com/"),
+        "valley_bank": ("AFFILIATE_VALLEY_BANK_URL", "https://www.valley.com/"),
+        "quontic_bank": ("AFFILIATE_QUONTIC_BANK_URL", "https://www.quontic.com/"),
+        "zacks": ("AFFILIATE_ZACKS_URL", "https://www.zacks.com/"),
+        "moby": ("AFFILIATE_MOBY_URL", "https://www.moby.co/"),
+        "legalzoom": ("AFFILIATE_LEGALZOOM_URL", "https://www.legalzoom.com/"),
+        "bench_accounting": ("AFFILIATE_BENCH_ACCOUNTING_URL", "https://www.bench.co/"),
+        "collective_scorp": ("AFFILIATE_COLLECTIVE_SCORP_URL", "https://www.collective.com/"),
+        "bluevine_checking": ("AFFILIATE_BLUEVINE_CHECKING_URL", "https://www.bluevine.com/"),
     }
-    for ext_k, ext_env in extended_fallback_catalog.items():
+    for ext_k, (ext_env, ext_fallback_url) in extended_fallback_catalog.items():
         if ext_k not in ordered_keys:
+            v_entry_ext = prop_vault.get(ext_k, {}) if isinstance(prop_vault, dict) else {}
+            v_status_ext = str(v_entry_ext.get("status") or "").strip().lower()
             v_meta = SOVRN_VERIFIED_PAYING_MERCHANTS.get(ext_k, {})
-            ext_url = str(v_meta.get("verified_url") or f"https://www.{ext_k}.com/").strip()
-            ext_direct_contract = direct_contract_upgrades.get(ext_k)
-            ext_sovrn_fallback = sovrn_fallback_upgrades.get(ext_k)
-            ext_direct_js = "true" if (v_meta.get("is_direct") and not ext_sovrn_fallback) else "false"
+            ext_is_declined = v_status_ext == "declined"
+            ext_is_direct = bool(not ext_is_declined and v_meta.get("is_direct"))
+            ext_status_val = "declined" if ext_is_declined else ("live" if ext_is_direct else "pending")
+            ext_status_env = ext_env[:-4] + "_STATUS" if ext_env.endswith("_URL") else f"AFFILIATE_{ext_k.upper()}_STATUS"
+            ext_url = str(v_meta.get("verified_url") or ext_fallback_url).strip()
+            ext_direct_contract = direct_contract_upgrades.get(ext_k) if ext_is_direct else None
+            ext_direct_js = "true" if ext_is_direct else "false"
             ext_extra = ""
             if ext_direct_contract:
                 ext_extra += f'    directContractUrl: "{ext_direct_contract}",\n'
-            if ext_sovrn_fallback:
-                ext_extra += f'    sovrnFallbackUrl: "{ext_sovrn_fallback}",\n'
             catalog_entries.append(
                 f'  {ext_k}: {{\n'
                 f'    defaultUrl: "{ext_url}",\n'
                 f'{ext_extra}'
                 f'    envVar: "{ext_env}",\n'
+                f'    statusEnvVar: "{ext_status_env}",\n'
+                f'    status: "{ext_status_val}",\n'
                 f'    isDirect: {ext_direct_js},\n'
                 f'  }},'
             )
@@ -3047,53 +3191,76 @@ export async function onRequest(context) {{
         if v_key not in ordered_keys:
             v_url = str(v_meta.get("verified_url") or "").strip()
             v_env = f"AFFILIATE_{v_key.upper()}_URL"
-            v_direct_contract = direct_contract_upgrades.get(v_key)
-            v_sovrn_fallback = sovrn_fallback_upgrades.get(v_key)
-            v_direct_js = "true" if (v_meta.get("is_direct") and not v_sovrn_fallback) else "false"
+            v_status_env = f"AFFILIATE_{v_key.upper()}_STATUS"
+            v_is_direct = bool(v_meta.get("is_direct"))
+            v_status_val = "live" if v_is_direct else "pending"
+            v_direct_contract = direct_contract_upgrades.get(v_key) if v_is_direct else None
+            v_direct_js = "true" if v_is_direct else "false"
             v_extra = ""
             if v_direct_contract:
                 v_extra += f'    directContractUrl: "{v_direct_contract}",\n'
-            if v_sovrn_fallback:
-                v_extra += f'    sovrnFallbackUrl: "{v_sovrn_fallback}",\n'
             catalog_entries.append(
                 f'  {v_key}: {{\n'
                 f'    defaultUrl: "{v_url}",\n'
                 f'{v_extra}'
                 f'    envVar: "{v_env}",\n'
+                f'    statusEnvVar: "{v_status_env}",\n'
+                f'    status: "{v_status_val}",\n'
                 f'    isDirect: {v_direct_js},\n'
                 f'  }},'
             )
             ordered_keys.append(v_key)
 
     direct_network_aliases = {
-        "efile": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL"),
-        "efile_com": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL"),
-        "file_com_tax": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_FILE_COM_TAX_URL"),
-        "taxact_business": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_TAXACT_BUSINESS_URL"),
-        "eztaxreturn": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
-        "eztaxreturn_com": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL"),
-        "lawdepot": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL"),
-        "legalzoom": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LEGALZOOM_URL"),
-        "xendoo_impact": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_IMPACT_URL"),
-        "bench_accounting": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_BENCH_ACCOUNTING_URL"),
-        "collective_scorp": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_COLLECTIVE_SCORP_URL"),
-        "avaliable_1031": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_AVALIABLE_1031_URL"),
-        "madison_specs_cost_seg": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_MADISON_SPECS_COST_SEG_URL"),
-        "bluevine_checking": ("https://mercury.com/r/profithelm-llc", "AFFILIATE_BLUEVINE_CHECKING_URL"),
-        "ramp_impact": ("https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL"),
-        "wallethub": ("https://www.jdoqocy.com/click-101906407-16952385", "AFFILIATE_WALLETHUB_URL"),
+        "efile": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL", "efile_com"),
+        "efile_com": ("https://www.jdoqocy.com/click-101906407-11917161", "AFFILIATE_EFILE_URL", "efile_com"),
+        "eztaxreturn": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL", "eztaxreturn_com"),
+        "eztaxreturn_com": ("https://www.dpbolvw.net/click-101906407-15704796", "AFFILIATE_EZTAXRETURN_URL", "eztaxreturn_com"),
+        "lawdepot": ("https://www.jdoqocy.com/click-101906407-16985242", "AFFILIATE_LAWDEPOT_URL", "lawdepot"),
+        "xendoo_impact": ("https://xendoo.pxf.io/c/7932737/1357375/16354", "AFFILIATE_XENDOO_IMPACT_URL", "xendoo"),
+        "ramp_impact": ("https://join.ramp.com/c/7932737/3981015/51436", "AFFILIATE_RAMP_URL", "ramp"),
+        "wallethub": ("https://www.jdoqocy.com/click-101906407-16952385", "AFFILIATE_WALLETHUB_URL", "wallethub"),
     }
-    for d_key, (d_url, d_env) in direct_network_aliases.items():
+    for d_key, (d_url, d_env, d_canon) in direct_network_aliases.items():
         if d_key not in ordered_keys:
             if not is_intent_matched(d_key, d_url):
                 continue
-            d_direct_contract = direct_contract_upgrades.get(d_key) or d_url
+            d_ve = (
+                prop_vault.get(d_key)
+                if isinstance(prop_vault, dict) and isinstance(prop_vault.get(d_key), dict)
+                else (prop_vault.get(d_canon, {}) if isinstance(prop_vault, dict) else {})
+            )
+            d_vst = str(d_ve.get("status") or "").strip().lower()
+            d_canon_obj = PROFITHELM_AFFILIATES.get(d_canon)
+            d_declined = (d_vst in _ph_declined) or (
+                bool(d_canon_obj and d_canon_obj.status == "declined") and d_vst not in _ph_live and d_vst not in _ph_pending
+            )
+            d_is_direct = bool(not d_declined and d_vst not in _ph_pending)
+            d_status_val = (
+                "declined"
+                if d_declined
+                else ("live" if d_is_direct else ("pending_p2" if d_vst == "pending_p2" else "pending"))
+            )
+            d_eff_default = (
+                (direct_contract_upgrades.get(d_key) or direct_contract_upgrades.get(d_canon) or d_url)
+                if d_is_direct
+                else _ph_clean_homepages.get(d_key, _ph_clean_homepages.get(d_canon, d_url))
+            )
+            d_direct_contract = (
+                (direct_contract_upgrades.get(d_key) or direct_contract_upgrades.get(d_canon) or d_url)
+                if d_is_direct
+                else ""
+            )
+            d_extra = f'    directContractUrl: "{d_direct_contract}",\n' if d_direct_contract else ""
+            d_status_env = d_env[:-4] + "_STATUS" if d_env.endswith("_URL") else f"AFFILIATE_{d_key.upper()}_STATUS"
             catalog_entries.append(
                 f'  {d_key}: {{\n'
-                f'    defaultUrl: "{d_url}",\n'
-                f'    directContractUrl: "{d_direct_contract}",\n'
+                f'    defaultUrl: "{d_eff_default}",\n'
+                f'{d_extra}'
                 f'    envVar: "{d_env}",\n'
-                f'    isDirect: true,\n'
+                f'    statusEnvVar: "{d_status_env}",\n'
+                f'    status: "{d_status_val}",\n'
+                f'    isDirect: {"true" if d_is_direct else "false"},\n'
                 f'  }},'
             )
             ordered_keys.append(d_key)
@@ -3173,7 +3340,6 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
     const kv =
       env &&
       (env.PROFITHELM_TELEMETRY_KV ||
-        env.PROFITHELM_LEADS ||
         env.TELEMETRY_KV ||
         null);
     if (kv && typeof kv.put === "function") {{
@@ -3276,7 +3442,7 @@ export async function onRequest(context) {{
   const rawPartner = (params.partner || "").trim().toLowerCase();
 
   // Whitelist check
-  const partnerConfig = PARTNER_CATALOG[rawPartner];
+  const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
   if (!partnerConfig) {{
     return new Response("Partner not found", {{
       status: 404,
@@ -3288,6 +3454,28 @@ export async function onRequest(context) {{
   }}
 
   // Resolve target URL and determine if active direct or fallback
+  const envStatus =
+    env && partnerConfig.statusEnvVar && env[partnerConfig.statusEnvVar]
+      ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
+      : null;
+  const effectiveStatus =
+    envStatus || partnerConfig.status || (partnerConfig.isDirect ? "live" : "pending");
+  if (
+    effectiveStatus === "declined" ||
+    effectiveStatus === "rejected" ||
+    effectiveStatus === "pending_p2"
+  ) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: "https://profithelm.com/tools/",
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "declined_partner_blocked",
+      }},
+    }});
+  }}
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
   const sovrnApproved = Boolean(
@@ -3312,7 +3500,9 @@ export async function onRequest(context) {{
     ? "direct_contract_upgraded"
     : isDirect
     ? "direct_default"
-    : "sovrn_fallback";
+    : sovrnApproved
+    ? "sovrn_fallback"
+    : "native_unmonetized_destination";
 
   // Validate raw target URL against SSRF
   if (!isSsrfSafe(rawTargetUrl)) {{
@@ -3391,9 +3581,9 @@ export async function onRequest(context) {{
   }}
   const populatedTargetUrl = targetObj.toString();
 
-  // Route directly or wrap with Sovrn Commerce fallback (including cuid sub-attribution)
+  // Route directly or wrap with Sovrn Commerce fallback ONLY when Sovrn is approved
   let finalRedirectUrl;
-  if (isDirect) {{
+  if (isDirect || !sovrnApproved) {{
     finalRedirectUrl = populatedTargetUrl;
   }} else {{
     const sovrnKey = (env && env.SOVRN_COMMERCE_DOMAIN_KEY) || DEFAULT_SOVRN_KEY;
@@ -3545,6 +3735,27 @@ def resolve_canonical_partner_redirect(
         val_str = str(raw_v if raw_v is not None else "")
         if clean_k and val_str != "" and clean_k not in norm_params:
             norm_params[clean_k] = val_str
+
+    status_env_var = str(partner_config.get("statusEnvVar") or "")
+    env_status = str(env_map.get(status_env_var) or "").strip().lower() if status_env_var else ""
+    effective_status = env_status or str(partner_config.get("status") or "").strip().lower()
+    if effective_status in ("declined", "rejected", "pending_p2"):
+        edu_fallback = {
+            "prexvo": "https://prexvo.com/tools/student-loan-repayment-calculator/",
+            "gainhelm": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+            "lienbond": "https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/",
+        }.get(resolved_prop, "https://profithelm.com/tools/")
+        return {
+            "partner": raw_partner,
+            "location": edu_fallback,
+            "native_destination": str(partner_config.get("defaultUrl") or edu_fallback),
+            "effective_base_url": edu_fallback,
+            "contract_tier": "declined_partner_blocked",
+            "subid": norm_params.get("subid") or "default",
+            "source_tool": norm_params.get("source_tool") or norm_params.get("source") or "direct",
+            "cta_slot": norm_params.get("cta_slot") or norm_params.get("slot") or "default",
+            "property_id": resolved_prop,
+        }
 
     env_var_name = str(partner_config.get("envVar") or "")
     env_url = str(env_map.get(env_var_name) or "").strip() if env_var_name else ""
@@ -3711,7 +3922,7 @@ def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
 const CORS_HEADERS = {{
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Pseofactory-Test",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Telemetry-Secret, X-Pseofactory-Test",
   "Access-Control-Max-Age": "86400",
 }};
 
@@ -3722,11 +3933,32 @@ export async function onRequestOptions() {{
   }});
 }}
 
+const HIGH_FREQUENCY_NON_KV_EVENTS = new Set([
+  "slider",
+  "slider_change",
+  "slider_drag",
+  "range_input",
+  "calc_input",
+  "calculator_input",
+  "calculator_interaction",
+  "workbench_interaction",
+  "input_change",
+  "field_change",
+  "form_input",
+  "keystroke",
+  "keydown",
+  "keyup",
+  "mousemove",
+  "scroll",
+  "hover",
+  "heartbeat",
+  "ping",
+]);
+
 function resolveTelemetryKV(env) {{
   if (!env || typeof env !== "object") return null;
   const candidates = [
     env.{prop_upper}_TELEMETRY_KV,
-    env.{prop_upper}_LEADS,
     env.TELEMETRY_KV,
   ];
   for (const kv of candidates) {{
@@ -3875,31 +4107,58 @@ export async function onRequestPost(context) {{
       payload.timestamp = new Date().toISOString();
     }}
 
+    const interactionType = String(
+      payload.interaction_type || props.interaction_type || ""
+    )
+      .trim()
+      .toLowerCase();
+    const isHighFrequencyUiEvent =
+      HIGH_FREQUENCY_NON_KV_EVENTS.has(String(eventName || "").toLowerCase()) ||
+      HIGH_FREQUENCY_NON_KV_EVENTS.has(
+        String(payload.event_type || "").toLowerCase()
+      ) ||
+      HIGH_FREQUENCY_NON_KV_EVENTS.has(interactionType);
+
     if (!isSyntheticProbe) {{
       appendInMemoryTelemetry(payload);
 
-      // If Cloudflare KV binding exists (dedicated telemetry KV or shared leads KV), persist event with compact KV metadata
-      const kv = resolveTelemetryKV(env);
-      if (kv && typeof kv.put === "function") {{
-        try {{
-          const kvMeta = {{
+      // Persist low-frequency conversion/calculation events to dedicated telemetry KV;
+      // log high-frequency UI slider/input events via console.log only to protect daily KV write quota.
+      if (isHighFrequencyUiEvent) {{
+        console.log(
+          JSON.stringify({{
+            telemetry_log_only: true,
             event_id: eventId,
             event: eventName,
-            event_type: payload.event_type || eventName,
             property_id: payload.property_id,
-            partner_key: payload.partner_key || null,
             tool_slug: payload.tool_slug || null,
-            cta_slot: payload.cta_slot || null,
-            subid: payload.subid || null,
-            value_tier: payload.value_tier || null,
             path: String(path || "/").slice(0, 160),
             timestamp: payload.timestamp,
-          }};
-          await kv.put(eventId, JSON.stringify(payload), {{
-            expirationTtl: 60 * 86400,
-            metadata: kvMeta,
-          }});
-        }} catch (_) {{}}
+          }})
+        );
+      }} else {{
+        const kv = resolveTelemetryKV(env);
+        if (kv && typeof kv.put === "function") {{
+          try {{
+            const kvMeta = {{
+              event_id: eventId,
+              event: eventName,
+              event_type: payload.event_type || eventName,
+              property_id: payload.property_id,
+              partner_key: payload.partner_key || null,
+              tool_slug: payload.tool_slug || null,
+              cta_slot: payload.cta_slot || null,
+              subid: payload.subid || null,
+              value_tier: payload.value_tier || null,
+              path: String(path || "/").slice(0, 160),
+              timestamp: payload.timestamp,
+            }};
+            await kv.put(eventId, JSON.stringify(payload), {{
+              expirationTtl: 60 * 86400,
+              metadata: kvMeta,
+            }});
+          }} catch (_) {{}}
+        }}
       }}
     }}
 
@@ -3907,7 +4166,8 @@ export async function onRequestPost(context) {{
       JSON.stringify({{
         ok: true,
         status: "RECORDED",
-        persisted: !isSyntheticProbe,
+        persisted: !isSyntheticProbe && !isHighFrequencyUiEvent,
+        kv_write_suppressed: isHighFrequencyUiEvent,
         synthetic_test: isSyntheticProbe,
         event_id: eventId,
         event: eventName,
@@ -3950,19 +4210,50 @@ export async function onRequestGet(context) {{
   try {{
     const {{ request, env }} = context;
     const url = new URL(request.url);
-    const authHeader = request.headers.get("authorization") || "";
-    const token =
-      authHeader.replace(/^Bearer\\s+/i, "") ||
-      url.searchParams.get("token") ||
-      "";
+    const authHeader =
+      (request && request.headers && typeof request.headers.get === "function"
+        ? request.headers.get("authorization")
+        : "") || "";
+    const headerSecret =
+      (request && request.headers && typeof request.headers.get === "function"
+        ? request.headers.get("x-telemetry-secret")
+        : "") || "";
+    const bearerToken = /^Bearer\\s+/i.test(authHeader)
+      ? authHeader.replace(/^Bearer\\s+/i, "").trim()
+      : "";
+    const providedSecret = bearerToken || headerSecret.trim();
+    const expectedSecret = String(
+      (env && env.TELEMETRY_EXPORT_SECRET) || ""
+    ).trim();
+    const isAuthorized =
+      Boolean(expectedSecret) &&
+      Boolean(providedSecret) &&
+      providedSecret === expectedSecret;
+    const isHealthOrSynthetic =
+      url.searchParams.get("health") === "1" ||
+      url.searchParams.get("synthetic_test") === "1" ||
+      ((request && request.headers && typeof request.headers.get === "function"
+        ? request.headers.get("x-pseofactory-test")
+        : "") === "1");
 
-    const secret =
-      env && (env.TELEMETRY_EXPORT_SECRET || env.CLOUDFLARE_API_TOKEN || "");
-    if (secret && token !== secret) {{
-      return new Response(JSON.stringify({{ ok: false, error: "Unauthorized" }}), {{
-        status: 401,
-        headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
-      }});
+    if (url.searchParams.get("health") === "1" || (!isAuthorized && isHealthOrSynthetic)) {{
+      return new Response(
+        JSON.stringify({{ ok: true, auth_required: true }}),
+        {{
+          status: 200,
+          headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
+        }}
+      );
+    }}
+
+    if (!isAuthorized) {{
+      return new Response(
+        JSON.stringify({{ ok: false, error: "Unauthorized", auth_required: true }}),
+        {{
+          status: 401,
+          headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }},
+        }}
+      );
     }}
 
     const limit = Math.min(
@@ -4146,21 +4437,17 @@ def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Telemetry-Secret, X-Pseofactory-Test",
   "Cache-Control": "private, no-cache, no-store, must-revalidate",
   "X-Robots-Tag": "noindex, nofollow",
 };
 
 const PARTNER_ROUTES = {
-  simply_business: "https://www.jdoqocy.com/click-101906407-16985242",
-  suretybonds_direct: "https://www.jdoqocy.com/click-101906407-16985242",
-  next_insurance_b2b: "https://www.jdoqocy.com/click-101906407-16985242",
-  thimble_contractor: "https://www.thimble.com/contractor-insurance",
+  simply_business: "https://www.simplybusiness.com/",
+  suretybonds_direct: "https://www.suretybondsdirect.com/",
+  thimble_contractor: "https://www.thimble.com/",
   jobber_field_service: "https://getjobber.com/",
   levelset_lien_filing: "https://www.levelset.com/",
-  ramp: "https://join.ramp.com/c/7932737/3981015/51436",
-  lawdepot: "https://www.jdoqocy.com/click-101906407-16985242",
-  xendoo: "https://xendoo.pxf.io/c/7932737/1357375/16354",
 };
 
 const STATE_LIEN_STATUTES = {
@@ -4268,6 +4555,36 @@ const LIENBOND_TOOLKIT_OFFERS = {
       "Machine-Readable Contractor Compliance Scenario Pack (JSON)",
     ],
   },
+  lb_surety_lien_wh347_packet: {
+    sku: "lb_surety_lien_wh347_packet",
+    title: "LienBond 50-State Mechanics Lien, AIA A312 Surety & Davis-Bacon WH-347 Master Packet",
+    price_usd: 79,
+    price_cents: 7900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "40 U.S.C. 3131-3148 (Miller & Davis-Bacon Acts), 29 CFR 5.5, Cal. Civ. Code 8132-8414 & Tex. Prop. Code Ch. 53",
+    deliverables: [
+      "50-State Preliminary Notice, Notice of Intent & Statutory Lien Waiver Master Filing Packet (HTML/PDF)",
+      "AIA A312 Performance/Payment Bond & SBA 13 CFR Part 115 Surety Underwriting Workpaper (HTML/PDF)",
+      "DOL Form WH-347 Weekly Certified Payroll & Bona Fide Fringe Credit Reconciliation Schedule (CSV)",
+      "Signed Multi-Statute Construction Compliance & Retainage Protection Manifest (JSON)",
+    ],
+  },
+  lb_workers_comp_emr_audit_packet: {
+    sku: "lb_workers_comp_emr_audit_packet",
+    title: "LienBond NCCI Workers' Comp Class Code & EMR Audit Defense Packet",
+    price_usd: 49,
+    price_cents: 4900,
+    currency: "usd",
+    billing_mode: "payment",
+    statutory_authority: "NCCI Basic Manual Rule 2-C-2, NCCI Experience Rating Plan (ERP) & ISO CG 00 01 Commercial GL Standards",
+    deliverables: [
+      "NCCI Governing Class Code & Payroll Separation Audit Defense Workpaper (HTML/PDF)",
+      "3-Year Experience Modification Rate (EMR) Primary vs Excess Loss Sensitivity Schedule (CSV)",
+      "Overtime Premium Payroll Deduction (1/3 vs 1/2 Credit) & Subcontractor COI Audit Checklist (HTML/PDF)",
+      "Signed Workers' Comp Premium Audit & Experience Rating Verification Manifest (JSON)",
+    ],
+  },
   lb_verified_partner_slot: {
     sku: "lb_verified_partner_slot",
     title: "Verified Calculator Partner Slot",
@@ -4287,7 +4604,7 @@ const LIENBOND_TOOLKIT_OFFERS = {
 
 function getLeadsKv(env) {
   if (!env) return null;
-  return env.LIENBOND_LEADS || env.LIENBOND_TELEMETRY_KV || env.TELEMETRY_KV || null;
+  return env.LIENBOND_LEADS || env.LEADS_KV || env.LEADS || null;
 }
 
 function getMemoryBuffer() {
@@ -4329,7 +4646,7 @@ function selectPartnerForSlug(toolSlug, reqPartner) {
   if (s.includes("lien") || s.includes("waiver")) return "levelset_lien_filing";
   if (s.includes("bond") || s.includes("surety")) return "suretybonds_direct";
   if (s.includes("workers-comp") || s.includes("emr")) return "simply_business";
-  return "next_insurance_b2b";
+  return "simply_business";
 }
 
 function parseEdgeJsonParam(rawVal) {
@@ -4373,7 +4690,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
   return {
     lead_id: leadId || "lead_lienbond_direct",
     property_id: "lienbond",
-    email: emailParam || "controller@lienbond.com",
+    email: emailParam || "",
     state: String(stateParam || "CA").toUpperCase().slice(0, 2) || "CA",
     tool_slug: toolSlug || "contractor-license-bond-cost-calculator-by-credit-score",
     calculated_amount: safeAmount,
@@ -4736,16 +5053,76 @@ function buildLienBondWorkpaperBundle(record, offer, mode = "paid_toolkit") {
 const EDGE_PROPERTY_ID = "lienbond";
 const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
 
+function edgeDomainHash32(str) {
+  let h = 0x811c9dc5;
+  const clean = String(str || "").trim().toLowerCase();
+  for (let i = 0; i < clean.length; i += 1) {
+    h ^= clean.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+function isFleetManagedDomain(domain) {
+  const d = String(domain || "").trim().toLowerCase();
+  if (!d) return false;
+  if (Array.isArray(EDGE_CLASSIFIER.own_domains)) {
+    for (const own of EDGE_CLASSIFIER.own_domains) {
+      if (d === own || d.endsWith("." + own)) return true;
+    }
+  }
+  const hashes = Array.isArray(EDGE_CLASSIFIER.fleet_domain_hashes) ? EDGE_CLASSIFIER.fleet_domain_hashes : [];
+  if (hashes.length > 0) {
+    if (hashes.includes(edgeDomainHash32(d))) return true;
+    const parts = d.split(".");
+    if (parts.length >= 2) {
+      const apex = parts.slice(-2).join(".");
+      if (hashes.includes(edgeDomainHash32(apex))) return true;
+    }
+  }
+  return false;
+}
+
+const CANONICAL_OPERATOR_MAILBOX = atob("YXJpZi5jb3NrdW5AcHJvZml0aGVsbS5jb20=");
+
+function normalizeCanonicalSenderEmail(rawEmail) {
+  const raw = String(rawEmail || "").trim();
+  const clean = raw.toLowerCase();
+  if (!clean || !clean.includes("@") || clean.includes("*")) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (clean === CANONICAL_OPERATOR_MAILBOX) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  const at = clean.lastIndexOf("@");
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at + 1);
+  if (!local || !domain) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (isFleetManagedDomain(domain)) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  return raw;
+}
+
 function classifyEdgeLeadEmail(email) {
   const value = String(email || "").trim().toLowerCase();
+  if (!value || value.includes("*")) return "synthetic";
   const at = value.lastIndexOf("@");
   if (at < 1) return "synthetic";
   const local = value.slice(0, at);
   const domain = value.slice(at + 1);
   if (!domain) return "synthetic";
-  for (const d of EDGE_CLASSIFIER.own_domains) {
-    if (domain === d || domain.endsWith("." + d)) return "synthetic";
-  }
+  if (isFleetManagedDomain(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
   if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
@@ -4794,11 +5171,25 @@ function maskEdgeEmail(email) {
 
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
-  if (!e || !e.includes("@")) return true;
-  return (
-    e === "controller@lienbond.com" ||
-    e === "audit@lienbond.com"
-  );
+  if (!e || !e.includes("@") || e.includes("*")) return true;
+  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  const at = e.lastIndexOf("@");
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (!local || !domain) return true;
+  if (isFleetManagedDomain(domain)) return true;
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return true;
+  }
+  if (Array.isArray(EDGE_CLASSIFIER.local_prefixes) && EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) {
+    return true;
+  }
+  return false;
 }
 
 function isEdgeVerifiedPaidRecord(item) {
@@ -5042,12 +5433,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
   const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@lienbond.com";
+  const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "LienBond";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/contractor-license-bond-cost-calculator-by-credit-score/";
-  const successUrl = `https://lienbond.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+  const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
+  const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+    ? "/"
+    : slugNorm === "general"
+    ? "/tools/contractor-license-bond-cost-calculator-by-credit-score/"
+    : `/tools/${slugNorm}/`;
+  const successUrl = `https://lienbond.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://lienbond.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
@@ -5080,6 +5476,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[workpaper_id]": `wp_${leadId}`,
         "metadata[property_id]": "lienbond",
         "metadata[tool_slug]": toolSlug,
+        "metadata[sku]": offer.sku,
         "metadata[offer_sku]": offer.sku,
         "metadata[merchant_email]": stripeMerchantEmail,
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 125000),
@@ -5167,18 +5564,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
 }
 
 function isSyntheticTestEmail(email) {
-  const e = String(email || "").toLowerCase();
-  const syntheticDomains = [
-    "@example.com",
-    "@example.org",
-    "@test.com",
-    "@localhost",
-    "@freightfleet-logistics.com",
-    "@pacific-industrial.com",
-    "@medcenter-cohort.org",
-    "@metro-health.org",
-  ];
-  return syntheticDomains.some((d) => e.endsWith(d));
+  return isPlaceholderCheckoutEmail(email);
 }
 
 async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = false) {
@@ -5188,6 +5574,14 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       zeptomail_status: "synthetic_test_suppressed",
       zeptomail_request_id: null,
       fulfillment_status: "synthetic_verified",
+    };
+  }
+  if (isPlaceholderCheckoutEmail(record && record.email) || isSyntheticTestEmail(record && record.email)) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "skipped_placeholder_or_internal_recipient",
+      zeptomail_request_id: null,
+      fulfillment_status: "suppressed_probe_email",
     };
   }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
@@ -5204,7 +5598,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
-  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@lienbond.com";
+  const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "LienBond Underwriting & Statutory Desk";
   const emailSubject = `[LienBond Playbook] Your Construction Surety, Lien & Audit Worksheet (${record.tool_slug})`;
   const fallbackLbCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}&redirect=1`;
@@ -5237,7 +5631,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   let zeptoErrorCode = null;
   let zeptoRequestId = null;
   const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
-  if (zeptoToken && !zohoPrimary) {
+  if (zeptoToken && !zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -5279,7 +5673,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       zeptoErrorCode = "network_error";
     }
   }
-  if (nangoSecretKey && nangoConnId) {
+  if (nangoSecretKey && nangoConnId && !isSyntheticTestEmail(record && record.email)) {
     try {
       const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
       const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
@@ -5291,9 +5685,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@lienbond.com";
+        const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@lienbond.com")
+          ? zohoSyntheticSinkEmail
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -5361,12 +5756,19 @@ export async function onRequestGet(context) {
   const reqSku = reqUrl.searchParams.get("sku") || "";
   const offer = selectOfferForSlug(toolSlug, reqSku);
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_lienbond_direct";
-  const email = reqUrl.searchParams.get("email") || "controller@lienbond.com";
+  const email = reqUrl.searchParams.get("email") || "";
   const amountParam = reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "";
   const stateParam = reqUrl.searchParams.get("state") || "CA";
   const inputsJsonParam = reqUrl.searchParams.get("inputs_json") || "";
   const outputsJsonParam = reqUrl.searchParams.get("outputs_json") || "";
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
+
+  if (reqUrl.searchParams.get("health") === "1") {
+    return new Response(
+      JSON.stringify({ ok: true, auth_required: true }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
 
   if (
     reqUrl.searchParams.get("fulfill") === "1" ||
@@ -5498,6 +5900,25 @@ export async function onRequestGet(context) {
     );
   }
 
+  const authHeader = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("authorization") : "") || "";
+  const headerSecret = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("x-telemetry-secret") : "") || "";
+  const bearerToken = /^Bearer\\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\\s+/i, "").trim() : "";
+  const providedSecret = bearerToken || headerSecret.trim();
+  const expectedSecret = String((env && env.TELEMETRY_EXPORT_SECRET) || "").trim();
+  const isAuthorized = Boolean(expectedSecret) && Boolean(providedSecret) && providedSecret === expectedSecret;
+  if (!isAuthorized) {
+    if (isSynth) {
+      return new Response(
+        JSON.stringify({ ok: true, auth_required: true }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+    return new Response(
+      JSON.stringify({ ok: false, error: "Unauthorized", auth_required: true }),
+      { status: 401, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
   const kv = getLeadsKv(env);
@@ -5616,6 +6037,7 @@ export async function onRequestPost(context) {
       body.source_tool ||
       body.source ||
       reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
       "contractor-license-bond-cost-calculator-by-credit-score"
     )
@@ -5649,7 +6071,7 @@ export async function onRequestPost(context) {
         toolSlug,
         String(calculatedAmount),
         state,
-        rawEmail || "controller@lienbond.com",
+        rawEmail || "",
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
@@ -5695,8 +6117,12 @@ export async function onRequestPost(context) {
       );
     }
 
-    const email = rawEmail || (isCheckoutMode ? "controller@lienbond.com" : "");
-    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    const email = rawEmail;
+    if (
+      isCheckoutMode
+        ? Boolean(email) && (email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))
+        : !email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+    ) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid contractor or business email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -5873,7 +6299,7 @@ export async function onRequestPost(context) {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Telemetry-Secret, X-Pseofactory-Test",
   "Cache-Control": "private, no-cache, no-store, must-revalidate",
   "X-Robots-Tag": "noindex, nofollow",
 };
@@ -5885,9 +6311,6 @@ const PARTNER_ROUTES = {
   thoropass_audit: "https://www.thoropass.com/solutions",
   coalition_cyber_insurance: "https://www.coalitioninc.com/cyber-insurance",
   cobalt_pentest: "https://www.cobalt.io/",
-  ramp: "https://join.ramp.com/c/7932737/3981015/51436",
-  lawdepot: "https://www.jdoqocy.com/click-101906407-16985242",
-  xendoo: "https://xendoo.pxf.io/c/7932737/1357375/16354",
 };
 
 const GAINHELM_TOOLKIT_OFFERS = {
@@ -5953,7 +6376,7 @@ const GAINHELM_TOOLKIT_OFFERS = {
 
 function getLeadsKv(env) {
   if (!env) return null;
-  return env.GAINHELM_LEADS || env.GAINHELM_TELEMETRY_KV || env.TELEMETRY_KV || null;
+  return env.GAINHELM_LEADS || env.LEADS_KV || env.LEADS || null;
 }
 
 function getMemoryBuffer() {
@@ -6023,7 +6446,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
   return {
     lead_id: leadId || "lead_gainhelm_direct",
     property_id: "gainhelm",
-    email: emailParam || "ciso@gainhelm.com",
+    email: emailParam || "",
     state: String(stateParam || "DE").toUpperCase().slice(0, 2) || "DE",
     tool_slug: toolSlug || "soc-2-audit-cost-calculator",
     calculated_amount: safeAmount,
@@ -6383,16 +6806,76 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
 const EDGE_PROPERTY_ID = "gainhelm";
 const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
 
+function edgeDomainHash32(str) {
+  let h = 0x811c9dc5;
+  const clean = String(str || "").trim().toLowerCase();
+  for (let i = 0; i < clean.length; i += 1) {
+    h ^= clean.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+function isFleetManagedDomain(domain) {
+  const d = String(domain || "").trim().toLowerCase();
+  if (!d) return false;
+  if (Array.isArray(EDGE_CLASSIFIER.own_domains)) {
+    for (const own of EDGE_CLASSIFIER.own_domains) {
+      if (d === own || d.endsWith("." + own)) return true;
+    }
+  }
+  const hashes = Array.isArray(EDGE_CLASSIFIER.fleet_domain_hashes) ? EDGE_CLASSIFIER.fleet_domain_hashes : [];
+  if (hashes.length > 0) {
+    if (hashes.includes(edgeDomainHash32(d))) return true;
+    const parts = d.split(".");
+    if (parts.length >= 2) {
+      const apex = parts.slice(-2).join(".");
+      if (hashes.includes(edgeDomainHash32(apex))) return true;
+    }
+  }
+  return false;
+}
+
+const CANONICAL_OPERATOR_MAILBOX = atob("YXJpZi5jb3NrdW5AcHJvZml0aGVsbS5jb20=");
+
+function normalizeCanonicalSenderEmail(rawEmail) {
+  const raw = String(rawEmail || "").trim();
+  const clean = raw.toLowerCase();
+  if (!clean || !clean.includes("@") || clean.includes("*")) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (clean === CANONICAL_OPERATOR_MAILBOX) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  const at = clean.lastIndexOf("@");
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at + 1);
+  if (!local || !domain) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (isFleetManagedDomain(domain)) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  return raw;
+}
+
 function classifyEdgeLeadEmail(email) {
   const value = String(email || "").trim().toLowerCase();
+  if (!value || value.includes("*")) return "synthetic";
   const at = value.lastIndexOf("@");
   if (at < 1) return "synthetic";
   const local = value.slice(0, at);
   const domain = value.slice(at + 1);
   if (!domain) return "synthetic";
-  for (const d of EDGE_CLASSIFIER.own_domains) {
-    if (domain === d || domain.endsWith("." + d)) return "synthetic";
-  }
+  if (isFleetManagedDomain(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
   if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
@@ -6441,11 +6924,25 @@ function maskEdgeEmail(email) {
 
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
-  if (!e || !e.includes("@")) return true;
-  return (
-    e === "ciso@gainhelm.com" ||
-    e === "audit@gainhelm.com"
-  );
+  if (!e || !e.includes("@") || e.includes("*")) return true;
+  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  const at = e.lastIndexOf("@");
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (!local || !domain) return true;
+  if (isFleetManagedDomain(domain)) return true;
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return true;
+  }
+  if (Array.isArray(EDGE_CLASSIFIER.local_prefixes) && EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) {
+    return true;
+  }
+  return false;
 }
 
 function isEdgeVerifiedPaidRecord(item) {
@@ -6691,12 +7188,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
   const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@gainhelm.com";
+  const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "GainHelm";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/soc-2-audit-cost-calculator/";
-  const successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+  const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
+  const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+    ? "/"
+    : slugNorm === "general"
+    ? "/tools/soc-2-audit-cost-calculator/"
+    : `/tools/${slugNorm}/`;
+  const successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://gainhelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
@@ -6729,6 +7231,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[workpaper_id]": `wp_${leadId}`,
         "metadata[property_id]": "gainhelm",
         "metadata[tool_slug]": toolSlug,
+        "metadata[sku]": offer.sku,
         "metadata[offer_sku]": offer.sku,
         "metadata[merchant_email]": stripeMerchantEmail,
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 48500),
@@ -6816,18 +7319,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
 }
 
 function isSyntheticTestEmail(email) {
-  const e = String(email || "").toLowerCase();
-  const syntheticDomains = [
-    "@example.com",
-    "@example.org",
-    "@test.com",
-    "@localhost",
-    "@freightfleet-logistics.com",
-    "@pacific-industrial.com",
-    "@medcenter-cohort.org",
-    "@metro-health.org",
-  ];
-  return syntheticDomains.some((d) => e.endsWith(d));
+  return isPlaceholderCheckoutEmail(email);
 }
 
 async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = false) {
@@ -6837,6 +7329,14 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       zeptomail_status: "synthetic_test_suppressed",
       zeptomail_request_id: null,
       fulfillment_status: "synthetic_verified",
+    };
+  }
+  if (isPlaceholderCheckoutEmail(record && record.email) || isSyntheticTestEmail(record && record.email)) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "skipped_placeholder_or_internal_recipient",
+      zeptomail_request_id: null,
+      fulfillment_status: "suppressed_probe_email",
     };
   }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
@@ -6853,7 +7353,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
-  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@gainhelm.com";
+  const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "GainHelm Research Desk";
   const emailSubject = `[GainHelm Playbook] Your Enterprise GRC & Audit Readiness Worksheet (${record.tool_slug})`;
   const fallbackGhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_gainhelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "soc-2-audit-cost-calculator")}&redirect=1`;
@@ -6886,7 +7386,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   let zeptoErrorCode = null;
   let zeptoRequestId = null;
   const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
-  if (zeptoToken && !zohoPrimary) {
+  if (zeptoToken && !zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -6928,7 +7428,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       zeptoErrorCode = "network_error";
     }
   }
-  if (nangoSecretKey && nangoConnId) {
+  if (nangoSecretKey && nangoConnId && !isSyntheticTestEmail(record && record.email)) {
     try {
       const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
       const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
@@ -6940,9 +7440,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@gainhelm.com";
+        const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@gainhelm.com")
+          ? zohoSyntheticSinkEmail
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -6980,7 +7481,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       }
     } catch (_) {}
   }
-  if (zeptoToken && zohoPrimary) {
+  if (zeptoToken && zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -7052,12 +7553,19 @@ export async function onRequestGet(context) {
   const reqSku = reqUrl.searchParams.get("sku") || "";
   const offer = selectOfferForSlug(toolSlug, reqSku);
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_gainhelm_direct";
-  const email = reqUrl.searchParams.get("email") || "ciso@gainhelm.com";
+  const email = reqUrl.searchParams.get("email") || "";
   const amountParam = reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "";
   const stateParam = reqUrl.searchParams.get("state") || "DE";
   const inputsJsonParam = reqUrl.searchParams.get("inputs_json") || "";
   const outputsJsonParam = reqUrl.searchParams.get("outputs_json") || "";
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
+
+  if (reqUrl.searchParams.get("health") === "1") {
+    return new Response(
+      JSON.stringify({ ok: true, auth_required: true }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
 
   if (
     reqUrl.searchParams.get("fulfill") === "1" ||
@@ -7189,6 +7697,25 @@ export async function onRequestGet(context) {
     );
   }
 
+  const authHeader = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("authorization") : "") || "";
+  const headerSecret = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("x-telemetry-secret") : "") || "";
+  const bearerToken = /^Bearer\\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\\s+/i, "").trim() : "";
+  const providedSecret = bearerToken || headerSecret.trim();
+  const expectedSecret = String((env && env.TELEMETRY_EXPORT_SECRET) || "").trim();
+  const isAuthorized = Boolean(expectedSecret) && Boolean(providedSecret) && providedSecret === expectedSecret;
+  if (!isAuthorized) {
+    if (isSynth) {
+      return new Response(
+        JSON.stringify({ ok: true, auth_required: true }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+    return new Response(
+      JSON.stringify({ ok: false, error: "Unauthorized", auth_required: true }),
+      { status: 401, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
   const kv = getLeadsKv(env);
@@ -7307,6 +7834,7 @@ export async function onRequestPost(context) {
       body.source_tool ||
       body.source ||
       reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
       "soc-2-audit-cost-calculator"
     )
@@ -7343,7 +7871,7 @@ export async function onRequestPost(context) {
         toolSlug,
         String(calculatedAmount),
         state,
-        rawEmail || "ciso@gainhelm.com",
+        rawEmail || "",
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
@@ -7389,8 +7917,12 @@ export async function onRequestPost(context) {
       );
     }
 
-    const email = rawEmail || (isCheckoutMode ? "ciso@gainhelm.com" : "");
-    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    const email = rawEmail;
+    if (
+      isCheckoutMode
+        ? Boolean(email) && (email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))
+        : !email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+    ) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid work email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -7572,7 +8104,7 @@ export async function onRequestPost(context) {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Telemetry-Secret, X-Pseofactory-Test",
   "Cache-Control": "private, no-cache, no-store, must-revalidate",
   "X-Robots-Tag": "noindex, nofollow",
 };
@@ -7586,11 +8118,12 @@ const RESTRICTED_PUBLIC_SERVICE_SLUGS = [
 ];
 
 const PARTNER_ROUTES = {
-  splash_financial: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
-  credible: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
-  sofi: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
-  earnest: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
-  edvestin: "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1",
+  splash_financial: "https://www.splashfinancial.com/",
+  credible: "https://www.credible.com/refinance-student-loans",
+  lendkey: "https://www.lendkey.com/student-loan-refinancing/",
+  edvestin: "https://edvestinu.com/refinance/",
+  laurel_road: "https://www.laurelroad.com/student-loan-refinancing/",
+  juno: "https://joinjuno.com/",
 };
 
 const PREXVO_TOOLKIT_OFFER = {
@@ -7611,7 +8144,7 @@ const PREXVO_TOOLKIT_OFFER = {
 
 function getLeadsKv(env) {
   if (!env) return null;
-  return env.PREXVO_LEADS || env.PREXVO_TELEMETRY_KV || env.TELEMETRY_KV || null;
+  return env.PREXVO_LEADS || env.LEADS_KV || env.LEADS || null;
 }
 
 function getMemoryBuffer() {
@@ -7654,7 +8187,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   const leadId = String((record && record.lead_id) || "lead_prexvo_direct");
   const toolSlug = String((record && record.tool_slug) || "student-loan-refinance-break-even-calculator");
   const stateCode = String((record && record.state) || "US").toUpperCase();
-  const email = String((record && record.email) || "borrower@prexvo.com");
+  const email = String((record && record.email) || "Verified Borrower");
   const rawAmt = Number(record && record.calculated_amount ? record.calculated_amount : 0);
   const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : 85000;
   const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
@@ -7745,10 +8278,20 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     },
   ];
 
-  const isQuickPx = String((record && record.offer_sku) || "").trim().toLowerCase() === "px_instant_repayment_worksheet_19";
-  const activePxSku = isQuickPx ? "px_instant_repayment_worksheet_19" : PREXVO_TOOLKIT_OFFER.sku;
-  const activePxTitle = isQuickPx ? "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)" : PREXVO_TOOLKIT_OFFER.title;
-  const grossPriceUsd = isQuickPx ? 19 : Number(PREXVO_TOOLKIT_OFFER.price_usd || 39);
+  const rawPxSku = String((record && record.offer_sku) || "").trim().toLowerCase();
+  const isPartnerSlotPx = rawPxSku === "px_verified_partner_slot";
+  const isQuickPx = rawPxSku === "px_instant_repayment_worksheet_19";
+  const activePxSku = isPartnerSlotPx
+    ? "px_verified_partner_slot"
+    : isQuickPx
+    ? "px_instant_repayment_worksheet_19"
+    : PREXVO_TOOLKIT_OFFER.sku;
+  const activePxTitle = isPartnerSlotPx
+    ? "Verified Calculator Partner Slot"
+    : isQuickPx
+    ? "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)"
+    : PREXVO_TOOLKIT_OFFER.title;
+  const grossPriceUsd = isPartnerSlotPx ? 299 : isQuickPx ? 19 : Number(PREXVO_TOOLKIT_OFFER.price_usd || 39);
 
   const playbookQs = new URLSearchParams({
     playbook: "1",
@@ -7994,16 +8537,76 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
 const EDGE_PROPERTY_ID = "prexvo";
 const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
 
+function edgeDomainHash32(str) {
+  let h = 0x811c9dc5;
+  const clean = String(str || "").trim().toLowerCase();
+  for (let i = 0; i < clean.length; i += 1) {
+    h ^= clean.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+function isFleetManagedDomain(domain) {
+  const d = String(domain || "").trim().toLowerCase();
+  if (!d) return false;
+  if (Array.isArray(EDGE_CLASSIFIER.own_domains)) {
+    for (const own of EDGE_CLASSIFIER.own_domains) {
+      if (d === own || d.endsWith("." + own)) return true;
+    }
+  }
+  const hashes = Array.isArray(EDGE_CLASSIFIER.fleet_domain_hashes) ? EDGE_CLASSIFIER.fleet_domain_hashes : [];
+  if (hashes.length > 0) {
+    if (hashes.includes(edgeDomainHash32(d))) return true;
+    const parts = d.split(".");
+    if (parts.length >= 2) {
+      const apex = parts.slice(-2).join(".");
+      if (hashes.includes(edgeDomainHash32(apex))) return true;
+    }
+  }
+  return false;
+}
+
+const CANONICAL_OPERATOR_MAILBOX = atob("YXJpZi5jb3NrdW5AcHJvZml0aGVsbS5jb20=");
+
+function normalizeCanonicalSenderEmail(rawEmail) {
+  const raw = String(rawEmail || "").trim();
+  const clean = raw.toLowerCase();
+  if (!clean || !clean.includes("@") || clean.includes("*")) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (clean === CANONICAL_OPERATOR_MAILBOX) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  const at = clean.lastIndexOf("@");
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at + 1);
+  if (!local || !domain) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (isFleetManagedDomain(domain)) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  return raw;
+}
+
 function classifyEdgeLeadEmail(email) {
   const value = String(email || "").trim().toLowerCase();
+  if (!value || value.includes("*")) return "synthetic";
   const at = value.lastIndexOf("@");
   if (at < 1) return "synthetic";
   const local = value.slice(0, at);
   const domain = value.slice(at + 1);
   if (!domain) return "synthetic";
-  for (const d of EDGE_CLASSIFIER.own_domains) {
-    if (domain === d || domain.endsWith("." + d)) return "synthetic";
-  }
+  if (isFleetManagedDomain(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
   if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
@@ -8052,11 +8655,25 @@ function maskEdgeEmail(email) {
 
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
-  if (!e || !e.includes("@")) return true;
-  return (
-    e === "borrower@prexvo.com" ||
-    e === "audit@prexvo.com"
-  );
+  if (!e || !e.includes("@") || e.includes("*")) return true;
+  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  const at = e.lastIndexOf("@");
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (!local || !domain) return true;
+  if (isFleetManagedDomain(domain)) return true;
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return true;
+  }
+  if (Array.isArray(EDGE_CLASSIFIER.local_prefixes) && EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) {
+    return true;
+  }
+  return false;
 }
 
 function isEdgeVerifiedPaidRecord(item) {
@@ -8333,7 +8950,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
       tool_slug: toolSlug || "student-loan-refinance-break-even-calculator",
       calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 85000,
       state: stateParam || "US",
-      email: emailParam || "borrower@prexvo.com",
+      email: emailParam || "",
       scenario_inputs: parsedInputs || {},
       scenario_outputs: parsedOutputs || {},
     };
@@ -8356,18 +8973,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
 }
 
 function isSyntheticTestEmail(email) {
-  const e = String(email || "").toLowerCase();
-  const syntheticDomains = [
-    "@example.com",
-    "@example.org",
-    "@test.com",
-    "@localhost",
-    "@freightfleet-logistics.com",
-    "@pacific-industrial.com",
-    "@medcenter-cohort.org",
-    "@metro-health.org",
-  ];
-  return syntheticDomains.some((d) => e.endsWith(d));
+  return isPlaceholderCheckoutEmail(email);
 }
 
 function isSyntheticProbeRequest(request, body, email) {
@@ -8437,12 +9043,17 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@prexvo.com";
+  const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "Prexvo";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  const toolPath = toolSlug && toolSlug !== "index" && toolSlug !== "general" ? `/tools/${toolSlug}/` : "/tools/student-loan-refinance-break-even-calculator/";
-  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+  const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
+  const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+    ? "/"
+    : slugNorm === "general"
+    ? "/tools/student-loan-refinance-break-even-calculator/"
+    : `/tools/${slugNorm}/`;
+  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
@@ -8517,6 +9128,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "metadata[workpaper_id]": `wp_${leadId}`,
       "metadata[property_id]": "prexvo",
       "metadata[tool_slug]": toolSlug,
+      "metadata[sku]": activeOffer.sku,
       "metadata[offer_sku]": activeOffer.sku,
       "metadata[merchant_email]": stripeMerchantEmail,
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 85000),
@@ -8630,6 +9242,14 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "synthetic_verified",
     };
   }
+  if (isPlaceholderCheckoutEmail(record && record.email) || isSyntheticTestEmail(record && record.email)) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "skipped_placeholder_or_internal_recipient",
+      zeptomail_request_id: null,
+      fulfillment_status: "suppressed_probe_email",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -8644,7 +9264,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
-  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "noreply@prexvo.com";
+  const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
   const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`;
   const fallbackPxCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}&redirect=1`;
@@ -8680,7 +9300,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   // (sender domain not verified in the ZeptoMail agent), so it is only a fallback unless
   // EMAIL_PRIMARY_RAIL=zeptomail is set after the agent domain is verified.
   const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
-  if (zeptoToken && !zohoPrimary) {
+  if (zeptoToken && !zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -8722,7 +9342,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       zeptoErrorCode = "network_error";
     }
   }
-  if (nangoSecretKey && nangoConnId) {
+  if (nangoSecretKey && nangoConnId && !isSyntheticTestEmail(record && record.email)) {
     try {
       const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
       const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
@@ -8734,9 +9354,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@prexvo.com";
+        const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@prexvo.com")
+          ? zohoSyntheticSinkEmail
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -8774,7 +9395,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       }
     } catch (_) {}
   }
-  if (zeptoToken && zohoPrimary) {
+  if (zeptoToken && zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -8833,14 +9454,21 @@ export async function onRequestOptions() {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
+  if (reqUrl.searchParams.get("health") === "1") {
+    return new Response(
+      JSON.stringify({ ok: true, auth_required: true }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
     if (reqUrl.searchParams.get("playbook") === "1" || reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill" || modeParam === "playbook") {
       const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
       const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
-      const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
+      const email = reqUrl.searchParams.get("email") || "";
       const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const toolSlug = (
       reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
       reqUrl.searchParams.get("source_tool") ||
       reqUrl.searchParams.get("source") ||
@@ -8930,9 +9558,10 @@ export async function onRequestGet(context) {
   }
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
-    const email = reqUrl.searchParams.get("email") || "borrower@prexvo.com";
+    const email = reqUrl.searchParams.get("email") || "";
     const toolSlug =
       reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
       reqUrl.searchParams.get("source_tool") ||
       reqUrl.searchParams.get("source") ||
@@ -8999,6 +9628,25 @@ export async function onRequestGet(context) {
       }
     );
   }
+  const authHeader = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("authorization") : "") || "";
+  const headerSecret = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("x-telemetry-secret") : "") || "";
+  const bearerToken = /^Bearer\\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\\s+/i, "").trim() : "";
+  const providedSecret = bearerToken || headerSecret.trim();
+  const expectedSecret = String((env && env.TELEMETRY_EXPORT_SECRET) || "").trim();
+  const isAuthorized = Boolean(expectedSecret) && Boolean(providedSecret) && providedSecret === expectedSecret;
+  if (!isAuthorized) {
+    if (isSyntheticProbeRequest(request, null, "")) {
+      return new Response(
+        JSON.stringify({ ok: true, auth_required: true }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+    return new Response(
+      JSON.stringify({ ok: false, error: "Unauthorized", auth_required: true }),
+      { status: 401, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
   const kv = getLeadsKv(env);
@@ -9115,7 +9763,7 @@ export async function onRequestPost(context) {
         toolSlug,
         body.calculated_amount !== undefined ? String(body.calculated_amount) : reqUrl.searchParams.get("amount"),
         state || "US",
-        email || "borrower@prexvo.com",
+        email || "",
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
@@ -9154,7 +9802,7 @@ export async function onRequestPost(context) {
 
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
-      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -9233,7 +9881,7 @@ export async function onRequestPost(context) {
       body.partner_sharing_consent !== undefined;
 
     if (!hasQuoteFields) {
-      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -9334,7 +9982,7 @@ export async function onRequestPost(context) {
       );
     }
 
-    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -9472,14 +10120,14 @@ export async function onRequestPost(context) {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, X-Pseofactory-Test",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Telemetry-Secret, X-Pseofactory-Test",
   "Cache-Control": "private, no-cache, no-store, must-revalidate",
   "X-Robots-Tag": "noindex, nofollow",
 };
 
 function getLeadsKv(env) {
   if (!env) return null;
-  return env.PROFITHELM_LEADS || env.PROFITHELM_TELEMETRY_KV || env.TELEMETRY_KV || null;
+  return env.PROFITHELM_LEADS || env.LEADS_KV || env.LEADS || null;
 }
 
 function getMemoryBuffer() {
@@ -9509,14 +10157,36 @@ const SPOKE_HUB_PREFIXES = [
   "section-179-calculator",
 ];
 
-function resolveCanonicalToolPath(toolSlug) {
+function defaultSlugForProfitHelmSku(sku) {
+  const k = String(sku || "").trim().toLowerCase();
+  if (k === "ph_instant_statutory_worksheet_19") return "irs-2027-tax-brackets";
+  if (k === "ph_commercial_capital_audit_toolkit" || k === "ph_section179_macrs_audit_kit") {
+    return "section-179-calculator";
+  }
+  if (k === "ph_statutory_tax_audit_workpapers") return "s-corp-reasonable-salary-tax-calculator";
+  return "section-1031-calculator";
+}
+
+function resolveCanonicalToolPath(toolSlug, sku = "") {
   const s = String(toolSlug || "")
     .trim()
     .toLowerCase()
     .replace(/^\\/+|\\/+$/g, "")
     .replace(/^tools\\//, "");
-  if (!s || s === "index" || s === "general") {
-    return "/tools/section-1031-calculator/";
+  if (
+    s === "index" ||
+    s === "home" ||
+    s === "homepage" ||
+    s === "tax-bracket-capital-allocation-hub" ||
+    (s.endsWith("-hub") && !SPOKE_HUB_PREFIXES.includes(s))
+  ) {
+    return "/";
+  }
+  if (!s) {
+    return sku ? `/tools/${defaultSlugForProfitHelmSku(sku)}/` : "/";
+  }
+  if (s === "general") {
+    return `/tools/${defaultSlugForProfitHelmSku(sku)}/`;
   }
   if (s.includes("/")) {
     return `/tools/${s}/`;
@@ -9551,9 +10221,9 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   const skuClean = String(reqSku || "").trim().toLowerCase();
   const pClean = String(reqPartner || "").trim().toLowerCase();
   if (skuClean === "ph_instant_statutory_worksheet_19") {
-    let qPartner = pClean || "crest_capital";
+    let qPartner = pClean || "xendoo";
     if (!pClean) {
-      if (s.includes("1031") || s.includes("like-kind") || s.includes("exchange")) qPartner = "ipx1031";
+      if (s.includes("1031") || s.includes("like-kind") || s.includes("exchange")) qPartner = "lawdepot";
       else if (s.includes("crypto") || s.includes("1099-da")) qPartner = "coinledger";
       else if (s.includes("prediction-market") || s.includes("kalshi") || s.includes("polymarket")) qPartner = "kalshi";
     }
@@ -9580,7 +10250,7 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
     return {
       vertical: "b2b_partner_slot",
       thresholdUsd: 25000,
-      partnerKey: pClean || "xendoo_impact",
+      partnerKey: pClean || "xendoo",
       partnerRepDesk: "ProfitHelm Verified Advisory Desk",
       liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
       offerSku: "ph_verified_partner_slot",
@@ -9596,6 +10266,7 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   }
   if (
     skuClean === "ph_1031_boot_replacement_workpapers" ||
+    skuClean === "ph_1031_boot_waterfall_kit" ||
     (skuClean === "" &&
       (s.includes("1031") ||
         s.includes("like-kind") ||
@@ -9604,15 +10275,19 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
         s.includes("3840") ||
         s.includes("boot") ||
         s.includes("dst") ||
+        pClean === "lawdepot" ||
         pClean === "ipx1031"))
   ) {
     return {
       vertical: "1031_exchange",
       thresholdUsd: 100000,
-      partnerKey: pClean || "ipx1031",
-      partnerRepDesk: "IPX1031 Exchange Desk",
-      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
-      offerSku: "ph_1031_boot_replacement_workpapers",
+      partnerKey: pClean && pClean !== "ipx1031" ? pClean : "lawdepot",
+      partnerRepDesk: "LawDepot Commercial Real Estate & Exchange Legal Desk",
+      liveBase: "https://www.jdoqocy.com/click-101906407-16985242",
+      offerSku:
+        skuClean === "ph_1031_boot_waterfall_kit"
+          ? "ph_1031_boot_waterfall_kit"
+          : "ph_1031_boot_replacement_workpapers",
       offerTitle: "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit",
       offerPriceUsd: 79,
       offerPriceCents: 7900,
@@ -9626,7 +10301,7 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
     };
   }
   if (
-    skuClean !== "ph_statutory_tax_audit_workpapers" &&
+    (skuClean === "" || skuClean === "ph_commercial_capital_audit_toolkit") &&
     (s.includes("factoring") ||
       s.includes("invoice") ||
       s.includes("line-of-credit") ||
@@ -9634,13 +10309,13 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
       s.includes("tariff") ||
       s.includes("301") ||
       s.includes("landed-cost") ||
-      pClean === "otr_solutions_factoring")
+      pClean === "ramp")
   ) {
     return {
       vertical: "invoice_factoring",
       thresholdUsd: 50000,
-      partnerKey: pClean || "otr_solutions_factoring",
-      partnerRepDesk: "Wade Fenton at OTR Solutions",
+      partnerKey: pClean && pClean !== "otr_solutions_factoring" ? pClean : "ramp",
+      partnerRepDesk: "Ramp Corporate Spend & Working Capital Desk",
       liveBase: "https://join.ramp.com/c/7932737/3981015/51436",
       offerSku: "ph_commercial_capital_audit_toolkit",
       offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
@@ -9657,6 +10332,7 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   }
   if (
     skuClean === "ph_commercial_capital_audit_toolkit" ||
+    skuClean === "ph_section179_macrs_audit_kit" ||
     (skuClean === "" &&
       (s.includes("179") ||
         s.includes("equipment") ||
@@ -9665,15 +10341,19 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
         s.includes("depreciation") ||
         s.includes("vehicle") ||
         s.includes("gvwr") ||
+        pClean === "xendoo" ||
         pClean === "crest_capital"))
   ) {
     return {
       vertical: "capex_section_179",
       thresholdUsd: 100000,
-      partnerKey: pClean || "crest_capital",
-      partnerRepDesk: "Aaron Rosenthal at E-file and Xendoo Commercial Tax Desk",
+      partnerKey: pClean && pClean !== "crest_capital" ? pClean : "xendoo",
+      partnerRepDesk: "Xendoo Commercial CPA & Section 179 Tax Desk",
       liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
-      offerSku: "ph_commercial_capital_audit_toolkit",
+      offerSku:
+        skuClean === "ph_section179_macrs_audit_kit"
+          ? "ph_section179_macrs_audit_kit"
+          : "ph_commercial_capital_audit_toolkit",
       offerTitle: "ProfitHelm Commercial Capital & Section 179 Depreciation Workpapers",
       offerPriceUsd: 49,
       offerPriceCents: 4900,
@@ -9686,8 +10366,8 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
       ],
     };
   }
-  let resolvedPartnerKey = pClean || "turbotax";
-  if (!pClean) {
+  let resolvedPartnerKey = pClean && pClean !== "turbotax" && pClean !== "taxslayer" ? pClean : "efile_com";
+  if (!pClean || pClean === "turbotax" || pClean === "taxslayer") {
     if (s.includes("crypto") || s.includes("1099-da")) resolvedPartnerKey = "koinly";
     else if (s.includes("prediction-market") || s.includes("kalshi") || s.includes("polymarket")) resolvedPartnerKey = "kalshi";
   }
@@ -9695,7 +10375,7 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
     vertical: "b2b_tax_advisory",
     thresholdUsd: 100000,
     partnerKey: resolvedPartnerKey,
-    partnerRepDesk: "Aaron Rosenthal at E-file and OTR Solutions Commercial Desk",
+    partnerRepDesk: "E-file.com & Xendoo Statutory Tax Desk",
     liveBase: "https://www.jdoqocy.com/click-101906407-11917161",
     offerSku: "ph_statutory_tax_audit_workpapers",
     offerTitle: "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite",
@@ -9744,7 +10424,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   const leadId = String((record && record.lead_id) || "lead_profithelm_direct");
   const toolSlug = String((record && record.tool_slug) || "section-1031-calculator");
   const stateCode = String((record && record.state) || "US").toUpperCase();
-  const email = String((record && record.email) || "cfo@profithelm.com");
+  const email = String((record && record.email) || "Verified Subscriber");
   const rawAmt = Number(record && record.calculated_amount ? record.calculated_amount : 0);
   const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : 250000;
   const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
@@ -9755,7 +10435,10 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
 
   let reconciliationSchedule = [];
   let sensitivityMatrix = [];
-  if (effSpec.offerSku === "ph_1031_boot_replacement_workpapers") {
+  if (
+    effSpec.offerSku === "ph_1031_boot_replacement_workpapers" ||
+    effSpec.offerSku === "ph_1031_boot_waterfall_kit"
+  ) {
     const adjustedBasis = baseAmount * 0.58;
     const realizedGain = Math.max(0, baseAmount - adjustedBasis);
     const deprRecapture = realizedGain * 0.28;
@@ -9815,7 +10498,10 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
         estimated_net_benefit: `-${fmtUsd(deferredShield)} Immediate Tax`,
       },
     ];
-  } else if (effSpec.offerSku === "ph_commercial_capital_audit_toolkit") {
+  } else if (
+    effSpec.offerSku === "ph_commercial_capital_audit_toolkit" ||
+    effSpec.offerSku === "ph_section179_macrs_audit_kit"
+  ) {
     const sec179Ded = Math.min(baseAmount, 1250000);
     const bonusDepr = Math.max(0, baseAmount - sec179Ded) * 0.4;
     const yr1Writeoff = sec179Ded + bonusDepr;
@@ -9987,7 +10673,10 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
 
   let statutoryTrendTimeseries = [];
-  if (effSpec.offerSku === "ph_1031_boot_replacement_workpapers") {
+  if (
+    effSpec.offerSku === "ph_1031_boot_replacement_workpapers" ||
+    effSpec.offerSku === "ph_1031_boot_waterfall_kit"
+  ) {
     statutoryTrendTimeseries = [
       {
         series_id: "fred_dgs10_yield",
@@ -10018,7 +10707,10 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
         points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
       },
     ];
-  } else if (effSpec.offerSku === "ph_commercial_capital_audit_toolkit") {
+  } else if (
+    effSpec.offerSku === "ph_commercial_capital_audit_toolkit" ||
+    effSpec.offerSku === "ph_section179_macrs_audit_kit"
+  ) {
     statutoryTrendTimeseries = [
       {
         series_id: "irs_sec179_cap",
@@ -10273,16 +10965,76 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
 const EDGE_PROPERTY_ID = "profithelm";
 const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
 
+function edgeDomainHash32(str) {
+  let h = 0x811c9dc5;
+  const clean = String(str || "").trim().toLowerCase();
+  for (let i = 0; i < clean.length; i += 1) {
+    h ^= clean.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+function isFleetManagedDomain(domain) {
+  const d = String(domain || "").trim().toLowerCase();
+  if (!d) return false;
+  if (Array.isArray(EDGE_CLASSIFIER.own_domains)) {
+    for (const own of EDGE_CLASSIFIER.own_domains) {
+      if (d === own || d.endsWith("." + own)) return true;
+    }
+  }
+  const hashes = Array.isArray(EDGE_CLASSIFIER.fleet_domain_hashes) ? EDGE_CLASSIFIER.fleet_domain_hashes : [];
+  if (hashes.length > 0) {
+    if (hashes.includes(edgeDomainHash32(d))) return true;
+    const parts = d.split(".");
+    if (parts.length >= 2) {
+      const apex = parts.slice(-2).join(".");
+      if (hashes.includes(edgeDomainHash32(apex))) return true;
+    }
+  }
+  return false;
+}
+
+const CANONICAL_OPERATOR_MAILBOX = atob("YXJpZi5jb3NrdW5AcHJvZml0aGVsbS5jb20=");
+
+function normalizeCanonicalSenderEmail(rawEmail) {
+  const raw = String(rawEmail || "").trim();
+  const clean = raw.toLowerCase();
+  if (!clean || !clean.includes("@") || clean.includes("*")) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (clean === CANONICAL_OPERATOR_MAILBOX) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  const at = clean.lastIndexOf("@");
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at + 1);
+  if (!local || !domain) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (isFleetManagedDomain(domain)) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return CANONICAL_OPERATOR_MAILBOX;
+  }
+  return raw;
+}
+
 function classifyEdgeLeadEmail(email) {
   const value = String(email || "").trim().toLowerCase();
+  if (!value || value.includes("*")) return "synthetic";
   const at = value.lastIndexOf("@");
   if (at < 1) return "synthetic";
   const local = value.slice(0, at);
   const domain = value.slice(at + 1);
   if (!domain) return "synthetic";
-  for (const d of EDGE_CLASSIFIER.own_domains) {
-    if (domain === d || domain.endsWith("." + d)) return "synthetic";
-  }
+  if (isFleetManagedDomain(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
   if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
   if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
@@ -10331,11 +11083,25 @@ function maskEdgeEmail(email) {
 
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
-  if (!e || !e.includes("@")) return true;
-  return (
-    e === "cfo@profithelm.com" ||
-    e === "audit@profithelm.com"
-  );
+  if (!e || !e.includes("@") || e.includes("*")) return true;
+  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  const at = e.lastIndexOf("@");
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (!local || !domain) return true;
+  if (isFleetManagedDomain(domain)) return true;
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {
+    return true;
+  }
+  if (Array.isArray(EDGE_CLASSIFIER.local_prefixes) && EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) {
+    return true;
+  }
+  return false;
 }
 
 function isEdgeVerifiedPaidRecord(item) {
@@ -10614,7 +11380,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
       tool_slug: toolSlug || "section-1031-calculator",
       calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 250000,
       state: resolvedState,
-      email: emailParam || "cfo@profithelm.com",
+      email: emailParam || "",
       scenario_inputs: parsedInputs || {},
       scenario_outputs: parsedOutputs || {},
     };
@@ -10639,18 +11405,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
 }
 
 function isSyntheticTestEmail(email) {
-  const e = String(email || "").toLowerCase();
-  const syntheticDomains = [
-    "@example.com",
-    "@example.org",
-    "@test.com",
-    "@localhost",
-    "@freightfleet-logistics.com",
-    "@pacific-industrial.com",
-    "@medcenter-cohort.org",
-    "@metro-health.org",
-  ];
-  return syntheticDomains.some((d) => e.endsWith(d));
+  return isPlaceholderCheckoutEmail(email);
 }
 
 function isSyntheticProbeRequest(request, body, email) {
@@ -10678,12 +11433,12 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
-  const stripeMerchantEmail = env && env.STRIPE_MERCHANT_EMAIL ? String(env.STRIPE_MERCHANT_EMAIL).trim() : "arif.coskun@profithelm.com";
+  const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "ProfitHelm";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  const toolPath = resolveCanonicalToolPath(toolSlug);
-  const successUrl = `https://profithelm.com${toolPath}?checkout_status=success&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&session_id={CHECKOUT_SESSION_ID}`;
+  const toolPath = resolveCanonicalToolPath(toolSlug, spec && spec.offerSku);
+  const successUrl = `https://profithelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://profithelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
@@ -10758,6 +11513,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "metadata[workpaper_id]": `wp_${leadId}`,
       "metadata[property_id]": "profithelm",
       "metadata[tool_slug]": toolSlug,
+      "metadata[sku]": spec.offerSku,
       "metadata[offer_sku]": spec.offerSku,
       "metadata[merchant_email]": stripeMerchantEmail,
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 250000),
@@ -10871,6 +11627,14 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "synthetic_verified",
     };
   }
+  if (isPlaceholderCheckoutEmail(record && record.email) || isSyntheticTestEmail(record && record.email)) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "skipped_placeholder_or_internal_recipient",
+      zeptomail_request_id: null,
+      fulfillment_status: "suppressed_probe_email",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -10885,7 +11649,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     };
   }
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
-  const fromEmail = env && env.ZEPTOMAIL_FROM_EMAIL ? String(env.ZEPTOMAIL_FROM_EMAIL).trim() : "arif@profithelm.com";
+  const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
   const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`;
   const fallbackPhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}&redirect=1`;
@@ -10921,7 +11685,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   // (sender domain not verified in the ZeptoMail agent), so it is only a fallback unless
   // EMAIL_PRIMARY_RAIL=zeptomail is set after the agent domain is verified.
   const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
-  if (zeptoToken && !zohoPrimary) {
+  if (zeptoToken && !zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -10963,7 +11727,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       zeptoErrorCode = "network_error";
     }
   }
-  if (nangoSecretKey && nangoConnId) {
+  if (nangoSecretKey && nangoConnId && !isSyntheticTestEmail(record && record.email)) {
     try {
       const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
       const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
@@ -10975,9 +11739,10 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
-        const zohoFromEmail = env && env.ZOHO_FROM_EMAIL ? String(env.ZOHO_FROM_EMAIL).trim() : "arif@profithelm.com";
+        const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
-          ? (env && env.ZOHO_SYNTHETIC_SINK_EMAIL ? String(env.ZOHO_SYNTHETIC_SINK_EMAIL).trim() : "arif.coskun@profithelm.com")
+          ? zohoSyntheticSinkEmail
           : record.email;
         const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${encodeURIComponent(zohoAccountId)}/messages`, {
           method: "POST",
@@ -11015,7 +11780,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       }
     } catch (_) {}
   }
-  if (zeptoToken && zohoPrimary) {
+  if (zeptoToken && zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
     zeptoAttempted = true;
     const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
     try {
@@ -11074,6 +11839,12 @@ export async function onRequestOptions() {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://profithelm.com/api/lead-capture");
+  if (reqUrl.searchParams.get("health") === "1") {
+    return new Response(
+      JSON.stringify({ ok: true, auth_required: true }),
+      { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
   if (
     reqUrl.searchParams.get("playbook") === "1" ||
@@ -11083,23 +11854,20 @@ export async function onRequestGet(context) {
   ) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
-    const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
+    const email = reqUrl.searchParams.get("email") || "";
     const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
-    const defaultSlugForSku =
-      reqSku === "ph_instant_statutory_worksheet_19"
-        ? "irs-2027-tax-brackets"
-        : reqSku === "ph_commercial_capital_audit_toolkit"
-        ? "section-179-calculator"
-        : reqSku === "ph_statutory_tax_audit_workpapers"
-        ? "s-corp-reasonable-salary-tax-calculator"
-        : "section-1031-calculator";
-    const toolSlug = (
+    const defaultSlugForSku = defaultSlugForProfitHelmSku(reqSku);
+    const rawToolParam = (
       reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
       reqUrl.searchParams.get("source_tool") ||
       reqUrl.searchParams.get("source") ||
-      defaultSlugForSku
-    ).toLowerCase();
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    const toolSlug = !rawToolParam || rawToolParam === "general" ? defaultSlugForSku : rawToolParam;
     const spec = resolveVerticalAndThreshold(toolSlug, "", reqSku);
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const storedRecord = await lookupEdgeLeadRecord(
@@ -11175,22 +11943,19 @@ export async function onRequestGet(context) {
   }
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
     const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
-    const email = reqUrl.searchParams.get("email") || "cfo@profithelm.com";
+    const email = reqUrl.searchParams.get("email") || "";
     const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
-    const defaultSlugForSku =
-      reqSku === "ph_instant_statutory_worksheet_19"
-        ? "irs-2027-tax-brackets"
-        : reqSku === "ph_commercial_capital_audit_toolkit"
-        ? "section-179-calculator"
-        : reqSku === "ph_statutory_tax_audit_workpapers"
-        ? "s-corp-reasonable-salary-tax-calculator"
-        : "section-1031-calculator";
-    const toolSlug =
+    const defaultSlugForSku = defaultSlugForProfitHelmSku(reqSku);
+    const rawToolParam = (
       reqUrl.searchParams.get("tool_slug") ||
+      reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
       reqUrl.searchParams.get("source_tool") ||
       reqUrl.searchParams.get("source") ||
-      defaultSlugForSku;
+      ""
+    ).trim();
+    const toolSlug =
+      !rawToolParam || rawToolParam.toLowerCase() === "general" ? defaultSlugForSku : rawToolParam;
     const spec = resolveVerticalAndThreshold(toolSlug, "", reqSku);
     const isSynth = isSyntheticProbeRequest(request, null, email);
     const customRecord = await lookupEdgeLeadRecord(
@@ -11244,6 +12009,25 @@ export async function onRequestGet(context) {
       }
     );
   }
+  const authHeader = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("authorization") : "") || "";
+  const headerSecret = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("x-telemetry-secret") : "") || "";
+  const bearerToken = /^Bearer\\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\\s+/i, "").trim() : "";
+  const providedSecret = bearerToken || headerSecret.trim();
+  const expectedSecret = String((env && env.TELEMETRY_EXPORT_SECRET) || "").trim();
+  const isAuthorized = Boolean(expectedSecret) && Boolean(providedSecret) && providedSecret === expectedSecret;
+  if (!isAuthorized) {
+    if (isSyntheticProbeRequest(request, null, "")) {
+      return new Response(
+        JSON.stringify({ ok: true, auth_required: true }),
+        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      );
+    }
+    return new Response(
+      JSON.stringify({ ok: false, error: "Unauthorized", auth_required: true }),
+      { status: 401, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    );
+  }
+
   const limitRaw = parseInt(reqUrl.searchParams.get("limit") || "100", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
   const kv = getLeadsKv(env);
@@ -11357,7 +12141,7 @@ export async function onRequestPost(context) {
         toolSlug,
         body.calculated_amount !== undefined ? String(body.calculated_amount) : reqUrl.searchParams.get("amount"),
         String(body.state || reqUrl.searchParams.get("state") || "US").trim().toUpperCase(),
-        email || "cfo@profithelm.com",
+        email || "",
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
@@ -11383,7 +12167,7 @@ export async function onRequestPost(context) {
     }
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
-      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -11462,7 +12246,7 @@ export async function onRequestPost(context) {
       body.partner_sharing_consent !== undefined;
 
     if (!hasQuoteFields) {
-      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -11569,7 +12353,7 @@ export async function onRequestPost(context) {
       );
     }
 
-    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -11754,8 +12538,9 @@ def sync_tenant_edge_redirect_function(
 
     dist_r_file = repo / "dist" / "functions" / "r" / "[partner].js"
     dist_needs_update = False
-    if dist_r_file.parent.is_dir():
+    if (repo / "dist").is_dir():
         try:
+            dist_r_file.parent.mkdir(parents=True, exist_ok=True)
             if not dist_r_file.is_file() or dist_r_file.read_text(encoding="utf-8") != js_code:
                 dist_r_file.write_text(js_code, encoding="utf-8")
                 dist_needs_update = True
@@ -11824,7 +12609,7 @@ def sync_tenant_edge_redirect_function(
         pass
 
     dist_api_dir = repo / "dist" / "functions" / "api"
-    if (repo / "dist" / "functions").is_dir():
+    if (repo / "dist").is_dir():
         try:
             dist_api_dir.mkdir(parents=True, exist_ok=True)
             dist_telemetry_file = dist_api_dir / "telemetry.js"
@@ -12113,89 +12898,86 @@ def sync_tenant_edge_redirect_function(
                 mw_file.write_text(mw_new, encoding="utf-8")
                 dist_needs_update = True
             dist_mw = repo / "dist" / "functions" / "_middleware.js"
-            if dist_mw.parent.is_dir() and (
-                not dist_mw.is_file()
-                or dist_mw.read_text(encoding="utf-8", errors="ignore") != mw_new
-            ):
-                dist_mw.write_text(mw_new, encoding="utf-8")
-                dist_needs_update = True
+            if (repo / "dist").is_dir():
+                dist_mw.parent.mkdir(parents=True, exist_ok=True)
+                if (
+                    not dist_mw.is_file()
+                    or dist_mw.read_text(encoding="utf-8", errors="ignore") != mw_new
+                ):
+                    dist_mw.write_text(mw_new, encoding="utf-8")
+                    dist_needs_update = True
         except Exception:
             pass
 
-    # Synchronize durable Cloudflare KV bindings in wrangler.toml when wrangler.toml exists
+    # Synchronize durable, strictly isolated Cloudflare KV bindings in wrangler.toml when wrangler.toml exists
     wrangler_file = repo / "wrangler.toml"
     wrangler_updated = False
     if wrangler_file.is_file():
         try:
             w_content = wrangler_file.read_text(encoding="utf-8")
             w_new = w_content
-            if prop_clean == "prexvo":
-                if 'binding = "PREXVO_TELEMETRY_KV"' not in w_new:
-                    kv_block = (
-                        "\n# Cloudflare KV Binding for Durable Prexvo Click & Calculation Telemetry\n"
-                        "[[kv_namespaces]]\n"
-                        'binding = "PREXVO_TELEMETRY_KV"\n'
-                        'id = "153917b16871453a9f07bfb39ff3fd98"\n'
-                    )
-                    w_new = w_new.rstrip() + "\n" + kv_block
-                if 'binding = "PREXVO_LEADS"' not in w_new:
-                    kv_leads_block = (
-                        "\n# Cloudflare KV Binding for Prexvo Consented Refinance Quote Leads\n"
-                        "[[kv_namespaces]]\n"
-                        'binding = "PREXVO_LEADS"\n'
-                        'id = "153917b16871453a9f07bfb39ff3fd98"\n'
-                    )
-                    w_new = w_new.rstrip() + "\n" + kv_leads_block
-            elif prop_clean == "profithelm":
-                if 'binding = "PROFITHELM_LEADS"' not in w_new:
+            dedicated_kv_bindings_by_prop = {
+                "profithelm": [
+                    (
+                        "PROFITHELM_LEADS",
+                        "983a21b6fcd54fbb884740017b7d96f1",
+                        "# Cloudflare KV Binding for ProfitHelm Consented Lead Gen & Checkout State",
+                    ),
+                    (
+                        "PROFITHELM_TELEMETRY_KV",
+                        "8c56efedd6214424b83e0e298c33ba27",
+                        "# Cloudflare KV Binding for Dedicated ProfitHelm Click & Calculation Telemetry",
+                    ),
+                ],
+                "prexvo": [
+                    (
+                        "PREXVO_TELEMETRY_KV",
+                        "153917b16871453a9f07bfb39ff3fd98",
+                        "# Cloudflare KV Binding for Durable Prexvo Click & Calculation Telemetry",
+                    ),
+                    (
+                        "PREXVO_LEADS",
+                        "320285659c4c494187fbf4665290ba93",
+                        "# Cloudflare KV Binding for Prexvo Consented Refinance Quote Leads",
+                    ),
+                ],
+                "gainhelm": [
+                    (
+                        "GAINHELM_TELEMETRY_KV",
+                        "d7e2021ef7cf47eea4ae382742481e75",
+                        "# Cloudflare KV Binding for Durable GainHelm Click & Calculation Telemetry",
+                    ),
+                    (
+                        "GAINHELM_LEADS",
+                        "31cdc2315c1e4c808a3c2f0b917cafbd",
+                        "# Cloudflare KV Binding for GainHelm Consented GRC Audit Quote Leads",
+                    ),
+                ],
+                "lienbond": [
+                    (
+                        "LIENBOND_TELEMETRY_KV",
+                        "802b129f39344707898e156494aff45d",
+                        "# Cloudflare KV Binding for Durable LienBond Click & Calculation Telemetry",
+                    ),
+                    (
+                        "LIENBOND_LEADS",
+                        "c6885b9faff44e3abbb91cadebf137a9",
+                        "# Cloudflare KV Binding for LienBond Consented Surety & Lien Quote Leads",
+                    ),
+                ],
+            }
+            for b_name, b_id, b_comment in dedicated_kv_bindings_by_prop.get(prop_clean, []):
+                binding_pattern = re.compile(
+                    rf'(binding\s*=\s*"{re.escape(b_name)}"\s*\n\s*id\s*=\s*")[^"]*(")'
+                )
+                if binding_pattern.search(w_new):
+                    w_new = binding_pattern.sub(rf"\g<1>{b_id}\2", w_new)
+                elif f'binding = "{b_name}"' not in w_new:
                     w_new = (
                         w_new.rstrip()
-                        + "\n\n# Cloudflare KV Binding for Lead Gen & Edge State\n"
-                        + "[[kv_namespaces]]\n"
-                        + 'binding = "PROFITHELM_LEADS"\n'
-                        + 'id = "983a21b6fcd54fbb884740017b7d96f1"\n'
-                    )
-                if 'binding = "PROFITHELM_TELEMETRY_KV"' not in w_new:
-                    w_new = (
-                        w_new.rstrip()
-                        + "\n\n# Cloudflare KV Binding for Dedicated ProfitHelm Click & Calculation Telemetry\n"
-                        + "[[kv_namespaces]]\n"
-                        + 'binding = "PROFITHELM_TELEMETRY_KV"\n'
-                        + 'id = "8c56efedd6214424b83e0e298c33ba27"\n'
-                    )
-            elif prop_clean == "gainhelm":
-                if 'binding = "GAINHELM_TELEMETRY_KV"' not in w_new:
-                    w_new = (
-                        w_new.rstrip()
-                        + "\n\n# Cloudflare KV Binding for Durable GainHelm Click & Calculation Telemetry\n"
-                        + "[[kv_namespaces]]\n"
-                        + 'binding = "GAINHELM_TELEMETRY_KV"\n'
-                        + 'id = "d7e2021ef7cf47eea4ae382742481e75"\n'
-                    )
-                if 'binding = "GAINHELM_LEADS"' not in w_new:
-                    w_new = (
-                        w_new.rstrip()
-                        + "\n\n# Cloudflare KV Binding for GainHelm Consented GRC Audit Quote Leads\n"
-                        + "[[kv_namespaces]]\n"
-                        + 'binding = "GAINHELM_LEADS"\n'
-                        + 'id = "d7e2021ef7cf47eea4ae382742481e75"\n'
-                    )
-            elif prop_clean == "lienbond":
-                if 'binding = "LIENBOND_TELEMETRY_KV"' not in w_new:
-                    w_new = (
-                        w_new.rstrip()
-                        + "\n\n# Cloudflare KV Binding for Durable LienBond Click & Calculation Telemetry\n"
-                        + "[[kv_namespaces]]\n"
-                        + 'binding = "LIENBOND_TELEMETRY_KV"\n'
-                        + 'id = "d7e2021ef7cf47eea4ae382742481e75"\n'
-                    )
-                if 'binding = "LIENBOND_LEADS"' not in w_new:
-                    w_new = (
-                        w_new.rstrip()
-                        + "\n\n# Cloudflare KV Binding for LienBond Consented Surety & Lien Quote Leads\n"
-                        + "[[kv_namespaces]]\n"
-                        + 'binding = "LIENBOND_LEADS"\n'
-                        + 'id = "d7e2021ef7cf47eea4ae382742481e75"\n'
+                        + f"\n\n{b_comment}\n[[kv_namespaces]]\n"
+                        + f'binding = "{b_name}"\n'
+                        + f'id = "{b_id}"\n'
                     )
             if w_new != w_content:
                 wrangler_file.write_text(w_new, encoding="utf-8")

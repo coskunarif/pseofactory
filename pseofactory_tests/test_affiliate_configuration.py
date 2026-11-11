@@ -208,11 +208,13 @@ def test_mandatory_disclosures_validation():
             f"Prexvo YMYL disclaimer missing mandatory statutory phrase: '{phrase}'"
         )
 
-    # Prexvo FTC disclosure check
+    # Prexvo FTC disclosure check (only pending/active partners; declined partners excluded)
     px_ftc = PREXVO_DISCLOSURES.get("ftc_disclosure", "")
     assert_no_forbidden_dashes(px_ftc, context="Prexvo FTC disclosure")
-    for partner_name in ("Splash Financial", "SoFi", "Credible", "Earnest", "LendKey"):
+    for partner_name in ("Splash Financial", "Credible", "LendKey"):
         assert partner_name in px_ftc, f"Prexvo FTC disclosure missing partner '{partner_name}'"
+    for declined_name in ("SoFi", "Earnest"):
+        assert declined_name not in px_ftc, f"Prexvo FTC disclosure must not list declined partner '{declined_name}'"
 
     # Prexvo legal disclaimer check
     px_advice = PREXVO_DISCLOSURES.get("disclaimer_no_advice", "")

@@ -847,24 +847,33 @@ def test_unified_vault_roster_tiers_completeness():
         "coinledger",
         "koinly",
         "rippling",
-        "ipx1031",
         "mercury",
         "kalshi",
-        "crest_capital",
         "gusto",
+        "ramp",
+        "xendoo",
+        "efile_com",
+        "eztaxreturn_com",
+        "freetaxusa",
+        "wallethub",
+        "lawdepot",
     }
+    assert set(ph_tiers["declined"]) == {"next_insurance_b2b", "invoice_simple"}
     assert set(ph_tiers["unapplied_expansion_queue"]) == set()
     all_ph_tiered = (
         set(ph_tiers["live_revenue_ready"])
         | set(ph_tiers["answered_action_required"])
         | set(ph_tiers["awaiting_vendor_response"])
+        | set(ph_tiers["declined"])
         | set(ph_tiers["unapplied_expansion_queue"])
     )
     assert all_ph_tiered == canonical_ph_keys
 
     px_tiers = px_prop["roster_tiers"]
-    assert set(px_tiers["live_revenue_ready"]) == {"splash_financial", "sofi", "credible", "earnest", "lendkey"}
-    assert set(px_tiers["awaiting_vendor_response"]) == set()
+    assert set(px_tiers["live_revenue_ready"]) == set()
+    assert set(px_tiers["answered_action_required"]) == set()
+    assert set(px_tiers["declined"]) == {"sofi", "earnest"}
+    assert set(px_tiers["awaiting_vendor_response"]) == {"splash_financial", "credible", "lendkey"}
     assert set(px_tiers["unapplied_expansion_queue"]) == set()
 
 
@@ -1219,7 +1228,7 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
     assert ipx_c.classification_type == "APPLICATION_SUBMITTED"
 
     simp_c = next(c for c in classifications if c.partner_key == "simply_business")
-    assert simp_c.property_id == "profithelm"
+    assert simp_c.property_id == "lienbond"
     assert simp_c.classification_type == "APPLICATION_SUBMITTED"
     assert simp_c.network == "Impact.com"
 
@@ -1233,7 +1242,7 @@ def test_suretybonds_and_ibkr_publisher_email_classifications():
     assert cj_tt.classification_type == "APPLICATION_SUBMITTED"
     assert cj_tt.network == "CJ Affiliate"
 
-    xen_c = next(c for c in classifications if c.partner_key == "crest_capital")
+    xen_c = next(c for c in classifications if c.partner_key == "xendoo")
     assert xen_c.property_id == "profithelm"
     assert xen_c.classification_type == "APPLICATION_APPROVED"
     assert xen_c.candidate_url == "https://www.xendoo.com/?fp_ref=arif-4ac24e"
@@ -1256,8 +1265,8 @@ def test_all_partners_have_verified_external_receipt_in_vault():
 
     assert vault["master_networks"]["impact"]["marketplace_status"] == "active"
     assert vault["master_networks"]["impact"]["identity_verification_status"] == "COMPLETE"
-    assert vault["master_networks"]["impact"]["active_advertiser_contracts"] == 1
-    assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 17
+    assert vault["master_networks"]["impact"]["active_advertiser_contracts"] == 4
+    assert vault["master_networks"]["impact"]["pending_advertiser_contracts"] == 14
     assert vault["master_networks"]["impact"]["verified_clicks"] >= 3
     assert vault["master_networks"]["partnerstack"]["verified_clicks"] >= 28
     assert vault["master_networks"]["cj_affiliate"]["company_cid"] == "7792582"
@@ -1267,11 +1276,12 @@ def test_all_partners_have_verified_external_receipt_in_vault():
     assert vault["master_networks"]["cj_affiliate"]["live_promotional_property_id"] == "101906407"
     assert vault["master_networks"]["cj_affiliate"]["onboarding_progress"] == "9_of_9_completed"
     assert vault["master_networks"]["cj_affiliate"]["account_status"] == "ACTIVE"
-    assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 28
+    assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 23
     assert vault["properties"]["profithelm"]["partners"]["kalshi"]["status"] == "live"
-    assert vault["properties"]["profithelm"]["partners"]["crest_capital"]["status"] == "live"
-    assert vault["properties"]["profithelm"]["partners"]["turbotax"]["status"] == "awaiting_response"
-    assert vault["properties"]["profithelm"]["partners"]["taxslayer"]["status"] == "awaiting_response"
+    assert vault["properties"]["profithelm"]["partners"]["xendoo"]["status"] == "live"
+    assert vault["properties"]["profithelm"]["partners"]["crest_capital"]["status"] == "pending"
+    assert vault["properties"]["profithelm"]["partners"]["turbotax"]["status"] == "pending"
+    assert vault["properties"]["profithelm"]["partners"]["taxslayer"]["status"] == "pending"
     assert (
         vault["properties"]["profithelm"]["partners"]["kalshi"]["url"]
         == "https://kalshi.pxf.io/c/7932737/3078072/37770"
@@ -1281,6 +1291,16 @@ def test_all_partners_have_verified_external_receipt_in_vault():
         "Inbox #",
         "Sent #",
         "Newsletter #",
+        "#259",
+        "#1905878",
+        "#5273914",
+        "#49719",
+        "Campaign #",
+        "Advertiser #",
+        "PartnerStack",
+        "mercury.com/r/profithelm-llc",
+        "ticket [",
+        "freightos.com/partners",
         "pendAdvContracts",
         "PENDING_CAMPAIGN_APPROVAL",
         "FirstPromoter token",
@@ -1384,7 +1404,7 @@ def test_publisher_introduction_sent_emails_classification():
     assert by_id["264"].partner_key == "turbotax"
     assert by_id["264"].property_id == "profithelm"
     assert by_id["265"].partner_key == "gusto"
-    assert by_id["268"].partner_key == "taxslayer"
+    assert by_id["268"].partner_key == "eztaxreturn_com"
     assert by_id["272"].partner_key == "splash_financial"
     assert by_id["272"].property_id == "prexvo"
     assert by_id["273"].partner_key == "sofi"
@@ -1473,20 +1493,20 @@ def test_cj_and_impact_inbound_approval_parsing_and_notification_filter():
     cls = engine.classify_partner_emails(messages)
     by_id = {c.email_id: c for c in cls}
 
-    assert by_id["999"].partner_key == "turbotax"
+    assert by_id["999"].partner_key == "efile_com"
     assert by_id["999"].classification_type == "APPLICATION_APPROVED"
     assert by_id["999"].requires_operator_decision is False
     assert "click-101906407-11917161" in by_id["999"].candidate_url
 
-    assert by_id["notif-846"].partner_key == "turbotax"
+    assert by_id["notif-846"].partner_key == "efile_com"
     assert by_id["notif-846"].classification_type == "APPLICATION_APPROVED"
     assert "click-101906407-11917161" in by_id["notif-846"].candidate_url
 
-    assert by_id["notif-848"].partner_key == "taxslayer"
+    assert by_id["notif-848"].partner_key == "eztaxreturn_com"
     assert by_id["notif-848"].classification_type == "APPLICATION_APPROVED"
     assert "click-101906407-15704796" in by_id["notif-848"].candidate_url
 
-    assert by_id["notif-847"].partner_key == "suretybonds_direct"
+    assert by_id["notif-847"].partner_key == "lawdepot"
     assert by_id["notif-847"].classification_type == "APPLICATION_APPROVED"
     assert "click-101906407-16985242" in by_id["notif-847"].candidate_url
 
@@ -1495,30 +1515,36 @@ def test_cj_and_impact_inbound_approval_parsing_and_notification_filter():
     assert by_id["sent-275"].classification_type == "APPLICATION_SUBMITTED"
 
 
-def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts(temp_bus_path, temp_email_paths):
+def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts(tmp_path, temp_bus_path, temp_email_paths):
     """
     Asserts that PartnerTrackingEngine.audit_readiness_and_vault_parity():
     1. Flags any registry status drift where monetization_vault.json is live/active_direct
-       while static affiliates.py still has status='pending' (crest_capital and ipx1031 on ProfitHelm,
-       and the 5 student loan partners on Prexvo).
+       while static affiliates.py still has status='pending'.
     2. Distinguishes true network-tracked affiliate URLs (is_network_tracked_link=True) from
-       UTM-only / bare merchant URLs (ipx1031 on ProfitHelm and the 5 pending Impact contracts on Prexvo).
-    3. Flags whenever an approved tracking link in monetization_vault.json (such as CJ E-file.com,
-       ezTaxReturn.com, LawDepot, or Impact Xendoo $500 CPA) is not yet wired as default_url in affiliates.py.
+       UTM-only / bare merchant URLs.
+    3. Verifies zero unwired approved vault links in production and flags simulated unwired links.
     4. Flags whenever an active partner's network or dashboard lacks verified payout credentials
        (and triggers an explicit alert if a simulated vault has missing EFT/PayPal credentials).
-    5. Verifies vault-to-placement parity across compiled HTML pages in profithelm-platform and prexvo.
+    5. Verifies vault-to-placement parity across retrofitted HTML pages in profithelm and prexvo.
     """
     import copy
+    import shutil
     from pseofactory.affiliates_hub import MonetizationHub
+    from pseofactory.maintenance import RetroReflectionEngine
 
     cache_path, state_path = temp_email_paths
     email_engine = EmailIngestionEngine(cache_path=cache_path, state_path=state_path)
     action_bus = HumanActionBus(bus_path=temp_bus_path)
     tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
 
+    ph_tmp_dist = tmp_path / "profithelm_dist"
+    shutil.copytree("/home/ubuntuadmin/projects/profithelm-platform/dist", ph_tmp_dist)
+    RetroReflectionEngine.retrofit_estate(
+        ph_tmp_dist, property_id="profithelm", canonical_base="https://profithelm.com"
+    )
+
     audit = tracker.audit_readiness_and_vault_parity(
-        profithelm_dist_dir="/home/ubuntuadmin/projects/profithelm-platform/dist",
+        profithelm_dist_dir=str(ph_tmp_dist),
         prexvo_dist_dir="/home/ubuntuadmin/projects/prexvo/dist",
     )
 
@@ -1526,32 +1552,49 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     ph_audit = audit["properties"]["profithelm"]
     px_audit = audit["properties"]["prexvo"]
     drift_keys = {d["partner_key"] for d in ph_audit["registry_status_drift"]}
-    assert drift_keys == set()  # crest_capital registry status reconciled with the live vault entry
+    assert drift_keys == set()
     px_drift_keys = {d["partner_key"] for d in px_audit["registry_status_drift"]}
     assert px_drift_keys == set()
 
-    assert ph_audit["network_tracked_live_count"] == 8
+    assert ph_audit["network_tracked_live_count"] == 13
     assert set(ph_audit["network_tracked_partners"]) == {
         "coinledger",
         "koinly",
         "rippling",
         "mercury",
         "kalshi",
-        "crest_capital",
         "gusto",
         "ramp",
+        "xendoo",
+        "efile_com",
+        "eztaxreturn_com",
+        "freetaxusa",
+        "wallethub",
+        "lawdepot",
     }
-    assert ph_audit["utm_only_or_bare_live_partners"] == ["ipx1031"]
+    assert ph_audit["utm_only_or_bare_live_partners"] == []
     assert px_audit["network_tracked_live_count"] == 0
     # Lenders are pending/declined, so none is a "live" partner at all.
     assert set(px_audit["utm_only_or_bare_live_partners"]) == set()
 
-    # 3. Verify unwired approved vault links are flagged automatically
+    # 3. Verify all approved vault links are now wired in affiliates.py, and simulated unwired link is flagged
     unwired_keys = {it["partner_key"] for it in ph_audit["unwired_vault_links"]}
-    assert "turbotax" in unwired_keys  # CJ E-file.com #4355234 approved link in vault
-    assert "taxslayer" in unwired_keys  # CJ ezTaxReturn.com #6874782 approved link in vault
-    assert "suretybonds_direct" in unwired_keys  # CJ LawDepot #4544498 approved link in vault
-    assert "crest_capital" in unwired_keys  # Impact Xendoo #16354 $500 CPA upgrade link in vault
+    assert unwired_keys == set()
+
+    unwired_vault = copy.deepcopy(tracker.hub.vault_data)
+    unwired_vault["properties"]["profithelm"]["partners"]["turbotax"]["cj_approved_tracking_url"] = (
+        "https://www.jdoqocy.com/click-101906407-99999999"
+    )
+    unwired_path = tmp_path / "unwired_vault.json"
+    unwired_path.write_text(json.dumps(unwired_vault), encoding="utf-8")
+    sim_unwired_audit = PartnerTrackingEngine(
+        email_engine=email_engine,
+        action_bus=action_bus,
+        monetization_hub=MonetizationHub(vault_path=str(unwired_path)),
+    ).audit_readiness_and_vault_parity()
+    assert "turbotax" in {
+        it["partner_key"] for it in sim_unwired_audit["properties"]["profithelm"]["unwired_vault_links"]
+    }
 
     # 4. Verify master network payout credentials are verified for Impact, CJ, PartnerStack, Mercury
     payout_map = audit["network_payout_readiness"]
@@ -1849,7 +1892,7 @@ def test_non_active_partnership_state_reconciliation_and_latest_inbox_sync(
     assert by_id["1588"].classification_type == "APPLICATION_APPROVED"
     assert by_id["1588"].candidate_url == "https://koinly.io/?fpr=arif-4c0b88"
 
-    assert by_id["1000"].partner_key == "turbotax"
+    assert by_id["1000"].partner_key == "efile_com"
     assert by_id["1000"].classification_type == "APPLICATION_APPROVED"
     assert by_id["1000"].candidate_url == "https://www.jdoqocy.com/click-101906407-11917161"
 
@@ -1869,20 +1912,20 @@ def test_non_active_partnership_state_reconciliation_and_latest_inbox_sync(
     ph_recon = recon["properties"]["profithelm"]
     px_recon = recon["properties"]["prexvo"]
 
-    assert ph_recon["total_canonical_partners"] == 22
+    assert ph_recon["total_canonical_partners"] == 29
     assert ph_recon["active_earning_count"] == 6
-    assert ph_recon["non_active_count"] == 16
-    assert ph_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 4
-    assert ph_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 7
-    assert ph_recon["counts_by_state"]["AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION"] == 3
-    assert ph_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 2
+    assert ph_recon["non_active_count"] == 23
+    assert ph_recon["counts_by_state"]["NEWLY_APPROVED_AND_WIRED_AT_EDGE"] == 7
+    assert ph_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 9
+    assert ph_recon["counts_by_state"]["AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION"] == 4
+    assert ph_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 3
 
     assert px_recon["total_canonical_partners"] == 5
     assert px_recon["active_earning_count"] == 0
     assert px_recon["non_active_count"] == 5
-    assert px_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 3
+    assert px_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 2
     assert px_recon["counts_by_state"]["AWAITING_NETWORK_OR_COMPLIANCE_VERIFICATION"] == 1
-    assert px_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 1
+    assert px_recon["counts_by_state"]["DECLINED_COVERED_BY_FALLBACK"] == 2
 
     delta_keys = {d["partner_key"] for d in recon["status_deltas_since_last_snapshot"]}
     assert {"rippling", "koinly", "otr_solutions_factoring"} <= delta_keys
@@ -1941,10 +1984,10 @@ def test_partner_earnings_ledger_sync_and_commission_email_ingestion(
     assert set(baseline_ledger["portals"].keys()) == expected_portals
     assert baseline_ledger["portals"]["partnerstack"]["is_authenticated_and_syncing"] is True
     assert baseline_ledger["portals"]["partnerstack"]["portal_verified_clicks"] >= 182
-    assert baseline_ledger["portals"]["firstpromoter_coinledger"]["is_authenticated_and_syncing"] is True
-    assert baseline_ledger["portals"]["firstpromoter_xendoo"]["is_authenticated_and_syncing"] is True
-    assert baseline_ledger["portals"]["koinly_native"]["is_authenticated_and_syncing"] is True
-    assert baseline_ledger["portals"]["sovrn_commerce"]["is_authenticated_and_syncing"] is True
+    assert baseline_ledger["portals"]["firstpromoter_coinledger"]["is_authenticated_and_syncing"] is False
+    assert baseline_ledger["portals"]["firstpromoter_xendoo"]["is_authenticated_and_syncing"] is False
+    assert baseline_ledger["portals"]["koinly_native"]["is_authenticated_and_syncing"] is False
+    assert baseline_ledger["portals"]["sovrn_commerce"]["is_authenticated_and_syncing"] is False
     assert baseline_ledger["portals"]["mercury_direct"]["is_authenticated_and_syncing"] is True
     assert baseline_ledger["portals"]["impact"]["is_authenticated_and_syncing"] is False
     assert baseline_ledger["portals"]["cj_affiliate"]["is_authenticated_and_syncing"] is False
@@ -2103,18 +2146,18 @@ def test_autonomous_link_promotion_and_new_zoho_classifications(
     by_id = {c.email_id: c for c in classified}
 
     assert by_id["notif-851"].classification_type == "APPLICATION_APPROVED"
-    assert by_id["notif-851"].partner_key == "taxslayer"
+    assert by_id["notif-851"].partner_key == "freetaxusa"
     assert by_id["notif-851"].network == "CJ Affiliate"
 
     assert by_id["notif-857"].classification_type == "APPLICATION_APPROVED"
-    assert by_id["notif-857"].partner_key == "mercury"
+    assert by_id["notif-857"].partner_key == "wallethub"
     assert by_id["notif-857"].network == "CJ Affiliate"
 
     assert by_id["1009"].classification_type == "APPLICATION_DECLINED"
     assert by_id["1009"].partner_key == "next_insurance_b2b"
 
     assert by_id["1025"].classification_type == "APPLICATION_DECLINED"
-    assert by_id["1025"].partner_key == "otr_solutions_factoring"
+    assert by_id["1025"].partner_key == "invoice_simple"
 
     promo_result = tracker.auto_promote_approved_links(classified, persist=False)
     assert promo_result["promoted_count"] == 1
@@ -2123,7 +2166,7 @@ def test_autonomous_link_promotion_and_new_zoho_classifications(
     assert promo_result["awaiting_portal_link_extraction"][0]["email_id"] == "notif-857"
 
     upgrades = tracker.hub.get_direct_contract_upgrades("profithelm")
-    assert upgrades["taxslayer"] == "https://www.dpbolvw.net/click-101906407-15704796"
+    assert upgrades["eztaxreturn_com"] == "https://www.dpbolvw.net/click-101906407-15704796"
     assert upgrades["ramp"] == "https://join.ramp.com/c/7932737/3981015/51436"
     assert upgrades["freetaxusa"] == "https://www.jdoqocy.com/click-101906407-12306188"
     assert upgrades["wallethub"] == "https://www.jdoqocy.com/click-101906407-16952385"
@@ -2234,7 +2277,7 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
     by_id = {c.email_id: c for c in classified}
     assert "1027" not in by_id
     assert by_id["notif-851"].classification_type == "APPLICATION_APPROVED"
-    assert by_id["notif-851"].partner_key == "taxslayer"
+    assert by_id["notif-851"].partner_key == "freetaxusa"
     assert by_id["notif-851"].candidate_url == "https://www.jdoqocy.com/click-101906407-12306188"
     assert by_id["news-1591"].classification_type == "APPLICATION_APPROVED"
     assert by_id["news-1591"].partner_key == "ramp"
@@ -2476,8 +2519,8 @@ def test_oct26_correspondence_publisher_prerequisites_and_autonomous_partner_lif
         assert (d_dir / "media-kit.json").is_file()
 
     stalled_rep = sync_rep["stalled_applications_monitor"]
-    assert stalled_rep["total_tracked_partners"] == 27
-    assert stalled_rep["fleet_total_tracked_partners"] == 33
+    assert stalled_rep["total_tracked_partners"] == 40
+    assert stalled_rep["fleet_total_tracked_partners"] == 46
     by_partner = {r["partner_key"]: r for r in stalled_rep["applications"]}
     assert by_partner["otr_solutions_factoring"]["lifecycle_state"] == "COUNTERPARTY_INTERNAL_REVIEW_CONFIRMED"
     assert by_partner["otr_solutions_factoring"]["is_stalled"] is False
@@ -2669,9 +2712,9 @@ def test_sovrn_inbox_1032_gainhelm_prerequisites_and_department_pipeline_handoff
     assert scanner.scan_directory(gh_dist, "gainhelm") == {}
 
     stalled_rep = sync_rep["stalled_applications_monitor"]
-    assert stalled_rep["total_tracked_partners"] == 27
+    assert stalled_rep["total_tracked_partners"] == 40
     assert stalled_rep["gainhelm_tracked_partners"] == 6
-    assert stalled_rep["fleet_total_tracked_partners"] == 33
+    assert stalled_rep["fleet_total_tracked_partners"] == 46
 
     gaps_rep = sync_rep["cluster_monetization_gaps"]
     assert gaps_rep["properties"]["gainhelm"]["clusters_count"] == 3
@@ -2760,8 +2803,27 @@ def test_falsify_monetization_and_autonomous_partner_followups_and_bounce_suppre
     action_bus = HumanActionBus(bus_path=temp_bus_path)
     tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
 
-    # 1. Correspondence anomaly analysis
-    anomalies = email_engine.analyze_correspondence_anomalies_and_checkins([])
+    # 1. Correspondence anomaly analysis (empty list returns 0 fabricated items; explicit messages surface all anomalies)
+    empty_anomalies = email_engine.analyze_correspondence_anomalies_and_checkins([], fetch_live=False)
+    assert empty_anomalies["hard_bounces_count"] == 0
+    assert empty_anomalies["unanswered_partner_checkins_count"] == 0
+    assert empty_anomalies["network_declines_count"] == 0
+    assert empty_anomalies["stale_drafts_count"] == 0
+
+    anomaly_msgs = [
+        EmailMessage(id="986", message_id="<b986@zoho>", account="zoho", mailbox="Inbox", date="2026-10-19T10:00:00Z", subject="Mail delivery failed: returning message to sender", sender_name="Mail Delivery System", sender_email="mailer-daemon@mail.zoho.com", body_snippet="550 5.1.1 <audit@profithelm.com>: User unknown"),
+        EmailMessage(id="997", message_id="<b997@zoho>", account="zoho", mailbox="Inbox", date="2026-10-20T10:00:00Z", subject="Undelivered Mail Returned to Sender", sender_name="Mail Delivery System", sender_email="mailer-daemon@mail.zoho.com", body_snippet="550 5.1.1 <audit@prexvo.com>: User unknown"),
+        EmailMessage(id="1033", message_id="<b1033@zoho>", account="zoho", mailbox="Inbox", date="2026-10-27T10:00:00Z", subject="Mail delivery failed: returning message to sender", sender_name="Mail Delivery System", sender_email="mailer-daemon@mail.zoho.com", body_snippet="550 5.1.1 <audit@gainhelm.com>: User unknown"),
+        EmailMessage(id="1034", message_id="<b1034@zoho>", account="zoho", mailbox="Inbox", date="2026-10-27T10:05:00Z", subject="Mail delivery failed: returning message to sender", sender_name="Mail Delivery System", sender_email="mailer-daemon@mail.zoho.com", body_snippet="550 5.1.1 <ciso@gainhelm.com>: User unknown"),
+        EmailMessage(id="1604", message_id="<n1604@fp>", account="zoho", mailbox="Newsletter", date="2026-10-25T12:00:00Z", subject="Checking in on your Xendoo Affiliate Program progress", sender_name="Luanne Bryant", sender_email="promoter@firstpromoter.com", body_snippet="Hi Arif, checking in from Xendoo! Let me know how you plan to promote us?"),
+        EmailMessage(id="1614", message_id="<n1614@fp>", account="zoho", mailbox="Newsletter", date="2026-10-26T12:00:00Z", subject="Checking in on your Koinly Affiliate Program", sender_name="Koinly Affiliates", sender_email="promoter@firstpromoter.com", body_snippet="Hi Arif, checking in from Koinly! Could you share where you will place your link?"),
+        EmailMessage(id="1025", message_id="<d1025@impact>", account="zoho", mailbox="Inbox", date="2026-10-23T12:00:00Z", subject="Promotion Request Declined for Invoice Simple", sender_name="impact.com", sender_email="notifications@app.impact.com", body_snippet="Invoice Simple has declined your application. Contact invoicesimple@hamstergarage.com for questions."),
+        EmailMessage(id="1009", message_id="<d1009@impact>", account="zoho", mailbox="Inbox", date="2026-10-22T12:00:00Z", subject="Promotion Request Declined for ERGO NEXT Insurance", sender_name="impact.com", sender_email="notifications@app.impact.com", body_snippet="ERGO NEXT Insurance has declined your application."),
+        EmailMessage(id="1031", message_id="<d1031@impact>", account="zoho", mailbox="Inbox", date="2026-10-26T13:11:59Z", subject="Promotion Request Declined for SoFi", sender_name="impact.com", sender_email="notifications@app.impact.com", body_snippet="SoFi has declined your application to promote their brand."),
+        EmailMessage(id="994", message_id="<d994@impact>", account="zoho", mailbox="Inbox", date="2026-10-20T12:00:00Z", subject="Promotion Request Declined for Earnest", sender_name="impact.com", sender_email="notifications@app.impact.com", body_snippet="Earnest has declined your application to promote their brand."),
+        EmailMessage(id="1", message_id="<draft1@zoho>", account="zoho", mailbox="Drafts", date="2026-10-18T12:00:00Z", subject="Draft partner outreach", sender_name="Arif Coskun", sender_email="arif.coskun@profithelm.com", body_snippet="Unsent draft body"),
+    ]
+    anomalies = email_engine.analyze_correspondence_anomalies_and_checkins(anomaly_msgs, fetch_live=False)
     assert anomalies["hard_bounces_count"] >= 4
     bounce_ids = {b["email_id"] for b in anomalies["hard_bounces"]}
     assert {"986", "997", "1033", "1034"}.issubset(bounce_ids)
@@ -2816,7 +2878,7 @@ def test_falsify_monetization_and_autonomous_partner_followups_and_bounce_suppre
     assert "FALSIFIED_ZERO_REALIZED_REVENUE" in rev_f["verdict"]
 
     part_f = falsification["partner_connection_falsification"]
-    assert part_f["fleet_total_tracked_partners"] == 33
+    assert part_f["fleet_total_tracked_partners"] == 46
     assert part_f["prexvo_approved_affiliate_contracts_count"] == 0
     assert part_f["gainhelm_approved_affiliate_contracts_count"] == 0
     assert part_f["discrepancies_count"] == 8
@@ -2915,12 +2977,13 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
         "www.dpbolvw.net"
       ]);
 
-      const crossVerticalKeys = new Set([
-        "ipx1031", "exeter1031", "first_american", "first_american_1031", "avaliable_1031",
-        "madison_specs_cost_seg", "dlp_capital", "groundfloor", "national_funding", "national_funding_med",
-        "otr_solutions_factoring", "freightos_marketplace", "flexport", "alt_lending", "viva_finance", "invoice_simple"
+      const liveApprovedProfitHelmKeys = new Set([
+        "coinledger", "koinly", "mercury", "ramp", "ramp_impact", "gusto", "rippling",
+        "kalshi", "freetaxusa", "eztaxreturn", "eztaxreturn_com", "efile", "efile_com",
+        "lawdepot", "xendoo", "xendoo_impact", "equipment_macrs", "wallethub"
       ]);
-      const crossVerticalHosts = new Set(["xendoo.pxf.io", "join.ramp.com"]);
+      const declinedProfitHelmKeys = new Set(["next_insurance_b2b", "invoice_simple"]);
+      const crossVerticalHosts = new Set(["xendoo.pxf.io", "join.ramp.com", "www.jdoqocy.com", "www.dpbolvw.net"]);
 
       const phKeys = [
         "coinledger", "koinly", "mercury", "stripe", "ramp", "rho", "gusto", "rippling",
@@ -2962,15 +3025,24 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
         const finalHost = loc.hostname === "redirect.viglink.com"
           ? new URL(loc.searchParams.get("u")).hostname
           : loc.hostname;
-        if (crossVerticalKeys.has(k)) {{
-          // Intent-matched: a 1031 / factoring / freight click never lands on an unrelated vertical.
-          if (crossVerticalHosts.has(finalHost)) {{
-            console.error("Cross-vertical swap for", k, loc.toString());
+        if (liveApprovedProfitHelmKeys.has(k)) {{
+          if (!approvedProfitHelmHosts.has(loc.hostname)) {{
+            console.error("Unapproved ProfitHelm destination for live key", k, loc.toString());
             process.exit(11);
           }}
-        }} else if (!approvedProfitHelmHosts.has(loc.hostname)) {{
-          console.error("Unapproved ProfitHelm destination for", k, loc.toString());
-          process.exit(11);
+        }} else {{
+          // Uncontracted or declined partners stay on their native brand destination (zero bait-and-switch).
+          if (crossVerticalHosts.has(finalHost)) {{
+            console.error("Cross-vertical or competitor swap for non-live key", k, loc.toString());
+            process.exit(11);
+          }}
+          const expectedNonLiveTier = declinedProfitHelmKeys.has(k)
+            ? "declined_partner_blocked"
+            : "native_unmonetized_destination";
+          if (res.headers.get("X-Edge-Contract-Tier") !== expectedNonLiveTier) {{
+            console.error("Unexpected contract tier for non-live key", k, res.headers.get("X-Edge-Contract-Tier"));
+            process.exit(11);
+          }}
         }}
         if (k === "koinly" && loc.searchParams.get("fpr") !== "arif-4c0b88") {{
           console.error("Koinly missing FirstPromoter fpr=arif-4c0b88:", loc.toString());
@@ -2983,6 +3055,7 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
         "credible", "credible_student_loans", "earnest", "earnest_student_refi",
         "lendkey", "lendkey_refi", "edvestin", "laurel_road", "juno"
       ];
+      const declinedPrexvoKeys = new Set(["sofi", "sofi_refi", "sofi_student_refi", "earnest", "earnest_student_refi"]);
       for (const k of pxKeys) {{
         const res = await pxRedirect.onRequest({{
           request: new Request(`https://prexvo.com/r/${{k}}?source_tool=student-loan-refinance-break-even-calculator&cta_slot=card_1&synthetic_test=1`),
@@ -2995,13 +3068,24 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
         }}
         const loc = new URL(res.headers.get("Location"));
         // A lender click must never be silently hijacked into the paid Stripe checkout.
-        if (loc.hostname === "prexvo.com" || loc.pathname.includes("lead-capture") || loc.searchParams.get("checkout")) {{
+        if (loc.pathname.includes("lead-capture") || loc.searchParams.get("checkout")) {{
           console.error("Prexvo lender click hijacked into checkout for", k, loc.toString());
           process.exit(21);
         }}
-        if (res.headers.get("X-Edge-Contract-Tier") !== "unapproved_native_unmonetized") {{
-          console.error("Unexpected Prexvo contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
-          process.exit(22);
+        if (declinedPrexvoKeys.has(k)) {{
+          if (res.headers.get("X-Edge-Contract-Tier") !== "declined_partner_blocked") {{
+            console.error("Unexpected Prexvo declined contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+            process.exit(22);
+          }}
+        }} else {{
+          if (loc.hostname === "prexvo.com") {{
+            console.error("Pending Prexvo lender redirected internally for", k, loc.toString());
+            process.exit(21);
+          }}
+          if (res.headers.get("X-Edge-Contract-Tier") !== "unapproved_native_unmonetized") {{
+            console.error("Unexpected Prexvo contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+            process.exit(22);
+          }}
         }}
       }}
 
@@ -3107,21 +3191,21 @@ def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
     assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "ACTIVE_TENANT"
 
     comp_reports = benchmark_all_properties()
-    assert set(comp_reports.keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert set(comp_reports.keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
     mi_report = MarketIntelligenceEngine(db_path=tmp_path / "mi_parity.db").run_workflow(
         sync_db=False, simulate_three_cycle_confirmation=False
     )
     active_tenant_ids = {t["tenant_id"] for t in mi_report["existing_tenants"]}
-    assert active_tenant_ids == {"profithelm", "prexvo", "gainhelm"}
+    assert active_tenant_ids == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
     # 3. Compilation, registry & workspace discovery parity
     scanner = WorkspacePropertyScanner()
     discovered_ids = {p.property_id for p in scanner.discover_properties()}
-    assert {"profithelm", "prexvo", "gainhelm"}.issubset(discovered_ids)
+    assert {"profithelm", "prexvo", "gainhelm", "lienbond"}.issubset(discovered_ids)
 
     reg = TenantRegistry.default()
-    for p_id in ("profithelm", "prexvo", "gainhelm"):
+    for p_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
         adp = reg.get_adapter(p_id)
         assert adp.dist_dir.is_dir()
         assert (adp.dist_dir / "index.html").is_file()
@@ -3132,7 +3216,7 @@ def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
     engine = PartnerTrackingEngine()
     pub_audit = engine.audit_publisher_prerequisites_and_compliance()
     assert pub_audit["status"] == "PASS"
-    assert set(pub_audit["properties"].keys()) == {"profithelm", "prexvo", "gainhelm"}
+    assert set(pub_audit["properties"].keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
     fals_rep = engine.falsify_monetization_and_partner_health(execute_live=False)
     yg = fals_rep["yield_gated_routing_enforcement"]
@@ -3566,7 +3650,8 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         }}
         return origFetch(url, init);
       }};
-      const stripeEnv = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
+      const stripeEnv = {{ STRIPE_SECRET_KEY: "sk_live_mock", TELEMETRY_EXPORT_SECRET: "tel_sec_stl" }};
+      const authJsonHeaders = {{ "Accept": "application/json", "x-telemetry-secret": "tel_sec_stl" }};
 
       const cases = [
         [phLead, "profithelm", "ph_1031_boot_replacement_workpapers", "section-1031-calculator", "lead_profithelm_stl_test", 450000, 79],
@@ -3585,7 +3670,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         if (cRes.status !== 503) {{ console.error("settle=1 must not succeed for", prop, cRes.status); process.exit(20); }}
         const cJson = await cRes.json();
         if (cJson.status !== "checkout_unavailable") {{ console.error("expected checkout_unavailable", prop, cJson.status); process.exit(21); }}
-        const s0 = await (await mod.onRequestGet({{ request: new Request(base, {{ headers: {{ "Accept": "application/json" }} }}), env: {{}} }})).json();
+        const s0 = await (await mod.onRequestGet({{ request: new Request(base, {{ headers: authJsonHeaders }}), env: stripeEnv }})).json();
         if (s0.summary.settled_upgrades_count !== 0 || s0.summary.attributed_revenue_usd !== 0) {{
           console.error("revenue booked without payment for", prop, s0.summary); process.exit(22);
         }}
@@ -3611,7 +3696,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         if (!fJson.statutory_data_pack || fJson.statutory_data_pack.schema_version !== "pseo-datapack-v1") {{
           console.error("Missing statutory_data_pack for", prop); process.exit(27);
         }}
-        const sRes = await mod.onRequestGet({{ request: new Request(base, {{ headers: {{ "Accept": "application/json" }} }}), env: {{}} }});
+        const sRes = await mod.onRequestGet({{ request: new Request(base, {{ headers: authJsonHeaders }}), env: stripeEnv }});
         const sJson = await sRes.json();
         if (!sJson.summary || !Array.isArray(sJson.summary.per_calculator_metrics) || sJson.summary.settled_upgrades_count < 1) {{
           console.error("Missing settled_upgrades_count / per_calculator_metrics in summary for", prop, sJson.summary); process.exit(28);
@@ -3909,21 +3994,30 @@ def test_autonomous_production_monetization_zero_nag_and_followup_idempotency(tm
     assert f_res["skipped_cooldown_count"] == 5
     assert f_res["newly_dispatched_count"] == 0
 
-    # Verify default production PartnerTrackingEngine reports 100% production readiness and 0 pending operator items
+    # Verify default production PartnerTrackingEngine reports honest non-self-cancelling pending gates and honest readiness scores
     live_tracker = PartnerTrackingEngine()
     live_dash = live_tracker.sync_and_evaluate(force_mail_poll=False)
-    pending_live = [it for it in live_dash.all_action_items if it.status == "PENDING_OPERATOR"]
-    assert len(pending_live) == 0
-    for prop_rep, exp_sku_cnt in (
-        (live_dash.profithelm, 3),
-        (live_dash.prexvo, 1),
-        (live_dash.gainhelm, 2),
+    pending_live_ids = {it.action_id for it in live_dash.all_action_items if it.status == "PENDING_OPERATOR"}
+    assert "act-lienbond-suretybonds-direct-partner-approval" in pending_live_ids
+    assert "act-profithelm-eztaxreturn-com-application-approved" in pending_live_ids
+    assert len(pending_live_ids) == 2
+
+    assert live_dash.profithelm.sellable_assets_live_count == 3
+    assert live_dash.profithelm.edge_redirect_coverage_pct == 100.0
+    assert live_dash.profithelm.monetization_readiness_score > 40.0
+    assert live_dash.profithelm.production_monetization_score > 60.0
+
+    for zero_aff_rep, exp_sku_cnt, exp_mode in (
+        (live_dash.prexvo, 1, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
+        (live_dash.gainhelm, 2, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
+        (live_dash.lienbond, 2, "AWAITING_OPERATOR_ACTION"),
     ):
-        assert prop_rep.production_monetization_ready is True
-        assert prop_rep.production_monetization_score == 100.0
-        assert prop_rep.sellable_assets_live_count == exp_sku_cnt
-        assert prop_rep.edge_redirect_coverage_pct == 100.0
-        assert prop_rep.autonomous_mode_status == "AUTONOMOUS_PRODUCTION_READY"
+        assert zero_aff_rep.monetization_readiness_score == 0.0
+        assert zero_aff_rep.production_monetization_ready is False
+        assert zero_aff_rep.production_monetization_score == 40.0
+        assert zero_aff_rep.sellable_assets_live_count == exp_sku_cnt
+        assert zero_aff_rep.edge_redirect_coverage_pct == 100.0
+        assert zero_aff_rep.autonomous_mode_status == exp_mode
 
 
 def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_cta_intent():
@@ -3938,9 +4032,8 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
        #calc-result-quick-unlock-bar, #inline-worksheet-capture-form, #btn-calc-result-quick-unlock,
        and #btn-post-calc-quick-unlock-checkout idempotently on commercial calculator pages with zero
        visual/UX contract issues, while strictly skipping restricted YMYL pages.
-    3. bind_asset_partner_roster and select_conversion_slot_plan keep crest_capital (Xendoo CPA Tax
-       & Bookkeeping) above rippling on irs-2027-tax-brackets and section-179-calculator under
-       high-impression GSC signals.
+    3. bind_asset_partner_roster and select_conversion_slot_plan bind brand-honest efile_com on
+       irs-2027-tax-brackets and xendoo on section-179-calculator under high-impression GSC signals.
     """
     from pseofactory.partner_tracker import (
         resolve_lead_monetization_offer,
@@ -4014,10 +4107,10 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
     assert "gh_instant_compliance_worksheet_19" in generate_edge_lead_capture_function(property_id="gainhelm")
     assert "lb_instant_lien_bond_worksheet_19" in generate_edge_lead_capture_function(property_id="lienbond")
 
-    # Tax bracket & Section 179 intent alignment: crest_capital (Xendoo CPA) outranks rippling under GSC signals
-    for tax_slug, tax_query in (
-        ("irs-2027-tax-brackets", "irs 2027 tax brackets calculator"),
-        ("section-179-calculator", "section 179 deduction calculator"),
+    # Tax bracket & Section 179 intent alignment: brand-honest efile_com on tax brackets and xendoo on Section 179
+    for tax_slug, tax_query, exp_pk in (
+        ("irs-2027-tax-brackets", "irs 2027 tax brackets calculator", "efile_com"),
+        ("section-179-calculator", "section 179 deduction calculator", "xendoo"),
     ):
         roster = bind_asset_partner_roster(
             slug=tax_slug,
@@ -4026,8 +4119,8 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
             page_archetype="calculator_workbench",
             gsc_metrics={"impressions": 450, "clicks": 3, "ctr": 0.0067, "position": 8.4},
         )
-        assert roster["primary_offer"]["partner_key"] == "crest_capital"
-        assert roster["slot_plan"]["slot_bindings"]["calculator_result_inline"]["partner_key"] == "crest_capital"
+        assert roster["primary_offer"]["partner_key"] == exp_pk
+        assert roster["slot_plan"]["slot_bindings"]["calculator_result_inline"]["partner_key"] == exp_pk
 
     # Contextual partner offer copy: state tax brackets must never show Section 179 copy
     ny_roster = bind_asset_partner_roster(
@@ -4036,10 +4129,21 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
         query="irs 2027 tax brackets new york",
         page_archetype="calculator_workbench",
     )
-    assert ny_roster["primary_offer"]["partner_key"] == "crest_capital"
-    assert "New York" in ny_roster["primary_offer"]["cta_text"]
+    assert ny_roster["primary_offer"]["partner_key"] == "efile_com"
     assert "Section 179" not in ny_roster["primary_offer"]["cta_text"]
+    assert "New York" in ny_roster["primary_offer"]["cta_text"]
     assert "New York" in ny_roster["primary_offer"]["badge"]
+    from pseofactory.affiliates import PROFITHELM_AFFILIATES, resolve_contextual_partner_offer_copy
+
+    ny_xendoo = resolve_contextual_partner_offer_copy(
+        "xendoo",
+        PROFITHELM_AFFILIATES["xendoo"],
+        slug="irs-2027-tax-brackets/new-york",
+        property_id="profithelm",
+    )
+    assert "New York" in ny_xendoo["cta_text"]
+    assert "Section 179" not in ny_xendoo["cta_text"]
+    assert "New York" in ny_xendoo["badge"]
 
     s179_roster = bind_asset_partner_roster(
         slug="section-179-calculator/ford-f150-lightning",
@@ -4047,7 +4151,7 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
         query="section 179 ford f150 lightning",
         page_archetype="calculator_workbench",
     )
-    assert s179_roster["primary_offer"]["partner_key"] == "crest_capital"
+    assert s179_roster["primary_offer"]["partner_key"] == "xendoo"
     assert "Section 179" in s179_roster["primary_offer"]["cta_text"]
 
     insolv_roster = bind_asset_partner_roster(

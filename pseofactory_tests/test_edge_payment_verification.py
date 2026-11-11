@@ -53,7 +53,8 @@ HARNESS = textwrap.dedent(
       return new Response("{}", { status: 500 });
     };
     const results = {};
-    const env = { STRIPE_SECRET_KEY: "sk_live_mock", LEADS_KV: kv, LEADS: kv };
+    const env = { STRIPE_SECRET_KEY: "sk_live_mock", TELEMETRY_EXPORT_SECRET: "test_export_sec", LEADS_KV: kv, LEADS: kv };
+    const authHeaders = { "x-telemetry-secret": "test_export_sec" };
     const call = async (qs, e = env, headers = {}) => {
       const r = await mod.onRequestGet({ request: new Request("https://t.example/api/lead-capture?" + qs, { headers }), env: e });
       const text = await r.text();
@@ -86,9 +87,10 @@ HARNESS = textwrap.dedent(
     results.post_unpaid = await callPost(base + "&fulfill=1", { lead_id: "LEAD", fulfill: true, session_id: "cs_live_UNPAID" });
     results.settle_param = await call(base + "&checkout=1&settle=1&format=json", { LEADS_KV: kv });
     results.settle_redirect = await call(base + "&checkout=1&settle=1&redirect=1", { LEADS_KV: kv });
-    results.list_before_paid = await call("limit=50");
+    results.list_unauth = await call("limit=50");
+    results.list_before_paid = await call("limit=50", env, authHeaders);
     results.paid = await call(base + "&fulfill=1&session_id=cs_live_PAID&format=json");
-    results.list_after_paid = await call("limit=50");
+    results.list_after_paid = await call("limit=50", env, authHeaders);
     results.checkout_live = await call(base + "&checkout=1&format=json");
     console.log(JSON.stringify(results));
     """
@@ -146,6 +148,7 @@ def test_settle_query_param_is_ignored_and_checkout_never_bypasses_stripe(tmp_pa
     loc = res["settle_redirect"]["location"] or ""
     assert "fulfill=1" not in loc and "format=html" not in loc
     assert "checkout_status=unavailable" in loc
+    assert res["list_unauth"]["status"] == 401
     before = res["list_before_paid"]["body"]["summary"]
     assert before["attributed_revenue_usd"] == 0
     assert before["settled_upgrades_count"] == 0

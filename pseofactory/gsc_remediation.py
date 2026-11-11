@@ -738,19 +738,19 @@ def _resolve_partner_offer_and_manual_gate(
                         "property_id": "profithelm",
                         "asset_slug": s_norm,
                         "partner_key": "suretybonds_direct",
-                        "partner_name": "SuretyBonds.com Direct",
+                        "partner_name": "SuretyBondsDirect.com",
                         "action_type": "INTEGRATION_REQUIREMENT",
                         "severity": "MEDIUM",
-                        "title": "SuretyBonds.com Direct Custom Quote Widget & Producer Verification",
+                        "title": "SuretyBondsDirect.com Custom Quote Widget & Producer Verification",
                         "description": (
                             f"Customs bond calculator {s_norm} is gaining search impressions and requires "
-                            f"manual agency producer code confirmation for SuretyBonds.com Direct."
+                            f"manual agency producer code confirmation for SuretyBondsDirect.com."
                         ),
                         "missing_requirements": [
                             "Verify licensed surety producer agreement",
                             "Provision direct quote widget affiliate tracking token",
                         ],
-                        "candidate_url": "https://www.suretybonds.com/",
+                        "candidate_url": "https://www.suretybondsdirect.com/",
                     }
             elif any(k in combined for k in ("freight-mode", "ocean-air", "container-demurrage", "freightos", "spot-freight")):
                 fr_info = registry.get("freightos_marketplace", {})
@@ -1092,8 +1092,8 @@ def _resolve_partner_offer_and_manual_gate(
         )
     elif eff_tenant == "lienbond":
         p_data = registry.get(chosen_key) or registry.get("suretybonds_direct") or {}
-        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "SuretyBonds.com Direct Contractor & License Bond Underwriting"))
-        p_url = str(p_data.get("url") or "https://www.suretybonds.com/")
+        p_name = _strip_forbidden_dashes(str(p_data.get("name") or "SuretyBondsDirect.com Contractor & License Bond Underwriting"))
+        p_url = str(p_data.get("url") or "https://www.suretybondsdirect.com/")
         p_cta = _strip_forbidden_dashes(str(p_data.get("cta_text") or "Get Instant Treasury-Listed Surety Bond Quotes"))
         p_disc = _strip_forbidden_dashes(
             str(

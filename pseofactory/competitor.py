@@ -1848,6 +1848,190 @@ TARGET_QUERY_BENCHMARKS: Dict[str, List[Dict[str, Any]]] = {
             "recommended_affiliates": ["vanta_security", "coalition_cyber_insurance"],
         },
     ],
+    "lienbond": [
+        {
+            "query": "miller act bond cost calculator",
+            "slug": "miller-act-bond-cost-calculator",
+            "target_url": "https://lienbond.com/tools/miller-act-bond-cost-calculator/",
+            "intent_tier": "tier_1_commercial_surety_bonds",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 12, "duckduckgo": 9},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "suretybonds.com",
+                    "url": "https://www.suretybonds.com/performance-bond/cost",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "Sliding-scale surety premium tables by contract value and credit tier.",
+                },
+                {
+                    "domain": "lance-surety.com",
+                    "url": "https://www.suretybondsby-lance.com/surety-bond-cost-calculator",
+                    "engine_ranks": {"google": 2, "bing": 3, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Credit-score banded surety premium examples.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Surety agencies publish static rate tables without an interactive 40 U.S.C. 3131 "
+                "Miller Act performance and payment bond premium calculator."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["suretybonds_direct", "thimble_contractor"],
+        },
+        {
+            "query": "mechanics lien deadline calculator",
+            "slug": "mechanics-lien-deadline-calculator",
+            "target_url": "https://lienbond.com/tools/mechanics-lien-deadline-calculator/",
+            "intent_tier": "tier_1_construction_lien_compliance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 11, "duckduckgo": 8},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "levelset.com",
+                    "url": "https://www.levelset.com/mechanics-lien/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "50-state preliminary notice and statutory lien filing charts.",
+                },
+                {
+                    "domain": "handle.com",
+                    "url": "https://www.handle.com/mechanics-lien-deadlines/",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 3},
+                    "winning_mechanics": [
+                        "deep_link_scenario_presets",
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "State construction notice deadline lookup guides.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "Construction legal directories list prose statutes without deterministic claimant-tier "
+                "preliminary notice and recording deadline calculators."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["levelset_lien_filing", "jobber_field_service"],
+        },
+        {
+            "query": "workers compensation emr experience mod calculator",
+            "slug": "workers-comp-emr-experience-mod-calculator",
+            "target_url": "https://lienbond.com/tools/workers-comp-emr-experience-mod-calculator/",
+            "intent_tier": "tier_1_workers_comp_emr",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 14, "duckduckgo": 10},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "ncci.com",
+                    "url": "https://www.ncci.com/Articles/Pages/UW_ABC-Exp-Rating.aspx",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Primary NCCI Experience Rating Plan actuarial authority.",
+                },
+                {
+                    "domain": "insureon.com",
+                    "url": "https://www.insureon.com/small-business-insurance/workers-compensation/cost",
+                    "engine_ranks": {"google": 3, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "State class-code workers compensation premium guides.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "NCCI and commercial brokers publish PDF worksheets without an interactive split-point "
+                "primary vs excess loss EMR Experience Modification Factor calculator."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["simply_business", "thimble_contractor"],
+        },
+        {
+            "query": "davis bacon prevailing wage fringe benefit wh 347 calculator",
+            "slug": "davis-bacon-wh-347-fringe-calculator",
+            "target_url": "https://lienbond.com/tools/davis-bacon-wh-347-fringe-calculator/",
+            "intent_tier": "tier_1_prevailing_wage_compliance",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 10, "duckduckgo": 7},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "dol.gov",
+                    "url": "https://www.dol.gov/agencies/whd/forms/wh347",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Official Department of Labor Form WH-347 PDF repository.",
+                },
+                {
+                    "domain": "lcptracker.com",
+                    "url": "https://lcptracker.com/resources/prevailing-wage/",
+                    "engine_ranks": {"google": 2, "bing": 3, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "deep_link_scenario_presets",
+                    ],
+                    "indexing_advantage": "Certified payroll compliance guides for public-works contractors.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "DOL hosts static WH-347 PDFs without an interactive 40 U.S.C. 3141 annualized bona fide "
+                "fringe credit vs cash-in-lieu overtime calculator."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["jobber_field_service", "simply_business"],
+        },
+        {
+            "query": "california contractor license bond sb 607 cost calculator",
+            "slug": "contractor-license-bond-cost-calculator",
+            "target_url": "https://lienbond.com/tools/contractor-license-bond-cost-calculator/",
+            "intent_tier": "tier_1_commercial_surety_bonds",
+            "restricted_public_service": False,
+            "commercial_offers_allowed": True,
+            "engine_positions": {"google": None, "bing": 13, "duckduckgo": 9},
+            "higher_ranked_competitors": [
+                {
+                    "domain": "cslb.ca.gov",
+                    "url": "https://www.cslb.ca.gov/Contractors/Maintain_License/Bond_Information/",
+                    "engine_ranks": {"google": 1, "bing": 1, "duckduckgo": 1},
+                    "winning_mechanics": [
+                        "jsonld_entity_triad",
+                    ],
+                    "indexing_advantage": "Official California CSLB $25,000 contractor bond requirement notice.",
+                },
+                {
+                    "domain": "suretybondsdirect.com",
+                    "url": "https://www.suretybondsdirect.com/surety-bonds/contractor-license-bond",
+                    "engine_ranks": {"google": 2, "bing": 2, "duckduckgo": 2},
+                    "winning_mechanics": [
+                        "server_rendered_sensitivity_grid",
+                        "compliant_intent_monetization",
+                    ],
+                    "indexing_advantage": "State-by-state contractor license bond penal sum directory.",
+                },
+            ],
+            "root_cause_diagnosis": (
+                "State licensing boards publish static penal sum amounts without credit-score tiered "
+                "multi-year surety premium and LLC employee/worker bond calculators."
+            ),
+            "compiler_upgrades_applied": list(WINNING_COMPETITOR_MECHANICS.keys()),
+            "recommended_affiliates": ["suretybonds_direct", "thimble_contractor"],
+        },
+    ],
 }
 
 
@@ -1975,7 +2159,11 @@ def _execute_multi_engine_benchmark(
             default_comp_domain = (
                 "studentaid.gov"
                 if prop == "prexvo"
-                else ("secureframe.com" if prop == "gainhelm" else "smartasset.com")
+                else (
+                    "secureframe.com"
+                    if prop == "gainhelm"
+                    else ("suretybonds.com" if prop == "lienbond" else "smartasset.com")
+                )
             )
             competitors = [
                 {
@@ -2095,13 +2283,14 @@ def benchmark_multi_engine_rankings(
 def benchmark_all_properties() -> Dict[str, Dict[str, Any]]:
     """
     Benchmarks multi-engine search rankings and higher-ranked competitors across
-    profithelm, prexvo, and gainhelm, returning a domain-isolated comparison dictionary.
+    profithelm, prexvo, gainhelm, and lienbond, returning a domain-isolated comparison dictionary.
     Zero em-dashes. Zero en-dashes.
     """
     return {
         "profithelm": benchmark_multi_engine_rankings("profithelm"),
         "prexvo": benchmark_multi_engine_rankings("prexvo"),
         "gainhelm": benchmark_multi_engine_rankings("gainhelm"),
+        "lienbond": benchmark_multi_engine_rankings("lienbond"),
     }
 
 
@@ -4705,7 +4894,7 @@ def render_partner_quote_intake_html(
         consent_copy = (
             "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
             "project jurisdiction state, and bond/payroll band with matched Treasury-listed surety underwriters, "
-            "commercial workers compensation carriers, and statutory lien service partners (including SuretyBonds.com, "
+            "commercial workers compensation carriers, and statutory lien service partners (including SuretyBondsDirect.com, "
             "Simply Business, Next Insurance, Thimble, and Levelset) to prepare a customized underwriting quote."
         )
         btn_text = "Request Instant Surety & Insurance Quote"

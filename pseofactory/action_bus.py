@@ -148,8 +148,23 @@ class HumanActionBus:
                 items_dict = {}
                 valid_fields = set(ActionItem.__dataclass_fields__.keys())
                 for k, v in data.get("actions", {}).items():
+                    if str(k).startswith("act-email-pers-"):
+                        continue
                     filtered_v = {fk: fv for fk, fv in v.items() if fk in valid_fields}
                     item = ActionItem(**filtered_v)
+                    if (
+                        item.property_id == "profithelm"
+                        and item.partner_key in LIENBOND_AFFILIATES
+                        and item.partner_key not in PROFITHELM_AFFILIATES
+                    ):
+                        new_key = (
+                            f"act-lienbond-{k[len('act-profithelm-'):]}"
+                            if str(k).startswith("act-profithelm-")
+                            else str(k)
+                        )
+                        item.property_id = "lienbond"
+                        item.action_id = new_key
+                        k = new_key
                     if item.estimated_monthly_revenue_impact_usd <= 0.0:
                         self._compute_and_apply_revenue_impact(item)
                     self._assert_item_invariants(item)
@@ -340,17 +355,38 @@ class HumanActionBus:
 
         cand_url = getattr(c, "candidate_url", "") or ""
 
-        # If already exists, don't revert if resolved, but update email id/date
+        # If already exists, don't revert if resolved unless a new human partner question arrived on a new email
         if action_id in self.items:
             existing = self.items[action_id]
-            existing.updated_at = datetime.now(timezone.utc).isoformat()
-            if c.deadline and not existing.deadline:
-                existing.deadline = c.deadline
-            if cand_url and not existing.candidate_url:
-                existing.candidate_url = cand_url
-            self._compute_and_apply_revenue_impact(existing, engagement_metrics=engagement_metrics)
-            self._recompute_revenue_priority_ranks()
-            return existing
+            is_older_numeric_email = (
+                str(c.email_id or "").isdigit()
+                and str(existing.source_email_id or "").isdigit()
+                and int(str(c.email_id)) <= int(str(existing.source_email_id))
+            )
+            has_new_question = (
+                bool(c.email_id)
+                and c.email_id != existing.source_email_id
+                and not is_older_numeric_email
+                and existing.status != "PENDING_OPERATOR"
+                and any("partner manager question" in r.lower() for r in (c.missing_requirements or []))
+            )
+            if has_new_question:
+                safe_eid = re.sub(r"[^a-z0-9]+", "-", str(c.email_id).lower()).strip("-") or "followup"
+                action_id = f"act-{c.property_id}-{safe_key}-partner-question-{safe_eid}"
+                if action_id in self.items:
+                    return self.items[action_id]
+            else:
+                existing.updated_at = datetime.now(timezone.utc).isoformat()
+                if c.deadline and not existing.deadline:
+                    existing.deadline = c.deadline
+                if cand_url and not existing.candidate_url:
+                    existing.candidate_url = cand_url
+                for req in c.missing_requirements or []:
+                    if req and req not in existing.missing_requirements:
+                        existing.missing_requirements.append(req)
+                self._compute_and_apply_revenue_impact(existing, engagement_metrics=engagement_metrics)
+                self._recompute_revenue_priority_ranks()
+                return existing
 
         title = f"{c.partner_name}: {c.classification_type.replace('_', ' ').title()}"
         title = title.replace("\u2014", "-").replace("\u2013", "-")
@@ -878,7 +914,7 @@ class HumanActionBus:
                 )
             eff_key = req_key if req_key in LIENBOND_AFFILIATES else "suretybonds_direct"
             eff_name = LIENBOND_AFFILIATES[eff_key].name.replace("\u2014", ": ").replace("\u2013", "-")
-            rep_target = "SuretyBonds.com & Simply Business Commercial Underwriting Desk"
+            rep_target = "SuretyBondsDirect.com & Simply Business Commercial Underwriting Desk"
         else:
             if req_key not in PROFITHELM_AFFILIATES and (
                 req_key in STUDENT_LOAN_PARTNER_KEYS
@@ -899,8 +935,8 @@ class HumanActionBus:
                 eff_key = "ipx1031"
                 eff_name = "IPX1031"
                 rep_target = "IPX1031 Exchange Desk"
-            elif req_key == "turbotax" or "tax" in slug_clean:
-                eff_key = "turbotax"
+            elif req_key in ("efile_com", "turbotax") or "tax" in slug_clean:
+                eff_key = "efile_com"
                 eff_name = "E-file"
                 rep_target = "Aaron Rosenthal at E-file and OTR Solutions Commercial Desk"
             elif req_key in PROFITHELM_AFFILIATES:
@@ -908,7 +944,7 @@ class HumanActionBus:
                 eff_name = PROFITHELM_AFFILIATES[req_key].name.replace("\u2014", ": ").replace("\u2013", "-")
                 rep_target = "Aaron Rosenthal at E-file, Wade Fenton at OTR Solutions, and IPX1031 Exchange Desk"
             else:
-                eff_key = "turbotax"
+                eff_key = "efile_com"
                 eff_name = "E-file"
                 rep_target = "Aaron Rosenthal at E-file, Wade Fenton at OTR Solutions, and IPX1031 Exchange Desk"
 

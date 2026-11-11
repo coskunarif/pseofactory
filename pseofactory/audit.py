@@ -1080,7 +1080,13 @@ def _audit_template_and_structure_gates(
     if "<td>480.00%</td>" in html_content:
         g8_ok = False
         violations.append("Gate 8 (Structural Components): HTML contains unnormalized percentage scale (480.00%)")
-    if re.search(r"<h2[^>]*>[^<]*[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*</h2>", html_content):
+    _h2_scrub = re.sub(
+        r"\b(?:ezTaxReturn|SuretyBondsDirect|FreeTaxUSA|CoinLedger|WalletHub|LawDepot|LendKey|NextInsurance|QuickBooks|FreshBooks|TurboTax|TaxSlayer|FirstPromoter|PartnerStack|ZeptoMail)\b",
+        "Brand",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    if re.search(r"<h2[^>]*>[^<]*[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*</h2>", _h2_scrub):
         g8_ok = False
         violations.append("Gate 8 (Structural Components): H2 heading contains unsplit CamelCase identifier")
 

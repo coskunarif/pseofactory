@@ -846,7 +846,8 @@ def test_prexvo_feedback_loop_enforces_ymyl_guardrail_and_places_commercial_refi
     refi_html = (refi_dir / "index.html").read_text(encoding="utf-8")
     assert 'class="overlay-section overlay-partner-offer affiliate-cta-section card"' in refi_html
     assert 'rel="noopener sponsored nofollow"' in refi_html
-    assert "sofi.com" in refi_html
+    assert "splashfinancial.com" in refi_html
+    assert "sofi.com" not in refi_html
 
 
 def test_manual_partner_or_platform_dependency_routes_single_clean_alert_without_interrupting_growth_loop(tmp_path):
@@ -1192,7 +1193,7 @@ def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers
         {
             "event_type": "affiliate_click",
             "slug": "student-loan-refinance-break-even-calculator",
-            "partner_key": "sofi_refi",
+            "partner_key": "splash_financial",
             "cta_slot": "calculator_primary_cta",
             "payout_usd": 100.0,
             "property_id": "prexvo",
@@ -1200,7 +1201,7 @@ def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers
         {
             "event_type": "affiliate_click",
             "slug": "student-loan-refinance-break-even-calculator",
-            "partner_key": "earnest",
+            "partner_key": "credible",
             "cta_slot": "calculator_primary_cta",
             "payout_usd": 150.0,
             "property_id": "prexvo",
@@ -1208,7 +1209,7 @@ def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers
         {
             "event_type": "affiliate_click",
             "slug": "student-loan-refinance-break-even-calculator",
-            "partner_key": "earnest",
+            "partner_key": "credible",
             "cta_slot": "calculator_primary_cta",
             "payout_usd": 150.0,
             "property_id": "prexvo",
@@ -1245,9 +1246,11 @@ def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers
     assert "student-loan-refinance-break-even-calculator" in px_res["yield_optimized_slugs"]
 
     updated_refi_html = (refi_dir / "index.html").read_text(encoding="utf-8")
-    assert 'data-partner="earnest"' in updated_refi_html
+    assert 'data-partner="credible"' in updated_refi_html
     assert 'data-optimization-status="YIELD_OPTIMIZED_PROMOTED"' in updated_refi_html
-    assert "earnest.com" in updated_refi_html
+    assert "credible.com" in updated_refi_html
+    assert 'data-partner="sofi"' not in updated_refi_html
+    assert 'data-partner="earnest"' not in updated_refi_html
 
     # Restricted public-service page must remain 100% free of commercial offers
     updated_pslf_html = (pslf_dir / "index.html").read_text(encoding="utf-8")

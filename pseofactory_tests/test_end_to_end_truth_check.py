@@ -2416,21 +2416,14 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
         if (res.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") process.exit(14);
       }}
 
-      // Explicit, honestly named non-GRC rails resolve to the brand they are named for
-      const honest = [
-        ["ramp", "join.ramp.com", "/51436"],
-        ["xendoo", "xendoo.pxf.io", "/16354"],
-        ["lawdepot", "www.jdoqocy.com", "click-101906407-16985242"],
-      ];
-      for (const [partner, host, frag] of honest) {{
+      // Foreign ProfitHelm-only affiliate contracts are strictly blocked (HTTP 404) on GainHelm
+      for (const foreignPartner of ["ramp", "xendoo", "lawdepot"]) {{
         const res = await ghRedirect.onRequest({{
-          request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=soc-2-audit-cost-calculator&cta_slot=footer"),
+          request: new Request("https://gainhelm.com/r/" + foreignPartner + "?source_tool=soc-2-audit-cost-calculator&cta_slot=footer"),
           env: {{}},
-          params: {{ partner }}
+          params: {{ partner: foreignPartner }}
         }});
-        if (res.status !== 302) process.exit(20);
-        const loc = new URL(res.headers.get("Location"));
-        if (loc.hostname !== host || !loc.pathname.includes(frag)) process.exit(21);
+        if (res.status !== 404) process.exit(20);
       }}
 
       process.exit(0);
@@ -2519,12 +2512,12 @@ def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_pa
         verify_department_handoff_chain,
     )
 
-    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm")
+    assert CANONICAL_TENANTS == ("profithelm", "prexvo", "gainhelm", "lienbond")
     assert len(CANONICAL_DEPARTMENT_CONTRACTS) == 6
 
     report = verify_department_handoff_chain(
         workspace_root="/home/ubuntuadmin/projects",
-        property_ids=["profithelm", "prexvo", "gainhelm"],
+        property_ids=["profithelm", "prexvo", "gainhelm", "lienbond"],
         persist=False,
         heal_markers=False,
         strict_current_engine_hash=False,
@@ -2533,8 +2526,8 @@ def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_pa
     assert report["stages_total"] == 6
     assert report["stages_passed"] == 6
     assert report["failing_stages_count"] == 0
-    assert report["target_tenants"] == ["profithelm", "prexvo", "gainhelm"]
-    assert report["discovered_tenants"] == ["profithelm", "prexvo", "gainhelm"]
+    assert report["target_tenants"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
+    assert report["discovered_tenants"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
 
     expected_order = (
         "DISCOVERY",
@@ -2567,7 +2560,7 @@ def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_pa
     persisted = sm.finalize_and_persist(cycle_id="test_e2e_handoff_chain", overall_status="PASS")
     assert state_file.is_file()
     assert persisted["overall_status"] == "PASS"
-    assert persisted["tenants_managed"] == ["profithelm", "prexvo", "gainhelm"]
+    assert persisted["tenants_managed"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
     assert set(persisted["contracts"].keys()) == set(expected_order)
 
 

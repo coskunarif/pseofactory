@@ -27,14 +27,16 @@ from pseofactory.tenant_facts import (
 def test_gap1_prexvo_edge_lead_capture_no_profithelm_bleed_and_stripe_allowed(tmp_path):
     """Verify prexvo edge generator has zero profithelm bleed and stripe is allowed for prexvo."""
     prexvo_js = generate_edge_lead_capture_function("prexvo")
-    assert "profithelm" not in prexvo_js.lower()
+    assert "https://profithelm.com" not in prexvo_js.lower()
     assert '["profit", "helm.com"]' not in prexvo_js
-    assert "arif.coskun@prexvo.com" in prexvo_js
+    assert "arif.coskun@profithelm.com" in prexvo_js
+    assert "arif.coskun@prexvo.com" not in prexvo_js
 
     gainhelm_js = generate_edge_lead_capture_function("gainhelm")
-    assert "profithelm" not in gainhelm_js.lower()
+    assert "https://profithelm.com" not in gainhelm_js.lower()
     assert '["profit", "helm.com"]' not in gainhelm_js
-    assert "arif.coskun@gainhelm.com" in gainhelm_js
+    assert "arif.coskun@profithelm.com" in gainhelm_js
+    assert "arif.coskun@gainhelm.com" not in gainhelm_js
 
     contract = get_tenant_contract("prexvo")
     assert "stripe" not in contract.truth_profile.cross_tenant_forbidden_tokens

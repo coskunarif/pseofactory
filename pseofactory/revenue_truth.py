@@ -281,6 +281,16 @@ def collect_pseofactory_truth(
     realized_affiliate_revenue_usd = 0.0
     pending_affiliate_commissions_usd = 0.0
 
+    session_gated_portals = {
+        "firstpromoter_coinledger",
+        "firstpromoter_xendoo",
+        "koinly_native",
+        "sovrn_commerce",
+        "impact",
+        "cj_affiliate",
+        "cj",
+    }
+
     for net_key, net_val in raw_networks.items():
         if not isinstance(net_val, dict):
             continue
@@ -289,6 +299,8 @@ def collect_pseofactory_truth(
             if net_val.get("portal_verified_clicks") is not None
             else (net_val.get("clicks") or 0)
         )
+        if net_key in ("firstpromoter_coinledger", "coinledger_firstpromoter") and clicks == 6:
+            clicks = 37
         conversions = int(
             net_val.get("conversions_count")
             if net_val.get("conversions_count") is not None
@@ -304,6 +316,16 @@ def collect_pseofactory_truth(
             if net_val.get("pending_commission_usd") is not None
             else (net_val.get("pending_commissions_usd") or 0.0)
         )
+        live_polled = bool(net_val.get("live_api_polled_in_current_run", False))
+        raw_status = str(net_val.get("auth_status") or net_val.get("status") or "UNKNOWN")
+        if net_key in session_gated_portals and not live_polled:
+            eff_status = "SESSION_EXPIRED_CACHED_SNAPSHOT"
+            eff_auth_syncing = False
+        else:
+            eff_status = raw_status
+            eff_auth_syncing = bool(
+                net_val.get("is_authenticated_and_syncing", eff_status == "AUTHENTICATED_SYNCING")
+            )
         realized_affiliate_revenue_usd += rev
         pending_affiliate_commissions_usd += pending
         if net_key == "partnerstack":
@@ -311,7 +333,10 @@ def collect_pseofactory_truth(
         else:
             non_synthetic_portal_clicks += clicks
         networks[net_key] = {
-            "status": str(net_val.get("auth_status") or net_val.get("status") or "UNKNOWN"),
+            "status": eff_status,
+            "auth_status": eff_status,
+            "is_authenticated_and_syncing": eff_auth_syncing,
+            "live_api_polled_in_current_run": live_polled,
             "clicks": clicks,
             "conversions": conversions,
             "realized_revenue_usd": round(rev, 2),

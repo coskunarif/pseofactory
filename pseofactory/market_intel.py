@@ -526,7 +526,7 @@ GREENFIELD_VERTICAL_CATALOG: Dict[str, Dict[str, Any]] = {
             ),
             CommissionOfferSpec(
                 partner_key="suretybonds_direct",
-                partner_name="SuretyBonds.com Nationwide Bonding",
+                partner_name="SuretyBondsDirect.com Nationwide Bonding",
                 network="CJ Affiliate / Direct Lead-Gen",
                 vertical_id="commercial_surety_insurance",
                 commission_type="HYBRID_CPA_REVSHARE",
@@ -537,7 +537,7 @@ GREENFIELD_VERTICAL_CATALOG: Dict[str, Dict[str, Any]] = {
                 approval_friction_days=2,
                 time_to_first_payout_days=15,
                 active_offer_verified=True,
-                program_url="https://www.suretybonds.com/affiliate-program",
+                program_url="https://www.suretybondsdirect.com/",
                 target_cta="Get Your Instant State License or Performance Bond Quote",
             ),
             CommissionOfferSpec(
@@ -642,7 +642,7 @@ GREENFIELD_VERTICAL_CATALOG: Dict[str, Dict[str, Any]] = {
         "why_it_wins_fastest": (
             "Mandatory purchase intent (contractors and plan fiduciaries cannot legally operate or bid without active coverage), "
             "ultra-high B2B CPCs ($15.90 to $24.50), weak PDF-heavy SERPs (mean KD 13.5, 100% Position 0 vacant), "
-            "and instant-active lead bounties ($125 to $232 effective bounty per quote lead via Simply Business, SuretyBonds.com, Next Insurance, and Thimble)."
+            "and instant-active lead bounties ($125 to $232 effective bounty per quote lead via Simply Business, SuretyBondsDirect.com, Next Insurance, and Thimble)."
         ),
     },
     "customs_freight_logistics": {
@@ -1555,6 +1555,8 @@ TRANSACTIONAL_TOOL_MODIFIERS: Dict[str, float] = {
     "markup": 13.0,
     "margin": 13.0,
     "schedule": 11.0,
+    "density": 11.0,
+    "class": 11.0,
     "modeler": 15.0,
     "simulator": 15.0,
 }
@@ -1565,6 +1567,8 @@ DECISION_URGENCY_SIGNALS: Dict[str, float] = {
     "hts": 10.0,
     "landed cost": 10.0,
     "nmfc": 10.0,
+    "ltl": 10.0,
+    "freight class": 10.0,
     "mpf": 10.0,
     "hmf": 10.0,
     "demurrage": 10.0,
@@ -2517,6 +2521,12 @@ class MarketIntelligenceEngine:
                     "brand_name": "GainHelm",
                     "domain": "gainhelm.com",
                     "scope": "Enterprise Cyber Compliance & Audit Scoping Calculators (SOC 2, CMMC 2.0, NIST 800-171 SPRS, ISO 27001, HIPAA, PCI DSS)",
+                },
+                {
+                    "tenant_id": "lienbond",
+                    "brand_name": "LienBond",
+                    "domain": "lienbond.com",
+                    "scope": "Statutory Surety Bond, Mechanics Lien, Workers Comp EMR & Construction Prevailing Wage Calculators (40 U.S.C. 3131, Davis-Bacon WH-347)",
                 },
             ],
             "staged_reserve_domains": [

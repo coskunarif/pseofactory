@@ -23,15 +23,28 @@ OWN_TENANT_DOMAINS: Tuple[str, ...] = (
     "lienbond.com",
 )
 
+UNPROVISIONED_FLEET_DOMAINS: Tuple[str, ...] = (
+    "profithelm.com",
+    "prexvo.com",
+    "gainhelm.com",
+    "lienbond.com",
+    "1031exchangehelm.com",
+)
+
 # Fixture / documentation domains used by self-tests, batch fixtures and probes.
 SYNTHETIC_DOMAINS: Tuple[str, ...] = (
     "example.com",
     "example.org",
     "example.net",
     "example.invalid",
+    "invalid.local",
+    "test.com",
+    "localhost",
     "synthetic.pseofactory.test",
     "freightfleet-logistics.com",
+    "pacific-industrial.com",
     "medcenter-cohort.org",
+    "metro-health.org",
     "cre-exchange-holdings.com",
     "precision-manufacturing.io",
 )
@@ -53,20 +66,29 @@ SYNTHETIC_LOCAL_PREFIXES: Tuple[str, ...] = (
     "no-reply",
 )
 
-_SYNTH_TLD_SUFFIXES: Tuple[str, ...] = (".invalid", ".test", ".example", ".localhost")
+_SYNTH_TLD_SUFFIXES: Tuple[str, ...] = (".invalid", ".test", ".example", ".localhost", ".local")
 
 REAL_PAYMENT_SESSION_RE = re.compile(r"^cs_live_[A-Za-z0-9_]+$")
+
+
+def _fnv1a32_hex(text: str) -> str:
+    """Deterministic 32-bit FNV-1a hex digest for tenant-isolated domain matching in edge JS."""
+    h = 0x811C9DC5
+    for byte in text.strip().lower().encode("utf-8"):
+        h ^= byte
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return f"{h:08x}"
 
 
 def classify_lead_email(email: Any) -> str:
     """Return ``"synthetic"`` for internal/fixture addresses, otherwise ``"real"``."""
     value = str(email or "").strip().lower()
-    if "@" not in value:
+    if "@" not in value or "*" in value:
         return "synthetic"
     local, _, domain = value.rpartition("@")
     if not local or not domain:
         return "synthetic"
-    if domain in OWN_TENANT_DOMAINS or domain.endswith(tuple("." + d for d in OWN_TENANT_DOMAINS)):
+    if domain in UNPROVISIONED_FLEET_DOMAINS or domain.endswith(tuple("." + d for d in UNPROVISIONED_FLEET_DOMAINS)):
         return "synthetic"
     if domain in SYNTHETIC_DOMAINS or domain.endswith(_SYNTH_TLD_SUFFIXES):
         return "synthetic"
@@ -132,14 +154,15 @@ def revenue_summary(rows: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
 def edge_classifier_json(property_id: str) -> str:
     """JSON blob embedded into a tenant's edge JS so it classifies like this module.
 
-    Only the tenant's own domain is embedded (tenant isolation: a tenant's compiled edge
-    code must never name another tenant). Cross-tenant operator addresses are still caught
-    on the edge by the shared local-part prefixes and fully by the Python classifier.
+    Only the tenant's own domain literal is embedded (tenant isolation: a tenant's compiled edge
+    code must never name another tenant). All fleet-managed domains (including unprovisioned
+    cross-tenant domains) are matched via 32-bit FNV-1a digests in ``fleet_domain_hashes``.
     """
     own = f"{str(property_id or '').strip().lower()}.com"
     return json.dumps(
         {
             "own_domains": [own] if own in OWN_TENANT_DOMAINS else [],
+            "fleet_domain_hashes": [_fnv1a32_hex(d) for d in UNPROVISIONED_FLEET_DOMAINS],
             "synthetic_domains": list(SYNTHETIC_DOMAINS),
             "local_prefixes": list(SYNTHETIC_LOCAL_PREFIXES),
             "synthetic_tld_suffixes": list(_SYNTH_TLD_SUFFIXES),

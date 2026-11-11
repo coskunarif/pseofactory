@@ -310,6 +310,9 @@ class CrossPropertyContaminationScanner:
             return []
 
         text_lower = text.lower()
+        if p_id != "profithelm":
+            text_lower = re.sub(r"arif\.coskun@profithelm\.com", "", text_lower)
+            text_lower = re.sub(r"\bprofithelm\s+llc\b", "", text_lower)
         matched: List[str] = []
         for token in sorted(foreign_set):
             # Check for word-bounded token presence
@@ -5561,9 +5564,15 @@ def _needs_page_structure_geo_normalization(
     ):
         return True
 
+    _camel_brand_scrub = re.sub(
+        r"\b(?:ezTaxReturn|SuretyBondsDirect|FreeTaxUSA|CoinLedger|WalletHub|LawDepot|LendKey|NextInsurance|QuickBooks|FreshBooks|TurboTax|TaxSlayer|FirstPromoter|PartnerStack|ZeptoMail)\b",
+        "Brand",
+        html_content,
+        flags=re.IGNORECASE,
+    )
     if re.search(
         r"<h[23][^>]*>[^<]*(?:[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*|\b(?:Section|Form)\d+\b[^<]*|\bIrs 2027\b[^<]*|\b(?:Quantitative|Arbitrage|Differential)\s+Model\s*)</h[23]>",
-        html_content,
+        _camel_brand_scrub,
     ):
         return True
 
@@ -6219,9 +6228,15 @@ def _normalize_spoke_and_synthesized_body_bloat(
 
     def _clean_heading_suffix(hm: re.Match) -> str:
         open_tag, inner_txt, close_tag = hm.group(1), hm.group(2), hm.group(3)
+        scrubbed_inner = re.sub(
+            r"\b(?:ezTaxReturn|SuretyBondsDirect|FreeTaxUSA|CoinLedger|WalletHub|LawDepot|LendKey|NextInsurance|QuickBooks|FreshBooks|TurboTax|TaxSlayer|FirstPromoter|PartnerStack|ZeptoMail)\b",
+            "Brand",
+            inner_txt,
+            flags=re.IGNORECASE,
+        )
         if not re.search(
             r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Section|Form)\d+\b|\b(?:Quantitative|Arbitrage|Differential)(?:\s+Model)?\b|\bIrs 2027\b|\bSaa\s+S",
-            inner_txt,
+            scrubbed_inner,
         ):
             return hm.group(0)
         cleaned_inner = re.sub(
@@ -7926,10 +7941,11 @@ def _normalize_page_structure_and_geo_parity(
 
 
 def _has_stale_pending_status(content: str, property_id: str) -> bool:
-    """True only when a partner link is labeled data-status="pending" although the registry
-    says that partner is live. Partners that are honestly pending/declined (no approved affiliate
-    contract) legitimately render data-status="pending" and must not be flagged stale."""
-    if 'data-status="pending"' not in content:
+    """True when a partner link has stale status drift vs the property registry:
+    - labeled data-status="pending" although the registry says that partner is live,
+    - labeled data-status="live" although the registry says that partner is pending/declined,
+    - or links to a declined partner (/r/<pk>) or to an uncontracted partner on a property with live offers."""
+    if 'href="/r/' not in content and "href='/r/" not in content and "data-status=" not in content:
         return False
     try:
         from pseofactory.affiliates import (
@@ -7951,15 +7967,29 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
         )
     except Exception:
         return True
-    for tag in re.finditer(r"<[a-z]+\b[^>]*data-status=\"pending\"[^>]*>", content, re.I):
-        pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', tag.group(0), re.I)
+    prop_has_live = any(p.status == "live" for p in registry.values())
+    for tag in re.finditer(r"<[a-z]+\b[^>]*(?:data-status=|href=[\"\']/r/)[^>]*>", content, re.I):
+        raw_tag = tag.group(0)
+        pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', raw_tag, re.I)
         if not pk_m:
-            href_m = re.search(r'href=["\']/r/([a-z0-9_]+)', tag.group(0), re.I)
+            href_m = re.search(r'href=["\']/r/([a-z0-9_]+)', raw_tag, re.I)
             pk = href_m.group(1).lower() if href_m else ""
         else:
             pk = pk_m.group(1).lower()
+        if not pk:
+            continue
         entry = registry.get(pk)
-        if entry is None or entry.status == "live":
+        st_m = re.search(r'data-status=["\']([a-z0-9_]+)["\']', raw_tag, re.I)
+        dom_status = st_m.group(1).lower() if st_m else ""
+        if entry is None:
+            return True
+        if entry.status == "declined":
+            return True
+        if dom_status == "pending" and entry.status == "live":
+            return True
+        if dom_status == "live" and entry.status != "live":
+            return True
+        if prop_has_live and entry.status != "live" and ('href="/r/' in raw_tag or "href='/r/" in raw_tag):
             return True
     return False
 
@@ -11038,10 +11068,10 @@ class RetroReflectionEngine:
                                     t_url = str(primary_off.get("default_url") or "https://www.vanta.com/")
                                     t_cta = str(primary_off.get("cta_text") or "Automate Audit Readiness with Vanta")
                                 elif property_id.lower() == "lienbond":
-                                    t_pk = str(primary_off.get("partner_key") or "suretybonds_com")
-                                    t_name = str(primary_off.get("name") or "SuretyBonds.com Nationwide Surety Underwriting")
-                                    t_url = str(primary_off.get("default_url") or "https://www.suretybonds.com/")
-                                    t_cta = str(primary_off.get("cta_text") or "Get Instant Surety Bond Quote")
+                                    t_pk = str(primary_off.get("partner_key") or "suretybonds_direct")
+                                    t_name = str(primary_off.get("name") or "SuretyBonds Direct Commercial Surety Underwriting")
+                                    t_url = str(primary_off.get("default_url") or "https://www.suretybondsdirect.com/")
+                                    t_cta = str(primary_off.get("cta_text") or "Request Instant Surety Bond Quote")
                                 else:
                                     if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
                                         t_pk = "kalshi"
@@ -11059,20 +11089,29 @@ class RetroReflectionEngine:
                                         t_url = str(primary_off.get("default_url") or "https://try.rippling.com/mcfo1m09qiwt")
                                         t_cta = str(primary_off.get("cta_text") or "Schedule Rippling Demo")
                                     elif "1031" in ov_low:
-                                        t_pk = "ipx1031"
-                                        t_name = "IPX1031 Qualified Intermediary"
-                                        t_url = "https://www.ipx1031.com/start-an-exchange/?utm_source=profithelm&utm_medium=referral&utm_campaign=section_1031_calculator"
-                                        t_cta = "Initiate Qualified 1031 Exchange with IPX1031"
+                                        t_pk = str(primary_off.get("partner_key") or "lawdepot")
+                                        t_name = str(primary_off.get("name") or "LawDepot Real Estate & LLC Legal Templates")
+                                        t_url = str(primary_off.get("default_url") or "https://www.jdoqocy.com/click-101906407-16985242")
+                                        t_cta = str(primary_off.get("cta_text") or "Draft Real Estate & LLC Agreements on LawDepot")
+                                    elif any(
+                                        k in ov_low
+                                        for k in (
+                                            "tax-bracket",
+                                            "irs-2027",
+                                            "ca-tax-brackets",
+                                            "capital-gains",
+                                            "tcja",
+                                        )
+                                    ):
+                                        t_pk = str(primary_off.get("partner_key") or "efile_com")
+                                        t_name = str(primary_off.get("name") or "E-file.com IRS Authorized Individual Tax E-File")
+                                        t_url = str(primary_off.get("default_url") or "https://www.jdoqocy.com/click-101906407-11917161")
+                                        t_cta = str(primary_off.get("cta_text") or "E-File Your Federal & State Tax Return on E-file.com")
                                     elif (
                                         ov_low in veh_slugs
                                         or any(
                                             k in ov_low
                                             for k in (
-                                                "tax-bracket",
-                                                "irs-2027",
-                                                "ca-tax-brackets",
-                                                "capital-gains",
-                                                "tcja",
                                                 "179",
                                                 "equipment",
                                                 "lease",
@@ -11085,9 +11124,9 @@ class RetroReflectionEngine:
                                             )
                                         )
                                     ):
-                                        t_pk = "crest_capital"
+                                        t_pk = "xendoo"
                                         t_name = "Xendoo Section 179 & Business Tax Accounting"
-                                        t_url = "https://www.xendoo.com/?fp_ref=arif-4ac24e"
+                                        t_url = "https://xendoo.pxf.io/c/7932737/1357375/16354"
                                         t_cta = "Optimize Section 179 Accounting with Xendoo"
                                     else:
                                         t_pk = str(primary_off.get("partner_key") or "mercury")
@@ -11854,15 +11893,71 @@ class RetroReflectionEngine:
                 )
             )
         )
-        meta_block_lines = [
-            '  <meta name="ir-site-verification-token" content="7932737">',
-            '  <meta name="cj-promotional-property-id" content="101906407">',
-            '  <meta name="sovrn-commerce-domain-key" content="2987330">',
+        verified_gsc_token = (
+            "At5f9a2APEkZhsFx0LICFC5R-TNKsXxzNsbG5YhUoIA"
+            if is_prexvo
+            else (
+                "Elwe-MFi7Z8hEE7ybiGr8xXBqSv87dF_ZMpqkhCDlQ8"
+                if is_gainhelm
+                else (
+                    "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
+                    if is_lienbond
+                    else "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
+                )
+            )
+        )
+        impact_verify_token = os.environ.get("IMPACT_SITE_VERIFICATION_TOKEN", "").strip()
+        is_profithelm_only = not (is_prexvo or is_gainhelm or is_lienbond)
+        meta_block_lines: List[str] = []
+        if is_profithelm_only:
+            if impact_verify_token and not impact_verify_token.isdigit():
+                meta_block_lines.append(f'  <meta name="ir-site-verification-token" content="{impact_verify_token}">')
+            meta_block_lines.extend([
+                '  <meta name="cj-promotional-property-id" content="101906407">',
+                '  <meta name="sovrn-commerce-domain-key" content="0a5ac1bfe04034bff021b394f5e71d90">',
+            ])
+        meta_block_lines.extend([
             f'  <meta name="partnerstack-publisher-entity" content="{entity_label}">',
             '  <meta name="ftc-affiliate-disclosure" content="16-CFR-Part-255-Compliant">',
             '  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">',
             '  <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json">',
-        ]
+        ])
+
+        def _sanitize_verification_meta(html_text: str) -> str:
+            cleaned = html_text
+            for fake_gsc in (
+                "google-site-verification-verified-2026",
+                "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q",
+            ):
+                cleaned = cleaned.replace(fake_gsc, verified_gsc_token)
+            if not is_profithelm_only:
+                cleaned = re.sub(
+                    r'[ \t]*<meta\b[^>]*name=["\'](?:ir-site-verification-token|cj-promotional-property-id|sovrn-commerce-domain-key)["\'][^>]*>\r?\n?',
+                    "",
+                    cleaned,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                if not (impact_verify_token and not impact_verify_token.isdigit()):
+                    cleaned = re.sub(
+                        r'[ \t]*<meta\b[^>]*name=["\']ir-site-verification-token["\'][^>]*content=["\']\d+["\'][^>]*>\r?\n?',
+                        "",
+                        cleaned,
+                        flags=re.IGNORECASE,
+                    )
+                cleaned = re.sub(
+                    r'(<meta\b[^>]*name=["\']cj-promotional-property-id["\'][^>]*content=["\'])101725461(["\'][^>]*>)',
+                    r"\g<1>101906407\2",
+                    cleaned,
+                    flags=re.IGNORECASE,
+                )
+                cleaned = re.sub(
+                    r'(<meta\b[^>]*name=["\']sovrn-commerce-domain-key["\'][^>]*content=["\'])2987330(["\'][^>]*>)',
+                    r"\g<1>0a5ac1bfe04034bff021b394f5e71d90\2",
+                    cleaned,
+                    flags=re.IGNORECASE,
+                )
+            return cleaned
 
         entry_rel_paths = (
             "index.html",
@@ -11878,7 +11973,7 @@ class RetroReflectionEngine:
                 continue
             try:
                 raw_h = h_file.read_text(encoding="utf-8", errors="ignore")
-                new_h = raw_h
+                new_h = _sanitize_verification_meta(raw_h)
                 for foreign_entity in (
                     "ProfitHelm LLC",
                     "Prexvo Statutory Research Group",
@@ -11920,7 +12015,7 @@ class RetroReflectionEngine:
                     continue
                 try:
                     raw_th = t_html.read_text(encoding="utf-8", errors="ignore")
-                    new_th = raw_th
+                    new_th = _sanitize_verification_meta(raw_th)
                     if (
                         not (is_prexvo or is_gainhelm or is_lienbond)
                         and (d / "about" / "index.html").is_file()
@@ -11998,7 +12093,7 @@ class RetroReflectionEngine:
                 if new_red != orig_red:
                     redirects_file.write_text(new_red, encoding="utf-8")
                     updated_files.append("_redirects")
-                if (d.parent / "functions" / "_middleware.js").is_file():
+                if (d.parent / "functions" / "r").is_dir() or (d.parent / "functions" / "_middleware.js").is_file():
                     sync_tenant_edge_redirect_function(d.parent, property_id=prop)
             except Exception:
                 pass
@@ -12103,36 +12198,47 @@ class RetroReflectionEngine:
                 "interactive_client_side_execution": True,
                 "zero_ai_hallucination_statutory_formulas": True,
             },
-            "verified_network_identities": {
-                "impact_com": {
-                    "account_id": "7932737",
-                    "company_name": entity_label,
-                    "verification_meta_name": "ir-site-verification-token",
-                    "tax_and_payout_status": "W-9 Verified & Choice Financial Group Checking ****1395 EFT Active",
-                },
-                "cj_affiliate": {
-                    "company_cid": "7792582",
-                    "publisher_id": "8101803",
-                    "promotional_property_id": "101906407",
-                    "verification_meta_name": "cj-promotional-property-id",
-                    "tax_and_payout_status": "W-9 Verified & Direct Deposit ****1395 Active",
-                },
-                "partnerstack": {
-                    "organization": entity_label,
-                    "verification_meta_name": "partnerstack-publisher-entity",
-                    "tax_and_payout_status": "Airwallex Direct Deposit ****1395 Active",
-                },
-                "sovrn_commerce": {
-                    "account_id": "2987330",
-                    "verification_meta_name": "sovrn-commerce-domain-key",
-                    "tax_and_payout_status": "W-9 Verified & EFT ****1395 Active",
-                },
-                "first_party_checkout": {
-                    "merchant_account_id": "acct_1TChdq2L53ce94b4",
-                    "settlement_bank": "Choice Financial Group (Routing 091311229, Account ****1395)",
-                    "charges_and_payouts_enabled": True,
-                },
-            },
+            "verified_network_identities": (
+                {
+                    "impact_com": {
+                        "account_id": "7932737",
+                        "company_name": entity_label,
+                        "verification_meta_name": "ir-site-verification-token",
+                        "tax_and_payout_status": "W-9 Verified & Choice Financial Group Checking ****1395 EFT Active",
+                    },
+                    "cj_affiliate": {
+                        "company_cid": "7792582",
+                        "publisher_id": "8101803",
+                        "promotional_property_id": "101906407",
+                        "verification_meta_name": "cj-promotional-property-id",
+                        "tax_and_payout_status": "W-9 Verified & Direct Deposit ****1395 Active",
+                    },
+                    "partnerstack": {
+                        "organization": entity_label,
+                        "verification_meta_name": "partnerstack-publisher-entity",
+                        "tax_and_payout_status": "Airwallex Direct Deposit ****1395 Active",
+                    },
+                    "sovrn_commerce": {
+                        "account_id": "2987330",
+                        "domain_key": "0a5ac1bfe04034bff021b394f5e71d90",
+                        "verification_meta_name": "sovrn-commerce-domain-key",
+                        "tax_and_payout_status": "W-9 Verified & EFT ****1395 Active",
+                    },
+                    "first_party_checkout": {
+                        "merchant_account_id": "acct_1T6fSTIq0ckFsf5j",
+                        "settlement_bank": "Choice Financial Group (Routing 091311229, Account ****1395)",
+                        "charges_and_payouts_enabled": True,
+                    },
+                }
+                if is_profithelm_only
+                else {
+                    "first_party_checkout": {
+                        "merchant_account_id": "acct_1T6fSTIq0ckFsf5j",
+                        "settlement_bank": "Choice Financial Group (Routing 091311229, Account ****1395)",
+                        "charges_and_payouts_enabled": True,
+                    },
+                }
+            ),
             "compliance_certifications": (
                 {
                     "ftc_16_cfr_part_255_affiliate_disclosure": True,
@@ -12921,14 +13027,14 @@ class RetroReflectionEngine:
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Verified Commercial Surety &amp; Construction Execution Partners</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/suretybonds_com" target="_blank" rel="noopener sponsored nofollow">SuretyBonds.com</a></div>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/suretybonds_direct" target="_blank" rel="noopener sponsored nofollow">SuretyBonds Direct</a></div>\n'
                             '      </section>\n    '
                         )
                     else:
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Verified Commercial Execution Partners</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/crest_capital" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
+                            '        <div class="affiliate-card partner-card"><a href="/r/xendoo" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
                             '      </section>\n    '
                         )
                     content = content.replace("</main>", f"{seed_sec}</main>", 1)
@@ -14380,8 +14486,8 @@ def _execute_autonomous_downstream_chain(
 def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
     """
     Synchronizes prexvo/builder.py and prexvo/freshness.py so honest-destination
-    lender routes with contract status 'pending' or 'declined' remain active
-    operational routes alongside 'live' (while 'pending_p2' stays suppressed).
+    lender routes with contract status 'pending' remain operational alongside 'live',
+    while 'declined' and 'pending_p2' partners are strictly suppressed and never rendered.
     Zero em-dashes. Zero en-dashes.
     """
     changed = False
@@ -14390,12 +14496,20 @@ def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
         b_src = px_builder.read_text(encoding="utf-8")
         b_orig = b_src
         b_src = b_src.replace(
-            'if p_info.get("status") == "live"',
             'if p_info.get("status") in ("live", "pending", "declined")',
+            'if p_info.get("status") in ("live", "pending")',
+        )
+        b_src = b_src.replace(
+            'if p_info.get("status") == "live"',
+            'if p_info.get("status") in ("live", "pending")',
+        )
+        b_src = b_src.replace(
+            'if status not in ("live", "pending", "declined"):',
+            'if status not in ("live", "pending"):',
         )
         b_src = b_src.replace(
             'if status != "live":',
-            'if status not in ("live", "pending", "declined"):',
+            'if status not in ("live", "pending"):',
         )
         if b_src != b_orig:
             px_builder.write_text(b_src, encoding="utf-8")
@@ -14406,16 +14520,28 @@ def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
         f_src = px_freshness.read_text(encoding="utf-8")
         f_orig = f_src
         f_src = f_src.replace(
-            'if effective_status != "live":',
             'if effective_status not in ("live", "pending", "declined"):',
+            'if effective_status not in ("live", "pending"):',
+        )
+        f_src = f_src.replace(
+            'if effective_status != "live":',
+            'if effective_status not in ("live", "pending"):',
+        )
+        f_src = f_src.replace(
+            'if status in ("live", "pending", "declined"):',
+            'if status in ("live", "pending"):',
         )
         f_src = f_src.replace(
             'if status == "live":',
-            'if status in ("live", "pending", "declined"):',
+            'if status in ("live", "pending"):',
+        )
+        f_src = f_src.replace(
+            'if getattr(p_data, "status", "") in ("live", "pending", "declined"):',
+            'if getattr(p_data, "status", "") in ("live", "pending"):',
         )
         f_src = f_src.replace(
             'if getattr(p_data, "status", "") == "live":',
-            'if getattr(p_data, "status", "") in ("live", "pending", "declined"):',
+            'if getattr(p_data, "status", "") in ("live", "pending"):',
         )
         if f_src != f_orig:
             px_freshness.write_text(f_src, encoding="utf-8")

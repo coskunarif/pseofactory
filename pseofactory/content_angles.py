@@ -778,7 +778,7 @@ def call_stateless_vertex_json(
     model: str = "gemini-3.8-flash",
     project: str = "profithelm-477200",
     location: str = "global",
-    account: str = "coskun.arf@gmail.com",
+    account: str = "arif.coskun@profithelm.com",
     enable_google_search: bool = True,
 ) -> Any:
     """

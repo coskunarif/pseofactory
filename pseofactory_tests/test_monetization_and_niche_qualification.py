@@ -64,7 +64,7 @@ def test_untangled_monetization_qualification_and_partner_routing():
     assert b2b_qual["monetization_qualified"] is True
     assert b2b_qual["property_id"] == "profithelm"
     assert b2b_qual["intent_tier"] == "commercial_b2b"
-    assert b2b_qual["primary_partner"] in ("crest_capital", "ramp", "mercury")
+    assert b2b_qual["primary_partner"] in ("xendoo", "ramp", "mercury")
     assert set(b2b_qual["recommended_partners"]).isdisjoint(RETAIL_TAX_PARTNERS)
     assert set(b2b_qual["recommended_partners"]).isdisjoint(STUDENT_LOAN_PARTNER_KEYS)
     assert b2b_qual["expected_bounty_usd"] >= 200.0

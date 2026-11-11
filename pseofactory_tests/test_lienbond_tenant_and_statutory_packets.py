@@ -68,7 +68,7 @@ def test_domain_registration_availability_verification() -> None:
 
 def test_lienbond_tenant_contract_and_affiliate_isolation() -> None:
     """Verifies LienBond tenant contract, domain classification, and affiliate roster isolation."""
-    assert CANONICAL_TENANT_IDS == ["profithelm", "prexvo", "gainhelm"]
+    assert CANONICAL_TENANT_IDS == ["profithelm", "prexvo", "gainhelm", "lienbond"]
     assert "lienbond.com" in OWN_TENANT_DOMAINS
     assert resolve_canonical_property_id("lienbond") == "lienbond"
     assert resolve_canonical_property_id("https://lienbond.com/tools/contractor-license-bond-cost-calculator/") == "lienbond"
