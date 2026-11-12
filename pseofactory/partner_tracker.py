@@ -5333,6 +5333,7 @@ def resolve_lead_monetization_offer(
         )
         tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
     elif prop_clean == "gainhelm" or sku_clean in (
+        "gh_instant_compliance_worksheet_19",
         "gh_soc2_cmmc_audit_workpapers",
         "gh_hipaa_iso27001_governance_kit",
     ):
@@ -5927,6 +5928,9 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
 ]
 
 
+_WORKPAPER_TREND_SERIES_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+
+
 def _resolve_trend_statutory_timeseries_for_workpaper(
     property_id: str,
     tool_slug: str,
@@ -5941,25 +5945,31 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
     slug_clean = (tool_slug or "general").strip().lower()
     sku_clean = (offer_sku or "").strip().lower()
 
-    series_list: List[Dict[str, Any]] = []
-    try:
-        from pseofactory.trends.db import TrendHistoryDB
-        db = TrendHistoryDB()
-        mat = db.compile_statutory_economic_matrix(prop_clean, slug_clean.replace("-", " "))
-        for s in mat.get("series") or []:
-            if isinstance(s, dict) and s.get("series_id") and isinstance(s.get("points"), dict):
-                series_list.append({
-                    "series_id": str(s["series_id"]),
-                    "property_id": str(s.get("property_id") or prop_clean),
-                    "statutory_citation": str(s.get("statutory_citation") or ""),
-                    "metric_key": str(s.get("metric_key") or ""),
-                    "metric_label": str(s.get("metric_label") or s["series_id"]),
-                    "unit": str(s.get("unit") or "USD"),
-                    "source_agency": str(s.get("source_agency") or "FEDERAL"),
-                    "points": {str(k): float(v) for k, v in s["points"].items()},
-                })
-    except Exception:
+    cached_base = _WORKPAPER_TREND_SERIES_CACHE.get(prop_clean)
+    if cached_base is not None:
+        series_list = [dict(x, points=dict(x["points"])) for x in cached_base]
+    else:
         series_list = []
+        try:
+            from pseofactory.trends.db import TrendHistoryDB
+            with TrendHistoryDB() as db:
+                mat = db.compile_statutory_economic_matrix(prop_clean, slug_clean.replace("-", " "))
+            for s in mat.get("series") or []:
+                if isinstance(s, dict) and s.get("series_id") and isinstance(s.get("points"), dict):
+                    series_list.append({
+                        "series_id": str(s["series_id"]),
+                        "property_id": str(s.get("property_id") or prop_clean),
+                        "statutory_citation": str(s.get("statutory_citation") or ""),
+                        "metric_key": str(s.get("metric_key") or ""),
+                        "metric_label": str(s.get("metric_label") or s["series_id"]),
+                        "unit": str(s.get("unit") or "USD"),
+                        "source_agency": str(s.get("source_agency") or "FEDERAL"),
+                        "points": {str(k): float(v) for k, v in s["points"].items()},
+                    })
+            if series_list:
+                _WORKPAPER_TREND_SERIES_CACHE[prop_clean] = [dict(x, points=dict(x["points"])) for x in series_list]
+        except Exception:
+            series_list = []
 
     existing_sids = {s["series_id"] for s in series_list}
     for s in _CANONICAL_STATUTORY_TIMESERIES_FALLBACK:
@@ -5978,6 +5988,7 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
             "fred_dgs10_yield",
         ]
     elif prop_clean == "gainhelm" or sku_clean in (
+        "gh_instant_compliance_worksheet_19",
         "gh_soc2_cmmc_audit_workpapers",
         "gh_hipaa_iso27001_governance_kit",
     ):
@@ -6149,6 +6160,7 @@ def synthesize_personalized_audit_workpaper(
     )
 
     if prop_clean == "gainhelm" or offer["offer_sku"] in (
+        "gh_instant_compliance_worksheet_19",
         "gh_soc2_cmmc_audit_workpapers",
         "gh_hipaa_iso27001_governance_kit",
     ):

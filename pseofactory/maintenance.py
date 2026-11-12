@@ -9957,7 +9957,9 @@ class RetroReflectionEngine:
         statutory_authority = _clean_non_math_dashes(str(raw.get("statutory_authority") or default_stat))
         economic_dataset = _clean_non_math_dashes(str(raw.get("economic_dataset") or default_econ))
         raw_model_name = _clean_non_math_dashes(str(raw.get("model_name") or f"{slug_title} Model"))
-        if re.search(r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Section|Form)\d+\b|\bQuantitative\b|\bIrs 2027\b", raw_model_name):
+        if isinstance(manifest_override, dict) and str(manifest_override.get("model_name") or "").strip():
+            model_name = _clean_non_math_dashes(str(manifest_override["model_name"]).strip())
+        elif re.search(r"[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Section|Form)\d+\b|\bQuantitative\b|\bIrs 2027\b", raw_model_name):
             model_name = f"{_format_safe_heading_topic(raw_model_name, slug)} Model"
         else:
             model_name = raw_model_name
@@ -10224,8 +10226,42 @@ class RetroReflectionEngine:
                     return out_html, list(out_rep)
 
         missing = cls.audit_html_mechanics(html_content)
-        if not missing and manifest_override is not None:
-            missing.append("calculation_manifest")
+        if not missing and isinstance(manifest_override, dict):
+            try:
+                emb_m = re.search(
+                    r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
+                    html_content,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                emb_obj = json.loads(emb_m.group(1).strip()) if emb_m else None
+                if not isinstance(emb_obj, dict):
+                    missing.append("calculation_manifest")
+                else:
+                    ov_pub_raw = manifest_override.get("published_output")
+                    if ov_pub_raw is not None:
+                        ov_pub = float(ov_pub_raw)
+                        if abs(float(emb_obj.get("published_output") or 0.0) - ov_pub) > 0.01:
+                            missing.append("calculation_manifest")
+                        ov_disp = (
+                            f"{round(ov_pub, 4):.4f}"
+                            if (0 < abs(ov_pub) < 1 and round(ov_pub, 4) != round(ov_pub, 2))
+                            else (f"{ov_pub:,.2f}" if not ov_pub.is_integer() else f"{ov_pub:,.0f}")
+                        )
+                        for ov_m in cls._collect_html_output_parity_missing(
+                            html_content=html_content,
+                            exp_pub=ov_pub,
+                            exp_disp=ov_disp,
+                            formula=str(manifest_override.get("formula") or emb_obj.get("formula") or ""),
+                            inputs=manifest_override.get("inputs") if isinstance(manifest_override.get("inputs"), dict) else None,
+                            require_ast_eval=(property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond")),
+                        ):
+                            if ov_m not in missing:
+                                missing.append(ov_m)
+                    if manifest_override.get("formula") and str(emb_obj.get("formula") or "") != str(manifest_override.get("formula")):
+                        if "calculation_manifest" not in missing:
+                            missing.append("calculation_manifest")
+            except Exception:
+                missing.append("calculation_manifest")
         if not missing and dist_dir is not None:
             sidecar_pre = Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json"
             if cls._sidecar_needs_sync(sidecar_pre, html_content):

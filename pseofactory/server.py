@@ -368,7 +368,15 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 default_slug = (
                     "section-1031-calculator"
                     if prop_id == "profithelm"
-                    else ("soc-2-audit-cost-calculator" if prop_id == "gainhelm" else "student-loan-refinance-break-even-calculator")
+                    else (
+                        "soc-2-audit-cost-calculator"
+                        if prop_id == "gainhelm"
+                        else (
+                            "contractor-license-bond-cost-calculator-by-credit-score"
+                            if prop_id == "lienbond"
+                            else "student-loan-refinance-break-even-calculator"
+                        )
+                    )
                 )
                 tool_slug = qs.get("tool_slug", qs.get("slug", [default_slug]))[0]
                 sku_param = qs.get("sku", qs.get("offer_sku", [""]))[0] or None

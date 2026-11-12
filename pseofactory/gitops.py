@@ -2796,23 +2796,35 @@ class LiveEdgeVerifier:
             if payload is not None:
                 hdrs["Content-Type"] = "application/json"
                 data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
-            t0 = time.time()
-            try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                    lat_ms = round((time.time() - t0) * 1000, 1)
-                    code = resp.getcode()
-                    body = resp.read().decode("utf-8", errors="ignore")
-            except urllib.error.HTTPError as he:
-                lat_ms = round((time.time() - t0) * 1000, 1)
-                code = he.code
+            last_err = ""
+            code = 0
+            body = ""
+            lat_ms = 0.0
+            for attempt in range(3):
+                req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+                t0 = time.time()
                 try:
-                    body = he.read().decode("utf-8", errors="ignore")
-                except Exception:
-                    body = ""
-            except Exception as ex:
-                lat_ms = round((time.time() - t0) * 1000, 1)
-                return 0, str(ex), None, lat_ms
+                    with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                        lat_ms = round((time.time() - t0) * 1000, 1)
+                        code = resp.getcode()
+                        body = resp.read().decode("utf-8", errors="ignore")
+                        break
+                except urllib.error.HTTPError as he:
+                    lat_ms = round((time.time() - t0) * 1000, 1)
+                    code = he.code
+                    try:
+                        body = he.read().decode("utf-8", errors="ignore")
+                    except Exception:
+                        body = ""
+                    break
+                except Exception as ex:
+                    lat_ms = round((time.time() - t0) * 1000, 1)
+                    code = 0
+                    last_err = str(ex)
+                    if attempt < 2:
+                        time.sleep(0.75)
+            if code == 0:
+                return 0, last_err, None, lat_ms
 
             parsed = None
             if body:
@@ -3041,21 +3053,29 @@ class LiveEdgeVerifier:
         for p_key in partner_cohort:
             r_path = f"/r/{p_key}"
             r_url = f"{base}{r_path}?synthetic_test=1"
-            req7 = urllib.request.Request(r_url, headers=base_headers, method="GET")
-            t0 = time.time()
             c7 = 0
             loc7 = ""
-            try:
-                with opener.open(req7, timeout=self.timeout) as resp7:
-                    c7 = resp7.getcode()
-                    loc7 = resp7.headers.get("Location", "")
-            except urllib.error.HTTPError as he7:
-                c7 = he7.code
-                if hasattr(he7, "headers") and he7.headers:
-                    loc7 = he7.headers.get("Location", "")
-            except Exception:
+            l7 = 0.0
+            for attempt in range(3):
+                req7 = urllib.request.Request(r_url, headers=base_headers, method="GET")
+                t0 = time.time()
                 c7 = 0
-            l7 = round((time.time() - t0) * 1000, 1)
+                loc7 = ""
+                try:
+                    with opener.open(req7, timeout=self.timeout) as resp7:
+                        c7 = resp7.getcode()
+                        loc7 = resp7.headers.get("Location", "")
+                except urllib.error.HTTPError as he7:
+                    c7 = he7.code
+                    if hasattr(he7, "headers") and he7.headers:
+                        loc7 = he7.headers.get("Location", "")
+                except Exception:
+                    c7 = 0
+                l7 = round((time.time() - t0) * 1000, 1)
+                if c7 != 0:
+                    break
+                if attempt < 2:
+                    time.sleep(0.75)
             r7_ok = c7 in (301, 302, 307, 308) and bool(loc7)
             routes[f"GET {r_path}"] = {
                 "status": "PASS" if r7_ok else "FAIL",

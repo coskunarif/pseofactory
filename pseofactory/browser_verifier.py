@@ -1377,8 +1377,12 @@ class UnifiedBrowserAuditor:
             if (previewBtn) {
                 previewBtn.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 120; i++) {
-                    if (document.getElementById('playbook-download-link') || document.getElementById('playbook-datapack-link')) break;
+                for (let i = 0; i < 400; i++) {
+                    if (
+                        document.getElementById('playbook-download-link') &&
+                        document.getElementById('playbook-csv-link') &&
+                        document.getElementById('playbook-datapack-link')
+                    ) break;
                     await new Promise(r => setTimeout(r, 12));
                 }
                 report.post_calc_upgrade_drawer.preview_rendered = Boolean(
@@ -1391,7 +1395,7 @@ class UnifiedBrowserAuditor:
             if (upgCheckoutBtn) {
                 upgCheckoutBtn.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 150; i++) {
+                for (let i = 0; i < 400; i++) {
                     if (upgCheckoutBtn.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
                     await new Promise(r => setTimeout(r, 12));
                 }
@@ -1528,7 +1532,7 @@ class UnifiedBrowserAuditor:
                 emailInp.value = 'playbook-probe@synthetic.pseofactory.test';
             }
             leadForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 150; i++) {
+            for (let i = 0; i < 400; i++) {
                 if (leadForm.getAttribute('data-submission-state') === 'success' || leadForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
@@ -1540,7 +1544,7 @@ class UnifiedBrowserAuditor:
             report.playbook_lead_capture_and_checkout.partner_href = pbPartner ? (pbPartner.getAttribute('href') || '') : '';
             if (pbCheckout) {
                 pbCheckout.click();
-                for (let i = 0; i < 150; i++) {
+                for (let i = 0; i < 400; i++) {
                     if (pbCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
@@ -1567,7 +1571,7 @@ class UnifiedBrowserAuditor:
             if (qEmail) qEmail.value = 'quote-probe@synthetic.pseofactory.test';
             if (qConsent) qConsent.checked = true;
             quoteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 150; i++) {
+            for (let i = 0; i < 400; i++) {
                 if (quoteForm.getAttribute('data-submission-state') === 'success' || quoteForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
@@ -1579,7 +1583,7 @@ class UnifiedBrowserAuditor:
             report.partner_quote_intake_and_checkout.partner_href = qPartner ? (qPartner.getAttribute('href') || '') : '';
             if (qCheckout) {
                 qCheckout.click();
-                for (let i = 0; i < 150; i++) {
+                for (let i = 0; i < 400; i++) {
                     if (qCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
@@ -1608,7 +1612,7 @@ class UnifiedBrowserAuditor:
             if (prEmail) prEmail.value = 'partner-desk@synthetic.pseofactory.test';
             if (prState && !prState.value) prState.value = 'CA';
             prForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 150; i++) {
+            for (let i = 0; i < 400; i++) {
                 if (prForm.getAttribute('data-submission-state') === 'success') break;
                 await new Promise(r => setTimeout(r, 12));
             }
@@ -1618,7 +1622,7 @@ class UnifiedBrowserAuditor:
                 report.partner_registration_and_slot_checkout.checkout_href = prChkLink.getAttribute('href') || '';
                 report.partner_registration_and_slot_checkout.focused_after_submit = (document.activeElement === prChkLink);
                 prChkLink.click();
-                for (let i = 0; i < 150; i++) {
+                for (let i = 0; i < 400; i++) {
                     if (prChkLink.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
                     await new Promise(r => setTimeout(r, 12));
                 }
@@ -2190,14 +2194,140 @@ class UnifiedBrowserAuditor:
         )
         return report
 
-    def check_cdp_reachability(self) -> Tuple[bool, str]:
-        """Checks if host Chrome CDP endpoint is responding on configured port."""
+    def check_cdp_reachability(self, retries: int = 4, timeout: float = 8.0) -> Tuple[bool, str]:
+        """Checks if host Chrome CDP endpoint is responding on configured port with transient timeout retries."""
+        import socket
+        import time
+
+        last_err = ""
+        attempts = max(1, int(retries))
+        for attempt in range(attempts):
+            try:
+                req = urllib.request.Request(f"{self.cdp_base}/json/version")
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return True, r.read().decode("utf-8")
+            except urllib.error.URLError as e:
+                last_err = str(e)
+                reason = getattr(e, "reason", None)
+                if isinstance(reason, ConnectionRefusedError):
+                    if attempt >= 1:
+                        break
+                    time.sleep(0.2)
+                    continue
+                if attempt + 1 < attempts:
+                    time.sleep(0.4 * (attempt + 1))
+            except (TimeoutError, socket.timeout, OSError) as e:
+                last_err = str(e)
+                if isinstance(e, ConnectionRefusedError) and attempt >= 1:
+                    break
+                if attempt + 1 < attempts:
+                    time.sleep(0.4 * (attempt + 1))
+            except Exception as e:
+                last_err = str(e)
+                if attempt + 1 < attempts:
+                    time.sleep(0.4 * (attempt + 1))
+        return False, last_err
+
+    def _open_cdp_tab(self, retries: int = 3, timeout: float = 12.0) -> Dict[str, Any]:
+        """Opens an isolated CDP target tab with transient timeout retries."""
+        import time
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(max(1, int(retries))):
+            try:
+                req_new = urllib.request.Request(f"{self.cdp_base}/json/new", method="PUT")
+                with urllib.request.urlopen(req_new, timeout=timeout) as r:
+                    return json.loads(r.read().decode("utf-8"))
+            except Exception as ex:
+                last_exc = ex
+                if attempt + 1 < max(1, int(retries)):
+                    time.sleep(0.5 * (attempt + 1))
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"Failed to open CDP tab on {self.cdp_base}")
+
+    @staticmethod
+    def _is_loopback_port_dead(host: str, port: int) -> bool:
+        """Returns True only when a loopback ephemeral test server port is no longer listening."""
+        import socket
+
         try:
-            req = urllib.request.Request(f"{self.cdp_base}/json/version")
-            with urllib.request.urlopen(req, timeout=3) as r:
-                return True, r.read().decode("utf-8")
-        except Exception as e:
-            return False, str(e)
+            with socket.create_connection((host, port), timeout=0.05):
+                return False
+        except OSError:
+            return True
+
+    def _cleanup_dead_loopback_tabs(
+        self,
+        exclude_tab_id: Optional[str] = None,
+        active_origin: Optional[str] = None,
+    ) -> int:
+        """
+        Cleans up leaked 127.0.0.1/localhost ephemeral test tabs whose local server has exited.
+        Never touches non-loopback user tabs or closes the final browser tab on shared port 9222.
+        """
+        closed = 0
+        try:
+            req_list = urllib.request.Request(f"{self.cdp_base}/json/list")
+            with urllib.request.urlopen(req_list, timeout=5) as r:
+                targets = json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return 0
+        if not isinstance(targets, list):
+            return 0
+        page_targets = [t for t in targets if isinstance(t, dict) and t.get("type") == "page"]
+        remaining_pages = len(page_targets)
+        norm_origin = active_origin.rstrip("/") if active_origin else ""
+        dead_port_cache: Dict[Tuple[str, int], bool] = {}
+        for item in page_targets:
+            if remaining_pages <= 1:
+                break
+            t_id = str(item.get("id") or "")
+            if not t_id or (exclude_tab_id and t_id == exclude_tab_id):
+                continue
+            t_url = str(item.get("url") or "")
+            if not (t_url.startswith("http://127.0.0.1:") or t_url.startswith("http://localhost:")):
+                continue
+            parsed = urllib.parse.urlsplit(t_url)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port
+            if not port or port == self.cdp_port:
+                continue
+            should_close = False
+            if norm_origin and t_url.startswith(norm_origin):
+                should_close = True
+            elif host in ("127.0.0.1", "localhost"):
+                key = (host, port)
+                if key not in dead_port_cache:
+                    dead_port_cache[key] = self._is_loopback_port_dead(host, port)
+                should_close = dead_port_cache[key]
+            if should_close:
+                try:
+                    req_close = urllib.request.Request(f"{self.cdp_base}/json/close/{t_id}", method="PUT")
+                    with urllib.request.urlopen(req_close, timeout=4):
+                        pass
+                    remaining_pages -= 1
+                    closed += 1
+                except Exception:
+                    pass
+        return closed
+
+    def _close_cdp_tab_and_leaked_loopback(
+        self,
+        tab_id: str,
+        active_origin: Optional[str] = None,
+        cleanup_stale_loopback: bool = False,
+    ) -> None:
+        """Closes the audit's own CDP tab and optionally sweeps dead loopback test tabs."""
+        if tab_id:
+            req_close = urllib.request.Request(f"{self.cdp_base}/json/close/{tab_id}", method="PUT")
+            try:
+                with urllib.request.urlopen(req_close, timeout=5):
+                    pass
+            except Exception:
+                pass
+        if cleanup_stale_loopback:
+            self._cleanup_dead_loopback_tabs(exclude_tab_id=tab_id, active_origin=active_origin)
 
     async def _send_cdp(self, ws: Any, method: str, params: Optional[Dict[str, Any]] = None, msg_id: int = 1) -> Dict[str, Any]:
         req = {"id": msg_id, "method": method, "params": params or {}}
@@ -2270,22 +2400,22 @@ class UnifiedBrowserAuditor:
             {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
             msg_id=msg_counter[0],
         )
+        await asyncio.sleep(0.04)
         msg_counter[0] += 1
         await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
-        for _ in range(25):
+        base_prefix_json = json.dumps(base_url.rstrip("/"))
+        for _ in range(125):
             await asyncio.sleep(0.04)
             msg_counter[0] += 1
             rs = await self._eval_js(
                 ws,
-                "document.readyState === 'complete' && document.body && document.body.children.length > 0",
+                f"window.location.href.startsWith({base_prefix_json}) && document.readyState === 'complete' && document.body && document.body.children.length > 0",
                 msg_id=msg_counter[0],
             )
             if rs:
                 break
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
         await asyncio.sleep(0.04)
@@ -2525,9 +2655,7 @@ class UnifiedBrowserAuditor:
         if ws is not None:
             return await self._audit_route_on_ws(ws, base_url, route, msg_counter)
 
-        req_new = urllib.request.Request(f"{self.cdp_base}/json/new", method="PUT")
-        with urllib.request.urlopen(req_new, timeout=10) as r:
-            info = json.loads(r.read().decode("utf-8"))
+        info = self._open_cdp_tab()
 
         tab_id = info["id"]
         ws_url = info["webSocketDebuggerUrl"]
@@ -2566,12 +2694,7 @@ class UnifiedBrowserAuditor:
                 )
                 return await self._audit_route_on_ws(new_ws, base_url, route, msg_counter)
         finally:
-            req_close = urllib.request.Request(f"{self.cdp_base}/json/close/{tab_id}", method="PUT")
-            try:
-                with urllib.request.urlopen(req_close, timeout=5):
-                    pass
-            except Exception:
-                pass
+            self._close_cdp_tab_and_leaked_loopback(tab_id, active_origin=base_url, cleanup_stale_loopback=False)
 
     @staticmethod
     def _cdp_session_lock(cdp_port: int):
@@ -2580,7 +2703,7 @@ class UnifiedBrowserAuditor:
         @contextlib.contextmanager
         def _lock_ctx():
             lock_path = f"/tmp/pseofactory_cdp_{cdp_port}.lock"
-            with open(lock_path, "w") as lf:
+            with open(lock_path, "a+") as lf:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
                 try:
                     yield
@@ -2594,7 +2717,10 @@ class UnifiedBrowserAuditor:
     def audit_route(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for verifying a single route."""
         with self._cdp_session_lock(self.cdp_port):
-            return asyncio.run(self.verify_route(base_url, route))
+            try:
+                return asyncio.run(self.verify_route(base_url, route))
+            finally:
+                self._cleanup_dead_loopback_tabs(active_origin=None)
 
     async def verify_interactive_surface(
         self,
@@ -2634,12 +2760,13 @@ class UnifiedBrowserAuditor:
             )
             msg_counter[0] += 1
             await self._send_cdp(active_ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
-            for _ in range(30):
-                await asyncio.sleep(0.05)
+            base_prefix_json = json.dumps(base_url.rstrip("/"))
+            for _ in range(125):
+                await asyncio.sleep(0.04)
                 msg_counter[0] += 1
                 rs = await self._eval_js(
                     active_ws,
-                    "document.readyState === 'complete' && document.body && document.body.children.length > 0",
+                    f"window.location.href.startsWith({base_prefix_json}) && document.readyState === 'complete' && document.body && document.body.children.length > 0",
                     msg_id=msg_counter[0],
                 )
                 if rs:
@@ -2654,9 +2781,7 @@ class UnifiedBrowserAuditor:
         if ws is not None:
             return await _run_on_ws(ws)
 
-        req_new = urllib.request.Request(f"{self.cdp_base}/json/new", method="PUT")
-        with urllib.request.urlopen(req_new, timeout=10) as r:
-            info = json.loads(r.read().decode("utf-8"))
+        info = self._open_cdp_tab()
 
         tab_id = info["id"]
         ws_url = info["webSocketDebuggerUrl"]
@@ -2695,17 +2820,15 @@ class UnifiedBrowserAuditor:
                 )
                 return await _run_on_ws(new_ws)
         finally:
-            req_close = urllib.request.Request(f"{self.cdp_base}/json/close/{tab_id}", method="PUT")
-            try:
-                with urllib.request.urlopen(req_close, timeout=5):
-                    pass
-            except Exception:
-                pass
+            self._close_cdp_tab_and_leaked_loopback(tab_id, active_origin=base_url, cleanup_stale_loopback=False)
 
     def audit_interactive_surface(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for full E2E interactive surface verification on a route."""
         with self._cdp_session_lock(self.cdp_port):
-            return asyncio.run(self.verify_interactive_surface(base_url, route))
+            try:
+                return asyncio.run(self.verify_interactive_surface(base_url, route))
+            finally:
+                self._cleanup_dead_loopback_tabs(active_origin=None)
 
     def run_audit(self, sample_size: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -2714,97 +2837,98 @@ class UnifiedBrowserAuditor:
         """
         import websockets
 
-        reachable, cdp_msg = self.check_cdp_reachability()
-        if not reachable:
-            if self.fail_closed:
-                raise RuntimeError(f"Chrome CDP unreachable on port {self.cdp_port}: {cdp_msg}")
-            return {
-                "status": "SKIPPED_CDP_OFFLINE",
-                "message": f"Chrome CDP unreachable on port {self.cdp_port}: {cdp_msg}",
-                "passed": True,
-                "total_routes": 0,
-                "findings": [],
-            }
+        with self._cdp_session_lock(self.cdp_port):
+            reachable, cdp_msg = self.check_cdp_reachability()
+            if not reachable:
+                if self.fail_closed:
+                    raise RuntimeError(f"Chrome CDP unreachable on port {self.cdp_port}: {cdp_msg}")
+                return {
+                    "status": "SKIPPED_CDP_OFFLINE",
+                    "message": f"Chrome CDP unreachable on port {self.cdp_port}: {cdp_msg}",
+                    "passed": True,
+                    "total_routes": 0,
+                    "findings": [],
+                }
 
-        if not self.dist_dir.exists():
-            return {
-                "status": "PASS",
-                "message": f"Distribution directory does not exist: {self.dist_dir}",
-                "passed": True,
-                "total_routes": 0,
-                "findings": [],
-            }
+            if not self.dist_dir.exists():
+                return {
+                    "status": "PASS",
+                    "message": f"Distribution directory does not exist: {self.dist_dir}",
+                    "passed": True,
+                    "total_routes": 0,
+                    "findings": [],
+                }
 
-        extractor = RouteManifestExtractor(self.dist_dir)
-        all_routes = [r for r in extractor.extract_routes() if r not in self.excluded_routes]
+            extractor = RouteManifestExtractor(self.dist_dir)
+            all_routes = [r for r in extractor.extract_routes() if r not in self.excluded_routes]
 
-        if sample_size is not None and sample_size > 0:
-            routes_to_audit = extractor.select_smart_routes(
-                all_routes=all_routes,
-                sample_size=sample_size,
-                widget_specs=self.widget_specs,
-            )
-        else:
-            routes_to_audit = all_routes
+            if sample_size is not None and sample_size > 0:
+                routes_to_audit = extractor.select_smart_routes(
+                    all_routes=all_routes,
+                    sample_size=sample_size,
+                    widget_specs=self.widget_specs,
+                )
+            else:
+                routes_to_audit = all_routes
 
-        findings: List[Dict[str, Any]] = []
-        msg_counter = [1]
+            findings: List[Dict[str, Any]] = []
+            msg_counter = [1]
 
-        prop_id = self.property_id or (self.adapter.tenant_id if self.adapter is not None else None)
-        with EphemeralDistServer(self.dist_dir, property_id=prop_id) as server:
-            base_url = server.base_url
+            self._cleanup_dead_loopback_tabs(active_origin=None)
 
-            async def audit_all() -> None:
-                req_new = urllib.request.Request(f"{self.cdp_base}/json/new", method="PUT")
-                with urllib.request.urlopen(req_new, timeout=10) as r:
-                    info = json.loads(r.read().decode("utf-8"))
-                tab_id = info["id"]
-                ws_url = info["webSocketDebuggerUrl"]
-                try:
-                    async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
-                        msg_counter[0] += 1
-                        await self._send_cdp(ws, "Page.enable", msg_id=msg_counter[0])
-                        msg_counter[0] += 1
-                        await self._send_cdp(
-                            ws,
-                            "Page.addScriptToEvaluateOnNewDocument",
-                            {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
-                            msg_id=msg_counter[0],
-                        )
-                        msg_counter[0] += 1
-                        await self._send_cdp(ws, "Runtime.enable", msg_id=msg_counter[0])
-                        msg_counter[0] += 1
-                        await self._send_cdp(ws, "Network.enable", msg_id=msg_counter[0])
-                        msg_counter[0] += 1
-                        await self._send_cdp(ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
-                        msg_counter[0] += 1
-                        await self._send_cdp(
-                            ws,
-                            "Network.setBlockedURLs",
-                            {
-                                "urls": [
-                                    "*googletagmanager.com*",
-                                    "*google-analytics.com*",
-                                    "*fonts.googleapis.com*",
-                                    "*fonts.gstatic.com*",
-                                    "*cloudflareinsights.com*",
-                                ]
-                            },
-                            msg_id=msg_counter[0],
-                        )
-                        for r in routes_to_audit:
-                            res = await self.verify_route(base_url, r, msg_counter, ws=ws)
-                            findings.append(res)
-                finally:
-                    req_close = urllib.request.Request(f"{self.cdp_base}/json/close/{tab_id}", method="PUT")
+            prop_id = self.property_id or (self.adapter.tenant_id if self.adapter is not None else None)
+            base_url = ""
+            with EphemeralDistServer(self.dist_dir, property_id=prop_id) as server:
+                base_url = server.base_url
+
+                async def audit_all() -> None:
+                    info = self._open_cdp_tab()
+                    tab_id = info["id"]
+                    ws_url = info["webSocketDebuggerUrl"]
                     try:
-                        with urllib.request.urlopen(req_close, timeout=5):
-                            pass
-                    except Exception:
-                        pass
+                        async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
+                            msg_counter[0] += 1
+                            await self._send_cdp(ws, "Page.enable", msg_id=msg_counter[0])
+                            msg_counter[0] += 1
+                            await self._send_cdp(
+                                ws,
+                                "Page.addScriptToEvaluateOnNewDocument",
+                                {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
+                                msg_id=msg_counter[0],
+                            )
+                            msg_counter[0] += 1
+                            await self._send_cdp(ws, "Runtime.enable", msg_id=msg_counter[0])
+                            msg_counter[0] += 1
+                            await self._send_cdp(ws, "Network.enable", msg_id=msg_counter[0])
+                            msg_counter[0] += 1
+                            await self._send_cdp(ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
+                            msg_counter[0] += 1
+                            await self._send_cdp(
+                                ws,
+                                "Network.setBlockedURLs",
+                                {
+                                    "urls": [
+                                        "*googletagmanager.com*",
+                                        "*google-analytics.com*",
+                                        "*fonts.googleapis.com*",
+                                        "*fonts.gstatic.com*",
+                                        "*cloudflareinsights.com*",
+                                    ]
+                                },
+                                msg_id=msg_counter[0],
+                            )
+                            for r in routes_to_audit:
+                                res = await self.verify_route(base_url, r, msg_counter, ws=ws)
+                                findings.append(res)
+                    finally:
+                        self._close_cdp_tab_and_leaked_loopback(
+                            tab_id,
+                            active_origin=base_url,
+                            cleanup_stale_loopback=False,
+                        )
 
-            with self._cdp_session_lock(self.cdp_port):
                 asyncio.run(audit_all())
+            self._cleanup_dead_loopback_tabs(active_origin=base_url)
 
         failed_count = sum(
             1

@@ -789,4 +789,139 @@ def test_live_edge_verifier_tenant_partner_route_selection_and_synthetic_telemet
         server.server_close()
 
 
+def test_verify_edge_functions_retries_transient_http_0_cold_swap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Regression test: right after Cloudflare Pages deployment, a cold isolate swap can drop a single
+    socket connection (HTTP 0) on /r/<partner> or /api/*. Verify LiveEdgeVerifier sleeps 0.75s and
+    retries up to 2 more times before failing, recovering cleanly on HTTP 302.
+    """
+    import http.server
+    import urllib.parse
+
+    attempt_counts: Dict[str, int] = {}
+    sleep_delays: List[float] = []
+    monkeypatch.setattr(time, "sleep", lambda secs: sleep_delays.append(secs))
+
+    class _ColdSwapHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            return
+
+        def _send_json(self, code: int, obj: Dict[str, Any]) -> None:
+            raw = json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            parsed = urllib.parse.urlsplit(self.path)
+            qs = urllib.parse.parse_qs(parsed.query)
+            attempt_counts[parsed.path] = attempt_counts.get(parsed.path, 0) + 1
+            if parsed.path == "/r/simply_business" and attempt_counts[parsed.path] == 1:
+                self.connection.close()
+                return
+            if parsed.path == "/api/lead-capture" and not qs and attempt_counts[parsed.path] == 1:
+                self.connection.close()
+                return
+            if parsed.path.startswith("/r/"):
+                slug = parsed.path[len("/r/") :]
+                self.send_response(302)
+                self.send_header("Location", f"https://dest.example.test/{slug}")
+                self.end_headers()
+                return
+            if parsed.path == "/api/lead-fulfillment":
+                self._send_json(402, {"ok": False, "status": "payment_required", "settled": False})
+                return
+            if parsed.path == "/api/checkout":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "checkout_session_ready",
+                        "property_id": "lienbond",
+                        "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    },
+                )
+                return
+            if parsed.path == "/api/lead-capture":
+                if qs.get("playbook") == ["1"]:
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "status": "playbook_ready",
+                            "property_id": "lienbond",
+                            "reconciliation_schedule": [1, 2, 3],
+                        },
+                    )
+                    return
+                if qs.get("checkout") == ["1"]:
+                    sku = (qs.get("sku") or ["lb_surety_bond_underwriting_kit"])[0]
+                    price = 299.0 if sku == "lb_verified_partner_slot" else 49.0
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "status": "checkout_session_ready",
+                            "checkout_mode": "stripe_live_session",
+                            "checkout_url": "https://checkout.stripe.com/c/pay/cs_live_lb",
+                            "property_id": "lienbond",
+                            "offer_sku": sku,
+                            "offer_price_usd": price,
+                            "stripe_display_name": "LienBond",
+                            "stripe_merchant_email": "arif.coskun@profithelm.com",
+                        },
+                    )
+                    return
+                self._send_json(200, {"ok": True, "auth_required": True})
+                return
+            self._send_json(404, {"ok": False})
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or "0")
+            body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            if body.get("intent") == "partner_registration":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "partner_registered",
+                        "offer_sku": "lb_verified_partner_slot",
+                        "offer_price_usd": 299.0,
+                        "stripe_merchant_email": "arif.coskun@profithelm.com",
+                    },
+                )
+                return
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "synthetic_test": True,
+                    "persisted": False,
+                    "property_id": "lienbond",
+                    "stripe_merchant_email": "arif.coskun@profithelm.com",
+                },
+            )
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ColdSwapHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        verifier = LiveEdgeVerifier(timeout=5.0, retries=1)
+        res = verifier.verify_edge_functions(base_url, property_id="lienbond", dist_dir=tmp_path / "lienbond" / "dist")
+        assert res["status"] == "PASS", res
+        assert res["issues"] == []
+        assert res["routes"]["GET /r/simply_business"]["status"] == "PASS"
+        assert res["routes"]["GET /r/simply_business"]["status_code"] == 302
+        assert attempt_counts["/r/simply_business"] == 2
+        assert attempt_counts["/api/lead-capture"] >= 2
+        assert sleep_delays == [0.75, 0.75]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+
 
