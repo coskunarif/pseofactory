@@ -2583,7 +2583,7 @@ class TrendHistoryDB:
                 },
             )
             entry["points"][str(rec.effective_year)] = rec.metric_value
-            entry["timeline"].append({"year": rec.effective_year, "value": rec.metric_value})
+            entry["timeline"].append({"epoch": rec.effective_year, "value": rec.metric_value})
 
         q_lower = str(query or "").lower()
         ordered_series = sorted(

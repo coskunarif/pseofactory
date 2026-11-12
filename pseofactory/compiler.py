@@ -1677,6 +1677,14 @@ def _enrich_manifest_with_proprietary_signals(
         inputs=clamped_inputs,
         published_output=published_output,
     )
+    if isinstance(statutory_matrix, dict) and '"year":' in json.dumps(statutory_matrix):
+        statutory_matrix = json.loads(json.dumps(statutory_matrix))
+        for _ser in statutory_matrix.get("series") or []:
+            if isinstance(_ser, dict) and isinstance(_ser.get("timeline"), list):
+                for _pt in _ser["timeline"]:
+                    if isinstance(_pt, dict) and "year" in _pt:
+                        _pt.setdefault("epoch", _pt["year"])
+                        _pt.pop("year", None)
     manifest["proprietary_telemetry"] = bundle["proprietary_telemetry"]
     manifest["statutory_economic_matrix"] = statutory_matrix or bundle["statutory_economic_matrix"]
     if corroborating_sources:

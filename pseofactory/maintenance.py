@@ -9343,6 +9343,77 @@ class RetroReflectionEngine:
                 ):
                     if "server_rendered_sensitivity_grid" not in missing:
                         missing.append("server_rendered_sensitivity_grid")
+            elif inferred_slug:
+                script_m = re.search(
+                    r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
+                    html_content,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if script_m:
+                    try:
+                        curr_m = json.loads(script_m.group(1).strip())
+                    except Exception:
+                        curr_m = None
+                    if (
+                        not isinstance(curr_m, dict)
+                        or not curr_m.get("formula")
+                        or not isinstance(curr_m.get("inputs"), dict)
+                        or curr_m.get("published_output") is None
+                    ):
+                        if "calculation_manifest" not in missing:
+                            missing.append("calculation_manifest")
+                    else:
+                        from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
+                        from pseofactory.proprietary_signals import (
+                            PUBLISH_VOLATILE_TELEMETRY_KEYS,
+                            compute_5point_nonlinear_sensitivity_rows,
+                        )
+                        curr_pub = float(curr_m.get("published_output") or 0.0)
+                        try:
+                            raw_eval_dyn = float(
+                                safe_eval_mathematical_formula(str(curr_m["formula"]), curr_m["inputs"])
+                            )
+                            exp_pub = (
+                                round(raw_eval_dyn, 4)
+                                if (0 < abs(raw_eval_dyn) < 1 and round(raw_eval_dyn, 4) != round(raw_eval_dyn, 2))
+                                else round(raw_eval_dyn, 2)
+                            )
+                        except Exception:
+                            exp_pub = curr_pub
+                        if 0 < abs(exp_pub) < 1 and round(exp_pub, 4) != round(exp_pub, 2):
+                            exp_disp = f"{round(exp_pub, 4):.4f}"
+                        else:
+                            exp_disp = f"{exp_pub:,.2f}" if not exp_pub.is_integer() else f"{exp_pub:,.0f}"
+                        curr_demand_tel = (curr_m.get("proprietary_telemetry") or {}).get("demand_telemetry") or {}
+                        is_canon_tenant_host = any(
+                            dom in canon_clean
+                            for dom in ("profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com")
+                        )
+                        if (
+                            round(curr_pub, 4) != round(exp_pub, 4)
+                            or any(k in curr_demand_tel for k in PUBLISH_VOLATILE_TELEMETRY_KEYS)
+                            or '"year":' in json.dumps(curr_m.get("statutory_economic_matrix") or {})
+                            or (
+                                is_canon_tenant_host
+                                and (
+                                    str(curr_m.get("entity_type") or "") not in AI_MODE_ENTITY_TAXONOMY
+                                    or not curr_m.get("statutory_economic_matrix")
+                                    or not curr_m.get("proprietary_telemetry")
+                                )
+                            )
+                        ):
+                            if "calculation_manifest" not in missing:
+                                missing.append("calculation_manifest")
+                        for dyn_miss in cls._collect_html_output_parity_missing(
+                            html_content=html_content,
+                            exp_pub=exp_pub,
+                            exp_disp=exp_disp,
+                            formula=str(curr_m["formula"]),
+                            inputs=curr_m["inputs"],
+                            require_ast_eval=is_canon_tenant_host,
+                        ):
+                            if dyn_miss not in missing:
+                                missing.append(dyn_miss)
 
             try:
                 from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -9943,7 +10014,139 @@ class RetroReflectionEngine:
             "proprietary_telemetry": signal_bundle["proprietary_telemetry"],
         }
 
-    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str], Tuple[str, List[str]]] = {}
+    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str, str], Tuple[str, List[str]]] = {}
+
+    @classmethod
+    def _collect_html_output_parity_missing(
+        cls,
+        html_content: str,
+        exp_pub: float,
+        exp_disp: str,
+        formula: str = "",
+        inputs: Optional[Dict[str, Any]] = None,
+        require_ast_eval: bool = False,
+    ) -> List[str]:
+        """Checks .output-value and .scenario-baseline nodes against manifest published_output."""
+        parity_missing: List[str] = []
+        out_m = re.search(
+            r'<(?:strong|span)[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*data-baseline-output=["\']([^"\']+)["\'][^>]*>\s*([^<]+)<',
+            html_content,
+            re.IGNORECASE,
+        )
+        if out_m:
+            raw_vis = out_m.group(2).strip()
+            vis_norm = raw_vis.lstrip("$").strip()
+            try:
+                if round(float(out_m.group(1)), 4) != round(exp_pub, 4) or (raw_vis != exp_disp and vis_norm != exp_disp):
+                    parity_missing.append("output_value")
+                    if 'class="scenario-presets-bar"' in html_content:
+                        parity_missing.append("deep_link_scenario_presets")
+            except ValueError:
+                parity_missing.append("output_value")
+                if 'class="scenario-presets-bar"' in html_content:
+                    parity_missing.append("deep_link_scenario_presets")
+        else:
+            out_m_plain = re.search(
+                r'<(?:strong|span)[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>\s*([^<]+)<',
+                html_content,
+                re.IGNORECASE,
+            )
+            if out_m_plain:
+                raw_vis = out_m_plain.group(1).strip()
+                vis_norm = raw_vis.lstrip("$").strip()
+                if raw_vis != exp_disp and vis_norm != exp_disp:
+                    parity_missing.append("output_value")
+                    if 'class="scenario-presets-bar"' in html_content:
+                        parity_missing.append("deep_link_scenario_presets")
+
+        scen_m = re.search(
+            r'<(?:strong|span)[^>]*class=["\'][^"\']*\bscenario-baseline\b[^"\']*["\'][^>]*>\s*([^<]+)<',
+            html_content,
+            re.IGNORECASE,
+        )
+        exp_con_delta = ""
+        if formula and isinstance(inputs, dict):
+            try:
+                from pseofactory.proprietary_signals import compute_5point_nonlinear_sensitivity_rows
+                exp_sens_rows = compute_5point_nonlinear_sensitivity_rows(formula, inputs, exp_pub)
+                exp_con_delta = exp_sens_rows[1]["cliff_delta"] if len(exp_sens_rows) > 1 else ""
+            except Exception:
+                exp_con_delta = ""
+        if scen_m:
+            scen_raw = scen_m.group(1).strip()
+            scen_norm = scen_raw.lstrip("$").strip()
+            if (
+                (scen_raw != exp_disp and scen_norm != exp_disp)
+                or (
+                    require_ast_eval
+                    and (
+                        'class="scenario-ast-eval"' not in html_content
+                        or (exp_con_delta and f">{exp_con_delta}<" not in html_content)
+                    )
+                )
+            ):
+                parity_missing.append("server_rendered_sensitivity_grid")
+        return parity_missing
+
+    @classmethod
+    def _rewrite_html_output_value_nodes(cls, html_str: str, pub_out: float, display_out: str) -> str:
+        """Rewrites <strong|span class='output-value'> and syncs #hero-range-anchor baseline readouts."""
+        updated = re.sub(
+            r'(<(strong|span)\b[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*data-baseline-output=["\'])[^"\']+(["\'][^>]*>)[\s\S]*?(</\2>)',
+            rf"\g<1>{pub_out}\g<3>{display_out}\g<4>",
+            html_str,
+            flags=re.IGNORECASE,
+        )
+
+        def _inject_baseline_attr(match: re.Match) -> str:
+            open_tag, tag_name, close_tag = match.group(1), match.group(2), match.group(3)
+            if "data-baseline-output=" in open_tag.lower():
+                return match.group(0)
+            # Do not rewrite empty JS overlay template placeholders without numeric content
+            inner_txt = match.group(0)[len(open_tag) : -len(close_tag)].strip()
+            if not inner_txt or not re.search(r"\d", inner_txt):
+                return match.group(0)
+            new_open = open_tag[:-1] + f' data-baseline-output="{pub_out}">'
+            return f"{new_open}{display_out}{close_tag}"
+
+        updated = re.sub(
+            r'(<(strong|span)\b[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>)[\s\S]*?(</\2>)',
+            _inject_baseline_attr,
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if 'id="hero-range-anchor"' in updated:
+            low_str = f"${round(pub_out * 0.8):,}" if pub_out >= 100 else f"{pub_out * 0.8:,.2f}"
+            high_str = f"${round(pub_out * 1.2):,}" if pub_out >= 100 else f"{pub_out * 1.2:,.2f}"
+            updated = re.sub(
+                r'(<div\b[^>]*id=["\']hero-range-anchor["\'][^>]*data-range-low=["\'])[^"\']*(["\'][^>]*data-range-baseline=["\'])[^"\']*(["\'][^>]*data-range-high=["\'])[^"\']*(["\'])',
+                rf"\g<1>{low_str}\g<2>{display_out}\g<3>{high_str}\g<4>",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            updated = re.sub(
+                r'(<strong\b[^>]*id=["\']hero-range-low["\'][^>]*>)[^<]*(</strong>)',
+                rf"\g<1>{low_str}\g<2>",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            updated = re.sub(
+                r'(<strong\b[^>]*id=["\']hero-range-baseline["\'][^>]*>)[^<]*(</strong>)',
+                rf"\g<1>{display_out}\g<2>",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            updated = re.sub(
+                r'(<strong\b[^>]*id=["\']hero-range-high["\'][^>]*>)[^<]*(</strong>)',
+                rf"\g<1>{high_str}\g<2>",
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        return updated
 
     @classmethod
     def _sidecar_needs_sync(cls, sidecar_path: Path, html_content: str) -> bool:
@@ -10009,10 +10212,11 @@ class RetroReflectionEngine:
         Returns (updated_html, list_of_repaired_mechanics).
         Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
         """
-        cache_key: Optional[Tuple[str, str, str]] = None
+        cache_key: Optional[Tuple[str, str, str, str]] = None
         if manifest_override is None and html_content:
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
-            cache_key = (h_digest, str(property_id).lower(), str(slug))
+            dist_key = str(Path(dist_dir).resolve()) if dist_dir is not None else ""
+            cache_key = (h_digest, str(property_id).lower(), str(slug), dist_key)
             cached_res = cls._RETROFIT_HTML_CACHE.get(cache_key)
             if cached_res is not None:
                 out_html, out_rep = cached_res
@@ -10020,10 +10224,34 @@ class RetroReflectionEngine:
                     return out_html, list(out_rep)
 
         missing = cls.audit_html_mechanics(html_content)
+        if not missing and manifest_override is not None:
+            missing.append("calculation_manifest")
         if not missing and dist_dir is not None:
             sidecar_pre = Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json"
             if cls._sidecar_needs_sync(sidecar_pre, html_content):
                 missing.append("calculation_manifest")
+            elif sidecar_pre.is_file():
+                try:
+                    sc_pre_obj = json.loads(sidecar_pre.read_text(encoding="utf-8"))
+                    if isinstance(sc_pre_obj, dict) and sc_pre_obj.get("published_output") is not None:
+                        sc_pub = float(sc_pre_obj["published_output"])
+                        sc_disp = (
+                            f"{round(sc_pub, 4):.4f}"
+                            if (0 < abs(sc_pub) < 1 and round(sc_pub, 4) != round(sc_pub, 2))
+                            else (f"{sc_pub:,.2f}" if not sc_pub.is_integer() else f"{sc_pub:,.0f}")
+                        )
+                        for pre_m in cls._collect_html_output_parity_missing(
+                            html_content=html_content,
+                            exp_pub=sc_pub,
+                            exp_disp=sc_disp,
+                            formula=str(sc_pre_obj.get("formula") or ""),
+                            inputs=sc_pre_obj.get("inputs") if isinstance(sc_pre_obj.get("inputs"), dict) else None,
+                            require_ast_eval=(property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond")),
+                        ):
+                            if pre_m not in missing:
+                                missing.append(pre_m)
+                except Exception:
+                    pass
         if not missing:
             if cache_key is not None:
                 if len(cls._RETROFIT_HTML_CACHE) > 512:
@@ -10098,6 +10326,17 @@ class RetroReflectionEngine:
         stat_auth = manifest["statutory_authority"]
         econ_ds = manifest["economic_dataset"]
         clamped_inputs = manifest["inputs"]
+
+        for post_resolve_miss in cls._collect_html_output_parity_missing(
+            html_content=updated,
+            exp_pub=pub_out,
+            exp_disp=display_out,
+            formula=manifest["formula"],
+            inputs=clamped_inputs,
+            require_ast_eval=(property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond")),
+        ):
+            if post_resolve_miss not in missing:
+                missing.append(post_resolve_miss)
 
         # 0. Dataset.isPartOf WebPage schema sanitization
         if "dataset_schema_ispartof" in missing:
@@ -10252,13 +10491,8 @@ class RetroReflectionEngine:
                     f'text-decoration: none; font-size: 14px; font-weight: 600;">{label}</a>'
                 )
             joined_p_links = "\n".join(p_links)
-            if 'class="scenario-presets-bar"' in updated and 'class="output-value"' in updated:
-                updated = re.sub(
-                    r'(<strong[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*data-baseline-output=["\'])[^"\']+(["\'][^>]*>)[\s\S]*?(</strong>)',
-                    rf"\g<1>{pub_out}\g<2>{display_out}\g<3>",
-                    updated,
-                    flags=re.IGNORECASE,
-                )
+            if 'class="scenario-presets-bar"' in updated and re.search(r'class=["\'][^"\']*\boutput-value\b', updated, re.IGNORECASE):
+                updated = cls._rewrite_html_output_value_nodes(updated, pub_out, display_out)
                 updated = re.sub(
                     r'(<div[^>]*class=["\'][^"\']*\bscenario-presets-bar\b[^"\']*["\'][^>]*>)[\s\S]*?(</div>)',
                     rf"\g<1>\n{joined_p_links}\n      \g<2>",
@@ -10294,20 +10528,8 @@ class RetroReflectionEngine:
                 if "output_value" in missing:
                     repaired.append("output_value")
         if "output_value" in missing:
-            if 'class="output-value"' in updated:
-                if 'data-baseline-output=' in updated:
-                    updated = re.sub(
-                        r'(<strong[^>]*class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*data-baseline-output=["\'])[^"\']+(["\'][^>]*>)[\s\S]*?(</strong>)',
-                        rf"\g<1>{pub_out}\g<2>{display_out}\g<3>",
-                        updated,
-                        flags=re.IGNORECASE,
-                    )
-                updated = re.sub(
-                    r'(<strong[^>]*class=["\']output-value["\']>)\s*[^<]+(</strong>)',
-                    rf'<strong class="output-value" data-baseline-output="{pub_out}">{display_out}\g<2>',
-                    updated,
-                    flags=re.IGNORECASE,
-                )
+            if re.search(r'<(?:strong|span)\b[^>]*class=["\'][^"\']*\boutput-value\b', updated, re.IGNORECASE):
+                updated = cls._rewrite_html_output_value_nodes(updated, pub_out, display_out)
                 if "output_value" not in repaired:
                     repaired.append("output_value")
             elif "output_value" not in repaired:
@@ -10340,6 +10562,12 @@ class RetroReflectionEngine:
                 re.IGNORECASE,
             ):
                 new_table_html = table_m.group(1)
+                if 'data-mechanic="server_rendered_sensitivity_grid"' not in updated:
+                    new_table_html = new_table_html.replace(
+                        "<table ",
+                        '<table data-mechanic="server_rendered_sensitivity_grid" ',
+                        1,
+                    )
                 updated = re.sub(
                     r'<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>',
                     lambda _m: new_table_html,
@@ -12849,6 +13077,32 @@ class RetroReflectionEngine:
                             ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
                         ):
                             _dv_upd = _dv_upd.replace(_b, _g)
+                        if '"year":' in _dv_upd:
+                            try:
+                                _dv_parsed = json.loads(_dv_upd)
+                                _dv_items = _dv_parsed if isinstance(_dv_parsed, list) else (
+                                    list(_dv_parsed.values()) if isinstance(_dv_parsed, dict) else []
+                                )
+                                _dv_epoch_changed = False
+                                for _dv_item in _dv_items:
+                                    if not isinstance(_dv_item, dict):
+                                        continue
+                                    for _mat_holder in (_dv_item, _dv_item.get("calculation_manifest")):
+                                        if not isinstance(_mat_holder, dict):
+                                            continue
+                                        _sem = _mat_holder.get("statutory_economic_matrix")
+                                        if isinstance(_sem, dict):
+                                            for _ser in _sem.get("series") or []:
+                                                if isinstance(_ser, dict) and isinstance(_ser.get("timeline"), list):
+                                                    for _pt in _ser["timeline"]:
+                                                        if isinstance(_pt, dict) and "year" in _pt:
+                                                            _pt.setdefault("epoch", _pt["year"])
+                                                            _pt.pop("year", None)
+                                                            _dv_epoch_changed = True
+                                if _dv_epoch_changed:
+                                    _dv_upd = json.dumps(_dv_parsed, ensure_ascii=False, indent=2) + "\n"
+                            except Exception:
+                                pass
                         if _dv_upd != _dv_raw:
                             _dv_p.write_text(_dv_upd, encoding="utf-8")
                     except Exception:
