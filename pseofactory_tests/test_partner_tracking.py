@@ -1276,7 +1276,7 @@ def test_all_partners_have_verified_external_receipt_in_vault():
     assert vault["master_networks"]["cj_affiliate"]["live_promotional_property_id"] == "101906407"
     assert vault["master_networks"]["cj_affiliate"]["onboarding_progress"] == "9_of_9_completed"
     assert vault["master_networks"]["cj_affiliate"]["account_status"] == "ACTIVE"
-    assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 23
+    assert vault["master_networks"]["cj_affiliate"]["pending_advertiser_applications"] == 13
     assert vault["properties"]["profithelm"]["partners"]["kalshi"]["status"] == "live"
     assert vault["properties"]["profithelm"]["partners"]["xendoo"]["status"] == "live"
     assert vault["properties"]["profithelm"]["partners"]["crest_capital"]["status"] == "pending"

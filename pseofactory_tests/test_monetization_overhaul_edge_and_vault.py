@@ -962,7 +962,10 @@ def test_lienbond_compiler_sku_price_parity_and_publisher_meta_isolation(tmp_pat
     )
     gh_head = (gh_dist / "index.html").read_text(encoding="utf-8")
     assert "Elwe-MFi7Z8hEE7ybiGr8xXBqSv87dF_ZMpqkhCDlQ8" in gh_head
-    assert "cj-promotional-property-id" not in gh_head
+    assert "<meta name='impact-site-verification' value='252d3e3c-d342-48fc-8359-eb3700e68b1f'>" in gh_head
+    assert '<meta name="cj-promotional-property-id" content="101927180">' in gh_head
+    assert "101725461" not in gh_head
+    assert "101906407" not in gh_head
     assert "sovrn-commerce-domain-key" not in gh_head
     assert "ir-site-verification-token" not in gh_head
     gh_kit = json.loads((gh_dist / "media-kit.json").read_text(encoding="utf-8"))

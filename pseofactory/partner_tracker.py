@@ -23,8 +23,8 @@ import os
 import re
 import time
 from dataclasses import dataclass, asdict, field
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Set
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, List, Optional, Set, Tuple
 from urllib.parse import urlencode
 
 from pseofactory.lead_classification import (
@@ -173,6 +173,63 @@ PartnerStatusReport = FleetMonetizationDashboardData
 # slow (seconds per page); the cursor is persisted so the next run resumes where this one stopped.
 TELEMETRY_FETCH_BUDGET_SECONDS = 60.0
 
+LOCAL_ENV_ALLOWED_KEYS: Tuple[str, ...] = (
+    "IMPACT_ACCOUNT_SID",
+    "IMPACT_AUTH_TOKEN",
+    "IMPACT_API_VERSION",
+    "CJ_PERSONAL_ACCESS_TOKEN",
+    "CJ_PUBLISHER_ID",
+    "CJ_COMPANY_CID",
+    "PARTNERSTACK_API_KEY",
+    "SOVRN_COMMERCE_DOMAIN_KEY",
+    "SOVRN_COMMERCE_API_KEY",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_ACCOUNT_ID",
+    "TELEMETRY_EXPORT_SECRET",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+)
+
+
+def _load_local_env(dotenv_path: Optional[str] = None) -> List[str]:
+    """Loads local .env keys into os.environ when absent without logging or returning values."""
+    from pathlib import Path
+
+    candidates: List[Path] = []
+    if dotenv_path:
+        candidates.append(Path(dotenv_path))
+    else:
+        candidates.append(Path(__file__).resolve().parent.parent / ".env")
+        fallback_repo_env = Path("/home/ubuntuadmin/projects/pseofactory/.env")
+        if fallback_repo_env not in candidates:
+            candidates.append(fallback_repo_env)
+
+    loaded_keys: List[str] = []
+    for cand in candidates:
+        if not cand.is_file():
+            continue
+        try:
+            for raw_line in cand.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export ") :].strip()
+                key, raw_val = line.split("=", 1)
+                key = key.strip()
+                if not key or key not in LOCAL_ENV_ALLOWED_KEYS:
+                    continue
+                val = raw_val.strip()
+                if len(val) >= 2 and ((val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")):
+                    val = val[1:-1]
+                if key not in os.environ:
+                    os.environ[key] = val
+                    loaded_keys.append(key)
+            break
+        except Exception:
+            continue
+    return loaded_keys
+
 
 class PartnerTrackingEngine:
     """
@@ -185,10 +242,13 @@ class PartnerTrackingEngine:
         email_engine: Optional[EmailIngestionEngine] = None,
         action_bus: Optional[HumanActionBus] = None,
         monetization_hub: Optional[MonetizationHub] = None,
+        hub: Optional[MonetizationHub] = None,
     ):
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            _load_local_env()
         self.email_engine = email_engine or EmailIngestionEngine()
         self.action_bus = action_bus or HumanActionBus()
-        self.monetization_hub = monetization_hub or MonetizationHub()
+        self.monetization_hub = monetization_hub or hub or MonetizationHub()
         self.hub = self.monetization_hub
 
     def rank_pending_partner_approvals(
@@ -2182,6 +2242,7 @@ class PartnerTrackingEngine:
         extra_email_messages: Optional[List[EmailMessage]] = None,
         engagement_by_property: Optional[Dict[str, Dict[str, Any]]] = None,
         timeout: float = 6.0,
+        persist: bool = True,
     ) -> Dict[str, Any]:
         """
         Synchronizes live partner dashboard balances, verified clicks, qualified leads,
@@ -2193,13 +2254,22 @@ class PartnerTrackingEngine:
         (modeled_epc_pipeline_usd).
         Zero em-dashes. Zero en-dashes.
         """
+        import base64
         import urllib.request
         from pathlib import Path
 
         use_live = bool(
             fetch_live_api
-            and ("PYTEST_CURRENT_TEST" not in os.environ or os.getenv("PSEUFACTORY_LIVE_NETWORK") == "1")
+            and (
+                "PYTEST_CURRENT_TEST" not in os.environ
+                or os.getenv("PSEUFACTORY_LIVE_NETWORK") == "1"
+                or os.getenv("PSEOFACTORY_LIVE_NETWORK") == "1"
+            )
         )
+        if use_live and "PYTEST_CURRENT_TEST" not in os.environ:
+            _load_local_env()
+            if not self.hub.partnerstack_api_key and os.getenv("PARTNERSTACK_API_KEY"):
+                self.hub.partnerstack_api_key = str(os.getenv("PARTNERSTACK_API_KEY") or "").strip()
 
         if engagement_by_property is None:
             sync_data = self.sync_edge_click_telemetry(fetch_live=False)
@@ -2496,63 +2566,183 @@ class PartnerTrackingEngine:
                         portals_state[p_slot]["uncollected_telemetry_reason"] = None
                         portals_state[p_slot]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
 
-            # 3. Optional Chrome CDP 9222 cookie extraction for PartnerStack Stats & Sovrn Payments
-            try:
-                import websocket  # type: ignore
-
-                tabs = json.loads(
-                    urllib.request.urlopen("http://127.0.0.1:9222/json/list", timeout=2.0).read().decode()
+            # 3. Impact REST API v16 headless report poller
+            impact_sid = str(os.getenv("IMPACT_ACCOUNT_SID") or "").strip()
+            impact_tok = str(os.getenv("IMPACT_AUTH_TOKEN") or "").strip()
+            impact_ver = str(os.getenv("IMPACT_API_VERSION") or "16").strip() or "16"
+            if impact_sid and impact_tok:
+                today_yyyy_mm_dd = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                impact_url = (
+                    f"https://api.impact.com/Mediapartners/{impact_sid}/Reports/"
+                    f"partner_performance_by_program?START_DATE=2026-01-01&END_DATE={today_yyyy_mm_dd}"
                 )
-                if tabs:
-                    ws = websocket.create_connection(tabs[0]["webSocketDebuggerUrl"], timeout=3.0)
-                    ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
-                    c_resp = json.loads(ws.recv())
-                    ws.close()
-                    c_list = (c_resp.get("result") or {}).get("cookies") or []
-                    ps_cookie_str = "; ".join(
-                        f"{c['name']}={c['value']}"
-                        for c in c_list
-                        if "partnerstack" in str(c.get("domain", ""))
+                basic_b64 = base64.b64encode(f"{impact_sid}:{impact_tok}".encode("utf-8")).decode("ascii")
+                impact_resp = _fetch_json_live(
+                    impact_url,
+                    {
+                        "Authorization": f"Basic {basic_b64}",
+                        "Accept": "application/json",
+                        "IR-Version": impact_ver,
+                    },
+                )
+                if isinstance(impact_resp, dict):
+                    impact_records = impact_resp.get("Records")
+                    if not isinstance(impact_records, list):
+                        impact_records = impact_resp.get("records")
+                    if isinstance(impact_records, list):
+                        total_impact_clicks = 0
+                        total_impact_actions = 0
+                        total_impact_cost = 0.0
+                        for rec in impact_records:
+                            if not isinstance(rec, dict):
+                                continue
+                            try:
+                                total_impact_clicks += int(
+                                    float(rec.get("Clicks") or rec.get("clicks") or 0)
+                                )
+                            except (TypeError, ValueError):
+                                pass
+                            try:
+                                total_impact_actions += int(
+                                    float(rec.get("Actions") or rec.get("actions") or 0)
+                                )
+                            except (TypeError, ValueError):
+                                pass
+                            try:
+                                cost_raw = (
+                                    rec.get("Total_Cost")
+                                    if rec.get("Total_Cost") not in (None, "")
+                                    else (rec.get("Action_Cost") or rec.get("Payout") or 0.0)
+                                )
+                                total_impact_cost += float(cost_raw or 0.0)
+                            except (TypeError, ValueError):
+                                pass
+                        portals_state["impact"]["portal_verified_clicks"] = total_impact_clicks
+                        portals_state["impact"]["raw_clicks"] = max(
+                            int(portals_state["impact"].get("raw_clicks", 0) or 0),
+                            total_impact_clicks,
+                        )
+                        portals_state["impact"]["conversions_count"] = total_impact_actions
+                        portals_state["impact"]["realized_commission_usd"] = round(total_impact_cost, 2)
+                        portals_state["impact"]["sync_mechanism"] = "IMPACT_REST_API_V16"
+                        portals_state["impact"]["auth_status"] = "AUTHENTICATED_SYNCING"
+                        portals_state["impact"]["is_authenticated_and_syncing"] = True
+                        portals_state["impact"]["live_api_polled_in_current_run"] = True
+                        portals_state["impact"]["uncollected_telemetry_reason"] = None
+                        portals_state["impact"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+
+            # 4. CJ GraphQL Commissions API headless poller
+            cj_pat = str(os.getenv("CJ_PERSONAL_ACCESS_TOKEN") or "").strip()
+            cj_pub_id = str(os.getenv("CJ_PUBLISHER_ID") or cj_cfg.get("publisher_id") or "8101803").strip()
+            if cj_pat and cj_pub_id:
+                now_utc = datetime.now(timezone.utc)
+                since_iso = (now_utc - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00Z")
+                before_iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+                cj_query = (
+                    '{ publisherCommissions(forPublishers: ["%s"], sincePostingDate: "%s", beforePostingDate: "%s") '
+                    "{ count payloadComplete records { actionTrackerName pubCommissionAmountUsd } } }"
+                    % (cj_pub_id, since_iso, before_iso)
+                )
+                try:
+                    cj_req = urllib.request.Request(
+                        "https://commissions.api.cj.com/query",
+                        data=json.dumps({"query": cj_query}).encode("utf-8"),
+                        headers={
+                            "Authorization": f"Bearer {cj_pat}",
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                            "User-Agent": "Mozilla/5.0",
+                        },
+                        method="POST",
                     )
-                    if ps_cookie_str:
-                        stats_url = str(
-                            ps_cfg.get("stats_endpoint")
-                            or "https://api.partnerstack.com/api/stats/user/user_pyzlwpKSqo2aSj?partner_team_stack_key=stck_sHqgUkyEIAPgiL"
+                    with urllib.request.urlopen(cj_req, timeout=timeout) as cj_http_resp:
+                        cj_payload = json.loads(cj_http_resp.read().decode("utf-8", errors="replace"))
+                except Exception:
+                    cj_payload = None
+
+                if isinstance(cj_payload, dict) and not cj_payload.get("errors"):
+                    pub_comms = (cj_payload.get("data") or {}).get("publisherCommissions")
+                    if isinstance(pub_comms, dict):
+                        cj_records = pub_comms.get("records")
+                        if not isinstance(cj_records, list):
+                            cj_records = []
+                        cj_comm_usd = 0.0
+                        for cj_rec in cj_records:
+                            if not isinstance(cj_rec, dict):
+                                continue
+                            try:
+                                cj_comm_usd += float(cj_rec.get("pubCommissionAmountUsd") or 0.0)
+                            except (TypeError, ValueError):
+                                pass
+                        raw_cnt = pub_comms.get("count")
+                        cj_conv_cnt = int(raw_cnt) if raw_cnt is not None else len(cj_records)
+                        portals_state["cj_affiliate"]["conversions_count"] = cj_conv_cnt
+                        portals_state["cj_affiliate"]["realized_commission_usd"] = round(cj_comm_usd, 2)
+                        portals_state["cj_affiliate"]["sync_mechanism"] = "CJ_GRAPHQL_COMMISSIONS_API"
+                        portals_state["cj_affiliate"]["auth_status"] = "AUTHENTICATED_SYNCING"
+                        portals_state["cj_affiliate"]["is_authenticated_and_syncing"] = True
+                        portals_state["cj_affiliate"]["live_api_polled_in_current_run"] = True
+                        portals_state["cj_affiliate"]["uncollected_telemetry_reason"] = None
+                        portals_state["cj_affiliate"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+
+            # 5. Optional Chrome CDP 9222 cookie extraction (strictly opt-in; never touches 9222 by default)
+            if os.getenv("PSEOFACTORY_ENABLE_CDP_COOKIE_SYNC") == "1":
+                try:
+                    import websocket  # type: ignore
+
+                    tabs = json.loads(
+                        urllib.request.urlopen("http://127.0.0.1:9222/json/list", timeout=2.0).read().decode()
+                    )
+                    if tabs:
+                        ws = websocket.create_connection(tabs[0]["webSocketDebuggerUrl"], timeout=3.0)
+                        ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
+                        c_resp = json.loads(ws.recv())
+                        ws.close()
+                        c_list = (c_resp.get("result") or {}).get("cookies") or []
+                        ps_cookie_str = "; ".join(
+                            f"{c['name']}={c['value']}"
+                            for c in c_list
+                            if "partnerstack" in str(c.get("domain", ""))
                         )
-                        ps_stats = _fetch_json_live(
-                            stats_url,
-                            {
-                                "Cookie": ps_cookie_str,
-                                "Origin": "https://dash.partnerstack.com",
-                                "Referer": "https://dash.partnerstack.com/",
-                            },
-                        )
-                        if isinstance(ps_stats, dict) and isinstance(ps_stats.get("data"), dict):
-                            u_stats = ps_stats["data"].get("user") or {}
-                            portals_state["partnerstack"]["portal_verified_clicks"] = int(
-                                u_stats.get("LINK_CLICKS", portals_state["partnerstack"]["portal_verified_clicks"])
-                                or 0
+                        if ps_cookie_str:
+                            stats_url = str(
+                                ps_cfg.get("stats_endpoint")
+                                or "https://api.partnerstack.com/api/stats/user/user_pyzlwpKSqo2aSj?partner_team_stack_key=stck_sHqgUkyEIAPgiL"
                             )
-                            portals_state["partnerstack"]["qualified_leads_count"] = int(
-                                u_stats.get("LEAD_SUBMITTED", 0) or u_stats.get("DEAL_SUBMITTED", 0) or 0
+                            ps_stats = _fetch_json_live(
+                                stats_url,
+                                {
+                                    "Cookie": ps_cookie_str,
+                                    "Origin": "https://dash.partnerstack.com",
+                                    "Referer": "https://dash.partnerstack.com/",
+                                },
                             )
-                            portals_state["partnerstack"]["conversions_count"] = int(
-                                u_stats.get("CUSTOMER_COUNT", 0) or 0
-                            )
-                            paid_cents = float(u_stats.get("COMMISSION_PAID", 0.0) or 0.0)
-                            unpaid_cents = float(
-                                u_stats.get("COMMISSION_UNPAID", 0.0) or u_stats.get("PENDING", 0.0) or 0.0
-                            )
-                            portals_state["partnerstack"]["paid_out_usd"] = round(paid_cents / 100.0, 2)
-                            portals_state["partnerstack"]["pending_commission_usd"] = round(unpaid_cents / 100.0, 2)
-                            portals_state["partnerstack"]["realized_commission_usd"] = round(
-                                (paid_cents + unpaid_cents) / 100.0, 2
-                            )
-                            portals_state["partnerstack"]["live_api_polled_in_current_run"] = True
-                            portals_state["partnerstack"]["uncollected_telemetry_reason"] = None
-                            portals_state["partnerstack"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
-            except Exception:
-                pass
+                            if isinstance(ps_stats, dict) and isinstance(ps_stats.get("data"), dict):
+                                u_stats = ps_stats["data"].get("user") or {}
+                                portals_state["partnerstack"]["portal_verified_clicks"] = int(
+                                    u_stats.get("LINK_CLICKS", portals_state["partnerstack"]["portal_verified_clicks"])
+                                    or 0
+                                )
+                                portals_state["partnerstack"]["qualified_leads_count"] = int(
+                                    u_stats.get("LEAD_SUBMITTED", 0) or u_stats.get("DEAL_SUBMITTED", 0) or 0
+                                )
+                                portals_state["partnerstack"]["conversions_count"] = int(
+                                    u_stats.get("CUSTOMER_COUNT", 0) or 0
+                                )
+                                paid_cents = float(u_stats.get("COMMISSION_PAID", 0.0) or 0.0)
+                                unpaid_cents = float(
+                                    u_stats.get("COMMISSION_UNPAID", 0.0) or u_stats.get("PENDING", 0.0) or 0.0
+                                )
+                                portals_state["partnerstack"]["paid_out_usd"] = round(paid_cents / 100.0, 2)
+                                portals_state["partnerstack"]["pending_commission_usd"] = round(unpaid_cents / 100.0, 2)
+                                portals_state["partnerstack"]["realized_commission_usd"] = round(
+                                    (paid_cents + unpaid_cents) / 100.0, 2
+                                )
+                                portals_state["partnerstack"]["live_api_polled_in_current_run"] = True
+                                portals_state["partnerstack"]["uncollected_telemetry_reason"] = None
+                                portals_state["partnerstack"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+                except Exception:
+                    pass
 
         # 4. Ingest email notifications for COMMISSION_EARNED, LEAD_CONVERTED, PAYOUT_ISSUED
         email_msgs: List[EmailMessage] = []
@@ -2808,13 +2998,14 @@ class PartnerTrackingEngine:
             "partners": partners_reconciliation,
         }
 
-        try:
-            target_ledger_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = target_ledger_path.with_name(f"{target_ledger_path.name}.{os.getpid()}.tmp")
-            tmp_path.write_text(json.dumps(ledger_payload, indent=2) + "\n", encoding="utf-8")
-            os.replace(tmp_path, target_ledger_path)
-        except Exception:
-            pass
+        if persist:
+            try:
+                target_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = target_ledger_path.with_name(f"{target_ledger_path.name}.{os.getpid()}.tmp")
+                tmp_path.write_text(json.dumps(ledger_payload, indent=2) + "\n", encoding="utf-8")
+                os.replace(tmp_path, target_ledger_path)
+            except Exception:
+                pass
 
         return ledger_payload
 

@@ -33,9 +33,35 @@ RIPPLING_PARTNERSTACK_URL = "https://try.rippling.com/mcfo1m09qiwt"
 COINLEDGER_FIRSTPROMOTER_URL = "https://coinledger.io/?fpr=arif-554004"
 KOINLY_FIRSTPROMOTER_URL = "https://koinly.io/?fpr=arif-4c0b88"
 
-# Active CJ publisher property. Legacy PID 101725461 returns HTTP 400 and must never be used.
+# Active CJ publisher properties across all 4 tenants. Legacy PID 101725461 returns HTTP 400 and must never be used.
 ACTIVE_CJ_PROPERTY_ID = "101906407"
+CJ_PROPERTY_ID_BY_TENANT: Dict[str, str] = {
+    "profithelm": "101906407",
+    "prexvo": "101927178",
+    "gainhelm": "101927180",
+    "lienbond": "101927181",
+}
+ACTIVE_CJ_PROPERTY_IDS: Tuple[str, ...] = (
+    "101906407",
+    "101927178",
+    "101927180",
+    "101927181",
+)
 DEAD_CJ_PROPERTY_IDS: Tuple[str, ...] = ("101725461",)
+
+# Per-tenant Impact Promotional Channels (MediaProperties) and homepage verification UUIDs.
+IMPACT_CHANNEL_ID_BY_TENANT: Dict[str, str] = {
+    "profithelm": "8980393",
+    "prexvo": "9151905",
+    "gainhelm": "9151929",
+    "lienbond": "9151944",
+}
+IMPACT_VERIFICATION_UUID_BY_TENANT: Dict[str, str] = {
+    "profithelm": "d089d8b3-753e-46dc-9c12-653de16f710d",
+    "prexvo": "79393cd8-e7dd-49af-a934-f8515d299b19",
+    "gainhelm": "252d3e3c-d342-48fc-8359-eb3700e68b1f",
+    "lienbond": "5ce463de-dd46-4356-871d-e6d1214b5d57",
+}
 
 
 def _norm(url: str) -> str:
@@ -240,12 +266,13 @@ def is_intent_matched(partner_key: str, tracking_url: str) -> bool:
         ("-12306188", frozenset({"freetaxusa"})),
         ("-16952385", frozenset({"wallethub"})),
     )
-    for link_suffix, brand_keys in cj_link_brand_allowlist:
-        if f"click-{ACTIVE_CJ_PROPERTY_ID}{link_suffix}" in base:
-            return key in brand_keys
+    for active_pid in ACTIVE_CJ_PROPERTY_IDS:
+        for link_suffix, brand_keys in cj_link_brand_allowlist:
+            if f"click-{active_pid}{link_suffix}" in base:
+                return key in brand_keys
 
     if is_cj_host:
-        if f"/links/{ACTIVE_CJ_PROPERTY_ID}/" in base:
+        if any(f"/links/{active_pid}/" in base for active_pid in ACTIVE_CJ_PROPERTY_IDS):
             cj_dlg_domain_allowlist: Tuple[Tuple[str, FrozenSet[str]], ...] = (
                 ("lawdepot.com", frozenset({"lawdepot", "lawdepot_legal"})),
                 ("efile.com", frozenset({"efile", "efile_com"})),

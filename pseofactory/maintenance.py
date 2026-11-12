@@ -12177,16 +12177,33 @@ class RetroReflectionEngine:
                 )
             )
         )
+        from pseofactory.affiliate_intent import (
+            CJ_PROPERTY_ID_BY_TENANT,
+            IMPACT_VERIFICATION_UUID_BY_TENANT,
+        )
+
         impact_verify_token = os.environ.get("IMPACT_SITE_VERIFICATION_TOKEN", "").strip()
         is_profithelm_only = not (is_prexvo or is_gainhelm or is_lienbond)
-        meta_block_lines: List[str] = []
+        resolved_prop_key = (
+            "prexvo"
+            if is_prexvo
+            else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+        )
+        expected_impact_uuid = IMPACT_VERIFICATION_UUID_BY_TENANT[resolved_prop_key]
+        expected_cj_pid = CJ_PROPERTY_ID_BY_TENANT[resolved_prop_key]
+        expected_impact_meta_tag = f"<meta name='impact-site-verification' value='{expected_impact_uuid}'>"
+        expected_cj_meta_tag = f'<meta name="cj-promotional-property-id" content="{expected_cj_pid}">'
+
+        meta_block_lines: List[str] = [
+            f"  {expected_impact_meta_tag}",
+            f"  {expected_cj_meta_tag}",
+        ]
         if is_profithelm_only:
             if impact_verify_token and not impact_verify_token.isdigit():
                 meta_block_lines.append(f'  <meta name="ir-site-verification-token" content="{impact_verify_token}">')
-            meta_block_lines.extend([
-                '  <meta name="cj-promotional-property-id" content="101906407">',
-                '  <meta name="sovrn-commerce-domain-key" content="0a5ac1bfe04034bff021b394f5e71d90">',
-            ])
+            meta_block_lines.append(
+                '  <meta name="sovrn-commerce-domain-key" content="0a5ac1bfe04034bff021b394f5e71d90">'
+            )
         meta_block_lines.extend([
             f'  <meta name="partnerstack-publisher-entity" content="{entity_label}">',
             '  <meta name="ftc-affiliate-disclosure" content="16-CFR-Part-255-Compliant">',
@@ -12201,9 +12218,36 @@ class RetroReflectionEngine:
                 "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q",
             ):
                 cleaned = cleaned.replace(fake_gsc, verified_gsc_token)
+
+            def _filter_impact_meta(m: re.Match[str]) -> str:
+                raw_tag = m.group(0)
+                if expected_impact_meta_tag in raw_tag:
+                    return raw_tag
+                return ""
+
+            cleaned = re.sub(
+                r'[ \t]*<meta\b[^>]*name=["\']impact-site-verification["\'][^>]*>\r?\n?',
+                _filter_impact_meta,
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+
+            def _filter_cj_meta(m: re.Match[str]) -> str:
+                raw_tag = m.group(0)
+                if f'content="{expected_cj_pid}"' in raw_tag or f"content='{expected_cj_pid}'" in raw_tag:
+                    return raw_tag
+                return ""
+
+            cleaned = re.sub(
+                r'[ \t]*<meta\b[^>]*name=["\']cj-promotional-property-id["\'][^>]*>\r?\n?',
+                _filter_cj_meta,
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+
             if not is_profithelm_only:
                 cleaned = re.sub(
-                    r'[ \t]*<meta\b[^>]*name=["\'](?:ir-site-verification-token|cj-promotional-property-id|sovrn-commerce-domain-key)["\'][^>]*>\r?\n?',
+                    r'[ \t]*<meta\b[^>]*name=["\'](?:ir-site-verification-token|sovrn-commerce-domain-key)["\'][^>]*>\r?\n?',
                     "",
                     cleaned,
                     flags=re.IGNORECASE,
@@ -12217,18 +12261,26 @@ class RetroReflectionEngine:
                         flags=re.IGNORECASE,
                     )
                 cleaned = re.sub(
-                    r'(<meta\b[^>]*name=["\']cj-promotional-property-id["\'][^>]*content=["\'])101725461(["\'][^>]*>)',
-                    r"\g<1>101906407\2",
-                    cleaned,
-                    flags=re.IGNORECASE,
-                )
-                cleaned = re.sub(
                     r'(<meta\b[^>]*name=["\']sovrn-commerce-domain-key["\'][^>]*content=["\'])2987330(["\'][^>]*>)',
                     r"\g<1>0a5ac1bfe04034bff021b394f5e71d90\2",
                     cleaned,
                     flags=re.IGNORECASE,
                 )
             return cleaned
+
+        def _meta_line_present(line: str, html_doc: str) -> bool:
+            stripped = line.strip()
+            if "impact-site-verification" in stripped:
+                return expected_impact_meta_tag in html_doc
+            if "cj-promotional-property-id" in stripped:
+                return (
+                    f'content="{expected_cj_pid}"' in html_doc
+                    or f"content='{expected_cj_pid}'" in html_doc
+                ) and ("cj-promotional-property-id" in html_doc)
+            attr_m = re.search(r"""(?:name|rel)=["']([^"']+)["']""", stripped)
+            if attr_m:
+                return attr_m.group(1) in html_doc
+            return stripped in html_doc
 
         entry_rel_paths = (
             "index.html",
@@ -12258,7 +12310,7 @@ class RetroReflectionEngine:
                         )
                 missing_lines = [
                     line for line in meta_block_lines
-                    if line.split('="')[1].split('"')[0] not in new_h
+                    if not _meta_line_present(line, new_h)
                 ]
                 if missing_lines and "</head>" in new_h:
                     inject_str = "\n".join(missing_lines)
@@ -12300,6 +12352,16 @@ class RetroReflectionEngine:
                     ):
                         new_th = new_th.replace('href="/disclaimers/"', 'href="/privacy/"')
                     t_missing: List[str] = []
+                    if expected_impact_meta_tag not in new_th:
+                        t_missing.append(f"  {expected_impact_meta_tag}")
+                    if not (
+                        (
+                            f'content="{expected_cj_pid}"' in new_th
+                            or f"content='{expected_cj_pid}'" in new_th
+                        )
+                        and "cj-promotional-property-id" in new_th
+                    ):
+                        t_missing.append(f"  {expected_cj_meta_tag}")
                     if 'rel="publisher-media-kit"' not in new_th:
                         t_missing.append('  <link rel="publisher-media-kit" type="application/json" href="/media-kit.json">')
                     if 'rel="tool-catalog"' not in new_th:

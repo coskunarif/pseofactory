@@ -1,7 +1,7 @@
 {
   "hub_metadata": {
-    "version": "1.1.0",
-    "updated_at": "2026-11-11T00:25:00+00:00",
+    "version": "1.2.0",
+    "updated_at": "2026-11-12T08:30:00+00:00",
     "description": "Unified programmatic monetization vault and master affiliate keys"
   },
   "master_networks": {
@@ -21,7 +21,16 @@
       "name": "PartnerStack",
       "api_key": "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP",
       "account_name": "ProfitHelm LLC",
-      "verified_clicks": 28,
+      "active_partnership_key": "part_jp9R0iYpPGriHu",
+      "network_profile_completion_pct": 94,
+      "listed_domains": [
+        "https://profithelm.com",
+        "https://prexvo.com",
+        "https://gainhelm.com",
+        "https://lienbond.com"
+      ],
+      "marketplace_application_status": "in_review",
+      "verified_clicks": 2578,
       "enabled": true
     },
     "stripe": {
@@ -39,6 +48,9 @@
       "cli_key_status": "Live standard secret key provisioned on Cloudflare Pages; legacy 90-day CLI key retired",
       "enabled": true,
       "billing_mode": "payment",
+      "phone_verification_status": "COMPLETE",
+      "payments_status": "Active",
+      "payouts_status": "Active",
       "charges_enabled": true,
       "payouts_enabled": true,
       "details_submitted": true,
@@ -360,12 +372,40 @@
       "identity_verification_status": "COMPLETE",
       "tax_form_status": "Comply Exchange Form W-9 submitted and active (Confirmation Code L5CBN6, EIN 41-2311423)",
       "payout_method_status": "COMPLETE - EFT Withdrawal (free) configured and active (ProfitHelm LLC, Choice Financial Group US CHECKING, Routing XXXXXXX29, Account XXXXXXXX1395, updated 2026-10-19T18:01Z, confirmed via Zoho Inbox #1002)",
-      "sync_mechanism": "PORTAL_SESSION_AND_ZOHO_EMAIL_INGEST",
-      "auth_status": "EMAIL_SYNCING_PORTAL_SESSION_EXPIRED_RELOGIN_REQUIRED",
+      "api_version": "16",
+      "rest_api_configured": true,
+      "sync_mechanism": "IMPACT_REST_API_V16_AND_ZOHO_EMAIL_INGEST",
+      "auth_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
       "is_authenticated_and_syncing": false,
       "enabled": true,
       "member_id": "8871615",
       "branded_account_id": "3161796 (Gusto #15154)",
+      "media_properties": {
+        "profithelm": {
+          "channel_id": "8980393",
+          "domain": "https://profithelm.com",
+          "verification_uuid": "d089d8b3-753e-46dc-9c12-653de16f710d",
+          "verification_status": "Connected"
+        },
+        "prexvo": {
+          "channel_id": "9151905",
+          "domain": "https://prexvo.com",
+          "verification_uuid": "79393cd8-e7dd-49af-a934-f8515d299b19",
+          "verification_status": "Pending"
+        },
+        "gainhelm": {
+          "channel_id": "9151929",
+          "domain": "https://gainhelm.com",
+          "verification_uuid": "252d3e3c-d342-48fc-8359-eb3700e68b1f",
+          "verification_status": "Pending"
+        },
+        "lienbond": {
+          "channel_id": "9151944",
+          "domain": "https://lienbond.com",
+          "verification_uuid": "5ce463de-dd46-4356-871d-e6d1214b5d57",
+          "verification_status": "Pending"
+        }
+      },
       "active_advertiser_contracts": 4,
       "live_active_contracts_count": 4,
       "live_active_contracts": [
@@ -375,8 +415,8 @@
           "status": "Active (Approved 2026-10-17)",
           "commission_terms": "$40.00 USD CPA per Trade",
           "tracking_url": "https://kalshi.pxf.io/c/7932737/3078072/37770",
-          "raw_clicks": 13,
-          "verified_clicks": 7,
+          "raw_clicks": 57,
+          "verified_clicks": 57,
           "actions": 0,
           "realized_commission_usd": 0.0
         },
@@ -387,8 +427,8 @@
           "commission_terms": "$500.00 USD CPA per Onboarded Client",
           "tracking_url": "https://xendoo.pxf.io/c/7932737/1357375/16354",
           "short_link": "https://xendoo.pxf.io/2Rq2rg",
-          "raw_clicks": 4,
-          "verified_clicks": 1,
+          "raw_clicks": 299,
+          "verified_clicks": 299,
           "actions": 0,
           "realized_commission_usd": 0.0
         },
@@ -398,8 +438,8 @@
           "status": "Active (Approved 2026-10-19, Zoho Inbox #1003 & #1004 from noelle.hyra@gusto.com)",
           "commission_terms": "$200.00-$300.00 USD CPA per Valid US Small Business Sale",
           "tracking_url": "https://gusto.pxf.io/c/7932737/1226287/15154",
-          "raw_clicks": 2,
-          "verified_clicks": 0,
+          "raw_clicks": 77,
+          "verified_clicks": 77,
           "actions": 0,
           "realized_commission_usd": 0.0
         },
@@ -410,41 +450,48 @@
           "commission_terms": "$100.00-$4,000.00 USD Closed Won / $50.00-$2,000.00 USD SQL",
           "tracking_url": "https://join.ramp.com/c/7932737/3981015/51436",
           "default_portal_link": "https://join.ramp.com/c/7932737/3861852/51436",
-          "raw_clicks": 0,
-          "verified_clicks": 0,
+          "raw_clicks": 15,
+          "verified_clicks": 15,
           "actions": 0,
           "realized_commission_usd": 0.0
         }
       ],
       "pending_advertiser_contracts": 14,
       "live_pending_advertiser_contracts": 14,
-      "verified_clicks": 8,
-      "raw_clicks": 19,
+      "verified_clicks": 448,
+      "raw_clicks": 448,
       "qualified_leads": 0,
       "conversions": 0,
       "realized_commission_usd": 0.0,
       "pending_commission_usd": 0.0,
       "approved_payable_usd": 0.0,
       "paid_out_usd": 0.0,
-      "last_synced_at": "2026-10-21T14:54:06+00:00"
+      "last_synced_at": "2026-11-12T08:30:00+00:00"
     },
     "cj_affiliate": {
       "name": "CJ Affiliate",
       "company_cid": "7792582",
       "publisher_id": "8101803",
       "live_promotional_property_id": "101906407",
-      "promotional_property_name": "ProfitHelmPrimary",
+      "promotional_property_name": "ProfitHelm Primary",
+      "promotional_properties": {
+        "profithelm": "101906407",
+        "prexvo": "101927178",
+        "gainhelm": "101927180",
+        "lienbond": "101927181"
+      },
+      "personal_access_token_configured": true,
       "account_user": "Arif Coskun",
       "onboarding_progress": "9_of_9_completed",
       "account_status": "ACTIVE",
       "activation_date": "2026-10-18T09:36:19Z",
       "tax_form_status": "IRS Form W-9 submitted and active (EIN ******1423)",
       "payment_method": "Direct Deposit / CJ Payments (Choice Financial Group, Routing *****1229, Account ********1395)",
-      "sync_mechanism": "CDP_DOM_BALANCE_AND_ZOHO_EMAIL_INGEST",
-      "auth_status": "DOM_BALANCE_VERIFIED_BACKEND_SESSION_EXPIRED_RELOGIN_REQUIRED",
+      "sync_mechanism": "CJ_GRAPHQL_COMMISSIONS_API_AND_ZOHO_EMAIL_INGEST",
+      "auth_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
       "is_authenticated_and_syncing": false,
-      "pending_advertiser_applications": 23,
-      "live_pending_advertiser_applications": 23,
+      "pending_advertiser_applications": 13,
+      "live_pending_advertiser_applications": 13,
       "active_joined_advertisers_count": 5,
       "verified_clicks": 31,
       "qualified_leads": 0,
@@ -453,7 +500,7 @@
       "pending_commission_usd": 0.0,
       "approved_payable_usd": 0.0,
       "paid_out_usd": 0.0,
-      "last_synced_at": "2026-10-21T17:16:12+00:00",
+      "last_synced_at": "2026-11-12T08:30:00+00:00",
       "active_joined_advertisers": {
         "efile_com": {
           "advertiser_id": "4355234",
@@ -533,6 +580,13 @@
           "realized_commission_usd": 0.0
         }
       },
+      "enabled": true
+    },
+    "cloudflare_edge": {
+      "name": "Cloudflare Workers & Pages",
+      "account_id": "8789c54bef2d281d4a8afb4df34f9878",
+      "plan": "workers_paid",
+      "default_usage_model": "standard",
       "enabled": true
     }
   },
@@ -636,7 +690,9 @@
           "active_partners": [
             "rippling"
           ],
-          "live_verified_clicks": 678,
+          "live_verified_clicks": 2578,
+          "network_profile_completion_pct": 94,
+          "marketplace_application_status": "in_review",
           "network_marketplace_status": "Direct invite Rippling part_jp9R0iYpPGriHu is Active; Mercury is direct in-house referral https://mercury.com/r/profithelm-llc",
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
           "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",

@@ -2312,6 +2312,19 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         is_lienbond=is_lienbond,
     )
 
+    from pseofactory.affiliate_intent import (
+        CJ_PROPERTY_ID_BY_TENANT,
+        IMPACT_VERIFICATION_UUID_BY_TENANT,
+    )
+
+    _compiler_prop_id = (
+        "prexvo"
+        if is_prexvo
+        else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    )
+    _impact_uuid = IMPACT_VERIFICATION_UUID_BY_TENANT[_compiler_prop_id]
+    _cj_pid = CJ_PROPERTY_ID_BY_TENANT[_compiler_prop_id]
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2319,6 +2332,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="content-language" content="en-US" />
   <meta name="google-site-verification" content="{gsc_token}" />
+  <meta name='impact-site-verification' value='{_impact_uuid}'>
+  <meta name="cj-promotional-property-id" content="{_cj_pid}">
   <meta name="author" content="{brand_org_name} Quantitative Research Group" />
   <meta name="description" content="{raw_meta_desc}" />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
@@ -2955,6 +2970,8 @@ def _build_lienbond_support_page_html(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="content-language" content="en-US" />
   <meta name="google-site-verification" content="{gsc_token}" />
+  <meta name='impact-site-verification' value='5ce463de-dd46-4356-871d-e6d1214b5d57'>
+  <meta name="cj-promotional-property-id" content="101927181">
   <meta name="author" content="LienBond Quantitative Research Group" />
   <meta name="description" content="{meta_desc}" />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
@@ -3294,6 +3311,8 @@ th { background-color: var(--bg-elevated); }
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="content-language" content="en-US" />
   <meta name="google-site-verification" content="{gsc_token}" />
+  <meta name='impact-site-verification' value='5ce463de-dd46-4356-871d-e6d1214b5d57'>
+  <meta name="cj-promotional-property-id" content="101927181">
   <meta name="author" content="LienBond Quantitative Research Group" />
   <meta name="description" content="Calculate contractor surety bond premiums, NCCI workers comp class code and EMR rates, 50-state mechanics lien deadlines, and WH-347 payroll." />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
