@@ -12212,12 +12212,21 @@ class RetroReflectionEngine:
         ])
 
         def _sanitize_verification_meta(html_text: str) -> str:
-            cleaned = html_text
+            head_end_idx = html_text.lower().find("</head>")
+            if head_end_idx != -1:
+                head_chunk = html_text[:head_end_idx]
+                tail_chunk = html_text[head_end_idx:]
+            else:
+                head_chunk = html_text
+                tail_chunk = ""
+
+            cleaned = head_chunk
             for fake_gsc in (
                 "google-site-verification-verified-2026",
                 "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q",
             ):
-                cleaned = cleaned.replace(fake_gsc, verified_gsc_token)
+                if fake_gsc in cleaned:
+                    cleaned = cleaned.replace(fake_gsc, verified_gsc_token)
 
             def _filter_impact_meta(m: re.Match[str]) -> str:
                 raw_tag = m.group(0)
@@ -12225,12 +12234,13 @@ class RetroReflectionEngine:
                     return raw_tag
                 return ""
 
-            cleaned = re.sub(
-                r'[ \t]*<meta\b[^>]*name=["\']impact-site-verification["\'][^>]*>\r?\n?',
-                _filter_impact_meta,
-                cleaned,
-                flags=re.IGNORECASE,
-            )
+            if "impact-site-verification" in cleaned.lower():
+                cleaned = re.sub(
+                    r'(?:(?<=^)|(?<=\n))[ \t]*<meta\b[^>]*name=["\']impact-site-verification["\'][^>]*>\r?\n?|<meta\b[^>]*name=["\']impact-site-verification["\'][^>]*>',
+                    _filter_impact_meta,
+                    cleaned,
+                    flags=re.IGNORECASE,
+                )
 
             def _filter_cj_meta(m: re.Match[str]) -> str:
                 raw_tag = m.group(0)
@@ -12238,35 +12248,39 @@ class RetroReflectionEngine:
                     return raw_tag
                 return ""
 
-            cleaned = re.sub(
-                r'[ \t]*<meta\b[^>]*name=["\']cj-promotional-property-id["\'][^>]*>\r?\n?',
-                _filter_cj_meta,
-                cleaned,
-                flags=re.IGNORECASE,
-            )
-
-            if not is_profithelm_only:
+            if "cj-promotional-property-id" in cleaned.lower():
                 cleaned = re.sub(
-                    r'[ \t]*<meta\b[^>]*name=["\'](?:ir-site-verification-token|sovrn-commerce-domain-key)["\'][^>]*>\r?\n?',
-                    "",
+                    r'(?:(?<=^)|(?<=\n))[ \t]*<meta\b[^>]*name=["\']cj-promotional-property-id["\'][^>]*>\r?\n?|<meta\b[^>]*name=["\']cj-promotional-property-id["\'][^>]*>',
+                    _filter_cj_meta,
                     cleaned,
                     flags=re.IGNORECASE,
                 )
-            else:
-                if not (impact_verify_token and not impact_verify_token.isdigit()):
+
+            cleaned_low = cleaned.lower()
+            if not is_profithelm_only:
+                if "ir-site-verification-token" in cleaned_low or "sovrn-commerce-domain-key" in cleaned_low:
                     cleaned = re.sub(
-                        r'[ \t]*<meta\b[^>]*name=["\']ir-site-verification-token["\'][^>]*content=["\']\d+["\'][^>]*>\r?\n?',
+                        r'(?:(?<=^)|(?<=\n))[ \t]*<meta\b[^>]*name=["\'](?:ir-site-verification-token|sovrn-commerce-domain-key)["\'][^>]*>\r?\n?|<meta\b[^>]*name=["\'](?:ir-site-verification-token|sovrn-commerce-domain-key)["\'][^>]*>',
                         "",
                         cleaned,
                         flags=re.IGNORECASE,
                     )
-                cleaned = re.sub(
-                    r'(<meta\b[^>]*name=["\']sovrn-commerce-domain-key["\'][^>]*content=["\'])2987330(["\'][^>]*>)',
-                    r"\g<1>0a5ac1bfe04034bff021b394f5e71d90\2",
-                    cleaned,
-                    flags=re.IGNORECASE,
-                )
-            return cleaned
+            else:
+                if not (impact_verify_token and not impact_verify_token.isdigit()) and "ir-site-verification-token" in cleaned_low:
+                    cleaned = re.sub(
+                        r'(?:(?<=^)|(?<=\n))[ \t]*<meta\b[^>]*name=["\']ir-site-verification-token["\'][^>]*content=["\']\d+["\'][^>]*>\r?\n?|<meta\b[^>]*name=["\']ir-site-verification-token["\'][^>]*content=["\']\d+["\'][^>]*>',
+                        "",
+                        cleaned,
+                        flags=re.IGNORECASE,
+                    )
+                if "2987330" in cleaned:
+                    cleaned = re.sub(
+                        r'(<meta\b[^>]*name=["\']sovrn-commerce-domain-key["\'][^>]*content=["\'])2987330(["\'][^>]*>)',
+                        r"\g<1>0a5ac1bfe04034bff021b394f5e71d90\2",
+                        cleaned,
+                        flags=re.IGNORECASE,
+                    )
+            return cleaned + tail_chunk
 
         def _meta_line_present(line: str, html_doc: str) -> bool:
             stripped = line.strip()
@@ -13150,16 +13164,6 @@ class RetroReflectionEngine:
             from pseofactory.compiler import compile_lienbond_estate
 
             compile_lienbond_estate(d.parent if d.name == "dist" else d, run_retrofit=False)
-
-        try:
-            from pseofactory.tenant_facts import TruthReconciliationEngine
-            TruthReconciliationEngine.reconcile_estate_assets(
-                dist_dir=d,
-                property_id=property_id,
-                repo_root=d.parent if d.parent.is_dir() else None,
-            )
-        except Exception:
-            pass
 
         # Sanitize any truncated CFR/EU descriptions or chopped short_titles in deployed_voids.json
         if d.parent.is_dir():
@@ -14369,6 +14373,7 @@ def _execute_autonomous_downstream_chain(
         )
         pre_report = preflight_engine.inspect_dist(adapter.dist_dir)
         eligible_urls = list(pre_report.push_eligible_urls)
+        preflight_act_id = f"act-{adapter.property_id}-{adapter.property_id}-indexing-preflight-gate-integration-requirement"
         if pre_report.blocked_urls and not dry_run:
             q_file = repo_root / ".agy" / "indexing_quarantine_ledger.json"
             preflight_engine.quarantine_blocked_urls(pre_report.blocked_urls, ledger_path=q_file)
@@ -14383,6 +14388,19 @@ def _execute_autonomous_downstream_chain(
                 missing_requirements=[f"Resolve preflight block on {u}" for u in pre_report.blocked_urls[:5]],
             )
             exceptions_routed.append(act.action_id)
+        elif (
+            not pre_report.blocked_urls
+            and not dry_run
+            and hasattr(bus, "items")
+            and preflight_act_id in bus.items
+            and getattr(bus.items[preflight_act_id], "status", "") == "PENDING_OPERATOR"
+        ):
+            bus.confirm_decision(
+                preflight_act_id,
+                decision="RESOLVE",
+                operator="indexing_preflight_airlock",
+                notes=f"Resolved: {adapter.domain} dist passed IndexingPreflightEngine airlock inspection with zero blocked URLs.",
+            )
         summary["preflight_status"] = "AIRLOCK_PASSED" if not pre_report.blocked_urls else "PARTIAL_QUARANTINE"
         summary["preflight_eligible_count"] = len(eligible_urls)
     except Exception as pre_err:
@@ -15051,7 +15069,7 @@ def reflect_and_recompile_all_assets(
                 pass
             try:
                 from pseofactory.gitops import sync_tenant_test_isolation_guards
-                sync_tenant_test_isolation_guards(adapter.repo_path)
+                sync_tenant_test_isolation_guards(adapter.repo_path, adapter.property_id)
             except Exception:
                 pass
 

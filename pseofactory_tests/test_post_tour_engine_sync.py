@@ -440,7 +440,40 @@ def test_monetization_vault_post_tour_baseline_snapshot() -> None:
 def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_backoff(
     tmp_path: Path,
 ) -> None:
+    import os
+    import subprocess
+    import yaml
     from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+    fake_bin = tmp_path / "fake_bin"
+    fake_bin.mkdir(parents=True)
+    fake_npx = fake_bin / "npx"
+    fake_npx.write_text(
+        "#!/usr/bin/env bash\n"
+        'count_file="${FAKE_NPX_COUNT_FILE:?}"\n'
+        'succeed_on="${FAKE_NPX_SUCCEED_ON:-0}"\n'
+        'cur=$(cat "$count_file" 2>/dev/null || echo 0)\n'
+        "cur=$((cur + 1))\n"
+        'echo "$cur" > "$count_file"\n'
+        'echo "$*" >> "${FAKE_NPX_ARGS_FILE:?}"\n'
+        'if [ "$succeed_on" -gt 0 ] && [ "$cur" -ge "$succeed_on" ]; then\n'
+        '  echo "Deployment complete!"\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "ERROR [code: 10429] Too Many Requests" >&2\n'
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake_npx.chmod(0o755)
+
+    fake_sleep = fake_bin / "sleep"
+    fake_sleep.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "$*" >> "${FAKE_SLEEP_LOG:?}"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_sleep.chmod(0o755)
 
     for repo_name, pkg_name, prop_id in (
         ("profithelm-platform", "profithelm", "profithelm"),
@@ -462,4 +495,251 @@ def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_ba
         assert "sleep $((attempt * 12))" in ci_text
         assert "\u2014" not in ci_text
         assert "\u2013" not in ci_text
+
+        parsed_ci = yaml.safe_load(ci_text)
+        assert isinstance(parsed_ci, dict)
+        jobs = parsed_ci.get("jobs") or {}
+        deploy_run_script = None
+        for job_spec in jobs.values():
+            for step in job_spec.get("steps") or []:
+                if step.get("name") == "Deploy to Cloudflare Pages Edge":
+                    deploy_run_script = step.get("run")
+        assert isinstance(deploy_run_script, str) and deploy_run_script.strip()
+        assert "${{" not in deploy_run_script
+
+        # Case (a): 3 rate-limit 10429 failures followed by 4th attempt success under bash -eo pipefail -> exits 0
+        cnt_ok = tmp_path / f"{prop_id}_ok_count.txt"
+        args_ok = tmp_path / f"{prop_id}_ok_args.txt"
+        sleep_ok = tmp_path / f"{prop_id}_ok_sleep.txt"
+        env_ok = {
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+            "FAKE_NPX_COUNT_FILE": str(cnt_ok),
+            "FAKE_NPX_ARGS_FILE": str(args_ok),
+            "FAKE_NPX_SUCCEED_ON": "4",
+            "FAKE_SLEEP_LOG": str(sleep_ok),
+        }
+        proc_ok = subprocess.run(
+            ["bash", "-eo", "pipefail", "-c", deploy_run_script],
+            cwd=repo_dir,
+            env=env_ok,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc_ok.returncode == 0, f"{prop_id} 4th-attempt recovery failed: {proc_ok.stderr}"
+        assert cnt_ok.read_text(encoding="utf-8").strip() == "4"
+        assert sleep_ok.read_text(encoding="utf-8").splitlines() == ["12", "24", "36"]
+        assert prop_id in args_ok.read_text(encoding="utf-8")
+
+        # Case (b): 4 consecutive rate-limit 10429 failures under bash -eo pipefail -> fails closed (returncode != 0)
+        cnt_fail = tmp_path / f"{prop_id}_fail_count.txt"
+        args_fail = tmp_path / f"{prop_id}_fail_args.txt"
+        sleep_fail = tmp_path / f"{prop_id}_fail_sleep.txt"
+        env_fail = {
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+            "FAKE_NPX_COUNT_FILE": str(cnt_fail),
+            "FAKE_NPX_ARGS_FILE": str(args_fail),
+            "FAKE_NPX_SUCCEED_ON": "0",
+            "FAKE_SLEEP_LOG": str(sleep_fail),
+        }
+        proc_fail = subprocess.run(
+            ["bash", "-eo", "pipefail", "-c", deploy_run_script],
+            cwd=repo_dir,
+            env=env_fail,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc_fail.returncode != 0
+        assert cnt_fail.read_text(encoding="utf-8").strip() == "4"
+        assert sleep_fail.read_text(encoding="utf-8").splitlines() == ["12", "24", "36"]
+
+
+def test_legacy_duplicate_cloudflare_workflows_removed_and_reflect_no_gitops_syncs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import argparse
+    from pseofactory import cli as cli_mod
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+    from pseofactory.maintenance import SubprocessPropertyAdapter
+
+    ph_dir = tmp_path / "profithelm-platform"
+    (ph_dir / "profithelm").mkdir(parents=True)
+    ph_wf = ph_dir / ".github" / "workflows"
+    ph_wf.mkdir(parents=True)
+    (ph_wf / "ci.yml").write_text("name: old\n", encoding="utf-8")
+    (ph_wf / "deploy-google.yml").write_text("name: old-google\n", encoding="utf-8")
+    (ph_wf / "deploy-cloudflare.yml").write_text(
+        "name: Legacy Duplicate Deploy\non: [push]\njobs:\n  d:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npx wrangler pages deploy dist\n",
+        encoding="utf-8",
+    )
+
+    px_dir = tmp_path / "prexvo"
+    (px_dir / "prexvo").mkdir(parents=True)
+    px_wf = px_dir / ".github" / "workflows"
+    px_wf.mkdir(parents=True)
+    (px_wf / "ci.yml").write_text("name: old\n", encoding="utf-8")
+    (px_wf / "deploy_cloudflare_pages.yml").write_text(
+        "name: Legacy Prexvo Duplicate Deploy\non: [push]\njobs:\n  d:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npx wrangler pages deploy dist\n",
+        encoding="utf-8",
+    )
+
+    # Prove cmd_reflect with --no-gitops (Stage 3b entrypoint before child release_pipeline.sh)
+    # updates ci.yml AND removes legacy duplicate Cloudflare workflows deterministically.
+    def _fake_reflect(**kwargs: Any) -> Dict[str, Any]:
+        return {
+            "status": "PASS",
+            "properties_scanned": 2,
+            "total_assets_checked": 2,
+            "total_drifted": 0,
+            "total_recompiled": 0,
+            "total_retrofitted": 0,
+            "property_reports": {
+                "profithelm": {"final_status": "PASS", "recompiled": 0, "retrofitted": 0},
+                "prexvo": {"final_status": "PASS", "recompiled": 0, "retrofitted": 0},
+            },
+        }
+
+    class _DummyRegistry:
+        def get_adapter(self, pid: str) -> SubprocessPropertyAdapter:
+            if pid == "profithelm":
+                return SubprocessPropertyAdapter(
+                    property_id="profithelm",
+                    brand_name="ProfitHelm",
+                    domain="profithelm.com",
+                    canonical_base="https://profithelm.com",
+                    dist_dir=ph_dir / "dist",
+                    repo_path=ph_dir,
+                )
+            return SubprocessPropertyAdapter(
+                property_id="prexvo",
+                brand_name="Prexvo",
+                domain="prexvo.com",
+                canonical_base="https://prexvo.com",
+                dist_dir=px_dir / "dist",
+                repo_path=px_dir,
+            )
+
+    monkeypatch.setattr(cli_mod, "reflect_and_recompile_all_assets", _fake_reflect)
+    monkeypatch.setattr(cli_mod.TenantRegistry, "default", classmethod(lambda cls: _DummyRegistry()))
+
+    rc = cli_mod.cmd_reflect(
+        argparse.Namespace(property=None, force=True, verbose=False, no_gitops=True, json=True)
+    )
+    assert rc == 0
+    assert not (ph_wf / "deploy-cloudflare.yml").exists()
+    assert (ph_wf / "deploy-google.yml").is_file()
+    assert "for attempt in 1 2 3 4; do" in (ph_wf / "ci.yml").read_text(encoding="utf-8")
+
+    assert not (px_wf / "deploy_cloudflare_pages.yml").exists()
+    assert "for attempt in 1 2 3 4; do" in (px_wf / "ci.yml").read_text(encoding="utf-8")
+
+    # Idempotency check: second call reports 0 updated files
+    assert sync_tenant_test_isolation_guards(ph_dir, "profithelm")["updated_files"] == 0
+    assert sync_tenant_test_isolation_guards(px_dir, "prexvo")["updated_files"] == 0
+
+
+def test_partner_tracker_cj_graphql_errors_fail_closed_and_non_json_resilience(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pseofactory import partner_tracker
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.affiliates_hub import MonetizationHub
+    from pseofactory.email_ingest import EmailIngestionEngine
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+
+    secret_impact_tok = "IR_SECRET_TOK_FAIL_CLOSED_99"
+    secret_cj_tok = "CJ_SECRET_PAT_FAIL_CLOSED_88"
+    monkeypatch.setenv("IMPACT_ACCOUNT_SID", "IR_TEST_SID_7932737")
+    monkeypatch.setenv("IMPACT_AUTH_TOKEN", secret_impact_tok)
+    monkeypatch.setenv("CJ_PERSONAL_ACCESS_TOKEN", secret_cj_tok)
+    monkeypatch.setenv("CJ_PUBLISHER_ID", "8101803")
+    monkeypatch.setenv("PSEUFACTORY_LIVE_NETWORK", "1")
+    monkeypatch.delenv("PARTNERSTACK_API_KEY", raising=False)
+
+    class _RawHTTPResponse:
+        def __init__(self, body_bytes: bytes, status: int = 200) -> None:
+            self._body = body_bytes
+            self.status = status
+
+        def read(self, _amt: int = -1) -> bytes:
+            return self._body
+
+        def __enter__(self) -> "_RawHTTPResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+    # 1. CJ HTTP 200 with GraphQL errors ({"data": null, "errors": [{"message": "Expired PAT"}]}) MUST fail closed
+    def _gql_error_urlopen(req: Any, timeout: float = 10.0) -> _RawHTTPResponse:
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "commissions.api.cj.com/query" in url:
+            return _RawHTTPResponse(
+                json.dumps({"data": None, "errors": [{"message": f"Expired PAT {secret_cj_tok}"}]}).encode("utf-8")
+            )
+        if "api.impact.com" in url:
+            return _RawHTTPResponse(json.dumps({"Records": []}).encode("utf-8"))
+        raise RuntimeError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", _gql_error_urlopen)
+    tracker = PartnerTrackingEngine(
+        hub=MonetizationHub(),
+        email_engine=EmailIngestionEngine(
+            cache_path=str(tmp_path / "ec.json"),
+            state_path=str(tmp_path / "es.json"),
+        ),
+        action_bus=HumanActionBus(bus_path=str(tmp_path / "bus.json")),
+    )
+    gql_res = tracker.sync_partner_earnings_and_balances(
+        ledger_path=str(tmp_path / "gql_err_ledger.json"),
+        fetch_live_api=True,
+        persist=False,
+    )
+    cj_portal = gql_res["portals"]["cj_affiliate"]
+    assert cj_portal["auth_status"] == "AUTH_FAILED"
+    assert cj_portal["is_authenticated_and_syncing"] is False
+    assert cj_portal["live_api_polled_in_current_run"] is False
+    assert "Expired PAT" in (cj_portal["uncollected_telemetry_reason"] or "")
+    assert secret_cj_tok not in json.dumps(gql_res)
+
+    poll_cj_fn = getattr(partner_tracker, "_poll_cj_graphql_commissions", None)
+    assert callable(poll_cj_fn)
+    direct_cj = poll_cj_fn(secret_cj_tok, "8101803")
+    assert direct_cj["ok"] is False
+    assert direct_cj["status"] == "AUTH_FAILED"
+    assert direct_cj["auth_status"] != "AUTHENTICATED_SYNCING"
+    assert direct_cj["is_authenticated_and_syncing"] is False
+    assert secret_cj_tok not in json.dumps(direct_cj)
+
+    # 2. Non-JSON HTTP 200 HTML WAF payloads from both Impact and CJ must NOT raise JSONDecodeError
+    def _html_waf_urlopen(req: Any, timeout: float = 10.0) -> _RawHTTPResponse:
+        return _RawHTTPResponse(b"<!DOCTYPE html><html><body>502 Bad Gateway</body></html>", status=200)
+
+    monkeypatch.setattr("urllib.request.urlopen", _html_waf_urlopen)
+    waf_res = tracker.sync_partner_earnings_and_balances(
+        ledger_path=str(tmp_path / "waf_ledger.json"),
+        fetch_live_api=True,
+        persist=False,
+    )
+    assert waf_res["portals"]["impact"]["auth_status"] == "API_ERROR"
+    assert waf_res["portals"]["impact"]["is_authenticated_and_syncing"] is False
+    assert waf_res["portals"]["impact"]["live_api_polled_in_current_run"] is False
+    assert waf_res["portals"]["cj_affiliate"]["auth_status"] == "API_ERROR"
+    assert waf_res["portals"]["cj_affiliate"]["is_authenticated_and_syncing"] is False
+    assert waf_res["portals"]["cj_affiliate"]["live_api_polled_in_current_run"] is False
+
+    poll_imp_fn = getattr(partner_tracker, "_poll_impact_api_v16", None)
+    assert callable(poll_imp_fn)
+    direct_imp_html = poll_imp_fn("IR_TEST_SID_7932737", secret_impact_tok)
+    direct_cj_html = poll_cj_fn(secret_cj_tok, "8101803")
+    assert direct_imp_html["ok"] is False
+    assert direct_imp_html["status"] == "API_ERROR"
+    assert direct_cj_html["ok"] is False
+    assert direct_cj_html["status"] == "API_ERROR"
+
 

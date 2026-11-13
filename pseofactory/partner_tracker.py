@@ -231,6 +231,299 @@ def _load_local_env(dotenv_path: Optional[str] = None) -> List[str]:
     return loaded_keys
 
 
+def _sanitize_poller_error_text(raw_msg: Any, secrets_to_redact: Tuple[str, ...] = ()) -> str:
+    text = str(raw_msg or "").replace("\u2014", "-").replace("\u2013", "-").strip()
+    for sec in secrets_to_redact:
+        if sec and sec in text:
+            text = text.replace(sec, "[REDACTED]")
+    return text[:240] if text else "Upstream API error"
+
+
+def _poll_impact_api_v16(
+    impact_sid: str,
+    impact_tok: str,
+    impact_ver: str = "16",
+    timeout: float = 6.0,
+) -> Dict[str, Any]:
+    """
+    Polls Impact REST API v16 partner_performance_by_program report headlessly.
+    Fails closed on non-JSON HTTP 200 payloads, missing Records lists, or HTTP auth errors.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import base64
+    import urllib.error
+    import urllib.request
+
+    sid = str(impact_sid or "").strip()
+    tok = str(impact_tok or "").strip()
+    ver = str(impact_ver or "16").strip() or "16"
+    today_yyyy_mm_dd = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    impact_url = (
+        f"https://api.impact.com/Mediapartners/{sid}/Reports/"
+        f"partner_performance_by_program?START_DATE=2026-01-01&END_DATE={today_yyyy_mm_dd}"
+    )
+    basic_b64 = base64.b64encode(f"{sid}:{tok}".encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(
+        impact_url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Authorization": f"Basic {basic_b64}",
+            "Accept": "application/json",
+            "IR-Version": ver,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_body = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as http_err:
+        status_code = getattr(http_err, "code", 500)
+        err_state = "AUTH_FAILED" if status_code in (401, 403) else "API_ERROR"
+        return {
+            "ok": False,
+            "status": err_state,
+            "auth_status": err_state,
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": f"Impact REST API v16 returned HTTP {status_code}.",
+        }
+    except Exception as net_err:
+        return {
+            "ok": False,
+            "status": "OFFLINE",
+            "auth_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": _sanitize_poller_error_text(net_err, (tok, basic_b64)),
+        }
+
+    try:
+        impact_resp = json.loads(raw_body)
+    except (ValueError, json.JSONDecodeError):
+        return {
+            "ok": False,
+            "status": "API_ERROR",
+            "auth_status": "API_ERROR",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": "Impact REST API v16 returned a non-JSON HTTP 200 payload.",
+        }
+
+    if not isinstance(impact_resp, dict):
+        return {
+            "ok": False,
+            "status": "API_ERROR",
+            "auth_status": "API_ERROR",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": "Impact REST API v16 returned an unexpected JSON root type.",
+        }
+
+    impact_records = impact_resp.get("Records")
+    if not isinstance(impact_records, list):
+        impact_records = impact_resp.get("records")
+    if not isinstance(impact_records, list):
+        err_msg = _sanitize_poller_error_text(
+            impact_resp.get("message") or impact_resp.get("error") or "Missing Records array in Impact response",
+            (tok, basic_b64),
+        )
+        low_msg = err_msg.lower()
+        err_state = (
+            "AUTH_FAILED"
+            if any(k in low_msg for k in ("unauthoriz", "auth", "token", "expired", "forbidden", "credential", "invalid"))
+            else "API_ERROR"
+        )
+        return {
+            "ok": False,
+            "status": err_state,
+            "auth_status": err_state,
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": f"Impact REST API v16 error: {err_msg}",
+        }
+
+    total_impact_clicks = 0
+    total_impact_actions = 0
+    total_impact_cost = 0.0
+    for rec in impact_records:
+        if not isinstance(rec, dict):
+            continue
+        try:
+            total_impact_clicks += int(float(rec.get("Clicks") or rec.get("clicks") or 0))
+        except (TypeError, ValueError):
+            pass
+        try:
+            total_impact_actions += int(float(rec.get("Actions") or rec.get("actions") or 0))
+        except (TypeError, ValueError):
+            pass
+        try:
+            cost_raw = (
+                rec.get("Total_Cost")
+                if rec.get("Total_Cost") not in (None, "")
+                else (rec.get("Action_Cost") or rec.get("Payout") or 0.0)
+            )
+            total_impact_cost += float(cost_raw or 0.0)
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "ok": True,
+        "status": "AUTHENTICATED_SYNCING",
+        "auth_status": "AUTHENTICATED_SYNCING",
+        "is_authenticated_and_syncing": True,
+        "live_api_polled_in_current_run": True,
+        "portal_verified_clicks": total_impact_clicks,
+        "conversions_count": total_impact_actions,
+        "realized_commission_usd": round(total_impact_cost, 2),
+        "error": None,
+    }
+
+
+def _poll_cj_graphql_commissions(
+    cj_pat: str,
+    cj_pub_id: str = "8101803",
+    timeout: float = 6.0,
+) -> Dict[str, Any]:
+    """
+    Polls CJ GraphQL Commissions API headlessly.
+    Fails closed when HTTP 200 contains non-empty GraphQL errors or non-JSON payloads.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import urllib.error
+    import urllib.request
+
+    pat = str(cj_pat or "").strip()
+    pub_id = str(cj_pub_id or "8101803").strip() or "8101803"
+    now_utc = datetime.now(timezone.utc)
+    since_iso = (now_utc - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00Z")
+    before_iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    cj_query = (
+        '{ publisherCommissions(forPublishers: ["%s"], sincePostingDate: "%s", beforePostingDate: "%s") '
+        "{ count payloadComplete records { actionTrackerName pubCommissionAmountUsd } } }"
+        % (pub_id, since_iso, before_iso)
+    )
+    cj_req = urllib.request.Request(
+        "https://commissions.api.cj.com/query",
+        data=json.dumps({"query": cj_query}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {pat}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(cj_req, timeout=timeout) as cj_http_resp:
+            raw_body = cj_http_resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as http_err:
+        status_code = getattr(http_err, "code", 500)
+        err_state = "AUTH_FAILED" if status_code in (401, 403) else "API_ERROR"
+        return {
+            "ok": False,
+            "status": err_state,
+            "auth_status": err_state,
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": f"CJ GraphQL Commissions API returned HTTP {status_code}.",
+        }
+    except Exception as net_err:
+        return {
+            "ok": False,
+            "status": "OFFLINE",
+            "auth_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": _sanitize_poller_error_text(net_err, (pat,)),
+        }
+
+    try:
+        cj_payload = json.loads(raw_body)
+    except (ValueError, json.JSONDecodeError):
+        return {
+            "ok": False,
+            "status": "API_ERROR",
+            "auth_status": "API_ERROR",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": "CJ GraphQL Commissions API returned a non-JSON HTTP 200 payload.",
+        }
+
+    if not isinstance(cj_payload, dict):
+        return {
+            "ok": False,
+            "status": "API_ERROR",
+            "auth_status": "API_ERROR",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": "CJ GraphQL Commissions API returned an unexpected JSON root type.",
+        }
+
+    gql_errors = cj_payload.get("errors")
+    if gql_errors:
+        extracted_msgs: List[str] = []
+        if isinstance(gql_errors, list):
+            for err_item in gql_errors:
+                if isinstance(err_item, dict):
+                    msg_val = err_item.get("message") or err_item.get("code") or str(err_item)
+                    extracted_msgs.append(_sanitize_poller_error_text(msg_val, (pat,)))
+                else:
+                    extracted_msgs.append(_sanitize_poller_error_text(err_item, (pat,)))
+        else:
+            extracted_msgs.append(_sanitize_poller_error_text(gql_errors, (pat,)))
+        joined_err = "; ".join(m for m in extracted_msgs if m) or "GraphQL query error"
+        low_err = joined_err.lower()
+        err_state = (
+            "AUTH_FAILED"
+            if any(k in low_err for k in ("expired", "pat", "token", "unauthoriz", "forbidden", "invalid", "credential", "auth"))
+            else "API_ERROR"
+        )
+        return {
+            "ok": False,
+            "status": err_state,
+            "auth_status": err_state,
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": f"CJ GraphQL API error: {joined_err}",
+        }
+
+    data_obj = cj_payload.get("data")
+    pub_comms = data_obj.get("publisherCommissions") if isinstance(data_obj, dict) else None
+    if not isinstance(pub_comms, dict):
+        return {
+            "ok": False,
+            "status": "API_ERROR",
+            "auth_status": "API_ERROR",
+            "is_authenticated_and_syncing": False,
+            "live_api_polled_in_current_run": False,
+            "error": "CJ GraphQL API response missing data.publisherCommissions object.",
+        }
+
+    cj_records = pub_comms.get("records")
+    if not isinstance(cj_records, list):
+        cj_records = []
+    cj_comm_usd = 0.0
+    for cj_rec in cj_records:
+        if not isinstance(cj_rec, dict):
+            continue
+        try:
+            cj_comm_usd += float(cj_rec.get("pubCommissionAmountUsd") or 0.0)
+        except (TypeError, ValueError):
+            pass
+    raw_cnt = pub_comms.get("count")
+    cj_conv_cnt = int(raw_cnt) if raw_cnt is not None else len(cj_records)
+    return {
+        "ok": True,
+        "status": "AUTHENTICATED_SYNCING",
+        "auth_status": "AUTHENTICATED_SYNCING",
+        "is_authenticated_and_syncing": True,
+        "live_api_polled_in_current_run": True,
+        "conversions_count": cj_conv_cnt,
+        "realized_commission_usd": round(cj_comm_usd, 2),
+        "error": None,
+    }
+
+
 class PartnerTrackingEngine:
     """
     Central coordinator reconciling affiliate registries, inbound email correspondence,
@@ -250,6 +543,28 @@ class PartnerTrackingEngine:
         self.action_bus = action_bus or HumanActionBus()
         self.monetization_hub = monetization_hub or hub or MonetizationHub()
         self.hub = self.monetization_hub
+
+    def _poll_impact_api_v16(
+        self,
+        impact_sid: Optional[str] = None,
+        impact_tok: Optional[str] = None,
+        impact_ver: Optional[str] = None,
+        timeout: float = 6.0,
+    ) -> Dict[str, Any]:
+        sid = str(impact_sid if impact_sid is not None else (os.getenv("IMPACT_ACCOUNT_SID") or "")).strip()
+        tok = str(impact_tok if impact_tok is not None else (os.getenv("IMPACT_AUTH_TOKEN") or "")).strip()
+        ver = str(impact_ver if impact_ver is not None else (os.getenv("IMPACT_API_VERSION") or "16")).strip() or "16"
+        return _poll_impact_api_v16(sid, tok, ver, timeout=timeout)
+
+    def _poll_cj_graphql_commissions(
+        self,
+        cj_pat: Optional[str] = None,
+        cj_pub_id: Optional[str] = None,
+        timeout: float = 6.0,
+    ) -> Dict[str, Any]:
+        pat = str(cj_pat if cj_pat is not None else (os.getenv("CJ_PERSONAL_ACCESS_TOKEN") or "")).strip()
+        pub_id = str(cj_pub_id if cj_pub_id is not None else (os.getenv("CJ_PUBLISHER_ID") or "8101803")).strip() or "8101803"
+        return _poll_cj_graphql_commissions(pat, pub_id, timeout=timeout)
 
     def rank_pending_partner_approvals(
         self,
@@ -723,6 +1038,41 @@ class PartnerTrackingEngine:
                         network="CJ Affiliate",
                     )
                 )
+
+            from pathlib import Path as _Path
+            tenant_dist_map = {
+                "profithelm": ("profithelm.com", _Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
+                "prexvo": ("prexvo.com", _Path("/home/ubuntuadmin/projects/prexvo/dist")),
+                "gainhelm": ("gainhelm.com", _Path("/home/ubuntuadmin/projects/gainhelm/dist")),
+                "lienbond": ("lienbond.com", _Path("/home/ubuntuadmin/projects/lienbond/dist")),
+            }
+            for pf_act_id, pf_item in list(self.action_bus.items.items()):
+                if (
+                    pf_item.status == "PENDING_OPERATOR"
+                    and str(pf_item.partner_key or "").endswith("_indexing_preflight_gate")
+                    and pf_item.property_id in tenant_dist_map
+                ):
+                    pf_domain, pf_dist = tenant_dist_map[pf_item.property_id]
+                    if pf_dist.is_dir():
+                        try:
+                            from pseofactory.indexing.preflight import IndexingPreflightEngine
+                            pf_rep = IndexingPreflightEngine(
+                                property_id=pf_item.property_id,
+                                domain=pf_domain,
+                                dist_dir=pf_dist,
+                            ).inspect_dist(pf_dist)
+                            if pf_rep.blocked_count == 0:
+                                self.action_bus.confirm_decision(
+                                    pf_act_id,
+                                    decision="RESOLVE",
+                                    operator="partner_tracker_auto_reconcile",
+                                    notes=(
+                                        f"Resolved: {pf_domain} dist passed IndexingPreflightEngine "
+                                        "airlock inspection with zero blocked URLs."
+                                    ),
+                                )
+                        except Exception:
+                            pass
 
     def _evaluate_property(
         self,
@@ -2571,119 +2921,66 @@ class PartnerTrackingEngine:
             impact_tok = str(os.getenv("IMPACT_AUTH_TOKEN") or "").strip()
             impact_ver = str(os.getenv("IMPACT_API_VERSION") or "16").strip() or "16"
             if impact_sid and impact_tok:
-                today_yyyy_mm_dd = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                impact_url = (
-                    f"https://api.impact.com/Mediapartners/{impact_sid}/Reports/"
-                    f"partner_performance_by_program?START_DATE=2026-01-01&END_DATE={today_yyyy_mm_dd}"
+                impact_poll = self._poll_impact_api_v16(
+                    impact_sid=impact_sid,
+                    impact_tok=impact_tok,
+                    impact_ver=impact_ver,
+                    timeout=timeout,
                 )
-                basic_b64 = base64.b64encode(f"{impact_sid}:{impact_tok}".encode("utf-8")).decode("ascii")
-                impact_resp = _fetch_json_live(
-                    impact_url,
-                    {
-                        "Authorization": f"Basic {basic_b64}",
-                        "Accept": "application/json",
-                        "IR-Version": impact_ver,
-                    },
-                )
-                if isinstance(impact_resp, dict):
-                    impact_records = impact_resp.get("Records")
-                    if not isinstance(impact_records, list):
-                        impact_records = impact_resp.get("records")
-                    if isinstance(impact_records, list):
-                        total_impact_clicks = 0
-                        total_impact_actions = 0
-                        total_impact_cost = 0.0
-                        for rec in impact_records:
-                            if not isinstance(rec, dict):
-                                continue
-                            try:
-                                total_impact_clicks += int(
-                                    float(rec.get("Clicks") or rec.get("clicks") or 0)
-                                )
-                            except (TypeError, ValueError):
-                                pass
-                            try:
-                                total_impact_actions += int(
-                                    float(rec.get("Actions") or rec.get("actions") or 0)
-                                )
-                            except (TypeError, ValueError):
-                                pass
-                            try:
-                                cost_raw = (
-                                    rec.get("Total_Cost")
-                                    if rec.get("Total_Cost") not in (None, "")
-                                    else (rec.get("Action_Cost") or rec.get("Payout") or 0.0)
-                                )
-                                total_impact_cost += float(cost_raw or 0.0)
-                            except (TypeError, ValueError):
-                                pass
-                        portals_state["impact"]["portal_verified_clicks"] = total_impact_clicks
-                        portals_state["impact"]["raw_clicks"] = max(
-                            int(portals_state["impact"].get("raw_clicks", 0) or 0),
-                            total_impact_clicks,
+                if impact_poll.get("ok"):
+                    total_impact_clicks = int(impact_poll.get("portal_verified_clicks", 0) or 0)
+                    portals_state["impact"]["portal_verified_clicks"] = total_impact_clicks
+                    portals_state["impact"]["raw_clicks"] = max(
+                        int(portals_state["impact"].get("raw_clicks", 0) or 0),
+                        total_impact_clicks,
+                    )
+                    portals_state["impact"]["conversions_count"] = int(impact_poll.get("conversions_count", 0) or 0)
+                    portals_state["impact"]["realized_commission_usd"] = float(
+                        impact_poll.get("realized_commission_usd", 0.0) or 0.0
+                    )
+                    portals_state["impact"]["sync_mechanism"] = "IMPACT_REST_API_V16"
+                    portals_state["impact"]["auth_status"] = "AUTHENTICATED_SYNCING"
+                    portals_state["impact"]["is_authenticated_and_syncing"] = True
+                    portals_state["impact"]["live_api_polled_in_current_run"] = True
+                    portals_state["impact"]["uncollected_telemetry_reason"] = None
+                    portals_state["impact"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+                else:
+                    portals_state["impact"]["is_authenticated_and_syncing"] = False
+                    portals_state["impact"]["live_api_polled_in_current_run"] = False
+                    if impact_poll.get("status") != "OFFLINE":
+                        portals_state["impact"]["auth_status"] = str(impact_poll.get("auth_status") or "API_ERROR")
+                        portals_state["impact"]["uncollected_telemetry_reason"] = str(
+                            impact_poll.get("error") or "Impact REST API v16 poll failed."
                         )
-                        portals_state["impact"]["conversions_count"] = total_impact_actions
-                        portals_state["impact"]["realized_commission_usd"] = round(total_impact_cost, 2)
-                        portals_state["impact"]["sync_mechanism"] = "IMPACT_REST_API_V16"
-                        portals_state["impact"]["auth_status"] = "AUTHENTICATED_SYNCING"
-                        portals_state["impact"]["is_authenticated_and_syncing"] = True
-                        portals_state["impact"]["live_api_polled_in_current_run"] = True
-                        portals_state["impact"]["uncollected_telemetry_reason"] = None
-                        portals_state["impact"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
 
             # 4. CJ GraphQL Commissions API headless poller
             cj_pat = str(os.getenv("CJ_PERSONAL_ACCESS_TOKEN") or "").strip()
             cj_pub_id = str(os.getenv("CJ_PUBLISHER_ID") or cj_cfg.get("publisher_id") or "8101803").strip()
             if cj_pat and cj_pub_id:
-                now_utc = datetime.now(timezone.utc)
-                since_iso = (now_utc - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00Z")
-                before_iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-                cj_query = (
-                    '{ publisherCommissions(forPublishers: ["%s"], sincePostingDate: "%s", beforePostingDate: "%s") '
-                    "{ count payloadComplete records { actionTrackerName pubCommissionAmountUsd } } }"
-                    % (cj_pub_id, since_iso, before_iso)
+                cj_poll = self._poll_cj_graphql_commissions(
+                    cj_pat=cj_pat,
+                    cj_pub_id=cj_pub_id,
+                    timeout=timeout,
                 )
-                try:
-                    cj_req = urllib.request.Request(
-                        "https://commissions.api.cj.com/query",
-                        data=json.dumps({"query": cj_query}).encode("utf-8"),
-                        headers={
-                            "Authorization": f"Bearer {cj_pat}",
-                            "Content-Type": "application/json",
-                            "Accept": "application/json",
-                            "User-Agent": "Mozilla/5.0",
-                        },
-                        method="POST",
+                if cj_poll.get("ok"):
+                    portals_state["cj_affiliate"]["conversions_count"] = int(cj_poll.get("conversions_count", 0) or 0)
+                    portals_state["cj_affiliate"]["realized_commission_usd"] = float(
+                        cj_poll.get("realized_commission_usd", 0.0) or 0.0
                     )
-                    with urllib.request.urlopen(cj_req, timeout=timeout) as cj_http_resp:
-                        cj_payload = json.loads(cj_http_resp.read().decode("utf-8", errors="replace"))
-                except Exception:
-                    cj_payload = None
-
-                if isinstance(cj_payload, dict) and not cj_payload.get("errors"):
-                    pub_comms = (cj_payload.get("data") or {}).get("publisherCommissions")
-                    if isinstance(pub_comms, dict):
-                        cj_records = pub_comms.get("records")
-                        if not isinstance(cj_records, list):
-                            cj_records = []
-                        cj_comm_usd = 0.0
-                        for cj_rec in cj_records:
-                            if not isinstance(cj_rec, dict):
-                                continue
-                            try:
-                                cj_comm_usd += float(cj_rec.get("pubCommissionAmountUsd") or 0.0)
-                            except (TypeError, ValueError):
-                                pass
-                        raw_cnt = pub_comms.get("count")
-                        cj_conv_cnt = int(raw_cnt) if raw_cnt is not None else len(cj_records)
-                        portals_state["cj_affiliate"]["conversions_count"] = cj_conv_cnt
-                        portals_state["cj_affiliate"]["realized_commission_usd"] = round(cj_comm_usd, 2)
-                        portals_state["cj_affiliate"]["sync_mechanism"] = "CJ_GRAPHQL_COMMISSIONS_API"
-                        portals_state["cj_affiliate"]["auth_status"] = "AUTHENTICATED_SYNCING"
-                        portals_state["cj_affiliate"]["is_authenticated_and_syncing"] = True
-                        portals_state["cj_affiliate"]["live_api_polled_in_current_run"] = True
-                        portals_state["cj_affiliate"]["uncollected_telemetry_reason"] = None
-                        portals_state["cj_affiliate"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+                    portals_state["cj_affiliate"]["sync_mechanism"] = "CJ_GRAPHQL_COMMISSIONS_API"
+                    portals_state["cj_affiliate"]["auth_status"] = "AUTHENTICATED_SYNCING"
+                    portals_state["cj_affiliate"]["is_authenticated_and_syncing"] = True
+                    portals_state["cj_affiliate"]["live_api_polled_in_current_run"] = True
+                    portals_state["cj_affiliate"]["uncollected_telemetry_reason"] = None
+                    portals_state["cj_affiliate"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
+                else:
+                    portals_state["cj_affiliate"]["is_authenticated_and_syncing"] = False
+                    portals_state["cj_affiliate"]["live_api_polled_in_current_run"] = False
+                    if cj_poll.get("status") != "OFFLINE":
+                        portals_state["cj_affiliate"]["auth_status"] = str(cj_poll.get("auth_status") or "API_ERROR")
+                        portals_state["cj_affiliate"]["uncollected_telemetry_reason"] = str(
+                            cj_poll.get("error") or "CJ GraphQL Commissions API poll failed."
+                        )
 
             # 5. Optional Chrome CDP 9222 cookie extraction (strictly opt-in; never touches 9222 by default)
             if os.getenv("PSEOFACTORY_ENABLE_CDP_COOKIE_SYNC") == "1":

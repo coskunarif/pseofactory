@@ -480,6 +480,25 @@ def cmd_reflect(args: argparse.Namespace) -> int:
             latch_state=True,
             defer_live_indexing=True,
         )
+        from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+        reg = TenantRegistry.default()
+        for p_id, r_info in res.get("property_reports", {}).items():
+            if r_info.get("final_status") != "PASS":
+                continue
+            try:
+                adapter = reg.get_adapter(p_id)
+                repo_path = adapter.repo_path or adapter.dist_dir.parent
+                repo_resolved = Path(repo_path).resolve()
+                is_live_workspace_repo = str(repo_resolved).startswith("/home/ubuntuadmin/projects/")
+                is_unmerged_wt_engine = "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
+                if is_live_workspace_repo and ("PYTEST_CURRENT_TEST" in os.environ or is_unmerged_wt_engine):
+                    continue
+                if repo_resolved.is_dir():
+                    sync_tenant_test_isolation_guards(repo_resolved, p_id)
+            except Exception:
+                pass
+
         if not no_gitops:
             import subprocess
             from pseofactory.drift import (
@@ -487,10 +506,9 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                 record_engine_hash,
                 verify_all_tenants_aligned_for_latch,
             )
-            from pseofactory.gitops import GitOpsCoordinator, sync_tenant_test_isolation_guards
+            from pseofactory.gitops import GitOpsCoordinator
             from pseofactory.indexer import PushIndexer
 
-            reg = TenantRegistry.default()
             for p_id, r_info in res.get("property_reports", {}).items():
                 if r_info.get("final_status") != "PASS":
                     continue

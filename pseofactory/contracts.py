@@ -9160,6 +9160,18 @@ def tokenize_preserving_url_slugs(text: str) -> List[Tuple[bool, str]]:
     return tokens
 
 
+_FAST_STATUTORY_ACRONYM_GATE_RE = re.compile(
+    r"(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|C3pao|3pao|Cmmc|Tcja|Qsbs|Pci\s+Dss|Nist|Sprs|Dfars|HITRUST\s+Csf|CSF\s+E1|E1\s+I1|CMMC\s+2\s+0|PCI\s+DSS\s+4\s+0|/tools/[^\s\"'<>)\]]*[A-Z])"
+)
+_EXTRA_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
+    (re.compile(r"\bHITRUST\s+Csf\b"), "HITRUST CSF"),
+    (re.compile(r"\bCSF\s+E1\s+I1\s+R2\b"), "CSF e1, i1 & r2"),
+    (re.compile(r"\bE1\s+I1\s+R2\b"), "e1, i1 & r2"),
+    (re.compile(r"\bCMMC\s+2\s+0\b"), "CMMC 2.0"),
+    (re.compile(r"\bPCI\s+DSS\s+4\s+0\b"), "PCI DSS 4.0"),
+)
+
+
 def normalize_statutory_acronym_casing(text: str) -> str:
     """
     Normalizes statutory and regulatory acronym casing across titles, headings,
@@ -9169,6 +9181,8 @@ def normalize_statutory_acronym_casing(text: str) -> str:
     """
     if not isinstance(text, str) or not text:
         return ""
+    if "calculator" not in text.lower() and not _FAST_STATUTORY_ACRONYM_GATE_RE.search(text):
+        return text
     rebuilt: List[str] = []
     for is_slug_or_url, segment in tokenize_preserving_url_slugs(text):
         if is_slug_or_url:
@@ -9177,14 +9191,14 @@ def normalize_statutory_acronym_casing(text: str) -> str:
             else:
                 rebuilt.append(segment)
             continue
+        if "calculator" not in segment.lower() and not _FAST_STATUTORY_ACRONYM_GATE_RE.search(segment):
+            rebuilt.append(segment)
+            continue
         cleaned = segment
         for pat, repl in UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS:
             cleaned = pat.sub(repl, cleaned)
-        cleaned = re.sub(r"\bHITRUST\s+Csf\b", "HITRUST CSF", cleaned)
-        cleaned = re.sub(r"\bCSF\s+E1\s+I1\s+R2\b", "CSF e1, i1 & r2", cleaned)
-        cleaned = re.sub(r"\bE1\s+I1\s+R2\b", "e1, i1 & r2", cleaned)
-        cleaned = re.sub(r"\bCMMC\s+2\s+0\b", "CMMC 2.0", cleaned)
-        cleaned = re.sub(r"\bPCI\s+DSS\s+4\s+0\b", "PCI DSS 4.0", cleaned)
+        for pat, repl in _EXTRA_STATUTORY_ACRONYM_PATTERNS:
+            cleaned = pat.sub(repl, cleaned)
         rebuilt.append(cleaned)
     return "".join(rebuilt)
 

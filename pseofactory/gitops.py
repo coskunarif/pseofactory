@@ -4895,9 +4895,15 @@ def sync_tenant_test_isolation_guards(
     # without redundant full-site rebuilds, editable install corruption, or overlapping push races.
     workflows_dir = repo / ".github" / "workflows"
     ci_yml_path = workflows_dir / "ci.yml"
-    if ci_yml_path.is_file() or ((repo / "gainhelm").is_dir() and (repo / "pyproject.toml").is_file()):
+    if (
+        ci_yml_path.is_file()
+        or ((repo / "gainhelm").is_dir() and (repo / "pyproject.toml").is_file())
+        or ((repo / "lienbond").is_dir() and (repo / ".pseofactory.json").is_file())
+    ):
         try:
+            is_managed_tenant_ci = False
             if (repo / "profithelm").is_dir() and ci_yml_path.is_file():
+                is_managed_tenant_ci = True
                 desired_ph_ci = (
                     "name: ProfitHelm CI Quality Gate\n\n"
                     "on:\n"
@@ -4969,11 +4975,27 @@ def sync_tenant_test_isolation_guards(
                     "        env:\n"
                     "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
                     "        run: |\n"
-                    "          export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          case \"$(command -v npx 2>/dev/null || true)\" in\n"
+                    "            \"\"|/usr/*|/bin/*) export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\" ;;\n"
+                    "          esac\n"
                     "          if [ -f /home/ubuntuadmin/.config/.wrangler/config/default.toml ]; then\n"
                     "            unset CLOUDFLARE_API_TOKEN\n"
                     "          fi\n"
-                    "          npx wrangler pages deploy dist --project-name profithelm --branch main --commit-dirty=true\n"
+                    "          deployed=0\n"
+                    "          for attempt in 1 2 3 4; do\n"
+                    "            if npx wrangler pages deploy dist --project-name profithelm --branch main --commit-dirty=true; then\n"
+                    "              deployed=1\n"
+                    "              break\n"
+                    "            fi\n"
+                    "            if [ \"$attempt\" -lt 4 ]; then\n"
+                    "              echo \"Wrangler deploy attempt $attempt failed; retrying after $((attempt * 12))s backoff...\" >&2\n"
+                    "              sleep $((attempt * 12))\n"
+                    "            fi\n"
+                    "          done\n"
+                    "          if [ \"$deployed\" -ne 1 ]; then\n"
+                    "            echo \"Wrangler deploy failed after 4 attempts.\" >&2\n"
+                    "            exit 1\n"
+                    "          fi\n"
                 )
                 if ci_yml_path.read_text(encoding="utf-8") != desired_ph_ci:
                     ci_yml_path.write_text(desired_ph_ci, encoding="utf-8")
@@ -5022,6 +5044,7 @@ def sync_tenant_test_isolation_guards(
                         deploy_google_path.write_text(desired_dg, encoding="utf-8")
                         updated_files.append(str(deploy_google_path))
             elif (repo / "prexvo").is_dir() and ci_yml_path.is_file():
+                is_managed_tenant_ci = True
                 desired_px_ci = (
                     "name: Prexvo CI Quality Gate\n\n"
                     "on:\n"
@@ -5067,16 +5090,33 @@ def sync_tenant_test_isolation_guards(
                     "        env:\n"
                     "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
                     "        run: |\n"
-                    "          export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          case \"$(command -v npx 2>/dev/null || true)\" in\n"
+                    "            \"\"|/usr/*|/bin/*) export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\" ;;\n"
+                    "          esac\n"
                     "          if [ -f /home/ubuntuadmin/.config/.wrangler/config/default.toml ]; then\n"
                     "            unset CLOUDFLARE_API_TOKEN\n"
                     "          fi\n"
-                    "          npx wrangler pages deploy dist --project-name prexvo --branch main --commit-dirty=true\n"
+                    "          deployed=0\n"
+                    "          for attempt in 1 2 3 4; do\n"
+                    "            if npx wrangler pages deploy dist --project-name prexvo --branch main --commit-dirty=true; then\n"
+                    "              deployed=1\n"
+                    "              break\n"
+                    "            fi\n"
+                    "            if [ \"$attempt\" -lt 4 ]; then\n"
+                    "              echo \"Wrangler deploy attempt $attempt failed; retrying after $((attempt * 12))s backoff...\" >&2\n"
+                    "              sleep $((attempt * 12))\n"
+                    "            fi\n"
+                    "          done\n"
+                    "          if [ \"$deployed\" -ne 1 ]; then\n"
+                    "            echo \"Wrangler deploy failed after 4 attempts.\" >&2\n"
+                    "            exit 1\n"
+                    "          fi\n"
                 )
                 if ci_yml_path.read_text(encoding="utf-8") != desired_px_ci:
                     ci_yml_path.write_text(desired_px_ci, encoding="utf-8")
                     updated_files.append(str(ci_yml_path))
             elif (repo / "gainhelm").is_dir():
+                is_managed_tenant_ci = True
                 desired_gh_ci = (
                     "name: GainHelm CI Quality Gate\n\n"
                     "on:\n"
@@ -5122,11 +5162,27 @@ def sync_tenant_test_isolation_guards(
                     "        env:\n"
                     "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
                     "        run: |\n"
-                    "          export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\n"
+                    "          case \"$(command -v npx 2>/dev/null || true)\" in\n"
+                    "            \"\"|/usr/*|/bin/*) export PATH=\"/home/ubuntuadmin/.nvm/versions/node/v22.16.0/bin:/home/ubuntuadmin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH\" ;;\n"
+                    "          esac\n"
                     "          if [ -f /home/ubuntuadmin/.config/.wrangler/config/default.toml ]; then\n"
                     "            unset CLOUDFLARE_API_TOKEN\n"
                     "          fi\n"
-                    "          npx wrangler pages deploy dist --project-name gainhelm --branch main --commit-dirty=true\n"
+                    "          deployed=0\n"
+                    "          for attempt in 1 2 3 4; do\n"
+                    "            if npx wrangler pages deploy dist --project-name gainhelm --branch main --commit-dirty=true; then\n"
+                    "              deployed=1\n"
+                    "              break\n"
+                    "            fi\n"
+                    "            if [ \"$attempt\" -lt 4 ]; then\n"
+                    "              echo \"Wrangler deploy attempt $attempt failed; retrying after $((attempt * 12))s backoff...\" >&2\n"
+                    "              sleep $((attempt * 12))\n"
+                    "            fi\n"
+                    "          done\n"
+                    "          if [ \"$deployed\" -ne 1 ]; then\n"
+                    "            echo \"Wrangler deploy failed after 4 attempts.\" >&2\n"
+                    "            exit 1\n"
+                    "          fi\n"
                 )
                 cur_gh_ci = ci_yml_path.read_text(encoding="utf-8") if ci_yml_path.is_file() else ""
                 if cur_gh_ci != desired_gh_ci:
@@ -5134,6 +5190,7 @@ def sync_tenant_test_isolation_guards(
                     ci_yml_path.write_text(desired_gh_ci, encoding="utf-8")
                     updated_files.append(str(ci_yml_path))
             elif (repo / "lienbond").is_dir() and (ci_yml_path.is_file() or (repo / ".pseofactory.json").is_file()):
+                is_managed_tenant_ci = True
                 desired_lb_ci = (
                     "name: LienBond CI & Cloudflare Pages Deploy\n\n"
                     "on:\n"
@@ -5170,13 +5227,35 @@ def sync_tenant_test_isolation_guards(
                     "        env:\n"
                     "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
                     "          CLOUDFLARE_ACCOUNT_ID: '8789c54bef2d281d4a8afb4df34f9878'\n"
-                    "        run: npx wrangler pages deploy dist --project-name=lienbond --branch=main --commit-dirty=true\n"
+                    "        run: |\n"
+                    "          deployed=0\n"
+                    "          for attempt in 1 2 3 4; do\n"
+                    "            if npx wrangler pages deploy dist --project-name=lienbond --branch=main --commit-dirty=true; then\n"
+                    "              deployed=1\n"
+                    "              break\n"
+                    "            fi\n"
+                    "            if [ \"$attempt\" -lt 4 ]; then\n"
+                    "              echo \"Wrangler deploy attempt $attempt failed; retrying after $((attempt * 12))s backoff...\" >&2\n"
+                    "              sleep $((attempt * 12))\n"
+                    "            fi\n"
+                    "          done\n"
+                    "          if [ \"$deployed\" -ne 1 ]; then\n"
+                    "            echo \"Wrangler deploy failed after 4 attempts.\" >&2\n"
+                    "            exit 1\n"
+                    "          fi\n"
                 )
                 cur_lb_ci = ci_yml_path.read_text(encoding="utf-8") if ci_yml_path.is_file() else ""
                 if cur_lb_ci != desired_lb_ci:
                     workflows_dir.mkdir(parents=True, exist_ok=True)
                     ci_yml_path.write_text(desired_lb_ci, encoding="utf-8")
                     updated_files.append(str(ci_yml_path))
+
+            if is_managed_tenant_ci and ci_yml_path.is_file() and workflows_dir.is_dir():
+                for legacy_cf_wf_name in ("deploy-cloudflare.yml", "deploy_cloudflare_pages.yml"):
+                    legacy_cf_wf = workflows_dir / legacy_cf_wf_name
+                    if legacy_cf_wf.is_file():
+                        legacy_cf_wf.unlink()
+                        updated_files.append(str(legacy_cf_wf))
             if (
                 (repo / ".git").exists()
                 and (repo / "dist" / "catalog.json").is_file()
