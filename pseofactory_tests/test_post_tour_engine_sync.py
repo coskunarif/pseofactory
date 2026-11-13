@@ -435,3 +435,31 @@ def test_monetization_vault_post_tour_baseline_snapshot() -> None:
     assert cf_net["account_id"] == "8789c54bef2d281d4a8afb4df34f9878"
     assert cf_net["default_usage_model"] == "standard"
     assert cf_net["plan"] == "workers_paid"
+
+
+def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_backoff(
+    tmp_path: Path,
+) -> None:
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+    for repo_name, pkg_name, prop_id in (
+        ("profithelm-platform", "profithelm", "profithelm"),
+        ("prexvo", "prexvo", "prexvo"),
+        ("gainhelm", "gainhelm", "gainhelm"),
+        ("lienbond", "lienbond", "lienbond"),
+    ):
+        repo_dir = tmp_path / repo_name
+        (repo_dir / pkg_name).mkdir(parents=True)
+        (repo_dir / ".github" / "workflows").mkdir(parents=True)
+        (repo_dir / ".github" / "workflows" / "ci.yml").write_text("placeholder\n", encoding="utf-8")
+        (repo_dir / ".pseofactory.json").write_text(
+            json.dumps({"property_id": prop_id}), encoding="utf-8"
+        )
+        sync_tenant_test_isolation_guards(repo_dir, property_id=prop_id)
+        ci_text = (repo_dir / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        assert "npx wrangler pages deploy dist" in ci_text
+        assert "for attempt in 1 2 3 4; do" in ci_text
+        assert "sleep $((attempt * 12))" in ci_text
+        assert "\u2014" not in ci_text
+        assert "\u2013" not in ci_text
+
