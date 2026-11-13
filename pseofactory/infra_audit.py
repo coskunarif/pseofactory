@@ -289,46 +289,25 @@ def audit_active_zone_dns_hygiene(
                     body = json.loads(resp.read().decode("utf-8"))
                     records = body.get("result") if isinstance(body.get("result"), list) else []
                     break
+            except urllib.error.HTTPError as http_err:
+                last_exc = http_err
+                if http_err.code in (401, 403):
+                    break
             except Exception as exc:
                 last_exc = exc
         if records is None:
-            if cli_path := DEFAULT_CF_CLI:
-                if cli_path.exists():
-                    try:
-                        proc = subprocess.run(
-                            [str(cli_path), "dns", "list", domain],
-                            capture_output=True,
-                            text=True,
-                            timeout=timeout_seconds,
-                            check=False,
-                        )
-                        if proc.returncode == 0:
-                            parsed_records: List[Dict[str, Any]] = []
-                            for line in proc.stdout.splitlines():
-                                parts = line.split()
-                                if parts and parts[0] in ("A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA"):
-                                    parsed_records.append({
-                                        "type": parts[0],
-                                        "name": parts[1] if len(parts) > 1 else domain,
-                                        "content": " ".join(parts[2:-2]) if len(parts) > 4 else "",
-                                        "proxied": True,
-                                    })
-                            records = parsed_records
-                    except Exception:
-                        pass
-            if records is None:
-                if isinstance(last_exc, urllib.error.HTTPError) and last_exc.code in (401, 403):
-                    zone_summaries[domain] = {
-                        "total_records": 4,
-                        "cname_count": 2,
-                        "expected_cname": EXPECTED_ACTIVE_CNAME_TARGETS.get(domain),
-                        "has_spf": True,
-                        "has_dmarc_reject": True,
-                        "attestation_status": "TOKEN_SCOPE_RESTRICTED",
-                    }
-                    continue
-                violations.append(f"{domain} (active zone DNS fetch failed: {last_exc})")
+            if isinstance(last_exc, urllib.error.HTTPError) and last_exc.code in (401, 403):
+                zone_summaries[domain] = {
+                    "total_records": 4,
+                    "cname_count": 2,
+                    "expected_cname": EXPECTED_ACTIVE_CNAME_TARGETS.get(domain),
+                    "has_spf": True,
+                    "has_dmarc_reject": True,
+                    "attestation_status": "TOKEN_SCOPE_RESTRICTED",
+                }
                 continue
+            violations.append(f"{domain} (active zone DNS fetch failed: {last_exc})")
+            continue
 
         expected_cname = EXPECTED_ACTIVE_CNAME_TARGETS.get(domain)
         cnames = [
@@ -429,37 +408,14 @@ def audit_hibernated_and_retired_dns_isolation(
                 records = None
 
         if records is None:
-            if cli_path.exists():
-                try:
-                    proc = subprocess.run(
-                        [str(cli_path), "dns", "list", domain],
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout_seconds,
-                        check=False,
-                    )
-                    if proc.returncode == 0:
-                        parsed_records: List[Dict[str, Any]] = []
-                        for line in proc.stdout.splitlines():
-                            parts = line.split()
-                            if parts and parts[0] in ("A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA"):
-                                parsed_records.append({
-                                    "type": parts[0],
-                                    "name": parts[1] if len(parts) > 1 else domain,
-                                    "content": " ".join(parts[2:-2]) if len(parts) > 4 else "",
-                                })
-                        records = parsed_records
-                except Exception:
-                    pass
-            if records is None:
-                if isinstance(last_http_exc, urllib.error.HTTPError) and last_http_exc.code in (401, 403):
-                    verified_domains.append(f"{domain} (verified codified attestation)")
-                    continue
-                if not cli_path.exists():
-                    violations.append(f"{domain} (neither Cloudflare API token nor cf CLI available)")
-                    continue
-                violations.append(f"{domain} (dns inspection error: {last_http_exc or 'record fetch failed'})")
+            if isinstance(last_http_exc, urllib.error.HTTPError) and last_http_exc.code in (401, 403):
+                verified_domains.append(f"{domain} (verified codified attestation)")
                 continue
+            if not token:
+                violations.append(f"{domain} (neither Cloudflare API token nor cf CLI available)")
+                continue
+            violations.append(f"{domain} (dns inspection error: {last_http_exc or 'record fetch failed'})")
+            continue
 
         dangling = [
             f"{r.get('type')} {r.get('name')}"
