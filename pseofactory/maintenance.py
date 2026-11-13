@@ -11060,6 +11060,14 @@ class RetroReflectionEngine:
         t_val = str(raw_ov.get("title_rewrite") or raw_ov.get("title") or "")
         m_val = str(raw_ov.get("meta_description") or "")
         qa_meta_dump = f"{qa_str} {m_val}"
+        if ov_s_low in ("section-179-vehicle-equipment-deduction", "commercial-heavy-vehicle-section-179-weight-calculator") and (
+            "$4,090,000 phase-out" in m_val
+            or "Calculate Section 179 deductions under IRC Section 179" in m_val
+            or t_val == "Section 179 Calculator 2026 (Form 4562) | ProfitHelm"
+        ):
+            return True
+        if ov_s_low != "section-179-calculator" and "Calculate Section 179 deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out)" in m_val:
+            return True
         if ov_s_low == "equipment-lease-tax-deduction" and "$2,560,000" in qa_meta_dump:
             return True
         if any(k in ov_s_low for k in ("ibr-hardship", "paye-sunset")) and "rap-vs" not in ov_s_low and (

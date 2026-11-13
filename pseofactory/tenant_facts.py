@@ -4161,6 +4161,17 @@ class TruthReconciliationEngine:
             ):
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)
+            if ov_slug == "section-179-vehicle-equipment-deduction":
+                if "Calculate Section 179 deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out)" in updated_str:
+                    updated_str = updated_str.replace(
+                        "Calculate Section 179 deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) and Section 168(k) bonus depreciation on IRS Form 4562.",
+                        "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+                    )
+                if '"Section 179 Calculator 2026 (Form 4562) | ProfitHelm"' in updated_str:
+                    updated_str = updated_str.replace(
+                        '"Section 179 Calculator 2026 (Form 4562) | ProfitHelm"',
+                        '"Section 179 Commercial Vehicle & Equipment Deduction Calculator | ProfitHelm"',
+                    )
         elif tenant_norm == "prexvo":
             for old_s, new_s in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                 if old_s in updated_str:
