@@ -6216,7 +6216,7 @@ def normalize_html_callout_message_match(
                 f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{html_lib.escape(ctx_card["badge"])}</span>\n'
-                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:var(--text-secondary);margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
                 f'        <h3 class="affiliate-title">{html_lib.escape(ctx_card["name"])}</h3>\n'
                 f'        <p class="affiliate-desc">{html_lib.escape(ctx_card["description"])}</p>\n'
                 f'      </div>\n'
@@ -6459,10 +6459,10 @@ def normalize_html_callout_message_match(
             inline_cta_html = (
                 f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
                 f'data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" {gsc_extra_attrs}'
-                f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
+                f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated); border: 1px solid var(--brand-border); border-left: 4px solid var(--brand-primary); border-radius: 8px;">\n'
                 f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
-                f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
-                f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
+                f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary);">{safe_badge} &bull; Verified Offer</div>\n'
+                f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary); margin-top: 0.125rem;">{safe_name}</div>\n'
                 f'            </div>\n'
                 f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
                 f'              {safe_cta} &rarr;\n'
@@ -6526,7 +6526,14 @@ def normalize_html_callout_message_match(
                 + updated[cta_pos2 : rap_meter_m.start()].rstrip()
                 + updated[rap_meter_m.end() :]
             )
-        if injected_inline and "</head>" in updated:
+        has_ext_porcelain_link = bool(
+            re.search(
+                r'<link\b[^>]*id=["\']pseo-visual-primitives["\']',
+                updated,
+                flags=re.I,
+            )
+        )
+        if injected_inline and "</head>" in updated and not has_ext_porcelain_link:
             fold_css = (
                 '  <style id="pseo-inline-cta-fold">\n'
                 '    .hero-section, .tool-header.hero-section { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; margin-bottom: 0.5rem !important; }\n'
@@ -6582,14 +6589,14 @@ def normalize_html_callout_message_match(
                     f'data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
                     f'data-partnership-model="{safe_inline_model}" '
                     f'data-cta-slot="comparison_table_cta" data-gsc-tier="{gsc_t_val}" '
-                    f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">\n'
-                    f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text, #0f172a);">Scenario Execution Partner: <strong>{safe_name}</strong> ({safe_brand})</span>\n'
+                    f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;">\n'
+                    f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">Scenario Execution Partner: <strong>{safe_name}</strong> ({safe_brand})</span>\n'
                     f'        <a href="{tbl_href}" target="_blank" rel="noopener sponsored nofollow" '
                     f'data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
                     f'data-partnership-model="{safe_inline_model}" '
                     f'data-tool="{safe_s}" data-subid="{safe_tbl_sub}" data-status="{safe_status}" '
                     f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
-                    f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{safe_cta} &rarr;</a>\n'
+                    f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_cta} &rarr;</a>\n'
                     f'      </div>'
                 )
 
@@ -6692,7 +6699,7 @@ def normalize_html_callout_message_match(
             banner_div = (
                 f'\n      <div class="ftc-disclosure-banner" data-mechanic="compliant_intent_monetization" '
                 f'style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem; padding: 0.625rem 0.875rem; '
-                f'background: var(--bg-surface, #f8fafc); border: 1px solid var(--border-hairline, #e2e8f0); border-radius: 6px; line-height: 1.4;">'
+                f'background: var(--bg-subtle); border: 1px solid var(--border-hairline); border-radius: 6px; line-height: 1.4;">'
                 f"{banner_inner}</div>"
             )
             hero_m = re.search(r'(<section\s+class=["\'][^"\']*hero-section[^"\']*["\'][^>]*>.*?</section>)', updated, re.S | re.I)
@@ -8000,10 +8007,10 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'data-partnership-model="{safe_in_model}" '
             f'data-gsc-tier="{safe_gsc_tier}" data-gsc-repositioned="{"true" if slot_plan.get("gsc_repositioned") else "false"}" '
             f'data-yield-score="{yield_str}" '
-            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.75rem; margin-bottom: 0.75rem; background: var(--bg-elevated, #eff6ff); border: 1px solid var(--brand-border, #bfdbfe); border-left: 4px solid var(--brand-primary, #1d4ed8); border-radius: 8px;">\n'
+            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.75rem; margin-bottom: 0.75rem; background: var(--bg-elevated); border: 1px solid var(--brand-border); border-left: 4px solid var(--brand-primary); border-radius: 8px;">\n'
             f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
-            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary, #1d4ed8);">{safe_badge} &bull; Verified Offer</div>\n'
-            f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary, #0f172a); margin-top: 0.125rem;">{safe_name}</div>\n'
+            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary);">{safe_badge} &bull; Verified Offer</div>\n'
+            f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary); margin-top: 0.125rem;">{safe_name}</div>\n'
             f'            </div>\n'
             f'            <a href="{safe_href}" target="_blank" rel="noopener sponsored nofollow" '
             f'data-partner="{pk_in}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
@@ -8114,14 +8121,14 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
             f'data-partnership-model="{safe_tbl_model}" '
             f'data-cta-slot="comparison_table_cta" data-gsc-tier="{html_lib.escape(gsc_tier)}" '
-            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">\n'
-            f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text, #0f172a);">Scenario Execution Partner: <strong>{safe_tbl_name}</strong> ({safe_tbl_brand})</span>\n'
+            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;">\n'
+            f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">Scenario Execution Partner: <strong>{safe_tbl_name}</strong> ({safe_tbl_brand})</span>\n'
             f'        <a href="{safe_tbl_href}" target="_blank" rel="noopener sponsored nofollow" '
             f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
             f'data-partnership-model="{safe_tbl_model}" '
             f'data-tool="{safe_tool}" data-subid="{safe_tbl_sub}" data-status="{safe_tbl_status}" '
             f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{safe_tbl_cta} &rarr;</a>\n'
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_tbl_cta} &rarr;</a>\n'
             f'      </div>'
         )
         if has_existing_table_cta:
@@ -8174,7 +8181,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{c_badge} ({c_role.title()} Offer)</span>\n'
-                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;font-weight:500;">Sponsored / {c_brand}</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:var(--text-secondary);margin-left:0.5rem;font-weight:500;">Sponsored / {c_brand}</span>\n'
                 f'        <h3 class="affiliate-title">{c_name}</h3>\n'
                 f'        <p class="affiliate-desc">{c_desc}</p>\n'
                 f'      </div>\n'
@@ -8263,11 +8270,11 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'data-cta-id="cta-{html_lib.escape(prop)}-{html_lib.escape(slug_id)}-{pk_ov}" '
             f'data-gsc-tier="{html_lib.escape(gsc_tier)}" data-mechanic="compliant_intent_monetization">\n'
             f'  <h3 class="section-subtitle">Recommended Partner Solution: {safe_ov_name}</h3>\n'
-            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{safe_ov_disc}</p>\n'
+            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 0.75rem;">{safe_ov_disc}</p>\n'
             f'  <a href="{safe_ov_href}" rel="noopener sponsored nofollow" target="_blank" '
             f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{pk_ov}" '
             f'data-tool="{html_lib.escape(slug_id)}" data-subid="{safe_ov_sub}" data-cta-slot="overlay_primary_cta" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{safe_ov_cta}</a>\n'
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_ov_cta}</a>\n'
             f'</section>'
         )
         updated = re.sub(

@@ -2276,7 +2276,7 @@ def _clean_short_label(words_list: List[str], max_chars: int = 32) -> str:
     return res
 
 
-def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> str:
+def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slug: str = "") -> str:
     """
     Deterministically normalizes meta description length into [120, 155] characters
     with domain-isolated statutory terminology, complete whole-word sentences,
@@ -2297,7 +2297,8 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
             short_label = "contractor surety bond compliance"
         else:
             short_label = "statutory tax liability"
-    q_low = f"{query_label.lower()} {short_label.lower()}"
+    slug_low = str(slug or "").lower().strip("/")
+    q_low = f"{query_label.lower()} {short_label.lower()} {slug_low}".strip()
 
     has_meta_defect = bool(
         re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", clean, re.IGNORECASE)
@@ -2307,40 +2308,14 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
             any(
                 k in q_low
                 for k in (
-                    "refinance",
-                    "icr",
-                    "income contingent",
-                    "ibr hardship",
-                    "hardship cap",
-                    "paye",
-                    "pay as you earn",
-                    "income based",
-                    "income-based",
-                    "student loan repayment",
-                    "student-loan-repayment",
-                    "student loan payment",
-                    "student-loan-payment",
-                    "student loan login",
-                    "student-loan-login",
-                    "student loan news",
-                    "student-loan-news",
-                    "tiered standard",
-                    "tiered-standard",
-                    "grad plus",
-                    "grad-plus",
-                    "borrowing cap",
-                    "parent plus",
-                    "parent-plus",
-                    "double consolidation",
-                    "married filing separately",
-                    "married-filing-separately",
-                    "pslf",
-                    "public service",
-                    "disclaimer",
-                    "methodology",
-                    "privacy",
-                    "about",
-                    "tools directory",
+                    "refinance", "icr", "income contingent", "ibr hardship", "hardship cap",
+                    "paye", "pay as you earn", "income based", "income-based",
+                    "student loan repayment", "student-loan-repayment", "student loan payment",
+                    "student-loan-payment", "student loan login", "student-loan-login",
+                    "student loan news", "student-loan-news", "tiered standard", "tiered-standard",
+                    "grad plus", "grad-plus", "borrowing cap", "parent plus", "parent-plus",
+                    "double consolidation", "married filing separately", "married-filing-separately",
+                    "pslf", "public service", "disclaimer", "methodology", "privacy", "about", "tools directory",
                 )
             )
             and "225% hhs poverty" in clean.lower()
@@ -2352,6 +2327,10 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
         or (
             any(k in q_low for k in ("buyback", "reconsideration"))
             and "hold harmless buyback eligibility under 34 cfr 685.219." in clean.lower()
+        )
+        or (
+            "pslf-qualifying" in slug_low
+            and "hold harmless buyback lump-sum" in clean.lower()
         )
         or (
             "calculate section 179 deductions under irc section 179" in clean.lower()
@@ -2471,7 +2450,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
                     "and the 10-year Standard payment ceiling under HEA Section 493C.",
                     " Verified under 20 U.S.C. 1098e and 34 CFR 685.221 rules.",
                 )
-            if "buyback" in q_low or "reconsideration" in q_low:
+            is_buyback_route = (
+                ("buyback" in slug_low or "reconsideration" in slug_low)
+                if slug_low
+                else ("buyback" in q_low or "reconsideration" in q_low)
+            )
+            if is_buyback_route:
                 return (
                     "Calculate PSLF Hold Harmless Buyback lump-sum payments under 34 CFR 685.219(g) "
                     "to credit eligible deferment and forbearance months toward 120.",
@@ -2683,7 +2667,7 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str) -> 
         if "2027" in q_low or "bracket" in q_low or "tcja" in q_low:
             return (
                 f"Calculate {lbl} liability under IRC Section 1(j), comparing marginal rates (10% to 37%), "
-                f"standard deductions, and post-TCJA sunset brackets.",
+                f"standard deductions, and enacted OBBBA brackets.",
                 " Grounded in IRC Section 1(j) federal statutory schedules.",
             )
         return (
@@ -4284,7 +4268,7 @@ def _build_tax_bracket_profithelm_overlay_blocks(
                 "baseline_ctr": ctr,
                 "impressions": impr,
                 "params": {"income": 450000, "deduction": 30000, "bracket": 35, "state_rate": 11.3},
-                "description": "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and post-TCJA sunset rate schedules.",
+                "description": "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and enacted OBBBA (P.L. 119-21) rate schedules.",
             },
         ],
         "comparison_rows": [
@@ -4642,7 +4626,7 @@ def compile_remediation_overlay_spec(
     )
     secondary_mod = title_strategy["secondary_modifier"]
     title_rewrite = title_strategy["title_rewrite"]
-    meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label)
+    meta_description = _normalize_meta_120_155("", tenant_id=resolved_tenant, query_label=heading_label, slug=slug)
     quick_answer = _normalize_quick_answer_40_60_words(heading_label, tenant_id=resolved_tenant, slug=slug)
 
     pos = (
@@ -8884,8 +8868,8 @@ def _build_overlay_heading_guidance_html(
 
     list_tag = "ol" if bool(PROCEDURAL_HEADING_PATTERN.search(clean_h2)) else "ul"
     return (
-        f'  <p class="section-desc" style="color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{p_text}</p>\n'
-        f'  <{list_tag} class="section-takeaways" style="margin: 0 0 1.5rem 1.25rem; color: var(--text-secondary, #475569); line-height: 1.6;">\n'
+        f'  <p class="section-desc" style="color: var(--text-secondary); margin-bottom: 0.75rem;">{p_text}</p>\n'
+        f'  <{list_tag} class="section-takeaways" style="margin: 0 0 1.5rem 1.25rem; color: var(--text-secondary); line-height: 1.6;">\n'
         f"    {b1}\n"
         f"    {b2}\n"
         f"  </{list_tag}>"
@@ -9141,11 +9125,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         "ibr-hardship",
                         "hardship-cap",
                         "paye-sunset",
-                        "parent-plus",
-                        "tiered-standard",
-                        "grad-plus",
-                        "student-loan-repayment-calculator",
-                        "married-filing-separately",
+                        "parent-plus", "tiered-standard", "grad-plus",
+                        "student-loan-repayment-calculator", "married-filing-separately",
                     )
                 )
                 and "225% hhs poverty" in meta_desc.lower()
@@ -9154,9 +9135,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 any(k in ov_slug_q.lower() for k in ("pslf-buyback", "pslf-qualifying"))
                 and "hold harmless buyback eligibility under 34 cfr 685.219." in meta_desc.lower()
             )
+            or ("pslf-qualifying" in ov_slug_q.lower() and "hold harmless buyback lump-sum" in meta_desc.lower())
         ):
             q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
-            meta_desc = _normalize_meta_120_155("", ov_tenant, q_lbl)
+            ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
+            meta_desc = _normalize_meta_120_155("", ov_tenant, q_lbl, slug=ov_slug_hint)
     if meta_desc:
         escaped_desc = html_lib.escape(meta_desc)
         html = re.sub(
@@ -9302,7 +9285,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             )
             sc_parts.append(f'      <h4>{label}</h4>')
             if desc_str:
-                sc_parts.append(f'      <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">{html_lib.escape(desc_str)}</p>')
+                sc_parts.append(f'      <p style="font-size: 0.875rem; color: var(--text-secondary);">{html_lib.escape(desc_str)}</p>')
             sc_parts.append(
                 f'      <button type="button" class="btn-preset touch-target" data-calc-preset="{preset_json}" '
                 f'data-cta-slot="calculator_preset_cta" '
@@ -9432,7 +9415,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 anchor = html_lib.escape(_strip_forbidden_dashes(str(hl["anchor"])))
                 hl_parts.append(
                     f'    <li><a href="{href}" class="touch-target cluster-link" '
-                    f'style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">{anchor}</a></li>'
+                    f'style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">{anchor}</a></li>'
                 )
         hl_parts.extend(["  </ul>", "</section>"])
         hub_links_markup = "\n".join(hl_parts)
@@ -9456,7 +9439,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             'data-mechanic="compliant_intent_monetization">\n'
             '  <div class="partner-card">\n'
             '    <h3 class="section-subtitle">Title IV Public Service Protection</h3>\n'
-            '    <p style="font-size: 0.875rem; color: var(--text-secondary, #475569);">Direct consolidation and federal repayment plans preserve statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685. Commercial private lender offers are strictly suppressed on restricted public-service pages.</p>\n'
+            '    <p style="font-size: 0.875rem; color: var(--text-secondary);">Direct consolidation and federal repayment plans preserve statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685. Commercial private lender offers are strictly suppressed on restricted public-service pages.</p>\n'
             '  </div>\n'
             '</section>'
         )
@@ -9546,11 +9529,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             f'data-cta-id="{p_cta_id}" data-yield-score="{p_yield}" data-empirical-erpm="{p_erpm}" '
             f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization">\n'
             f'  <h3 class="section-subtitle">Recommended Partner Solution: {p_name}</h3>\n'
-            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary, #475569); margin-bottom: 0.75rem;">{p_disc}</p>\n'
+            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 0.75rem;">{p_disc}</p>\n'
             f'  <a href="{p_url}" rel="noopener sponsored nofollow" target="_blank" '
             f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{p_key}" '
             f'data-cta-slot="{p_slot}" data-cta-id="{p_cta_id}" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
             f'</section>'
         )
         injected_sections.append(partner_section_markup)
@@ -9592,9 +9575,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         for f in faq_items:
             q = f["question"]
             a = f["answer"]
-            faq_parts.append('    <details class="faq-item faq-card" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset, #f8fafc); border: 1px solid var(--border, #dbe1ea); border-radius: 8px;">')
+            faq_parts.append('    <details class="faq-item faq-card" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">')
             faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
-            faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary, #475569); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
+            faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
             faq_parts.append("    </details>")
             schema_entities.append({
                 "@type": "Question",

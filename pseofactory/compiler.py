@@ -774,8 +774,8 @@ def _render_scenario_presets_bar_html(
             f'class="touch-target scenario-preset-link" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
-            f'background: var(--bg-elevated, #eff6ff); color: var(--accent, #1d4ed8); '
-            f'border: 1px solid var(--border-strong, #bfdbfe); text-decoration: none; font-size: 14px; font-weight: 600;">'
+            f'background: var(--bg-elevated); color: var(--accent); '
+            f'border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">'
             f'{label}</a>'
         )
     joined_links = "\n".join(links_html)
@@ -872,7 +872,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'data-partnership-model="{in_model}" '
                 f'data-tool="{html_lib.escape(slug_id)}" data-subid="{in_sub}" data-status="live" '
                 f'data-cta-slot="calculator_result_inline" class="btn-cta partner-cta touch-target" '
-                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none; white-space: nowrap;">{in_cta}</a>\n'
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; white-space: nowrap;">{in_cta}</a>\n'
                 f'        </div>'
             )
         if "comparison_table_cta" in (slot_plan.get("active_slots") or []) and isinstance(table_offer, dict) and table_offer.get("partner_key"):
@@ -896,7 +896,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'data-partnership-model="{tb_model}" '
                 f'data-tool="{html_lib.escape(slug_id)}" data-subid="{tb_sub}" data-status="live" '
                 f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
-                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">{tb_cta}</a>\n'
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{tb_cta}</a>\n'
                 f'    </div>'
             )
         return inline_html, table_html
@@ -934,7 +934,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'data-partnership-model="{c_model}" '
                 f'data-tool="{html_lib.escape(slug_id)}" data-subid="{c_sub}" data-status="live" '
                 f'data-cta-slot="{c_slot}" class="btn-cta partner-cta touch-target" '
-                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none; font-size: 14px;">{c_cta}</a>\n'
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; font-size: 14px;">{c_cta}</a>\n'
                 f'          </div>\n'
                 f'        </div>'
             )
@@ -982,7 +982,7 @@ def _render_compiler_monetization_and_guardrail_html(
             f'              <option value="MA">Massachusetts (MA)</option>\n'
             f'            </select>\n'
             f'          </div>\n'
-            f'          <button type="submit" id="partner-registration-submit-btn" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 6px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 700; border: none; cursor: pointer;">Register Firm</button>\n'
+            f'          <button type="submit" id="partner-registration-submit-btn" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 700; border: none; cursor: pointer;">Register Firm</button>\n'
             f'          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite" style="width: 100%; font-size: 13px; font-weight: 600; margin-top: 6px;"></div>\n'
             f'        </form>\n'
             f'      </div>\n'
@@ -1067,12 +1067,12 @@ def _render_compiler_monetization_and_guardrail_html(
             f'class="affiliate-cta-link touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
-            f'background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">'
+            f'background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">'
             f'{cta_text}</a>\n'
             f'      </p>\n'
             f'{roster_grid_html}'
             f'{partner_reg_drawer_html}'
-            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted, #475569); margin-top: 10px;">\n'
+            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
             f'        {ftc_disc}\n'
             f'      </p>\n'
             f'    </section>'
@@ -1143,7 +1143,7 @@ def _render_compiler_monetization_and_guardrail_html(
             f'data-partner-companies="{companies_csv}" data-commercial-offers="compliant-refinance" '
             f'data-restricted-public-service="false" data-mechanic="compliant_intent_monetization">\n'
             f'      <h2>Private Student Loan Refinance Comparison: {partner_name}</h2>\n'
-            f'      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted, #475569);">\n'
+            f'      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted);">\n'
             f'        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685. {ymyl_disc}\n'
             f'      </p>\n'
             f'      <p style="margin-top: 12px;">\n'
@@ -1152,12 +1152,12 @@ def _render_compiler_monetization_and_guardrail_html(
             f'class="affiliate-cta-link touch-target" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
-            f'background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 600; text-decoration: none;">'
+            f'background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">'
             f'{cta_text}</a>\n'
             f'      </p>\n'
             f'{roster_grid_html}'
             f'{partner_reg_drawer_html}'
-            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted, #475569); margin-top: 10px;">\n'
+            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
             f'        {ftc_disc}\n'
             f'      </p>\n'
             f'    </section>'
@@ -1414,6 +1414,18 @@ def _build_compiled_json_ld_graph(
             {"@type": "ListItem", "position": 3, "name": title, "item": f"{canonical_base}/tools/{slug}/"},
         ]
     howto_clean_label = re.sub(r"\s+Calculator\b", "", title.split("|")[0].strip(), flags=re.IGNORECASE).strip() or title
+    from pseofactory.tenant_facts import get_tenant_contract
+
+    _prop_for_schema = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    _schema_contract = get_tenant_contract(_prop_for_schema)
+    _editorial_email = (
+        "compliance@lienbond.com"
+        if _prop_for_schema == "lienbond"
+        else f"editorial@{_schema_contract.domain}"
+    )
+    _same_as_urls = ["https://www.wikidata.org/wiki/Q499388"]
+    if _schema_contract.linkedin_company_id:
+        _same_as_urls.insert(0, f"https://www.linkedin.com/company/{_schema_contract.linkedin_company_id}/")
     graph_payload = {
         "@context": "https://schema.org",
         "@graph": [
@@ -1426,12 +1438,9 @@ def _build_compiled_json_ld_graph(
                 "contactPoint": {
                     "@type": "ContactPoint",
                     "contactType": "editorial",
-                    "email": "arif.coskun@profithelm.com",
+                    "email": _editorial_email,
                 },
-                "sameAs": [
-                    "https://www.linkedin.com/company/106482196",
-                    "https://www.wikidata.org/wiki/Q499388",
-                ],
+                "sameAs": _same_as_urls,
             },
             {
                 "@type": ["LocalBusiness", "FinancialService", "ProfessionalService"],
@@ -1461,7 +1470,7 @@ def _build_compiled_json_ld_graph(
                     }
                 ],
                 "telephone": "+1-509-204-5500",
-                "email": "arif.coskun@profithelm.com",
+                "email": _editorial_email,
                 "priceRange": "$$",
                 "areaServed": {"@type": "Country", "name": "United States"},
             },
@@ -1500,9 +1509,9 @@ def _build_compiled_json_ld_graph(
                 "inLanguage": "en-US",
                 "dateModified": "2026-10-31",
                 "author": {
-                    "@type": "Person",
-                    "name": "Arif Coskun",
-                    "jobTitle": "Lead Software Architect",
+                    "@type": "Organization",
+                    "@id": f"{canonical_base}/#organization",
+                    "name": f"{brand_org_name} Quantitative Research Group",
                     "url": canonical_base,
                 },
                 "publisher": {
@@ -1782,6 +1791,50 @@ def _clamp_candidate_inputs(raw_inputs: Dict[str, Any]) -> Dict[str, Any]:
     return clamped_inputs
 
 
+def _resolve_candidate_tenant_flags(
+    candidate_spec: Dict[str, Any],
+    slug: str,
+) -> tuple[bool, bool, bool]:
+    """Resolves (is_prexvo, is_gainhelm, is_lienbond) deterministically from spec, statutory authority, and env."""
+    spec_tenant_signals = " ".join(
+        str(candidate_spec.get(k) or "")
+        for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
+    ).lower()
+    if "lienbond" in spec_tenant_signals:
+        return False, False, True
+    if "gainhelm" in spec_tenant_signals:
+        return False, True, False
+    if "profithelm" in spec_tenant_signals and "prexvo" not in spec_tenant_signals:
+        return False, False, False
+    if "prexvo" in spec_tenant_signals:
+        return True, False, False
+
+    stat_lower = str(candidate_spec.get("statutory_authority") or "").lower()
+    slug_lower = slug.lower()
+    env_signals = " ".join([
+        os.environ.get("FACTORY_PROPERTY_ID", "").lower(),
+        os.environ.get("FACTORY_BRAND_NAME", "").lower(),
+        os.environ.get("FACTORY_DOMAIN", "").lower(),
+    ])
+    if any(
+        t in stat_lower
+        for t in ("aicpa ssae 18", "32 cfr part 170", "dfars 252.204", "iso/iec 27006", "45 cfr 160.404", "pci dss v4", "fedramp", "hitrust csf")
+    ):
+        return False, True, False
+    if any(t in stat_lower for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")):
+        return True, False, False
+    if (
+        any(t in stat_lower for t in ("irs rev. proc.", "26 u.s.c. section 1(", "26 u.s.c. section 179", "26 u.s.c. section 1031"))
+        or slug_lower.startswith(("irs-2027-tax-brackets", "section-179-calculator", "section-1031-calculator", "crypto-tax-calculator", "tcja-sunset"))
+    ):
+        return False, False, False
+    if "lienbond" in env_signals:
+        return False, False, True
+    if "gainhelm" in env_signals:
+        return False, True, False
+    return "prexvo" in env_signals, False, False
+
+
 def _extract_candidate_metadata(candidate_spec: Dict[str, Any]) -> tuple:
     """Extracts and normalizes core candidate metadata and manifest fields."""
     manifest_source = candidate_spec.get("calculation_manifest") if isinstance(candidate_spec.get("calculation_manifest"), dict) else {}
@@ -1938,45 +1991,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         inputs=clamped_inputs,
     )
 
-    spec_tenant_signals = " ".join(
-        str(candidate_spec.get(k) or "")
-        for k in ("property_id", "property", "tenant", "domain", "brand_name", "canonical_base")
-    ).lower()
-    is_gainhelm = False
-    is_lienbond = False
-    if "lienbond" in spec_tenant_signals:
-        is_prexvo = False
-        is_lienbond = True
-    elif "gainhelm" in spec_tenant_signals:
-        is_prexvo = False
-        is_gainhelm = True
-    elif "profithelm" in spec_tenant_signals and "prexvo" not in spec_tenant_signals:
-        is_prexvo = False
-    elif "prexvo" in spec_tenant_signals:
-        is_prexvo = True
-    else:
-        env_signals = " ".join([
-            os.environ.get("FACTORY_PROPERTY_ID", "").lower(),
-            os.environ.get("FACTORY_BRAND_NAME", "").lower(),
-            os.environ.get("FACTORY_DOMAIN", "").lower(),
-        ])
-        if "lienbond" in env_signals:
-            is_prexvo = False
-            is_lienbond = True
-        elif "gainhelm" in env_signals or any(
-            t in str(candidate_spec.get("statutory_authority") or "").lower()
-            for t in ("aicpa ssae 18", "32 cfr part 170", "dfars 252.204", "iso/iec 27006", "45 cfr 160.404", "pci dss v4", "fedramp", "hitrust csf")
-        ):
-            is_prexvo = False
-            is_gainhelm = True
-        else:
-            is_prexvo = (
-                "prexvo" in env_signals
-                or any(
-                    t in str(candidate_spec.get("statutory_authority") or "").lower()
-                    for t in ("title iv", "34 cfr", "pslf", "repayment assistance plan")
-                )
-            )
+    is_prexvo, is_gainhelm, is_lienbond = _resolve_candidate_tenant_flags(candidate_spec, slug)
     default_base = (
         "https://prexvo.com"
         if is_prexvo
@@ -2220,7 +2235,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             '        <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">Personalized Calculation Playbook &amp; Statutory Workpaper</div>\n'
             '        <form id="lead-capture-form" class="lead-capture-form" action="/api/lead-capture" method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">\n'
             '          <input type="email" name="email" placeholder="Work email for personalized playbook" aria-label="Work email for personalized playbook" required class="touch-target" style="padding:10px 14px;border-radius:6px;border:1px solid var(--border);min-height:44px;flex:1;min-width:220px;" />\n'
-            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary,#1d4ed8);color:#fff;font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
+            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary);color:var(--cta-fg);font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
             '        </form>\n'
             '      </div>\n'
         )
@@ -2353,39 +2368,41 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
   <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json" />
   <style>
     :root {{
-      /* Surfaces & Canvas */
-      --bg: #07090e;
-      --card-bg: #0f172a;
-      --bg-elevated: #151f38;
-      --bg-inset: #0b1329;
-      --bg-canvas: #07090e;
-      --bg-surface: #0f172a;
-      --text-primary: #f8fafc;
-      --brand-primary: #38bdf8;
+      /* Surfaces & Canvas (Canonical Porcelain Light) */
+      --bg: #fbfcfd;
+      --card-bg: #ffffff;
+      --bg-elevated: #eff6ff;
+      --bg-inset: #f8fafc;
+      --bg-canvas: #fbfcfd;
+      --bg-surface: #ffffff;
+      --text-primary: #0f172a;
+      --brand-primary: #1d4ed8;
 
       /* Borders & Separation */
-      --border: rgba(255, 255, 255, 0.08);
-      --border-strong: rgba(255, 255, 255, 0.16);
+      --border: #dbe1ea;
+      --border-color: #dbe1ea;
+      --border-strong: #bfdbfe;
 
       /* Typography */
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
+      --text: #0f172a;
+      --text-muted: #475569;
       --text-dim: #64748b;
 
       /* Accents & States */
-      --accent: #38bdf8;
-      --accent-hover: #0284c7;
-      --accent-subtle: rgba(56, 189, 248, 0.10);
+      --accent: #1d4ed8;
+      --accent-hover: #1e40af;
+      --accent-subtle: rgba(29, 78, 216, 0.08);
+      --cta-fg: #ffffff;
 
       /* Depth & Atmospheric Lighting */
-      --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
-      --shadow-elevated: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
-      --card-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+      --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+      --shadow-elevated: 0 10px 25px -5px rgba(15, 23, 42, 0.06), 0 8px 10px -6px rgba(15, 23, 42, 0.03);
+      --card-highlight: none;
     }}
     [data-theme="porcelain"] {{
       --bg-canvas: #fbfcfd;
       --bg-surface: #ffffff;
-      --text-primary: #090d16;
+      --text-primary: #0f172a;
       --brand-primary: #1d4ed8;
       --bg: var(--bg-canvas);
       --card-bg: var(--bg-surface);
@@ -2399,6 +2416,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       --accent: var(--brand-primary);
       --accent-hover: #1e40af;
       --accent-subtle: rgba(29, 78, 216, 0.08);
+      --cta-fg: #ffffff;
     }}
     * {{
       box-sizing: border-box;
@@ -2709,11 +2727,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
         <a href="{'/' + ('about' if 'profithelm' in str(canonical_base or '').lower() else 'methodology') + '/'}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
         <a href="{'/' + ('privacy' if 'profithelm' in str(canonical_base or '').lower() else 'disclaimers') + '/'}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
-        <a href="mailto:arif.coskun@profithelm.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
+        <a href="mailto:{'compliance@lienbond.com' if 'lienbond' in str(canonical_base or '').lower() else 'editorial@' + canonical_base.replace('https://', '').replace('http://', '')}" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
       <p style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">{brand_org_name} Editorial Policy: All calculations are deterministic and verified by statutory models.</p>
-      <div class="disclosures" style="margin-top: 16px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">
+      <div class="disclosures" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
 {disclosures_html_block}
       </div>
     </footer>
@@ -2919,10 +2937,9 @@ def _build_lienbond_support_page_html(
                     "contactPoint": {
                         "@type": "ContactPoint",
                         "contactType": "editorial",
-                        "email": "arif.coskun@profithelm.com",
+                        "email": "compliance@lienbond.com",
                     },
                     "sameAs": [
-                        "https://www.linkedin.com/company/106482196",
                         "https://www.wikidata.org/wiki/Q499388",
                     ],
                 },
@@ -3009,7 +3026,7 @@ def _build_lienbond_support_page_html(
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
         <a href="/methodology/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
         <a href="/disclaimers/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
-        <a href="mailto:arif.coskun@profithelm.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
+        <a href="mailto:compliance@lienbond.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
       <p style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">LienBond Editorial Policy: All calculations are deterministic and verified by statutory models.</p>
@@ -3056,50 +3073,13 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         d.mkdir(parents=True, exist_ok=True)
 
     gsc_token = "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
-    style_css_content = """
-:root {
-  --bg: #07090e;
-  --card-bg: #0f172a;
-  --bg-elevated: #151f38;
-  --bg-inset: #0b1329;
-  --bg-canvas: #07090e;
-  --bg-surface: #0f172a;
-  --text-primary: #f8fafc;
-  --brand-primary: #38bdf8;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --text: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
-  --accent: #38bdf8;
-  --accent-hover: #0284c7;
-  --accent-subtle: rgba(56, 189, 248, 0.10);
-  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
-}
-* { box-sizing: border-box; }
-body { background-color: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; line-height: 1.6; margin: 0; padding: 32px 16px; }
-.container { max-width: 960px; margin: 0 auto; }
-.card { background-color: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: var(--shadow-card); }
-h1, h2, h3 { color: var(--text); margin-top: 0; }
-h1 { font-size: 28px; line-height: 1.2; font-weight: 700; }
-h2 { font-size: 20px; line-height: 1.3; font-weight: 600; }
-h3 { font-size: 16px; line-height: 1.4; font-weight: 600; }
-.touch-target { min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; border-radius: 8px; }
-button.touch-target { background-color: var(--accent); color: var(--bg); font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-input.touch-target, select.touch-target { background-color: var(--bg-elevated); border: 1px solid var(--border); color: var(--text); width: 100%; }
-.multi-dataset-join { background-color: var(--bg-elevated); border-left: 4px solid var(--accent); padding: 20px; border-radius: 8px; margin-bottom: 24px; }
-.result-box { min-height: 110px; contain: layout style; background-color: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 20px; }
-.output-value { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; border: 1px solid var(--border); border-radius: 8px; margin-top: 16px; }
-table { width: 100%; min-width: 600px; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
-th, td { border: 1px solid var(--border); padding: 12px; text-align: left; }
-th { background-color: var(--bg-elevated); }
-@media (max-width: 640px) {
-  body { padding: 16px 12px; }
-  .card { padding: 16px; margin-bottom: 16px; }
-  .calculator-form { display: flex; flex-direction: column; gap: 12px; }
-}
-""".strip() + "\n"
+    from pseofactory.porcelain_shell import (
+        compile_tenant_porcelain_estate,
+        generate_porcelain_stylesheet,
+        sync_tenant_porcelain_shell,
+    )
+
+    style_css_content = generate_porcelain_stylesheet("lienbond")
     (css_dir / "style.css").write_text(style_css_content, encoding="utf-8")
     (static_css_dir / "style.css").write_text(style_css_content, encoding="utf-8")
 
@@ -3455,8 +3435,8 @@ th { background-color: var(--bg-elevated); }
         </table>
       </div>
       <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
-        <a href="/api/lead-capture?checkout=1&amp;sku=lb_surety_lien_wh347_packet&amp;tool_slug=contractor-license-bond-cost-calculator-by-credit-score&amp;redirect=1" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;border-radius:8px;background:#10b981;color:#07090e;font-weight:700;text-decoration:none;">Download 50-State Lien, AIA A312 &amp; WH-347 Packet ($79)</a>
-        <a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1" class="touch-target" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);font-weight:700;text-decoration:none;">Download NCCI Class Code &amp; EMR Audit Packet ($49)</a>
+        <a href="/api/lead-capture?checkout=1&amp;sku=lb_surety_lien_wh347_packet&amp;tool_slug=contractor-license-bond-cost-calculator-by-credit-score&amp;redirect=1" class="btn-cta touch-target">Download 50-State Lien, AIA A312 &amp; WH-347 Packet ($79)</a>
+        <a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1" class="btn-secondary touch-target">Download NCCI Class Code &amp; EMR Audit Packet ($49)</a>
       </div>
     </aside>
 
@@ -3481,7 +3461,7 @@ th { background-color: var(--bg-elevated); }
         <a href="/tools/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Tools Directory</a> |
         <a href="/methodology/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Statutory Methodology</a> |
         <a href="/disclaimers/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Disclaimers</a> |
-        <a href="mailto:arif.coskun@profithelm.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
+        <a href="mailto:compliance@lienbond.com" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Contact Editorial</a> |
         <a href="/sitemap.xml" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 10px;color:var(--accent);">Sitemap</a>
       </p>
       <p style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">LienBond Editorial Policy: All calculations are deterministic and verified by statutory models.</p>
@@ -3792,7 +3772,8 @@ th { background-color: var(--bg-elevated); }
     (dist / "_headers").write_text(
         build_edge_headers(
             "https://lienbond.com",
-            routes=["/", "/tools/", "/methodology/", "/disclaimers/"] + [f'/tools/{p["slug"]}/' for p in compiled_pages],
+            routes=["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"]
+            + [f'/tools/{p["slug"]}/' for p in compiled_pages],
         ),
         encoding="utf-8",
     )
@@ -4150,6 +4131,13 @@ jobs:
             property_id="lienbond",
             canonical_base="https://lienbond.com",
         )
+
+    if not (
+        "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
+        and str(root.resolve()).startswith("/home/ubuntuadmin/projects/")
+    ):
+        sync_tenant_porcelain_shell(root, "lienbond")
+    compile_tenant_porcelain_estate(dist, "lienbond", repo_root=root)
 
     try:
         from pseofactory.drift import (

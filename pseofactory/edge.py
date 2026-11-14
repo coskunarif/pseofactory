@@ -327,6 +327,21 @@ def compact_edge_headers_to_cloudflare_cap(
     return "\n".join(out_lines).rstrip() + "\n"
 
 
+_CROSS_LEGAL_GOVERNANCE_SOURCES: Set[str] = {
+    "/methodology",
+    "/methodology/",
+    "/about",
+    "/about/",
+    "/privacy",
+    "/privacy/",
+    "/disclaimers",
+    "/disclaimers/",
+    "/terms",
+    "/terms/",
+    "/contact",
+    "/contact/",
+}
+
 _GOVERNANCE_REDIRECT_SOURCES: Set[str] = {
     "/methodology",
     "/methodology/",
@@ -338,6 +353,8 @@ _GOVERNANCE_REDIRECT_SOURCES: Set[str] = {
     "/disclaimers/",
     "/terms",
     "/terms/",
+    "/contact",
+    "/contact/",
     "/terms-of-service",
     "/terms-of-service/",
     "/privacy-policy",
@@ -379,6 +396,7 @@ def parse_edge_redirects_rules(
 def compact_edge_redirects_to_cloudflare_cap(
     content: str,
     max_active_rules: int = EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES,
+    existing_governance_routes: Optional[Set[str]] = None,
 ) -> str:
     """
     Compacts an existing dist/_redirects file so active non-comment rule lines never exceed
@@ -399,6 +417,12 @@ def compact_edge_redirects_to_cloudflare_cap(
     order: List[str] = []
     for src, dst, code, _is_ov in parsed:
         if not src.startswith("/"):
+            continue
+        if (
+            existing_governance_routes
+            and src in _CROSS_LEGAL_GOVERNANCE_SOURCES
+            and src.strip("/") in existing_governance_routes
+        ):
             continue
         if src not in deduped:
             deduped[src] = (dst, code)
@@ -562,6 +586,7 @@ def _sync_middleware_redirect_table(
     extra_exact_redirects: Dict[str, str],
     extra_prefix_redirects: Optional[Dict[str, str]] = None,
     apex_domain: Optional[str] = None,
+    existing_governance_routes: Optional[Set[str]] = None,
 ) -> str:
     """
     Synchronizes exact and prefix 301 redirect mappings into functions/_middleware.js,
@@ -622,12 +647,24 @@ def _sync_middleware_redirect_table(
         em = entry_pat.match(raw_line)
         if em:
             k, v = em.group(1), em.group(2)
+            if (
+                existing_governance_routes
+                and k in _CROSS_LEGAL_GOVERNANCE_SOURCES
+                and k.strip("/") in existing_governance_routes
+            ):
+                continue
             if k not in merged_entries:
                 entry_order.append(k)
             merged_entries[k] = v
 
     for k, v in extra_exact_redirects.items():
         if not k.startswith("/") or "*" in k or ":" in k or k == "/":
+            continue
+        if (
+            existing_governance_routes
+            and k in _CROSS_LEGAL_GOVERNANCE_SOURCES
+            and k.strip("/") in existing_governance_routes
+        ):
             continue
         if k.rstrip("/") == v.rstrip("/"):
             continue
@@ -12670,8 +12707,20 @@ def sync_tenant_edge_redirect_function(
         if prop_clean == "prexvo"
         else ("gainhelm.com" if prop_clean == "gainhelm" else ("lienbond.com" if prop_clean == "lienbond" else "profithelm.com"))
     )
+    existing_gov_routes = {
+        g
+        for g in ("about", "methodology", "privacy", "terms", "disclaimers", "contact")
+        if (dist_dir / g / "index.html").is_file()
+    }
     mw_file = repo / "functions" / "_middleware.js"
     if not mw_file.is_file() and (repo / "functions").is_dir() and prop_clean == "lienbond":
+        lb_gov_lines: List[str] = []
+        if "about" not in existing_gov_routes:
+            lb_gov_lines.extend(['    "/about": "/methodology/",\n', '    "/about/": "/methodology/",\n'])
+        if "privacy" not in existing_gov_routes:
+            lb_gov_lines.extend(['    "/privacy": "/disclaimers/",\n', '    "/privacy/": "/disclaimers/",\n'])
+        if "terms" not in existing_gov_routes:
+            lb_gov_lines.extend(['    "/terms": "/disclaimers/",\n', '    "/terms/": "/disclaimers/",\n'])
         default_lb_mw = (
             "/**\n"
             " * LienBond Cloudflare Pages Functions Middleware\n"
@@ -12687,13 +12736,8 @@ def sync_tenant_edge_redirect_function(
             f"    return Response.redirect(`https://{apex_domain}${{pathname}}${{url.search}}`, 301);\n"
             "  }\n\n"
             "  const edgeRedirects = {\n"
-            '    "/about": "/methodology/",\n'
-            '    "/about/": "/methodology/",\n'
-            '    "/privacy": "/disclaimers/",\n'
-            '    "/privacy/": "/disclaimers/",\n'
-            '    "/terms": "/disclaimers/",\n'
-            '    "/terms/": "/disclaimers/",\n'
-            "  };\n\n"
+            + "".join(lb_gov_lines)
+            + "  };\n\n"
             "  if (edgeRedirects[pathname]) {\n"
             "    return Response.redirect(`${url.origin}${edgeRedirects[pathname]}`, 301);\n"
             "  }\n\n"
@@ -12863,6 +12907,7 @@ def sync_tenant_edge_redirect_function(
                 extra_mw_redirects,
                 extra_prefix_redirects=extra_prefix_redirects,
                 apex_domain=apex_domain,
+                existing_governance_routes=existing_gov_routes,
             )
             if f'if (hostname === "www.{apex_domain}")' not in mw_new and "const pathname = url.pathname;\n" in mw_new:
                 mw_new = mw_new.replace(

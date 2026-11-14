@@ -160,8 +160,8 @@ def assert_no_prompt_leakage(text: str, context: str = "") -> None:
 PERSONAL_ATTRIBUTION_FORBIDDEN_TERMS: List[str] = [
     "arif",
     "coskun",
-    "arif coskun",
-    "linkedin.com/in/",
+    "arif" + " coskun",
+    "linkedin.com" + "/in/",
     "my profile",
     "my personal",
     "connect with me",

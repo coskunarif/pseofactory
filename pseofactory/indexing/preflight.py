@@ -24,7 +24,10 @@ import xml.etree.ElementTree as ET
 from html import unescape as html_unescape
 import functools
 from html.parser import HTMLParser
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup  # noqa: F401
+except ImportError:
+    BeautifulSoup = None  # type: ignore[assignment,misc]
 
 _RE_SCRIPT_STYLE_SVG = re.compile(
     r"<(script|style|svg)\b[^>]*>.*?</\1>",

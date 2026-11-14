@@ -5516,7 +5516,7 @@ def investigate_competitor_traffic_spikes(
         else:
             comp_entry: Dict[str, Any] = {
                 "title": f"{q_text.title()}: 2026/2027 Statutory Tax & Scenario Comparison Calculator",
-                "snippet": "Interactive marginal bracket slider, post-TCJA sunset comparison matrix, and downloadable CPA audit checklist.",
+                "snippet": "Interactive marginal bracket slider, enacted OBBBA (P.L. 119-21) comparison matrix, and downloadable CPA audit checklist.",
                 "interactive_features": (
                     list(matched_mut.get("absorbed_mechanics") or [])
                     if matched_mut
@@ -5980,7 +5980,7 @@ def compile_ai_citation_digital_pr_queue(
                 statutory_hook = "31 U.S.C. Section 3124 State Tax Exemption & Tax-Equivalent Yield Arbitrage Formula"
                 benchmark_node = "tax_brackets_benchmarks.md"
             else:
-                statutory_hook = "IRC Section 1(j) Post-TCJA Sunset Marginal Rate Reversion (+2.6% to +4.0% Bracket Shift)"
+                statutory_hook = "OBBBA (P.L. 119-21) & IRC Section 1(j) Permanent Marginal Rate Schedules (10% to 37%)"
                 benchmark_node = "tax_brackets_benchmarks.md"
             target_publications = [
                 "State CPA Society & Tax Practitioner Technical Resource Hubs",

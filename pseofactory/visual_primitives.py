@@ -293,7 +293,7 @@ def get_screen_archetype_contract(html_content: str = "", rel_path: str = "index
     return dict(SCREEN_ARCHETYPE_CONTRACTS[archetype])
 
 
-def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
+def render_visual_primitives_style(is_tenant_porcelain: bool = True) -> str:
     """
     Renders the deterministic visual primitive stylesheet (<style id="pseo-visual-primitives">).
     Defines complete design tokens and aliases so zero CSS variables are ever undefined,
@@ -415,12 +415,12 @@ def render_visual_primitives_style(is_tenant_porcelain: bool = False) -> str:
 """
 
     root_block = porcelain_tokens if is_tenant_porcelain else obsidian_tokens
+    porcelain_selector_rule = f'    [data-theme="porcelain"] {{{porcelain_tokens}    }}\n' if is_tenant_porcelain else ""
     interactive_and_mobile_css = _render_visual_primitives_interactive_and_mobile_css()
 
     return f"""  <style id="pseo-visual-primitives" data-version="{VISUAL_PRIMITIVES_VERSION}">
     :root {{{root_block}    }}
-    [data-theme="porcelain"] {{{porcelain_tokens}    }}
-    [data-theme="obsidian"], [data-theme="dark"] {{{obsidian_tokens}    }}
+{porcelain_selector_rule}    [data-theme="obsidian"], [data-theme="dark"] {{{obsidian_tokens}    }}
     *, *::before, *::after {{
       box-sizing: border-box;
     }}
@@ -1415,11 +1415,29 @@ def _render_runtime_sync_workbench_js() -> str:
           ["arb-capital", "serp-b2b-gross"],
           ["pm-tax-gain", "serp-b2b-gross"],
           ["field-bond_amount", "serp-b2b-gross"],
+          ["input-bond_amount", "serp-b2b-gross"],
           ["input-bond_penalty_amount", "serp-b2b-gross"],
+          ["field-bond_penalty_amount", "serp-b2b-gross"],
           ["input-field_trade_payroll", "serp-b2b-gross"],
           ["input-annual_payroll", "serp-b2b-gross"],
+          ["field-annual_payroll", "serp-b2b-gross"],
           ["input-unpaid_contract_draw", "serp-b2b-gross"],
+          ["input-unpaid_progress_billing", "serp-b2b-gross"],
+          ["input-gross_contract_billed", "serp-b2b-gross"],
+          ["input-direct_job_cost", "serp-b2b-gross"],
+          ["input-annual_prevailing_hours", "serp-b2b-gross"],
+          ["input-qualifying_plan_assets", "serp-b2b-gross"],
+          ["input-manual_workers_comp_premium", "serp-b2b-gross"],
+          ["input-annual_subcontract_volume", "serp-b2b-gross"],
           ["input-contract_price", "serp-b2b-gross"],
+          ["field-relinquished_sale_price", "serp-1031-rel-debt"],
+          ["field-relinquished_sale_price", "serp-b2b-gross"],
+          ["field-vehicle_cost", "serp-179-cost"],
+          ["field-vehicle_cost", "serp-b2b-gross"],
+          ["field-current_qre_spend", "serp-b2b-gross"],
+          ["field-customs_value_fob", "serp-b2b-gross"],
+          ["cg-ordinary-income", "serp-b2b-gross"],
+          ["arb-yes-cents", "serp-b2b-gross"],
           ["field-invoice_face_value", "serp-b2b-gross"],
           ["field-current_year_domestic_qre", "serp-b2b-gross"],
           ["field-declared_customs_value", "serp-b2b-gross"],
@@ -1430,7 +1448,12 @@ def _render_runtime_sync_workbench_js() -> str:
           var src = document.getElementById(pairs[i][0]);
           var dst = document.getElementById(pairs[i][1]);
           if (src && dst && src.value) {
-            dst.value = src.value;
+            var numSrc = parseFloat(String(src.value).replace(/,/g, ""));
+            if (pairs[i][1] === "serp-b2b-gross" && !isNaN(numSrc) && numSrc > 0 && numSrc < 5000) {
+              dst.value = String(Math.round(numSrc * 250));
+            } else {
+              dst.value = src.value;
+            }
           }
         }
         var cStEl = document.getElementById("crypto-short-term");
@@ -1442,6 +1465,14 @@ def _render_runtime_sync_workbench_js() -> str:
           var cLtV = cLtEl ? (parseFloat(String(cLtEl.value || "0").replace(/,/g, "")) || 0) : 0;
           var cSkV = cSkEl ? (parseFloat(String(cSkEl.value || "0").replace(/,/g, "")) || 0) : 0;
           cProcEl.value = String(Math.max(1000, Math.round(cStV + cLtV + cSkV)));
+        }
+        var cgOrdEl = document.getElementById("cg-ordinary-income");
+        var cgAmtEl = document.getElementById("cg-amount");
+        var cgTaxGrossEl = document.getElementById("serp-tax-gross");
+        if ((cgOrdEl || cgAmtEl) && cgTaxGrossEl) {
+          var cgOrdV = cgOrdEl ? (parseFloat(String(cgOrdEl.value || "0").replace(/,/g, "")) || 0) : 0;
+          var cgAmtV = cgAmtEl ? (parseFloat(String(cgAmtEl.value || "0").replace(/,/g, "")) || 0) : 0;
+          cgTaxGrossEl.value = String(Math.max(1000, Math.round(cgOrdV + cgAmtV)));
         }
         var hcEl = document.getElementById("calc-input-headcount");
         var b2bGrossEl = document.getElementById("serp-b2b-gross");
@@ -2082,7 +2113,13 @@ def _render_runtime_sync_events_js() -> str:
         "sec1031-sale-price", "sec179-cost", "tax-income", "field-gross_income",
         "crypto-long-term", "crypto-short-term", "field-loan_balance", "input-loan_balance",
         "runway-cash", "tey-principal", "cg-amount", "arb-capital", "pm-tax-gain",
-        "field-bond_amount", "field-invoice_face_value", "field-current_year_domestic_qre",
+        "field-bond_amount", "input-bond_amount", "field-bond_penalty_amount",
+        "input-unpaid_progress_billing", "input-gross_contract_billed",
+        "input-direct_job_cost", "input-qualifying_plan_assets",
+        "input-manual_workers_comp_premium", "input-annual_subcontract_volume",
+        "field-relinquished_sale_price", "field-vehicle_cost",
+        "field-current_qre_spend", "field-customs_value_fob", "field-annual_payroll",
+        "field-invoice_face_value", "field-current_year_domestic_qre",
         "field-declared_customs_value", "field-annual_covered_payroll",
         "field-net_business_income", "input-total_parachute_payment",
         "input-med_school_loan_balance", "input-outside_securities_counsel_retainer",
@@ -2104,7 +2141,13 @@ def _render_runtime_sync_events_js() -> str:
         "tax-income", "field-gross_income", "serp-tax-gross", "crypto-short-term",
         "serp-crypto-proceeds", "field-loan_balance", "input-loan_balance", "serp-loan-balance",
         "runway-cash", "tey-principal", "cg-amount", "arb-capital", "pm-tax-gain",
-        "field-bond_amount", "field-invoice_face_value", "field-current_year_domestic_qre",
+        "field-bond_amount", "input-bond_amount", "field-bond_penalty_amount",
+        "input-unpaid_progress_billing", "input-gross_contract_billed",
+        "input-direct_job_cost", "input-qualifying_plan_assets",
+        "input-manual_workers_comp_premium", "input-annual_subcontract_volume",
+        "field-relinquished_sale_price", "field-vehicle_cost",
+        "field-current_qre_spend", "field-customs_value_fob", "field-annual_payroll",
+        "field-invoice_face_value", "field-current_year_domestic_qre",
         "field-declared_customs_value", "field-annual_covered_payroll",
         "field-net_business_income", "serp-b2b-gross"
       ];
@@ -2437,7 +2480,7 @@ def _render_runtime_sync_events_js() -> str:
         var panel = document.createElement("div");
         panel.id = existingId;
         panel.setAttribute("data-workpaper-mode", mode || "playbook");
-        panel.style.cssText = "margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--bg-inset,#f8fafc);border:1px solid var(--border,#cbd5e1);font-size:12px;line-height:1.5;";
+        panel.style.cssText = "margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--bg-inset);border:1px solid var(--border);font-size:12px;line-height:1.5;";
         var stl = (data && data.settlement_attribution) || (data && data.statutory_data_pack && data.statutory_data_pack.settlement_attribution) || null;
         if (mode === "checkout_fulfill" || (stl && stl.settlement_status === "settled")) {
           var stlId = (stl && stl.settlement_id) || ("stl_" + (data.lead_id || "verified"));
@@ -2454,7 +2497,7 @@ def _render_runtime_sync_events_js() -> str:
           stlBanner.setAttribute("data-settlement-status", String(stlStatus));
           stlBanner.setAttribute("data-attributed-revenue-usd", String(attrRev));
           stlBanner.setAttribute("data-datapack-id", String(dpId));
-          stlBanner.style.cssText = "margin-bottom:6px;padding:5px 8px;border-radius:6px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);font-size:11px;font-weight:700;color:#047857;";
+          stlBanner.style.cssText = "margin-bottom:6px;padding:5px 8px;border-radius:6px;background:var(--status-positive-bg);border:1px solid var(--status-positive-border);font-size:11px;font-weight:700;color:var(--status-positive);";
           stlBanner.textContent = "Settlement Verified (" + String(stlId) + ") | Attributed Revenue: $" + String(attrRev) + " | Data Pack: " + String(dpId);
           panel.appendChild(stlBanner);
         }
@@ -2464,7 +2507,7 @@ def _render_runtime_sync_events_js() -> str:
             return (r.line_code || "LINE") + ": " + (r.optimized_value || r.baseline_value || "");
           }).join(" | ");
           var summaryDiv = document.createElement("div");
-          summaryDiv.style.cssText = "margin-bottom:6px;font-weight:600;color:var(--text-primary,#0f172a);";
+          summaryDiv.style.cssText = "margin-bottom:6px;font-weight:600;color:var(--text-primary);";
           summaryDiv.textContent = "Personalized Workpaper Preview (" + summaryLine + ")";
           panel.appendChild(summaryDiv);
         }
@@ -2483,7 +2526,7 @@ def _render_runtime_sync_events_js() -> str:
           ffLink.target = "_blank";
           ffLink.rel = "noopener";
           ffLink.setAttribute("data-workpaper-html-download", "1");
-          ffLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#0f766e;text-decoration:underline;";
+          ffLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
           ffLink.textContent = "Open Instant Audit Workpaper (HTML/PDF)";
           ffLink.addEventListener("click", function(ev) {
             ffLink.setAttribute("data-download-triggered", "true");
@@ -2501,7 +2544,7 @@ def _render_runtime_sync_events_js() -> str:
           pbLink.target = "_blank";
           pbLink.rel = "noopener";
           pbLink.setAttribute("data-workpaper-html-download", "1");
-          pbLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#0f766e;text-decoration:underline;";
+          pbLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
           pbLink.textContent = "Open Personalized Playbook Worksheet";
           pbLink.addEventListener("click", function(ev) {
             pbLink.setAttribute("data-download-triggered", "true");
@@ -2518,7 +2561,7 @@ def _render_runtime_sync_events_js() -> str:
           csvLink.className = "touch-target";
           csvLink.href = csvUrl;
           csvLink.setAttribute("data-workpaper-csv-download", "1");
-          csvLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#1d4ed8;text-decoration:underline;";
+          csvLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--brand-primary);text-decoration:underline;";
           csvLink.textContent = "Download CSV Reconciliation Schedule";
           csvLink.addEventListener("click", function(ev) {
             csvLink.setAttribute("data-download-triggered", "true");
@@ -2538,7 +2581,7 @@ def _render_runtime_sync_events_js() -> str:
           dpLink.className = "touch-target";
           dpLink.href = dpUrl;
           dpLink.setAttribute("data-datapack-download", "1");
-          dpLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:#7c3aed;text-decoration:underline;";
+          dpLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--brand-primary);text-decoration:underline;";
           dpLink.textContent = "Download Statutory Data Pack (JSON)";
           dpLink.addEventListener("click", function(ev) {
             dpLink.setAttribute("data-download-triggered", "true");
@@ -3401,7 +3444,7 @@ def _render_runtime_sync_events_js() -> str:
             if (!readout) {
               readout = document.createElement("div");
               readout.className = "output-value calc-metric-value overlay-preset-readout";
-              readout.style.cssText = "margin-top: 12px; padding: 10px 14px; border-radius: 8px; background: var(--bg-inset, #f8fafc); border: 1px solid var(--border, #dbe1ea); font-size: 14px; font-weight: 600;";
+              readout.style.cssText = "margin-top: 12px; padding: 10px 14px; border-radius: 8px; background: var(--bg-inset); border: 1px solid var(--border); font-size: 14px; font-weight: 600;";
               ovScenarios.appendChild(readout);
             }
             var summaryPairs = [];
@@ -4210,7 +4253,20 @@ def _detect_theme_and_token_polarity_issues(
     style_blocks: List[str],
 ) -> List[str]:
     issues: List[str] = []
-    if expect_primitives:
+    norm_rel = (rel_path or "").strip().strip("/").lower()
+    if norm_rel in ("signal", "signal/index.html", "static/signal/index.html"):
+        return issues
+
+    link_prim_match = re.search(
+        r'<link\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>',
+        html_content,
+        re.IGNORECASE,
+    )
+    has_external_porcelain_link = bool(
+        link_prim_match and f'data-version="{VISUAL_PRIMITIVES_VERSION}"' in link_prim_match.group(0)
+    )
+
+    if expect_primitives and not has_external_porcelain_link:
         prim_match = re.search(
             r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
             html_content,
@@ -4244,6 +4300,19 @@ def _detect_theme_and_token_polarity_issues(
     if style_blocks or expect_primitives or "var(--" in html_content:
         no_script_html = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", html_content, flags=re.IGNORECASE)
         defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_html))
+        if has_external_porcelain_link:
+            try:
+                from pseofactory.porcelain_shell import (
+                    extract_defined_and_referenced_css_vars,
+                    generate_porcelain_stylesheet,
+                )
+
+                porcelain_defined, _ = extract_defined_and_referenced_css_vars(
+                    generate_porcelain_stylesheet("profithelm")
+                )
+                defined_vars |= porcelain_defined
+            except Exception:
+                pass
         used_vars_no_fallback = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_html))
         undefined_vars = sorted(used_vars_no_fallback - defined_vars)
         if undefined_vars:
@@ -5107,14 +5176,14 @@ def _retrofit_pro_hook_and_lead_capture_cards(
             quote_jump_html = (
                 f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
                 f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
-                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border, #bfdbfe); background: var(--bg-surface, #ffffff); color: var(--brand-primary, #1d4ed8); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border); background: var(--bg-surface); color: var(--brand-primary); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
                 f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
                 if has_quote_intake
                 else ""
             )
             sample_unlock_html = (
                 f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
-                f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border, #cbd5e1); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary, #475569);">'
+                f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
                 f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Bracket &amp; Deduction Schedule (Unlocked) | Line 2 Effective vs. Marginal Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
                 f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
                 f'<a href="{checkout_href}" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
@@ -5159,17 +5228,17 @@ def _retrofit_pro_hook_and_lead_capture_cards(
         quote_jump_html = (
             f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
             f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border, #bfdbfe); background: var(--bg-surface, #ffffff); color: var(--brand-primary, #1d4ed8); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border); background: var(--bg-surface); color: var(--brand-primary); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
             f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
             if has_quote_intake
             else ""
         )
         injected_pro_card = (
-            f'\n          <div class="pro-hook-card" style="background: rgba(29, 78, 216, 0.04); border: 1px dashed var(--brand-border, #bfdbfe); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8125rem; color: var(--text-secondary, #475569); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem;">'
-            f'<span><strong style="color: var(--brand-primary, #1d4ed8);">Statutory Audit Workpaper:</strong> Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>'
-            f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="color: var(--brand-primary, #1d4ed8); font-weight: 700; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">Export Audit Workpaper (${offer_price}) &rarr;</a>'
+            f'\n          <div class="pro-hook-card" style="background: var(--brand-soft); border: 1px dashed var(--brand-border); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8125rem; color: var(--text-secondary); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem;">'
+            f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>'
+            f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="color: var(--brand-primary); font-weight: 700; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">Export Audit Workpaper (${offer_price}) &rarr;</a>'
             f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
-            f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border, #cbd5e1); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary, #475569);">'
+            f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
             f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Reconciliation Schedule (Unlocked) | Line 2 Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
             f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
             f'<a href="{checkout_href}" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
@@ -5200,7 +5269,7 @@ def _retrofit_pro_hook_and_lead_capture_cards(
         except ValueError:
             calc_amt_fmt2 = "$125,000"
         sample_box_html = (
-            f'          <div class="post-calc-sample-schedule-preview" data-sample-unlocked="true" style="margin-top: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; border: 1px dashed var(--border, #cbd5e1); background: rgba(15, 23, 42, 0.04); font-size: 13px; line-height: 1.45;">\n'
+            f'          <div class="post-calc-sample-schedule-preview" data-sample-unlocked="true" style="margin-top: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; border: 1px dashed var(--border); background: var(--bg-subtle); font-size: 13px; line-height: 1.45;">\n'
             f'            <div style="font-weight: 700; margin-bottom: 4px;">Unlocked Sample Packet Lines ({calc_amt_fmt2} Baseline):</div>\n'
             f'            <div>1. [UNLOCKED] Personalized Statutory Reconciliation Workpaper (HTML/PDF &amp; CSV)</div>\n'
             f'            <div>2. [UNLOCKED] Multi-Scenario Sensitivity Matrix (0.8x / 1.0x / 1.2x tiers)</div>\n'
@@ -5314,7 +5383,7 @@ def _retrofit_partner_reg_and_quick_unlock(
             f'              <option value="MA">Massachusetts (MA)</option>\n'
             f'            </select>\n'
             f'          </div>\n'
-            f'          <button type="submit" id="partner-registration-submit-btn" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 6px; background: var(--accent, #1d4ed8); color: var(--cta-fg, #ffffff); font-weight: 700; border: none; cursor: pointer;">Register Firm</button>\n'
+            f'          <button type="submit" id="partner-registration-submit-btn" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 700; border: none; cursor: pointer;">Register Firm</button>\n'
             f'          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite" style="width: 100%; font-size: 13px; font-weight: 600; margin-top: 6px;"></div>\n'
             f'        </form>\n'
             f'      </div>\n'
@@ -5515,7 +5584,7 @@ def _retrofit_partner_reg_and_quick_unlock(
             f'class="touch-target btn-primary post-calc-upgrade-btn" data-checkout-trigger="1" '
             f'data-offer-sku="{quick_sku}" data-offer-price="19" data-cta-slot="post_calc_quick_unlock_cta" '
             f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; '
-            f'padding: 10px 18px; border-radius: 8px; background: #0f766e; color: #ffffff; font-weight: 700; '
+            f'padding: 10px 18px; border-radius: 8px; background: var(--status-positive); color: var(--cta-fg); font-weight: 700; '
             f'font-size: 14px; text-decoration: none; cursor: pointer;">{ctx_q_drawer["drawer_quick_btn_label"]}</a>\n            '
         )
         updated, n_qbtn = re.subn(
@@ -5750,7 +5819,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
             f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
             f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent, #1d4ed8); color: #ffffff; font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
             f'      </div>\n'
         )
         q_pos = updated.find('<div id="partner-quote-intake-step"')
@@ -5827,12 +5896,11 @@ def normalize_html_visual_primitives(
             updated,
             flags=re.IGNORECASE,
         )
-        is_tenant_porcelain = (
-            "/static/css/style.css" in non_prim_doc
-            or "/css/style.css" in non_prim_doc
-            or 'data-theme="porcelain"' in non_prim_doc
-            or "--bg-canvas: #fbfcfd" in non_prim_doc
-        ) and "--bg: #07090e" not in non_prim_doc and "--bg-canvas: #07090e" not in non_prim_doc and 'data-theme="obsidian"' not in non_prim_doc
+        is_tenant_porcelain = not (
+            "--bg: #07090e" in non_prim_doc
+            or "--bg-canvas: #07090e" in non_prim_doc
+            or 'data-theme="obsidian"' in non_prim_doc
+        )
 
     def _heal_inverted_dark_root_block(m: re.Match) -> str:
         root_css = m.group(1)
@@ -5850,9 +5918,22 @@ def normalize_html_visual_primitives(
         if "visual_primitives_css" not in repaired:
             repaired.append("visual_primitives_css")
 
-    # 1. Inject or repair <style id="pseo-visual-primitives">
+    # 1. Inject or repair <style id="pseo-visual-primitives"> unless external Porcelain <link> is active
+    link_prim_m = re.search(
+        r'<link\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>',
+        updated,
+        re.IGNORECASE,
+    )
+    has_ext_porcelain = bool(
+        link_prim_m and f'data-version="{VISUAL_PRIMITIVES_VERSION}"' in link_prim_m.group(0)
+    )
     style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
-    if 'id="pseo-visual-primitives"' in updated or "id='pseo-visual-primitives'" in updated:
+    if "2027 2027 " in updated:
+        updated = updated.replace("2027 2027 ", "2027 ")
+        repaired.append("duplicate_year_label")
+    if has_ext_porcelain:
+        pass
+    elif 'id="pseo-visual-primitives"' in updated or "id='pseo-visual-primitives'" in updated:
         prim_match = re.search(
             r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
             updated,
@@ -5861,7 +5942,9 @@ def normalize_html_visual_primitives(
         prim_body = prim_match.group(1) if prim_match else ""
         prim_root = prim_body.split('[data-theme="porcelain"]', 1)[0]
         has_token_inversion = (not is_tenant_porcelain) and (
-            "--text-primary: #0f172a" in prim_root or "--bg-surface: #ffffff" in prim_root
+            "--text-primary: #0f172a" in prim_root
+            or "--text-primary: #090d16" in prim_root
+            or "--bg-surface: #ffffff" in prim_root
         )
         needs_style_repair = (
             f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
@@ -5877,9 +5960,6 @@ def normalize_html_visual_primitives(
             or ".serp-scenario-comparator-table" not in prim_body
             or has_token_inversion
         )
-        if "2027 2027 " in updated:
-            updated = updated.replace("2027 2027 ", "2027 ")
-            repaired.append("duplicate_year_label")
         if needs_style_repair:
             updated = re.sub(
                 r'\s*<style[^>]*id=["\']pseo-visual-primitives["\'][^>]*>[\s\S]*?</style>',
@@ -5905,35 +5985,76 @@ def normalize_html_visual_primitives(
     # 1b. Synthesize safe fallback tokens for any undefined var(--...) custom properties
     no_script_doc = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", updated, flags=re.IGNORECASE)
     defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_doc))
+    if has_ext_porcelain:
+        try:
+            from pseofactory.porcelain_shell import (
+                extract_defined_and_referenced_css_vars,
+                generate_porcelain_stylesheet,
+            )
+
+            porcelain_defined, _ = extract_defined_and_referenced_css_vars(
+                generate_porcelain_stylesheet("profithelm")
+            )
+            defined_vars |= porcelain_defined
+        except Exception:
+            pass
     used_vars = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_doc))
     orphan_vars = sorted(used_vars - defined_vars)
     if orphan_vars:
-        fallback_lines: List[str] = []
-        for ov in orphan_vars:
-            ov_low = ov.lower()
-            if any(k in ov_low for k in ("bg", "surface", "canvas", "card")):
-                fb_val = "#ffffff" if is_tenant_porcelain else "#0f172a"
-            elif any(k in ov_low for k in ("border", "line", "divider")):
-                fb_val = "#dbe1ea" if is_tenant_porcelain else "rgba(255, 255, 255, 0.12)"
-            elif any(k in ov_low for k in ("text", "fg", "ink", "title", "heading")):
-                fb_val = "#090d16" if is_tenant_porcelain else "#f8fafc"
-            elif any(k in ov_low for k in ("radius", "round")):
-                fb_val = "8px"
-            elif any(k in ov_low for k in ("space", "gap", "pad")):
-                fb_val = "16px"
-            else:
-                fb_val = "#1d4ed8" if is_tenant_porcelain else "#38bdf8"
-            fallback_lines.append(f"      {ov}: {fb_val};")
-        fallback_css = "\n".join(fallback_lines) + "\n"
-        updated = re.sub(
-            r'(<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>\s*:root\s*\{)',
-            r"\1\n" + fallback_css,
-            updated,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        if "orphan_css_token_repair" not in repaired:
-            repaired.append("orphan_css_token_repair")
+        if has_ext_porcelain:
+            for ov in orphan_vars:
+                ov_low = ov.lower()
+                if "canvas" in ov_low:
+                    canon_tok = "--bg-canvas"
+                elif any(k in ov_low for k in ("bg", "surface", "card")):
+                    canon_tok = "--bg-surface"
+                elif any(k in ov_low for k in ("border", "line", "divider")):
+                    canon_tok = "--border"
+                elif any(k in ov_low for k in ("text", "fg", "ink", "title", "heading")):
+                    canon_tok = "--text-primary"
+                elif any(k in ov_low for k in ("radius", "round")):
+                    canon_tok = "--radius-md"
+                else:
+                    canon_tok = "--brand-primary"
+                updated = re.sub(
+                    rf"var\(\s*{re.escape(ov)}\s*\)",
+                    f"var({canon_tok})",
+                    updated,
+                )
+            if "orphan_css_token_repair" not in repaired:
+                repaired.append("orphan_css_token_repair")
+        else:
+            fallback_lines: List[str] = []
+            for ov in orphan_vars:
+                ov_low = ov.lower()
+                if any(k in ov_low for k in ("bg", "surface", "canvas", "card")):
+                    fb_val = "#ffffff" if is_tenant_porcelain else "#0f172a"
+                elif any(k in ov_low for k in ("border", "line", "divider")):
+                    fb_val = "#dbe1ea" if is_tenant_porcelain else "rgba(255, 255, 255, 0.12)"
+                elif any(k in ov_low for k in ("text", "fg", "ink", "title", "heading")):
+                    fb_val = "#0f172a" if is_tenant_porcelain else "#f8fafc"
+                elif any(k in ov_low for k in ("radius", "round")):
+                    fb_val = "8px"
+                elif any(k in ov_low for k in ("space", "gap", "pad")):
+                    fb_val = "16px"
+                else:
+                    fb_val = "#1d4ed8" if is_tenant_porcelain else "#38bdf8"
+                fallback_lines.append(f"      {ov}: {fb_val};")
+            fallback_css = "\n".join(fallback_lines) + "\n"
+            updated = re.sub(
+                r'(<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>\s*:root\s*\{)',
+                r"\1\n" + fallback_css,
+                updated,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            if "orphan_css_token_repair" not in repaired:
+                repaired.append("orphan_css_token_repair")
+
+    if has_ext_porcelain and re.search(r"<style\b", updated, flags=re.IGNORECASE):
+        updated = re.sub(r"\s*<style\b[^>]*>[\s\S]*?</style>", "", updated, flags=re.IGNORECASE)
+        if "strip_competing_inline_style" not in repaired:
+            repaired.append("strip_competing_inline_style")
 
     # 1c. Normalize any stylesheet rules that set min-height or min-width < 44px
     def _fix_style_block_touch_targets(m: re.Match) -> str:
@@ -6097,11 +6218,11 @@ def normalize_html_visual_primitives(
     # 5h. Ensure every commercial calculator page with #partner-quote-intake-step also exposes #lead-capture-form ("Get Free Playbook")
     if 'id="partner-quote-intake-step"' in updated and 'id="lead-capture-form"' not in updated:
         playbook_card_html = (
-            '      <div class="playbook-capture-card" style="margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated, #f8fafc);">\n'
+            '      <div class="playbook-capture-card" style="margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated);">\n'
             '        <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">Personalized Calculation Playbook &amp; Statutory Workpaper</div>\n'
             '        <form id="lead-capture-form" class="lead-capture-form" action="/api/lead-capture" method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;" novalidate>\n'
             '          <input type="email" name="email" placeholder="Enter email for personalized playbook" aria-label="Email for personalized playbook" required class="touch-target" style="padding:10px 14px;border-radius:6px;border:1px solid var(--border);min-height:44px;flex:1;min-width:220px;" />\n'
-            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary,#1d4ed8);color:#fff;font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
+            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary);color:var(--cta-fg);font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
             '        </form>\n'
             '      </div>\n'
         )
@@ -6247,8 +6368,10 @@ def normalize_html_visual_primitives(
                 or "surety_lien" not in sync_body
                 or "btn-calc-result-quick-unlock" not in sync_body
                 or '["input-med_school_loan_balance", "serp-loan-balance"]' not in sync_body
+                or '["input-bond_amount", "serp-b2b-gross"]' not in sync_body
                 or 'mode === "lienbond"' in sync_body
                 or "autoPrevBtn" not in sync_body
+                or ('id="cg-ordinary-income"' in updated and "cgTaxGrossEl" not in sync_body)
                 or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
                 or "hiddenForm" not in sync_body
                 or "primaryCalcIds" not in sync_body

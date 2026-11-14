@@ -56,7 +56,7 @@ def compute_engine_hash(
                     pass
                 for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json"):
                     for p in bpath.glob(pattern):
-                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules")) or p.name.endswith(".pyc"):
+                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", "_pseo_substrate")) or p.name.endswith(".pyc"):
                             continue
                         try:
                             mtimes.append(p.stat().st_mtime)
@@ -112,7 +112,7 @@ def compute_engine_hash(
             if bpath.is_dir():
                 for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json"):
                     for p in bpath.glob(pattern):
-                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules")) or p.name.endswith(".pyc"):
+                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", "_pseo_substrate")) or p.name.endswith(".pyc"):
                             continue
                         rel = f"{bpath.name}/{p.relative_to(bpath).as_posix()}"
                         try:
@@ -186,7 +186,7 @@ def compute_two_tier_merkle_hash(
                     if not p.is_file():
                         continue
                     rel_parts = p.relative_to(tpath).parts
-                    if any(ex in rel_parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", ".agy")) or p.name.endswith(".pyc"):
+                    if any(ex in rel_parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", ".agy", "_pseo_substrate")) or p.name.endswith(".pyc"):
                         continue
                     rel = p.relative_to(tpath).as_posix()
                     key = f"{idx}:{rel}" if len(raw_candidates) > 1 else rel
@@ -275,12 +275,34 @@ def write_substrate_lock(
             from pseofactory.affiliates import normalize_html_callout_message_match
             from pseofactory.visual_primitives import normalize_html_visual_primitives
 
+            from pseofactory.porcelain_shell import (
+                _discover_estate_tools_and_gsc_token,
+                classify_porcelain_blueprint,
+                extract_defined_and_referenced_css_vars,
+                generate_porcelain_stylesheet_from_profile,
+                get_porcelain_tenant_profile,
+                normalize_html_to_porcelain_shell,
+            )
+
+            _porc_prof = get_porcelain_tenant_profile(pid)
+            _porc_css = generate_porcelain_stylesheet_from_profile(_porc_prof)
+            _porc_vars, _ = extract_defined_and_referenced_css_vars(_porc_css)
+            _porc_tools, _ = _discover_estate_tools_and_gsc_token(eff_dist, _porc_prof)
+            _porc_hubs = {
+                _hc
+                for _hc in ("vs", "comparisons", "compare", "guides", "articles", "research")
+                if (eff_dist / _hc / "index.html").is_file()
+            }
             for html_f in sorted(eff_dist.rglob("*.html")):
-                if not html_f.is_file():
+                if not html_f.is_file() or html_f.name.startswith("."):
                     continue
+                rel_hf = html_f.relative_to(eff_dist).as_posix()
                 try:
                     raw_html = html_f.read_text(encoding="utf-8")
                 except Exception:
+                    continue
+                bp_hf = classify_porcelain_blueprint(rel_hf, raw_html, pid)
+                if bp_hf in ("operator_pwa", "governance_legal", "error_404"):
                     continue
                 norm_html = raw_html
                 if (
@@ -298,6 +320,19 @@ def write_substrate_lock(
                     norm_html, _ = normalize_html_visual_primitives(norm_html)
                 if "/r/" in norm_html or "overlay-partner-offer" in norm_html:
                     norm_html = normalize_html_callout_message_match(norm_html, property_id=pid)
+                if norm_html != raw_html and (
+                    'data-theme="porcelain"' in raw_html
+                    or '<link rel="stylesheet" id="pseo-visual-primitives"' in raw_html
+                    or '<link rel="stylesheet" id="pseo-visual-primitives"' in norm_html
+                ):
+                    norm_html, _ = normalize_html_to_porcelain_shell(
+                        norm_html,
+                        rel_hf,
+                        _porc_prof,
+                        active_tools=_porc_tools,
+                        known_css_vars=_porc_vars,
+                        existing_hubs=_porc_hubs,
+                    )
                 if norm_html != raw_html:
                     html_f.write_text(norm_html, encoding="utf-8")
         except Exception:

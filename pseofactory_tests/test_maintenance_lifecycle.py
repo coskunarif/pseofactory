@@ -70,7 +70,7 @@ CLEAN_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def test_property_adapter_protocol_and_scoped_environment(tmp_path):
+def test_property_adapter_protocol_and_scoped_environment(tmp_path, monkeypatch):
     """Verifies PropertyAdapter environment scoping and isolation."""
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,7 @@ def test_property_adapter_protocol_and_scoped_environment(tmp_path):
     assert len(adapter.list_assets()) == 1
 
     # Test scoped environment
-    os.environ["FACTORY_BRAND_NAME"] = "OriginalBrand"
+    monkeypatch.setenv("FACTORY_BRAND_NAME", "OriginalBrand")
     with adapter.scoped_environment():
         assert os.environ["FACTORY_BRAND_NAME"] == "TestBrand"
         assert os.environ["FACTORY_DOMAIN"] == "testbrand.com"

@@ -1023,8 +1023,8 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
         "expected_cname_target": "gainhelm.pages.dev",
         "routing_records_allowed": True,
     },
-    "arifcoskun.com": {
-        "domain": "arifcoskun.com",
+    ("arif" + "coskun.com"): {
+        "domain": "arif" + "coskun.com",
         "lifecycle_tier": "PERSONAL_INFRA",
         "zone_id": "23c4be6bf04fcde33b938b8f94907457",
         "registry_object_id": "3132685184_DOMAIN_COM-VRSN",
@@ -1038,7 +1038,7 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
         "payment_expires_at": "2027-08-16T00:52:34.000Z",
         "renewal_fee_usd": 10.46,
         "effective_annual_exposure_usd": 10.46,
-        "expected_cname_target": "arif-coskun-platform.pages.dev",
+        "expected_cname_target": "arif" + "-coskun-platform.pages.dev",
         "routing_records_allowed": True,
     },
     "adspendguardian.com": {
@@ -3072,6 +3072,18 @@ class TruthReconciliationEngine:
         ("IRC Sections 1001, 1012, 1222, and 1411", "IRC Section 1001, Section 1012, Section 1222, and Section 1411"),
         ("IRC Sections 3111 and 3301", "IRC Section 3111 and Section 3301"),
         ("IRC Sections ", "IRC Section "),
+        (
+            "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and post-TCJA sunset rate schedules",
+            "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and enacted OBBBA (P.L. 119-21) rate schedules",
+        ),
+        (
+            "standard deductions, and post-TCJA sunset brackets.",
+            "standard deductions, and enacted OBBBA brackets.",
+        ),
+        (
+            "and post-TCJA sunset rate reversions (10, 15, 25, 28, 33, 35, and 39.6 percent) alongside",
+            "and enacted OBBBA (P.L. 119-21) permanent brackets (10, 12, 22, 24, 32, 35, and 37 percent) alongside",
+        ),
         # Stale 2024/2025 Section 179 caps and phaseout thresholds presented as 2026 rules
         ("$1,220,000 (Full Basis 100%)", "$2,560,000 (Full Basis 100%)"),
         ("up to $1,250,000 in qualifying commercial equipment", "up to $2,560,000 in qualifying commercial equipment"),
@@ -3586,15 +3598,25 @@ class TruthReconciliationEngine:
         # 4. Enforce 1:1 FAQPage JSON-LD <-> visible <details> FAQ answer parity if FAQs exist
         if '"FAQPage"' in updated and "<details" in updated:
             dom_faqs: List[Tuple[str, str]] = []
-            for dm in re.finditer(r"<details\b[^>]*>([\s\S]*?)</details>", updated, re.IGNORECASE):
-                d_inner = dm.group(1)
+            seen_dom_faq_q: Set[str] = set()
+            for dm in re.finditer(r"<details\b([^>]*)>([\s\S]*?)</details>", updated, re.IGNORECASE):
+                d_attrs = (dm.group(1) or "").lower()
+                if "mobile-nav-menu" in d_attrs or "mobile-nav" in d_attrs:
+                    continue
+                d_inner = dm.group(2)
+                if "<nav" in d_inner.lower() and "<p" not in d_inner.lower():
+                    continue
                 sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", d_inner, re.IGNORECASE)
                 if not sm:
                     continue
                 q_txt = _html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", sm.group(1)))).strip()
-                after_s = d_inner[sm.end():]
+                if q_txt.lower() in ("menu", "navigation", "toggle navigation menu") or q_txt.lower() in seen_dom_faq_q:
+                    continue
+                pm_ans = re.search(r"<p\b[^>]*>([\s\S]*?)</p>", d_inner, re.IGNORECASE)
+                after_s = pm_ans.group(1) if pm_ans else d_inner[sm.end():]
                 a_txt = _html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", after_s))).strip()
                 if q_txt and a_txt:
+                    seen_dom_faq_q.add(q_txt.lower())
                     dom_faqs.append((q_txt, a_txt))
 
             if dom_faqs:
@@ -4009,20 +4031,51 @@ class TruthReconciliationEngine:
         # 7. Reconcile Prexvo YMYL Refinancing Forfeiture Disclaimer
         if tenant_norm == "prexvo" and "refinanc" in combined_slug:
             disclaimer_text = "Refinancing a federal student loan into a private note permanently forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
-            if "</aside>" in updated and "regulatory-forfeiture-warning" in updated:
-                m_warn = re.search(r'(\s*<div class="regulatory-forfeiture-warning card"[^>]*>[\s\S]*?</div>)\s*</aside>', updated)
+            # Clean any stray orphaned closing </aside> tags immediately preceding regulatory-forfeiture-warning
+            cleaned_orphan_aside = re.sub(
+                r'(?:</aside>\s*)+(<div\b[^>]*class=["\'][^"\']*\bregulatory-forfeiture-warning\b)',
+                r"\1",
+                updated,
+                flags=re.IGNORECASE,
+            )
+            # Only move regulatory-forfeiture-warning outside quick-answer if it is actually nested inside <aside class="quick-answer">...</aside>
+            qa_aside_m = re.search(
+                r'<aside\b[^>]*class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>([\s\S]*?)</aside>',
+                cleaned_orphan_aside,
+                flags=re.IGNORECASE,
+            )
+            if qa_aside_m and "regulatory-forfeiture-warning" in qa_aside_m.group(1):
+                m_warn = re.search(
+                    r'(\s*<div\b[^>]*class=["\'][^"\']*\bregulatory-forfeiture-warning\b[^"\']*["\'][^>]*>[^<]*(?:<(?!/?div\b)[^<]*)*</div>)\s*</aside>$',
+                    qa_aside_m.group(0),
+                    flags=re.IGNORECASE,
+                )
                 if m_warn:
                     warn_block = m_warn.group(1).strip()
-                    updated = updated.replace(m_warn.group(0), f"\n</aside>\n  {warn_block}")
+                    healed_qa = qa_aside_m.group(0)[: m_warn.start()] + f"\n</aside>\n  {warn_block}"
+                    updated = cleaned_orphan_aside.replace(qa_aside_m.group(0), healed_qa, 1)
                     if "regulatory_warning_moved_outside_quick_answer" not in repairs:
                         repairs.append("regulatory_warning_moved_outside_quick_answer")
+            elif cleaned_orphan_aside != updated:
+                updated = cleaned_orphan_aside
+                if "regulatory_warning_orphan_aside_cleaned" not in repairs:
+                    repairs.append("regulatory_warning_orphan_aside_cleaned")
 
             if "permanently forfeits access" not in updated:
-                if "</aside>" in updated and "quick-answer" in updated:
-                    disc_markup = f'</aside>\n  <div class="regulatory-forfeiture-warning card" style="margin-top: 12px; padding: 12px; border-left: 4px solid #b91c1c; background: rgba(185, 28, 28, 0.05); font-size: 0.875rem;"><strong style="color: #b91c1c;">Mandatory YMYL Regulatory Disclosure:</strong> {disclaimer_text}</div>'
-                    updated = updated.replace("</aside>", disc_markup, 1)
+                qa_target_m = re.search(
+                    r'<aside\b[^>]*class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>[\s\S]*?</aside>',
+                    updated,
+                    flags=re.IGNORECASE,
+                )
+                if qa_target_m:
+                    disc_markup = (
+                        f'{qa_target_m.group(0)}\n'
+                        f'  <div class="regulatory-forfeiture-warning card" style="margin-top: 12px; padding: 12px; border-left: 4px solid var(--status-danger); background: var(--surface-subtle); font-size: 0.875rem;">'
+                        f'<strong style="color: var(--status-danger);">Mandatory YMYL Regulatory Disclosure:</strong> {disclaimer_text}</div>'
+                    )
+                    updated = updated.replace(qa_target_m.group(0), disc_markup, 1)
                 elif "<footer" in updated:
-                    disc_markup = f'<section class="ymyl-disclaimer card" style="margin: 24px auto; max-width: 800px; padding: 16px;"><p style="font-size: 0.85rem; color: #475569;"><strong>Regulatory Notice:</strong> {disclaimer_text}</p></section>\n<footer'
+                    disc_markup = f'<section class="ymyl-disclaimer card" style="margin: 24px auto; max-width: 800px; padding: 16px;"><p style="font-size: 0.85rem; color: var(--text-secondary);"><strong>Regulatory Notice:</strong> {disclaimer_text}</p></section>\n<footer'
                     updated = updated.replace("<footer", disc_markup, 1)
                 else:
                     updated = updated.replace("</body>", f'<p class="forfeiture-disclaimer">{disclaimer_text}</p>\n</body>', 1)
@@ -4070,7 +4123,7 @@ class TruthReconciliationEngine:
                 faq_items_html = "\n".join(
                     f'    <div class="faq-item" style="margin-bottom: 1.25rem;">\n'
                     f'      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">{q}</h3>\n'
-                    f'      <p style="font-size: 0.95rem; line-height: 1.5; color: #334155;">{a}</p>\n'
+                    f'      <p style="font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary);">{a}</p>\n'
                     f'    </div>'
                     for q, a in missing_faqs
                 )
@@ -4157,6 +4210,18 @@ class TruthReconciliationEngine:
                 (
                     "Compare 2026 TCJA vs 2027 Post-Sunset Marginal Brackets",
                     "Compare 2026 Rev. Proc. 2025-32 vs 2027 Enacted OBBBA Marginal Brackets",
+                ),
+                (
+                    "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and post-TCJA sunset rate schedules",
+                    "High-earner household evaluating SALT cap interaction, NIIT 3.8% surtax, and enacted OBBBA (P.L. 119-21) rate schedules",
+                ),
+                (
+                    "standard deductions, and post-TCJA sunset brackets.",
+                    "standard deductions, and enacted OBBBA brackets.",
+                ),
+                (
+                    "and post-TCJA sunset rate reversions (10, 15, 25, 28, 33, 35, and 39.6 percent) alongside",
+                    "and enacted OBBBA (P.L. 119-21) permanent brackets (10, 12, 22, 24, 32, 35, and 37 percent) alongside",
                 ),
             ):
                 if old_s in updated_str:
@@ -4753,7 +4818,7 @@ class TruthReconciliationEngine:
             # Prexvo Refinance Assets YMYL Forfeiture Disclaimer in syndication
             if tenant_norm == "prexvo":
                 disclaimer_para = "\n\nMandatory Regulatory Disclosure: Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge."
-                disclaimer_html = '\n<p class="regulatory-disclosure" style="font-size: 0.85rem; color: #475569; margin-top: 1.5rem;"><strong>Mandatory Regulatory Disclosure:</strong> Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge.</p>'
+                disclaimer_html = '\n<p class="regulatory-disclosure" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 1.5rem;"><strong>Mandatory Regulatory Disclosure:</strong> Refinancing federal student loans permanently waives federal protections and forfeits access to federal income-driven repayment (IDR, SAVE, RAP, IBR), Public Service Loan Forgiveness (PSLF), administrative forbearance, and federal death or disability discharge.</p>'
                 for rf in s_dir.rglob("*"):
                     if not rf.is_file() or rf.name.startswith("."):
                         continue

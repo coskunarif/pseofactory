@@ -468,6 +468,7 @@ def audit_rendered_asset(
     candidate_spec: Dict[str, Any],
     tenant: str,
     tolerance: float = 0.01,
+    dist_dir: Optional[Union[str, Path]] = None,
 ) -> ContentAccuracyAuditReport:
     """
     Evaluates rendered HTML and calculation manifest against candidate_spec
@@ -955,6 +956,7 @@ def audit_rendered_asset(
         candidate_spec=candidate_spec,
         violations=violations,
         gate_results=gate_results,
+        dist_dir=dist_dir,
     )
 
     passed = len(violations) == 0
@@ -1128,8 +1130,140 @@ def _audit_template_and_structure_gates(
                 g8_ok = False
                 violations.append(f"Gate 8 (Structural Components): {q_err}")
 
+    from pseofactory.porcelain_shell import audit_porcelain_shell_page
+
+    has_porcelain_link = bool(
+        re.search(r'<link\b[^>]*id=["\']pseo-visual-primitives["\']', html_content or "", re.IGNORECASE)
+    )
+    if has_porcelain_link:
+        for p_err in audit_porcelain_shell_page(
+            html_content,
+            slug,
+            check_shell_landmarks=True,
+        ):
+            g8_ok = False
+            violations.append(f"Gate 8 (Porcelain Shell Contract): {p_err}")
+
     gate_results["structural_components"] = g8_ok
     return no_scripts_text
+
+
+def _verify_calculate_btn_touch_target(
+    html_content: str,
+    dist_dir: Optional[Union[str, Path]] = None,
+) -> List[str]:
+    """Verifies Gate 10 44x44px touch target on #calculate-btn / primary CTA against inline style or disk CSS."""
+    issues: List[str] = []
+    btn_tag_m = re.search(
+        r'<button\b[^>]*\bid=["\']calculate-btn["\'][^>]*>',
+        html_content,
+        re.IGNORECASE,
+    )
+    btn_style_m = (
+        re.search(r'\bstyle=["\']([^"\']+)["\']', btn_tag_m.group(0), re.IGNORECASE)
+        if btn_tag_m
+        else None
+    )
+    if btn_style_m:
+        style_str = btn_style_m.group(1)
+        h_m = re.search(r"min-height:\s*(\d+(?:\.\d+)?)px", style_str, re.IGNORECASE)
+        w_m = re.search(r"min-width:\s*(\d+(?:\.\d+)?)px", style_str, re.IGNORECASE)
+        if h_m and float(h_m.group(1)) < 44:
+            issues.append(f"Gate 10 (Touch Target): #calculate-btn min-height {h_m.group(1)}px < 44px")
+        if w_m and float(w_m.group(1)) < 44:
+            issues.append(f"Gate 10 (Touch Target): #calculate-btn min-width {w_m.group(1)}px < 44px")
+        if h_m and float(h_m.group(1)) >= 44 and (not w_m or float(w_m.group(1)) >= 44):
+            return issues
+
+    link_tag_m = re.search(
+        r'<link\b[^>]*\bid=["\']pseo-visual-primitives["\'][^>]*>',
+        html_content,
+        re.IGNORECASE,
+    )
+    if link_tag_m:
+        href_m = re.search(r'\bhref=["\']([^"\']+)["\']', link_tag_m.group(0), re.IGNORECASE)
+        if not href_m or not href_m.group(1).strip():
+            issues.append("Gate 10 (Touch Target): #pseo-visual-primitives <link> missing href attribute")
+            return issues
+        href_val = href_m.group(1).strip()
+        btn_classes = set()
+        if btn_tag_m:
+            cls_m = re.search(r'\bclass=["\']([^"\']+)["\']', btn_tag_m.group(0), re.IGNORECASE)
+            if cls_m:
+                btn_classes = {c.strip() for c in cls_m.group(1).split() if c.strip()}
+        if dist_dir is not None:
+            css_rel = href_val.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+            css_path = Path(dist_dir) / css_rel
+            if not css_path.is_file():
+                issues.append(
+                    f"Gate 10 (Touch Target): Referenced stylesheet '{href_val}' does not exist in dist/"
+                )
+                return issues
+            css_raw = re.sub(
+                r"/\*[\s\S]*?\*/",
+                "",
+                css_path.read_text(encoding="utf-8", errors="ignore"),
+            )
+            matched_min_heights: List[float] = []
+            explicit_id_heights: List[float] = []
+            explicit_id_widths: List[float] = []
+            for rule_m in re.finditer(r"([^{}@]+)\{([^{}]*)\}", css_raw):
+                sel_group = rule_m.group(1)
+                decls = rule_m.group(2)
+                selectors = [s.strip() for s in sel_group.split(",") if s.strip()]
+                applies = False
+                applies_id = False
+                for sel in selectors:
+                    sel_base = sel.split(":", 1)[0].strip()
+                    if "#calculate-btn" in sel_base:
+                        applies = True
+                        applies_id = True
+                    elif btn_tag_m:
+                        if sel_base == "button":
+                            applies = True
+                        elif any(sel_base == f".{cls}" or f".{cls}" in sel_base.split() for cls in btn_classes):
+                            applies = True
+                    elif sel_base in (".touch-target", ".btn", ".btn-primary", ".btn-cta"):
+                        applies = True
+                if not applies:
+                    continue
+                mh_m = re.search(r"min-height\s*:\s*(\d+(?:\.\d+)?)px", decls, re.IGNORECASE)
+                mw_m = re.search(r"min-width\s*:\s*(\d+(?:\.\d+)?)px", decls, re.IGNORECASE)
+                if mh_m:
+                    val_h = float(mh_m.group(1))
+                    matched_min_heights.append(val_h)
+                    if applies_id:
+                        explicit_id_heights.append(val_h)
+                if mw_m and applies_id:
+                    explicit_id_widths.append(float(mw_m.group(1)))
+            if explicit_id_heights and explicit_id_heights[-1] < 44:
+                issues.append(
+                    f"Gate 10 (Touch Target): Stylesheet '{href_val}' sets #calculate-btn min-height {explicit_id_heights[-1]:g}px < 44px"
+                )
+            elif not matched_min_heights or max(matched_min_heights) < 44:
+                issues.append(
+                    f"Gate 10 (Touch Target): Stylesheet '{href_val}' lacks >=44px min-height rule covering #calculate-btn / primary CTA"
+                )
+            if explicit_id_widths and explicit_id_widths[-1] < 44:
+                issues.append(
+                    f"Gate 10 (Touch Target): Stylesheet '{href_val}' sets #calculate-btn min-width {explicit_id_widths[-1]:g}px < 44px"
+                )
+        elif btn_tag_m and not (
+            btn_classes & {"touch-target", "btn", "btn-cta", "btn-primary"}
+        ):
+            issues.append(
+                "Gate 10 (Touch Target): #calculate-btn lacks touch-target/btn class for external stylesheet sizing"
+            )
+        return issues
+
+    inline_css_mh = re.search(
+        r"(?:\.touch-target|#calculate-btn)[^{]*\{[^}]*min-height:\s*(\d+(?:\.\d+)?)px",
+        html_content,
+        re.IGNORECASE,
+    )
+    if not inline_css_mh or float(inline_css_mh.group(1)) < 44:
+        issues.append("Gate 10 (Touch Target): #calculate-btn missing 44x44px touch target specification")
+    return issues
 
 
 def _audit_schema_and_fact_gates(
@@ -1144,6 +1278,7 @@ def _audit_schema_and_fact_gates(
     candidate_spec: Dict[str, Any],
     violations: List[str],
     gate_results: Dict[str, bool],
+    dist_dir: Optional[Union[str, Path]] = None,
 ) -> None:
     """Executes Gates 9, 10, and 11 for audit_rendered_asset."""
     g9_ok = True
@@ -1266,29 +1401,10 @@ def _audit_schema_and_fact_gates(
         g10_ok = False
         violations.append(f"Gate 10 (Anti-Slop): Forbidden dashes detected: {ex}")
 
-    btn_m = re.search(
-        r'<button[^>]*id=["\']calculate-btn["\'][^>]*style=["\']([^"\']+)["\']',
-        html_content,
-        re.IGNORECASE,
-    ) or re.search(
-        r'<button[^>]*style=["\']([^"\']+)["\'][^>]*id=["\']calculate-btn["\']',
-        html_content,
-        re.IGNORECASE,
-    )
-    if btn_m:
-        style_str = btn_m.group(1)
-        h_m = re.search(r'min-height:\s*(\d+)px', style_str)
-        w_m = re.search(r'min-width:\s*(\d+)px', style_str)
-        if h_m and int(h_m.group(1)) < 44:
-            g10_ok = False
-            violations.append(f"Gate 10 (Touch Target): #calculate-btn min-height {h_m.group(1)}px < 44px")
-        if w_m and int(w_m.group(1)) < 44:
-            g10_ok = False
-            violations.append(f"Gate 10 (Touch Target): #calculate-btn min-width {w_m.group(1)}px < 44px")
-    else:
-        if not re.search(r'\.touch-target[^{]*\{[^}]*min-height:\s*44px', html_content, re.IGNORECASE):
-            g10_ok = False
-            violations.append("Gate 10 (Touch Target): #calculate-btn missing 44x44px touch target specification")
+    resolved_dist = dist_dir if dist_dir is not None else (candidate_spec.get("dist_dir") if isinstance(candidate_spec, dict) else None)
+    for tt_err in _verify_calculate_btn_touch_target(html_content, dist_dir=resolved_dist):
+        g10_ok = False
+        violations.append(tt_err)
 
     from pseofactory.visual_primitives import (
         VISUAL_PRIMITIVES_VERSION,
@@ -1370,9 +1486,16 @@ class ContentAccuracyAuditStage:
         tenant: Optional[str] = None,
         tolerance: float = 0.01,
         strict: bool = False,
+        dist_dir: Optional[Union[str, Path]] = None,
     ) -> List[str]:
         t = tenant or property_id
-        rep = audit_rendered_asset(html_content=rendered_html, candidate_spec=candidate_spec, tenant=t, tolerance=tolerance)
+        rep = audit_rendered_asset(
+            html_content=rendered_html,
+            candidate_spec=candidate_spec,
+            tenant=t,
+            tolerance=tolerance,
+            dist_dir=dist_dir,
+        )
         return rep.violations
 
     def audit(
@@ -1380,6 +1503,7 @@ class ContentAccuracyAuditStage:
         html: str,
         candidate_spec: Dict[str, Any],
         tenant: str,
+        dist_dir: Optional[Union[str, Path]] = None,
     ) -> ContentAccuracyAuditReport:
         """
         Executes audit against rendered HTML and candidate specification.
@@ -1390,6 +1514,7 @@ class ContentAccuracyAuditStage:
             candidate_spec=candidate_spec,
             tenant=tenant,
             tolerance=self.tolerance,
+            dist_dir=dist_dir,
         )
         if self.strict and not report.passed:
             raise ContentAccuracyAuditError(
@@ -2267,6 +2392,28 @@ def audit_estate_accuracy(
     violations_by_surface: Dict[str, List[str]] = {}
 
     # 1. Audit 100% of HTML pages in dist/ (top-level hubs, nested spokes, guides, institutional pages)
+    from pseofactory.porcelain_shell import (
+        audit_porcelain_estate_structure,
+        audit_porcelain_shell_page,
+        extract_defined_and_referenced_css_vars,
+    )
+
+    has_full_porcelain_estate = (
+        (d / "index.html").is_file()
+        and (d / "tools" / "index.html").is_file()
+        and (d / "sitemap.xml").is_file()
+    )
+    estate_css_defined_vars = None
+    if has_full_porcelain_estate and (d / "css" / "style.css").is_file():
+        estate_css_defined_vars, _ = extract_defined_and_referenced_css_vars(
+            (d / "css" / "style.css").read_text(encoding="utf-8", errors="ignore")
+        )
+    if has_full_porcelain_estate:
+        estate_porcelain_v = audit_porcelain_estate_structure(d, tenant_norm)
+        if estate_porcelain_v:
+            violations_by_surface["__porcelain_estate__"] = estate_porcelain_v
+            non_html_failed += 1
+
     for html_page in sorted(d.rglob("*.html")):
         if html_page.name.startswith("."):
             continue
@@ -2288,9 +2435,9 @@ def audit_estate_accuracy(
             tools_audited += 1
             if is_nested_spoke:
                 spokes_audited += 1
-            spec = {"slug": slug_key, "property_id": tenant_norm}
+            spec = {"slug": slug_key, "property_id": tenant_norm, "dist_dir": str(d)}
             try:
-                report = auditor.audit(html=html_content, candidate_spec=spec, tenant=tenant_norm)
+                report = auditor.audit(html=html_content, candidate_spec=spec, tenant=tenant_norm, dist_dir=d)
                 if not report.passed:
                     page_violations.extend(report.violations)
             except Exception as ex:
@@ -2307,6 +2454,17 @@ def audit_estate_accuracy(
             for sv in stat_v:
                 if sv not in page_violations:
                     page_violations.append(sv)
+
+        for pv in audit_porcelain_shell_page(
+            html_content,
+            rel_path,
+            css_defined_vars=estate_css_defined_vars,
+            check_shell_landmarks=has_full_porcelain_estate,
+            property_id=tenant_norm,
+        ):
+            msg = f"Gate 8 (Porcelain Shell Contract): {pv}"
+            if msg not in page_violations:
+                page_violations.append(msg)
 
         html_pages_audited += 1
         if page_violations:

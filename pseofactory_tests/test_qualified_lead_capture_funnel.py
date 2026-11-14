@@ -1014,6 +1014,7 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
 
     # Also verify real compiled tenant routes across profithelm-platform (156), prexvo (25), and gainhelm (15)
     from pathlib import Path
+    import shutil
     from pseofactory.browser_verifier import RouteManifestExtractor
     from pseofactory.visual_primitives import normalize_html_visual_primitives
 
@@ -1032,6 +1033,10 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             "tools/soc-2-audit-cost-calculator/index.html",
             "tools/cmmc-2-0-compliance-cost-calculator/index.html",
         ]),
+        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond/dist"), 18, [
+            "index.html",
+            "tools/contractor-license-bond-cost-calculator-by-credit-score/index.html",
+        ]),
     ]
     for prop_id, real_dist, expected_min_routes, sample_rel_files in tenant_Matrix:
         if not real_dist.is_dir():
@@ -1044,6 +1049,10 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
         assert any(r.startswith("/tools/") and r != "/tools/" for r in smart_sample)
         real_sample_dist = tmp_path / f"real_{prop_id}" / "dist"
         real_sample_dist.mkdir(parents=True, exist_ok=True)
+        for asset_dir_name in ("css", "static", "js"):
+            src_asset_dir = real_dist / asset_dir_name
+            if src_asset_dir.is_dir():
+                shutil.copytree(src_asset_dir, real_sample_dist / asset_dir_name, dirs_exist_ok=True)
         for rel_f in sample_rel_files:
             src_f = real_dist / rel_f
             if src_f.is_file():

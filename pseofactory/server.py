@@ -477,6 +477,17 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "private, no-cache, no-store, must-revalidate")
             self.end_headers()
             return
+        if clean_path in ("/css/style.css", "/static/css/style.css"):
+            disk_css = Path(self.root_dir) / clean_path.lstrip("/")
+            if not disk_css.is_file():
+                from pseofactory.porcelain_shell import generate_porcelain_stylesheet
+                css_bytes = generate_porcelain_stylesheet(self._detect_property_id()).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/css; charset=utf-8")
+                self.send_header("Content-Length", str(len(css_bytes)))
+                self.end_headers()
+                self.wfile.write(css_bytes)
+                return
         super().do_GET()
 
     def do_HEAD(self) -> None:

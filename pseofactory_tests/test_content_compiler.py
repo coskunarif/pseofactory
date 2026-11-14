@@ -184,8 +184,9 @@ def test_compiler_html_structure_and_touch_targets():
     assert "min-width: 44px" in html
     assert 'class="touch-target"' in html
 
-    # Obsidian dark-theme styling check
-    assert "#07090e" in html
+    # Canonical Porcelain Light styling check
+    assert "#fbfcfd" in html
+    assert "#ffffff" in html
     assert "#0f172a" in html
     assert "--card-bg" in html
 

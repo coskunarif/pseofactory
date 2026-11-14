@@ -195,7 +195,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     )
     default_sample = getattr(args, "sample", None)
     if default_sample is None and in_pipeline:
-        default_sample = 2
+        default_sample = 8
 
     from pseofactory.browser_verifier import (
         UnifiedBrowserAuditor as _DefaultBrowserAuditor,
@@ -905,7 +905,7 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     skip_ci = getattr(args, "skip_ci", False)
 
     is_once = run_once or (not daemon)
-    budget = getattr(args, "budget", None) or float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0"))
+    budget = getattr(args, "budget", None) or float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0"))
 
     supervisor = AutonomousLifecycleSupervisor(
         interval=interval,
@@ -2472,7 +2472,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 4 tenants")
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
-    p_sup.add_argument("--budget", type=float, default=float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "2400.0")), help="Execution budget in seconds (default: 2400)")
+    p_sup.add_argument("--budget", type=float, default=float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0")), help="Execution budget in seconds (default: 3300)")
 
     # gsc-ceiling
     p_ceiling = subparsers.add_parser(

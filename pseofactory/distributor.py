@@ -10394,6 +10394,17 @@ Calculations and statutory rules derived from:
             )
             cats = ["Financial Modeling", "SaaS Analytics", "Developer Tools", "AI Tools", "Finance", "Productivity"]
             li_cid = "143884102"
+        from pseofactory.tenant_facts import get_tenant_contract as _get_tc
+        try:
+            li_cid = _get_tc(property_id).linkedin_company_id or li_cid
+        except Exception:
+            pass
+        social_payload: Dict[str, str] = {
+            "twitter": f"@{_normalize_property_id(property_id)}",
+            "twitter_url": f"https://x.com/{_normalize_property_id(property_id)}",
+        }
+        if li_cid:
+            social_payload["linkedin_company_url"] = f"https://www.linkedin.com/company/{li_cid}"
         dir_manifest_payload = {
             "status": "SUCCESS",
             "base_manifest": {
@@ -10416,11 +10427,7 @@ Calculations and statutory rules derived from:
                 "free_tier": True,
                 "primary_category": cats[0],
                 "categories": cats,
-                "social": {
-                    "twitter": f"@{_normalize_property_id(property_id)}",
-                    "twitter_url": f"https://x.com/{_normalize_property_id(property_id)}",
-                    "linkedin_company_url": f"https://www.linkedin.com/company/{li_cid}",
-                },
+                "social": social_payload,
             },
             "directory_manifests": {
                 "producthunt": {
@@ -10662,7 +10669,7 @@ def verify_cross_platform_public_visibility(
             "verified_public_posts_count": 0,
             "verified_public_permalinks": [],
             "credential_gap": (
-                f"LinkedIn session (Arif Coskun) redirects to /company/no-access/ for company_id {corp_company_id}; "
+                f"LinkedIn session (corporate page admin) redirects to /company/no-access/ for company_id {corp_company_id}; "
                 "grant Super Admin or Content Admin on the official company page to enable autonomous company dispatches."
             ),
         }

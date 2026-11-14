@@ -404,11 +404,15 @@ class RouteManifestExtractor:
         widget_specs: Optional[List[InteractiveWidgetSpec]] = None,
     ) -> List[str]:
         """
-        Selects a deterministic, archetype-stratified + delta-aware route sample:
-        1. All git-dirty / newly generated HTML routes in dist/ (up to 10)
-        2. Primary interactive calculator widget routes from widget_specs (or newest /tools/*/ route)
-        3. Most recently modified /tools/<slug>/ calculator route on disk
-        4. Root hub route ('/') and remaining routes up to max(sample_size, len(dirty_routes) + 1)
+        Selects a deterministic, 5-blueprint stratified + delta-aware route sample:
+        1. Git-dirty / newly generated HTML routes in dist/ (up to dirty_cap)
+        2. Stratified public blueprint representatives:
+           - home_hub ('/')
+           - calculator_leaf (primary widget_spec or newest '/tools/<slug>/')
+           - tools_directory ('/tools/')
+           - governance_legal ('/disclaimers/', '/about/', '/methodology/', etc.)
+           - error_404 ('/404.html')
+        3. Remaining widget_specs and routes up to target_cap.
         """
         if sample_size is None or sample_size <= 0 or sample_size >= len(all_routes):
             return list(all_routes)
@@ -416,23 +420,26 @@ class RouteManifestExtractor:
         selected: List[str] = []
 
         def _pick(r: str) -> None:
-            if r in available and r not in selected:
+            if r in available and r not in selected and len(selected) < target_cap:
                 selected.append(r)
 
         dirty_cap = min(10, max(1, sample_size - 2)) if not widget_specs else 10
         dirty = [r for r in self.detect_git_dirty_routes() if r in available][:dirty_cap]
+        target_cap = max(sample_size, len(dirty) + (1 if len(dirty) > 0 else 0))
+
         for dr in dirty:
             _pick(dr)
 
-        for spec in (widget_specs or []):
-            if len(selected) >= max(sample_size, len(dirty) + 1) and len(dirty) == 0:
-                break
-            _pick(spec.route)
-            if len(dirty) == 0 and len(selected) >= max(1, sample_size - 1):
-                break
+        # 1. home_hub
+        _pick("/")
 
+        # 2. calculator_leaf
         tool_routes = [r for r in all_routes if r.startswith("/tools/") and r != "/tools/"]
-        if tool_routes:
+        for spec in (widget_specs or []):
+            _pick(spec.route)
+            if not dirty and len(selected) >= max(2, target_cap - 3):
+                break
+        if tool_routes and not any(r.startswith("/tools/") and r != "/tools/" for r in selected):
             newest_route = None
             newest_mtime = -1.0
             for tr in tool_routes:
@@ -445,14 +452,22 @@ class RouteManifestExtractor:
                             newest_route = tr
                     except Exception:
                         pass
-            if newest_route and len(selected) < max(sample_size, len(dirty) + 1):
-                _pick(newest_route)
-            if not any(r.startswith("/tools/") and r != "/tools/" for r in selected):
-                _pick(tool_routes[0])
+            _pick(newest_route or tool_routes[0])
 
-        target_cap = max(sample_size, len(dirty) + (1 if len(dirty) > 0 else 0))
-        if len(selected) < target_cap:
-            _pick("/")
+        # 3. tools_directory
+        _pick("/tools/")
+
+        # 4. governance_legal
+        for gov_r in ("/disclaimers/", "/about/", "/methodology/", "/privacy/", "/terms/", "/contact/"):
+            if gov_r in available:
+                _pick(gov_r)
+                break
+
+        # 5. error_404
+        _pick("/404.html")
+
+        for spec in (widget_specs or []):
+            _pick(spec.route)
         for r in all_routes:
             if len(selected) >= target_cap:
                 break
@@ -559,10 +574,23 @@ class UnifiedBrowserAuditor:
     JS_CHECK_VISUAL_PRIMITIVES = """(() => {
         const vw = window.innerWidth;
         const p = location.pathname;
+        if (p === '/signal' || p === '/signal/' || p === '/signal/index.html' || p.startsWith('/signal/') || p.startsWith('/static/signal')) {
+            return {
+                screen_archetype: 'operator_pwa',
+                hierarchy_violations: [],
+                unwrapped_tables: [],
+                transparent_controls: [],
+                clipped_elements: [],
+                card_geometry_violations: [],
+                whitespace_rhythm_violations: [],
+                calculator_ergonomics_violations: [],
+                cta_density_violations: []
+            };
+        }
         const hasCalcControls = Boolean(document.querySelector('form.calculator-form, .interactive-calculator-container, .calculator-card, .calculation-container, input[type="number"], input[type="range"], [data-calc-input]'));
         const hasComparison = Boolean(document.querySelector('.comparison-table-section, .statutory-comparison-table-section, table.comparison-table')) || p.includes('-vs-');
         let archetype = 'statutory_guide';
-        if (['/', '/index.html', '/tools/', '/tools/index.html', '/about/', '/about.html', '/contact/', '/contact.html', '/privacy/', '/privacy.html', '/terms/', '/terms.html', '/404.html', '/editorial-standards/', '/editorial-standards/index.html'].includes(p)) {
+        if (['/', '/index.html', '/tools/', '/tools/index.html', '/about/', '/about.html', '/methodology/', '/methodology.html', '/disclaimers/', '/disclaimers.html', '/contact/', '/contact.html', '/privacy/', '/privacy.html', '/terms/', '/terms.html', '/404.html', '/editorial-standards/', '/editorial-standards/index.html'].includes(p)) {
             archetype = 'index_hub';
         } else if (p.includes('-vs-') || (!hasCalcControls && hasComparison)) {
             archetype = 'comparison_page';
@@ -580,6 +608,38 @@ class UnifiedBrowserAuditor:
             calculator_ergonomics_violations: [],
             cta_density_violations: []
         };
+        const siteHeader = document.querySelector('header.site-header');
+        if (!siteHeader) {
+            result.hierarchy_violations.push({ type: 'missing_site_header', vw: vw });
+        }
+        const siteFooter = document.querySelector('footer.site-footer');
+        if (!siteFooter) {
+            result.hierarchy_violations.push({ type: 'missing_site_footer', vw: vw });
+        }
+        const mainLandmark = document.querySelector('main#main-content') || document.querySelector('main');
+        if (!mainLandmark) {
+            result.hierarchy_violations.push({ type: 'missing_main_landmark', vw: vw });
+        } else {
+            const directContainer = Array.from(mainLandmark.children).filter(ch => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName));
+            if (directContainer.length !== 1 || !directContainer[0].classList.contains('container')) {
+                result.hierarchy_violations.push({ type: 'missing_main_container', count: directContainer.length, vw: vw });
+            }
+        }
+        if (vw <= 480) {
+            const mobileMenu = document.querySelector('details.mobile-nav-menu');
+            if (!mobileMenu) {
+                result.hierarchy_violations.push({ type: 'missing_mobile_nav_drawer', vw: vw });
+            } else {
+                const mcs = window.getComputedStyle(mobileMenu);
+                if (mcs.display === 'none' || mcs.visibility === 'hidden') {
+                    result.hierarchy_violations.push({ type: 'hidden_mobile_nav_drawer', vw: vw });
+                }
+            }
+        }
+        const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+        if (bodyBg !== 'rgb(251, 252, 253)') {
+            result.card_geometry_violations.push({ type: 'non_porcelain_body_bg', bg: bodyBg, vw: vw });
+        }
         const getFs = sel => {
             const el = document.querySelector(sel);
             if (!el) return null;
@@ -622,6 +682,15 @@ class UnifiedBrowserAuditor:
             if (!m) return null;
             return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: m[4] !== undefined ? Number(m[4]) : 1 };
         };
+        const blendOver = (top, bottom) => {
+            const a = Math.max(0, Math.min(1, top.a));
+            return {
+                r: top.r * a + bottom.r * (1 - a),
+                g: top.g * a + bottom.g * (1 - a),
+                b: top.b * a + bottom.b * (1 - a),
+                a: 1
+            };
+        };
         const relLum = rgb => {
             const f = c => {
                 const s = c / 255;
@@ -630,30 +699,62 @@ class UnifiedBrowserAuditor:
             return 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b);
         };
         const getEffectiveBg = el => {
+            const layers = [];
             let cur = el;
             while (cur && cur !== document.documentElement) {
                 const bg = parseRgb(window.getComputedStyle(cur).backgroundColor);
-                if (bg && bg.a > 0.1) return bg;
+                if (bg && bg.a > 0) {
+                    layers.push(bg);
+                    if (bg.a >= 0.999) break;
+                }
                 cur = cur.parentElement;
             }
-            return parseRgb(window.getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+            let base = parseRgb(window.getComputedStyle(document.documentElement).backgroundColor);
+            if (!base || base.a === 0) {
+                base = { r: 251, g: 252, b: 253, a: 1 };
+            }
+            for (let i = layers.length - 1; i >= 0; i--) {
+                base = blendOver(layers[i], base);
+            }
+            return base;
         };
-        document.querySelectorAll('h1, main h2, main h3, .card-title, .calc-inline-cta strong').forEach(el => {
+        const hasDirectText = el => {
+            if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') return true;
+            for (let i = 0; i < el.childNodes.length; i++) {
+                const n = el.childNodes[i];
+                if (n.nodeType === 3 && n.nodeValue && n.nodeValue.trim().length > 0) return true;
+            }
+            return false;
+        };
+        const contrastNodes = document.querySelectorAll(
+            'h1, h2, h3, h4, p, li, th, td, label, summary, a, button, input:not([type=hidden]):not([type=range]):not([type=checkbox]):not([type=radio]), select, .card-title, .badge, .pill, .output-value, .calc-metric-value, .result-value'
+        );
+        contrastNodes.forEach(el => {
+            if (!hasDirectText(el)) return;
+            if (el.classList && (el.classList.contains('sr-only') || el.classList.contains('visually-hidden'))) return;
             const r = el.getBoundingClientRect();
             const cs = window.getComputedStyle(el);
-            if (cs.display === 'none' || cs.visibility === 'hidden' || r.width === 0 || r.height === 0) return;
-            const fg = parseRgb(cs.color);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0 || r.width <= 1 || r.height <= 1) return;
+            const rawFg = parseRgb(cs.color);
             const bg = getEffectiveBg(el);
-            if (fg && bg) {
+            if (rawFg && bg) {
+                const fg = rawFg.a < 1 ? blendOver(rawFg, bg) : rawFg;
                 const l1 = relLum(fg);
                 const l2 = relLum(bg);
                 const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-                if (ratio < 3.0) {
+                const fs = parseFloat(cs.fontSize || '16') || 16;
+                const fw = parseInt(cs.fontWeight || '400', 10) || (cs.fontWeight === 'bold' ? 700 : 400);
+                const isLarge = fs >= 24 || (fs >= 18.66 && fw >= 700);
+                const minReq = isLarge ? 3.0 : 4.5;
+                if (ratio + 0.01 < minReq && result.hierarchy_violations.length < 15) {
                     result.hierarchy_violations.push({
                         type: 'low_contrast_text',
                         tag: el.tagName,
+                        cls: String(el.className || '').slice(0, 40),
                         ratio: Math.round(ratio * 100) / 100,
+                        minRatio: minReq,
                         fg: cs.color,
+                        bg: 'rgb(' + Math.round(bg.r) + ', ' + Math.round(bg.g) + ', ' + Math.round(bg.b) + ')',
                         vw: vw
                     });
                 }
@@ -714,6 +815,9 @@ class UnifiedBrowserAuditor:
             const r = c.getBoundingClientRect();
             if (r.width === 0 && r.height === 0) return;
             const cs = window.getComputedStyle(c);
+            if (cs.backgroundColor !== 'rgb(255, 255, 255)') {
+                result.card_geometry_violations.push({ index: idx, type: 'non_porcelain_card_bg', bg: cs.backgroundColor, vw: vw });
+            }
             const br = Math.round(parseFloat(cs.borderRadius) || 0);
             if (br !== 12) {
                 result.card_geometry_violations.push({ index: idx, borderRadius: cs.borderRadius });
@@ -723,29 +827,31 @@ class UnifiedBrowserAuditor:
                 result.card_geometry_violations.push({ index: idx, paddingTop: cs.paddingTop });
             }
         });
-        const mainEl = document.querySelector('main') || document.body;
-        const flowRoot = (mainEl.children.length === 1 && mainEl.children[0].classList.contains('container')) ? mainEl.children[0] : mainEl;
+        const mainEl = document.querySelector('main');
+        const flowRoot = (mainEl && mainEl.children.length === 1 && mainEl.children[0].classList.contains('container')) ? mainEl.children[0] : mainEl;
         const topFlowBlocks = [];
-        Array.from(flowRoot.children).forEach(ch => {
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName) || ch.classList.contains('statutory-accuracy-benchmarks')) return;
-            const cs = window.getComputedStyle(ch);
-            if (cs.display === 'none' || cs.visibility === 'hidden') return;
-            if (ch.classList.contains('gsc-overlay-container')) {
-                Array.from(ch.children).forEach(och => {
-                    if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(och.tagName)) return;
-                    const ocs = window.getComputedStyle(och);
-                    const or = och.getBoundingClientRect();
-                    if (ocs.display !== 'none' && ocs.visibility !== 'hidden' && or.height > 0 && or.width > vw * 0.45) {
-                        topFlowBlocks.push(och);
+        if (flowRoot) {
+            Array.from(flowRoot.children).forEach(ch => {
+                if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName) || ch.classList.contains('statutory-accuracy-benchmarks')) return;
+                const cs = window.getComputedStyle(ch);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return;
+                if (ch.classList.contains('gsc-overlay-container')) {
+                    Array.from(ch.children).forEach(och => {
+                        if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(och.tagName)) return;
+                        const ocs = window.getComputedStyle(och);
+                        const or = och.getBoundingClientRect();
+                        if (ocs.display !== 'none' && ocs.visibility !== 'hidden' && or.height > 0 && or.width > vw * 0.45) {
+                            topFlowBlocks.push(och);
+                        }
+                    });
+                } else {
+                    const r = ch.getBoundingClientRect();
+                    if (r.height > 0 && r.width > vw * 0.45) {
+                        topFlowBlocks.push(ch);
                     }
-                });
-            } else {
-                const r = ch.getBoundingClientRect();
-                if (r.height > 0 && r.width > vw * 0.45) {
-                    topFlowBlocks.push(ch);
                 }
-            }
-        });
+            });
+        }
         if (topFlowBlocks.length >= 2) {
             const lefts = topFlowBlocks.map(el => Math.round(el.getBoundingClientRect().left * 10) / 10);
             const drift = Math.max(...lefts) - Math.min(...lefts);
@@ -1932,7 +2038,7 @@ class UnifiedBrowserAuditor:
     ):
         self.adapter = adapter
         if adapter is not None:
-            self.dist_dir = adapter.dist_dir
+            self.dist_dir = Path(dist_dir).resolve() if dist_dir is not None else adapter.dist_dir
             self.widget_specs = adapter.get_widget_specs()
             self.excluded_routes = set(adapter.get_excluded_routes())
             self.property_id = property_id or adapter.tenant_id

@@ -1673,19 +1673,6 @@ class MasterSEOVerifier:
 
         if required_endpoints is not None:
             self.required_endpoints = list(required_endpoints)
-        elif "lienbond" in str(self.dist_dir).lower() or "lienbond" in self.domain.lower():
-            self.required_endpoints = [
-                "/feed.xml",
-                "/llms.txt",
-                "/llms-full.txt",
-                "/sitemap.xml",
-                "/sitemap-hubs.xml",
-                "/sitemap-leaves.xml",
-                "/",
-                "/methodology/",
-                "/disclaimers/",
-                "/tools/",
-            ]
         else:
             self.required_endpoints = [
                 "/feed.xml",
@@ -1695,9 +1682,13 @@ class MasterSEOVerifier:
                 "/sitemap-hubs.xml",
                 "/sitemap-leaves.xml",
                 "/",
-                "/about/",
-                "/privacy/",
                 "/tools/",
+                "/about/",
+                "/methodology/",
+                "/privacy/",
+                "/terms/",
+                "/disclaimers/",
+                "/contact/",
             ]
         self._file_cache: Dict[str, Tuple[float, int, str]] = MasterSEOVerifier._GLOBAL_FILE_CACHE
 
