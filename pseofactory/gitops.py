@@ -116,6 +116,21 @@ def ci_result_is_failure(ci_res: Optional[Dict[str, Any]]) -> bool:
     return status in {"FAIL", "FAILED", "FAILURE", "ERROR", "CI_FAILURE", "CI_TIMEOUT", "TIMEOUT", "CANCELLED"}
 
 
+# GitHub Actions conclusions that prove a commit failed CI (cancelled/skipped prove nothing).
+CI_FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
+
+# Rollback ledger statuses meaning the restored known-good commit itself still failed the gate.
+_ROLLBACK_STILL_FAILING = {"ci": "ROLLBACK_CI_FAILED", "edge": "ROLLED_BACK_EDGE_STILL_FAILING"}
+
+
+def _rollback_gate(gate: Optional[str], reason: Optional[str]) -> str:
+    """Normalizes the release gate a rollback is answering for: 'ci' or 'edge'."""
+    g = (gate or "").strip().lower()
+    if g in _ROLLBACK_STILL_FAILING:
+        return g
+    return "edge" if str(reason or "").startswith("EDGE_VERIFICATION_FAILED") else "ci"
+
+
 def _is_test_context(
     repo_path: Optional[Union[str, Path]] = None,
     property_id: Optional[str] = None,
@@ -1505,6 +1520,51 @@ class GitOpsCoordinator:
             "attempts": max_attempts,
         }
 
+    def baseline_gate_failure_evidence(
+        self,
+        sha: str,
+        gate: str,
+        workflow: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Returns evidence that commit `sha` has already been measured failing `gate`, else None.
+        Sources of truth (no new state):
+        - the auto-rollback ledger: every entry's failed_sha failed its gate, and a revert_sha
+          whose re-verification failed (ROLLBACK_CI_FAILED / ROLLED_BACK_EDGE_STILL_FAILING)
+          failed it too;
+        - for the CI gate, GitHub Actions' own conclusion for that commit.
+        Zero em-dashes. Zero en-dashes.
+        """
+        sha = (sha or "").strip()
+        if not sha:
+            return None
+        gate = _rollback_gate(gate, None)
+        ledger = self.runs_base / "auto_rollback_ledger.jsonl"
+        if ledger.is_file():
+            try:
+                lines = ledger.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except Exception:
+                lines = []
+            for line in reversed(lines):
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict) or _rollback_gate(rec.get("gate"), rec.get("reason")) != gate:
+                    continue
+                if rec.get("failed_sha") == sha:
+                    return f"ledger: {sha[:12]} failed the {gate} gate in run {rec.get('run_id')}"
+                if rec.get("revert_sha") == sha and rec.get("status") == _ROLLBACK_STILL_FAILING[gate]:
+                    return f"ledger: rollback commit {sha[:12]} still failed the {gate} gate in run {rec.get('run_id')}"
+        if gate == "ci" and workflow:
+            try:
+                conclusion = CICDWatcher(workflow=workflow).completed_conclusion(sha, repo_path=self.repo_path)
+            except Exception:
+                conclusion = None
+            if conclusion in CI_FAILED_CONCLUSIONS:
+                return f"GitHub Actions '{workflow}' concluded '{conclusion}' on {sha[:12]}"
+        return None
+
     def auto_rollback_release(
         self,
         target_dir: Optional[Union[str, Path]],
@@ -1516,9 +1576,12 @@ class GitOpsCoordinator:
         workflow: Optional[str] = None,
         edge_url: Optional[str] = None,
         dist_dir: Optional[Union[str, Path]] = None,
+        gate: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Self-healing rollback after a pushed release fails CI or live edge verification.
+        Refuses (NOT_ATTRIBUTABLE) when the known-good commit is already proven to fail
+        the same gate, because then the release is not the cause.
         Creates a forward commit whose tree equals the last known-good commit (no history
         rewrite, no force push), fast-forwards main, pushes, then re-verifies CI and the
         live edge so main and production converge back to the known-good state.
@@ -1579,6 +1642,24 @@ class GitOpsCoordinator:
         if head != failed_sha:
             result["status"] = "SKIPPED_HEAD_MOVED"
             result["skip_reason"] = f"HEAD {head[:12]} is no longer the failed release; refusing to clobber newer work"
+            return _record(result)
+
+        # Attribution: a failure is the release's fault only if the known-good baseline
+        # passes the same gate. When the baseline is already proven to fail it (infra
+        # outage, auth error, a probe expecting a route the tenant never had), reverting
+        # cannot fix anything: it only discards correct content, and every following
+        # cycle re-ships and re-reverts forever.
+        gate = _rollback_gate(gate, reason)
+        result["gate"] = gate
+        baseline_evidence = self.baseline_gate_failure_evidence(
+            sha=known_good_sha, gate=gate, workflow=workflow
+        )
+        if baseline_evidence:
+            result["status"] = "NOT_ATTRIBUTABLE"
+            result["skip_reason"] = (
+                f"Known-good {known_good_sha[:12]} already fails the {gate} gate ({baseline_evidence}); "
+                "the failure is not caused by this release, so the release is kept and the failure escalates"
+            )
             return _record(result)
 
         tree = _git("rev-parse", f"{known_good_sha}^{{tree}}").stdout.strip()
@@ -1842,6 +1923,7 @@ class GitOpsCoordinator:
                         workflow=wf,
                         edge_url=None,
                         dist_dir=None,
+                        gate="ci",
                     )
                     queue.complete_event(enqueued_event_id, status="CI_FAILURE")
                     return GitOpsResult(
@@ -1888,6 +1970,7 @@ class GitOpsCoordinator:
                         workflow=None if skip_ci else wf,
                         edge_url=edge_url,
                         dist_dir=dist_dir,
+                        gate="edge",
                     )
                     queue.complete_event(enqueued_event_id, status="EDGE_VERIFICATION_FAILED")
                     return GitOpsResult(
@@ -2093,6 +2176,40 @@ class CICDWatcher:
                     return m.group(1)
         except Exception:
             pass
+        return None
+
+    def completed_conclusion(self, head_sha: str, repo_path: Optional[Path] = None) -> Optional[str]:
+        """
+        One non-blocking lookup of the latest completed workflow run conclusion for a commit.
+        Returns None when unknown (no remote, no gh, no completed run). No side effects.
+        Zero em-dashes. Zero en-dashes.
+        """
+        rp = Path(repo_path).resolve() if repo_path else Path.cwd().resolve()
+        slug = self.resolve_repo_slug(rp)
+        if not slug or not self.workflow or not shutil.which("gh"):
+            return None
+        res = subprocess.run(
+            [
+                "gh", "-R", slug, "run", "list",
+                "--workflow", self.workflow,
+                "--commit", head_sha.strip(),
+                "--json", "status,conclusion",
+                "--limit", "5",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if res.returncode != 0:
+            return None
+        try:
+            runs = json.loads(res.stdout.strip() or "[]")
+        except Exception:
+            return None
+        for run in runs if isinstance(runs, list) else []:
+            if isinstance(run, dict) and run.get("status") == "completed" and run.get("conclusion"):
+                return str(run["conclusion"]).strip().lower()
         return None
 
     def watch(

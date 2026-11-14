@@ -367,3 +367,68 @@ def test_retro_reflection_flags_and_heals_volatile_telemetry_in_html_and_sidecar
     assert RetroReflectionEngine._sidecar_needs_sync(sidecar, raw_html) is True
 
 
+
+
+def _revert_commits(repo):
+    return [s for s in _git(repo, "log", "--pretty=%s").splitlines() if "auto-rollback" in s]
+
+
+def test_persistent_infra_ci_failure_does_not_revert_every_cycle(tenant_repo):
+    """
+    Replays lienbond 2026-11-12/13: Cloudflare auth broke the deploy step, every CI run
+    failed, and each hourly cycle shipped its content and then reverted it (25 reverts,
+    each ROLLBACK_CI_FAILED). Once the known-good commit is proven to fail CI, a later
+    failure is not the release's fault: the release is kept and the failure escalates.
+    """
+    repo, origin = tenant_repo
+    github = {}  # sha -> conclusion: one shared view of GitHub Actions for watch + lookup
+
+    def fake_watch(self, head_sha, repo_path=None, run_id=None):
+        github[head_sha] = "failure"  # deploy step: Authentication error [code: 10000]
+        return {"status": "FAIL", "conclusion": "failure", "error": "CI/CD workflow 'ci.yml' concluded with 'failure'"}
+
+    def fake_conclusion(self, head_sha, repo_path=None):
+        return github.get(head_sha)
+
+    with patch.object(gitops.CICDWatcher, "watch", fake_watch), patch.object(
+        gitops.CICDWatcher, "completed_conclusion", fake_conclusion
+    ):
+        for cycle in (1, 2, 3):
+            (repo / "dist" / "index.html").write_text(f"<html>cycle {cycle} content</html>\n", encoding="utf-8")
+            coord = GitOpsCoordinator(repo_path=repo, run_id=f"infra-ci-{cycle}", dry_run=False, workflow="ci.yml")
+            res = coord.dispatch_to_shipper(property_id="test_tenant", skip_edge=True, workflow="ci.yml")
+            assert res.status == "CI_FAILURE", "the failure must still be reported, never shipped as success"
+
+    # Cycle 1 measures the baseline (one rollback, which itself fails CI); after that the
+    # engine stops discarding content.
+    assert len(_revert_commits(repo)) == 1, _revert_commits(repo)
+    assert (res.details.get("rollback") or {}).get("status") == "NOT_ATTRIBUTABLE"
+    assert (repo / "dist" / "index.html").read_text(encoding="utf-8") == "<html>cycle 3 content</html>\n"
+    assert subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "main"], capture_output=True, text=True, check=True
+    ).stdout.strip() == _git(repo, "rev-parse", "HEAD")
+
+
+def test_edge_probe_failing_on_known_good_does_not_revert_every_cycle(tenant_repo):
+    """
+    Replays prexvo/gainhelm 2026-11-07/08: the edge verifier probed /r/simply_business,
+    a route those tenants never had, so the edge gate failed for every commit. 40 hourly
+    cycles were reverted, each ending ROLLED_BACK_EDGE_STILL_FAILING.
+    """
+    repo, _ = tenant_repo
+
+    def fake_edge(self, base_url, dist_dir=None, dry_run=False, sample_tools=None):
+        return {"status": "FAIL", "error": "GET /r/simply_business expected HTTP 302 redirect, got HTTP 404"}
+
+    with patch.object(LiveEdgeVerifier, "verify_edge_deployment", fake_edge):
+        for cycle in (1, 2, 3):
+            (repo / "dist" / "index.html").write_text(f"<html>cycle {cycle} content</html>\n", encoding="utf-8")
+            coord = GitOpsCoordinator(repo_path=repo, run_id=f"infra-edge-{cycle}", dry_run=False)
+            res = coord.dispatch_to_shipper(
+                property_id="test_tenant", skip_ci=True, edge_url="https://tenant.example", dist_dir=repo / "dist"
+            )
+            assert res.status == "EDGE_VERIFICATION_FAILED"
+
+    assert len(_revert_commits(repo)) == 1, _revert_commits(repo)
+    assert (res.details.get("rollback") or {}).get("status") == "NOT_ATTRIBUTABLE"
+    assert (repo / "dist" / "index.html").read_text(encoding="utf-8") == "<html>cycle 3 content</html>\n"
