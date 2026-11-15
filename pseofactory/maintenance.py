@@ -9303,7 +9303,15 @@ class RetroReflectionEngine:
             rel = html_path.resolve().relative_to(dist_dir.resolve()).as_posix()
         except Exception:
             rel = html_path.name
-        if rel == "tools/index.html":
+        if rel in (
+            "tools/index.html",
+            "about/index.html",
+            "methodology/index.html",
+            "privacy/index.html",
+            "terms/index.html",
+            "disclaimers/index.html",
+            "contact/index.html",
+        ):
             return False
         if rel.startswith("tools/") and html_path.suffix == ".html":
             return True

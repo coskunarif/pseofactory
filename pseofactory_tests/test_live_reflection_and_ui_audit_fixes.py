@@ -401,3 +401,26 @@ def test_post_reflection_audit_gates_lienbond_titles_prexvo_loan_monthly_and_met
         "", "profithelm", "commercial heavy vehicle section 179 weight calculator", slug="commercial-heavy-vehicle-section-179-weight-calculator"
     )
     assert m_veh != m_heavy
+
+
+def test_governance_pages_never_treated_as_calculators_or_polluted(tmp_path: Path) -> None:
+    """Governance routes (disclaimers/, methodology/, etc.) must never be classified as calculator pages."""
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
+
+    dist = tmp_path / "dist"
+    (dist / "disclaimers").mkdir(parents=True)
+    polluted_disclaimers = (
+        "<!DOCTYPE html><html><head><script type='application/ld+json'>{\"sameAs\":[\"https://www.wikidata.org/wiki/Q499388\"]}</script></head>"
+        "<body><main><h1>Disclaimers</h1><table><tr><th>A</th><td>" + ("statutory text " * 200) + "</td></tr></table>"
+        "<script id='calculation-manifest' type='application/json'>{\"formula\":\"a+b\"}</script></main></body></html>"
+    )
+    disc_file = dist / "disclaimers" / "index.html"
+    disc_file.write_text(polluted_disclaimers, encoding="utf-8")
+    (dist / "index.html").write_text("<!DOCTYPE html><html><body><main><h1>Home</h1></main></body></html>", encoding="utf-8")
+
+    assert RetroReflectionEngine.is_tool_or_calculator_page(disc_file, dist, polluted_disclaimers) is False
+    compile_tenant_porcelain_estate(dist, property_id="gainhelm", repo_root=tmp_path)
+    cleaned = disc_file.read_text(encoding="utf-8")
+    assert "Q499388" not in cleaned
+    assert 'id="calculation-manifest"' not in cleaned and "id='calculation-manifest'" not in cleaned

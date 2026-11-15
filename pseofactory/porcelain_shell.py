@@ -3808,11 +3808,18 @@ def compile_tenant_porcelain_estate_with_profile(
             source_gov_html = gov_html
             if route_slug in ("disclaimers", "methodology") and gov_file.is_file():
                 existing_gov = gov_file.read_text(encoding="utf-8", errors="ignore")
+                has_polluted_calc = (
+                    'id="calculation-manifest"' in existing_gov
+                    or "id='calculation-manifest'" in existing_gov
+                    or "How to Calculate Legal Disclaimers" in existing_gov
+                    or "How to Calculate Methodology" in existing_gov
+                    or "Q499388" in existing_gov
+                )
                 existing_plain = re.sub(
                     r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", existing_gov, flags=re.IGNORECASE
                 )
                 existing_plain = re.sub(r"<[^>]+>", " ", existing_plain)
-                if len(existing_plain.strip()) >= 1800 and "<table" in existing_gov.lower():
+                if not has_polluted_calc and len(existing_plain.strip()) >= 1800 and "<table" in existing_gov.lower():
                     source_gov_html = existing_gov
             norm_gov_html, _ = normalize_html_to_porcelain_shell(
                 source_gov_html,
