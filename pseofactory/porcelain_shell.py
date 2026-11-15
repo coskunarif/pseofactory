@@ -801,6 +801,13 @@ main blockquote a:not(.btn):not(.btn-cta):not(.partner-btn):not(.touch-target):n
   padding: 0;
 }}
 
+main a.inline-prose-link {{
+  display: inline !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+}}
+
 /* Visible Keyboard Focus Ring */
 a:focus,
 a:focus-visible,
@@ -1619,6 +1626,22 @@ details.faq-accordion > summary::-webkit-details-marker {{
   .footer-grid {{
     grid-template-columns: 1fr;
   }}
+
+  .calc-inline-cta a,
+  .comparison-table-cta-bar a,
+  .pro-hook-card a,
+  .affiliate-card a,
+  .partner-card a,
+  .btn-cta,
+  .btn-primary,
+  .partner-cta,
+  .affiliate-cta-link {{
+    white-space: normal !important;
+    overflow-wrap: break-word;
+    text-align: center;
+    max-width: 100%;
+    box-sizing: border-box;
+  }}
 }}
 
 /* Executive CPA & Statutory Workpaper Print Stylesheet */
@@ -2221,12 +2244,26 @@ def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
             return replacement_org
 
         out_dict: Dict[str, Any] = {}
+        wikidata_map = {
+            "lienbond": "https://www.wikidata.org/wiki/Q192161",
+            "prexvo": "https://www.wikidata.org/wiki/Q633315",
+            "gainhelm": "https://www.wikidata.org/wiki/Q166142",
+            "profithelm": "https://www.wikidata.org/wiki/Q8161",
+        }
+        canonical_wikidata = wikidata_map.get(
+            str(profile.get("property_id") or "profithelm"),
+            "https://www.wikidata.org/wiki/Q8161",
+        )
         for k, v in value.items():
             if k == "sameAs":
                 urls = [v] if isinstance(v, str) else (list(v) if isinstance(v, list) else [])
                 filtered: List[str] = []
                 for u in urls:
                     u_str = str(u).strip()
+                    if "wikidata.org/wiki/Q499388" in u_str:
+                        if canonical_wikidata not in filtered:
+                            filtered.append(canonical_wikidata)
+                        continue
                     if _PERSONAL_LINKEDIN_RE.search(u_str):
                         if expected_li and expected_li not in filtered:
                             filtered.append(expected_li)
@@ -2235,7 +2272,8 @@ def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
                         continue
                     if _PERSONAL_MAKER_HANDLE_RE.search(u_str):
                         continue
-                    filtered.append(u_str)
+                    if u_str not in filtered:
+                        filtered.append(u_str)
                 if filtered:
                     out_dict["sameAs"] = filtered
                 continue
@@ -2930,6 +2968,81 @@ def normalize_html_to_porcelain_shell(
         return f"class={quote}{' '.join(tokens)}{quote}"
 
     inner_main = re.sub(r'\bclass=(["\'])(.*?)\1', _strip_card_from_callouts, inner_main)
+
+    _cta_link_classes = {
+        "btn",
+        "btn-cta",
+        "btn-primary",
+        "btn-secondary",
+        "partner-btn",
+        "partner-cta",
+        "pro-hook-link",
+        "pro-hook-direct-checkout",
+        "affiliate-cta-link",
+        "scenario-preset-link",
+        "contextual-cluster-link",
+        "hero-register-firm-link",
+        "serp-intent-banner-btn",
+        "tool-link",
+        "nav-link",
+        "cluster-link",
+        "btn-preset",
+    }
+
+    def _mark_prose_container_links(block_match: re.Match[str]) -> str:
+        open_tag = block_match.group(1)
+        body_in = block_match.group(2)
+        close_tag = block_match.group(3)
+        if "<a" not in body_in.lower():
+            return block_match.group(0)
+        # Skip if nested block elements exist inside this prose container
+        if re.search(r"<(p|div|section|article|table|ul|ol|dl|blockquote)\b", body_in, flags=re.IGNORECASE):
+            return block_match.group(0)
+        parent_plain = re.sub(r"<[^>]+>", "", body_in).strip()
+        if not parent_plain:
+            return block_match.group(0)
+
+        def _maybe_tag_anchor(a_match: re.Match[str]) -> str:
+            prefix_before = body_in[: a_match.start()]
+            # Ensure <a> is a direct child of <p>/<dd>/<blockquote> (depth 0)
+            depth = 0
+            for tm in re.finditer(r"<(/?)([a-zA-Z0-9]+)\b[^>]*(/?)>", prefix_before):
+                t_slash, t_name, t_self = tm.group(1), tm.group(2).lower(), tm.group(3)
+                if t_self or t_name in {"br", "hr", "img", "input", "wbr"}:
+                    continue
+                depth += -1 if t_slash else 1
+            if depth != 0:
+                return a_match.group(0)
+
+            attrs = a_match.group(1)
+            a_inner = a_match.group(2)
+            if re.search(r'\b(?:role=["\']button["\']|data-cta-slot=|data-checkout-)', attrs, flags=re.IGNORECASE):
+                return a_match.group(0)
+            link_plain = re.sub(r"<[^>]+>", "", a_inner).strip()
+            if len(parent_plain) <= len(link_plain) + 2:
+                return a_match.group(0)
+            cm = re.search(r'\bclass=(["\'])(.*?)\1', attrs, flags=re.IGNORECASE)
+            if cm:
+                cls_tokens = cm.group(2).split()
+                if {c.lower() for c in cls_tokens} & _cta_link_classes:
+                    return a_match.group(0)
+                if "inline-prose-link" not in cls_tokens:
+                    cls_tokens.append("inline-prose-link")
+                q = cm.group(1)
+                new_attrs = attrs[: cm.start()] + f"class={q}{' '.join(cls_tokens)}{q}" + attrs[cm.end() :]
+            else:
+                new_attrs = attrs + ' class="inline-prose-link"'
+            return f"<a{new_attrs}>{a_inner}</a>"
+
+        new_body_in = re.sub(r"<a(\b[^>]*)>([\s\S]*?)</a>", _maybe_tag_anchor, body_in, flags=re.IGNORECASE)
+        return f"{open_tag}{new_body_in}{close_tag}"
+
+    inner_main = re.sub(
+        r"(<(?:p|dd|blockquote)\b[^>]*>)([\s\S]*?)(</(?:p|dd|blockquote)>)",
+        _mark_prose_container_links,
+        inner_main,
+        flags=re.IGNORECASE,
+    )
 
     # Preserve data-* guardrails on <body> (e.g. PSLF/SAVE data-commercial-offers="none")
     kept_body_attrs: List[str] = [f'data-blueprint="{blueprint}"']
@@ -4200,22 +4313,36 @@ def _scrub_tenant_personal_maker_and_inline_js(repo_path: Path, profile: Dict[st
             updated.append("pyproject.toml")
 
     b_file = repo / pkg_name / "builder.py"
-    if b_file.is_file() and pkg_name in ("prexvo", "gainhelm"):
+    if b_file.is_file():
         b_src = b_file.read_text(encoding="utf-8")
-        b_new = re.sub(
-            r'node\["author"\]\s*=\s*\{\s*"@type"\s*:\s*"Person"[\s\S]*?\}',
-            (
-                'node["author"] = {\n'
-                '                "@type": "Organization",\n'
-                '                "@id": org_id,\n'
-                '                "name": SITE_NAME,\n'
-                '                "url": CANONICAL_BASE,\n'
-                "            }"
-            ),
-            b_src,
+        b_new = b_src
+        if pkg_name in ("prexvo", "gainhelm"):
+            b_new = re.sub(
+                r'node\["author"\]\s*=\s*\{\s*"@type"\s*:\s*"Person"[\s\S]*?\}',
+                (
+                    'node["author"] = {\n'
+                    '                "@type": "Organization",\n'
+                    '                "@id": org_id,\n'
+                    '                "name": SITE_NAME,\n'
+                    '                "url": CANONICAL_BASE,\n'
+                    "            }"
+                ),
+                b_new,
+            )
+            if _PERSONAL_MAKER_NAME_RE.search(b_new):
+                b_new = _PERSONAL_MAKER_NAME_RE.sub(profile["legal_entity"], b_new)
+        wikidata_builder_map = {
+            "lienbond": "https://www.wikidata.org/wiki/Q192161",
+            "prexvo": "https://www.wikidata.org/wiki/Q633315",
+            "gainhelm": "https://www.wikidata.org/wiki/Q166142",
+            "profithelm": "https://www.wikidata.org/wiki/Q8161",
+        }
+        target_wikidata = wikidata_builder_map.get(
+            str(profile.get("property_id") or "profithelm"),
+            "https://www.wikidata.org/wiki/Q8161",
         )
-        if _PERSONAL_MAKER_NAME_RE.search(b_new):
-            b_new = _PERSONAL_MAKER_NAME_RE.sub(profile["legal_entity"], b_new)
+        if "https://www.wikidata.org/wiki/Q499388" in b_new:
+            b_new = b_new.replace("https://www.wikidata.org/wiki/Q499388", target_wikidata)
         if b_new != b_src:
             b_file.write_text(b_new, encoding="utf-8")
             updated.append(f"{pkg_name}/builder.py")

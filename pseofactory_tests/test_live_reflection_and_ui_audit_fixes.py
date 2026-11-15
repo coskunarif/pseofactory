@@ -574,3 +574,69 @@ def test_washington_spokes_never_classified_as_crypto_and_sec1031_outputs_tracke
     )
     assert _has_vertical_competitor_pollution(polluted_wa_html) is True
     assert '[id*="-res-"]' in UnifiedBrowserAuditor.JS_RUN_E2E_INTERACTIVE_SURFACE
+
+
+def test_porcelain_shell_scrubs_q499388_marks_inline_prose_links_and_wraps_mobile_cta(tmp_path: Path) -> None:
+    """
+    1. _consolidate_jsonld_head & sync_tenant_porcelain_shell must replace legacy Q499388 Wikidata URLs
+       across both reflected dist/ HTML and tenant builder.py files.
+    2. Genuine inline sentence links (<p>See <a class="touch-target">disclosures</a>.</p>) must receive
+       .inline-prose-link (display: inline; min-height: 0) while standalone <p><a class="touch-target">...</a></p>
+       remain 44px touch targets.
+    3. Long .calc-inline-cta .btn-cta buttons with inline white-space: nowrap must wrap cleanly on 375px mobile
+       without causing horizontal document overflow.
+    """
+    from pseofactory.porcelain_shell import (
+        compile_tenant_porcelain_estate,
+        generate_porcelain_stylesheet,
+        sync_tenant_porcelain_shell,
+    )
+
+    repo = tmp_path / "profithelm-platform"
+    pkg = repo / "profithelm"
+    dist = repo / "dist"
+    (dist / "tools" / "bid-bond-calculator").mkdir(parents=True)
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text('"""ProfitHelm."""\n', encoding="utf-8")
+    (pkg / "builder.py").write_text(
+        'SAME_AS = ["https://www.wikidata.org/wiki/Q499388"]\n',
+        encoding="utf-8",
+    )
+
+    raw_leaf = (
+        '<!DOCTYPE html><html lang="en"><head><title>Bid Bond</title>'
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@type":"Organization","name":"ProfitHelm",'
+        '"sameAs":["https://www.wikidata.org/wiki/Q499388"]}</script></head>'
+        '<body><main id="main-content"><div class="container">'
+        '<div class="calculation-container card">'
+        '<p>For full details, <a href="/disclaimers/" class="touch-target">Read full disclosures</a> before filing.</p>'
+        '<p><a href="#scenario-b" class="touch-target">Compare with Accelerated Repayment Scenario B</a></p>'
+        '<div class="result-box"><div class="calc-inline-cta">'
+        '<div class="calc-inline-cta-copy">Simply Business Bonding</div>'
+        '<a href="/r/simply_business" class="btn-cta touch-target" '
+        'style="display: inline-flex; min-height: 44px; padding: 10px 14px; white-space: nowrap;">'
+        'Compare Instant Workers Comp and Commercial Contractor Surety Quotes at Simply Business</a>'
+        "</div></div></div></div></main></body></html>"
+    )
+    leaf_path = dist / "tools" / "bid-bond-calculator" / "index.html"
+    leaf_path.write_text(raw_leaf, encoding="utf-8")
+    (dist / "index.html").write_text(raw_leaf, encoding="utf-8")
+
+    sync_tenant_porcelain_shell(repo, property_id="profithelm")
+    compile_tenant_porcelain_estate(dist, property_id="profithelm", repo_root=repo)
+
+    builder_txt = (pkg / "builder.py").read_text(encoding="utf-8")
+    assert "Q499388" not in builder_txt
+    assert "https://www.wikidata.org/wiki/Q8161" in builder_txt
+
+    norm_leaf = leaf_path.read_text(encoding="utf-8")
+    assert "Q499388" not in norm_leaf
+    assert "https://www.wikidata.org/wiki/Q8161" in norm_leaf
+    assert 'href="/disclaimers/" class="touch-target inline-prose-link"' in norm_leaf
+    assert 'href="#scenario-b" class="touch-target"' in norm_leaf
+
+    css = generate_porcelain_stylesheet("profithelm")
+    assert "main a.inline-prose-link" in css
+    assert "white-space: normal !important;" in css
+
