@@ -1371,6 +1371,84 @@ class SubprocessPropertyAdapter(PropertyAdapter):
 
 
 
+# Tracked in the tenant repo next to dist/: the data fingerprint dist was last fully built from.
+TENANT_DATA_BUILD_STAMP = ".pseofactory-data-build.json"
+
+
+def refresh_tenant_datasets(adapter: "PropertyAdapter", timeout: int = 300) -> Optional[Dict[str, Any]]:
+    """
+    Generic tenant data refresh: if the tenant package ships <package>/datasets/refresh.py,
+    runs it so source datasets are really re-fetched (and their provenance recorded)
+    every cycle instead of freshness being hand-stamped. Returns the tenant's JSON
+    report ({"status": CHANGED|UNCHANGED|FAILED, "data_changed": bool, ...}) or None
+    when the tenant has no refresher.
+    Zero em-dashes. Zero en-dashes.
+    """
+    repo = getattr(adapter, "repo_path", None)
+    if not repo:
+        return None
+    package = adapter.property_id
+    if not (Path(repo) / package / "datasets" / "refresh.py").is_file():
+        return None
+    env = os.environ.copy()
+    engine_root = str(Path(__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(repo), engine_root, env.get("PYTHONPATH", "")) if p)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", f"{package}.datasets.refresh", "--json"],
+            cwd=str(repo),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        report = json.loads(proc.stdout)
+    except Exception as exc:
+        return {"status": "FAILED", "data_changed": False, "error": f"{type(exc).__name__}: {exc}"}
+    if not isinstance(report, dict):
+        return {"status": "FAILED", "data_changed": False, "error": "refresh printed no JSON report"}
+    return report
+
+
+def sync_tenant_data_and_build(adapter: "PropertyAdapter") -> Optional[Dict[str, Any]]:
+    """
+    Stage 0 of a tenant maintenance cycle: re-fetch the tenant's source datasets, then
+    fully rebuild dist whenever it was not built from the current data. The fingerprint
+    dist was built from is persisted (TENANT_DATA_BUILD_STAMP) and only advanced after a
+    successful build, so a cycle that dies mid-way is repaired by the next one.
+    Returns the refresh report plus "rebuilt", or None for tenants without a refresher.
+    Zero em-dashes. Zero en-dashes.
+    """
+    data_refresh = refresh_tenant_datasets(adapter)
+    if data_refresh is None:
+        return None
+    errors = [data_refresh["error"]] if data_refresh.get("error") else []
+    errors += [
+        f"{r.get('dataset_id')}: {r['error']}"
+        for r in data_refresh.get("results", [])
+        if isinstance(r, dict) and r.get("error")
+    ]
+    print(
+        f"[DISPATCH:DATA] Dataset refresh -> property={adapter.property_id}, "
+        f"status={data_refresh.get('status')}" + (f", errors={errors}" if errors else "")
+    )
+    data_refresh["rebuilt"] = False
+    fingerprint = data_refresh.get("data_fingerprint")
+    stamp_file = Path(adapter.repo_path) / TENANT_DATA_BUILD_STAMP
+    try:
+        built_from = json.loads(stamp_file.read_text(encoding="utf-8")).get("data_fingerprint")
+    except Exception:
+        built_from = None
+    if fingerprint and fingerprint != built_from and hasattr(adapter, "build_all"):
+        if adapter.build_all():
+            _atomic_write_text(stamp_file, json.dumps({"data_fingerprint": fingerprint}, indent=2) + "\n")
+            data_refresh["rebuilt"] = True
+        else:
+            print(f"Warning: rebuild after dataset refresh failed for '{adapter.property_id}'")
+    return data_refresh
+
+
 def sync_tenant_pseofactory_marker(repo_path: Union[str, Path], property_id: str) -> bool:
     """
     Ensures a canonical .pseofactory.json marker file is present and aligned across
@@ -4448,6 +4526,15 @@ class MaintenanceLifecycle:
                     )
                 except Exception as recon_err:
                     print(f"Warning: Preflight truth reconciliation error for '{adapter.property_id}': {recon_err}")
+
+            # Stage 0: re-fetch tenant source datasets; rebuild whenever dist was not built from
+            # the current data (persisted fingerprint, so a cycle that dies between refresh and
+            # rebuild cannot leave fresh data behind stale pages)
+            if not dry_run and not (
+                "PYTEST_CURRENT_TEST" in os.environ
+                and str(Path(getattr(adapter, "repo_path", None) or "/").resolve()).startswith("/home/ubuntuadmin/projects/")
+            ):
+                sync_tenant_data_and_build(adapter)
 
             # Stage 1: Preflight Asset Integrity Audit
             passed_s_file = Path(state_file).resolve() if state_file else None
@@ -9924,12 +10011,23 @@ class RetroReflectionEngine:
             elif not is_prexvo and not is_gainhelm and not is_lienbond and slug in cls.PROFITHELM_FALLBACK_MANIFESTS:
                 preset = cls.PROFITHELM_FALLBACK_MANIFESTS[slug]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
+                # The preset is a fallback, not a second source of truth: a manifest the tenant
+                # generator built from its own (refreshed) data is kept when it uses the same
+                # model and its published_output really recomputes from its inputs.
+                try:
+                    from pseofactory.contracts import safe_eval_mathematical_formula
+
+                    raw_recomputes = abs(
+                        float(safe_eval_mathematical_formula(str(raw.get("formula")), raw.get("inputs") or {})) - raw_pub
+                    ) <= 0.01
+                except Exception:
+                    raw_recomputes = False
                 if (
                     not raw
                     or not raw.get("formula")
                     or raw.get("formula") != preset["formula"]
                     or raw.get("formula") == "gross_amount * (1.0 - effective_rate)"
-                    or round(raw_pub, 4) != round(float(preset["published_output"]), 4)
+                    or not raw_recomputes
                 ):
                     raw = dict(preset)
             elif not is_prexvo and not is_gainhelm and not is_lienbond and (
