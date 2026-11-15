@@ -367,6 +367,9 @@ ALLOWED_TITLE_EXPANSIONS: Set[str] = {
     "amortization", "10", "year", "hardship", "grad", "plus", "sec", "projection", "projections",
     "crew", "cab", "truck", "fleet", "van", "cargo", "electric", "4wd", "work", "suv",
     "schedule", "schedules",
+    "preliminary", "notice", "deadline", "california", "florida", "retainage",
+    "interest", "penalty", "by", "fringe", "benefit", "rate", "coverage", "amount",
+    "workers", "comp", "fidelity", "prevailing", "wage",
 }
 
 

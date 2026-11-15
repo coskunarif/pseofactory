@@ -2407,25 +2407,40 @@ class TenantFactStore:
                     f"Banned claim detected for {profile.brand_name}: '{banned}'"
                 )
 
-        # 2. Pricing verification
+        # 2. Pricing verification (distinguishing SaaS tier pricing claims from domain calculation figures)
         if "$" in text and ("/mo" in text_lower or "per mo" in text_lower):
-            pricing_matches = re.findall(
-                r'\$(\d+(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
-                text,
-                re.IGNORECASE,
-            )
             valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
             allowed_statutory_monthly = {
                 float(v)
                 for k, v in profile.statutory_truth.limits_and_thresholds.items()
                 if isinstance(v, (int, float)) and ("monthly" in k or "subsidy" in k)
             }
-            for price_str in pricing_matches:
-                price_val = float(price_str)
-                if price_val not in valid_prices and price_val not in allowed_statutory_monthly:
-                    violations.append(
-                        f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
-                    )
+            calc_output_markers = (
+                "payment", "rap", "ibr", "icr", "save", "pslf", "loan", "agi",
+                "borrower", "forbearance", "subsidy", "discretionary", "tax",
+                "savings", "/yr", "annual", "lease", "burn", "mrr", "premium", "retainage",
+            )
+            explicit_saas_tier_markers = (
+                "pricing", "tier", "subscription", "membership", "plan:", "upgrade",
+            )
+            for m_price in re.finditer(
+                r'\$(\d+(?:\.\d{1,2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
+                text,
+                re.IGNORECASE,
+            ):
+                price_val = float(m_price.group(1))
+                if price_val in valid_prices or price_val in allowed_statutory_monthly:
+                    continue
+                win_start = max(0, m_price.start() - 110)
+                win_end = min(len(text_lower), m_price.end() + 110)
+                window = text_lower[win_start:win_end]
+                has_saas_marker = any(sm in window for sm in explicit_saas_tier_markers)
+                has_calc_marker = any(cm in window for cm in calc_output_markers)
+                if has_calc_marker and not has_saas_marker:
+                    continue
+                violations.append(
+                    f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
+                )
 
         # 3. Cross-tenant boundary isolation (exempting verified parent-entity Zoho mailbox & Stripe legal name)
         boundary_scan_lower = text_lower
@@ -4237,6 +4252,16 @@ class TruthReconciliationEngine:
                         '"Section 179 Calculator 2026 (Form 4562) | ProfitHelm"',
                         '"Section 179 Commercial Vehicle & Equipment Deduction Calculator | ProfitHelm"',
                     )
+            elif ov_slug == "commercial-heavy-vehicle-section-179-weight-calculator":
+                updated_str = updated_str.replace(
+                    "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+                    "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions ($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
+                )
+            elif ov_slug == "equipment-lease-vs-buy-section-179-calculator":
+                updated_str = updated_str.replace(
+                    "Calculate commercial equipment operating lease tax deductions under IRC Section 162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
+                    "Compare commercial equipment lease vs buy after-tax cash flow under IRC Section 162(a)(3) lease deductions and IRC Section 179 purchase expensing.",
+                )
         elif tenant_norm == "prexvo":
             for old_s, new_s in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                 if old_s in updated_str:
@@ -4249,6 +4274,11 @@ class TruthReconciliationEngine:
             for old_s, new_s in cls.GAINHELM_HTML_REPLACEMENTS:
                 if old_s in updated_str:
                     updated_str = updated_str.replace(old_s, new_s)
+        elif tenant_norm == "lienbond":
+            updated_str = updated_str.replace(
+                "California, Texas and Florida Calculator | LienBond",
+                "California, Texas & Florida Notice Calculator | LienBond",
+            )
 
         if updated_str != serialized:
             parsed = _json_lib.loads(updated_str)

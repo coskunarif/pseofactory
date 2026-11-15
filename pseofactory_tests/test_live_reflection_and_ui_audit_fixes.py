@@ -331,3 +331,73 @@ def test_drift_ci_substrate_lock_fallback_containment_truth_and_ui_auth(
         "Origin": "http://127.0.0.1:8090",
     }
     assert DashboardRequestHandler._check_api_auth(dummy) is True
+
+
+def test_post_reflection_audit_gates_lienbond_titles_prexvo_loan_monthly_and_meta_uniqueness() -> None:
+    """Covers LienBond title/H1 parity, Prexvo loan $/mo non-pricing figures, and distinct Section 179/lease metas."""
+    from pseofactory.audit import _titles_match
+    from pseofactory.gsc_remediation import _normalize_meta_120_155, apply_remediation_overlay_to_html
+    from pseofactory.tenant_facts import TenantFactStore
+
+    # 1. LienBond 50-60 char SEO titles must match full descriptive H1s in Gate 1
+    assert _titles_match(
+        "Commercial Construction Retainage Calculator | LienBond",
+        "Commercial Construction Retainage Interest Penalty Calculator by State",
+    )
+    assert _titles_match(
+        "Davis-Bacon Prevailing Wage and WH-347 Calculator | LienBond",
+        "Davis-Bacon Prevailing Wage and WH-347 Fringe Benefit Rate Calculator",
+    )
+    assert _titles_match(
+        "ERISA Section 412 Fidelity Bond Calculator | LienBond",
+        "ERISA Section 412 Fidelity Bond Coverage Amount Calculator",
+    )
+    assert _titles_match(
+        "Experience Modification Rate (EMR) Calculator | LienBond",
+        "Experience Modification Rate (EMR) Workers Comp Penalty Calculator",
+    )
+    fixed_lb_html = apply_remediation_overlay_to_html(
+        "<html><head><title>Old</title></head><body><h1>California, Texas and Florida Preliminary Notice Deadline Calculator</h1></body></html>",
+        {
+            "tenant": "lienbond",
+            "slug": "california-texas-florida-preliminary-notice-deadline-calculator",
+            "title_rewrite": "California, Texas and Florida Calculator | LienBond",
+        },
+    )
+    assert "Notice Calculator | LienBond" in fixed_lb_html
+    m_title = re.search(r"<title>(.*?)</title>", fixed_lb_html)
+    assert m_title and _titles_match(
+        m_title.group(1),
+        "California, Texas and Florida Preliminary Notice Deadline Calculator",
+    )
+
+    # 2. Prexvo student loan $/mo payment/tax/savings figures must NOT be flagged as SaaS pricing tiers,
+    #    while actual SaaS tier pricing hallucinations ($49/mo Pro Tier) MUST still be flagged.
+    store = TenantFactStore.get_instance()
+    ok_loan, viol_loan = store.verify_claim(
+        "prexvo",
+        "Under 34 CFR 685.209(e), filing separately lowers the monthly RAP payment by $410.31/mo ($4,923.72/yr). "
+        "After subtracting the $120.42/mo ($1,445/yr) marginal federal income tax increase, separate filing yields "
+        "$289.90/mo ($3,478.75/yr) in net household savings.",
+        context="tools/married-filing-separately-student-loan-calculator/index.html",
+    )
+    assert ok_loan is True, f"Unexpected loan monthly false positive: {viol_loan}"
+    ok_bad_tier, _ = store.verify_claim("prexvo", "Pricing: $49/mo Pro Tier", context="index.html")
+    assert ok_bad_tier is False
+
+    # 3. ProfitHelm Section 179 heavy-vehicle vs equipment-deduction and lease vs lease-vs-buy metas must be unique
+    m_lease = _normalize_meta_120_155(
+        "", "profithelm", "equipment lease tax deduction", slug="equipment-lease-tax-deduction"
+    )
+    m_lease_buy = _normalize_meta_120_155(
+        "", "profithelm", "equipment lease vs buy section 179 calculator", slug="equipment-lease-vs-buy-section-179-calculator"
+    )
+    assert m_lease != m_lease_buy
+
+    m_veh = _normalize_meta_120_155(
+        "", "profithelm", "section 179 vehicle equipment deduction", slug="section-179-vehicle-equipment-deduction"
+    )
+    m_heavy = _normalize_meta_120_155(
+        "", "profithelm", "commercial heavy vehicle section 179 weight calculator", slug="commercial-heavy-vehicle-section-179-weight-calculator"
+    )
+    assert m_veh != m_heavy

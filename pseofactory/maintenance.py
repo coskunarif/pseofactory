@@ -13660,12 +13660,32 @@ class RetroReflectionEngine:
                 ("Yelofunding", "Commercial Surety Underwriting"),
                 ("yelofunding", "commercial-surety"),
                 ("zero AI slop", "strictly verified statutory math"),
+                (
+                    "California, Texas and Florida Calculator | LienBond",
+                    "California, Texas &amp; Florida Notice Calculator | LienBond",
+                ),
             ):
                 if _bf in content:
                     content = content.replace(_bf, _gf)
                     html_file.write_text(content, encoding="utf-8")
                     if rel not in retrofitted_paths:
                         retrofitted_paths.append(rel)
+            if "commercial-heavy-vehicle-section-179-weight-calculator" in rel and "Model combined IRC Section 179 expensing" in content:
+                content = content.replace(
+                    "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+                    "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions ($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
+                )
+                html_file.write_text(content, encoding="utf-8")
+                if rel not in retrofitted_paths:
+                    retrofitted_paths.append(rel)
+            elif "equipment-lease-vs-buy-section-179-calculator" in rel and "Calculate commercial equipment operating lease tax deductions" in content:
+                content = content.replace(
+                    "Calculate commercial equipment operating lease tax deductions under IRC Section 162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
+                    "Compare commercial equipment lease vs buy after-tax cash flow under IRC Section 162(a)(3) lease deductions and IRC Section 179 purchase expensing.",
+                )
+                html_file.write_text(content, encoding="utf-8")
+                if rel not in retrofitted_paths:
+                    retrofitted_paths.append(rel)
             if not cls.is_tool_or_calculator_page(html_file, d, content):
                 if rel == "tools/index.html":
                     dup_partner_secs = list(

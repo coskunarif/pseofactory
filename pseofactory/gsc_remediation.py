@@ -2605,6 +2605,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in Internal Revenue Code statutory schedules.",
             )
         if "equipment lease" in q_low or "equipment-lease" in q_low or "162(a)(3)" in q_low:
+            if "vs buy" in q_low or "vs-buy" in q_low or "lease-vs-buy" in (slug or "").lower():
+                return (
+                    "Compare commercial equipment lease vs buy after-tax cash flow under IRC Section "
+                    "162(a)(3) lease deductions and IRC Section 179 purchase expensing.",
+                    " Grounded in IRC Section 162(a)(3), Section 179, and ASC 842 rules.",
+                )
             return (
                 "Calculate commercial equipment operating lease tax deductions under IRC Section "
                 "162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
@@ -2641,7 +2647,13 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in IRS reasonable compensation audit benchmarks.",
             )
         if "179" in q_low or "gvwr" in q_low or "heavy vehicle" in q_low or "equipment" in q_low:
-            if "vehicle" in q_low or "heavy" in q_low or "gvwr" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low:
+            if "heavy" in q_low or "gvwr" in q_low or "weight" in q_low or "heavy-vehicle" in (slug or "").lower():
+                return (
+                    "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions "
+                    "($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
+                    " Grounded in IRC Section 179(b)(5) and Section 280F limits.",
+                )
+            if "vehicle" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low:
                 return (
                     "Model combined IRC Section 179 expensing, 20% bonus depreciation, "
                     "and business-use recapture thresholds for commercial vehicles and equipment.",
@@ -9089,6 +9101,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         else ("GainHelm" if ov_tenant == "gainhelm" else ("LienBond" if ov_tenant == "lienbond" else "ProfitHelm"))
     )
     title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
+    if title_rewrite == "California, Texas and Florida Calculator | LienBond":
+        title_rewrite = "California, Texas & Florida Notice Calculator | LienBond"
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
     if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
         title_rewrite = _normalize_title_50_60(title_rewrite, ov_brand, ov_tenant)
@@ -9177,6 +9191,14 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 and "hold harmless buyback eligibility under 34 cfr 685.219." in meta_desc.lower()
             )
             or ("pslf-qualifying" in ov_slug_q.lower() and "hold harmless buyback lump-sum" in meta_desc.lower())
+            or (
+                "heavy-vehicle" in ov_slug_q.lower()
+                and "model combined irc section 179 expensing" in meta_desc.lower()
+            )
+            or (
+                ("lease-vs-buy" in ov_slug_q.lower() or "lease vs buy" in ov_slug_q.lower())
+                and "calculate commercial equipment operating lease tax deductions" in meta_desc.lower()
+            )
         ):
             q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
             ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
