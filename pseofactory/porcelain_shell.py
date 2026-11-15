@@ -4487,6 +4487,15 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
         shutil.rmtree(dist_fn_leak_dir, ignore_errors=True)
         updated_files.append("dist/functions")
 
+    tsiu_p = repo / "tests" / "test_search_and_indexing_upgrades.py"
+    if tsiu_p.is_file():
+        tsiu_src = tsiu_p.read_text(encoding="utf-8")
+        legacy_mw_mirror_line = '    assert dist_mw.exists(), "dist/functions/_middleware.js missing from static build!"'
+        hardened_mw_mirror_line = '    assert not dist_mw.exists(), "dist/functions/_middleware.js must not be copied into public dist/!"'
+        if legacy_mw_mirror_line in tsiu_src:
+            tsiu_p.write_text(tsiu_src.replace(legacy_mw_mirror_line, hardened_mw_mirror_line, 1), encoding="utf-8")
+            updated_files.append("tests/test_search_and_indexing_upgrades.py")
+
     if pkg_name == "profithelm":
         app_js_p = pkg_dir / "static" / "js" / "app.js"
         if app_js_p.is_file():

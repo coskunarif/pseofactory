@@ -424,3 +424,41 @@ def test_governance_pages_never_treated_as_calculators_or_polluted(tmp_path: Pat
     cleaned = disc_file.read_text(encoding="utf-8")
     assert "Q499388" not in cleaned
     assert 'id="calculation-manifest"' not in cleaned and "id='calculation-manifest'" not in cleaned
+
+
+def test_sync_tenant_porcelain_shell_enforces_no_dist_functions_in_staging_lockdown(tmp_path: Path) -> None:
+    """sync_tenant_porcelain_shell must enforce that dist/functions/ never exists in builder.py, dist/, or lockdown assertions."""
+    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
+
+    repo = tmp_path / "profithelm-platform"
+    pkg = repo / "profithelm"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text('"""ProfitHelm."""\n', encoding="utf-8")
+    (pkg / "builder.py").write_text(
+        'def build_all():\n'
+        '    functions_src = BASE_DIR / "functions"\n'
+        '    dist_functions = DIST_DIR / "functions"\n'
+        '    if functions_src.exists():\n'
+        '        shutil.copytree(functions_src, dist_functions, dirs_exist_ok=True)\n',
+        encoding="utf-8",
+    )
+    leak_fn = repo / "dist" / "functions" / "_middleware.js"
+    leak_fn.parent.mkdir(parents=True)
+    leak_fn.write_text("export async function onRequest(ctx) { return ctx.next(); }\n", encoding="utf-8")
+
+    tests_dir = repo / "tests"
+    tests_dir.mkdir(parents=True)
+    tsiu = tests_dir / "test_search_and_indexing_upgrades.py"
+    tsiu.write_text(
+        'def check_staging_lockdown(DIST_DIR):\n'
+        '    dist_mw = DIST_DIR / "functions" / "_middleware.js"\n'
+        '    assert dist_mw.exists(), "dist/functions/_middleware.js missing from static build!"\n',
+        encoding="utf-8",
+    )
+
+    sync_tenant_porcelain_shell(repo, "profithelm")
+
+    assert not (repo / "dist" / "functions").exists()
+    assert "shutil.copytree(functions_src, dist_functions" not in (pkg / "builder.py").read_text(encoding="utf-8")
+    patched_test = tsiu.read_text(encoding="utf-8")
+    assert "assert not dist_mw.exists()" in patched_test
