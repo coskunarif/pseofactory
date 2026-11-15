@@ -5518,7 +5518,8 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
                 "staking",
                 "8949",
                 "1099-da",
-                "wash",
+                "wash-sale",
+                "wash_sale",
                 "prediction",
                 "kalshi",
                 "polymarket",
@@ -5574,6 +5575,12 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
     ):
         stat_src = stat_src.replace("; CFTC 17 CFR Part 40", "; IRS Form 4562").replace("CFTC 17 CFR Part 40", "").strip(" ;")
 
+    if "Rev. Proc. 2024-28" in stat_src and not any(
+        k in s_low for k in ("crypto", "staking", "8949", "1099-da", "wash-sale", "wash_sale", "wash sale")
+    ):
+        stat_src = ""
+        econ_src = ""
+
     if _is_179_or_equipment_slug(s_low):
         default_stat = "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562"
         default_econ = "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)"
@@ -5583,7 +5590,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
     elif any(k in s_low for k in ("1031", "like-kind", "exchange", "ftb-3840")):
         default_stat = "IRC Section 1031(a)(3); Treas. Reg. 1.1031(k)-1; IRS Form 8824"
         default_econ = "Federal Reserve Z.1 Commercial Real Estate Series and FHFA House Price Index"
-    elif any(k in s_low for k in ("crypto", "staking", "8949", "1099-da", "wash")):
+    elif any(k in s_low for k in ("crypto", "staking", "8949", "1099-da", "wash-sale", "wash_sale", "wash sale")):
         default_stat = "IRS Rev. Proc. 2024-28; Rev. Rul. 2023-14; IRC Section 6045"
         default_econ = "CFTC Commitments of Traders (COT) and Treasury Digital Asset Series"
     elif any(k in s_low for k in ("prediction", "kalshi", "polymarket", "kelly", "implied", "arbitrage", "odds", "vigorish", "-vig", "vig-")):
@@ -5617,6 +5624,9 @@ def _has_vertical_competitor_pollution(html_content: str) -> bool:
         canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_content, re.IGNORECASE)
     if canon_m:
         canon_url = canon_m.group(1).strip().lower()
+        if not any(t in canon_url for t in ("crypto", "staking", "8949", "1099-da", "wash-sale", "wash_sale")):
+            if 'data-workbench-mode="crypto"' in html_content or "Immediate Wallet-by-Wallet Basis and Form 1099-DA Trap Alert" in html_content:
+                return True
         if _is_179_or_equipment_slug(canon_url):
             return (
                 "CFTC 17 CFR Part 40" in html_content

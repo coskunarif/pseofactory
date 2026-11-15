@@ -959,7 +959,7 @@ class UnifiedBrowserAuditor:
 
     JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {
         const failures = [];
-        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
+        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
         const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
         const hasOutputs = document.querySelectorAll(outSel).length > 0;
@@ -1141,7 +1141,7 @@ class UnifiedBrowserAuditor:
             affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '', partners_verified_count: 0, all_partner_redirects: [], partner_failures: [] }
         };
 
-        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
+        const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
         const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
 

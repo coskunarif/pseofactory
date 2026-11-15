@@ -3127,7 +3127,7 @@ def _resolve_vertical_competitor_content(
                 "Confirm pre-closing exchange assignment documentation under Treas. Reg. 1.1031(k)-1(g)(4) before escrow closes.",
                 "Audit multi-state clawback compliance support (CA FTB Form 3840 / OR-24) and reverse/improvement EAT structuring capability.",
             ]
-        elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash")):
+        elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash-sale", "wash_sale", "wash sale")):
             trap_title = "Immediate Wallet-by-Wallet Basis and Form 1099-DA Trap Alert (Rev. Proc. 2024-28)"
             trap_body = (
                 "Under IRS Rev. Proc. 2024-28 and Treasury final digital asset broker regulations, universal "
@@ -5497,7 +5497,7 @@ def render_serp_incumbent_depth_upgrade_block(
         )
     ):
         spec = _build_prediction_market_depth_spec(topic_label, statutory_authority, economic_dataset)
-    elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash")):
+    elif any(tok in s_low for tok in ("crypto", "staking", "8949", "1099-da", "wash-sale", "wash_sale", "wash sale")):
         spec = _build_crypto_depth_spec(topic_label, statutory_authority)
     elif (
         s_low in veh_slugs

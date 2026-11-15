@@ -541,3 +541,36 @@ def test_serp_b2b_deduction_responsiveness_pslf_widget_spec_and_metrics_grid_ord
         get_porcelain_tenant_profile("gainhelm"),
     )
     assert norm_gh.index("calc-metrics-grid") < norm_gh.index("calc-inline-cta")
+
+
+def test_washington_spokes_never_classified_as_crypto_and_sec1031_outputs_tracked() -> None:
+    """
+    'washington' must never match 'wash' (intended for 'wash-sale'), which previously injected
+    Crypto Form 1099-DA workbenches onto Washington Section 1031 and Tax Bracket spokes.
+    """
+    from pseofactory.browser_verifier import UnifiedBrowserAuditor
+    from pseofactory.competitor import render_serp_incumbent_depth_upgrade_block
+    from pseofactory.maintenance import _has_vertical_competitor_pollution
+
+    wa_1031 = render_serp_incumbent_depth_upgrade_block(
+        slug="section-1031-calculator/washington",
+        title="Washington 1031 Exchange Calculator",
+        property_id="profithelm",
+    )
+    assert 'data-workbench-mode="sec1031"' in wa_1031
+    assert 'data-workbench-mode="crypto"' not in wa_1031
+
+    wa_tax = render_serp_incumbent_depth_upgrade_block(
+        slug="irs-2027-tax-brackets/washington",
+        title="Washington 2027 Tax Brackets Calculator",
+        property_id="profithelm",
+    )
+    assert 'data-workbench-mode="tax_brackets"' in wa_tax
+    assert 'data-workbench-mode="crypto"' not in wa_tax
+
+    polluted_wa_html = (
+        '<html><head><link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/washington/"></head>'
+        '<body><section id="serp-incumbent-depth-workbench" data-workbench-mode="crypto">Rev. Proc. 2024-28</section></body></html>'
+    )
+    assert _has_vertical_competitor_pollution(polluted_wa_html) is True
+    assert '[id*="-res-"]' in UnifiedBrowserAuditor.JS_RUN_E2E_INTERACTIVE_SURFACE
