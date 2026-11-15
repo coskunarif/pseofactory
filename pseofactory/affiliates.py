@@ -6527,6 +6527,33 @@ def normalize_html_callout_message_match(
                 + updated[cta_pos2 : rap_meter_m.start()].rstrip()
                 + updated[rap_meter_m.end() :]
             )
+        gh_m1 = re.search(
+            r'<div\b[^>]*class=["\'][^"\']*\b(?:calc-metrics-grid|metrics-grid)\b[^"\']*["\'][^>]*>',
+            updated,
+            flags=re.I,
+        )
+        cta_pos3 = updated.find('<div class="calc-inline-cta"')
+        if gh_m1 and cta_pos3 != -1 and cta_pos3 < gh_m1.start():
+            gm_s1 = gh_m1.start()
+            gm_d1 = 0
+            gm_e1 = -1
+            for d_tok1 in re.finditer(r"</?div\b[^>]*>", updated[gm_s1:], flags=re.I):
+                t_low1 = d_tok1.group(0).lower()
+                if t_low1.startswith("</div"):
+                    gm_d1 -= 1
+                    if gm_d1 == 0:
+                        gm_e1 = gm_s1 + d_tok1.end()
+                        break
+                elif not t_low1.endswith("/>"):
+                    gm_d1 += 1
+            if gm_e1 > gm_s1 and ('id="metric-' in updated[gm_s1:gm_e1] or "id='metric-" in updated[gm_s1:gm_e1]):
+                updated = (
+                    updated[:cta_pos3]
+                    + updated[gm_s1:gm_e1].strip()
+                    + "\n          "
+                    + updated[cta_pos3:gm_s1].rstrip()
+                    + updated[gm_e1:]
+                )
         has_ext_porcelain_link = bool(
             re.search(
                 r'<link\b[^>]*id=["\']pseo-visual-primitives["\']',
@@ -8103,6 +8130,33 @@ def reposition_affiliate_placements_from_gsc_signals(
                 + updated[cta_pos_m2 : rap_meter_m2.start()].rstrip()
                 + updated[rap_meter_m2.end() :]
             )
+        gh_m2 = re.search(
+            r'<div\b[^>]*class=["\'][^"\']*\b(?:calc-metrics-grid|metrics-grid)\b[^"\']*["\'][^>]*>',
+            updated,
+            flags=re.I,
+        )
+        cta_pos_m3 = updated.find('<div class="calc-inline-cta"')
+        if gh_m2 and cta_pos_m3 != -1 and cta_pos_m3 < gh_m2.start():
+            gm_s2 = gh_m2.start()
+            gm_d2 = 0
+            gm_e2 = -1
+            for d_tok2 in re.finditer(r"</?div\b[^>]*>", updated[gm_s2:], flags=re.I):
+                t_low2 = d_tok2.group(0).lower()
+                if t_low2.startswith("</div"):
+                    gm_d2 -= 1
+                    if gm_d2 == 0:
+                        gm_e2 = gm_s2 + d_tok2.end()
+                        break
+                elif not t_low2.endswith("/>"):
+                    gm_d2 += 1
+            if gm_e2 > gm_s2 and ('id="metric-' in updated[gm_s2:gm_e2] or "id='metric-" in updated[gm_s2:gm_e2]):
+                updated = (
+                    updated[:cta_pos_m3]
+                    + updated[gm_s2:gm_e2].strip()
+                    + "\n          "
+                    + updated[cta_pos_m3:gm_s2].rstrip()
+                    + updated[gm_e2:]
+                )
 
     # 2. Inject or update comparison_table_cta when active in slot_plan (or heal any pre-existing bar in DOM)
     has_existing_table_cta = 'class="comparison-table-cta-bar"' in updated or "class='comparison-table-cta-bar'" in updated

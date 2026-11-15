@@ -2979,6 +2979,39 @@ def normalize_html_to_porcelain_shell(
         "</html>\n"
     )
 
+    gh_m = re.search(
+        r'<div\b[^>]*class=["\'][^"\']*\b(?:calc-metrics-grid|metrics-grid)\b[^"\']*["\'][^>]*>',
+        assembled,
+        flags=re.IGNORECASE,
+    )
+    cta_m = re.search(
+        r'<div\b[^>]*class=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>',
+        assembled,
+        flags=re.IGNORECASE,
+    )
+    cta_p = cta_m.start() if cta_m else -1
+    if gh_m and cta_p != -1 and cta_p < gh_m.start():
+        gm_s = gh_m.start()
+        gm_d = 0
+        gm_e = -1
+        for d_tok in re.finditer(r"</?div\b[^>]*>", assembled[gm_s:], flags=re.IGNORECASE):
+            t_low = d_tok.group(0).lower()
+            if t_low.startswith("</div"):
+                gm_d -= 1
+                if gm_d == 0:
+                    gm_e = gm_s + d_tok.end()
+                    break
+            elif not t_low.endswith("/>"):
+                gm_d += 1
+        if gm_e > gm_s and ('id="metric-' in assembled[gm_s:gm_e] or "id='metric-" in assembled[gm_s:gm_e]):
+            assembled = (
+                assembled[:cta_p]
+                + assembled[gm_s:gm_e].strip()
+                + "\n          "
+                + assembled[cta_p:gm_s].rstrip()
+                + assembled[gm_e:]
+            )
+
     sanitized = sanitize_inline_styles_outside_svg(assembled, known_css_vars)
     sanitized = sanitized.replace("\u2014", "-").replace("\u2013", "-")
     return sanitized, blueprint

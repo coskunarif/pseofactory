@@ -462,3 +462,82 @@ def test_sync_tenant_porcelain_shell_enforces_no_dist_functions_in_staging_lockd
     assert "shutil.copytree(functions_src, dist_functions" not in (pkg / "builder.py").read_text(encoding="utf-8")
     patched_test = tsiu.read_text(encoding="utf-8")
     assert "assert not dist_mw.exists()" in patched_test
+
+
+def test_serp_b2b_deduction_responsiveness_pslf_widget_spec_and_metrics_grid_order(monkeypatch) -> None:
+    """
+    1. #serp-b2b-deduction must reactively update SERP workbench outputs even when primary gross < $194k (e.g. $50k).
+    2. PrexvoBrowserAdapter PSLF widget specs must target Prexvo's real .metric-value (#metric-rap_subsidy / #metric-rap_payment).
+    3. GainHelm .calc-metrics-grid must be detected and normalized above .calc-inline-cta across reflection & Porcelain shell.
+    """
+    from playwright.sync_api import sync_playwright
+    from pseofactory.browser_verifier import PrexvoBrowserAdapter
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.porcelain_shell import get_porcelain_tenant_profile, normalize_html_to_porcelain_shell
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
+
+    # 1. Real Chromium execution of render_runtime_synchronizer_script() with $50k gross & $165k -> $222,800 deduction
+    script_tag = render_runtime_synchronizer_script()
+    doc = (
+        "<!DOCTYPE html><html><body><main>"
+        "<input type='number' id='field-bond_amount' value='50000' />"
+        "<section id='serp-incumbent-depth-workbench' data-workbench-mode='b2b'>"
+        "<input type='number' id='serp-b2b-gross' value='50000' />"
+        "<input type='number' id='serp-b2b-deduction' value='165000' />"
+        "<input type='number' id='serp-b2b-rate' value='24.5' />"
+        "<select id='serp-b2b-regime'><option value='optimal_election' selected>Optimal</option></select>"
+        "<div id='serp-out-primary'>$6,738</div>"
+        "<div id='serp-out-secondary'>$12,250</div>"
+        "<div id='serp-out-tertiary'>$5,512</div>"
+        "<div id='serp-out-quaternary'>$43,262</div>"
+        "</section>"
+        "</main>"
+        f"{script_tag}</body></html>"
+    )
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(doc, wait_until="domcontentloaded")
+        snap = page.evaluate(
+            """() => {
+              const snapOut = () => ['serp-out-primary','serp-out-secondary','serp-out-tertiary','serp-out-quaternary']
+                .map(id => document.getElementById(id).textContent).join('|');
+              const inp = document.getElementById('serp-b2b-deduction');
+              inp.value = '165000';
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              const before = snapOut();
+              inp.value = '222800';
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              const after = snapOut();
+              return { before, after };
+            }"""
+        )
+        browser.close()
+    assert snap["before"] != snap["after"], f"#serp-b2b-deduction failed to update outputs: {snap}"
+
+    # 2. PrexvoBrowserAdapter PSLF widget spec selector parity
+    specs = {s.widget_id: s for s in PrexvoBrowserAdapter().get_widget_specs()}
+    pslf_sim = specs["pslf-qualifying-payment-simulator"]
+    assert "#metric-rap_subsidy" in pslf_sim.output_selector or ".metric-value" in pslf_sim.output_selector
+    assert int(pslf_sim.input_value) >= 1000
+
+    # 3. GainHelm .calc-metrics-grid above .calc-inline-cta in reflection detection & Porcelain shell
+    gh_inverted = (
+        "<!DOCTYPE html><html><head><title>SOC 2 Audit Cost Calculator | GainHelm Statutory Model</title></head>"
+        "<body><main><h1>SOC 2 Audit Cost Calculator</h1>"
+        "<div class='calc-results-column result-box'>"
+        "<h3 class='calc-column-title'>Deterministic Statutory Outputs</h3>"
+        "<div class='calc-inline-cta'><a href='/r/vanta_security' data-cta-slot='calculator_result_inline'>Vanta</a></div>"
+        "<div class='calc-metrics-grid'><div class='calc-metric-card'><div class='calc-metric-value' id='metric-soc2_total_cost'>$78,100</div></div></div>"
+        "</div></main></body></html>"
+    )
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    missing = RetroReflectionEngine.audit_html_mechanics(gh_inverted)
+    assert "deterministic_visual_primitives" in missing
+
+    norm_gh, _ = normalize_html_to_porcelain_shell(
+        gh_inverted,
+        "tools/soc-2-audit-cost-calculator/index.html",
+        get_porcelain_tenant_profile("gainhelm"),
+    )
+    assert norm_gh.index("calc-metrics-grid") < norm_gh.index("calc-inline-cta")

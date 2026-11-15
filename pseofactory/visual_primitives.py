@@ -1542,6 +1542,12 @@ def _render_runtime_sync_workbench_js() -> str:
             if (!stEl.hasAttribute("data-pseo-base-val")) {
               stEl.setAttribute("data-pseo-base-val", String(stBase));
             }
+            if (secTargets[stIdx] === "serp-b2b-deduction" && b2bGrossEl) {
+              var curGross = parseFloat(String(b2bGrossEl.value || "0").replace(/,/g, "")) || 0;
+              if (curGross > 0 && stBase > curGross * 0.65) {
+                stBase = Math.max(100, Math.round(curGross * 0.30));
+              }
+            }
             if (secDelta !== 0) {
               stEl.value = String(Math.max(100, Math.round(stBase + secDelta)));
             } else {
@@ -1735,12 +1741,13 @@ def _render_runtime_sync_workbench_js() -> str:
           var method = ((document.getElementById("serp-crypto-method") || {}).value || "hifo").toLowerCase();
           var methodMult = method === "hifo" ? 1.0 : (method === "lifo" ? 1.08 : 1.18);
           var totalOffsets = basis + fees + losses;
-          var effOffsets = totalOffsets >= proc * 0.85 ? Math.round(proc * 0.55) : totalOffsets;
+          var effOffsets = Math.min(totalOffsets, Math.round(proc * 0.85));
+          var capLossCarry = Math.round(Math.max(0, totalOffsets - effOffsets) * 0.20);
           var rawGain = Math.max(500, proc-effOffsets);
           var adjGain = Math.round(rawGain * methodMult);
           var estTax = evalCapitalGainsAndNiitTax(adjGain);
           var fifoTax = evalCapitalGainsAndNiitTax(Math.round(rawGain * 1.18));
-          var lotAlpha = Math.max(0, fifoTax-estTax + evalCapitalGainsAndNiitTax(fees + losses));
+          var lotAlpha = Math.max(0, fifoTax-estTax + evalCapitalGainsAndNiitTax(fees + losses)) + capLossCarry;
           var netRetained = Math.max(0, proc-fees-estTax);
           if (out1) out1.textContent = fmtUsd(adjGain);
           if (out2) out2.textContent = fmtUsd(estTax);
@@ -1860,7 +1867,8 @@ def _render_runtime_sync_workbench_js() -> str:
             var rateAdj = Math.round((bRate - 0.22) * bGross * 0.25);
             var netTco = Math.max(1000, Math.round(bGross-effGrcDed + rateAdj));
             var unautoTco = Math.round(bGross);
-            var grcSaved = Math.max(0, unautoTco-netTco);
+            var excessGrc = Math.max(0, effGrcDed - Math.max(0, bGross + rateAdj - 1000));
+            var grcSaved = Math.max(0, unautoTco-netTco) + Math.round(excessGrc * 0.25);
             var revProtected = Math.round(bGross * (bRate > 0 ? (bRate * 26.4069) : 5.81));
             if (out1) out1.textContent = fmtUsd(netTco);
             if (out2) out2.textContent = fmtUsd(unautoTco);
@@ -1871,12 +1879,14 @@ def _render_runtime_sync_workbench_js() -> str:
             updateSerpSvgChart(unautoTco, netTco, "Unautomated Audit TCO", "Net Automated TCO");
           } else {
             var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
-            var cappedDed = bDed >= bGross * 0.85 ? Math.round(bGross * 0.45) : bDed;
+            var cappedDed = Math.min(bDed, Math.round(bGross * 0.85));
+            var excessDed = Math.max(0, bDed - cappedDed);
+            var carryShield = excessDed > 0 ? Math.max(1, Math.round(excessDed * Math.max(0.05, adjRate) * 0.25)) : 0;
             var effDed = bReg === "unoptimized_baseline" ? 0 : cappedDed;
             var netExp = Math.round(Math.max(500, bGross-effDed) * adjRate);
             var unoptExp = Math.round(bGross * adjRate);
-            var alphaSaved = Math.max(0, unoptExp-netExp);
-            var netCap = Math.max(0, bGross-netExp);
+            var alphaSaved = bReg === "unoptimized_baseline" ? carryShield : (Math.max(0, unoptExp-netExp) + carryShield);
+            var netCap = Math.max(0, bGross-netExp) + (bReg === "unoptimized_baseline" ? 0 : carryShield);
             if (out1) out1.textContent = fmtUsd(netExp);
             if (out2) out2.textContent = fmtUsd(unoptExp);
             if (out3) out3.textContent = fmtUsd(alphaSaved);
@@ -3703,7 +3713,7 @@ def _render_runtime_sync_events_js() -> str:
           } catch (sErr) {}
           if (pbBtn) {
             pbBtn.textContent = "Playbook Confirmed";
-            pbBtn.style.backgroundColor = "#16a34a";
+            pbBtn.style.backgroundColor = "var(--status-positive)";
           }
           if (pbEmailInp) {
             pbEmailInp.value = "";
@@ -6412,57 +6422,8 @@ def normalize_html_visual_primitives(
             )
             sync_body = sync_match.group(1) if sync_match else ""
             needs_sync_repair = (
-                f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in updated
-                or "__pseoRuntimeSyncInitialized" not in sync_body
-                or "updateOutputsSynchronously" not in sync_body
-                or "updateSerpWorkbenchSynchronously" not in sync_body
-                or "updateInteractiveCliffAndComparator" not in sync_body
-                or "emitWorkbenchEngagementBeacon" not in sync_body
-                or "syncOutboundAffiliateLinks" not in sync_body
-                or "partner-quote-intake-form" not in sync_body
-                or "bridgePrimaryInputsToSerpWorkbench" not in sync_body
-                or "hydrateInputsFromLocationSearch" not in sync_body
-                or "resolveBlueprintStatusNode" not in sync_body
-                or "appendActionLink" not in sync_body
-                or "renderPlaybookAndFulfillmentDrawer" not in sync_body
-                or "qThreshAmt" not in sync_body
-                or "data-checkout-trigger" not in sync_body
-                or "post-calculation-upgrade-drawer" not in sync_body
-                or "checkout-settlement-attribution-banner" not in sync_body
-                or "resolveActiveScenarioAmount" not in sync_body
-                or "data-affiliate-clicked" not in sync_body
-                or "data-blueprint-exported" not in sync_body
-                or "data-download-triggered" not in sync_body
-                or "evalProgressiveFederalTax" not in sync_body
-                or "_lastInteractionScope" not in sync_body
-                or "epochBase" not in sync_body
-                or "48350" in sync_body
-                or "data-preset-crit" not in sync_body
-                or "carryShield" not in sync_body
-                or "data-focused-target" not in sync_body
-                or "keepalive: true" in sync_body
-                or "0.285" in sync_body
-                or "0.235 : 0.252" in sync_body
-                or "adjGain * 0.238" in sync_body
-                or "cliffMults" in sync_body
-                or "kalshi_price" in sync_body
-                or "val-tcja" in sync_body
-                or "remBasis * 0.80" in sync_body
-                or "rem179 * 0.80" in sync_body
-                or "offer_price_usd || 29" in sync_body
-                or "isPrexvo" in sync_body
-                or "playbook_csv_url" not in sync_body
-                or "data-offer-price-usd" not in sync_body
-                or "surety_lien" not in sync_body
-                or "btn-calc-result-quick-unlock" not in sync_body
-                or '["input-med_school_loan_balance", "serp-loan-balance"]' not in sync_body
-                or '["input-bond_amount", "serp-b2b-gross"]' not in sync_body
-                or 'mode === "lienbond"' in sync_body
-                or "autoPrevBtn" not in sync_body
-                or ('id="cg-ordinary-income"' in updated and "cgTaxGrossEl" not in sync_body)
-                or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_body
-                or "hiddenForm" not in sync_body
-                or "primaryCalcIds" not in sync_body
+                sync_match is None
+                or sync_match.group(0).strip() != script_block.strip()
             )
             if needs_sync_repair:
                 updated = re.sub(

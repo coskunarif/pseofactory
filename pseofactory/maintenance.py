@@ -9782,6 +9782,7 @@ class RetroReflectionEngine:
         from pseofactory.visual_primitives import (
             VISUAL_PRIMITIVES_VERSION,
             detect_visual_and_ux_contract_issues,
+            render_runtime_synchronizer_script,
         )
         if (
             'id="pseo-visual-primitives"' not in html_content
@@ -9874,6 +9875,12 @@ class RetroReflectionEngine:
                 and 'id="rap-subsidy-meter"' in html_content
                 and html_content.find('<div class="calc-inline-cta"') < html_content.find('id="rap-subsidy-meter"')
             )
+            or (
+                '<div class="calc-inline-cta"' in html_content
+                and '<div class="calc-metrics-grid"' in html_content
+                and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="calc-metrics-grid"')
+            )
+            or render_runtime_synchronizer_script().strip() not in html_content
                 )
             )
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
