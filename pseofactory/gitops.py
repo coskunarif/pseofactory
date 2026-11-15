@@ -2256,7 +2256,7 @@ class CICDWatcher:
                         capture_output=True,
                         text=True,
                         check=False,
-                        timeout=min(timeout, 300),
+                        timeout=min(self.timeout, 300),
                     )
                     if w_res.returncode == 0:
                         return {
@@ -2398,7 +2398,15 @@ class CICDWatcher:
                                         check=False,
                                         timeout=15,
                                     )
-                                    if "recent account payments have failed or your spending limit needs to be increased" in (view_res.stdout or ""):
+                                    view_out = view_res.stdout or ""
+                                    is_cf_deploy_step_only_fail = (
+                                        "X Deploy LienBond" in view_out
+                                        and "✓ Verify LienBond" in view_out
+                                    )
+                                    if (
+                                        "recent account payments have failed or your spending limit needs to be increased" in view_out
+                                        or is_cf_deploy_step_only_fail
+                                    ):
                                         proj_name = (
                                             "prexvo"
                                             if "prexvo" in rp.name
@@ -2434,6 +2442,8 @@ class CICDWatcher:
                                                     "error": f"Local audit gate error for '{proj_name}': {aud_err}",
                                                 }
                                             w_env = os.environ.copy()
+                                            if Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml").is_file():
+                                                w_env.pop("CLOUDFLARE_API_TOKEN", None)
                                             nvm_bins = sorted(
                                                 Path("/home/ubuntuadmin/.nvm/versions/node").glob("v*/bin"),
                                                 reverse=True,

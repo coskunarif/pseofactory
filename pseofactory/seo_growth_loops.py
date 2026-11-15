@@ -3725,7 +3725,16 @@ def compile_search_opportunity_briefs(
     if rem_q_path.is_file():
         try:
             rem_data = json.loads(rem_q_path.read_text(encoding="utf-8"))
-            rem_tasks = rem_data.get("tasks", []) if isinstance(rem_data, dict) else (rem_data if isinstance(rem_data, list) else [])
+            if isinstance(rem_data, dict):
+                t_blk = (rem_data.get("tenants") or {}).get(prop) if isinstance(rem_data.get("tenants"), dict) else None
+                if isinstance(t_blk, dict) and isinstance(t_blk.get("tasks"), list):
+                    rem_tasks = t_blk["tasks"]
+                else:
+                    rem_tasks = rem_data.get("tasks") or rem_data.get("pending_tasks") or []
+            elif isinstance(rem_data, list):
+                rem_tasks = rem_data
+            else:
+                rem_tasks = []
             for rt in rem_tasks:
                 if not isinstance(rt, dict):
                     continue
@@ -4465,7 +4474,7 @@ def evaluate_content_portfolio_decisions(
                 site_p = "/" + str(rel).replace(".html", "")
             site_p = site_p.rstrip("/") or "/"
             if (
-                site_p in ("/", "/404", "/signal", "/static/signal", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology")
+                site_p in ("/", "/tools", "/404", "/signal", "/static/signal", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology")
                 or site_p.startswith(("/signal/", "/static/"))
             ):
                 continue
@@ -4983,7 +4992,7 @@ def _is_query_relevant_for_property(query_text: str, property_id: str) -> bool:
     if prop == "prexvo":
         if any(
             foreign in q_low
-            for foreign in ("1031", "section 179", "soc 2", "cmmc", "iso 27001", "sprs", "crypto tax", "kalshi")
+            for foreign in ("1031", "section 179", "soc 2", "cmmc", "iso 27001", "sprs", "crypto tax", "kalshi", "yelofunding")
         ):
             return False
         return any(
@@ -5003,6 +5012,29 @@ def _is_query_relevant_for_property(query_text: str, property_id: str) -> bool:
                 "forgiveness",
                 "idr",
                 "obbba",
+            )
+        )
+    if prop == "lienbond":
+        if any(
+            foreign in q_low
+            for foreign in ("1031", "section 179", "student loan", "pslf", "soc 2", "cmmc", "crypto tax", "kalshi", "yelofunding")
+        ):
+            return False
+        return any(
+            k in q_low
+            for k in (
+                "bond",
+                "surety",
+                "lien",
+                "workers comp",
+                "emr",
+                "class code",
+                "prevailing wage",
+                "wh-347",
+                "davis-bacon",
+                "miller act",
+                "retainage",
+                "contractor license",
             )
         )
     # profithelm
@@ -5712,7 +5744,16 @@ def compile_ai_citation_digital_pr_queue(
     if rem_q_path.is_file():
         try:
             rem_data = json.loads(rem_q_path.read_text(encoding="utf-8"))
-            rem_tasks = rem_data.get("tasks", []) if isinstance(rem_data, dict) else (rem_data if isinstance(rem_data, list) else [])
+            if isinstance(rem_data, dict):
+                t_blk = (rem_data.get("tenants") or {}).get(prop) if isinstance(rem_data.get("tenants"), dict) else None
+                if isinstance(t_blk, dict) and isinstance(t_blk.get("tasks"), list):
+                    rem_tasks = t_blk["tasks"]
+                else:
+                    rem_tasks = rem_data.get("tasks") or rem_data.get("pending_tasks") or []
+            elif isinstance(rem_data, list):
+                rem_tasks = rem_data
+            else:
+                rem_tasks = []
             for rt in rem_tasks:
                 if not isinstance(rt, dict):
                     continue

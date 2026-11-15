@@ -12,7 +12,9 @@ from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 import urllib.parse
 
+import atexit
 import os
+import shutil
 import sys
 import fcntl
 import threading
@@ -20,6 +22,28 @@ import uuid
 import time
 import tempfile
 from datetime import datetime, timezone
+
+_REGISTERED_TEST_TEMP_PATHS: set[Path] = set()
+
+
+def _register_test_temp_path(p: Path) -> Path:
+    _REGISTERED_TEST_TEMP_PATHS.add(p)
+    return p
+
+
+def _cleanup_registered_test_temp_paths() -> None:
+    for p in list(_REGISTERED_TEST_TEMP_PATHS):
+        try:
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                p.unlink(missing_ok=True)
+                p.with_suffix(".lock").unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_registered_test_temp_paths)
 
 CANONICAL_BASE = os.environ.get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
 SITE_NAME = os.environ.get("FACTORY_SITE_NAME", "ProfitHelm")
@@ -149,7 +173,9 @@ class DistributionIdempotencyLedger:
         if ledger_path is not None:
             self.ledger_path = Path(ledger_path)
         elif _is_test_context():
-            self.ledger_path = Path(tempfile.gettempdir()) / f"pseofactory_test_dist_idempotency_{os.getpid()}.json"
+            self.ledger_path = _register_test_temp_path(
+                Path(tempfile.gettempdir()) / f"pseofactory_test_dist_idempotency_{os.getpid()}.json"
+            )
         else:
             self.ledger_path = DEFAULT_DISTRIBUTION_LEDGER_PATH
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
@@ -294,7 +320,9 @@ class SyndicationWALQueue:
         if queues_dir is not None:
             self.queues_dir = Path(queues_dir)
         elif _is_test_context(property_id=raw_pid):
-            self.queues_dir = Path(tempfile.gettempdir()) / f"pseofactory_test_queues_{os.getpid()}"
+            self.queues_dir = _register_test_temp_path(
+                Path(tempfile.gettempdir()) / f"pseofactory_test_queues_{os.getpid()}"
+            )
         else:
             self.queues_dir = self.DEFAULT_QUEUES_DIR
         self.queues_dir.mkdir(parents=True, exist_ok=True)
@@ -9875,7 +9903,7 @@ def export_all_syndication_files(
     if dry_run:
         eff_run = run_id or f"dryrun-{int(time.time())}"
         if _is_test_context(output_dir, property_id):
-            runs_root = Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}"
+            runs_root = _register_test_temp_path(Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}")
         else:
             runs_root = Path("/home/ubuntuadmin/projects/.agy/runs")
         output_dir = runs_root / eff_run / "syndication_dry_run"
@@ -9884,7 +9912,9 @@ def export_all_syndication_files(
         try:
             adapter = TenantRegistry.default().get_adapter(property_id)
             if _is_test_context(getattr(adapter, "repo_path", None), property_id):
-                output_dir = Path(tempfile.gettempdir()) / f"pseofactory_test_syndication_{property_id}_{os.getpid()}"
+                output_dir = _register_test_temp_path(
+                    Path(tempfile.gettempdir()) / f"pseofactory_test_syndication_{property_id}_{os.getpid()}"
+                )
             else:
                 output_dir = adapter.repo_path / "syndication" if adapter.repo_path else Path(f"/tmp/{property_id}_syndication")
         except Exception:
@@ -11450,7 +11480,7 @@ def dispatch_to_distribution_lead(
 
     # Save distribution_draft.json atomically under flock
     if _is_test_context(dist_dir, property_id):
-        runs_root = Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}"
+        runs_root = _register_test_temp_path(Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}")
     else:
         runs_root = Path("/home/ubuntuadmin/projects/.agy/runs")
     draft_dir = runs_root / eff_run_id

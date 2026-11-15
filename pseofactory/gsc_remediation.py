@@ -4526,11 +4526,11 @@ def compile_remediation_overlay_spec(
                 "ordermetrics",
                 "futures tax",
                 "for gaming",
-                "bid bond",
                 "(",
                 ")",
                 '"',
             )
+            + (("bid bond",) if resolved_tenant != "lienbond" else ())
         )
     )
     if is_noisy_query and slug:
@@ -4541,7 +4541,7 @@ def compile_remediation_overlay_spec(
     # Scrub any accidental cross-tenant tokens from query label
     query_clean = _strip_forbidden_dashes(raw_query)
     if resolved_tenant == "prexvo":
-        for bad in ("profithelm", "gainhelm", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs"):
+        for bad in ("profithelm", "gainhelm", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs", "yelofunding"):
             query_clean = re.sub(re.escape(bad), "title iv repayment", query_clean, flags=re.IGNORECASE)
     elif resolved_tenant == "gainhelm":
         for bad in ("profithelm", "prexvo", "lienbond", "section 179", "section 1031", "1031 exchange", "tcja", "qsbs", "title iv", "34 cfr", "pslf", "student loan", "paye sunset"):
@@ -7163,14 +7163,16 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                 merged["preset_scenarios"] = merged_sc
 
             # Merge faq_entries / faq_additions / faq_schema
-            for faq_key in ("faq_entries", "faq_additions", "faq_schema"):
-                cur_faqs = list(merged.get(faq_key) or [])
+            for faq_key in ("faq_entries", "faq_additions"):
+                existing_val = merged.get(faq_key)
+                cur_faqs = list(existing_val) if isinstance(existing_val, list) else []
                 seen_q = {
                     str(f.get("question") or "").strip().lower()
                     for f in cur_faqs
                     if isinstance(f, dict)
                 }
-                for f in spec.get(faq_key) or []:
+                incoming_val = spec.get(faq_key)
+                for f in (incoming_val if isinstance(incoming_val, list) else []):
                     if isinstance(f, dict):
                         fq = str(f.get("question") or "").strip().lower()
                         if fq and fq not in seen_q:
@@ -7178,6 +7180,45 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                             seen_q.add(fq)
                 if cur_faqs:
                     merged[faq_key] = cur_faqs
+
+            inc_schema = spec.get("faq_schema")
+            cur_schema = merged.get("faq_schema")
+            if isinstance(inc_schema, dict):
+                if isinstance(cur_schema, dict):
+                    cur_ents = list(cur_schema.get("mainEntity") or []) if isinstance(cur_schema.get("mainEntity"), list) else []
+                    seen_names = {
+                        str(e.get("name") or "").strip().lower()
+                        for e in cur_ents
+                        if isinstance(e, dict)
+                    }
+                    for e in (inc_schema.get("mainEntity") or []):
+                        if isinstance(e, dict):
+                            en = str(e.get("name") or "").strip().lower()
+                            if en and en not in seen_names:
+                                cur_ents.append(e)
+                                seen_names.add(en)
+                    merged_schema = dict(cur_schema)
+                    merged_schema.update({k: v for k, v in inc_schema.items() if k != "mainEntity"})
+                    if cur_ents:
+                        merged_schema["mainEntity"] = cur_ents
+                    merged["faq_schema"] = merged_schema
+                else:
+                    merged["faq_schema"] = inc_schema
+            elif isinstance(inc_schema, list):
+                cur_list = list(cur_schema) if isinstance(cur_schema, list) else []
+                seen_sq = {
+                    str(f.get("question") or f.get("name") or "").strip().lower()
+                    for f in cur_list
+                    if isinstance(f, dict)
+                }
+                for f in inc_schema:
+                    if isinstance(f, dict):
+                        fq = str(f.get("question") or f.get("name") or "").strip().lower()
+                        if fq and fq not in seen_sq:
+                            cur_list.append(f)
+                            seen_sq.add(fq)
+                if cur_list:
+                    merged["faq_schema"] = cur_list
 
             path.parent.mkdir(parents=True, exist_ok=True)
             serialized_merged = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
@@ -9051,7 +9092,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
     if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
         title_rewrite = _normalize_title_50_60(title_rewrite, ov_brand, ov_tenant)
-    if title_rewrite and ov_tenant != "lienbond" and "lienbond.com" not in canon_url_early:
+    if title_rewrite:
         escaped_title = html_lib.escape(title_rewrite)
         html = re.sub(
             r"<title>.*?</title>",
@@ -9368,10 +9409,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             imp_raw = _strip_forbidden_dashes(str(mrow.get("net_dollar_impact", "")))
             act_raw = _strip_forbidden_dashes(str(mrow.get("next_action", "")))
             if ov_tenant == "prexvo" or "$187/mo" in imp_raw or "$410/mo" in imp_raw:
-                imp_raw = imp_raw.replace("$187/mo", "$2,244 Annual").replace("$410/mo", "$4,920 Annual")
                 imp_raw = re.sub(
-                    r"\$\d+(?:\.\d{2})?\s*(?:/|\s*per\s*)(?:mo|month)",
-                    "$2,244 Annual",
+                    r"\$(\d[\d,]*(?:\.\d{2})?)\s*(?:/|\s*per\s*)(?:mo|month)",
+                    lambda m: f"${round(float(m.group(1).replace(',', '')) * 12):,} Annual",
                     imp_raw,
                     flags=re.IGNORECASE,
                 )
@@ -9869,6 +9909,11 @@ class AsyncRemediationQueue:
             "timestamp",
             "recorded_at",
             "evaluated_at",
+            "generated_at",
+            "fetched_at",
+            "last_checked_at",
+            "queued_at",
+            "engagement_metrics",
             "idempotency_key",
             "content_sha256",
             "attempt_count",

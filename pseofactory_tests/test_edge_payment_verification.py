@@ -451,22 +451,25 @@ def test_verify_tenant_edge_functions_parity_enforces_dist_functions_and_obbba_a
     sync_tenant_edge_redirect_function(repo, property_id="profithelm")
     ok, reasons = verify_tenant_edge_functions_parity(repo, "profithelm")
     assert ok is True, reasons
+    assert not (repo / "dist" / "functions").exists()
     assert '"branding_settings[display_name]": "ProfitHelm"' in (
-        repo / "dist" / "functions" / "api" / "lead-capture.js"
+        repo / "functions" / "api" / "lead-capture.js"
     ).read_text(encoding="utf-8")
 
-    # Simulate a tenant build overwriting dist/functions/api/lead-capture.js with stale JS
+    # Simulate a tenant build leaking dist/functions/api/lead-capture.js into static dist/
+    (repo / "dist" / "functions" / "api").mkdir(parents=True, exist_ok=True)
     (repo / "dist" / "functions" / "api" / "lead-capture.js").write_text(
-        '// stale lead-capture without branding_settings\n', encoding="utf-8"
+        '// stale lead-capture leaked into dist\n', encoding="utf-8"
     )
     ok_stale, reasons_stale = verify_tenant_edge_functions_parity(repo, "profithelm")
     assert ok_stale is False
-    assert any("dist/functions/api/lead-capture.js" in r for r in reasons_stale)
+    assert any("dist/functions" in r for r in reasons_stale)
 
-    # Re-sync heals dist/functions/api/lead-capture.js back to exact parity
+    # Re-sync purges leaked dist/functions/ back to exact parity
     sync_tenant_edge_redirect_function(repo, property_id="profithelm")
     ok_healed, reasons_healed = verify_tenant_edge_functions_parity(repo, "profithelm")
     assert ok_healed is True, reasons_healed
+    assert not (repo / "dist" / "functions").exists()
 
     maint_src = (
         Path(__file__).resolve().parent.parent / "pseofactory" / "maintenance.py"

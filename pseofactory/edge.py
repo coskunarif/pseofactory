@@ -6,6 +6,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import json
+import shutil
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -653,6 +654,11 @@ def _sync_middleware_redirect_table(
                 and k.strip("/") in existing_governance_routes
             ):
                 continue
+            if existing_governance_routes and v.rstrip("/") == "/disclaimers" and "disclaimers" not in existing_governance_routes:
+                if "privacy" in k and "privacy" in existing_governance_routes:
+                    v = "/privacy/"
+                elif "terms" in existing_governance_routes:
+                    v = "/terms/"
             if k not in merged_entries:
                 entry_order.append(k)
             merged_entries[k] = v
@@ -666,6 +672,11 @@ def _sync_middleware_redirect_table(
             and k.strip("/") in existing_governance_routes
         ):
             continue
+        if existing_governance_routes and v.rstrip("/") == "/disclaimers" and "disclaimers" not in existing_governance_routes:
+            if "privacy" in k and "privacy" in existing_governance_routes:
+                v = "/privacy/"
+            elif "terms" in existing_governance_routes:
+                v = "/terms/"
         if k.rstrip("/") == v.rstrip("/"):
             continue
         if k not in merged_entries:
@@ -12539,15 +12550,17 @@ def sync_tenant_edge_redirect_function(
 
     prop_clean = (property_id or "").strip().lower()
     repo = Path(repo_path)
-    r_dir = repo / "functions" / "r"
+    fn_root = repo / "functions"
+    r_dir = fn_root / "r"
     target_file = r_dir / "[partner].js"
 
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond") or not r_dir.is_dir():
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond") or not fn_root.is_dir():
         return {
             "status": "SKIPPED",
             "path": str(target_file),
             "live_direct_partners": [],
         }
+    r_dir.mkdir(parents=True, exist_ok=True)
 
     active_hub = hub if hub is not None else MonetizationHub()
     js_code = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
@@ -12573,14 +12586,12 @@ def sync_tenant_edge_redirect_function(
         if p_obj.status == "live" or v_status in ("live", "active_direct"):
             live_direct_partners.append(k)
 
-    dist_r_file = repo / "dist" / "functions" / "r" / "[partner].js"
+    dist_fn_leak_dir = repo / "dist" / "functions"
     dist_needs_update = False
-    if (repo / "dist").is_dir():
+    if dist_fn_leak_dir.exists():
         try:
-            dist_r_file.parent.mkdir(parents=True, exist_ok=True)
-            if not dist_r_file.is_file() or dist_r_file.read_text(encoding="utf-8") != js_code:
-                dist_r_file.write_text(js_code, encoding="utf-8")
-                dist_needs_update = True
+            shutil.rmtree(dist_fn_leak_dir, ignore_errors=True)
+            dist_needs_update = True
         except Exception:
             pass
 
@@ -12645,29 +12656,6 @@ def sync_tenant_edge_redirect_function(
     except Exception:
         pass
 
-    dist_api_dir = repo / "dist" / "functions" / "api"
-    if (repo / "dist").is_dir():
-        try:
-            dist_api_dir.mkdir(parents=True, exist_ok=True)
-            dist_telemetry_file = dist_api_dir / "telemetry.js"
-            if not dist_telemetry_file.is_file() or dist_telemetry_file.read_text(encoding="utf-8") != telemetry_js:
-                dist_telemetry_file.write_text(telemetry_js, encoding="utf-8")
-                dist_needs_update = True
-            dist_lead_file = dist_api_dir / "lead-capture.js"
-            if not dist_lead_file.is_file() or dist_lead_file.read_text(encoding="utf-8") != lead_capture_js:
-                dist_lead_file.write_text(lead_capture_js, encoding="utf-8")
-                dist_needs_update = True
-            dist_checkout_file = dist_api_dir / "checkout.js"
-            if not dist_checkout_file.is_file() or dist_checkout_file.read_text(encoding="utf-8") != checkout_js:
-                dist_checkout_file.write_text(checkout_js, encoding="utf-8")
-                dist_needs_update = True
-            dist_fulfillment_file = dist_api_dir / "lead-fulfillment.js"
-            if not dist_fulfillment_file.is_file() or dist_fulfillment_file.read_text(encoding="utf-8") != fulfillment_js:
-                dist_fulfillment_file.write_text(fulfillment_js, encoding="utf-8")
-                dist_needs_update = True
-        except Exception:
-            pass
-
     # Synchronize dist/_routes.json static-asset bypass and dist/_headers <= 95 rule cap
     dist_dir = repo / "dist"
     routes_json_file = dist_dir / "_routes.json"
@@ -12713,7 +12701,7 @@ def sync_tenant_edge_redirect_function(
         if (dist_dir / g / "index.html").is_file()
     }
     mw_file = repo / "functions" / "_middleware.js"
-    if not mw_file.is_file() and (repo / "functions").is_dir() and prop_clean == "lienbond":
+    if not mw_file.is_file() and (repo / "functions").is_dir():
         lb_gov_lines: List[str] = []
         if "about" not in existing_gov_routes:
             lb_gov_lines.extend(['    "/about": "/methodology/",\n', '    "/about/": "/methodology/",\n'])
@@ -12723,7 +12711,7 @@ def sync_tenant_edge_redirect_function(
             lb_gov_lines.extend(['    "/terms": "/disclaimers/",\n', '    "/terms/": "/disclaimers/",\n'])
         default_lb_mw = (
             "/**\n"
-            " * LienBond Cloudflare Pages Functions Middleware\n"
+            f" * {apex_domain} Cloudflare Pages Functions Middleware\n"
             " * Enforces www-to-apex 301 canonical redirects, staging lockdown on *.pages.dev,\n"
             " * and RFC 5988 canonical Link headers on HTML routes.\n"
             " * Zero em-dashes. Zero en-dashes.\n"
@@ -12922,6 +12910,28 @@ def sync_tenant_edge_redirect_function(
                     "  const response = await context.next();\n  return response;\n}",
                 )
 
+            if "isNonApexDev" not in mw_new and "  return response;\n}" in mw_new:
+                non_apex_guard_snippet = (
+                    "  if (response.status >= 300 && response.status < 400) {\n"
+                    "    return response;\n"
+                    "  }\n\n"
+                    f'  const isApex = hostname === "{apex_domain}";\n'
+                    '  const isNonApexDev = !isApex || hostname.endsWith(".pages.dev") || hostname.startsWith("preview.");\n\n'
+                    "  if (isNonApexDev) {\n"
+                    "    const newHeaders = new Headers(response.headers);\n"
+                    '    newHeaders.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");\n'
+                    '    newHeaders.set("Cache-Control", "no-store, no-cache, must-revalidate");\n'
+                    "    const body = [204, 205, 304].includes(response.status) ? null : response.body;\n"
+                    "    return new Response(body, {\n"
+                    "      status: response.status,\n"
+                    "      statusText: response.statusText,\n"
+                    "      headers: newHeaders,\n"
+                    "    });\n"
+                    "  }\n\n"
+                    "  return response;\n}"
+                )
+                mw_new = mw_new.replace("  return response;\n}", non_apex_guard_snippet, 1)
+
             if "rel=\"canonical\"" not in mw_new and "return response;\n}" in mw_new:
                 canonical_fallback_snippet = (
                     "  if (response.status === 200 && !response.headers.get(\"Link\")) {\n"
@@ -12942,15 +12952,6 @@ def sync_tenant_edge_redirect_function(
             if mw_new != mw_orig:
                 mw_file.write_text(mw_new, encoding="utf-8")
                 dist_needs_update = True
-            dist_mw = repo / "dist" / "functions" / "_middleware.js"
-            if (repo / "dist").is_dir():
-                dist_mw.parent.mkdir(parents=True, exist_ok=True)
-                if (
-                    not dist_mw.is_file()
-                    or dist_mw.read_text(encoding="utf-8", errors="ignore") != mw_new
-                ):
-                    dist_mw.write_text(mw_new, encoding="utf-8")
-                    dist_needs_update = True
         except Exception:
             pass
 
@@ -13136,7 +13137,18 @@ def verify_tenant_edge_functions_parity(
     repo = Path(repo_path)
     expected_map = get_expected_edge_functions_map(property_id, hub=hub)
     reasons: List[str] = []
-    has_dist_functions = (repo / "dist" / "functions").is_dir()
+    if (repo / "dist" / "functions").exists():
+        reasons.append(f"{property_id}: dist/functions must not exist in public static output")
+    mw_check = repo / "functions" / "_middleware.js"
+    if not mw_check.is_file():
+        reasons.append(f"{property_id}: missing functions/_middleware.js")
+    else:
+        try:
+            mw_src = mw_check.read_text(encoding="utf-8")
+            if "isNonApexDev" not in mw_src:
+                reasons.append(f"{property_id}: functions/_middleware.js missing non-apex noindex guard (isNonApexDev)")
+        except Exception as exc:
+            reasons.append(f"{property_id}: unreadable functions/_middleware.js ({exc})")
     for rel_path, expected_src in expected_map.items():
         fpath = repo / rel_path
         if not fpath.is_file():
@@ -13148,19 +13160,6 @@ def verify_tenant_edge_functions_parity(
                     reasons.append(f"{property_id}: {rel_path} byte mismatch against pseofactory.edge")
             except Exception as exc:
                 reasons.append(f"{property_id}: unreadable {rel_path} ({exc})")
-
-        if has_dist_functions:
-            dist_rel = f"dist/{rel_path}"
-            dist_fpath = repo / dist_rel
-            if not dist_fpath.is_file():
-                reasons.append(f"{property_id}: missing {dist_rel}")
-            else:
-                try:
-                    dist_actual = dist_fpath.read_text(encoding="utf-8")
-                    if dist_actual != expected_src:
-                        reasons.append(f"{property_id}: {dist_rel} byte mismatch against pseofactory.edge")
-                except Exception as exc:
-                    reasons.append(f"{property_id}: unreadable {dist_rel} ({exc})")
     return len(reasons) == 0, reasons
 
 

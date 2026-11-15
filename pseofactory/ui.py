@@ -15,8 +15,10 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import hmac
+from http.cookies import SimpleCookie
 import json
 import os
 import re
@@ -1221,6 +1223,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    @staticmethod
+    def _compute_session_cookie(token: str) -> str:
+        return hmac.new(token.encode("utf-8"), b"pseo_ui_session_v1", hashlib.sha256).hexdigest()
+
     def do_GET(self) -> None:
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path in ("/", "/dashboard", "/index.html"):
@@ -1230,6 +1236,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 body = html_content.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                auth_token = os.environ.get("PSEODASHBOARD_API_TOKEN", "").strip()
+                if auth_token:
+                    sig = self._compute_session_cookie(auth_token)
+                    self.send_header("Set-Cookie", f"pseo_ui_session={sig}; HttpOnly; SameSite=Strict; Path=/")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -1297,6 +1307,25 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             req_token = self.headers.get("X-API-Key", "").strip()
 
         if not req_token:
+            cookie_hdr = self.headers.get("Cookie", "") if hasattr(self, "headers") and self.headers else ""
+            if cookie_hdr:
+                origin_hdr = self.headers.get("Origin", "").strip()
+                host_hdr = self.headers.get("Host", "").strip()
+                if origin_hdr and host_hdr:
+                    origin_host = urllib.parse.urlsplit(origin_hdr).netloc
+                    if origin_host and origin_host != host_hdr:
+                        return False
+                jar = SimpleCookie()
+                try:
+                    jar.load(cookie_hdr)
+                    morsel = jar.get("pseo_ui_session")
+                    if morsel and morsel.value:
+                        return hmac.compare_digest(
+                            morsel.value,
+                            DashboardRequestHandler._compute_session_cookie(auth_token),
+                        )
+                except Exception:
+                    return False
             return False
 
         return hmac.compare_digest(req_token, auth_token)

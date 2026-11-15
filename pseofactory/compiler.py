@@ -15,6 +15,7 @@ Enforces:
 Zero em-dashes. Zero en-dashes.
 """
 
+import hashlib
 import os
 import json
 import re
@@ -857,6 +858,8 @@ def _render_compiler_monetization_and_guardrail_html(
             in_model = html_lib.escape(str(inline_offer.get("partnership_model") or "CPA_BOUNTY"))
             in_href = html_lib.escape(str(inline_offer.get("attributed_href") or f"/r/{pk_in}"))
             in_sub = html_lib.escape(str(inline_offer.get("subid") or f"{slug_id}_inline"))
+            in_status = html_lib.escape(str(inline_offer.get("status") or "pending"))
+            in_slot_label = "Primary Conversion Slot" if in_status == "live" else "Referral Resource"
             inline_html = (
                 f'\n        <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{pk_in}" data-company-brand="{in_brand}" data-partner-tier="primary" '
@@ -864,13 +867,13 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'data-cta-slot="calculator_result_inline" '
                 f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-top: 12px; background: var(--bg-elevated); border: 1px solid var(--border-strong); border-left: 4px solid var(--accent); border-radius: 8px;">\n'
                 f'          <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
-                f'            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);">{in_badge} &bull; Primary Conversion Slot</div>\n'
+                f'            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);">{in_badge} &bull; {in_slot_label}</div>\n'
                 f'            <div style="font-size: 14px; font-weight: 700; color: var(--text); margin-top: 2px;">{in_name}</div>\n'
                 f'          </div>\n'
                 f'          <a href="{in_href}" rel="noopener sponsored nofollow" target="_blank" '
                 f'data-partner="{pk_in}" data-company-brand="{in_brand}" data-partner-tier="primary" '
                 f'data-partnership-model="{in_model}" '
-                f'data-tool="{html_lib.escape(slug_id)}" data-subid="{in_sub}" data-status="live" '
+                f'data-tool="{html_lib.escape(slug_id)}" data-subid="{in_sub}" data-status="{in_status}" '
                 f'data-cta-slot="calculator_result_inline" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; white-space: nowrap;">{in_cta}</a>\n'
                 f'        </div>'
@@ -884,6 +887,7 @@ def _render_compiler_monetization_and_guardrail_html(
             tb_model = html_lib.escape(str(table_offer.get("partnership_model") or "CPA_BOUNTY"))
             tb_href = html_lib.escape(str(table_offer.get("attributed_href") or f"/r/{pk_tb}"))
             tb_sub = html_lib.escape(str(table_offer.get("subid") or f"{slug_id}_table"))
+            tb_status = html_lib.escape(str(table_offer.get("status") or "pending"))
             table_html = (
                 f'    <div class="comparison-table-cta-bar card pseo-card" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{pk_tb}" data-company-brand="{tb_brand}" data-partner-tier="{tb_role}" '
@@ -894,7 +898,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'      <a href="{tb_href}" rel="noopener sponsored nofollow" target="_blank" '
                 f'data-partner="{pk_tb}" data-company-brand="{tb_brand}" data-partner-tier="{tb_role}" '
                 f'data-partnership-model="{tb_model}" '
-                f'data-tool="{html_lib.escape(slug_id)}" data-subid="{tb_sub}" data-status="live" '
+                f'data-tool="{html_lib.escape(slug_id)}" data-subid="{tb_sub}" data-status="{tb_status}" '
                 f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{tb_cta}</a>\n'
                 f'    </div>'
@@ -910,7 +914,7 @@ def _render_compiler_monetization_and_guardrail_html(
             c_pk = str(card_offer.get("partner_key") or "")
             c_name = html_lib.escape(str(card_offer.get("name") or c_pk))
             c_desc = html_lib.escape(str(card_offer.get("description") or ""))
-            c_badge = html_lib.escape(str(card_offer.get("badge") or "Verified Partner"))
+            c_badge = html_lib.escape(str(card_offer.get("badge") or "Partner Option"))
             c_cta = html_lib.escape(str(card_offer.get("cta_text") or "Explore Partner"))
             c_brand = html_lib.escape(str(card_offer.get("company_brand") or c_pk))
             c_role = html_lib.escape(str(card_offer.get("tier_role") or ("primary" if idx == 1 else "secondary")))
@@ -918,13 +922,15 @@ def _render_compiler_monetization_and_guardrail_html(
             c_slot = html_lib.escape(str(card_offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card")))
             c_href = html_lib.escape(str(card_offer.get("attributed_href") or f"/r/{c_pk}"))
             c_sub = html_lib.escape(str(card_offer.get("subid") or f"{slug_id}_card_{idx}"))
+            c_status = html_lib.escape(str(card_offer.get("status") or "pending"))
+            c_disc_label = f"Sponsored / {c_brand}" if c_status == "live" else f"Partner Disclosure / {c_brand}"
             card_items.append(
                 f'        <div class="affiliate-card partner-card" data-partner="{c_pk}" '
                 f'data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}" '
                 f'style="padding: 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">\n'
                 f'          <div class="affiliate-info">\n'
                 f'            <span class="affiliate-badge" style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent);">{c_badge} ({c_role.title()})</span>\n'
-                f'            <span class="affiliate-disclosure-badge" style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">Sponsored / {c_brand}</span>\n'
+                f'            <span class="affiliate-disclosure-badge" style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">{c_disc_label}</span>\n'
                 f'            <h3 class="affiliate-title" style="margin: 6px 0 4px 0; font-size: 15px;">{c_name}</h3>\n'
                 f'            <p class="affiliate-desc" style="margin: 0; font-size: 13px; color: var(--text-muted);">{c_desc}</p>\n'
                 f'          </div>\n'
@@ -932,7 +938,7 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'            <a href="{c_href}" rel="noopener sponsored nofollow" target="_blank" '
                 f'data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" '
                 f'data-partnership-model="{c_model}" '
-                f'data-tool="{html_lib.escape(slug_id)}" data-subid="{c_sub}" data-status="live" '
+                f'data-tool="{html_lib.escape(slug_id)}" data-subid="{c_sub}" data-status="{c_status}" '
                 f'data-cta-slot="{c_slot}" class="btn-cta partner-cta touch-target" '
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; font-size: 14px;">{c_cta}</a>\n'
                 f'          </div>\n'
@@ -1423,7 +1429,13 @@ def _build_compiled_json_ld_graph(
         if _prop_for_schema == "lienbond"
         else f"editorial@{_schema_contract.domain}"
     )
-    _same_as_urls = ["https://www.wikidata.org/wiki/Q499388"]
+    _wikidata_entity_map = {
+        "lienbond": "https://www.wikidata.org/wiki/Q192161",
+        "prexvo": "https://www.wikidata.org/wiki/Q633315",
+        "gainhelm": "https://www.wikidata.org/wiki/Q166142",
+        "profithelm": "https://www.wikidata.org/wiki/Q8161",
+    }
+    _same_as_urls = [_wikidata_entity_map.get(_prop_for_schema, "https://www.wikidata.org/wiki/Q8161")]
     if _schema_contract.linkedin_company_id:
         _same_as_urls.insert(0, f"https://www.linkedin.com/company/{_schema_contract.linkedin_company_id}/")
     graph_payload = {
@@ -1441,38 +1453,6 @@ def _build_compiled_json_ld_graph(
                     "email": _editorial_email,
                 },
                 "sameAs": _same_as_urls,
-            },
-            {
-                "@type": ["LocalBusiness", "FinancialService", "ProfessionalService"],
-                "@id": f"{canonical_base}/#localbusiness",
-                "name": brand_org_name,
-                "url": canonical_base,
-                "parentOrganization": {"@id": f"{canonical_base}/#organization"},
-                "address": {
-                    "@type": "PostalAddress",
-                    "streetAddress": "522 W Riverside Ave, Suite N",
-                    "addressLocality": "Spokane",
-                    "addressRegion": "WA",
-                    "postalCode": "99201",
-                    "addressCountry": "US",
-                },
-                "geo": {
-                    "@type": "GeoCoordinates",
-                    "latitude": 47.6588,
-                    "longitude": -117.4260,
-                },
-                "openingHoursSpecification": [
-                    {
-                        "@type": "OpeningHoursSpecification",
-                        "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-                        "opens": "09:00",
-                        "closes": "17:00",
-                    }
-                ],
-                "telephone": "+1-509-204-5500",
-                "email": _editorial_email,
-                "priceRange": "$$",
-                "areaServed": {"@type": "Country", "name": "United States"},
             },
             {
                 "@type": "WebSite",
@@ -2622,7 +2602,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       <h2>Interactive Quantitative Model: {safe_model_h2}</h2>
       <p>
         Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
-        (greater than or equal to zero) per HWL-1263 to prevent crawler or user state corruption.
+        (greater than or equal to zero) under strict statutory boundary validation to prevent crawler or user state corruption.
       </p>
 {state_first_hero_bar_html}
 {scenario_presets_bar_html}
@@ -2940,7 +2920,7 @@ def _build_lienbond_support_page_html(
                         "email": "compliance@lienbond.com",
                     },
                     "sameAs": [
-                        "https://www.wikidata.org/wiki/Q499388",
+                        "https://www.wikidata.org/wiki/Q192161",
                     ],
                 },
                 {
@@ -3328,7 +3308,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 
     <div id="calculator-workspace-anchor" class="calculation-container card">
       <h2>Interactive Contractor License &amp; Performance Bond Premium Calculator</h2>
-      <p>Evaluate contractor license and AIA A312 performance bond premiums with non-negative numeric parameter clamping per HWL-1263.</p>
+      <p>Evaluate contractor license and AIA A312 performance bond premiums with non-negative numeric parameter clamping under strict statutory boundary validation.</p>
       <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
         <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=20000&amp;credit_tier_rate_pct=1.2&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="conservative" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Conservative ($20k Bond)</a>
         <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=25000&amp;credit_tier_rate_pct=1.5&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="baseline" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Baseline ($25k Bond)</a>
@@ -3600,7 +3580,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       <ol class="procedure-steps">
         <li><strong>Deterministic AST Formula Execution:</strong> Every calculator evaluates pure mathematical expressions verified against Factor-7 JSON manifests with zero floating-point drift.</li>
         <li><strong>Primary Statutory Authority Grounding:</strong> Each model pairs federal or state statutory code citations with empirical benchmarks from SFAA, NCCI, BLS, and U.S. Census VIP series.</li>
-        <li><strong>Non-Negative Parameter Clamping (HWL-1263):</strong> Client and server deserializers clamp numeric inputs to non-negative bounds and verify 5-point sensitivity schedules.</li>
+        <li><strong>Non-Negative Parameter Clamping:</strong> Client and server deserializers clamp numeric inputs to non-negative bounds and verify 5-point sensitivity schedules.</li>
       </ol>
       <div class="table-wrap">
         <table class="comparison-table">
@@ -3749,7 +3729,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 """
     (dist / "feed.xml").write_text(feed_xml, encoding="utf-8")
 
-    indexnow_key = "4e1df81051618d8a982aa278ff55052f"
+    indexnow_key = hashlib.sha256(b"lienbond.com:indexnow:v1").hexdigest()[:32]
     (dist / f"{indexnow_key}.txt").write_text(f"{indexnow_key}\n", encoding="utf-8")
 
     (dist / "catalog.json").write_text(
@@ -3777,7 +3757,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         ),
         encoding="utf-8",
     )
-    (dist / "_redirects").write_text("", encoding="utf-8")
+    if not (dist / "_redirects").exists():
+        (dist / "_redirects").write_text("", encoding="utf-8")
 
     pseo_meta = {
         "property_id": "lienbond",

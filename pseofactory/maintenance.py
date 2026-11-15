@@ -1517,10 +1517,18 @@ class WorkspacePropertyScanner:
         "parasite-output",
     }
 
-    def __init__(self, workspace_root: Optional[Union[str, Path]] = None):
+    def __init__(
+        self,
+        workspace_root: Optional[Union[str, Path]] = None,
+        require_manifest: Optional[bool] = None,
+    ):
         self.workspace_root = Path(
             workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
         ).resolve()
+        if require_manifest is None:
+            self.require_manifest = (self.workspace_root == Path("/home/ubuntuadmin/projects").resolve())
+        else:
+            self.require_manifest = bool(require_manifest)
 
     def _parse_pseofactory_json(self, config_file: Path) -> Optional[PropertyAdapter]:
         try:
@@ -1665,14 +1673,18 @@ class WorkspacePropertyScanner:
                 if f_json.is_file():
                     adapter = self._parse_pseofactory_json(f_json)
 
+            eff_require_manifest = self.require_manifest or (
+                root == Path("/home/ubuntuadmin/projects").resolve()
+            )
+
             # 3. dist/sitemap.xml
-            if adapter is None:
+            if adapter is None and not eff_require_manifest:
                 sm = entry / "dist" / "sitemap.xml"
                 if sm.is_file():
                     adapter = self._parse_sitemap_xml(sm, entry)
 
             # 4. pyproject.toml with dist/
-            if adapter is None:
+            if adapter is None and not eff_require_manifest:
                 pyproj = entry / "pyproject.toml"
                 if pyproj.is_file():
                     adapter = self._parse_pyproject_toml(pyproj, entry)
@@ -2479,8 +2491,7 @@ class LiveTruthAuditEngine:
             return []
         violations: List[str] = []
         ctx_label = context or "LiveTruthAuditEngine.audit_html"
-        if "\u2014" in html_content or "\u2013" in html_content:
-            return []
+        dash_neutral_html = html_content.replace("\u2014", "-").replace("\u2013", "-")
         from pseofactory.audit import (
             detect_tautological_or_fabricated_manifest_issues,
             verify_manifest_ssr_metric_parity,
@@ -2490,11 +2501,11 @@ class LiveTruthAuditEngine:
             detect_uncorroborated_statutory_claims,
             safe_eval_mathematical_formula,
         )
-        auditable_html = _fast_strip_style_and_js(html_content)
+        auditable_html = _fast_strip_style_and_js(dash_neutral_html)
         claim_scan_html = (
-            re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", html_content, flags=re.IGNORECASE)
-            if "<style" in html_content.lower()
-            else html_content
+            re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", dash_neutral_html, flags=re.IGNORECASE)
+            if "<style" in dash_neutral_html.lower()
+            else dash_neutral_html
         )
         try:
             is_valid, claim_violations = self.fact_store.verify_claim(
@@ -2535,16 +2546,19 @@ class LiveTruthAuditEngine:
                     if pub_out is not None:
                         baseline_output = float(pub_out)
                     if formula_str and isinstance(raw_inputs, dict) and baseline_output is not None:
+                        allow_neg_sprs = (
+                            "sprs" in formula_str.lower()
+                            or "sprs" in ctx_label.lower()
+                            or any("sprs" in str(ik).lower() for ik in raw_inputs.keys())
+                        )
                         clamped_in: Dict[str, Any] = {}
                         for k, v in raw_inputs.items():
                             if isinstance(v, (int, float)):
-                                clamped_in[k] = max(0.0, float(v))
+                                clamped_in[k] = float(v) if allow_neg_sprs else max(0.0, float(v))
                             elif isinstance(v, str):
                                 try:
-                                    clamped_in[k] = max(
-                                        0.0,
-                                        float(v.replace("$", "").replace(",", "").replace("%", "").strip()),
-                                    )
+                                    parsed_v = float(v.replace("$", "").replace(",", "").replace("%", "").strip())
+                                    clamped_in[k] = parsed_v if allow_neg_sprs else max(0.0, parsed_v)
                                 except ValueError:
                                     clamped_in[k] = v
                             else:
@@ -12957,7 +12971,7 @@ class RetroReflectionEngine:
                         try:
                             raw_t = t_idx.read_text(encoding="utf-8", errors="ignore")
                             if not re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', raw_t, re.I):
-                                indexable_tool_urls.append(f"{base}/tools/{t_sub.name}/")
+                                indexable_tool_urls.append(f"{canon}/tools/{t_sub.name}/")
                         except Exception:
                             pass
 
@@ -13641,6 +13655,11 @@ class RetroReflectionEngine:
                 ("EU Digital Operational Resilience Act (Regulation.", "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554)."),
                 ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) &amp; EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
                 ("NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU.", "NIST AI RMF 1.0 (15 U.S.C. 278h-1)."),
+                ("$2,244 Annual Net Savings ($2,244 Annual vs $2,244 Annual)", "$2,244 Annual Net Savings ($6,492 Annual vs $8,736 Annual)"),
+                ("($2,244 Annual vs $2,244 Annual)", "($6,492 Annual vs $8,736 Annual)"),
+                ("Yelofunding", "Commercial Surety Underwriting"),
+                ("yelofunding", "commercial-surety"),
+                ("zero AI slop", "strictly verified statutory math"),
             ):
                 if _bf in content:
                     content = content.replace(_bf, _gf)
@@ -13648,35 +13667,65 @@ class RetroReflectionEngine:
                     if rel not in retrofitted_paths:
                         retrofitted_paths.append(rel)
             if not cls.is_tool_or_calculator_page(html_file, d, content):
-                if rel == "tools/index.html" and "data-partner-roster=" not in content and "</main>" in content:
+                if rel == "tools/index.html":
+                    dup_partner_secs = list(
+                        re.finditer(
+                            r'\s*<section\b[^>]*class=["\'][^"\']*(?:affiliates-section|refinance-partner-section)[^"\']*["\'][^>]*>[\s\S]*?</section>',
+                            content,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                    if len(dup_partner_secs) > 1:
+                        kept_sec = dup_partner_secs[0].group(0).strip()
+                        if "data-partner-roster=" not in kept_sec:
+                            kept_sec = kept_sec.replace("<section ", '<section data-partner-roster="1" ', 1)
+                        for m_dup in reversed(dup_partner_secs):
+                            content = content[:m_dup.start()] + content[m_dup.end():]
+                        if "</div>\n  </main>" in content:
+                            content = content.replace("</div>\n  </main>", f"\n      {kept_sec}\n    </div>\n  </main>", 1)
+                        elif "</main>" in content:
+                            content = content.replace("</main>", f"\n      {kept_sec}\n    </main>", 1)
+                        html_file.write_text(content, encoding="utf-8")
+                        if rel not in retrofitted_paths:
+                            retrofitted_paths.append(rel)
+                if (
+                    rel == "tools/index.html"
+                    and "data-partner-roster=" not in content
+                    and "affiliates-section" not in content
+                    and "refinance-partner-section" not in content
+                    and "</main>" in content
+                ):
                     if property_id.lower() == "prexvo":
                         seed_sec = (
-                            '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+                            '\n    <section class="refinance-partner-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
                             '      <a href="/r/splash_financial" target="_blank" rel="noopener sponsored nofollow">Splash Financial</a>\n'
                             '    </section>\n  '
                         )
                     elif property_id.lower() == "gainhelm":
                         seed_sec = (
-                            '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
-                            '        <h2>Verified Enterprise GRC &amp; Security Execution Partners</h2>\n'
+                            '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
+                            '        <h2>Enterprise GRC &amp; Security Execution Options</h2>\n'
                             '        <div class="affiliate-card partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>\n'
                             '      </section>\n    '
                         )
                     elif property_id.lower() == "lienbond":
                         seed_sec = (
-                            '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
-                            '        <h2>Verified Commercial Surety &amp; Construction Execution Partners</h2>\n'
+                            '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
+                            '        <h2>Commercial Surety &amp; Construction Execution Options</h2>\n'
                             '        <div class="affiliate-card partner-card"><a href="/r/suretybonds_direct" target="_blank" rel="noopener sponsored nofollow">SuretyBonds Direct</a></div>\n'
                             '      </section>\n    '
                         )
                     else:
                         seed_sec = (
-                            '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
-                            '        <h2>Verified Commercial Execution Partners</h2>\n'
+                            '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
+                            '        <h2>Commercial Execution Options</h2>\n'
                             '        <div class="affiliate-card partner-card"><a href="/r/xendoo" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
                             '      </section>\n    '
                         )
-                    content = content.replace("</main>", f"{seed_sec}</main>", 1)
+                    if "</div>\n  </main>" in content:
+                        content = content.replace("</div>\n  </main>", f"{seed_sec}</div>\n  </main>", 1)
+                    else:
+                        content = content.replace("</main>", f"{seed_sec}</main>", 1)
                     html_file.write_text(content, encoding="utf-8")
                     if rel not in retrofitted_paths:
                         retrofitted_paths.append(rel)
@@ -15402,6 +15451,7 @@ def reflect_and_recompile_all_assets(
                 if verbose:
                     print(f"Warning: Edge redirect sync error for '{p_id}': {edge_err}")
 
+        porc_sync_updated: List[str] = []
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
@@ -15419,11 +15469,20 @@ def reflect_and_recompile_all_assets(
                 pass
             try:
                 from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
-                sync_tenant_porcelain_shell(Path(adapter.repo_path), adapter.property_id)
+                porc_res = sync_tenant_porcelain_shell(Path(adapter.repo_path), adapter.property_id)
+                if isinstance(porc_res, dict):
+                    porc_sync_updated = list(porc_res.get("updated_files") or [])
             except Exception:
                 pass
 
-        source_sync_changed = False
+        source_sync_changed = any(
+            f in porc_sync_updated
+            for f in (
+                "profithelm/interactive_calculator.py",
+                "profithelm/data/prediction_markets.json",
+                "profithelm/builder.py",
+            )
+        )
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id == "profithelm"

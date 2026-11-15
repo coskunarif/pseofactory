@@ -6456,12 +6456,13 @@ def normalize_html_callout_message_match(
                 else f"\n{preserved_gsc_inline_block}"
             )
         else:
+            inline_slot_tag = "Verified Offer" if safe_status == "live" else "Partner Option"
             inline_cta_html = (
                 f'\n          <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="{primary_inline_pk}" '
                 f'data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" {gsc_extra_attrs}'
                 f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--bg-elevated); border: 1px solid var(--brand-border); border-left: 4px solid var(--brand-primary); border-radius: 8px;">\n'
                 f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
-                f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary);">{safe_badge} &bull; Verified Offer</div>\n'
+                f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary);">{safe_badge} &bull; {inline_slot_tag}</div>\n'
                 f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary); margin-top: 0.125rem;">{safe_name}</div>\n'
                 f'            </div>\n'
                 f'            <a href="{inline_href}" target="_blank" rel="noopener sponsored nofollow" data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partnership-model="{safe_inline_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{safe_status}" data-tier="starter" data-cta-slot="calculator_result_inline" class="btn-cta touch-target" style="white-space: nowrap;">\n'
@@ -8001,6 +8002,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         safe_gsc_tier = html_lib.escape(gsc_tier)
         yield_str = f"{float(inline_offer.get('yield_score', 0.0) or 0.0):.2f}"
 
+        inline_offer_tag = "Verified Offer" if safe_in_status == "live" else "Partner Option"
         new_inline_div = (
             f'<div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
             f'data-partner="{pk_in}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
@@ -8009,7 +8011,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'data-yield-score="{yield_str}" '
             f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.75rem; margin-bottom: 0.75rem; background: var(--bg-elevated); border: 1px solid var(--brand-border); border-left: 4px solid var(--brand-primary); border-radius: 8px;">\n'
             f'            <div class="calc-inline-cta-copy" style="flex: 1; min-width: 180px;">\n'
-            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary);">{safe_badge} &bull; Verified Offer</div>\n'
+            f'              <div style="font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary);">{safe_badge} &bull; {inline_offer_tag}</div>\n'
             f'              <div style="font-size: 0.875rem; font-weight: 700; color: var(--text-primary); margin-top: 0.125rem;">{safe_name}</div>\n'
             f'            </div>\n'
             f'            <a href="{safe_href}" target="_blank" rel="noopener sponsored nofollow" '

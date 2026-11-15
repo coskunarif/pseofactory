@@ -1333,6 +1333,11 @@ def _render_runtime_sync_maps_js() -> str:
         var firstNum = document.querySelector('input[type="number"]');
         if (firstNum) return firstNum;
       }
+      var rGrp = rangeEl.closest ? rangeEl.closest(".form-group, .input-group, .calc-field, .field-group") : rangeEl.parentElement;
+      if (rGrp) {
+        var sibNums = rGrp.querySelectorAll('input[type="number"]');
+        if (sibNums.length === 1) return sibNums[0];
+      }
       return null;
     }
 
@@ -1358,6 +1363,11 @@ def _render_runtime_sync_maps_js() -> str:
       }
       var bySliderSuffix = nId ? document.getElementById(nId + "-slider") : null;
       if (bySliderSuffix) return bySliderSuffix;
+      var nGrp = numEl.closest ? numEl.closest(".form-group, .input-group, .calc-field, .field-group") : numEl.parentElement;
+      if (nGrp) {
+        var sibRanges = nGrp.querySelectorAll('input[type="range"]');
+        if (sibRanges.length === 1) return sibRanges[0];
+      }
       return null;
     }
 
@@ -1939,7 +1949,36 @@ def _render_runtime_sync_workbench_js() -> str:
         return;
       }
 
-      var primaryNumEl = document.querySelector('input[type="number"], input[type="range"]');
+      var hasNativeCalc = Boolean(
+        document.querySelector("form.calculator-form, #calc-form, #calculator-form, [id^='metric-'], [id^='val-'], [id^='res-'], #rap-subsidy-meter")
+        || typeof window.updateTaxCalculator === "function"
+        || typeof window.updateCryptoCalculator === "function"
+        || typeof window.updateSection179Calculator === "function"
+      );
+
+      if (hasNativeCalc || _lastInteractionScope === "serp") {
+        var primaryOutEl = outNodes[0];
+        if (primaryOutEl && !(primaryOutEl.classList && primaryOutEl.classList.contains("overlay-preset-readout"))) {
+          var rawLiveTxt = (primaryOutEl.textContent || "").trim();
+          var liveNum = parseFloat(rawLiveTxt.replace(/[^0-9.-]/g, ""));
+          if (!isNaN(liveNum) && isFinite(liveNum)) {
+            var hrBaseLive = document.getElementById("hero-range-baseline");
+            var hrLowLive = document.getElementById("hero-range-low");
+            var hrHighLive = document.getElementById("hero-range-high");
+            var wantsUsd = rawLiveTxt.indexOf("$") !== -1 || (hrLowLive && (hrLowLive.textContent || "").indexOf("$") !== -1);
+            var fmtRange = function(v) {
+              return wantsUsd ? fmtUsd(v) : formatOutNum(v);
+            };
+            if (hrBaseLive) hrBaseLive.textContent = fmtRange(liveNum);
+            if (hrLowLive) hrLowLive.textContent = fmtRange(liveNum * 0.8);
+            if (hrHighLive) hrHighLive.textContent = fmtRange(liveNum * 1.2);
+          }
+        }
+        syncOutboundAffiliateLinks();
+        return;
+      }
+
+      var primaryNumEl = document.querySelector('input[type="number"]:not([id^="serp-"]), input[type="range"]:not([id^="serp-"])');
       var ratio = 1.0;
       if (typeof triggerScale === "number" && triggerScale > 0) {
         ratio = triggerScale;
@@ -1948,25 +1987,6 @@ def _render_runtime_sync_workbench_js() -> str:
         var baseAttr = parseFloat(primaryNumEl.getAttribute("data-pseo-base-val") || "");
         if (!isNaN(curVal) && !isNaN(baseAttr) && baseAttr > 0) {
           ratio = curVal / baseAttr;
-        }
-      }
-      var allCalcControls = document.querySelectorAll('input[type="number"]:not([readonly]), select:not([id^="quote-intake-"])');
-      for (var acIdx = 0; acIdx < allCalcControls.length; acIdx++) {
-        var acEl = allCalcControls[acIdx];
-        if (acEl === primaryNumEl) continue;
-        if (acEl.closest && acEl.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form")) continue;
-        if (acEl.tagName === "SELECT") {
-          var bIdx = parseInt(acEl.getAttribute("data-pseo-base-idx") || "0", 10) || 0;
-          var cIdx = acEl.selectedIndex || 0;
-          if (cIdx !== bIdx) {
-            ratio = ratio * (1 + ((cIdx - bIdx) * 0.065));
-          }
-        } else {
-          var bVal = parseFloat(acEl.getAttribute("data-pseo-base-val") || "");
-          var cVal = parseFloat(String(acEl.value || "").replace(/,/g, ""));
-          if (!isNaN(cVal) && !isNaN(bVal) && Math.abs(cVal - bVal) > 1e-6) {
-            ratio = ratio * (bVal > 0 ? (0.7 + 0.3 * (cVal / bVal)) : (1 + (cVal * 0.05)));
-          }
         }
       }
 
@@ -1981,7 +2001,7 @@ def _render_runtime_sync_workbench_js() -> str:
             outEl.setAttribute("data-baseline-output", String(baseOut));
           }
         }
-        if (!isNaN(baseOut) && baseOut > 0 && Math.abs(ratio-1.0) > 1e-6) {
+        if (!isNaN(baseOut) && baseOut > 0 && Math.abs(ratio - 1.0) > 1e-6) {
           var newOut = baseOut * ratio;
           outEl.textContent = formatOutNum(newOut);
           var scBase = document.querySelector(".scenario-baseline");
@@ -2000,7 +2020,7 @@ def _render_runtime_sync_workbench_js() -> str:
           if (hrBase) hrBase.textContent = formatOutNum(newOut);
           if (hrLow) hrLow.textContent = formatOutNum(newOut * 0.8);
           if (hrHigh) hrHigh.textContent = formatOutNum(newOut * 1.2);
-        } else if (!isNaN(baseOut) && Math.abs(ratio-1.0) <= 1e-6) {
+        } else if (!isNaN(baseOut) && Math.abs(ratio - 1.0) <= 1e-6) {
           outEl.textContent = formatOutNum(baseOut);
           var hrBaseReset = document.getElementById("hero-range-baseline");
           var hrLowReset = document.getElementById("hero-range-low");
@@ -2395,6 +2415,8 @@ def _render_runtime_sync_events_js() -> str:
       var inps = document.querySelectorAll('input[type="number"], input[type="range"], select');
       for (var i = 0; i < inps.length; i++) {
         var el = inps[i];
+        if (el.type === "range" && findPairedNumberInput(el)) continue;
+        if (el.closest && el.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form")) continue;
         var key = el.id || el.name || "";
         if (key && !/^retro-range-/.test(key)) {
           state.inputs[key] = el.value;
@@ -2819,7 +2841,7 @@ def _render_runtime_sync_events_js() -> str:
       } finally {
         _syncing = false;
       }
-    }, true);
+    }, false);
 
     document.addEventListener("input", function() {
       if (_syncing) return;
@@ -2860,7 +2882,7 @@ def _render_runtime_sync_events_js() -> str:
       } finally {
         _syncing = false;
       }
-    }, true);
+    }, false);
 
     document.addEventListener("change", function(e) {
       if (_syncing) return;
@@ -3480,12 +3502,17 @@ def _render_runtime_sync_events_js() -> str:
 
       var scenarioLink = e.target && e.target.closest ? e.target.closest("a.scenario-preset-link, a[data-preset]") : null;
       if (scenarioLink) {
+        var href = scenarioLink.getAttribute("href") || "";
+        var qIdx = href.indexOf("?");
+        var rawTargetPath = (qIdx !== -1 ? href.slice(0, qIdx) : href).split("#")[0];
+        var curLocPath = (window.location && window.location.pathname) ? window.location.pathname : "";
+        if (rawTargetPath && rawTargetPath.charAt(0) === "/" && rawTargetPath.replace(/\\/+$/, "") !== curLocPath.replace(/\\/+$/, "")) {
+          return;
+        }
         e.preventDefault();
         initBaseValues();
         var presetType = (scenarioLink.getAttribute("data-preset") || "baseline").toLowerCase();
         var mult = presetType === "conservative" ? 0.8 : (presetType === "aggressive" ? 1.2 : 1.0);
-        var href = scenarioLink.getAttribute("href") || "";
-        var qIdx = href.indexOf("?");
         var params = qIdx !== -1 ? new URLSearchParams(href.slice(qIdx + 1).replace(/&amp;/g, "&")) : new URLSearchParams();
         var matchedParam = false;
         params.forEach(function(v, k) {
@@ -5186,7 +5213,7 @@ def _retrofit_pro_hook_and_lead_capture_cards(
                 f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
                 f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Bracket &amp; Deduction Schedule (Unlocked) | Line 2 Effective vs. Marginal Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
                 f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
-                f'<a href="{checkout_href}" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
+                f'<a href="{checkout_href}" rel="nofollow" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
                 f'{quote_jump_html}'
                 f'</div></div>'
             )
@@ -5241,7 +5268,7 @@ def _retrofit_pro_hook_and_lead_capture_cards(
             f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
             f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Reconciliation Schedule (Unlocked) | Line 2 Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
             f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
-            f'<a href="{checkout_href}" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
+            f'<a href="{checkout_href}" rel="nofollow" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
             f'{quote_jump_html}'
             f'</div></div></div>'
         )
@@ -5536,6 +5563,36 @@ def _retrofit_partner_reg_and_quick_unlock(
         )
         actions.append("prexvo_subsidy_meter_first_order")
 
+    gh_metrics_m = re.search(
+        r'<div\b[^>]*class=["\'][^"\']*\b(?:calc-metrics-grid|metrics-grid)\b[^"\']*["\'][^>]*>',
+        updated,
+        flags=re.IGNORECASE,
+    )
+    cta_pos3 = updated.find('<div class="calc-inline-cta"')
+    if gh_metrics_m and cta_pos3 != -1 and cta_pos3 < gh_metrics_m.start():
+        gm_start = gh_metrics_m.start()
+        gm_depth = 0
+        gm_end = -1
+        for div_tok in re.finditer(r"</?div\b[^>]*>", updated[gm_start:], flags=re.IGNORECASE):
+            tok_str = div_tok.group(0).lower()
+            if tok_str.startswith("</div"):
+                gm_depth -= 1
+                if gm_depth == 0:
+                    gm_end = gm_start + div_tok.end()
+                    break
+            elif not tok_str.endswith("/>"):
+                gm_depth += 1
+        if gm_end > gm_start and 'id="metric-' in updated[gm_start:gm_end]:
+            gm_slice = updated[gm_start:gm_end].strip()
+            updated = (
+                updated[:cta_pos3]
+                + gm_slice
+                + "\n          "
+                + updated[cta_pos3:gm_start].rstrip()
+                + updated[gm_end:]
+            )
+            actions.append("gainhelm_metrics_grid_first_order")
+
     ctx_q_drawer = resolve_quick_unlock_contextual_copy(
         slug=tool_slug,
         property_id=prop_id,
@@ -5579,7 +5636,7 @@ def _retrofit_partner_reg_and_quick_unlock(
                 flags=re.IGNORECASE,
             )
         quick_btn_html = (
-            f'<a id="btn-post-calc-quick-unlock-checkout" '
+            f'<a id="btn-post-calc-quick-unlock-checkout" rel="nofollow" '
             f'href="/api/lead-capture?checkout=1&amp;sku={quick_sku}&amp;tool_slug={tool_slug}&amp;amount={amt_int}&amp;redirect=1" '
             f'class="touch-target btn-primary post-calc-upgrade-btn" data-checkout-trigger="1" '
             f'data-offer-sku="{quick_sku}" data-offer-price="19" data-cta-slot="post_calc_quick_unlock_cta" '
@@ -5596,6 +5653,16 @@ def _retrofit_partner_reg_and_quick_unlock(
         )
         if n_qbtn > 0:
             actions.append("post_calc_quick_unlock_button")
+
+    updated_nf = re.sub(
+        r'<a\b(?![^>]*\brel=)([^>]*\bhref=["\']/api/lead-capture\?checkout=1[^"\']*["\'][^>]*)>',
+        r'<a rel="nofollow"\1>',
+        updated,
+        flags=re.IGNORECASE,
+    )
+    if updated_nf != updated:
+        updated = updated_nf
+        actions.append("checkout_links_rel_nofollow")
 
     return updated
 
@@ -5625,19 +5692,24 @@ def _retrofit_hero_range_and_jurisdiction_bars(
             re.IGNORECASE,
         )
         raw_out_txt = re.sub(r"<[^>]+>", "", out_m.group(2)).strip() if out_m else "$100,000"
+        prefix_ctx = updated[max(0, out_m.start() - 90) : out_m.start()] if out_m else ""
+        has_dollar_prefix = "$" in raw_out_txt or bool(re.search(r"\$\s*(?:</[a-zA-Z0-9]+>\s*)?$", prefix_ctx))
         num_m = re.search(r"-?\d[\d,]*(?:\.\d+)?", raw_out_txt)
         try:
             base_num = float(num_m.group(0).replace(",", "")) if num_m else 100000.0
         except ValueError:
             base_num = 100000.0
-        is_pct = "%" in raw_out_txt and "$" not in raw_out_txt
+        is_pct = "%" in raw_out_txt and not has_dollar_prefix
         if is_pct:
             low_str = f"{base_num * 0.8:.2f}%"
             base_str = raw_out_txt
             high_str = f"{base_num * 1.2:.2f}%"
-        elif "$" in raw_out_txt or base_num >= 100:
+        elif has_dollar_prefix or base_num >= 100:
             low_str = f"${round(base_num * 0.8):,}"
-            base_str = raw_out_txt if raw_out_txt else f"${round(base_num):,}"
+            if raw_out_txt:
+                base_str = raw_out_txt if raw_out_txt.startswith("$") else f"${raw_out_txt}"
+            else:
+                base_str = f"${round(base_num):,}"
             high_str = f"${round(base_num * 1.2):,}"
         else:
             low_str = f"{base_num * 0.8:,.2f}"
@@ -5673,6 +5745,22 @@ def _retrofit_hero_range_and_jurisdiction_bars(
         )
         if n_hra > 0:
             actions.append("hero_range_anchor")
+    elif 'id="hero-range-anchor"' in updated and '<strong id="hero-range-low">$' in updated:
+        healed_hra = re.sub(
+            r'(<strong id="hero-range-baseline">)(\d[\d,]*(?:\.\d+)?)(</strong>)',
+            r"\1$\2\3",
+            updated,
+            count=1,
+        )
+        healed_hra = re.sub(
+            r'(id="hero-range-anchor"[^>]*data-range-low="\$[^"]*"\s+data-range-baseline=")(\d[\d,]*(?:\.\d+)?)(")',
+            r"\1$\2\3",
+            healed_hra,
+            count=1,
+        )
+        if healed_hra != updated:
+            updated = healed_hra
+            actions.append("heal_hero_range_baseline_currency")
 
     if (
         has_quote_intake

@@ -1076,7 +1076,7 @@ class FactoryPipeline:
             is_mocked = hasattr(verifier.audit_seo_checklist, "mock_calls") or hasattr(
                 MasterSEOVerifier.audit_seo_checklist, "mock_calls"
             )
-            if is_mocked:
+            if is_mocked or (adapter.dist_dir / "index.html").is_file():
                 seo_audit_report = verifier.audit_seo_checklist(
                     dist_dir=adapter.dist_dir,
                     raise_on_error=False,

@@ -513,7 +513,11 @@ class UnifiedBrowserAuditor:
             const r = el.getBoundingClientRect();
             const s = window.getComputedStyle(el);
             if (s.display === 'none' || s.visibility === 'hidden' || (r.width === 0 && r.height === 0)) return;
-            if (s.display === 'inline' && el.tagName === 'A' && el.parentElement && ['P', 'LI'].includes(el.parentElement.tagName) && el.getClientRects().length > 1) return;
+            if (s.display === 'inline' && el.tagName === 'A' && el.parentElement && ['P', 'LI', 'DD', 'BLOCKQUOTE', 'TD'].includes(el.parentElement.tagName)) {
+                const parentText = (el.parentElement.textContent || '').trim();
+                const linkText = (el.textContent || '').trim();
+                if (el.getClientRects().length > 1 || parentText.length > linkText.length) return;
+            }
             if (r.width < 43.5 || r.height < 43.5) {
                 undersized.push({
                     tag: el.tagName,

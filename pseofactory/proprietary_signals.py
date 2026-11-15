@@ -685,6 +685,8 @@ def compute_multi_year_longitudinal_trajectory(
     telemetry_tag = (
         f"Proprietary Signal Telemetry: JEV {jev:.1f} | "
         f"{clicks:,} Scenario Interactions ({delivs:,} Workpaper Exports)."
+        if clicks > 0
+        else f"Proprietary Signal Telemetry: JEV {jev:.1f} Statutory Demand Index."
     )
 
     if prop == "prexvo":
@@ -780,7 +782,7 @@ def compute_multi_year_longitudinal_trajectory(
                 ("2027 Post-Sunset Regime", f"150% FPL Shift Risk (${f27 * 1.5:,.0f} Shield at ${f27:,.0f} FPL)", f"{r27:.2f}% Direct Rate / Form 982 Insolvency", "cliff-exposure-2027", "$4,010 / yr ($334.17 monthly)"),
                 ("2028-2030 Forward Projection", f"CPI-Indexed HHS FPL (${f30:,.0f} Base by 2030)", "PSLF 26 U.S.C. 108(f)(1) Remains Tax-Exempt", "cliff-exposure-2028", "$3,779 / yr ($314.92 monthly)"),
             ]
-        return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
+        return {"h3_title": h3_title, "summary": summary, "summary_default": summary, "rows": rows}
 
     if prop == "gainhelm":
         soc2_pts = db_series.get("aicpa_soc2_type2_median_cpa_fee_usd", {}).get("points", {})
@@ -862,7 +864,7 @@ def compute_multi_year_longitudinal_trajectory(
                 ("2027 Full Mandate Phase", f"Projected Type II CPA Fee ${cpa27:,.0f}", f"AI Governance &amp; Subservice Carve-Out / ${wg27:.2f}/hr", "cliff-exposure-2027", "$83,400 SOC 2 TCO"),
                 ("2028-2030 Triennial Cycle", f"Projected Type II CPA Fee ${cpa30:,.0f} by 2030", f"Continuous Automated Trust Center / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$94,600 SOC 2 TCO"),
             ]
-        return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
+        return {"h3_title": h3_title, "summary": summary, "summary_default": summary, "rows": rows}
 
     if prop == "lienbond":
         h3_title = f"Multi-Year Surety Bond, NCCI EMR &amp; Statutory Lien Schedule (2024 to 2030): {topic_label}"
@@ -879,7 +881,7 @@ def compute_multi_year_longitudinal_trajectory(
             ("2027 Forward Underwriting", "Indexed State License Bond Penal Sums ($25k-$50k)", "NCCI 3-Year Loss Run Window &amp; Audit Verification", "cliff-exposure-2027", "$7,850 Perf Bond / 0.92 EMR"),
             ("2028-2030 Multi-Year Horizon", "Treasury Circular 570 Aggregate Underwriting Cap", "Automated Statutory Lien Waiver &amp; Certified Payroll", "cliff-exposure-2028", "$8,200 Perf Bond / 0.88 EMR"),
         ]
-        return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
+        return {"h3_title": h3_title, "summary": summary, "summary_default": summary, "rows": rows}
 
     # ProfitHelm tool-specific longitudinal synthesis
     fica_pts = db_series.get("ssa_fica_wage_base", {}).get("points", {})
@@ -933,16 +935,17 @@ def compute_multi_year_longitudinal_trajectory(
         ]
     elif any(k in s_low for k in ("179", "equipment", "vehicle", "lease")):
         summary = (
-            f"2026 Depreciation Schedule: IRC Section 168(k) first-year bonus depreciation steps down from 60% (2024) "
-            f"and 40% (2025) to 20% in 2026 and 0% in 2027 alongside the $2,560,000 Section 179 OBBBA cap "
+            f"2026 Depreciation Schedule: Under enacted OBBBA (P.L. 119-21), IRC Section 168(k) permanently restores "
+            f"100% first-year bonus depreciation for qualified property acquired and placed in service after Jan 19, 2025 "
+            f"(repealing the pre-OBBBA phase-down) alongside the $2,560,000 Section 179 cap "
             f"($30,500 Heavy SUV Section 179(b)(5) cap). {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", "IRC 179 ($1.22M Cap / $30,500 SUV) + 60% Bonus", f"20% Section 199A QBI / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$53,000 SUV / $350k Equip"),
-            ("2025 Enacted Window", "IRC 179 ($2.50M OBBBA Cap / $31,300 SUV) + 40% Bonus", f"40% Section 168(k) Bonus / {y25:.2f}% 10Y Treasury", "cliff-exposure-2025", "$45,980 SUV / $350k Equip"),
-            ("2026 Statutory Schedule", "IRC 179 ($2.56M Cap / $30,500 SUV) + 20% Bonus", f"20% Section 168(k) Bonus / {c26:.1f}% Core CPI", "cliff-exposure-2026", "$38,000 SUV / $350k Equip"),
-            ("2027 Enacted OBBBA Regime", "IRC 179 ($2.62M Cap / $30,500 SUV) + 0% Bonus", "MACRS 5-Yr / 7-Yr Straight-Line Recovery Above Cap", "cliff-exposure-2027", "$30,500 SUV / $0 Bonus"),
-            ("2028-2030 Forward Projection", "0% Bonus / Inflation-Indexed Section 179 Cap", "Section 179(d)(10) 50% or Less Business-Use Recapture", "cliff-exposure-2028", "$30,500 SUV / MACRS Only"),
+            ("2025 Enacted Window", "IRC 179 ($2.50M OBBBA Cap / $31,300 SUV) + 100% OBBBA Bonus", f"100% Section 168(k) Post-Jan-19 / {y25:.2f}% 10Y Treasury", "cliff-exposure-2025", "$68,000 SUV / $350k Equip"),
+            ("2026 Statutory Schedule", "IRC 179 ($2.56M Cap / $30,500 SUV) + 100% OBBBA Bonus", f"100% Section 168(k) Permanent / {c26:.1f}% Core CPI", "cliff-exposure-2026", "$68,000 SUV / $350k Equip"),
+            ("2027 Enacted OBBBA Regime", "IRC 179 ($2.62M Cap / $30,500 SUV) + 100% OBBBA Bonus", "Permanent IRC 168(k) 100% Expensing Above Cap", "cliff-exposure-2027", "$68,000 SUV / $350k Equip"),
+            ("2028-2030 Forward Projection", "100% OBBBA Bonus / Inflation-Indexed Section 179 Cap", "Section 179(d)(10) 50% or Less Business-Use Recapture", "cliff-exposure-2028", "$68,000 SUV / 100% Bonus"),
         ]
     elif any(k in s_low for k in ("tax-bracket", "irs-2027", "ca-tax", "capital-gains")):
         summary = (
@@ -973,17 +976,17 @@ def compute_multi_year_longitudinal_trajectory(
     else:
         summary = (
             f"2026 Statutory &amp; Yield Schedule: 10-Year U.S. Treasury yields shift from {y25:.2f}% (2025) and "
-            f"{y26:.2f}% (2026) toward {y30:.2f}% (2030) alongside IRC Section 168(k) 20% to 0% bonus depreciation "
-            f"and Section 174 R&amp;D rules. {telemetry_tag}"
+            f"{y26:.2f}% (2026) toward {y30:.2f}% (2030) alongside enacted OBBBA (P.L. 119-21) permanent 100% IRC Section 168(k) "
+            f"bonus depreciation and Section 174A domestic R&amp;D expensing. {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", f"31 U.S.C. 3124 State Exemption ({y24:.2f}% 10Y Yield)", f"IRC 168(k) 60% Bonus / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$64,200 / 5.95% TEY"),
-            ("2025 Enacted Window", f"FRED DGS10 {y25:.2f}% Benchmark / 4.80% T-Bill", "IRC 168(k) 40% Bonus / 14% ASC R&amp;D Credit", "cliff-exposure-2025", "$69,825 / 6.13% TEY"),
-            ("2026 Statutory Schedule", f"FRED DGS10 {y26:.2f}% / IRC 6621 8% IRS Interest", "IRC 168(k) 20% Bonus / Permanent 10%-37% Brackets", "cliff-exposure-2026", "$77,000 R&amp;D / 6.13% TEY"),
-            ("2027 Enacted OBBBA Regime", f"FRED DGS10 {y27:.2f}% / 0% Bonus Depreciation", "Permanent 37.0% Top Federal Rate + 14.6% CA Top Rate", "cliff-exposure-2027", "$84,200 / 6.13% TEY"),
-            ("2028-2030 Forward Projection", f"FRED DGS10 {y30:.2f}% Equilibrium Yield", "Section 174 Domestic R&amp;D Expensing &amp; Credit", "cliff-exposure-2028", "$88,950 / 5.92% TEY"),
+            ("2025 Enacted Window", f"FRED DGS10 {y25:.2f}% Benchmark / 4.80% T-Bill", "IRC 168(k) 100% Post-Jan-19 Bonus / 14% ASC R&amp;D Credit", "cliff-exposure-2025", "$69,825 / 6.13% TEY"),
+            ("2026 Statutory Schedule", f"FRED DGS10 {y26:.2f}% / IRC 6621 8% IRS Interest", "IRC 168(k) 100% Bonus / Permanent 10%-37% Brackets", "cliff-exposure-2026", "$77,000 R&amp;D / 6.13% TEY"),
+            ("2027 Enacted OBBBA Regime", f"FRED DGS10 {y27:.2f}% / 100% OBBBA Bonus Depreciation", "Permanent 37.0% Top Federal Rate + 14.6% CA Top Rate", "cliff-exposure-2027", "$84,200 / 6.13% TEY"),
+            ("2028-2030 Forward Projection", f"FRED DGS10 {y30:.2f}% Equilibrium Yield", "Section 174A Domestic R&amp;D Expensing &amp; Credit", "cliff-exposure-2028", "$88,950 / 5.92% TEY"),
         ]
-    return {"h3_title": h3_title, "summary_default": summary, "rows": rows}
+    return {"h3_title": h3_title, "summary": summary, "summary_default": summary, "rows": rows}
 
 
 def compute_stateful_comparator_defaults(

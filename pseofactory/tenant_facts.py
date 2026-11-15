@@ -4784,20 +4784,13 @@ class TruthReconciliationEngine:
                                 updated_txt,
                                 flags=re.I,
                             )
+                            updated_txt = updated_txt.replace("3.0% federal marginal tax bracket", "3 percentage point marginal tax rate increase")
+                            updated_txt = updated_txt.replace("3.0% bracket", "3 percentage point rate shift")
                         if updated_txt != txt:
                             qf.write_text(updated_txt, encoding="utf-8")
                             repaired_paths.append(str(qf))
                     except Exception:
                         pass
-                        try:
-                            txt = qf.read_text(encoding="utf-8")
-                            updated_txt = txt.replace("3.0% federal marginal tax bracket", "3 percentage point marginal tax rate increase")
-                            updated_txt = updated_txt.replace("3.0% bracket", "3 percentage point rate shift")
-                            if updated_txt != txt:
-                                qf.write_text(updated_txt, encoding="utf-8")
-                                repaired_paths.append(str(qf))
-                        except Exception:
-                            pass
 
             # PSLF 120 payments in save-plan-litigation-transition
             save_dir = s_dir / "save-plan-litigation-transition"

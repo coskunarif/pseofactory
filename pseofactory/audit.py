@@ -761,16 +761,24 @@ def audit_rendered_asset(
     if not isinstance(raw_inputs, dict):
         raw_inputs = {}
 
-    # Clamp numeric inputs >= 0 per HWL-1263
+    # Clamp numeric inputs >= 0 unless SPRS NIST 800-171 range (-203..110)
+    allow_negative_sprs = (
+        "sprs" in formula.lower()
+        or "sprs" in str(candidate_spec.get("slug") or "").lower()
+        or any("sprs" in str(ik).lower() for ik in raw_inputs.keys())
+    )
     clamped_inputs: Dict[str, Any] = {}
     for k, v in raw_inputs.items():
         if isinstance(v, (int, float)):
-            clamped_inputs[k] = max(0.0, float(v)) if isinstance(v, float) else max(0, v)
+            if allow_negative_sprs:
+                clamped_inputs[k] = float(v) if isinstance(v, float) else v
+            else:
+                clamped_inputs[k] = max(0.0, float(v)) if isinstance(v, float) else max(0, v)
         elif isinstance(v, str):
             v_clean = v.replace("$", "").replace(",", "").replace("%", "").strip()
             try:
                 num_v = float(v_clean)
-                clamped_inputs[k] = max(0.0, num_v)
+                clamped_inputs[k] = num_v if allow_negative_sprs else max(0.0, num_v)
             except ValueError:
                 clamped_inputs[k] = v
         else:
@@ -2591,8 +2599,6 @@ __all__ = [
     "evaluate_x_like_2109835011772035193_capability_matrix",
     "score_estate_jev_seo_rubric",
 ]
-
-
 
 from pseofactory.verifier import (
     X_LIKE_2098466289282842729_CAPABILITY_MATRIX,

@@ -898,12 +898,9 @@ def test_sync_tenant_edge_replaces_stale_wrangler_kv_ids_and_mirrors_dist(tmp_pa
             "functions/r/[partner].js",
             "functions/api/telemetry.js",
             "functions/api/lead-capture.js",
-            "dist/functions/_middleware.js",
-            "dist/functions/r/[partner].js",
-            "dist/functions/api/telemetry.js",
-            "dist/functions/api/lead-capture.js",
         ):
             assert (repo_dir / rel_fn).is_file(), f"Missing {rel_fn} for {prop}"
+        assert not (repo_dir / "dist" / "functions").exists(), f"Server JS leaked into dist/functions for {prop}"
 
 
 def test_lienbond_compiler_sku_price_parity_and_publisher_meta_isolation(tmp_path: Path) -> None:

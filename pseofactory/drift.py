@@ -400,6 +400,26 @@ def write_substrate_lock(
         except Exception:
             pass
     fp, tot = compute_dist_lock_metrics(eff_dist)
+    synced_sub_hash: Optional[str] = None
+    for cand_pkg in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        cand_sub_dir = r_root / cand_pkg / "_pseo_substrate" / "pseofactory"
+        if cand_sub_dir.is_dir():
+            sub_files: Dict[str, bytes] = {}
+            for p in cand_sub_dir.glob("**/*.py"):
+                if "__pycache__" in p.parts or p.name.endswith(".pyc"):
+                    continue
+                rel = f"pseofactory/{p.relative_to(cand_sub_dir).as_posix()}"
+                try:
+                    sub_files[rel] = p.read_bytes()
+                except Exception:
+                    pass
+            if sub_files:
+                sub_master = hashlib.sha256()
+                for rel_path in sorted(sub_files.keys()):
+                    file_sha = hashlib.sha256(sub_files[rel_path]).hexdigest()
+                    sub_master.update(f"{rel_path}:{file_sha}\n".encode("utf-8"))
+                synced_sub_hash = sub_master.hexdigest()
+            break
     payload = dict(existing)
     if "property_id" not in payload and "property" not in payload:
         payload["property_id"] = pid
@@ -408,6 +428,8 @@ def write_substrate_lock(
     payload["dist_fingerprint"] = fp
     payload["engine_hash"] = eh
     payload["substrate_hash"] = eh
+    if synced_sub_hash:
+        payload["synced_substrate_hash"] = synced_sub_hash
     payload["total_assets"] = tot
     if "engine_sha256" in payload or pid == "lienbond":
         payload["engine_sha256"] = eh
@@ -654,6 +676,33 @@ def detect_engine_drift(
                 raw_bdirs = data.get("base_dirs")
                 if isinstance(raw_bdirs, list) and all(isinstance(x, str) and Path(x).exists() for x in raw_bdirs):
                     recorded_base_dirs = raw_bdirs
+        except Exception:
+            recorded_hash = None
+    elif s_path.name == "engine_hash.json" and s_path.parent.name == ".agy":
+        try:
+            cand_repo = s_path.resolve().parent.parent
+            fallback_lock = cand_repo / "substrate_lock.json"
+            if fallback_lock.is_file() and (
+                (cand_repo / ".pseofactory.json").is_file() or (cand_repo / "factory.json").is_file()
+            ):
+                lock_data = json.loads(fallback_lock.read_text(encoding="utf-8"))
+                if isinstance(lock_data, dict):
+                    dist_ok = True
+                    cand_dist = cand_repo / "dist"
+                    if cand_dist.is_dir() and lock_data.get("dist_fingerprint"):
+                        live_fp, _ = compute_dist_lock_metrics(cand_dist)
+                        dist_ok = (live_fp == lock_data.get("dist_fingerprint"))
+                    if dist_ok:
+                        in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
+                        if in_synced_substrate and lock_data.get("synced_substrate_hash"):
+                            recorded_hash = str(lock_data["synced_substrate_hash"])
+                        else:
+                            recorded_hash = str(
+                                lock_data.get("engine_hash")
+                                or lock_data.get("substrate_hash")
+                                or lock_data.get("synced_substrate_hash")
+                                or ""
+                            ) or None
         except Exception:
             recorded_hash = None
 

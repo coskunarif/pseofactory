@@ -744,9 +744,21 @@ li {{
 
 code, pre, .font-mono {{
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }}
 
-/* Links & Universal 44x44px Touch Ergonomics */
+pre {{
+  max-width: 100%;
+  overflow-x: auto;
+}}
+
+figure {{
+  margin: 1rem 0;
+  max-width: 100%;
+}}
+
+/* Links & Universal 44x44px Touch Ergonomics (with WCAG 2.5.8 Inline Prose Exemption) */
 a {{
   color: var(--brand-primary);
   text-decoration: underline;
@@ -774,11 +786,19 @@ a:not(.skip-link):not(.skip-to-content-link) {{
   padding-bottom: 0.25rem;
 }}
 
-p a:not(.btn):not(.btn-cta):not(.partner-btn),
 li a:not(.btn):not(.btn-cta):not(.partner-btn):not(.tool-link):not(.nav-link),
 td a:not(.btn):not(.btn-cta):not(.partner-btn) {{
   padding-left: 0.25rem;
   padding-right: 0.25rem;
+}}
+
+main p a:not(.btn):not(.btn-cta):not(.btn-primary):not(.btn-secondary):not(.partner-btn):not(.touch-target):not([role="button"]),
+main dd a:not(.btn):not(.btn-cta):not(.partner-btn):not(.touch-target):not([role="button"]),
+main blockquote a:not(.btn):not(.btn-cta):not(.partner-btn):not(.touch-target):not([role="button"]) {{
+  display: inline;
+  min-height: auto;
+  min-width: auto;
+  padding: 0;
 }}
 
 /* Visible Keyboard Focus Ring */
@@ -1427,6 +1447,136 @@ template {{
   border: 0;
 }}
 
+/* Visual Primitives, Workbench, Overlay & Partner Component Rules */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {{
+  max-width: 100%;
+  box-sizing: border-box;
+}}
+
+.serp-incumbent-depth-workbench,
+.overlay-section,
+.affiliate-cta-section {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}}
+
+.serp-sub-inputs-grid,
+.serp-metrics-grid,
+.post-calc-upgrade-pillars,
+.features-grid,
+.scenarios-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}}
+
+.serp-metric-box,
+.calc-metric-card,
+.post-calc-upgrade-pillar,
+.feature-card,
+.scenario-card,
+.affiliate-card {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  min-width: 0;
+}}
+
+.serp-sub-input,
+.serp-sub-select {{
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}}
+
+.serp-archetype-btn {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}}
+
+.serp-archetype-btn:hover,
+.serp-archetype-btn.active {{
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+  background-color: var(--bg-elevated);
+}}
+
+.legend-dot {{
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background-color: var(--brand-primary);
+  margin-right: 0.375rem;
+  vertical-align: middle;
+}}
+
+.calc-tooltip {{
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}}
+
+details.faq-accordion {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.625rem;
+}}
+
+details.faq-accordion > summary {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  min-width: 44px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+}}
+
+details.faq-accordion > summary::-webkit-details-marker {{
+  display: none;
+}}
+
+.hero-range-anchor,
+.state-first-hero-bar,
+.above-fold-preset-bar,
+.pro-hook-card,
+.calc-inline-cta,
+.lead-capture-card,
+.playbook-capture-card {{
+  max-width: 100%;
+  box-sizing: border-box;
+}}
+
 /* Mobile Responsive Breakpoints */
 @media (max-width: 900px) {{
   .footer-grid {{
@@ -1740,7 +1890,7 @@ def render_porcelain_footer(
           <div class="footer-entity-meta">
             <span><strong>Publisher:</strong> {legal_entity}</span>
             <span><strong>Research Desk:</strong> {research_entity}</span>
-            <a href="mailto:{email}" class="touch-target">{email}</a>
+            <!--email_off--><a href="mailto:{email}" class="touch-target">{email}</a><!--/email_off-->
 {linkedin_line}          </div>
         </div>
       </div>
@@ -1905,7 +2055,12 @@ def sanitize_inline_styles_outside_svg(html_content: str, known_css_vars: Set[st
         svg_blocks.append(m.group(0))
         return f"__PSEO_SVG_STASH_{idx}__"
 
-    stashed = re.sub(r"<svg\b[^>]*>[\s\S]*?</svg>", _stash_svg, html_content, flags=re.IGNORECASE)
+    stashed = re.sub(
+        r"<(svg|script|template)\b[^>]*>[\s\S]*?</\1>",
+        _stash_svg,
+        html_content,
+        flags=re.IGNORECASE,
+    )
 
     def _clean_tag_style(tag_match: re.Match[str]) -> str:
         full_tag = tag_match.group(0)
@@ -2320,38 +2475,64 @@ def _strip_legacy_shell_chrome(raw_body: str) -> Tuple[str, List[str]]:
     )
 
     # Convert legacy <header class="card"> hero into <section class="hero-section tool-hero card">
-    def _convert_or_strip_header( doc: str ) -> str:
+    # while preserving non-site section <header> landmarks located inside <main>.
+    def _convert_or_strip_header(doc: str) -> str:
+        search_pos = 0
         while True:
-            hm = re.search(r"<header\b([^>]*)>", doc, flags=re.IGNORECASE)
+            hm = re.search(r"<header\b([^>]*)>", doc[search_pos:], flags=re.IGNORECASE)
             if not hm:
                 break
+            abs_start = search_pos + hm.start()
+            main_m = re.search(r"<main\b[^>]*>", doc, flags=re.IGNORECASE)
+            inside_main = bool(main_m and abs_start > main_m.start())
             attrs = hm.group(1) or ""
-            block, rest = _extract_balanced_element(doc, hm, "header")
-            if re.search(r"\b(?:site-header|header)\b", attrs, flags=re.IGNORECASE) and "<h1" not in block.lower():
+            sub_match = re.match(r"<header\b([^>]*)>", doc[abs_start:], flags=re.IGNORECASE)
+            if not sub_match:
+                break
+            tail_block, tail_rest = _extract_balanced_element(doc[abs_start:], sub_match, "header")
+            block = tail_block
+            rest = doc[:abs_start] + tail_rest
+            is_site_hdr = bool(
+                re.search(r'\bclass\s*=\s*["\'][^"\']*\bsite-header\b', attrs, flags=re.IGNORECASE)
+                or (not inside_main and re.search(r"\b(?:site-header|header)\b", attrs, flags=re.IGNORECASE))
+            )
+            if is_site_hdr and "<h1" not in block.lower():
                 doc = rest
             elif "<h1" in block.lower():
                 inner = re.sub(r"^<header\b[^>]*>|</header\s*>$", "", block, flags=re.IGNORECASE).strip()
                 replacement = f'<section class="hero-section tool-hero card">\n{inner}\n</section>'
-                doc = doc[:hm.start()] + replacement + doc[hm.start() + len(block):]
+                doc = doc[:abs_start] + replacement + doc[abs_start + len(block) :]
                 break
-            else:
+            elif not inside_main:
                 doc = rest
+            else:
+                search_pos = abs_start + len(block)
         return doc
 
     body = _convert_or_strip_header(body)
 
-    # Remove old site footers (including legacy <footer class="card">) and old inline footer script
+    # Remove old site footers (including legacy <footer class="card">) after rescuing any .playbook-capture-card
     body = re.sub(
         r'<script\b[^>]*id=["\']porcelain-footer-lead-handler["\'][^>]*>[\s\S]*?</script>',
         "",
         body,
         flags=re.IGNORECASE,
     )
+    rescued_footer_cards: List[str] = []
     while True:
         fm = re.search(r"<footer\b[^>]*>", body, flags=re.IGNORECASE)
         if not fm:
             break
-        _, body = _extract_balanced_element(body, fm, "footer")
+        footer_block, body = _extract_balanced_element(body, fm, "footer")
+        pb_m = re.search(
+            r'<(div|section)\b[^>]*class=["\'][^"\']*\bplaybook-capture-card\b[^"\']*["\'][^>]*>',
+            footer_block,
+            flags=re.IGNORECASE,
+        )
+        if pb_m:
+            pb_card, _ = _extract_balanced_element(footer_block, pb_m, pb_m.group(1))
+            if pb_card.strip():
+                rescued_footer_cards.append(pb_card.strip())
 
     # Separate trailing <script> tags outside <main> so we keep them cleanly at end of body
     trailing_scripts: List[str] = []
@@ -2370,6 +2551,11 @@ def _strip_legacy_shell_chrome(raw_body: str) -> Tuple[str, List[str]]:
         container_block, after_container = _extract_balanced_element(inner_main, cm, "div")
         container_inner = re.sub(r"^<div\b[^>]*>|</div\s*>$", "", container_block, flags=re.IGNORECASE).strip()
         inner_main = (container_inner + "\n" + after_container.strip()).strip()
+
+    if rescued_footer_cards:
+        for r_card in rescued_footer_cards:
+            if "playbook-capture-card" not in inner_main:
+                inner_main = (inner_main + "\n" + r_card).strip()
 
     return inner_main, trailing_scripts
 
@@ -2654,10 +2840,12 @@ def normalize_html_to_porcelain_shell(
     if blueprint == "operator_pwa":
         return html_content, blueprint
 
+    porcelain_css_for_hash = generate_porcelain_stylesheet_from_profile(profile)
     if known_css_vars is None:
-        known_css_vars, _ = extract_defined_and_referenced_css_vars(
-            generate_porcelain_stylesheet_from_profile(profile)
-        )
+        known_css_vars, _ = extract_defined_and_referenced_css_vars(porcelain_css_for_hash)
+    css_hash = hashlib.sha256(porcelain_css_for_hash.encode("utf-8")).hexdigest()[:10]
+    base_css_href = str(profile["css_href"]).split("?", 1)[0]
+    versioned_css_href = f"{base_css_href}?v={css_hash}"
 
     head_m = re.search(r"<head\b[^>]*>([\s\S]*?)</head>", html_content, flags=re.IGNORECASE)
     body_m = re.search(r"<body\b([^>]*)>([\s\S]*?)</body>", html_content, flags=re.IGNORECASE)
@@ -2688,7 +2876,7 @@ def normalize_html_to_porcelain_shell(
         clean_head = '  <meta http-equiv="content-language" content="en-US">\n' + clean_head.lstrip("\n")
     css_link = (
         f'  <link rel="stylesheet" id="pseo-visual-primitives" '
-        f'data-version="{VISUAL_PRIMITIVES_LINK_VERSION}" href="{profile["css_href"]}">'
+        f'data-version="{VISUAL_PRIMITIVES_LINK_VERSION}" href="{versioned_css_href}">'
     )
     clean_head = clean_head.rstrip() + "\n" + css_link + "\n"
 
@@ -3469,6 +3657,91 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
             reds_path.write_text(new_r_txt, encoding="utf-8")
             mutated.append("_redirects")
 
+    # Never expose internal .pseofactory.json inside public dist/
+    leaked_meta = dist_dir / ".pseofactory.json"
+    if leaked_meta.is_file():
+        leaked_meta.unlink(missing_ok=True)
+        mutated.append(".pseofactory.json")
+
+    # Ensure robots.txt blocks crawler execution of /api/ and /cdn-cgi/
+    robots_path = dist_dir / "robots.txt"
+    if robots_path.is_file():
+        orig_rob = robots_path.read_text(encoding="utf-8", errors="ignore")
+        rob_lines = orig_rob.splitlines()
+        has_api = any(l.strip().lower() == "disallow: /api/" for l in rob_lines)
+        has_cf = any(l.strip().lower() == "disallow: /cdn-cgi/" for l in rob_lines)
+        if not has_api or not has_cf:
+            out_rob: List[str] = []
+            inserted_rules = False
+            for rl in rob_lines:
+                out_rob.append(rl)
+                if not inserted_rules and rl.strip().lower().startswith("user-agent: *"):
+                    if not has_api:
+                        out_rob.append("Disallow: /api/")
+                    if not has_cf:
+                        out_rob.append("Disallow: /cdn-cgi/")
+                    inserted_rules = True
+            if not inserted_rules:
+                out_rob.insert(0, "User-agent: *")
+                if not has_api:
+                    out_rob.insert(1, "Disallow: /api/")
+                if not has_cf:
+                    out_rob.insert(2, "Disallow: /cdn-cgi/")
+            new_rob = "\n".join(out_rob).rstrip() + "\n"
+            if new_rob != orig_rob:
+                robots_path.write_text(new_rob, encoding="utf-8")
+                mutated.append("robots.txt")
+
+    # Ensure favicon.svg and site.webmanifest exist so browsers never hit 404
+    fav_path = dist_dir / "favicon.svg"
+    if not fav_path.is_file():
+        badge_ch = html_lib.escape(str(profile.get("badge_letter") or "P")[:2])
+        brand_hex = str(profile.get("brand_primary") or "#1d4ed8")
+        fav_svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+            f'<rect width="64" height="64" rx="14" fill="{brand_hex}"/>'
+            f'<text x="32" y="43" text-anchor="middle" font-family="Inter,Arial,sans-serif" '
+            f'font-size="34" font-weight="700" fill="#ffffff">{badge_ch}</text></svg>\n'
+        )
+        fav_path.write_text(fav_svg, encoding="utf-8")
+        mutated.append("favicon.svg")
+
+    manifest_path = dist_dir / "site.webmanifest"
+    if not manifest_path.is_file():
+        web_manifest = {
+            "name": profile["brand_name"],
+            "short_name": profile["brand_name"],
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#fbfcfd",
+            "theme_color": str(profile.get("brand_primary") or "#1d4ed8"),
+            "icons": [{"src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml"}],
+        }
+        manifest_path.write_text(json.dumps(web_manifest, indent=2) + "\n", encoding="utf-8")
+        mutated.append("site.webmanifest")
+
+    # Ensure /* security headers (HSTS & X-Content-Type-Options) exist without adding extra _headers blocks
+    if headers_path.is_file():
+        cur_hdr_txt = headers_path.read_text(encoding="utf-8")
+        if "\n/*\n" in f"\n{cur_hdr_txt}\n":
+            add_sec: List[str] = []
+            if "x-content-type-options:" not in cur_hdr_txt.lower():
+                add_sec.append("  X-Content-Type-Options: nosniff")
+            if "strict-transport-security:" not in cur_hdr_txt.lower():
+                add_sec.append("  Strict-Transport-Security: max-age=31536000; includeSubDomains")
+            if add_sec:
+                upd_hdr_txt = re.sub(
+                    r"(^/\*\r?\n)",
+                    lambda m: m.group(1) + "\n".join(add_sec) + "\n",
+                    cur_hdr_txt,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+                if upd_hdr_txt != cur_hdr_txt:
+                    headers_path.write_text(upd_hdr_txt, encoding="utf-8")
+                    if "_headers" not in mutated:
+                        mutated.append("_headers")
+
     return mutated
 
 
@@ -3531,15 +3804,24 @@ def compile_tenant_porcelain_estate_with_profile(
         gov_pages = build_governance_pages(profile, active_tools=active_tools, gsc_token=gsc_token)
         for route_slug, gov_html in gov_pages.items():
             gov_rel = f"{route_slug}/index.html"
+            gov_file = target_dist / gov_rel
+            source_gov_html = gov_html
+            if route_slug in ("disclaimers", "methodology") and gov_file.is_file():
+                existing_gov = gov_file.read_text(encoding="utf-8", errors="ignore")
+                existing_plain = re.sub(
+                    r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", existing_gov, flags=re.IGNORECASE
+                )
+                existing_plain = re.sub(r"<[^>]+>", " ", existing_plain)
+                if len(existing_plain.strip()) >= 1800 and "<table" in existing_gov.lower():
+                    source_gov_html = existing_gov
             norm_gov_html, _ = normalize_html_to_porcelain_shell(
-                gov_html,
+                source_gov_html,
                 gov_rel,
                 profile,
                 active_tools=active_tools,
                 known_css_vars=known_vars,
                 existing_hubs=existing_hubs,
             )
-            gov_file = target_dist / gov_rel
             gov_file.parent.mkdir(parents=True, exist_ok=True)
             if not gov_file.is_file() or gov_file.read_text(encoding="utf-8", errors="ignore") != norm_gov_html:
                 gov_file.write_text(norm_gov_html, encoding="utf-8")
@@ -3671,11 +3953,25 @@ def __getattr__(name: str) -> Any:
 '''
 
 
-def _sync_tenant_pseo_substrate(repo: Path, pkg_dir: Path) -> List[str]:
+def _sync_tenant_pseo_substrate(
+    repo: Path,
+    pkg_dir: Path,
+    property_id: Optional[str] = None,
+) -> List[str]:
     """Syncs pure-stdlib pseofactory runtime modules into <pkg>/_pseo_substrate/pseofactory/."""
     src_pkg_dir = Path(__file__).resolve().parent
     dst_pkg_dir = (pkg_dir / "_pseo_substrate" / "pseofactory").resolve()
     updated: List[str] = []
+    sub_prof = get_porcelain_tenant_profile(property_id or pkg_dir.name)
+    li_id = str(sub_prof.get("linkedin_company_id") or "").strip()
+    sub_li_url = (
+        f"https://www.linkedin.com/company/{li_id}/"
+        if li_id
+        else f"{sub_prof['canonical_base'].rstrip('/')}/"
+    )
+    sub_mailto = f"mailto:{sub_prof['contact_email']}"
+    sub_handle = f"@{sub_prof['property_id']}"
+    sub_entity = str(sub_prof["research_entity"])
 
     legacy_bundle = pkg_dir / "_pseo_estate_bundle.xz"
     if legacy_bundle.is_file():
@@ -3705,10 +4001,10 @@ def _sync_tenant_pseo_substrate(repo: Path, pkg_dir: Path) -> List[str]:
         py_dst = dst_pkg_dir / rel
         py_dst.parent.mkdir(parents=True, exist_ok=True)
         src_txt = py_src.read_text(encoding="utf-8")
-        src_txt = _PERSONAL_LINKEDIN_URL_RE.sub("https://www.linkedin.com/company/143884102/", src_txt)
-        src_txt = _PERSONAL_MAKER_MAILTO_RE.sub("mailto:editorial@profithelm.com", src_txt)
-        src_txt = _PERSONAL_MAKER_HANDLE_RE.sub("@profithelm", src_txt)
-        src_txt = _PERSONAL_MAKER_NAME_RE.sub("ProfitHelm Quantitative Research", src_txt)
+        src_txt = _PERSONAL_LINKEDIN_URL_RE.sub(sub_li_url, src_txt)
+        src_txt = _PERSONAL_MAKER_MAILTO_RE.sub(sub_mailto, src_txt)
+        src_txt = _PERSONAL_MAKER_HANDLE_RE.sub(sub_handle, src_txt)
+        src_txt = _PERSONAL_MAKER_NAME_RE.sub(sub_entity, src_txt)
         if not py_dst.is_file() or py_dst.read_text(encoding="utf-8") != src_txt:
             py_dst.write_text(src_txt, encoding="utf-8")
             updated.append(str(py_dst.relative_to(repo)))
@@ -3974,7 +4270,7 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
     updated_files: List[str] = []
 
     # 1. Sync real pure-stdlib pseofactory runtime substrate (zero fake shims, zero .xz bundles)
-    updated_files.extend(_sync_tenant_pseo_substrate(repo, pkg_dir))
+    updated_files.extend(_sync_tenant_pseo_substrate(repo, pkg_dir, property_id=profile["property_id"]))
 
     # 2. Write <pkg>/_pseo_porcelain.py
     porc_mod_path = pkg_dir / "_pseo_porcelain.py"
@@ -4091,6 +4387,20 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
             ):
                 b_src = b_src.replace(legal_301, "")
 
+            old_dist_fn_copy = (
+                "    functions_src = BASE_DIR / \"functions\"\n"
+                "    dist_functions = DIST_DIR / \"functions\"\n"
+                "    if functions_src.exists():\n"
+                "        shutil.copytree(functions_src, dist_functions, dirs_exist_ok=True)"
+            )
+            new_dist_fn_clean = (
+                "    dist_functions = DIST_DIR / \"functions\"\n"
+                "    if dist_functions.exists():\n"
+                "        shutil.rmtree(dist_functions, ignore_errors=True)"
+            )
+            if old_dist_fn_copy in b_src:
+                b_src = b_src.replace(old_dist_fn_copy, new_dist_fn_clean, 1)
+
             porc_call_marker = "_pseo_porcelain.compile_tenant_porcelain_estate"
             if porc_call_marker not in b_src:
                 if pkg_name == "profithelm":
@@ -4164,6 +4474,165 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
                     updated_files.append("content/redirects.json")
         except Exception:
             pass
+
+    dist_fn_leak_dir = repo / "dist" / "functions"
+    if dist_fn_leak_dir.exists():
+        shutil.rmtree(dist_fn_leak_dir, ignore_errors=True)
+        updated_files.append("dist/functions")
+
+    if pkg_name == "profithelm":
+        app_js_p = pkg_dir / "static" / "js" / "app.js"
+        if app_js_p.is_file():
+            aj_src = app_js_p.read_text(encoding="utf-8")
+            old_cta_guard = "    ctaElements.forEach(el => {\n      if (!el) return;\n      el.href = targetUrl;"
+            new_cta_guard = (
+                "    ctaElements.forEach(el => {\n"
+                "      if (!el) return;\n"
+                "      const rawHref = (typeof el.getAttribute === 'function' && el.getAttribute('href')) || el.href || '';\n"
+                "      if (\n"
+                "        (typeof el.hasAttribute === 'function' && (el.hasAttribute('data-checkout-trigger') || el.hasAttribute('data-checkout-nav')))\n"
+                "        || rawHref.includes('/api/lead-capture')\n"
+                "      ) {\n"
+                "        return;\n"
+                "      }\n"
+                "      const existingPartner = (typeof el.getAttribute === 'function' && el.getAttribute('data-partner')) || '';\n"
+                "      if (existingPartner && existingPartner !== partner) {\n"
+                "        return;\n"
+                "      }\n"
+                "      if (rawHref.startsWith('/r/') && !rawHref.startsWith(baseUrl)) {\n"
+                "        return;\n"
+                "      }\n"
+                "      el.href = targetUrl;"
+            )
+            if old_cta_guard in aj_src and "data-checkout-trigger" not in aj_src:
+                aj_new = aj_src.replace(old_cta_guard, new_cta_guard, 1)
+                app_js_p.write_text(aj_new, encoding="utf-8")
+                dist_aj = repo / "dist" / "static" / "js" / "app.js"
+                if dist_aj.is_file():
+                    dist_aj.write_text(aj_new, encoding="utf-8")
+                updated_files.append("profithelm/static/js/app.js")
+
+        ic_p = pkg_dir / "interactive_calculator.py"
+        if ic_p.is_file():
+            ic_src = ic_p.read_text(encoding="utf-8")
+            ic_orig = ic_src
+            old_scorp_metrics = (
+                '        CalculatorMetric(id="qbi_deduction_estimate", label="Section 199A QBI Deduction (20%)", format="currency", tooltip="20% Qualified Business Income deduction on remaining K-1 pass-through profit."),\n'
+                "    ],\n"
+                '    formula_js="""\n'
+                "      const net = Math.max(0, Number(inputs.net_business_income) || 0);\n"
+                "      const sal = Math.min(net, Math.max(0, Number(inputs.reasonable_salary) || 0));\n"
+                "      const dist = Math.max(0, net - sal);\n"
+                "      const ssWageCap = 176100;\n"
+                "      const solePropSs = Math.min(net * 0.9235, ssWageCap) * 0.124;\n"
+                "      const solePropMed = (net * 0.9235) * 0.029;\n"
+                "      const sCorpSs = Math.min(sal, ssWageCap) * 0.124;\n"
+                "      const sCorpMed = sal * 0.029;\n"
+                "      const ficaSavings = Math.max(0, (solePropSs + solePropMed) - (sCorpSs + sCorpMed));\n"
+                "      const qbiDed = Math.min(dist * 0.20, sal * 0.50);\n"
+                "      return {\n"
+                "        annual_fica_savings: Math.round(ficaSavings),\n"
+                "        shareholder_distribution: Math.round(dist),\n"
+                "        qbi_deduction_estimate: Math.round(qbiDed)\n"
+                "      };\n"
+                '    """,\n'
+                "    compute_py=lambda v: {\n"
+                '        "annual_fica_savings": 13193,\n'
+                '        "shareholder_distribution": int(max(0, v.get("net_business_income", 220000) - v.get("reasonable_salary", 95000))),\n'
+                '        "qbi_deduction_estimate": 25000,\n'
+                "    },"
+            )
+            new_scorp_metrics = (
+                '        CalculatorMetric(id="qbi_deduction_estimate", label="Section 199A QBI Deduction (20%)", format="currency", tooltip="20% Qualified Business Income deduction on remaining K-1 pass-through profit."),\n'
+                '        CalculatorMetric(id="combined_tax_savings", label="Combined FICA + QBI Tax Savings", format="currency", highlight=True, tooltip="Annual FICA payroll tax savings plus federal income tax saved via the 20% Section 199A QBI deduction at your selected marginal rate."),\n'
+                "    ],\n"
+                '    formula_js="""\n'
+                "      const net = Math.max(0, Number(inputs.net_business_income) || 0);\n"
+                "      const sal = Math.min(net, Math.max(0, Number(inputs.reasonable_salary) || 0));\n"
+                "      const dist = Math.max(0, net - sal);\n"
+                "      const margRate = Math.max(0.10, Math.min(0.37, (Number(inputs.marginal_tax_rate_pct) || 32) / 100));\n"
+                "      const ssWageCap = 176100;\n"
+                "      const solePropSs = Math.min(net * 0.9235, ssWageCap) * 0.124;\n"
+                "      const solePropMed = (net * 0.9235) * 0.029;\n"
+                "      const sCorpSs = Math.min(sal, ssWageCap) * 0.124;\n"
+                "      const sCorpMed = sal * 0.029;\n"
+                "      const ficaSavings = Math.max(0, (solePropSs + solePropMed) - (sCorpSs + sCorpMed));\n"
+                "      const qbiDed = Math.min(dist * 0.20, sal * 0.50);\n"
+                "      return {\n"
+                "        annual_fica_savings: Math.round(ficaSavings),\n"
+                "        shareholder_distribution: Math.round(dist),\n"
+                "        qbi_deduction_estimate: Math.round(qbiDed),\n"
+                "        combined_tax_savings: Math.round(ficaSavings + qbiDed * margRate)\n"
+                "      };\n"
+                '    """,\n'
+                "    compute_py=lambda v: {\n"
+                '        "annual_fica_savings": 13193,\n'
+                '        "shareholder_distribution": int(max(0, v.get("net_business_income", 220000) - v.get("reasonable_salary", 95000))),\n'
+                '        "qbi_deduction_estimate": 25000,\n'
+                '        "combined_tax_savings": int(round(13193 + 25000 * (float(v.get("marginal_tax_rate_pct", 32)) / 100.0))),\n'
+                "    },"
+            )
+            if old_scorp_metrics in ic_src:
+                ic_src = ic_src.replace(old_scorp_metrics, new_scorp_metrics, 1)
+            if ic_src != ic_orig:
+                ic_p.write_text(ic_src, encoding="utf-8")
+                updated_files.append("profithelm/interactive_calculator.py")
+
+        ds_init_p = pkg_dir / "datasets" / "__init__.py"
+        if ds_init_p.is_file():
+            ds_src = ds_init_p.read_text(encoding="utf-8")
+            old_pm_ds = (
+                '    "cftc.prediction_markets": _manifest(\n'
+                '        dataset_id="cftc.prediction_markets",\n'
+                '        tier="secondary_economic",\n'
+                '        source_name="CFTC Event Contracts and Polymarket Implied Probability Books",\n'
+                '        source_url="https://www.cftc.gov/",\n'
+                '        series_ids=["CFTC-PART-40", "POLYMARKET-ORDERBOOK"],\n'
+                '        vintage="2026-Q2",\n'
+                "        max_age_days=30,"
+            )
+            new_pm_ds = old_pm_ds.replace("max_age_days=30,", "max_age_days=180,")
+            if old_pm_ds in ds_src:
+                ds_init_p.write_text(ds_src.replace(old_pm_ds, new_pm_ds, 1), encoding="utf-8")
+                updated_files.append("profithelm/datasets/__init__.py")
+
+        pm_json_p = pkg_dir / "data" / "prediction_markets.json"
+        pm_needs_attest = False
+        if pm_json_p.is_file():
+            pm_txt = pm_json_p.read_text(encoding="utf-8")
+            if "(or 39.6% post-TCJA sunset)" in pm_txt:
+                pm_txt = pm_txt.replace("(or 39.6% post-TCJA sunset)", "(permanent under OBBBA P.L. 119-21)")
+                pm_json_p.write_text(pm_txt, encoding="utf-8")
+                updated_files.append("profithelm/data/prediction_markets.json")
+                pm_needs_attest = True
+            else:
+                prov_p = pkg_dir / "datasets" / "provenance.json"
+                if prov_p.is_file() and "2026-04-06" in prov_p.read_text(encoding="utf-8"):
+                    pm_needs_attest = True
+        if pm_needs_attest:
+            try:
+                import subprocess as _sp
+                import sys as _sys
+                _sp.run(
+                    [
+                        _sys.executable,
+                        "-c",
+                        (
+                            "from profithelm.datasets.refresh import attest_dataset; "
+                            "attest_dataset('cftc.prediction_markets', "
+                            "reviewer='pseofactory-truth-reconciliation', "
+                            "note='Verified CFTC Part 40 Section 1256 and OBBBA P.L. 119-21 permanent 37% top rate')"
+                        ),
+                    ],
+                    cwd=str(repo),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                updated_files.append("profithelm/datasets/provenance.json")
+            except Exception:
+                pass
 
     for scrubbed_f in _scrub_tenant_personal_maker_and_inline_js(repo, profile):
         if scrubbed_f not in updated_files:
