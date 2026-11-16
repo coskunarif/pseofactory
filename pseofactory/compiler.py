@@ -626,7 +626,8 @@ def _format_human_readable_formula(formula_str: str) -> str:
     except SyntaxError:
         cleaned = re.sub(r"\bround\(\s*", "", raw)
         cleaned = re.sub(r",\s*\d+\s*\)", "", cleaned)
-        return cleaned.replace("\u2014", "-").replace("\u2013", "-")
+        cleaned = cleaned.replace("\u2014", "-").replace("\u2013", "-")
+        return re.sub(r"\s+-\s+", " minus ", cleaned)
 
     def _prec(n: ast.AST) -> int:
         if isinstance(n, ast.BinOp):
@@ -682,7 +683,7 @@ def _format_human_readable_formula(formula_str: str) -> str:
                 right_s = f"({right_s})"
             op_map = {
                 ast.Add: " + ",
-                ast.Sub: " - ",
+                ast.Sub: " minus ",
                 ast.Mult: " x ",
                 ast.Div: " / ",
                 ast.FloorDiv: " // ",
@@ -715,8 +716,8 @@ def _format_human_readable_formula(formula_str: str) -> str:
             return " ".join(chunks)
         return raw
 
-    formatted = _fmt(parsed).strip()
-    return formatted.replace("\u2014", "-").replace("\u2013", "-")
+    formatted = _fmt(parsed).strip().replace("\u2014", "-").replace("\u2013", "-")
+    return re.sub(r"\s+-\s+", " minus ", formatted)
 
 
 def _sanitize_visible_sample_calculation(sample_calc: str) -> str:

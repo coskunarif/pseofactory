@@ -534,3 +534,77 @@ def test_publisher_head_injects_og_image_idempotently_across_tenants_and_governa
         matches = re.findall(r"<meta\b[^>]*og:image[^>]*>", norm_kept, flags=re.IGNORECASE)
         assert len(matches) == 1 and existing_tag in matches[0], matches
 
+
+def test_calc_panel_title_desktop_h2_hierarchy_and_h3_ordering(tmp_path: Path) -> None:
+    """
+    Verify .calc-panel-title (used on <h2>) computes to >= 18px (1.125rem+) on desktop
+    while .calc-column-title and .calc-hub-subtitle (used on <h3>) stay <= .calc-panel-title.
+    """
+    def _parse_font_size_px(css_text: str, cls_name: str) -> float:
+        m = re.search(
+            rf"(?:^|[}},])\s*[^}}]*\.{re.escape(cls_name)}\b[^}}]*\{{([^}}]*)\}}",
+            css_text,
+            flags=re.MULTILINE,
+        )
+        assert m, f"Missing CSS rule for .{cls_name}"
+        fs_m = re.search(r"font-size\s*:\s*([0-9.]+)(rem|px)", m.group(1), flags=re.IGNORECASE)
+        assert fs_m, f"Missing font-size declaration for .{cls_name}: {m.group(1)}"
+        val = float(fs_m.group(1))
+        unit = fs_m.group(2).lower()
+        return val * 16.0 if unit == "rem" else val
+
+    for tid in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        css = generate_porcelain_stylesheet(tid)
+        panel_px = _parse_font_size_px(css, "calc-panel-title")
+        col_px = _parse_font_size_px(css, "calc-column-title")
+        hub_px = _parse_font_size_px(css, "calc-hub-subtitle")
+        assert panel_px >= 18.0, f"{tid}: .calc-panel-title computed {panel_px}px < 18px"
+        assert col_px >= 15.5 and col_px <= panel_px, (
+            f"{tid}: .calc-column-title ({col_px}px) must be >= 15.5px and <= .calc-panel-title ({panel_px}px)"
+        )
+        assert hub_px >= 15.5 and hub_px <= panel_px, (
+            f"{tid}: .calc-hub-subtitle ({hub_px}px) must be >= 15.5px and <= .calc-panel-title ({panel_px}px)"
+        )
+
+    dist_dir = tmp_path / "dist"
+    (dist_dir / "tools" / "panel-hierarchy-test").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>ProfitHelm Hub</title></head>"
+        "<body><main><h1>ProfitHelm Hub</h1><p>Statutory financial calculators.</p></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>Tools | ProfitHelm</title></head>"
+        "<body><main><h1>Tools</h1><p>Calculator directory.</p></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "panel-hierarchy-test" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>Panel Hierarchy Test | ProfitHelm</title>"
+        "<meta name='description' content='Panel title heading hierarchy verification page.'></head>"
+        "<body><main><h1>Panel Hierarchy Test Calculator</h1>"
+        "<p>Deterministic statutory model.</p>"
+        "<div class='interactive-calculator-container'>"
+        "<div class='calc-grid'>"
+        "<div class='calc-inputs-panel'>"
+        "<div class='calc-panel-header'><h2 class='calc-panel-title'>What Are Your Model Inputs?</h2></div>"
+        "<form><label for='amount'>Amount</label><input id='amount' type='number' value='1000'>"
+        "<button id='calculate-btn' type='submit'>Calculate</button></form>"
+        "</div>"
+        "<div class='calc-outputs-panel'>"
+        "<h3 class='calc-column-title'>Projected Outputs</h3>"
+        "<h3 class='calc-hub-subtitle'>Model Summary</h3>"
+        "</div>"
+        "</div></div></main></body></html>",
+        encoding="utf-8",
+    )
+    compile_tenant_porcelain_estate(dist_dir, "profithelm")
+
+    auditor = UnifiedBrowserAuditor(dist_dir=dist_dir, property_id="profithelm", fail_closed=True)
+    cdp_ok, _ = auditor.check_cdp_reachability()
+    if cdp_ok:
+        with EphemeralDistServer(dist_dir, property_id="profithelm") as srv:
+            finding = auditor.audit_route(srv.base_url, "/tools/panel-hierarchy-test/")
+            assert finding.get("hierarchy_violations") == [], (
+                f"Unexpected heading hierarchy violations: {finding.get('hierarchy_violations')}"
+            )
+

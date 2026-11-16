@@ -6,6 +6,7 @@ statutory execution packets across all tenants.
 Zero em-dashes. Zero en-dashes.
 """
 
+import re
 from pathlib import Path
 
 from pseofactory.affiliates import (
@@ -15,7 +16,10 @@ from pseofactory.affiliates import (
     get_affiliate_route,
     get_affiliates_for_property,
 )
+from pseofactory.browser_verifier import UnifiedBrowserAuditor
 from pseofactory.compiler import (
+    LIENBOND_EXPANSION_SPECS,
+    _format_human_readable_formula,
     compile_high_effort_page,
     compile_lienbond_estate,
     get_lienbond_expansion_specs,
@@ -407,4 +411,154 @@ def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None
     assert out["allCleared"] is True
     assert len(out["postSubmitCalls"]) == 1
     assert "bond_amount=99000" in out["postSubmitCalls"][0]
+
+
+def test_lienbond_readable_formulas_and_compiled_estate_zero_spaced_hyphens(tmp_path: Path) -> None:
+    """
+    Verifies _format_human_readable_formula emits zero spaced hyphens (\\s+-\\s+) across all
+    LIENBOND_EXPANSION_SPECS and fallback paths, and compiled LienBond HTML passes UnifiedBrowserAuditor dashes=0.
+    """
+    spaced_hyphen_re = re.compile(r"\s+-\s+")
+
+    for spec in LIENBOND_EXPANSION_SPECS:
+        readable = _format_human_readable_formula(spec["formula"])
+        assert not spaced_hyphen_re.search(readable), f"{spec['slug']}: spaced hyphen in {readable!r}"
+        assert_no_forbidden_dashes(readable, context=f"readable formula {spec['slug']}")
+
+    # Explicit subtraction and SyntaxError fallback checks
+    sub_readable = _format_human_readable_formula("round(contract_price - 100000.0, 2)")
+    assert sub_readable == "Contract Price minus 100,000"
+    assert not spaced_hyphen_re.search(sub_readable)
+
+    fallback_readable = _format_human_readable_formula("round((contract_price - 100000.0), 2")
+    assert not spaced_hyphen_re.search(fallback_readable), f"Fallback emitted spaced hyphen: {fallback_readable!r}"
+    assert "minus" in fallback_readable
+
+    estate_res = compile_lienbond_estate(tmp_path)
+    assert estate_res["status"] == "PASS"
+    dist_dir = tmp_path / "dist"
+
+    for hp in sorted(dist_dir.rglob("*.html")):
+        txt = hp.read_text(encoding="utf-8", errors="ignore")
+        assert_no_forbidden_dashes(txt, context=hp.relative_to(dist_dir).as_posix())
+        title_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", txt, flags=re.IGNORECASE)
+        if title_m:
+            assert not spaced_hyphen_re.search(title_m.group(1)), f"{hp}: title spaced hyphen {title_m.group(1)!r}"
+        body_m = re.search(r"<body[^>]*>([\s\S]*)</body>", txt, flags=re.IGNORECASE)
+        if body_m:
+            vis = re.sub(
+                r"<(script|style|code|pre|noscript)\b[^>]*>[\s\S]*?</\1>",
+                "",
+                body_m.group(1),
+                flags=re.IGNORECASE,
+            )
+            vis_text = re.sub(r"<[^>]+>", "\n", vis)
+            for line in vis_text.splitlines():
+                assert not spaced_hyphen_re.search(line), (
+                    f"{hp.relative_to(dist_dir)}: spaced hyphen in visible body: {line.strip()[:100]!r}"
+                )
+
+    auditor = UnifiedBrowserAuditor(dist_dir=dist_dir, property_id="lienbond", fail_closed=True)
+    cdp_ok, _ = auditor.check_cdp_reachability()
+    if cdp_ok:
+        report = auditor.run_audit(sample_size=None)
+        dash_findings = [
+            {"route": f.get("route"), "dashes": f.get("dashes")}
+            for f in report.get("findings", [])
+            if f.get("dashes")
+        ]
+        assert dash_findings == [], f"LienBond browser dash violations: {dash_findings}"
+        assert report.get("failed_count") == 0, (
+            f"LienBond browser audit failed_count={report.get('failed_count')}: "
+            f"{[f for f in report.get('findings', []) if f.get('dashes') or f.get('hierarchy_violations')]}"
+        )
+
+
+def test_reflect_recompiles_lienbond_when_substrate_compiler_syncs(tmp_path: Path, monkeypatch) -> None:
+    """
+    Verifies reflect_and_recompile_all_assets invokes LienBond build_all() both when
+    lienbond/_pseo_substrate/pseofactory/compiler.py changes (force=False) and when force=True.
+    """
+    import pseofactory.maintenance as maint_mod
+    from pseofactory.maintenance import (
+        AssetIntegrityReport,
+        RetroReflectionEngine,
+        SubprocessPropertyAdapter,
+        TenantRegistry,
+        reflect_and_recompile_all_assets,
+    )
+    from pseofactory.porcelain_shell import compile_tenant_porcelain_estate, sync_tenant_porcelain_shell
+
+    lb_root = tmp_path / "lienbond"
+    pkg_dir = lb_root / "lienbond"
+    dist_dir = lb_root / "dist"
+    (dist_dir / "tools").mkdir(parents=True, exist_ok=True)
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    (pkg_dir / "builder.py").write_text("def build_all():\n    return True\n", encoding="utf-8")
+    (dist_dir / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>LienBond Hub</title></head>"
+        "<body><main><h1>LienBond Hub</h1><p>Surety calculators.</p></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>LienBond Tools</title></head>"
+        "<body><main><h1>LienBond Tools</h1><p>Directory.</p></main></body></html>",
+        encoding="utf-8",
+    )
+    sync_tenant_porcelain_shell(lb_root, "lienbond")
+    compile_tenant_porcelain_estate(dist_dir, "lienbond", repo_root=lb_root)
+
+    # Simulate stale synced compiler.py inside LienBond's _pseo_substrate
+    sub_compiler = pkg_dir / "_pseo_substrate" / "pseofactory" / "compiler.py"
+    assert sub_compiler.is_file()
+    sub_compiler.write_text("# stale compiler\n", encoding="utf-8")
+
+    adapter = SubprocessPropertyAdapter(
+        property_id="lienbond",
+        brand_name="LienBond",
+        domain="lienbond.com",
+        canonical_base="https://lienbond.com",
+        dist_dir=dist_dir,
+        repo_path=lb_root,
+    )
+    reg = TenantRegistry()
+    reg.register_adapter(adapter)
+
+    build_calls: list[str] = []
+    monkeypatch.setattr(adapter, "build_all", lambda: build_calls.append("build_all") or True)
+    monkeypatch.setattr(
+        maint_mod.AssetIntegrityEvaluator,
+        "audit_all",
+        lambda self, adp, **kw: AssetIntegrityReport(
+            property_id="lienbond",
+            status="PASS",
+            total_assets_checked=2,
+            compliant_assets_count=2,
+            drifted_assets=[],
+        ),
+    )
+    monkeypatch.setattr(RetroReflectionEngine, "audit_estate", lambda *a, **kw: {"status": "PASS", "stale_count": 0})
+    monkeypatch.setattr(RetroReflectionEngine, "retrofit_estate", lambda *a, **kw: {"status": "PASS", "pages_retrofitted": 0, "porcelain_compiled": True})
+
+    # 1. force=False still rebuilds LienBond when _pseo_substrate/pseofactory/compiler.py was updated
+    reflect_and_recompile_all_assets(
+        properties=["lienbond"],
+        force=False,
+        latch_state=False,
+        run_downstream=False,
+        registry=reg,
+        workspace_root=tmp_path,
+    )
+    assert build_calls == ["build_all"]
+
+    # 2. force=True rebuilds LienBond even when _pseo_substrate is already in sync
+    reflect_and_recompile_all_assets(
+        properties=["lienbond"],
+        force=True,
+        latch_state=False,
+        run_downstream=False,
+        registry=reg,
+        workspace_root=tmp_path,
+    )
+    assert build_calls == ["build_all", "build_all"]
 

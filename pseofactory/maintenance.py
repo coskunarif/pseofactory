@@ -16042,6 +16042,7 @@ def reflect_and_recompile_all_assets(
                 "gainhelm/interactive_calculator.py",
                 "lienbond/builder.py",
                 "lienbond/cli.py",
+                "lienbond/_pseo_substrate/pseofactory/compiler.py",
             )
         )
         if (
@@ -17627,6 +17628,7 @@ def reflect_and_recompile_all_assets(
         except Exception:
             callout_mismatch_count = 0
 
+        force_lienbond_build = bool(force and getattr(adapter, "property_id", None) == "lienbond")
         pre_retro_ran = False
         pre_retrofitted_count = 0
         if (
@@ -17634,6 +17636,7 @@ def reflect_and_recompile_all_assets(
             and (adapter.dist_dir / "index.html").is_file()
             and not is_live_repo_blocked
             and not source_sync_changed
+            and not force_lienbond_build
             and (stale_mechanic_count > 0 or callout_mismatch_count > 0 or edge_functions_updated or force)
         ):
             try:
@@ -17694,6 +17697,7 @@ def reflect_and_recompile_all_assets(
             should_run_full_build = (
                 has_structural_drift
                 or bool(source_sync_changed)
+                or force_lienbond_build
                 or (topical_reconciliation_changed and not has_existing_compiled_dist)
                 or not isinstance(adapter, SubprocessPropertyAdapter)
             )

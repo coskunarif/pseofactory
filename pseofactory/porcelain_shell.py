@@ -1926,9 +1926,15 @@ details.faq-accordion > summary::-webkit-details-marker {{
 }}
 
 .calc-hub-subtitle,
-.calc-column-title,
-.calc-panel-title {{
+.calc-column-title {{
   font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}}
+
+.calc-panel-title {{
+  font-size: 1.1875rem;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0 0 0.5rem 0;
