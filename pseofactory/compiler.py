@@ -4142,7 +4142,11 @@ testpaths = ["tests"]
         encoding="utf-8",
     )
     (root / ".gitignore").write_text(
-        "__pycache__/\n*.py[cod]\n*$py.class\n.pytest_cache/\n*.egg-info/\n.venv/\n.env\n.wrangler/\n.agy/\n.indexing_intent_wal.jsonl\n",
+        (
+            "__pycache__/\n*.py[cod]\n*$py.class\n.pytest_cache/\n*.egg-info/\n"
+            ".venv/\n.env\n.wrangler/\n.agy/\n.indexing_intent_wal.jsonl\n"
+            "/syndication/\n/dist/syndication/\ndist/**/*.tmp\ndist/**/*.orig\ndist/**/*.backup\n"
+        ),
         encoding="utf-8",
     )
     (pkg_dir / "__init__.py").write_text(
@@ -4416,6 +4420,7 @@ jobs:
             p
             for p in dist.glob("**/*")
             if p.is_file()
+            and "syndication" not in p.relative_to(dist).parts
             and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
             and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
         )

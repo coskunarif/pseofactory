@@ -232,6 +232,7 @@ def compute_dist_lock_metrics(dist_dir: Union[str, Path]) -> Tuple[str, int]:
         p
         for p in d_root.glob("**/*")
         if p.is_file()
+        and "syndication" not in p.relative_to(d_root).parts
         and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
         and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
     )
@@ -295,6 +296,8 @@ def write_substrate_lock(
             }
             for html_f in sorted(eff_dist.rglob("*.html")):
                 if not html_f.is_file() or html_f.name.startswith("."):
+                    continue
+                if "syndication" in html_f.relative_to(eff_dist).parts:
                     continue
                 rel_hf = html_f.relative_to(eff_dist).as_posix()
                 try:
@@ -449,6 +452,7 @@ def write_substrate_lock(
                 p
                 for p in eff_dist.glob("**/*")
                 if p.is_file()
+                and "syndication" not in p.relative_to(eff_dist).parts
                 and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
                 and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
             )
@@ -592,6 +596,7 @@ def verify_all_tenants_aligned_for_latch(
                             f"dist/{p.relative_to(dist_dir).as_posix()}"
                             for p in sorted(dist_dir.glob("**/*"))
                             if p.is_file()
+                            and "syndication" not in p.relative_to(dist_dir).parts
                             and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
                             and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
                         ]

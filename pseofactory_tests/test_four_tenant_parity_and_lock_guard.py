@@ -168,8 +168,11 @@ def test_recompute_tenant_lock_enforces_visual_primitive_and_quick_unlock_parity
     assert ok is True
 
     gi_txt = (repo_dir / ".gitignore").read_text(encoding="utf-8")
-    assert "syndication/" in gi_txt
-    assert "dist/syndication/" in gi_txt
+    gi_lines = gi_txt.splitlines()
+    assert "/syndication/" in gi_lines
+    assert "/dist/syndication/" in gi_lines
+    assert "syndication/" not in gi_lines
+    assert "dist/syndication/" not in gi_lines
 
     healed_html = index_f.read_text(encoding="utf-8")
     assert "2027 2027 " not in healed_html

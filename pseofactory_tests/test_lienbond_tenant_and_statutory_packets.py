@@ -842,3 +842,209 @@ def test_lienbond_synced_ci_workflow_installs_pytest_and_beautifulsoup4(tmp_path
     assert "beautifulsoup4" in install_runs[0]
     assert "python3 -m lienbond.cli audit" in ci_text
 
+
+def test_lienbond_git_archive_ci_audit_tracks_substrate_syndication_and_ignores_top_level(
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies anchored /syndication/ and /dist/syndication/ rules in .gitignore keep
+    repo-root syndication artifacts untracked while tracking
+    lienbond/_pseo_substrate/pseofactory/syndication/__init__.py in HEAD so an
+    isolated git archive HEAD checkout passes lienbond.cli audit cleanly.
+    """
+    import io
+    import json
+    import os
+    import subprocess
+    import sys
+    import tarfile
+    from pseofactory.drift import write_substrate_lock
+    from pseofactory.gitops import GitOpsCoordinator, sync_tenant_test_isolation_guards
+    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
+
+    lb_repo = tmp_path / "lienbond"
+    lb_repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-b", "main", str(lb_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(lb_repo), "config", "user.email", "ci@lienbond.com"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(lb_repo), "config", "user.name", "LienBond CI"], check=True, capture_output=True)
+
+    estate_res = compile_lienbond_estate(lb_repo, run_retrofit=True)
+    assert estate_res["status"] == "PASS"
+    sync_tenant_porcelain_shell(lb_repo, "lienbond")
+
+    (lb_repo / "syndication").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "syndication" / "pack.json").write_text('{"pack": "ignored"}\n', encoding="utf-8")
+    (lb_repo / "dist" / "syndication").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "dist" / "syndication" / "secret.html").write_text(
+        "<!DOCTYPE html><html><body>Ignored Syndication</body></html>\n",
+        encoding="utf-8",
+    )
+
+    sync_tenant_test_isolation_guards(lb_repo, property_id="lienbond")
+    gi_lines = (lb_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "/syndication/" in gi_lines
+    assert "/dist/syndication/" in gi_lines
+    assert "syndication/" not in gi_lines
+    assert "dist/syndication/" not in gi_lines
+
+    write_substrate_lock(lb_repo, property_id="lienbond", sync_ledgers=True)
+    coord = GitOpsCoordinator(lb_repo, branch="main")
+    coord.stage_tracked()
+    subprocess.run(
+        ["git", "-C", str(lb_repo), "commit", "-m", "chore(lienbond): stage compiled estate and substrate"],
+        check=True,
+        capture_output=True,
+    )
+
+    head_files = set(
+        subprocess.check_output(
+            ["git", "-C", str(lb_repo), "ls-tree", "-r", "--name-only", "HEAD"],
+            text=True,
+        ).splitlines()
+    )
+    tracked_files = set(
+        subprocess.check_output(
+            ["git", "-C", str(lb_repo), "ls-files"],
+            text=True,
+        ).splitlines()
+    )
+    assert "syndication/pack.json" not in head_files
+    assert "syndication/pack.json" not in tracked_files
+    assert "dist/syndication/secret.html" not in head_files
+    assert "dist/syndication/secret.html" not in tracked_files
+    assert "lienbond/_pseo_substrate/pseofactory/syndication/__init__.py" in head_files
+
+    archive_proc = subprocess.run(
+        ["git", "-C", str(lb_repo), "archive", "--format=tar", "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    ci_checkout = tmp_path / "ci_checkout"
+    ci_checkout.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(archive_proc.stdout), mode="r:*") as tf:
+        if sys.version_info >= (3, 12):
+            tf.extractall(ci_checkout, filter="data")
+        else:
+            tf.extractall(ci_checkout)
+
+    assert not (ci_checkout / ".git").exists()
+    assert not (ci_checkout / ".agy").exists()
+    assert not (ci_checkout / "syndication" / "pack.json").exists()
+    assert not (ci_checkout / "dist" / "syndication" / "secret.html").exists()
+    assert (ci_checkout / "lienbond" / "_pseo_substrate" / "pseofactory" / "syndication" / "__init__.py").is_file()
+
+    clean_env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "WORKSPACE_ROOT": ".",
+        "PYTHONPATH": f".{os.pathsep}lienbond/_pseo_substrate",
+    }
+    cli_proc = subprocess.run(
+        [sys.executable, "-m", "lienbond.cli", "audit"],
+        cwd=str(ci_checkout),
+        env=clean_env,
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+    assert cli_proc.returncode == 0, (
+        f"Expected rc == 0 for lienbond.cli audit, got {cli_proc.returncode}; "
+        f"stdout={cli_proc.stdout!r} stderr={cli_proc.stderr!r}"
+    )
+    audit_payload = json.loads(cli_proc.stdout)
+    assert audit_payload["status"] == "PASS"
+    assert audit_payload["drifted_assets_count"] == 0
+    assert audit_payload["total_assets_checked"] > 0
+
+    bs4_probe = (
+        "import contextlib, io, json, sys\n"
+        "from pathlib import Path\n"
+        "sys.modules['bs4'] = None\n"
+        "import pseofactory\n"
+        "import pseofactory.syndication\n"
+        "from pseofactory.drift import detect_engine_drift\n"
+        "import lienbond.cli as lb_cli\n"
+        "assert '_pseo_substrate' in Path(pseofactory.__file__).resolve().parts, pseofactory.__file__\n"
+        "assert '_pseo_substrate' in Path(pseofactory.syndication.__file__).resolve().parts, pseofactory.syndication.__file__\n"
+        "drift_res = detect_engine_drift(Path('.agy/engine_hash.json'))\n"
+        "buf = io.StringIO()\n"
+        "with contextlib.redirect_stdout(buf):\n"
+        "    rc = lb_cli.main(['audit'])\n"
+        "print(json.dumps({'rc': rc, 'drift': drift_res, 'audit': json.loads(buf.getvalue())}))\n"
+    )
+    bs4_proc = subprocess.run(
+        [sys.executable, "-c", bs4_probe],
+        cwd=str(ci_checkout),
+        env=clean_env,
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+    assert bs4_proc.returncode == 0, f"bs4=None probe failed: stderr={bs4_proc.stderr!r}"
+    bs4_res = json.loads(bs4_proc.stdout.strip().splitlines()[-1])
+    assert bs4_res["rc"] == 0
+    assert bs4_res["drift"]["status"] == "ALIGNED"
+    assert bs4_res["drift"]["drift_detected"] is False
+    assert bs4_res["audit"]["status"] == "PASS"
+    assert bs4_res["audit"]["drifted_assets_count"] == 0
+
+
+def test_lienbond_upgrades_legacy_gitignore_and_recompute_stages_substrate_syndication(
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies sync_tenant_test_isolation_guards upgrades legacy bare syndication/ and
+    dist/syndication/ entries to anchored /syndication/ and /dist/syndication/, and
+    recompute_and_amend_tenant_lock_and_ledger stages _pseo_substrate/pseofactory/**/*.py
+    without staging ignored top-level syndication files.
+    """
+    import subprocess
+    from pseofactory.gitops import (
+        recompute_and_amend_tenant_lock_and_ledger,
+        sync_tenant_test_isolation_guards,
+    )
+    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
+
+    lb_repo = tmp_path / "lienbond_legacy"
+    lb_repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-b", "main", str(lb_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(lb_repo), "config", "user.email", "ci@lienbond.com"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(lb_repo), "config", "user.name", "LienBond CI"], check=True, capture_output=True)
+
+    estate_res = compile_lienbond_estate(lb_repo, run_retrofit=False)
+    assert estate_res["status"] == "PASS"
+    sync_tenant_porcelain_shell(lb_repo, "lienbond")
+
+    (lb_repo / ".gitignore").write_text(
+        "__pycache__/\n*.py[cod]\n.agy/\ndist/\nsyndication/\ndist/syndication/\n",
+        encoding="utf-8",
+    )
+    (lb_repo / "syndication").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "syndication" / "pack.json").write_text('{"pack": "ignored"}\n', encoding="utf-8")
+    (lb_repo / "dist" / "syndication").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "dist" / "syndication" / "secret.html").write_text("<html>ignored</html>\n", encoding="utf-8")
+
+    subprocess.run(["git", "-C", str(lb_repo), "add", ".gitignore", ".pseofactory.json", "substrate_lock.json"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(lb_repo), "commit", "-m", "init legacy lienbond"], check=True, capture_output=True)
+
+    sync_tenant_test_isolation_guards(lb_repo, property_id="lienbond")
+    gi_lines = (lb_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert gi_lines.count("/syndication/") == 1
+    assert gi_lines.count("/dist/syndication/") == 1
+    assert "syndication/" not in gi_lines
+    assert "dist/syndication/" not in gi_lines
+    assert "dist/" not in gi_lines
+
+    ok = recompute_and_amend_tenant_lock_and_ledger(lb_repo, property_id="lienbond", amend=False)
+    assert ok is True
+
+    staged_files = set(
+        subprocess.check_output(
+            ["git", "-C", str(lb_repo), "diff", "--cached", "--name-only"],
+            text=True,
+        ).splitlines()
+    )
+    assert "lienbond/_pseo_substrate/pseofactory/syndication/__init__.py" in staged_files
+    assert "lienbond/_pseo_substrate/pseofactory/compiler.py" in staged_files
+    assert "syndication/pack.json" not in staged_files
+    assert "dist/syndication/secret.html" not in staged_files
+

@@ -527,6 +527,46 @@ def recompute_and_amend_tenant_lock_and_ledger(
                     files_to_stage.append(rel_sf)
             except Exception:
                 pass
+        sub_pkg_dirs: List[Path] = []
+        seen_sub_dirs: Set[Path] = set()
+        for cand_pkg in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+            cand_sub_dir = repo / cand_pkg / "_pseo_substrate" / "pseofactory"
+            if cand_sub_dir.is_dir() and cand_sub_dir not in seen_sub_dirs:
+                seen_sub_dirs.add(cand_sub_dir)
+                sub_pkg_dirs.append(cand_sub_dir)
+        for cand_sub_dir in sorted(repo.glob("*/_pseo_substrate/pseofactory")):
+            if cand_sub_dir.is_dir() and cand_sub_dir not in seen_sub_dirs:
+                seen_sub_dirs.add(cand_sub_dir)
+                sub_pkg_dirs.append(cand_sub_dir)
+        for cand_sub_dir in sub_pkg_dirs:
+            sub_root_init = cand_sub_dir.parent / "__init__.py"
+            if sub_root_init.is_file():
+                rel_sri = sub_root_init.relative_to(repo).as_posix()
+                if rel_sri not in files_to_stage:
+                    files_to_stage.append(rel_sri)
+            for py_sub in sorted(cand_sub_dir.rglob("*.py")):
+                if "__pycache__" in py_sub.parts or py_sub.name.endswith(".pyc"):
+                    continue
+                rel_sub = py_sub.relative_to(repo).as_posix()
+                if rel_sub not in files_to_stage:
+                    files_to_stage.append(rel_sub)
+            ls_sub = subprocess.run(
+                ["git", "-C", str(repo), "ls-files", cand_sub_dir.relative_to(repo).as_posix()],
+                env=eff_env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if ls_sub.returncode == 0 and ls_sub.stdout.strip():
+                for ln_sub in ls_sub.stdout.splitlines():
+                    rel_tracked_sub = ln_sub.strip()
+                    if (
+                        rel_tracked_sub
+                        and not (repo / rel_tracked_sub).exists()
+                        and rel_tracked_sub not in files_to_stage
+                    ):
+                        files_to_stage.append(rel_tracked_sub)
         for cand_rel in (".agy/asset_ledger.json", ".agy/engine_hash.json", "freshness_audit_report.json"):
             if (repo / cand_rel).is_file():
                 ls_res = subprocess.run(
@@ -859,6 +899,8 @@ class GitOpsCoordinator:
         ":!dist",
         ":!syndication/*",
         ":!syndication",
+        ":!dist/syndication/*",
+        ":!dist/syndication",
         ":!*.db",
         ":!*.db-shm",
         ":!*.db-wal",
@@ -5138,7 +5180,7 @@ def sync_tenant_test_isolation_guards(
         except Exception:
             pass
 
-    # 4b. Ensure compiled tenant .gitignore tracks dist/ (while ignoring dist/syndication/ and temp artifacts)
+    # 4b. Ensure compiled tenant .gitignore tracks dist/ (while ignoring /syndication/, /dist/syndication/, and temp artifacts)
     gitignore_path = repo / ".gitignore"
     if gitignore_path.is_file() and (
         (repo / ".pseofactory.json").is_file() or (repo / "substrate_lock.json").is_file()
@@ -5147,16 +5189,31 @@ def sync_tenant_test_isolation_guards(
             gi_src = gitignore_path.read_text(encoding="utf-8")
             gi_lines = gi_src.splitlines()
             new_gi_lines: List[str] = []
-            removed_dist = False
+            seen_anchored: Set[str] = set()
             for ln in gi_lines:
-                if ln.strip() in ("dist/", "dist", "/dist/", "/dist"):
-                    removed_dist = True
+                stripped_ln = ln.strip()
+                if stripped_ln in ("dist/", "dist", "/dist/", "/dist"):
+                    continue
+                if stripped_ln in ("syndication/", "syndication", "/syndication/", "/syndication"):
+                    if "/syndication/" not in seen_anchored:
+                        new_gi_lines.append("/syndication/")
+                        seen_anchored.add("/syndication/")
+                    continue
+                if stripped_ln in (
+                    "dist/syndication/",
+                    "dist/syndication",
+                    "/dist/syndication/",
+                    "/dist/syndication",
+                ):
+                    if "/dist/syndication/" not in seen_anchored:
+                        new_gi_lines.append("/dist/syndication/")
+                        seen_anchored.add("/dist/syndication/")
                     continue
                 new_gi_lines.append(ln)
             existing_gi_stripped = {ln.strip() for ln in new_gi_lines}
             for extra_ignore in (
-                "syndication/",
-                "dist/syndication/",
+                "/syndication/",
+                "/dist/syndication/",
                 "dist/**/*.tmp",
                 "dist/**/*.orig",
                 "dist/**/*.backup",

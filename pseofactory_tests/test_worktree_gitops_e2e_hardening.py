@@ -720,7 +720,11 @@ def test_new_dist_assets_staged_and_verify_all_tenants_aligned_rejects_untracked
     staged = coord.stage_tracked(px_repo)
     assert "dist/manifests/new-spoke.json" in staged
     assert "dist/tools/new-spoke/index.html" in staged
-    assert "dist/" not in (px_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    px_gi_lines = (px_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "dist/" not in px_gi_lines
+    assert "/syndication/" in px_gi_lines
+    assert "/dist/syndication/" in px_gi_lines
+    assert "syndication/" not in px_gi_lines
 
     subprocess.run(
         ["git", "-C", str(px_repo), "commit", "-m", "fix(prexvo): stage new dist assets"],
