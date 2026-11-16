@@ -667,12 +667,33 @@ def detect_engine_drift(
     s_path = Path(resolved_target)
     recorded_hash: Optional[str] = None
     recorded_base_dirs: Optional[List[str]] = None
+    in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
     if s_path.exists():
         try:
             from pseofactory.supervisor import AtomicStateLedger
             data = AtomicStateLedger.load_json(s_path)
             if isinstance(data, dict):
-                recorded_hash = data.get("engine_hash") or data.get("substrate_hash")
+                if in_synced_substrate and data.get("synced_substrate_hash"):
+                    recorded_hash = str(data["synced_substrate_hash"])
+                else:
+                    recorded_hash = data.get("engine_hash") or data.get("substrate_hash")
+                if (
+                    in_synced_substrate
+                    and not data.get("synced_substrate_hash")
+                    and recorded_hash
+                    and s_path.name == "engine_hash.json"
+                    and s_path.parent.name == ".agy"
+                ):
+                    cand_repo = s_path.resolve().parent.parent
+                    sibling_lock = cand_repo / "substrate_lock.json"
+                    if sibling_lock.is_file():
+                        lock_data = json.loads(sibling_lock.read_text(encoding="utf-8"))
+                        if (
+                            isinstance(lock_data, dict)
+                            and lock_data.get("engine_hash") == recorded_hash
+                            and lock_data.get("synced_substrate_hash")
+                        ):
+                            recorded_hash = str(lock_data["synced_substrate_hash"])
                 raw_bdirs = data.get("base_dirs")
                 if isinstance(raw_bdirs, list) and all(isinstance(x, str) and Path(x).exists() for x in raw_bdirs):
                     recorded_base_dirs = raw_bdirs
@@ -693,7 +714,6 @@ def detect_engine_drift(
                         live_fp, _ = compute_dist_lock_metrics(cand_dist)
                         dist_ok = (live_fp == lock_data.get("dist_fingerprint"))
                     if dist_ok:
-                        in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
                         if in_synced_substrate and lock_data.get("synced_substrate_hash"):
                             recorded_hash = str(lock_data["synced_substrate_hash"])
                         else:

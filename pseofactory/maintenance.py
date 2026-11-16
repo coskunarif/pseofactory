@@ -3392,7 +3392,11 @@ class AssetIntegrityEvaluator:
                     try:
                         lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
                         expected_eng = compute_engine_hash(base_dirs=b_dirs)
-                        if (
+                        in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
+                        if in_synced_substrate and lock_data.get("synced_substrate_hash"):
+                            if lock_data.get("synced_substrate_hash") != expected_eng:
+                                engine_drifted = True
+                        elif (
                             lock_data.get("engine_hash") != expected_eng
                             or lock_data.get("substrate_hash") != expected_eng
                         ):

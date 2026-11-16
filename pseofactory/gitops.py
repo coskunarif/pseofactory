@@ -5568,7 +5568,7 @@ def sync_tenant_test_isolation_guards(
                     "        with:\n"
                     "          python-version: '3.12'\n\n"
                     "      - name: Install Test Runner\n"
-                    "        run: pip install pytest\n\n"
+                    "        run: pip install pytest beautifulsoup4\n\n"
                     "      - name: Run LienBond Estate Tests\n"
                     "        run: pytest -q tests/\n\n"
                     "      - name: Verify LienBond Static Distribution & Audit\n"

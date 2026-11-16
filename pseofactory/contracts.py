@@ -918,6 +918,136 @@ class StageResult:
         }
 
 
+_VOID_HTML_TAGS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+
+
+class _FallbackHTMLNode:
+    """Lightweight stdlib HTML node matching the BeautifulSoup tag interface used by contracts."""
+
+    def __init__(self, name: Optional[str], attrs: Optional[List[Tuple[str, Optional[str]]]] = None):
+        self.name: Optional[str] = name.lower() if name else None
+        parsed_attrs: Dict[str, Any] = {}
+        for raw_key, raw_val in (attrs or []):
+            key = raw_key.lower()
+            if key == "class":
+                parsed_attrs["class"] = [tok for tok in (raw_val or "").split() if tok]
+            else:
+                parsed_attrs[key] = "" if raw_val is None else raw_val
+        self.attrs: Dict[str, Any] = parsed_attrs
+        self._contents: List[Union[str, "_FallbackHTMLNode"]] = []
+        self.children: List["_FallbackHTMLNode"] = []
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.attrs.get(key.lower(), default)
+
+    def get_text(self, separator: str = "", strip: bool = False) -> str:
+        parts: List[str] = []
+
+        def _collect(node: "_FallbackHTMLNode") -> None:
+            for item in node._contents:
+                if isinstance(item, str):
+                    chunk = item.strip() if strip else item
+                    if not strip or chunk:
+                        parts.append(chunk)
+                else:
+                    _collect(item)
+
+        _collect(self)
+        return separator.join(parts)
+
+    def find_all(self, name: Any = None, recursive: bool = True) -> List["_FallbackHTMLNode"]:
+        def _matches(node: "_FallbackHTMLNode") -> bool:
+            if name is None:
+                return True
+            if callable(name):
+                return bool(name(node))
+            if isinstance(name, str):
+                return node.name == name.lower()
+            if isinstance(name, re.Pattern):
+                return bool(node.name and name.search(node.name))
+            if isinstance(name, (list, tuple, set, frozenset)):
+                allowed = {str(item).lower() for item in name}
+                return node.name in allowed
+            return False
+
+        matched: List["_FallbackHTMLNode"] = []
+
+        def _walk(node: "_FallbackHTMLNode") -> None:
+            for child in node.children:
+                if _matches(child):
+                    matched.append(child)
+                if recursive:
+                    _walk(child)
+
+        _walk(self)
+        return matched
+
+
+class _FallbackHTMLTreeParser(HTMLParser):
+    """Stdlib HTMLParser tree builder used when bs4 is unavailable."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = _FallbackHTMLNode(name=None)
+        self._stack: List[_FallbackHTMLNode] = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        node = _FallbackHTMLNode(name=tag, attrs=attrs)
+        parent = self._stack[-1]
+        parent._contents.append(node)
+        parent.children.append(node)
+        if node.name not in _VOID_HTML_TAGS:
+            self._stack.append(node)
+
+    def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        node = _FallbackHTMLNode(name=tag, attrs=attrs)
+        parent = self._stack[-1]
+        parent._contents.append(node)
+        parent.children.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in _VOID_HTML_TAGS:
+            return
+        for idx in range(len(self._stack) - 1, 0, -1):
+            if self._stack[idx].name == tag_lower:
+                del self._stack[idx:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self._stack[-1]._contents.append(data)
+
+
+def _parse_html_soup(raw_html: str) -> Any:
+    """Parses HTML via BeautifulSoup when installed, falling back to stdlib HTMLParser."""
+    try:
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(raw_html, "html.parser")
+    except ImportError:
+        parser = _FallbackHTMLTreeParser()
+        parser.feed(raw_html)
+        parser.close()
+        return parser.root
+
+
 def assert_comparison_layout_contracts(html: str) -> bool:
     """
     Validates Google AI Mode Layout Container contracts on HTML:
@@ -929,8 +1059,7 @@ def assert_comparison_layout_contracts(html: str) -> bool:
     """
     assert_no_forbidden_dashes(html, context="HTML layout content")
     try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, "html.parser")
+        soup = _parse_html_soup(html)
     except Exception as ex:
         raise ValueError(f"Failed to parse HTML for comparison layout check: {ex}") from ex
 
@@ -1010,8 +1139,7 @@ def assert_multi_scale_semantic_compression(content: str, entity_name: str, bran
 
     raw_paras = [p.strip() for p in re.split(r"\n\s*\n+", content) if p.strip()]
     if len(raw_paras) <= 1 and "<p" in content.lower():
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(content, "html.parser")
+        soup = _parse_html_soup(content)
         p_tags = soup.find_all("p")
         if p_tags:
             raw_paras = [p.get_text(strip=True) for p in p_tags if p.get_text(strip=True)]

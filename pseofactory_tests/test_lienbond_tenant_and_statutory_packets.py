@@ -562,3 +562,283 @@ def test_reflect_recompiles_lienbond_when_substrate_compiler_syncs(tmp_path: Pat
     )
     assert build_calls == ["build_all", "build_all"]
 
+
+def _run_lienbond_substrate_audit_subprocess(lb_repo: Path) -> dict:
+    """Runs AssetIntegrityEvaluator(enforce_master_seo=True) and detect_engine_drift from _pseo_substrate."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    sub_root = lb_repo / "lienbond" / "_pseo_substrate"
+    script = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "sys.modules['bs4'] = None\n"
+        "import pseofactory\n"
+        "from pseofactory.drift import detect_engine_drift\n"
+        "from pseofactory.maintenance import AssetIntegrityEvaluator, SubprocessPropertyAdapter\n"
+        "repo = Path.cwd().resolve()\n"
+        "assert '_pseo_substrate' in Path(pseofactory.__file__).resolve().parts, pseofactory.__file__\n"
+        "drift_res = detect_engine_drift(repo / '.agy' / 'engine_hash.json')\n"
+        "adp = SubprocessPropertyAdapter(\n"
+        "    property_id='lienbond',\n"
+        "    brand_name='LienBond',\n"
+        "    domain='lienbond.com',\n"
+        "    canonical_base='https://lienbond.com',\n"
+        "    dist_dir=repo / 'dist',\n"
+        "    repo_path=repo,\n"
+        ")\n"
+        "report = AssetIntegrityEvaluator(enforce_master_seo=True).audit_all(adp)\n"
+        "reasons = []\n"
+        "for rec in report.drifted_assets:\n"
+        "    reasons.extend([r.value if hasattr(r, 'value') else str(r) for r in rec.reasons])\n"
+        "print(json.dumps({\n"
+        "    'pseofactory_file': pseofactory.__file__,\n"
+        "    'drift': drift_res,\n"
+        "    'status': report.status,\n"
+        "    'total_assets_checked': report.total_assets_checked,\n"
+        "    'drifted_assets_count': report.drifted_assets_count,\n"
+        "    'reasons': sorted(set(reasons)),\n"
+        "}))\n"
+    )
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "PYTHONPATH": f"{lb_repo}{os.pathsep}{sub_root}",
+        "WORKSPACE_ROOT": ".",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(lb_repo),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_lienbond_clean_ci_and_local_substrate_audit_drift_parity(tmp_path: Path) -> None:
+    """
+    Verifies _pseo_substrate audit alignment and tamper detection for both:
+    (a) clean CI checkouts without .agy/ (using synced_substrate_hash vs full engine_hash), and
+    (b) local checkouts with .agy/engine_hash.json alongside substrate_lock.json.
+    """
+    import json
+    import shutil
+    from pseofactory.drift import record_engine_hash, write_substrate_lock
+    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
+
+    lb_repo = tmp_path / "lienbond"
+    estate_res = compile_lienbond_estate(lb_repo, run_retrofit=True)
+    assert estate_res["status"] == "PASS"
+    sync_tenant_porcelain_shell(lb_repo, "lienbond")
+    write_substrate_lock(lb_repo, property_id="lienbond", sync_ledgers=False)
+
+    lock_path = lb_repo / "substrate_lock.json"
+    orig_lock_text = lock_path.read_text(encoding="utf-8")
+    lock_data = json.loads(orig_lock_text)
+    assert lock_data["engine_hash"] != lock_data["synced_substrate_hash"]
+
+    # Case (a): Clean CI checkout without .agy/ passes enforce_master_seo=True and bs4=None
+    shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
+    clean_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+    assert "_pseo_substrate" in clean_res["pseofactory_file"]
+    assert clean_res["drift"]["status"] == "ALIGNED"
+    assert clean_res["drift"]["drift_detected"] is False
+    assert clean_res["status"] == "PASS"
+    assert clean_res["drifted_assets_count"] == 0
+
+    # Case (a.2): Corrupting synced_substrate_hash in substrate_lock.json fails with ENGINE_HASH_DRIFT
+    corrupted_lock = dict(lock_data)
+    corrupted_lock["synced_substrate_hash"] = "f" * 64
+    lock_path.write_text(json.dumps(corrupted_lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    corrupt_lock_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+    assert corrupt_lock_res["drift"]["drift_detected"] is True
+    assert corrupt_lock_res["drifted_assets_count"] > 0
+    assert "ENGINE_HASH_DRIFT" in corrupt_lock_res["reasons"]
+    lock_path.write_text(orig_lock_text, encoding="utf-8")
+
+    # Case (a.3): Editing a synced _pseo_substrate module fails with ENGINE_HASH_DRIFT
+    sub_contracts = lb_repo / "lienbond" / "_pseo_substrate" / "pseofactory" / "contracts.py"
+    orig_contracts = sub_contracts.read_text(encoding="utf-8")
+    sub_contracts.write_text(orig_contracts + "\n# tampered substrate check\n", encoding="utf-8")
+    tamper_sub_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+    assert tamper_sub_res["drift"]["drift_detected"] is True
+    assert tamper_sub_res["drifted_assets_count"] > 0
+    assert "ENGINE_HASH_DRIFT" in tamper_sub_res["reasons"]
+    sub_contracts.write_text(orig_contracts, encoding="utf-8")
+
+    # Case (b): Local checkout WITH .agy/engine_hash.json (full hash) + matching substrate_lock.json passes
+    agy_eh_path = lb_repo / ".agy" / "engine_hash.json"
+    record_engine_hash(agy_eh_path, hash_value=lock_data["engine_hash"])
+    agy_eh_data = json.loads(agy_eh_path.read_text(encoding="utf-8"))
+    assert "synced_substrate_hash" not in agy_eh_data
+    assert agy_eh_data["engine_hash"] == lock_data["engine_hash"]
+
+    local_ok_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+    assert local_ok_res["drift"]["status"] == "ALIGNED"
+    assert local_ok_res["drift"]["drift_detected"] is False
+    assert local_ok_res["status"] == "PASS"
+    assert local_ok_res["drifted_assets_count"] == 0
+
+    # Case (b.2): Corrupting .agy/engine_hash.json fails closed with ENGINE_HASH_DRIFT
+    agy_eh_path.write_text(
+        json.dumps({"engine_hash": "0" * 64, "substrate_hash": "0" * 64}),
+        encoding="utf-8",
+    )
+    local_bad_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+    assert local_bad_res["drift"]["status"] == "DRIFT"
+    assert local_bad_res["drift"]["drift_detected"] is True
+    assert local_bad_res["drifted_assets_count"] > 0
+    assert "ENGINE_HASH_DRIFT" in local_bad_res["reasons"]
+
+
+def test_contracts_bs4_fallback_strict_when_bs4_unavailable(monkeypatch) -> None:
+    """
+    Verifies stdlib HTMLParser fallback when bs4 is unavailable preserves strict
+    layout homogeneity, minimum >=3 item threshold, and semantic compression assertions.
+    """
+    import sys
+    import pytest
+    from pseofactory.contracts import (
+        assert_comparison_layout_contracts,
+        assert_multi_scale_semantic_compression,
+    )
+
+    monkeypatch.setitem(sys.modules, "bs4", None)
+
+    valid_cards_html = (
+        '<div class="comparison-container">'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan A</div>'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan B</div>'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan C</div>'
+        "</div>"
+    )
+    err_msg: str | None = None
+    ok = False
+    try:
+        ok = assert_comparison_layout_contracts(valid_cards_html)
+    except (ValueError, ImportError) as exc:
+        err_msg = str(exc) or type(exc).__name__
+    assert err_msg is None, err_msg
+    assert ok is True
+
+    valid_carousel_html = (
+        "<carousel>"
+        '  <card data-entity-type="SuretyBondModel">Item 1</card>'
+        '  <card data-entity-type="SuretyBondModel">Item 2</card>'
+        '  <card data-entity-type="SuretyBondModel">Item 3</card>'
+        "</carousel>"
+    )
+    carousel_err: str | None = None
+    carousel_ok = False
+    try:
+        carousel_ok = assert_comparison_layout_contracts(valid_carousel_html)
+    except (ValueError, ImportError) as exc:
+        carousel_err = str(exc) or type(exc).__name__
+    assert carousel_err is None, carousel_err
+    assert carousel_ok is True
+
+    under_three_html = (
+        '<div class="comparison-container">'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan A</div>'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan B</div>'
+        "</div>"
+    )
+    with pytest.raises(ValueError, match="Minimum Asset Threshold violated"):
+        assert_comparison_layout_contracts(under_three_html)
+
+    under_three_direct_children = (
+        '<div class="comparison-container">'
+        "  <div>Direct A</div>"
+        "  <div>Direct B</div>"
+        "</div>"
+    )
+    with pytest.raises(ValueError, match="Minimum Asset Threshold violated"):
+        assert_comparison_layout_contracts(under_three_direct_children)
+
+    heterogeneous_html = (
+        '<div class="comparison-container">'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan A</div>'
+        '  <div class="card" data-entity-type="TaxCalculationModel">Plan B</div>'
+        '  <div class="card" data-entity-type="SuretyBondModel">Plan C</div>'
+        "</div>"
+    )
+    with pytest.raises(ValueError, match="Homogeneity Law violated"):
+        assert_comparison_layout_contracts(heterogeneous_html)
+
+    valid_p_html = (
+        "<p>LienBond calculates contractor surety bond rates under federal Miller Act rules. "
+        "The underwriting model evaluates credit tiers deterministically. "
+        "Contractors verify statutory bond limits before bidding.</p>"
+        "<p>SuretyCalculator models Miller Act performance bond tiers cleanly. "
+        "Each formula adheres to Treasury Circular 570 rules. "
+        "SuretyCalculator confirms fixed sliding scale premiums across states.</p>"
+    )
+    comp_err: str | None = None
+    comp_ok = False
+    try:
+        comp_ok = assert_multi_scale_semantic_compression(
+            valid_p_html,
+            entity_name="SuretyCalculator",
+            brand_name="LienBond",
+        )
+    except (ValueError, ImportError) as exc:
+        comp_err = str(exc) or type(exc).__name__
+    assert comp_err is None, comp_err
+    assert comp_ok is True
+
+    unanchored_p_html = (
+        "<p>This paragraph omits any reference to the required subject. "
+        "It states generic surety terms without proper entity anchoring. "
+        "Therefore the compression verifier must reject it.</p>"
+    )
+    with pytest.raises(ValueError, match="Micro entity anchoring violated"):
+        assert_multi_scale_semantic_compression(
+            unanchored_p_html,
+            entity_name="SuretyCalculator",
+            brand_name="LienBond",
+        )
+
+    wrong_sentence_count_html = (
+        "<p>LienBond calculates contractor surety bond rates under federal law. "
+        "Only two sentences appear here.</p>"
+    )
+    with pytest.raises(ValueError, match="Meso atomic structure violated"):
+        assert_multi_scale_semantic_compression(
+            wrong_sentence_count_html,
+            entity_name="SuretyCalculator",
+            brand_name="LienBond",
+        )
+
+
+def test_lienbond_synced_ci_workflow_installs_pytest_and_beautifulsoup4(tmp_path: Path) -> None:
+    """Verifies sync_tenant_test_isolation_guards emits pytest and beautifulsoup4 in LienBond ci.yml."""
+    import yaml
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+    lb_repo = tmp_path / "lienbond"
+    (lb_repo / "lienbond").mkdir(parents=True)
+    (lb_repo / ".pseofactory.json").write_text('{"property_id": "lienbond"}\n', encoding="utf-8")
+    workflows_dir = lb_repo / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "ci.yml").write_text("name: stale\n", encoding="utf-8")
+
+    sync_tenant_test_isolation_guards(lb_repo, property_id="lienbond")
+    ci_text = (workflows_dir / "ci.yml").read_text(encoding="utf-8")
+    assert "\u2014" not in ci_text
+    assert "\u2013" not in ci_text
+
+    parsed = yaml.safe_load(ci_text)
+    install_runs = [
+        step.get("run", "")
+        for step in parsed["jobs"]["verify"]["steps"]
+        if step.get("name") == "Install Test Runner"
+    ]
+    assert len(install_runs) == 1
+    assert "pytest" in install_runs[0]
+    assert "beautifulsoup4" in install_runs[0]
+    assert "python3 -m lienbond.cli audit" in ci_text
+
