@@ -75,7 +75,8 @@ class ProfitHelmBrowserAdapter(TenantBrowserAdapter):
 
     @property
     def dist_dir(self) -> Path:
-        return Path("/home/ubuntuadmin/projects/profithelm-platform/dist")
+        root = Path(os.environ.get("PSEOFACTORY_WORKSPACE_ROOT") or "/home/ubuntuadmin/projects")
+        return root / "profithelm-platform" / "dist"
 
     @property
     def canonical_domain(self) -> str:
@@ -125,7 +126,8 @@ class PrexvoBrowserAdapter(TenantBrowserAdapter):
 
     @property
     def dist_dir(self) -> Path:
-        return Path("/home/ubuntuadmin/projects/prexvo/dist")
+        root = Path(os.environ.get("PSEOFACTORY_WORKSPACE_ROOT") or "/home/ubuntuadmin/projects")
+        return root / "prexvo" / "dist"
 
     @property
     def canonical_domain(self) -> str:
@@ -185,7 +187,8 @@ class GainHelmBrowserAdapter(TenantBrowserAdapter):
 
     @property
     def dist_dir(self) -> Path:
-        return Path("/home/ubuntuadmin/projects/gainhelm/dist")
+        root = Path(os.environ.get("PSEOFACTORY_WORKSPACE_ROOT") or "/home/ubuntuadmin/projects")
+        return root / "gainhelm" / "dist"
 
     @property
     def canonical_domain(self) -> str:
@@ -235,7 +238,8 @@ class LienBondBrowserAdapter(TenantBrowserAdapter):
 
     @property
     def dist_dir(self) -> Path:
-        return Path("/home/ubuntuadmin/projects/lienbond/dist")
+        root = Path(os.environ.get("PSEOFACTORY_WORKSPACE_ROOT") or "/home/ubuntuadmin/projects")
+        return root / "lienbond" / "dist"
 
     @property
     def canonical_domain(self) -> str:
@@ -565,6 +569,94 @@ class UnifiedBrowserAuditor:
         return violations;
     })()"""
 
+    BLOCKED_EXTERNAL_URL_PATTERNS: List[str] = [
+        "*googletagmanager.com*",
+        "*google-analytics.com*",
+        "*fonts.googleapis.com*",
+        "*fonts.gstatic.com*",
+        "*cloudflareinsights.com*",
+        "*unpkg.com*",
+        "*jsdelivr.net*",
+        "*cdnjs.cloudflare.com*",
+        "*doubleclick.net*",
+        "*facebook.net*",
+        "*plausible.io*",
+    ]
+
+    @staticmethod
+    def _build_broken_assets_js(
+        check_meta_assets: bool = False,
+        check_script_assets: bool = True,
+    ) -> str:
+        flag = "true" if check_meta_assets else "false"
+        script_flag = "true" if check_script_assets else "false"
+        return f"""(async () => {{
+        const broken = [];
+        document.querySelectorAll('img').forEach(img => {{
+            if (!img.complete || img.naturalWidth === 0) {{
+                broken.push({{ type: 'broken_image', src: img.src }});
+            }}
+        }});
+        const toLocalUrl = (raw) => {{
+            const s = String(raw || '').trim();
+            if (!s || s.startsWith('data:') || s.startsWith('blob:')) return null;
+            if (s.startsWith('/')) return window.location.origin + s;
+            try {{
+                const u = new URL(s, window.location.href);
+                if (u.origin === window.location.origin) return u.href;
+                if ({flag} && /^https?:\\/\\/(?:www\\.)?(?:profithelm|prexvo|gainhelm|lienbond)\\.com$/i.test(u.origin)) {{
+                    return window.location.origin + u.pathname + u.search;
+                }}
+            }} catch (e) {{}}
+            return null;
+        }};
+        const seen = new Set();
+        const targets = [];
+        document.querySelectorAll('link[rel="stylesheet"][href]').forEach(el => {{
+            const lu = toLocalUrl(el.getAttribute('href'));
+            if (lu && !seen.has(lu)) {{
+                seen.add(lu);
+                targets.push({{ kind: 'stylesheet', url: lu }});
+            }}
+        }});
+        if ({script_flag}) {{
+            document.querySelectorAll('script[src]').forEach(el => {{
+                const lu = toLocalUrl(el.getAttribute('src'));
+                if (lu && !seen.has(lu)) {{
+                    seen.add(lu);
+                    targets.push({{ kind: 'script', url: lu }});
+                }}
+            }});
+        }}
+        if ({flag}) {{
+            document.querySelectorAll('link[rel*="icon"][href]').forEach(el => {{
+                const lu = toLocalUrl(el.getAttribute('href'));
+                if (lu && !seen.has(lu)) {{
+                    seen.add(lu);
+                    targets.push({{ kind: 'favicon', url: lu }});
+                }}
+            }});
+            document.querySelectorAll('meta[property="og:image"][content], meta[name="twitter:image"][content]').forEach(el => {{
+                const lu = toLocalUrl(el.getAttribute('content'));
+                if (lu && !seen.has(lu)) {{
+                    seen.add(lu);
+                    targets.push({{ kind: 'og_image', url: lu }});
+                }}
+            }});
+        }}
+        await Promise.all(targets.map(async (item) => {{
+            try {{
+                const resp = await fetch(item.url, {{ method: 'GET', cache: 'no-store' }});
+                if (!resp.ok) {{
+                    broken.push({{ type: 'broken_local_subresource', kind: item.kind, src: item.url, status: resp.status }});
+                }}
+            }} catch (err) {{
+                broken.push({{ type: 'broken_local_subresource', kind: item.kind, src: item.url, error: String(err) }});
+            }}
+        }}));
+        return broken;
+    }})()"""
+
     JS_CHECK_BROKEN_ASSETS = """(() => {
         const broken = [];
         document.querySelectorAll('img').forEach(img => {
@@ -637,6 +729,83 @@ class UnifiedBrowserAuditor:
                 const mcs = window.getComputedStyle(mobileMenu);
                 if (mcs.display === 'none' || mcs.visibility === 'hidden') {
                     result.hierarchy_violations.push({ type: 'hidden_mobile_nav_drawer', vw: vw });
+                }
+            }
+            document.querySelectorAll('.nav-cta-desktop').forEach(navCta => {
+                const ncs = window.getComputedStyle(navCta);
+                if (ncs.display !== 'none') {
+                    result.hierarchy_violations.push({ type: 'visible_nav_cta_desktop_on_mobile', display: ncs.display, vw: vw });
+                }
+            });
+        }
+        document.querySelectorAll('.hero-register-firm-link').forEach(regLink => {
+            const rcs = window.getComputedStyle(regLink);
+            if (rcs.display === 'none' || rcs.visibility === 'hidden') return;
+            const pl = parseFloat(rcs.paddingLeft || '0') || 0;
+            const pr = parseFloat(rcs.paddingRight || '0') || 0;
+            if (pl <= 0 || pr <= 0) {
+                result.hierarchy_violations.push({ type: 'hero_register_firm_link_zero_padding', paddingLeft: pl, paddingRight: pr, vw: vw });
+            }
+        });
+        const roundWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+            acceptNode: node => {
+                const parent = node.parentElement;
+                if (!parent) return NodeFilter.FILTER_REJECT;
+                const tag = parent.tagName.toLowerCase();
+                if (['script', 'style', 'code', 'pre', 'noscript'].includes(tag)) return NodeFilter.FILTER_REJECT;
+                const pcs = window.getComputedStyle(parent);
+                if (pcs.display === 'none' || pcs.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        while (roundWalker.nextNode()) {
+            const tVal = roundWalker.currentNode.nodeValue || '';
+            if (tVal.includes('round((')) {
+                result.hierarchy_violations.push({ type: 'raw_formula_round_paren_visible', text: tVal.trim().slice(0, 80), vw: vw });
+                break;
+            }
+        }
+        const primExtLink = document.querySelector('link#pseo-visual-primitives[href]');
+        if (primExtLink && vw >= 1024) {
+            const definedClasses = new Set();
+            const collectRuleClasses = (ruleList) => {
+                if (!ruleList) return;
+                for (let ri = 0; ri < ruleList.length; ri++) {
+                    const r = ruleList[ri];
+                    if (r.selectorText) {
+                        const cleanedSel = String(r.selectorText).replace(/\\[[^\\]]*\\]/g, '');
+                        const cm = cleanedSel.match(/\\.([a-zA-Z_-][a-zA-Z0-9_-]*)/g);
+                        if (cm) {
+                            cm.forEach(tok => definedClasses.add(tok.slice(1)));
+                        }
+                    }
+                    if (r.cssRules) collectRuleClasses(r.cssRules);
+                }
+            };
+            for (let si = 0; si < document.styleSheets.length; si++) {
+                try {
+                    const sheet = document.styleSheets[si];
+                    if (sheet && sheet.cssRules) collectRuleClasses(sheet.cssRules);
+                } catch (e) {}
+            }
+            if (definedClasses.size > 0) {
+                const hookAllow = new Set(['active', 'open', 'closed', 'collapsed', 'expanded', 'selected', 'disabled', 'hidden', 'visible', 'sr-only', 'visually-hidden']);
+                const undefFound = [];
+                const undefSeen = new Set();
+                document.querySelectorAll('[class]').forEach(el => {
+                    const tagL = (el.tagName || '').toLowerCase();
+                    if (tagL === 'script' || tagL === 'style' || tagL === 'noscript') return;
+                    if (el.closest && el.closest('svg')) return;
+                    el.classList.forEach(cls => {
+                        if (!cls || hookAllow.has(cls) || cls.startsWith('js-') || cls.startsWith('is-') || cls.startsWith('has-')) return;
+                        if (!definedClasses.has(cls) && !undefSeen.has(cls)) {
+                            undefSeen.add(cls);
+                            undefFound.push(cls);
+                        }
+                    });
+                });
+                if (undefFound.length > 0) {
+                    result.hierarchy_violations.push({ type: 'undefined_ui_classes', classes: undefFound.slice(0, 12), vw: vw });
                 }
             }
         }
@@ -959,6 +1128,14 @@ class UnifiedBrowserAuditor:
 
     JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {
         const failures = [];
+        const extraCritEl = document.getElementById('calc-input-extra_criteria');
+        const pth = String(window.location.pathname || '');
+        if (extraCritEl && pth.indexOf('/tools/') === 0 && !/soc-?2/i.test(pth)) {
+            failures.push({
+                widget_id: 'calc-input-extra_criteria',
+                detail: 'Dead extra_criteria control rendered on non-SOC-2 calculator'
+            });
+        }
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
         const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
@@ -1569,19 +1746,24 @@ class UnifiedBrowserAuditor:
         }
 
         // 3d. State-First Hero Bar bidirectional state sync & #hero-range-anchor verification
+        const rangeAnchor = document.getElementById('hero-range-anchor');
+        report.hero_state_and_range_anchor.range_anchor_present = Boolean(
+            rangeAnchor && ((rangeAnchor.innerText || rangeAnchor.textContent || '').trim().length > 0)
+        );
         const heroStateSel = document.getElementById('quote-intake-hero-state');
         if (heroStateSel && heroStateSel.options && heroStateSel.options.length > 1) {
             report.hero_state_and_range_anchor.present = true;
-            const rangeAnchor = document.getElementById('hero-range-anchor');
-            report.hero_state_and_range_anchor.range_anchor_present = Boolean(
-                rangeAnchor && ((rangeAnchor.innerText || rangeAnchor.textContent || '').trim().length > 0)
-            );
             const origHeroVal = heroStateSel.value;
             const origStateUrl = window.location.pathname + window.location.search + window.location.hash;
             const nextStateVal = origHeroVal === 'TX' ? 'NY' : 'TX';
+            const outAnchorBefore = (document.getElementById('hero-range-baseline')?.innerText || document.querySelector('.output-value')?.innerText || '').trim();
+            const isRetainageStateTool = Boolean(document.getElementById('input-retainage_holdback_pct') || document.getElementById('input-credit_line_apr_pct'));
             heroStateSel.value = nextStateVal;
             heroStateSel.dispatchEvent(new Event('change', { bubbles: true }));
             report.hero_state_and_range_anchor.synced_state = heroStateSel.value;
+            const outAnchorAfter = (document.getElementById('hero-range-baseline')?.innerText || document.querySelector('.output-value')?.innerText || '').trim();
+            const stateMathUpdated = !isRetainageStateTool || (outAnchorBefore !== '' && outAnchorAfter !== '' && outAnchorBefore !== outAnchorAfter);
+            report.hero_state_and_range_anchor.math_updated = stateMathUpdated;
             const qStatePeer = document.getElementById('quote-intake-state');
             const prStatePeer = document.getElementById('quote-intake-partner-reg-state');
             const peerOk = (
@@ -1592,9 +1774,11 @@ class UnifiedBrowserAuditor:
             heroStateSel.value = origHeroVal;
             heroStateSel.dispatchEvent(new Event('change', { bubbles: true }));
             window.history.replaceState(null, '', origStateUrl);
-            if (!report.hero_state_and_range_anchor.range_anchor_present || !peerOk) {
+            if (!report.hero_state_and_range_anchor.range_anchor_present || !peerOk || !stateMathUpdated) {
                 report.hero_state_and_range_anchor.passed = false;
             }
+        } else if (report.hero_state_and_range_anchor.range_anchor_present) {
+            report.hero_state_and_range_anchor.passed = true;
         }
 
         // 3e. Empty-submit validation focus verification across monetization forms
@@ -2516,19 +2700,19 @@ class UnifiedBrowserAuditor:
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
         base_prefix_json = json.dumps(base_url.rstrip("/"))
-        for _ in range(125):
-            await asyncio.sleep(0.04)
+        for _ in range(75):
+            await asyncio.sleep(0.02)
             msg_counter[0] += 1
             rs = await self._eval_js(
                 ws,
-                f"window.location.href.startsWith({base_prefix_json}) && document.readyState === 'complete' && document.body && document.body.children.length > 0",
+                f"window.location.href.startsWith({base_prefix_json}) && (document.readyState === 'interactive' || document.readyState === 'complete') && document.body && document.body.children.length > 0 && Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).every(l => !l.href || !l.href.startsWith(window.location.origin) || l.sheet !== null)",
                 msg_id=msg_counter[0],
             )
             if rs:
                 break
         msg_counter[0] += 1
         await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-        await asyncio.sleep(0.04)
+        await asyncio.sleep(0.02)
 
         # 1a. Wide Desktop Viewport (1440x900)
         msg_counter[0] += 1
@@ -2649,7 +2833,20 @@ class UnifiedBrowserAuditor:
 
         # 6. Broken asset check
         msg_counter[0] += 1
-        broken_assets = await self._eval_js(ws, self.JS_CHECK_BROKEN_ASSETS, msg_id=msg_counter[0])
+        has_full_sitemap = (self.dist_dir / "sitemap.xml").is_file()
+        has_local_scripts = (
+            has_full_sitemap
+            or (self.dist_dir / "static" / "js").is_dir()
+            or (self.dist_dir / "js").is_dir()
+        )
+        broken_assets = await self._eval_js(
+            ws,
+            self._build_broken_assets_js(
+                check_meta_assets=has_full_sitemap,
+                check_script_assets=has_local_scripts,
+            ),
+            msg_id=msg_counter[0],
+        )
         if broken_assets:
             defects["broken_assets"] = broken_assets
 
@@ -2791,15 +2988,7 @@ class UnifiedBrowserAuditor:
                 await self._send_cdp(
                     new_ws,
                     "Network.setBlockedURLs",
-                    {
-                        "urls": [
-                            "*googletagmanager.com*",
-                            "*google-analytics.com*",
-                            "*fonts.googleapis.com*",
-                            "*fonts.gstatic.com*",
-                            "*cloudflareinsights.com*",
-                        ]
-                    },
+                    {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
                     msg_id=msg_counter[0],
                 )
                 return await self._audit_route_on_ws(new_ws, base_url, route, msg_counter)
@@ -2917,15 +3106,7 @@ class UnifiedBrowserAuditor:
                 await self._send_cdp(
                     new_ws,
                     "Network.setBlockedURLs",
-                    {
-                        "urls": [
-                            "*googletagmanager.com*",
-                            "*google-analytics.com*",
-                            "*fonts.googleapis.com*",
-                            "*fonts.gstatic.com*",
-                            "*cloudflareinsights.com*",
-                        ]
-                    },
+                    {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
                     msg_id=msg_counter[0],
                 )
                 return await _run_on_ws(new_ws)
@@ -3016,15 +3197,7 @@ class UnifiedBrowserAuditor:
                             await self._send_cdp(
                                 ws,
                                 "Network.setBlockedURLs",
-                                {
-                                    "urls": [
-                                        "*googletagmanager.com*",
-                                        "*google-analytics.com*",
-                                        "*fonts.googleapis.com*",
-                                        "*fonts.gstatic.com*",
-                                        "*cloudflareinsights.com*",
-                                    ]
-                                },
+                                {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
                                 msg_id=msg_counter[0],
                             )
                             for r in routes_to_audit:

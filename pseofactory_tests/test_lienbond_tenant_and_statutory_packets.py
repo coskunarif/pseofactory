@@ -331,3 +331,80 @@ def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path) -> None
     assert len(airlock.valid_urls) == 1
     assert len(airlock.quarantined_urls) == 0
 
+
+def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None:
+    """
+    Verifies the compiled form submit handler clears pending debounce timers and invokes
+    window.history.replaceState synchronously with current DOM inputs (zero 150ms race).
+    """
+    import json
+    import re
+    import subprocess
+
+    res = compile_high_effort_page(
+        {
+            "slug": "contractor-license-bond-cost-calculator-by-credit-score",
+            "query": "contractor license bond cost calculator by credit score",
+            "title": "Contractor License Bond Cost Calculator",
+            "property_id": "lienbond",
+            "canonical_base": "https://lienbond.com",
+            "statutory_authority": "U.S. Treasury Department Circular 570 and 40 U.S.C. Section 3131",
+            "economic_dataset": "BLS Producer Price Index for Construction & SFAA Loss Ratio Series",
+            "model_name": "Contractor License Bond Credit Tier Underwriting Model",
+            "formula": "round((bond_amount * credit_tier_rate_pct / 100.0) * term_years, 2)",
+            "inputs": {"bond_amount": 25000, "credit_tier_rate_pct": 1.5, "term_years": 1},
+            "published_output": 375.0,
+            "sample_calculation": "Evaluating a $25,000 bond at 1.5% for 1 year yields $375.00 premium",
+        }
+    )
+    html = res["html"]
+    scripts = re.findall(r"<script(?:\s+[^>]*)?>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
+    calc_scripts = [s for s in scripts if "updateQueryParams" in s and "handleRecompute" in s]
+    assert calc_scripts, "Expected compiled inline calculator script with updateQueryParams"
+    calc_js = calc_scripts[-1]
+
+    node_harness = (
+        "const vm = require('vm');\n"
+        "const listeners = {};\n"
+        "const replaceCalls = [];\n"
+        "const bondInput = { id: 'input-bond_amount', name: 'bond_amount', type: 'number', value: '25000' };\n"
+        "const rateInput = { id: 'input-credit_tier_rate_pct', name: 'credit_tier_rate_pct', type: 'number', value: '1.5' };\n"
+        "const termInput = { id: 'input-term_years', name: 'term_years', type: 'number', value: '1' };\n"
+        "const form = {\n"
+        "  querySelectorAll: () => [bondInput, rateInput, termInput],\n"
+        "  addEventListener: (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn); },\n"
+        "};\n"
+        "const outputElem = { textContent: '' };\n"
+        "let scheduled = [];\n"
+        "const sandbox = {\n"
+        "  URL, URLSearchParams,\n"
+        "  setTimeout: (fn, ms) => { const id = scheduled.length + 1; scheduled.push({ id, fn, ms, cleared: false }); return id; },\n"
+        "  clearTimeout: (id) => { const item = scheduled.find((x) => x.id === id); if (item) item.cleared = true; },\n"
+        "  window: {\n"
+        "    location: { href: 'https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/', search: '' },\n"
+        "    history: { replaceState: (_s, _t, u) => { replaceCalls.push(u); sandbox.window.location.href = u; sandbox.window.location.search = new URL(u).search; } },\n"
+        "    addEventListener: () => {},\n"
+        "  },\n"
+        "  document: {\n"
+        "    readyState: 'complete',\n"
+        "    getElementById: (id) => (id.endsWith('-calculator') ? form : null),\n"
+        "    querySelector: (sel) => (sel === '.output-value' ? outputElem : null),\n"
+        "    addEventListener: () => {},\n"
+        "  },\n"
+        "};\n"
+        f"vm.runInNewContext({json.dumps(calc_js)}, sandbox);\n"
+        "bondInput.value = '99000';\n"
+        "for (const fn of (listeners.input || [])) fn({ target: bondInput });\n"
+        "const preSubmitSyncCalls = replaceCalls.length;\n"
+        "for (const fn of (listeners.submit || [])) fn({ preventDefault: () => {} });\n"
+        "const postSubmitCalls = replaceCalls.slice();\n"
+        "const allCleared = scheduled.every((s) => s.cleared);\n"
+        "console.log(JSON.stringify({ preSubmitSyncCalls, postSubmitCalls, allCleared, output: outputElem.textContent }));\n"
+    )
+    proc = subprocess.run(["node", "-e", node_harness], capture_output=True, text=True, check=True, timeout=15)
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["preSubmitSyncCalls"] == 0
+    assert out["allCleared"] is True
+    assert len(out["postSubmitCalls"]) == 1
+    assert "bond_amount=99000" in out["postSubmitCalls"][0]
+

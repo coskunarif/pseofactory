@@ -2472,6 +2472,7 @@ def audit_estate_accuracy(
             css_defined_vars=estate_css_defined_vars,
             check_shell_landmarks=has_full_porcelain_estate,
             property_id=tenant_norm,
+            dist_dir=d if has_full_porcelain_estate else None,
         ):
             msg = f"Gate 8 (Porcelain Shell Contract): {pv}"
             if msg not in page_violations:

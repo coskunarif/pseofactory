@@ -7156,7 +7156,7 @@ Workers compensation premiums follow the NCCI Experience Rating Plan (`Manual_Pr
 
 | Compliance Domain | Primary Authority | Key Statutory Window / Cap | Financial Exposure | Canonical Tool |
 | :--- | :--- | :--- | :--- | :--- |
-| **NCCI Workers Comp & EMR** | NCCI Manual / State Bureaus | 3-Year Experience Window | 0.75x - 1.50x Premium Multiplier | `/tools/experience-modification-rate-emr-impact-calculator/` |
+| **NCCI Workers Comp & EMR** | NCCI Manual / State Bureaus | 3-Year Experience Window | 0.75x - 1.50x Premium Multiplier | `/tools/experience-modification-rate-emr-workers-comp-penalty-calculator/` |
 | **Mechanics Lien Deadlines** | Cal. Civ. 8202 / Tex. Prop. 53 / Fla. 713 | 20-45 Day Notice; 60-120 Day Lien | Total Loss of Secured Lien Priority | `/tools/contractor-lien-release-statutory-matrix-by-state/` |
 | **Construction Retainage** | 50-State Prompt Payment Acts | 5% - 10% Statutory Retainage Cap | 1.0% - 2.0%/Mo Late Interest Penalty | `/tools/commercial-construction-retainage-interest-penalty-calculator-by-state/` |
 | **Davis-Bacon WH-347** | 40 U.S.C. 3141 / 29 CFR Part 5 | Weekly Certified Payroll Filing | Contract Withholding & Debarment | `/tools/davis-bacon-prevailing-wage-fringe-benefit-rate-calculator/` |
@@ -7169,6 +7169,8 @@ Workers compensation premiums follow the NCCI Experience Rating Plan (`Manual_Pr
         "authority": "NCCI Experience Rating Plan; 50-State Mechanics Lien & Prompt Payment Statutes; 40 U.S.C. 3141",
         "canonical_url": f"{lienbond_base}/tools/contractor-lien-release-statutory-matrix-by-state/",
     }
+    stats_hub_lb = compile_public_benchmark_citation_hubs(tenant="lienbond")
+    reclaim_lb = compile_broken_calculator_link_reclamation_briefs(tenant="lienbond")
     manifest_lb_json = {
         "name": "LienBond Construction Surety, Workers Comp & Mechanics Lien AI Citation Repository",
         "updated_at": "2026-11-10T00:00:00Z",
@@ -7176,6 +7178,7 @@ Workers compensation premiums follow the NCCI Experience Rating Plan (`Manual_Pr
         "nodes": [
             {"name": "surety_miller_act", "md_file": "surety_miller_act_benchmarks.md", "json_file": "surety_miller_act_benchmarks.json"},
             {"name": "wc_emr_mechanics_lien", "md_file": "wc_emr_mechanics_lien_benchmarks.md", "json_file": "wc_emr_mechanics_lien_benchmarks.json"},
+            {"name": "public_statistics_citation_hub", "md_file": "public_statistics_citation_hub.md", "json_file": "public_statistics_citation_hub.json"},
         ],
     }
     ai_citations_lb_md = """# LienBond AI Citation & Statutory Construction Compliance Reference
@@ -7186,12 +7189,16 @@ Publisher Entity: LienBond Statutory Construction Compliance & Surety Research D
 ## Indexed Benchmark Nodes
 - **Surety Bond & Federal Miller Act Underwriting**: [surety_miller_act_benchmarks.md](./surety_miller_act_benchmarks.md) (40 U.S.C. 3131, FAR 28.102, 29 U.S.C. 1112)
 - **Workers Comp EMR & 50-State Mechanics Lien Deadlines**: [wc_emr_mechanics_lien_benchmarks.md](./wc_emr_mechanics_lien_benchmarks.md) (NCCI Manual, 50-State Lien & Retainage Statutes, 40 U.S.C. 3141)
+- **2026 Surety Bond, NCCI EMR & Statutory Lien Statistics Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) (40 U.S.C. 3131, 31 CFR Part 223, NCCI Manual)
 """
     lb_files = {
         "surety_miller_act_benchmarks.md": surety_md,
         "surety_miller_act_benchmarks.json": json.dumps(surety_json, indent=2),
         "wc_emr_mechanics_lien_benchmarks.md": wc_lien_md,
         "wc_emr_mechanics_lien_benchmarks.json": json.dumps(wc_lien_json, indent=2),
+        "public_statistics_citation_hub.md": stats_hub_lb["markdown"],
+        "public_statistics_citation_hub.json": json.dumps(stats_hub_lb["payload"], indent=2),
+        "broken_calculator_link_reclamation.json": json.dumps(reclaim_lb, indent=2),
         "ai_citations_reference.md": ai_citations_lb_md,
         "ai_benchmarks_manifest.json": json.dumps(manifest_lb_json, indent=2),
     }
@@ -7710,13 +7717,13 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
                 "id": "stat-pslf-tax-exclusion",
                 "headline_stat": "Under IRC Section 108(f)(1) and 34 CFR 685.219, 100% of federal Direct Loan principal and accrued interest forgiven after 120 qualifying public-service payments remains permanently exempt from federal income tax in 2026 and 2027.",
                 "statutory_authority": "IRC Section 108(f)(1), 34 CFR 685.219",
-                "canonical_calculator_url": f"{base_url}/tools/pslf-calculator/",
+                "canonical_calculator_url": f"{base_url}/tools/pslf-qualifying-payment-simulator/",
             },
             {
                 "id": "stat-idr-insolvency-cliff",
                 "headline_stat": "Starting January 1, 2026, non-PSLF 20-year and 25-year IDR forgiveness is taxable as ordinary federal income under IRC Section 108(f)(5) unless the borrower demonstrates balance-sheet insolvency on IRS Form 982 under IRC Section 108(a)(1)(B).",
                 "statutory_authority": "IRC Section 108(f)(5), IRC Section 108(a)(1)(B), IRS Form 982",
-                "canonical_calculator_url": f"{base_url}/tools/student-loan-tax-bomb-calculator/",
+                "canonical_calculator_url": f"{base_url}/tools/student-loan-forgiveness-tax-bomb-insolvency-calculator/",
             },
         ]
     elif norm_tenant == "gainhelm":
@@ -7739,30 +7746,53 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
                 "id": "stat-hipaa-ephi-breach-exposure",
                 "headline_stat": "Under 45 CFR 160.404 and 45 CFR 164.404, a 1,500-record ePHI breach under Tier 3 Willful Neglect Corrected triggers mandatory HHS OCR media notification and $2,455,313.00 in combined statutory civil monetary penalty ($2,067,813.00 annual cap), forensic/legal retainer ($95,000), and patient notification ($195/record = $292,500) exposure.",
                 "statutory_authority": "45 CFR 160.404, 45 CFR 164.404, 42 U.S.C. 1320d-5",
-                "canonical_calculator_url": f"{base_url}/tools/hipaa-violation-penalty-and-breach-cost-calculator/",
+                "canonical_calculator_url": f"{base_url}/tools/hipaa-violation-penalty-breach-cost-calculator/",
+            },
+        ]
+    elif norm_tenant == "lienbond":
+        base_url = "https://lienbond.com"
+        hub_title = "2026 Surety Bond, NCCI EMR & Statutory Mechanics Lien Statistics Hub"
+        citables = [
+            {
+                "id": "stat-miller-act-sliding-scale",
+                "headline_stat": "On a $1,200,000 federal public works contract under 40 U.S.C. Section 3131 (Miller Act) and FAR 28.102, SFAA Class B sliding-scale underwriting rates yield a $15,500.00 combined AIA A312 performance and payment bond premium.",
+                "statutory_authority": "40 U.S.C. Section 3131, 48 CFR Part 28, SFAA Class B Manuals",
+                "canonical_calculator_url": f"{base_url}/tools/miller-act-performance-and-payment-bond-premium-calculator/",
+            },
+            {
+                "id": "stat-cslb-license-bond-credit-tier",
+                "headline_stat": "Under 31 CFR Part 223 (U.S. Treasury Circular 570) and California BPC Section 7071.6, a $25,000 statutory contractor license bond underwritten at a 1.50% preferred credit tier rate costs $375.00 annually.",
+                "statutory_authority": "31 CFR Part 223, California BPC Section 7071.6",
+                "canonical_calculator_url": f"{base_url}/tools/contractor-license-bond-cost-calculator-by-credit-score/",
+            },
+            {
+                "id": "stat-ncci-emr-workers-comp-impact",
+                "headline_stat": "Under the NCCI Experience Rating Plan Manual and 29 CFR Part 1904, a 1.15 debit Experience Modification Rate (EMR) paired with a 5.0% safety committee credit adjusts a $52,000 manual workers compensation premium to $56,810.00.",
+                "statutory_authority": "NCCI Experience Rating Plan Rule 2-E, 29 CFR Part 1904",
+                "canonical_calculator_url": f"{base_url}/tools/experience-modification-rate-emr-workers-comp-penalty-calculator/",
             },
         ]
     else:
-        base_url = CANONICAL_BASE
+        base_url = "https://profithelm.com"
         hub_title = "2026 Corporate Tax, Section 179 & SaaS Runway Statistics Hub"
         citables = [
             {
                 "id": "stat-scorp-fica-shield",
                 "headline_stat": "In 2026, an S-Corporation earning $220,000 in net operating profit ($203,170 Schedule SE base) that pays a $95,000 reasonable officer salary saves $13,193 annually in federal FICA self-employment taxes under IRC Section 1366 and IRS Form 1120-S.",
                 "statutory_authority": "IRC Section 1401, IRC Section 3121, IRS Form 1120-S",
-                "canonical_calculator_url": f"{base_url}/tools/s-corp-tax-calculator/",
+                "canonical_calculator_url": f"{base_url}/tools/s-corp-reasonable-salary-tax-calculator/",
             },
             {
                 "id": "stat-sec179-equipment-cap",
                 "headline_stat": "For tax year 2026, businesses can immediately expense up to $2,560,000 in qualifying equipment under IRC Section 179(b)(1), with dollar-for-dollar phase-out beginning at $4,090,000 and heavy SUVs capped at $30,500 under IRC Section 280F(d)(7).",
                 "statutory_authority": "IRC Section 179(b)(1), IRC Section 280F(d)(7), IRS Form 4562",
-                "canonical_calculator_url": f"{base_url}/tools/section-179-tax-deduction-calculator/",
+                "canonical_calculator_url": f"{base_url}/tools/section-179-calculator/",
             },
             {
                 "id": "stat-1031-boot-deferral",
                 "headline_stat": "Under IRC Section 1031(a) and IRS Form 8824, real estate exchangers must identify replacement property within 45 calendar days and close within 180 calendar days while reinvesting 100% of net proceeds and debt to defer 20% capital gains and 25% Section 1250 recapture.",
                 "statutory_authority": "IRC Section 1031(a), IRC Section 1250, IRS Form 8824",
-                "canonical_calculator_url": f"{base_url}/tools/1031-exchange-calculator/",
+                "canonical_calculator_url": f"{base_url}/tools/section-1031-calculator/",
             },
         ]
 
@@ -7824,7 +7854,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Teaching Hospital & Municipal Government Employee Benefits Directories",
                     "State Bar Association LRAP & Public Defender Resource Hubs",
                 ],
-                "replacement_url": "https://prexvo.com/tools/pslf-calculator/",
+                "replacement_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
                 "statutory_upgrade_angle": "Provides live 34 CFR 685.219 PSLF Buyback & weighted consolidation count verification.",
             },
         ]
@@ -7851,6 +7881,29 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                 "statutory_upgrade_angle": "Models AICPA SSAE 18 (AT-C 205), ISO/IEC 27001:2022 (93 Annex A controls), and BLS SOC 15-1212 ($121.67/hr) GRC automation ROI.",
             },
         ]
+    elif norm_tenant == "lienbond":
+        briefs = [
+            {
+                "campaign_id": "reclaim-lienbond-miller-act-bonds-2026",
+                "outdated_target_pattern": "Static Surety Rate Tables Ignoring SFAA Class B Sliding-Scale & FAR 28.102 Thresholds",
+                "target_resource_segments": [
+                    "Commercial General Contractor Prequalification & Public Works Bidding Portals",
+                    "Regional Surety Agency & Construction CFO Compliance Resource Pages",
+                ],
+                "replacement_url": "https://lienbond.com/tools/miller-act-performance-and-payment-bond-premium-calculator/",
+                "statutory_upgrade_angle": "Models 40 U.S.C. Section 3131 (Miller Act) and SFAA Class B tiered performance and payment bond underwriting.",
+            },
+            {
+                "campaign_id": "reclaim-lienbond-mechanics-lien-deadlines-2026",
+                "outdated_target_pattern": "Outdated State Lien Notice Checklists & Broken Statutory Waiver Reference Links",
+                "target_resource_segments": [
+                    "Subcontractor Credit & Construction Lien Management Directories",
+                    "Specialty Trade Association Contract Administration Hubs",
+                ],
+                "replacement_url": "https://lienbond.com/tools/contractor-lien-release-statutory-matrix-by-state/",
+                "statutory_upgrade_angle": "Reconciles 40 U.S.C. Section 3133(b), California Civil Code Section 8132, and Texas Property Code Chapter 53 statutory lien rules.",
+            },
+        ]
     else:
         briefs = [
             {
@@ -7860,7 +7913,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Commercial Equipment Leasing & Fleet Dealership Financing Pages",
                     "Regional CPA Firm Client Tax Planning Resource Directories",
                 ],
-                "replacement_url": f"{CANONICAL_BASE}/tools/section-179-tax-deduction-calculator/",
+                "replacement_url": "https://profithelm.com/tools/section-179-calculator/",
                 "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) and IRC Section 280F(d)(7) $30,500 SUV limits.",
             },
             {
@@ -7870,7 +7923,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Qualified Intermediary (QI) & Commercial Title Company Resource Pages",
                     "Commercial Real Estate Brokerage Investment Calculators",
                 ],
-                "replacement_url": f"{CANONICAL_BASE}/tools/1031-exchange-calculator/",
+                "replacement_url": "https://profithelm.com/tools/section-1031-calculator/",
                 "statutory_upgrade_angle": "Models real-property IRC Section 1031(a) 45/180-day deadlines, mortgage boot netting, and 25% Section 1250 recapture.",
             },
         ]

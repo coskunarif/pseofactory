@@ -29,6 +29,7 @@ class EdgeConfigStandards:
     MAX_CLOUDFLARE_REDIRECTS_RULES: int = 95
     STATIC_CACHE: str = "public, max-age=31536000, immutable"
     HTML_MACHINE_CACHE: str = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+    CRAWLER_AND_FEED_CACHE: str = "public, max-age=0, s-maxage=60, must-revalidate"
     ERROR_CACHE: str = "no-store"
     SECURITY_HEADERS: Dict[str, str] = {
         "X-Content-Type-Options": "nosniff",
@@ -142,6 +143,7 @@ def build_edge_headers(
         machine_endpoints
         if machine_endpoints is not None
         else [
+            "/robots.txt",
             "/feed.xml",
             "/llms.txt",
             "/llms-full.txt",
@@ -152,9 +154,19 @@ def build_edge_headers(
             "/sitemap-leaves.xml",
         ]
     )
-    for required_json_ep in ("/catalog.json", "/media-kit.json"):
-        if required_json_ep not in raw_endpoints and required_json_ep.lstrip("/") not in raw_endpoints:
-            raw_endpoints.append(required_json_ep)
+    for required_ep in ("/robots.txt", "/catalog.json", "/media-kit.json"):
+        if required_ep not in raw_endpoints and required_ep.lstrip("/") not in raw_endpoints:
+            raw_endpoints.append(required_ep)
+
+    fresh_revalidate_endpoints: Set[str] = {
+        "/robots.txt",
+        "/sitemap.xml",
+        "/sitemap-hubs.xml",
+        "/sitemap-leaves.xml",
+        "/feed.xml",
+        "/llms.txt",
+        "/llms-full.txt",
+    }
 
     for ep in raw_endpoints:
         path = ep if ep.startswith("/") else f"/{ep}"
@@ -167,9 +179,18 @@ def build_edge_headers(
         if ext in EdgeConfigStandards.MACHINE_CONTENT_TYPES:
             ct = EdgeConfigStandards.MACHINE_CONTENT_TYPES[ext]
             lines.append(f"  Content-Type: {ct}")
-        if path in ("/catalog.json", "/media-kit.json"):
+        if path in fresh_revalidate_endpoints:
+            lines.append(f"  Cache-Control: {EdgeConfigStandards.CRAWLER_AND_FEED_CACHE}")
+        elif path in ("/catalog.json", "/media-kit.json"):
             lines.append(f"  Cache-Control: {EdgeConfigStandards.HTML_MACHINE_CACHE}")
             lines.append("  X-Robots-Tag: index, follow")
+        lines.append("")
+        active_rules_count += 1
+
+    if "/ai-benchmarks/*" not in seen_routes and active_rules_count < max_active_rules:
+        seen_routes.add("/ai-benchmarks/*")
+        lines.append("/ai-benchmarks/*")
+        lines.append(f"  Cache-Control: {EdgeConfigStandards.CRAWLER_AND_FEED_CACHE}")
         lines.append("")
         active_rules_count += 1
 
@@ -295,7 +316,7 @@ def compact_edge_headers_to_cloudflare_cap(
             return (0, 0)
         if route in ("/*", "/404.html"):
             return (1, 0)
-        if route.endswith((".xml", ".txt", ".json")):
+        if route.endswith((".xml", ".txt", ".json")) or route == "/ai-benchmarks/*":
             return (2, 0)
         segments = [s for s in route.strip("/").split("/") if s]
         if len(segments) <= 1:

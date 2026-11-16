@@ -640,3 +640,256 @@ def test_porcelain_shell_scrubs_q499388_marks_inline_prose_links_and_wraps_mobil
     assert "main a.inline-prose-link" in css
     assert "white-space: normal !important;" in css
 
+
+def test_calculate_btn_preserves_edited_input_before_url_debounce_and_hero_state_picker_routes(tmp_path: Path) -> None:
+    """
+    Verifies in headless Chromium:
+    1. Clicking #calculate-btn within 30ms of editing an input while location.search still holds
+       stale query params never overwrites user-edited DOM inputs back to stale URL params,
+       while window popstate still re-hydrates from URL.
+    2. #quote-intake-hero-state updates primary inputs/outputs on LienBond homepage (/),
+       EMR Workers Comp Penalty Calculator, Contractor Lien Release Statutory Matrix (+ #serp-b2b-rate),
+       and ProfitHelm Crypto Tax Calculator (+ #res-crypto-state even for single filing status).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import functools
+    import http.server
+    import threading
+    from playwright.sync_api import sync_playwright
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
+
+    script_tag = render_runtime_synchronizer_script()
+    site_dir = tmp_path / "site"
+    site_dir.mkdir(parents=True, exist_ok=True)
+
+    (site_dir / "lb_home.html").write_text(
+        "<!DOCTYPE html><html><body><main>"
+        "<select id='quote-intake-hero-state' name='state'><option value='CA'>CA</option><option value='TX'>TX</option></select>"
+        "<form id='hub-bond-calculator' class='calculator-form'>"
+        "<input type='number' id='input-bond_amount' name='bond_amount' value='25000' />"
+        "<input type='number' id='input-credit_tier_rate_pct' name='credit_tier_rate_pct' value='1.5' />"
+        "<input type='number' id='input-term_years' name='term_years' value='1' />"
+        "<button type='submit' id='calculate-btn'>Recalculate Output</button>"
+        "<div class='output-value'>375.00</div>"
+        "</form>"
+        "<script>"
+        "(function(){"
+        "var form=document.getElementById('hub-bond-calculator');"
+        "var out=document.querySelector('.output-value');"
+        "var dt=null;"
+        "function recalc(){"
+        "var b=parseFloat(document.getElementById('input-bond_amount').value)||0;"
+        "var r=parseFloat(document.getElementById('input-credit_tier_rate_pct').value)||0;"
+        "var t=parseFloat(document.getElementById('input-term_years').value)||0;"
+        "out.textContent=(Math.round((b*r/100*t)*100)/100).toFixed(2);"
+        "if(dt)clearTimeout(dt);"
+        "dt=setTimeout(function(){var u=new URL(window.location.href);u.searchParams.set('bond_amount',String(b));window.history.replaceState({},'',u.toString());},150);"
+        "}"
+        "form.addEventListener('input',recalc);"
+        "form.addEventListener('change',recalc);"
+        "form.addEventListener('submit',function(e){e.preventDefault();recalc();});"
+        "})();"
+        "</script>"
+        f"{script_tag}</main></body></html>",
+        encoding="utf-8",
+    )
+
+    (site_dir / "lb_emr.html").write_text(
+        "<!DOCTYPE html><html><body><main>"
+        "<select id='quote-intake-hero-state' name='state'><option value='TX'>TX</option><option value='CA'>CA</option></select>"
+        "<form id='emr-calc' class='calculator-form'>"
+        "<input type='number' id='input-manual_workers_comp_premium' value='50000' />"
+        "<input type='number' id='input-emr_factor' value='1.0' />"
+        "<button type='submit' id='calculate-btn'>Recalculate Output</button>"
+        "<div class='output-value'>50000.00</div>"
+        "</form>"
+        "<script>"
+        "(function(){"
+        "var form=document.getElementById('emr-calc');"
+        "var out=document.querySelector('.output-value');"
+        "function recalc(){"
+        "var p=parseFloat(document.getElementById('input-manual_workers_comp_premium').value)||0;"
+        "var e=parseFloat(document.getElementById('input-emr_factor').value)||1;"
+        "out.textContent=(p*e).toFixed(2);"
+        "}"
+        "form.addEventListener('input',recalc);form.addEventListener('change',recalc);"
+        "})();"
+        "</script>"
+        f"{script_tag}</main></body></html>",
+        encoding="utf-8",
+    )
+
+    (site_dir / "lb_matrix.html").write_text(
+        "<!DOCTYPE html><html><body><main>"
+        "<select id='quote-intake-hero-state' name='state'><option value='TX'>TX</option><option value='CA'>CA</option><option value='FL'>FL</option></select>"
+        "<form id='matrix-calc' class='calculator-form'>"
+        "<input type='number' id='input-unpaid_contract_draw' value='85000' />"
+        "<input type='number' id='input-change_order_balance' value='12500' />"
+        "<input type='number' id='input-unserved_late_days' value='0' />"
+        "<input type='number' id='input-daily_forfeiture_rate' value='500' />"
+        "<button type='submit' id='calculate-btn'>Recalculate Output</button>"
+        "<div class='output-value'>97500.00</div>"
+        "</form>"
+        "<section id='serp-incumbent-depth-workbench' data-workbench-mode='surety_lien'>"
+        "<input type='number' id='serp-b2b-gross' value='85000' />"
+        "<input type='number' id='serp-b2b-deduction' value='12500' />"
+        "<input type='number' id='serp-b2b-rate' value='18.0' />"
+        "<select id='serp-b2b-regime'><option value='optimal_election' selected>Optimal</option></select>"
+        "<div id='serp-out-primary'>$13,050</div>"
+        "<div id='serp-out-secondary'>$15,300</div>"
+        "<div id='serp-out-tertiary'>$2,250</div>"
+        "<div id='serp-out-quaternary'>$71,950</div>"
+        "</section>"
+        f"{script_tag}</main></body></html>",
+        encoding="utf-8",
+    )
+
+    (site_dir / "ph_crypto.html").write_text(
+        "<!DOCTYPE html><html><body><main>"
+        "<select id='quote-intake-hero-state' name='state'><option value='TX'>TX</option><option value='CA'>CA</option></select>"
+        "<input type='number' id='crypto-short-term' value='45000' />"
+        "<input type='number' id='crypto-long-term' value='18000' />"
+        "<input type='number' id='crypto-staking' value='2000' />"
+        "<input type='number' id='crypto-ordinary-income' value='85000' />"
+        "<select id='crypto-status'><option value='single' selected>Single</option><option value='married_joint'>MFJ</option></select>"
+        "<select id='crypto-state'><option value='0.0'>TX (0%)</option><option value='0.05' selected>IL (5%)</option><option value='0.093'>CA (9.3%)</option></select>"
+        "<div id='res-crypto-tax'>$0</div>"
+        "<div id='res-crypto-net'>$0</div>"
+        "<div id='res-crypto-rate'>0.0%</div>"
+        "<div id='res-crypto-niit'>$0</div>"
+        "<div id='res-crypto-state'>$3,250</div>"
+        "<script>window.updateCryptoCalculator = function() { /* simulates legacy unpatched app.js */ };</script>"
+        f"{script_tag}</main></body></html>",
+        encoding="utf-8",
+    )
+
+    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+    handler = functools.partial(QuietHandler, directory=str(site_dir))
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            # 1 & 2a. #calculate-btn stale URL param race + hero state picker on LienBond /
+            page.goto(f"http://127.0.0.1:{port}/lb_home.html?bond_amount=25000", wait_until="domcontentloaded")
+            assert page.locator("#input-bond_amount").input_value() == "25000"
+            page.locator("#input-bond_amount").fill("31250")
+            page.click("#calculate-btn")
+            assert page.locator("#input-bond_amount").input_value() == "31250"
+            assert page.locator(".output-value").inner_text().strip() == "468.75"
+            page.wait_for_timeout(200)
+            assert page.locator("#input-bond_amount").input_value() == "31250"
+            # popstate still hydrates URL changes
+            page.evaluate("() => { window.history.pushState({}, '', '?bond_amount=40000'); window.dispatchEvent(new Event('popstate')); }")
+            assert page.locator("#input-bond_amount").input_value() == "40000"
+
+            page.select_option("#quote-intake-hero-state", "TX")
+            assert page.locator("#input-bond_amount").input_value() == "10000"
+            assert page.locator(".output-value").inner_text().strip() == "150.00"
+            page.select_option("#quote-intake-hero-state", "CA")
+            assert page.locator("#input-bond_amount").input_value() == "25000"
+            assert page.locator(".output-value").inner_text().strip() == "375.00"
+
+            # 2b. LienBond EMR Workers Comp Penalty Calculator
+            page.goto(f"http://127.0.0.1:{port}/lb_emr.html", wait_until="domcontentloaded")
+            page.select_option("#quote-intake-hero-state", "CA")
+            assert page.locator("#input-manual_workers_comp_premium").input_value() == "66750"
+            assert page.locator(".output-value").inner_text().strip() == "66750.00"
+            page.select_option("#quote-intake-hero-state", "TX")
+            assert page.locator("#input-manual_workers_comp_premium").input_value() == "39000"
+            assert page.locator(".output-value").inner_text().strip() == "39000.00"
+
+            # 2c. LienBond Contractor Lien Release Statutory Matrix
+            page.goto(f"http://127.0.0.1:{port}/lb_matrix.html", wait_until="domcontentloaded")
+            page.select_option("#quote-intake-hero-state", "CA")
+            assert page.locator("#input-daily_forfeiture_rate").input_value() == "1250"
+            assert page.locator("#input-unserved_late_days").input_value() == "0"
+            assert page.locator("#serp-b2b-rate").input_value() == "24"
+            ca_serp = page.locator("#serp-out-primary").inner_text().strip()
+            page.select_option("#quote-intake-hero-state", "FL")
+            assert page.locator("#input-daily_forfeiture_rate").input_value() == "1000"
+            assert page.locator("#input-unserved_late_days").input_value() == "0"
+            assert page.locator("#serp-b2b-rate").input_value() == "9.5"
+            fl_serp = page.locator("#serp-out-primary").inner_text().strip()
+            assert ca_serp != fl_serp
+
+            # 2d & 3. ProfitHelm Crypto Tax Calculator (#crypto-state + #res-crypto-state for single)
+            page.goto(f"http://127.0.0.1:{port}/ph_crypto.html", wait_until="domcontentloaded")
+            page.select_option("#quote-intake-hero-state", "CA")
+            assert page.locator("#crypto-state").input_value() == "0.093"
+            assert page.locator("#res-crypto-state").inner_text().strip() == "$6,045"
+            page.select_option("#quote-intake-hero-state", "TX")
+            assert page.locator("#crypto-state").input_value() == "0.0"
+            assert page.locator("#res-crypto-state").inner_text().strip() == "$0"
+            browser.close()
+    finally:
+        srv.shutdown()
+
+
+def test_profithelm_app_js_crypto_state_audit_retrofit_and_live_guard(tmp_path: Path) -> None:
+    """
+    Verifies RetroReflectionEngine.audit_estate detects missing stateTaxDisplay assignment
+    in ProfitHelm static/js/app.js alongside legacy head_of_household: 12700 drift,
+    retrofit_estate idempotently patches it right after niitEl assignment, and live repos remain blocked.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    repo = tmp_path / "profithelm-platform"
+    dist = repo / "dist"
+    js_dir = dist / "static" / "js"
+    js_dir.mkdir(parents=True, exist_ok=True)
+    (dist / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>ProfitHelm</title>"
+        "<link rel='canonical' href='https://profithelm.com/'></head>"
+        "<body><main><h1>ProfitHelm</h1></main></body></html>",
+        encoding="utf-8",
+    )
+
+    app_js = js_dir / "app.js"
+    app_js.write_text(
+        "const STD = { single: 8600, head_of_household: 12700 };\n"
+        "function updateCryptoCalculator() {\n"
+        "  const niitEl = document.getElementById('res-crypto-niit');\n"
+        "  const stateTaxDisplay = document.getElementById('res-crypto-state');\n"
+        "  if (niitEl) niitEl.innerText = fmtUSD.format(niitTax);\n"
+        "  const crStateInput = document.getElementById('crypto-state');\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    pre_audit = RetroReflectionEngine.audit_estate(dist, "profithelm")
+    assert pre_audit["stale_pages"].get("static/js/app.js") == ["statutory_truth_reconciliation"]
+
+    retro = RetroReflectionEngine.retrofit_estate(dist, "profithelm", "https://profithelm.com")
+    assert retro["status"] == "PASS"
+    assert "static/js/app.js" in retro["retrofitted_paths"]
+
+    patched = app_js.read_text(encoding="utf-8")
+    assert "head_of_household: 12900" in patched
+    expected_block = (
+        "  if (niitEl) niitEl.innerText = fmtUSD.format(niitTax);\n"
+        "  if (stateTaxDisplay) stateTaxDisplay.innerText = fmtUSD.format(stateTax);"
+    )
+    assert expected_block in patched
+
+    post_audit = RetroReflectionEngine.audit_estate(dist, "profithelm")
+    assert "static/js/app.js" not in post_audit.get("stale_pages", {})
+
+    retro_second = RetroReflectionEngine.retrofit_estate(dist, "profithelm", "https://profithelm.com")
+    assert app_js.read_text(encoding="utf-8").count("if (stateTaxDisplay) stateTaxDisplay.innerText = fmtUSD.format(stateTax);") == 1
+    assert "static/js/app.js" not in retro_second["retrofitted_paths"]
+
+    live_ph_dist = Path("/home/ubuntuadmin/projects/profithelm-platform/dist")
+    if live_ph_dist.is_dir():
+        blocked = RetroReflectionEngine.retrofit_estate(live_ph_dist, "profithelm", "https://profithelm.com")
+        assert blocked["status"] == "BLOCKED_LIVE_WORKTREE"
+
+

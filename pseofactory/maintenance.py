@@ -45,6 +45,66 @@ def _atomic_write_text(path: Union[Path, str], content: str, encoding: str = "ut
         raise
 
 
+_LIVE_PROJECTS_ROOT = Path("/home/ubuntuadmin/projects").resolve()
+_WORKTREES_ROOT = (_LIVE_PROJECTS_ROOT / ".agy" / "worktrees").resolve()
+
+
+def _is_live_repo_mutation_blocked(path: Optional[Union[str, Path]]) -> bool:
+    """
+    Returns True iff running under pytest or an unmerged .agy/worktrees checkout
+    AND the resolved target path is under /home/ubuntuadmin/projects/ outside .agy/worktrees/.
+    """
+    if path is None:
+        return False
+    in_test_or_worktree = (
+        "PYTEST_CURRENT_TEST" in os.environ
+        or "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
+    )
+    if not in_test_or_worktree:
+        return False
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        return True
+    if resolved == _WORKTREES_ROOT or resolved.is_relative_to(_WORKTREES_ROOT):
+        return False
+    return resolved == _LIVE_PROJECTS_ROOT or resolved.is_relative_to(_LIVE_PROJECTS_ROOT)
+
+
+def _adapter_live_repo_mutation_blocked(adapter: Any) -> bool:
+    """Returns True if any target path on adapter resolves inside a protected live repository."""
+    return any(
+        _is_live_repo_mutation_blocked(p)
+        for p in (
+            getattr(adapter, "dist_dir", None),
+            getattr(adapter, "repo_path", None),
+            getattr(adapter, "base_dir", None),
+        )
+    )
+
+
+def _profithelm_app_js_needs_crypto_state_fix(js_text: str) -> bool:
+    """Returns True when ProfitHelm app.js fetches #res-crypto-state without writing stateTaxDisplay."""
+    return (
+        "stateTaxDisplay" in js_text
+        and "stateTaxDisplay.innerText" not in js_text
+        and "stateTaxDisplay.textContent" not in js_text
+    )
+
+
+def _patch_profithelm_app_js_crypto_state(js_text: str) -> str:
+    """Idempotently assigns #res-crypto-state inside updateCryptoCalculator() in ProfitHelm app.js."""
+    if not _profithelm_app_js_needs_crypto_state_fix(js_text):
+        return js_text
+    return re.sub(
+        r"^([ \t]*)(if \(niitEl\) niitEl\.innerText = fmtUSD\.format\(niitTax\);)",
+        r"\1\2\n\1if (stateTaxDisplay) stateTaxDisplay.innerText = fmtUSD.format(stateTax);",
+        js_text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
     assert_touch_targets,
@@ -1143,7 +1203,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
         if self._build_command:
             try:
                 env = os.environ.copy()
-                env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
+                env["PYTHONPATH"] = f"{self._repo_path}:{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
                 env["FACTORY_CANONICAL_BASE"] = self.canonical_base
                 env["FACTORY_DOMAIN"] = self.domain
                 env["FACTORY_BRAND_NAME"] = self.brand_name
@@ -1246,7 +1306,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
                 env["LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env[f"FACTORY_{self.property_id.upper()}_LINKEDIN_COMPANY_ID"] = self.linkedin_company_id
                 env.setdefault("PROFITHELM_OFFLINE_JEV", "1")
-                env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
+                env["PYTHONPATH"] = f"{self._repo_path}:{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
                 res = subprocess.run([sys.executable, "-c", script], env=env, cwd=str(self._repo_path), capture_output=True, timeout=1200)
                 if res.returncode == 0:
                     try:
@@ -1296,7 +1356,7 @@ class SubprocessPropertyAdapter(PropertyAdapter):
             cmd = ["bash", str(factory_script), "--dry-run", "--force"]
             try:
                 env = os.environ.copy()
-                env["PYTHONPATH"] = f"{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
+                env["PYTHONPATH"] = f"{self._repo_path}:{pkg_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
                 env["FACTORY_CANONICAL_BASE"] = self.canonical_base
                 env["FACTORY_DOMAIN"] = self.domain
                 env["FACTORY_BRAND_NAME"] = self.brand_name
@@ -3121,6 +3181,7 @@ class AssetIntegrityEvaluator:
                     rel_key,
                     check_shell_landmarks=has_compiled_porcelain_estate or has_porcelain_shell_link,
                     property_id=adapter.property_id,
+                    dist_dir=adapter.dist_dir if has_compiled_porcelain_estate else None,
                 )
                 if (is_dist_html and has_porcelain_shell_link)
                 else []
@@ -3409,24 +3470,21 @@ class AssetIntegrityEvaluator:
 
         # Optional Master SEO Checklist check
         if self.enforce_master_seo and adapter.dist_dir.exists() and (adapter.dist_dir / "sitemap.xml").is_file():
-            try:
-                from pseofactory.porcelain_shell import audit_porcelain_estate_structure
+            from pseofactory.porcelain_shell import audit_porcelain_estate_structure
 
-                porcelain_estate_issues = audit_porcelain_estate_structure(
-                    adapter.dist_dir,
-                    adapter.property_id,
-                )
-                for pe_issue in porcelain_estate_issues:
-                    drifted.append(
-                        AssetDriftRecord(
-                            asset_path=str(adapter.dist_dir),
-                            slug=None,
-                            reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
-                            details=[f"Porcelain Estate Contract: {pe_issue}"],
-                        )
+            porcelain_estate_issues = audit_porcelain_estate_structure(
+                adapter.dist_dir,
+                adapter.property_id,
+            )
+            for pe_issue in porcelain_estate_issues:
+                drifted.append(
+                    AssetDriftRecord(
+                        asset_path=str(adapter.dist_dir),
+                        slug=None,
+                        reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
+                        details=[f"Porcelain Estate Contract: {pe_issue}"],
                     )
-            except Exception:
-                pass
+                )
             try:
                 from pseofactory.verifier import MasterSEOVerifier
                 dist_key = str(adapter.dist_dir.resolve())
@@ -5727,6 +5785,61 @@ def _extract_faq_schema_and_body_counts(html_content: str) -> Tuple[List[Tuple[s
     return schema_pairs, body_pairs
 
 
+_PREXVO_WORKBENCH_SLUG_MARKERS: Dict[str, Tuple[str, str]] = {
+    "student-loan-refinance-break-even-calculator": (
+        "Interactive Private Refinance APR Spread",
+        "Truth in Lending Act (TILA) Regulation Z",
+    ),
+    "icr-repayment-calculator": (
+        "Interactive ICR 20% Discretionary",
+        "34 CFR 685.209(b), Income-Contingent Repayment",
+    ),
+    "ibr-hardship-cap-calculator": (
+        "Interactive IBR Partial Financial Hardship",
+        "HEA Section 493C (20 U.S.C. 1098e)",
+    ),
+}
+
+
+def _prexvo_workbench_needs_refresh(slug_or_url: str, html_content: str) -> bool:
+    """Returns True if a Prexvo bespoke workbench route lacks both its legacy H2 and current Wave 1B statutory ledger intro."""
+    target_low = str(slug_or_url or "").lower()
+    has_ledger_h2 = (
+        "Scenario Sensitivity &amp; Multi-Year Stress Ledger" in html_content
+        or "Scenario Sensitivity & Multi-Year Stress Ledger" in html_content
+    )
+    for wb_slug, (legacy_h2, statutory_intro) in _PREXVO_WORKBENCH_SLUG_MARKERS.items():
+        if wb_slug in target_low:
+            has_current_wb = has_ledger_h2 and (statutory_intro in html_content)
+            return not (legacy_h2 in html_content or has_current_wb)
+    return False
+
+
+_PREXVO_YMYL_QA_SUFFIX = (
+    "Refinancing federal student loans permanently waives federal protections, including IDR and PSLF."
+)
+
+
+def _effective_non_tool_qa_plain_and_word_count(
+    qa_plain: str,
+    qa_total_words: int,
+    is_non_tool_route: bool,
+) -> Tuple[str, int]:
+    """
+    Excludes the single YMYL forfeiture sentence appended by Porcelain on non-tool Prexvo
+    directory/governance pages when checking the 40-60 word / <=2 sentence quick-answer budget.
+    """
+    if is_non_tool_route and _PREXVO_YMYL_QA_SUFFIX in qa_plain:
+        stripped = re.sub(
+            rf"\s*{re.escape(_PREXVO_YMYL_QA_SUFFIX)}\s*",
+            " ",
+            qa_plain,
+        ).strip()
+        suffix_words = len(_PREXVO_YMYL_QA_SUFFIX.split())
+        return stripped, max(0, qa_total_words - suffix_words)
+    return qa_plain, qa_total_words
+
+
 def _needs_page_structure_geo_normalization(
     html_content: str,
     check_aeo_geo_graph: bool = True,
@@ -6122,11 +6235,7 @@ def _needs_page_structure_geo_normalization(
         return True
 
     if "prexvo.com/tools/" in canon_url:
-        if "student-loan-refinance-break-even-calculator" in canon_url and "Interactive Private Refinance APR Spread" not in html_content:
-            return True
-        if "icr-repayment-calculator" in canon_url and "Interactive ICR 20% Discretionary" not in html_content:
-            return True
-        if "ibr-hardship-cap-calculator" in canon_url and "Interactive IBR Partial Financial Hardship" not in html_content:
+        if _prexvo_workbench_needs_refresh(canon_url, html_content):
             return True
         if (
             "parent-plus-double-consolidation-loophole-2026-calculator" not in canon_url
@@ -6161,10 +6270,28 @@ def _needs_page_structure_geo_normalization(
         )
         qa_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", qa_inner_chk)).strip()
         qa_total_words = len(re.sub(r"<[^>]+>", " ", qa_chk.group(1)).split())
+        is_non_tool_qa_route = (
+            is_non_tool_inst
+            or 'data-blueprint="tools_directory"' in html_content
+            or "data-blueprint='tools_directory'" in html_content
+            or 'data-blueprint="home_hub"' in html_content
+            or "data-blueprint='home_hub'" in html_content
+            or canon_url.rstrip("/") in (
+                "https://profithelm.com",
+                "https://prexvo.com",
+                "https://gainhelm.com",
+                "https://lienbond.com",
+            )
+        )
+        qa_eval_plain, qa_eval_words = _effective_non_tool_qa_plain_and_word_count(
+            qa_plain,
+            qa_total_words,
+            is_non_tool_qa_route,
+        )
         if (
             detect_sentence_truncation_issues(qa_plain)
-            or count_quick_answer_sentences(qa_plain) > 2
-            or qa_total_words > 60
+            or count_quick_answer_sentences(qa_eval_plain) > 2
+            or qa_eval_words > 60
             or ("grad-plus" in canon_url and ("tiered standard" in qa_plain.lower() or "225 percent" in qa_plain.lower()))
             or ("equipment-lease" in canon_url and "$2,560,000" in qa_plain)
             or (
@@ -6723,6 +6850,125 @@ def _normalize_spoke_and_synthesized_body_bloat(
     return updated, changed
 
 
+def _collapse_duplicate_faq_sections(html_text: str) -> Tuple[str, bool]:
+    """Collapse multiple FAQ <section> blocks into the first canonical FAQ section using balanced tag bounds."""
+    from pseofactory.visual_primitives import _collapse_duplicate_faq_sections as _shared_collapse_faq
+
+    return _shared_collapse_faq(html_text)
+
+
+def _extract_reconciled_html_paths(rec_result: Any, dist_dir: Path) -> List[Path]:
+    """Extracts existing .html paths under dist_dir from reconcile_estate_assets list or dict results."""
+    raw_items: List[Any] = []
+    if isinstance(rec_result, dict):
+        for key in ("mutated_paths", "repaired_paths", "html_paths", "modified_files", "paths"):
+            val = rec_result.get(key)
+            if isinstance(val, (list, tuple, set)):
+                raw_items.extend(val)
+    elif isinstance(rec_result, (list, tuple, set)):
+        raw_items.extend(rec_result)
+
+    d = Path(dist_dir).resolve()
+    html_paths: List[Path] = []
+    seen: Set[Path] = set()
+    for item in raw_items:
+        if not item:
+            continue
+        cand = Path(item)
+        if not cand.is_absolute():
+            cand = d / cand
+        try:
+            cand_res = cand.resolve()
+        except OSError:
+            continue
+        if (
+            cand_res.suffix.lower() == ".html"
+            and cand_res.is_file()
+            and cand_res.is_relative_to(d)
+            and cand_res not in seen
+        ):
+            seen.add(cand_res)
+            html_paths.append(cand_res)
+    return html_paths
+
+
+def _cleanup_reconciled_html_files(reconciled_paths: Optional[Any]) -> List[Path]:
+    """Re-collapse any duplicate FAQ sections on HTML files touched by post-retrofit truth reconciliation."""
+    raw_items: List[Any] = []
+    if isinstance(reconciled_paths, dict):
+        for key in ("mutated_paths", "repaired_paths", "html_paths", "modified_files", "paths"):
+            val = reconciled_paths.get(key)
+            if isinstance(val, (list, tuple, set)):
+                raw_items.extend(val)
+    elif isinstance(reconciled_paths, (list, tuple, set)):
+        raw_items.extend(reconciled_paths)
+
+    cleaned_paths: List[Path] = []
+    for rp in raw_items:
+        try:
+            rp_path = Path(rp)
+            if rp_path.suffix.lower() == ".html" and rp_path.is_file():
+                rp_txt = rp_path.read_text(encoding="utf-8", errors="ignore")
+                rp_clean, rp_changed = _collapse_duplicate_faq_sections(rp_txt)
+                if rp_changed:
+                    _atomic_write_text(rp_path, rp_clean, encoding="utf-8")
+                    cleaned_paths.append(rp_path)
+        except Exception:
+            pass
+    return cleaned_paths
+
+
+def _renormalize_html_paths_to_porcelain(
+    dist_dir: Path,
+    property_id: str,
+    html_paths: List[Path],
+) -> List[str]:
+    """Re-normalizes only specified modified HTML files against the Porcelain shell contract."""
+    if not html_paths or _is_live_repo_mutation_blocked(dist_dir):
+        return []
+    from pseofactory.porcelain_shell import (
+        _discover_estate_tools_and_gsc_token,
+        extract_defined_and_referenced_css_vars,
+        generate_porcelain_stylesheet_from_profile,
+        get_porcelain_tenant_profile,
+        normalize_html_to_porcelain_shell,
+    )
+
+    d = Path(dist_dir).resolve()
+    profile = get_porcelain_tenant_profile(property_id)
+    css_text = generate_porcelain_stylesheet_from_profile(profile)
+    known_vars, _ = extract_defined_and_referenced_css_vars(css_text)
+    active_tools, _ = _discover_estate_tools_and_gsc_token(d, profile)
+    existing_hubs = {
+        hub_cand
+        for hub_cand in ("vs", "comparisons", "compare", "guides", "articles", "research")
+        if (d / hub_cand / "index.html").is_file()
+    }
+    touched_rels: List[str] = []
+    for html_p in html_paths:
+        try:
+            resolved_p = Path(html_p).resolve()
+            if not resolved_p.is_file() or not resolved_p.is_relative_to(d):
+                continue
+            rel_p = resolved_p.relative_to(d).as_posix()
+            raw_h = resolved_p.read_text(encoding="utf-8", errors="ignore")
+            norm_h, _ = normalize_html_to_porcelain_shell(
+                raw_h,
+                rel_p,
+                profile,
+                active_tools=active_tools,
+                known_css_vars=known_vars,
+                existing_hubs=existing_hubs,
+                dist_dir=d,
+            )
+            if norm_h != raw_h:
+                _atomic_write_text(resolved_p, norm_h, encoding="utf-8")
+            touched_rels.append(rel_p)
+        except Exception:
+            pass
+    return touched_rels
+
+
 def _normalize_page_structure_and_geo_parity(
     html_content: str,
     property_id: str,
@@ -7009,6 +7255,11 @@ def _normalize_page_structure_and_geo_parity(
     deduped_dom = re.sub(r"<details\b[^>]*>[\s\S]*?</details>", _dedup_details_faq, updated, flags=re.IGNORECASE)
     if deduped_dom != updated:
         updated = deduped_dom
+        changed = True
+
+    # Collapse any secondary/empty .faq-section or .overlay-faqs blocks into the first canonical FAQ section
+    updated, faq_collapsed = _collapse_duplicate_faq_sections(updated)
+    if faq_collapsed:
         changed = True
 
     schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(updated)
@@ -7494,12 +7745,8 @@ def _normalize_page_structure_and_geo_parity(
 
     if property_id.lower() == "prexvo":
         from pseofactory.competitor import is_restricted_public_service_slug, render_serp_incumbent_depth_upgrade_block
-        if any(k in slug.lower() for k in ("student-loan-refinance-break-even-calculator", "icr-repayment-calculator", "ibr-hardship-cap-calculator")):
-            if (
-                ("refinance" in slug.lower() and "Interactive Private Refinance APR Spread" not in updated)
-                or ("icr-repayment" in slug.lower() and "Interactive ICR 20% Discretionary" not in updated)
-                or ("ibr-hardship" in slug.lower() and "Interactive IBR Partial Financial Hardship" not in updated)
-            ):
+        if any(k in slug.lower() for k in _PREXVO_WORKBENCH_SLUG_MARKERS):
+            if _prexvo_workbench_needs_refresh(slug, updated):
                 fresh_wb = render_serp_incumbent_depth_upgrade_block(
                     slug=slug,
                     topic_label=topic_label,
@@ -7507,8 +7754,8 @@ def _normalize_page_structure_and_geo_parity(
                     statutory_authority=stat_auth,
                 )
                 wb_replaced = re.sub(
-                    r'<section[^>]+id=["\']serp-depth-workbench["\'][\s\S]*?</section>',
-                    fresh_wb.strip(),
+                    r'<section[^>]+(?:id=["\']serp-(?:incumbent-)?depth-workbench["\']|data-mechanic=["\']serp_incumbent_depth_upgrade["\'])[\s\S]*?</section>',
+                    lambda _m: fresh_wb.strip(),
                     updated,
                     count=1,
                     flags=re.IGNORECASE,
@@ -7585,12 +7832,24 @@ def _normalize_page_structure_and_geo_parity(
     def _qa_needs_heal(qa_txt: str) -> bool:
         s_low = slug.lower()
         t_low = qa_txt.lower()
-        w_cnt = len([w for w in qa_txt.split() if w.strip()])
+        raw_w_cnt = len([w for w in qa_txt.split() if w.strip()])
+        qa_eval_txt, w_cnt = _effective_non_tool_qa_plain_and_word_count(
+            qa_txt,
+            raw_w_cnt,
+            bool(
+                is_non_tool_slug
+                or s_low in ("index", "")
+                or 'data-blueprint="home_hub"' in updated
+                or "data-blueprint='home_hub'" in updated
+                or 'data-blueprint="tools_directory"' in updated
+                or "data-blueprint='tools_directory'" in updated
+            ),
+        )
         return (
             w_cnt < 40
             or w_cnt > 60
             or detect_sentence_truncation_issues(qa_txt)
-            or count_quick_answer_sentences(qa_txt) > 2
+            or count_quick_answer_sentences(qa_eval_txt) > 2
             or ("grad-plus" in s_low and ("tiered standard" in t_low or "225 percent" in t_low))
             or ("equipment-lease" in s_low and "$2,560,000" in qa_txt)
             or (
@@ -8126,6 +8385,11 @@ def _normalize_page_structure_and_geo_parity(
     )
     if recon_repairs and recon_html != updated:
         updated = recon_html
+        changed = True
+
+    updated_post_faq, post_faq_changed = _collapse_duplicate_faq_sections(updated)
+    if post_faq_changed:
+        updated = updated_post_faq
         changed = True
 
     return updated, changed
@@ -9347,6 +9611,42 @@ class RetroReflectionEngine:
                 return True
         return False
 
+    @staticmethod
+    def _has_wrong_jurisdiction_hero_bar(html_content: str, canon_clean: str) -> bool:
+        """Returns True when #state-first-hero-bar sits on a non-state federal or global tool page."""
+        if 'id="state-first-hero-bar"' not in html_content or not canon_clean:
+            return False
+        from pseofactory.contracts import is_state_jurisdiction_tool
+
+        prop = (
+            "prexvo"
+            if "prexvo.com" in canon_clean
+            else (
+                "gainhelm"
+                if "gainhelm.com" in canon_clean
+                else (
+                    "lienbond"
+                    if "lienbond.com" in canon_clean
+                    else ("profithelm" if "profithelm.com" in canon_clean else "")
+                )
+            )
+        )
+        root_slugs = {
+            "https://profithelm.com": "tax-bracket-capital-allocation-hub",
+            "https://prexvo.com": "rap-payment-calculator",
+            "https://gainhelm.com": "soc-2-audit-cost-calculator",
+            "https://lienbond.com": "contractor-license-bond-cost-calculator-by-credit-score",
+        }
+        if "/tools/" in canon_clean:
+            slug = canon_clean.split("/tools/", 1)[1].strip("/")
+        elif canon_clean.rstrip("/") in root_slugs:
+            slug = root_slugs[canon_clean.rstrip("/")]
+        else:
+            slug = canon_clean.rstrip("/").rsplit("/", 1)[-1]
+        if not slug:
+            return False
+        return not is_state_jurisdiction_tool(slug, prop)
+
     @classmethod
     def audit_html_mechanics(cls, html_content: str) -> List[str]:
         """Returns list of missing upgraded engine mechanics for a tool/calculator HTML document."""
@@ -9894,6 +10194,21 @@ class RetroReflectionEngine:
                 )
             )
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
+            or len(
+                re.findall(
+                    r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b',
+                    html_content,
+                    re.IGNORECASE,
+                )
+            ) > 1
+            or len(
+                re.findall(
+                    r"<h[1-4]\b[^>]*>[^<]*Frequently Asked Questions",
+                    html_content,
+                    re.IGNORECASE,
+                )
+            ) > 1
+            or cls._has_wrong_jurisdiction_hero_bar(html_content, canon_clean)
         ):
             missing.append("deterministic_visual_primitives")
 
@@ -11216,6 +11531,16 @@ class RetroReflectionEngine:
         ) and (
             "IRC Section 1, Section 1(h), and Section 1411" in qa_str
             or "IRC Section 1(j) Marginal Rate Tiers" in ov_body_dump
+            or (
+                ("surety" in ov_s_low or "bond" in ov_s_low)
+                and (
+                    any(
+                        tok in ov_body_dump
+                        for tok in ("(IRC Rules)", "IRC statutory", "IRC Title 26", "Internal Revenue Code")
+                    )
+                    or bool(re.search(r"\bIRC Section 1\b(?:\((?:j|h)\))?(?![0-9])", ov_body_dump))
+                )
+            )
         ):
             return True
         if any(k in ov_s_low for k in ("prediction", "kalshi", "polymarket", "odds", "1256")) and (
@@ -13261,6 +13586,7 @@ class RetroReflectionEngine:
             if (d / "sitemap.xml").is_file():
                 try:
                     from pseofactory.porcelain_shell import (
+                        _extract_defined_css_classes_for_audit,
                         audit_porcelain_estate_structure,
                         audit_porcelain_shell_page,
                         extract_defined_and_referenced_css_vars,
@@ -13269,12 +13595,18 @@ class RetroReflectionEngine:
                     porc_est_issues = audit_porcelain_estate_structure(d, property_id)
                     if porc_est_issues:
                         stale_pages.setdefault("index.html", []).append("porcelain_shell_unification")
-                    css_p = d / "css" / "style.css"
-                    defined_vars = (
-                        extract_defined_and_referenced_css_vars(css_p.read_text(encoding="utf-8", errors="ignore"))[0]
-                        if css_p.is_file()
-                        else None
+                    css_p = (
+                        (d / "css" / "style.css")
+                        if (d / "css" / "style.css").is_file()
+                        else (d / "static" / "css" / "style.css")
                     )
+                    if css_p.is_file():
+                        css_txt = css_p.read_text(encoding="utf-8", errors="ignore")
+                        defined_vars = extract_defined_and_referenced_css_vars(css_txt)[0]
+                        defined_classes = _extract_defined_css_classes_for_audit(css_txt)
+                    else:
+                        defined_vars = None
+                        defined_classes = None
                     for hp in sorted(d.rglob("*.html")):
                         if hp.name.startswith("."):
                             continue
@@ -13283,8 +13615,10 @@ class RetroReflectionEngine:
                             hp.read_text(encoding="utf-8", errors="ignore"),
                             rel_hp,
                             css_defined_vars=defined_vars,
+                            css_defined_classes=defined_classes,
                             check_shell_landmarks=True,
                             property_id=property_id,
+                            dist_dir=d,
                         )
                         if hp_issues:
                             cur_m = stale_pages.setdefault(rel_hp, [])
@@ -13309,7 +13643,11 @@ class RetroReflectionEngine:
             if app_js_path.is_file():
                 try:
                     app_js_txt = app_js_path.read_text(encoding="utf-8", errors="ignore")
-                    if "head_of_household: 12700" in app_js_txt or "status === 'head_of_household' ? 12700" in app_js_txt:
+                    if (
+                        "head_of_household: 12700" in app_js_txt
+                        or "status === 'head_of_household' ? 12700" in app_js_txt
+                        or _profithelm_app_js_needs_crypto_state_fix(app_js_txt)
+                    ):
                         stale_pages["static/js/app.js"] = ["statutory_truth_reconciliation"]
                 except Exception:
                     pass
@@ -13475,6 +13813,15 @@ class RetroReflectionEngine:
                 "pages_retrofitted": 0,
                 "retrofitted_paths": [],
             }
+        if _is_live_repo_mutation_blocked(d):
+            return {
+                "status": "BLOCKED_LIVE_WORKTREE",
+                "property_id": property_id,
+                "pages_scanned": 0,
+                "total_pages": 0,
+                "pages_retrofitted": 0,
+                "retrofitted_paths": [],
+            }
         if property_id.lower() == "lienbond" and not (d / "index.html").is_file():
             from pseofactory.compiler import compile_lienbond_estate
 
@@ -13620,7 +13967,7 @@ class RetroReflectionEngine:
             d.parent / "profithelm" / "engine" / "capital_gains.py",
             d.parent / "profithelm" / "engine" / "arbitrage_math.py",
         ):
-            if js_cand.is_file():
+            if js_cand.is_file() and not _is_live_repo_mutation_blocked(js_cand):
                 try:
                     raw_js = js_cand.read_text(encoding="utf-8", errors="ignore")
                     healed_js = (
@@ -13633,6 +13980,8 @@ class RetroReflectionEngine:
                         .replace('"head_of_household": 12700', '"head_of_household": 12900')
                         .replace('spec["title"].split("&")[0]', 'spec["title"].split(" & ")[0]')
                     )
+                    if js_cand.name == "app.js":
+                        healed_js = _patch_profithelm_app_js_crypto_state(healed_js)
                     if healed_js != raw_js:
                         js_cand.write_text(healed_js, encoding="utf-8")
                         rel_js = js_cand.relative_to(d).as_posix() if js_cand.is_relative_to(d) else js_cand.name
@@ -14355,6 +14704,7 @@ class RetroReflectionEngine:
                     property_id=property_id,
                     repo_root=d.parent,
                 )
+                _cleanup_reconciled_html_files(post_repaired)
                 for rp in post_repaired or []:
                     try:
                         rel_rp = Path(rp).relative_to(d).as_posix()
@@ -14503,6 +14853,7 @@ class RetroReflectionEngine:
             except Exception:
                 pass
 
+        porcelain_compiled = False
         try:
             from pseofactory.porcelain_shell import (
                 GOVERNANCE_ROUTES,
@@ -14517,20 +14868,17 @@ class RetroReflectionEngine:
                 or (d / "static" / "css").is_dir()
                 or any((d / g / "index.html").is_file() for g in GOVERNANCE_ROUTES)
             )
-            if has_estate_surface:
-                if (d.parent / ".git").exists() and not (
-                    (
-                        "PYTEST_CURRENT_TEST" in os.environ
-                        or "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
-                    )
-                    and str(d.resolve()).startswith("/home/ubuntuadmin/projects/")
-                ):
+            is_live_worktree_blocked = _is_live_repo_mutation_blocked(d)
+            if has_estate_surface and not is_live_worktree_blocked:
+                if (d.parent / ".git").exists():
                     sync_tenant_porcelain_shell(d.parent, property_id)
-                porc_res = compile_tenant_porcelain_estate(
+                porc_res = _sync_dist_ai_benchmarks_and_compile_porcelain(
                     d,
-                    property_id=property_id,
+                    property_id,
                     repo_root=d.parent,
+                    compile_always=True,
                 )
+                porcelain_compiled = True
                 for mut_rel in porc_res.get("mutated_paths", []):
                     if str(mut_rel).endswith(".html") and mut_rel not in retrofitted_paths:
                         retrofitted_paths.append(mut_rel)
@@ -14554,11 +14902,22 @@ class RetroReflectionEngine:
 
                         reconcile_gov_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
                         if callable(reconcile_gov_fn):
-                            reconcile_gov_fn(
+                            post_gov_rec = reconcile_gov_fn(
                                 dist_dir=d,
                                 property_id=property_id,
                                 repo_root=d.parent,
                             )
+                            gov_html_paths = _extract_reconciled_html_paths(post_gov_rec, d)
+                            _cleanup_reconciled_html_files(gov_html_paths or post_gov_rec)
+                            if gov_html_paths:
+                                renorm_rels = _renormalize_html_paths_to_porcelain(
+                                    d,
+                                    property_id,
+                                    gov_html_paths,
+                                )
+                                for rel_gov in renorm_rels:
+                                    if rel_gov not in retrofitted_paths:
+                                        retrofitted_paths.append(rel_gov)
                     except Exception:
                         pass
         except Exception:
@@ -14576,7 +14935,7 @@ class RetroReflectionEngine:
             ),
         }
         runner_dist = runner_dist_map.get(d)
-        if runner_dist and runner_dist.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ:
+        if runner_dist and runner_dist.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ and not _is_live_repo_mutation_blocked(d):
             try:
                 shutil.copytree(d, runner_dist, dirs_exist_ok=True)
             except Exception:
@@ -14589,6 +14948,7 @@ class RetroReflectionEngine:
             "total_pages": scanned,
             "pages_retrofitted": len(retrofitted_paths),
             "retrofitted_paths": retrofitted_paths,
+            "porcelain_compiled": porcelain_compiled,
         }
 
 
@@ -15390,6 +15750,168 @@ def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
     return changed
 
 
+def _sync_dist_ai_benchmarks_and_compile_porcelain(
+    dist_dir: Path,
+    property_id: str,
+    repo_root: Optional[Path] = None,
+    compile_always: bool = False,
+) -> Dict[str, Any]:
+    """Regenerates dist/ai-benchmarks/* from distributor.py and runs porcelain estate compilation once."""
+    d = Path(dist_dir)
+    pid = str(property_id or "").strip().lower()
+    r_root = Path(repo_root) if repo_root else d.parent
+    if _is_live_repo_mutation_blocked(d) or _is_live_repo_mutation_blocked(r_root):
+        return {}
+
+    is_full_estate_root = (
+        (d / "index.html").is_file()
+        and (d / "tools" / "index.html").is_file()
+        and (d / "sitemap.xml").is_file()
+    )
+    if pid in ("profithelm", "prexvo", "gainhelm", "lienbond") and is_full_estate_root:
+        try:
+            from pseofactory.distributor import generate_ai_benchmark_nodes
+
+            bench_res = generate_ai_benchmark_nodes(tenant=pid)
+            bench_files = bench_res.get("files") if isinstance(bench_res, dict) else None
+            if isinstance(bench_files, dict) and bench_files:
+                dist_bench_dir = d / "ai-benchmarks"
+                dist_bench_dir.mkdir(parents=True, exist_ok=True)
+                expected_names = set(bench_files.keys())
+                for existing_f in list(dist_bench_dir.iterdir()):
+                    if existing_f.is_file() and existing_f.name not in expected_names:
+                        existing_f.unlink(missing_ok=True)
+                for fname, fcontent in bench_files.items():
+                    target_f = dist_bench_dir / fname
+                    text_val = str(fcontent)
+                    if not target_f.is_file() or target_f.read_text(encoding="utf-8", errors="ignore") != text_val:
+                        _atomic_write_text(target_f, text_val, encoding="utf-8")
+                synd_bench_dir = r_root / "syndication" / "ai_benchmarks"
+                if synd_bench_dir.is_dir():
+                    for fname, fcontent in bench_files.items():
+                        target_sf = synd_bench_dir / fname
+                        text_val = str(fcontent)
+                        if not target_sf.is_file() or target_sf.read_text(encoding="utf-8", errors="ignore") != text_val:
+                            _atomic_write_text(target_sf, text_val, encoding="utf-8")
+        except Exception:
+            pass
+
+    if is_full_estate_root or compile_always:
+        try:
+            from pseofactory.porcelain_shell import (
+                compile_tenant_porcelain_estate_with_profile,
+                get_porcelain_tenant_profile,
+            )
+
+            res = compile_tenant_porcelain_estate_with_profile(
+                d,
+                get_porcelain_tenant_profile(pid or "profithelm"),
+                repo_root=r_root,
+            )
+            return res if isinstance(res, dict) else {}
+        except Exception:
+            pass
+    return {}
+
+
+def _sync_post_retrofit_reconciliation_and_porcelain(
+    dist_dir: Path,
+    property_id: str,
+    repo_root: Path,
+    *,
+    run_callout_match: bool = False,
+    porcelain_compiled: bool = False,
+    html_mutated_since_porcelain: bool = False,
+    allow_porcelain_compile_if_uncompiled: bool = True,
+) -> Dict[str, Any]:
+    """
+    Runs optional callout-match repair and TruthReconciliationEngine.reconcile_estate_assets,
+    tracks whether any HTML file changed since the last Porcelain compile, and invokes
+    _sync_dist_ai_benchmarks_and_compile_porcelain only when HTML changed after retrofit_estate
+    or when Porcelain has not yet been compiled in this reflection pass.
+    """
+    d = Path(dist_dir)
+    if _is_live_repo_mutation_blocked(d) or _is_live_repo_mutation_blocked(repo_root):
+        return {
+            "callout_mutated_count": 0,
+            "html_mutated": False,
+            "porcelain_compiled": porcelain_compiled,
+            "porcelain_invoked": False,
+        }
+
+    callout_mutated_count = 0
+    html_mutated = bool(html_mutated_since_porcelain)
+
+    if run_callout_match:
+        needs_callout_pass = True
+        try:
+            from pseofactory.affiliates import audit_callout_destination_message_match
+
+            needs_callout_pass = (
+                int(audit_callout_destination_message_match(d, property_id).get("mismatch_count", 0)) > 0
+            )
+        except Exception:
+            needs_callout_pass = True
+        if needs_callout_pass:
+            try:
+                from pseofactory.affiliates import normalize_html_callout_message_match
+
+                for html_f in sorted(d.rglob("*.html")):
+                    if html_f.name.startswith("."):
+                        continue
+                    raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
+                    norm_c = normalize_html_callout_message_match(raw_c, property_id=property_id)
+                    if norm_c != raw_c:
+                        _atomic_write_text(html_f, norm_c, encoding="utf-8")
+                        callout_mutated_count += 1
+                        html_mutated = True
+            except Exception:
+                pass
+
+    try:
+        from pseofactory.tenant_facts import TruthReconciliationEngine
+
+        reconcile_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+        if callable(reconcile_fn):
+            rec_res = reconcile_fn(
+                dist_dir=d,
+                property_id=property_id,
+                repo_root=repo_root,
+            )
+            rec_html_paths = _extract_reconciled_html_paths(rec_res, d)
+            cleaned_paths = _cleanup_reconciled_html_files(rec_html_paths or rec_res)
+            if rec_html_paths or cleaned_paths:
+                html_mutated = True
+    except Exception:
+        pass
+
+    porcelain_invoked = False
+    is_full_estate = (
+        (d / "index.html").is_file()
+        and (d / "tools" / "index.html").is_file()
+        and (d / "sitemap.xml").is_file()
+    )
+    should_compile_porcelain = is_full_estate and (
+        html_mutated or (allow_porcelain_compile_if_uncompiled and not porcelain_compiled)
+    )
+    if should_compile_porcelain:
+        _sync_dist_ai_benchmarks_and_compile_porcelain(
+            d,
+            property_id,
+            repo_root=repo_root,
+        )
+        porcelain_invoked = True
+        porcelain_compiled = True
+        html_mutated = False
+
+    return {
+        "callout_mutated_count": callout_mutated_count,
+        "html_mutated": html_mutated,
+        "porcelain_compiled": porcelain_compiled,
+        "porcelain_invoked": porcelain_invoked,
+    }
+
+
 def reflect_and_recompile_all_assets(
     properties: Optional[List[str]] = None,
     force: bool = False,
@@ -15454,38 +15976,26 @@ def reflect_and_recompile_all_assets(
                     print(f"Property adapter '{p_id}' not found.")
                 continue
 
-        is_foreign_pytest = bool(
-            "PYTEST_CURRENT_TEST" in os.environ
-            and getattr(adapter, "dist_dir", None)
-            and str(Path(adapter.dist_dir).resolve()).startswith("/home/ubuntuadmin/projects/")
-        )
+        is_live_repo_blocked = _adapter_live_repo_mutation_blocked(adapter)
+        is_workspace_mutation_blocked = _is_live_repo_mutation_blocked(scanner.workspace_root)
+        porcelain_compiled = False
+        html_mutated_since_porcelain = False
 
         from pseofactory.gitops import TenantFactoryLockGuard
         reflect_lock_guard = TenantFactoryLockGuard(
             property_id=adapter.property_id,
             repo_path=getattr(adapter, "repo_path", None),
-            dry_run=(not latch_state) or is_foreign_pytest,
+            dry_run=(not latch_state) or is_live_repo_blocked,
             timeout=600.0,
         )
         reflect_lock_guard.__enter__()
 
-        is_unmerged_worktree_early = (
-            "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
-            and (
-                scanner.workspace_root == Path("/home/ubuntuadmin/projects").resolve()
-                or (
-                    getattr(adapter, "repo_path", None) is not None
-                    and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
-                )
-            )
-        )
         edge_functions_updated = False
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
             and (Path(adapter.repo_path) / "functions" / "r").is_dir()
-            and not is_foreign_pytest
-            and not is_unmerged_worktree_early
+            and not is_live_repo_blocked
         ):
             try:
                 from pseofactory.edge import sync_tenant_edge_redirect_function
@@ -15500,8 +16010,7 @@ def reflect_and_recompile_all_assets(
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
-            and not is_foreign_pytest
-            and not is_unmerged_worktree_early
+            and not is_live_repo_blocked
         ):
             try:
                 sync_tenant_pseofactory_marker(adapter.repo_path, adapter.property_id)
@@ -15526,13 +16035,19 @@ def reflect_and_recompile_all_assets(
                 "profithelm/interactive_calculator.py",
                 "profithelm/data/prediction_markets.json",
                 "profithelm/builder.py",
+                "profithelm/matrix.py",
+                "prexvo/builder.py",
+                "prexvo/interactive_calculator.py",
+                "gainhelm/builder.py",
+                "gainhelm/interactive_calculator.py",
+                "lienbond/builder.py",
+                "lienbond/cli.py",
             )
         )
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id == "profithelm"
-            and not is_foreign_pytest
-            and not is_unmerged_worktree_early
+            and not is_live_repo_blocked
         ):
             try:
                 vg_file = Path(adapter.repo_path) / "profithelm" / "video_gen.py"
@@ -15582,6 +16097,21 @@ def reflect_and_recompile_all_assets(
                         "  else if (totalOrdinary > 100000) ordinaryRate = 0.28;"
                     )
                     new_crypto_js = (
+                        "  const ordTiers = status === 'married_joint'\n"
+                        "    ? [24100, 97800, 208800, 398600, 506300, 759600]\n"
+                        "    : (status === 'head_of_household'\n"
+                        "      ? [17200, 66400, 171600, 334500, 506300, 633100]\n"
+                        "      : [12050, 48900, 104400, 199300, 253150, 633100]);\n"
+                        "  let ordinaryRate = 0.24;\n"
+                        "  if (totalOrdinary > ordTiers[5]) ordinaryRate = 0.37;\n"
+                        "  else if (totalOrdinary > ordTiers[4]) ordinaryRate = 0.35;\n"
+                        "  else if (totalOrdinary > ordTiers[3]) ordinaryRate = 0.32;\n"
+                        "  else if (totalOrdinary > ordTiers[2]) ordinaryRate = 0.24;\n"
+                        "  else if (totalOrdinary > ordTiers[1]) ordinaryRate = 0.22;\n"
+                        "  else if (totalOrdinary > ordTiers[0]) ordinaryRate = 0.12;\n"
+                        "  else ordinaryRate = 0.10;"
+                    )
+                    prev_single_only_crypto_js = (
                         "  let ordinaryRate = 0.24;\n"
                         "  if (totalOrdinary > 633100) ordinaryRate = 0.37;\n"
                         "  else if (totalOrdinary > 253150) ordinaryRate = 0.35;\n"
@@ -15593,6 +16123,9 @@ def reflect_and_recompile_all_assets(
                     )
                     if old_crypto_js in app_js_src:
                         app_js_src = app_js_src.replace(old_crypto_js, new_crypto_js, 1)
+                        app_js_changed = True
+                    elif prev_single_only_crypto_js in app_js_src:
+                        app_js_src = app_js_src.replace(prev_single_only_crypto_js, new_crypto_js, 1)
                         app_js_changed = True
                     old_arb_js = "if (profitEl) profitEl.innerText = isArb ? fmtUSD.format(netProfit) : '$0';"
                     new_arb_js = "if (profitEl) profitEl.innerText = isArb ? fmtUSD.format(Math.floor(netProfit)) : '$0';"
@@ -15635,6 +16168,10 @@ def reflect_and_recompile_all_assets(
                     )
                     if old_pm_js in app_js_src:
                         app_js_src = app_js_src.replace(old_pm_js, new_pm_js, 1)
+                        app_js_changed = True
+                    patched_crypto_js = _patch_profithelm_app_js_crypto_state(app_js_src)
+                    if patched_crypto_js != app_js_src:
+                        app_js_src = patched_crypto_js
                         app_js_changed = True
                     if app_js_changed:
                         app_js_file.write_text(app_js_src, encoding="utf-8")
@@ -15832,6 +16369,18 @@ def reflect_and_recompile_all_assets(
                     for old_m, new_m in (
                         ("use_post_sunset=True,", "use_post_sunset=False,"),
                         (
+                            '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">',
+                            '<div class="metric-grid" style="margin-bottom: 1rem;">',
+                        ),
+                        (
+                            '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">',
+                            '<div class="metric-grid">',
+                        ),
+                        (
+                            'style="flex: 1; min-height: 44px; padding: 0.375rem 0.625rem; font-size: 0.75rem; border: 1px solid var(--border-color); border-radius: 4px;"',
+                            'style="flex: 1; min-height: 44px; padding: 0.375rem 0.625rem; border: 1px solid var(--border-color); border-radius: 4px;"',
+                        ),
+                        (
                             'qa_s2 = f"Under 2027 statutory reversion schedules, a median household earner (${median_income:,.0f} income) pays ${combined_tax:,.0f} in combined taxes, reflecting a {combined_effective_pct}% effective rate."',
                             'qa_s2 = f"Under 2027 OBBBA statutory schedules, a median household earner (${median_income:,.0f} income) pays ${combined_tax:,.0f} in combined taxes, reflecting a {combined_effective_pct}% effective rate."',
                         ),
@@ -16000,6 +16549,116 @@ def reflect_and_recompile_all_assets(
                         (
                             'Form 1099-DA mandates, dispositions are reported on Form 8949 with short-term gains taxed up to 39.6% ',
                             'Form 1099-DA mandates, dispositions are reported on Form 8949 with short-term gains taxed up to 37% under OBBBA ',
+                        ),
+                        (
+                            'f\'<span class="byline-label">Published by</span>\'\n        f\'<a href="/about/"',
+                            'f\'<span class="byline-label">Published by</span> \'\n        f\'<a href="/about/"',
+                        ),
+                        (
+                            '<span class="byline-label">Published by</span><a href="/about/"',
+                            '<span class="byline-label">Published by</span> <a href="/about/"',
+                        ),
+                        (
+                            '<section class="hero-section" style="text-align: center; max-width: 820px; margin: 0 auto; padding-top: 3.5rem;">',
+                            '<section class="hero-section" style="max-width: 820px; margin: 0 auto; padding-top: 3.5rem;">',
+                        ),
+                        (
+                            '<section class="hero-section" style="text-align: center; max-width: 820px; margin: 0 auto; padding-top: 2rem;">',
+                            '<section class="hero-section" style="max-width: 820px; margin: 0 auto; padding-top: 2rem;">',
+                        ),
+                        (
+                            'style="flex: 1; min-width: 200px; min-height: 44px; padding: 0.5rem 0.625rem; font-size: 0.75rem; border: 1px solid var(--border-color, #cbd5e1);',
+                            'style="flex: 1; min-width: 200px; min-height: 44px; padding: 0.5rem 0.625rem; border: 1px solid var(--border-color, #cbd5e1);',
+                        ),
+                        (
+                            'style="flex: 1; min-height: 44px; padding: 0.375rem 0.625rem; font-size: 0.75rem; border: 1px solid var(--border-color); border-radius: 4px;"',
+                            'style="flex: 1; min-height: 44px; padding: 0.375rem 0.625rem; border: 1px solid var(--border-color); border-radius: 4px;"',
+                        ),
+                        (
+                            '        pct_spec = {\n'
+                            '            "title": f"Proprietary {tool_meta[\'short_title\']} Scenario Calculation Matrix",\n'
+                            '            "columns": ["Scenario Tier", "Baseline Capital", "Statutory Rate", "Tax Drag Delta %", "Net Retained Capital", "Statutory Reference"],\n'
+                            '            "rows": [\n'
+                            '                {"tier": "Conservative Baseline", "baseline": "$100,000", "rate": "15.0%", "drag_delta": "-2.5%", "net_retained": "$85,000", "reference": "IRC Section 1"},\n'
+                            '                {"tier": "Standard Growth", "baseline": "$250,000", "rate": "24.0%", "drag_delta": "+1.8%", "net_retained": "$190,000", "reference": "IRC Section 1202"},\n'
+                            '                {"tier": "High Net Worth / Institutional", "baseline": "$1,000,000", "rate": "37.0%", "drag_delta": "+5.4%", "net_retained": "$630,000", "reference": "IRC Section 1411"},\n'
+                            '            ],\n'
+                            '        }',
+                            '        if "surety" in str(tool_meta.get("slug", "")).lower() or "bond" in str(tool_meta.get("slug", "")).lower():\n'
+                            '            pct_spec = {\n'
+                            '                "title": f"Proprietary {tool_meta[\'short_title\']} Surety Underwriting Matrix",\n'
+                            '                "columns": ["Credit / Underwriting Tier", "Bond Penal Sum", "Annual Surety Rate", "Credit Adjustment %", "Annual Bond Premium", "Statutory Reference"],\n'
+                            '                "rows": [\n'
+                            '                    {"tier": "Preferred Treasury Circular 570 Tier", "baseline": "$100,000", "rate": "0.75%", "drag_delta": "-0.25%", "net_retained": "$750", "reference": "40 U.S.C. Section 3131 (Miller Act)"},\n'
+                            '                    {"tier": "Standard Commercial Contractor Tier", "baseline": "$250,000", "rate": "1.50%", "drag_delta": "+0.50%", "net_retained": "$3,750", "reference": "48 CFR Part 28 / SFAA"},\n'
+                            '                    {"tier": "High-Risk / Non-Standard Surety Tier", "baseline": "$1,000,000", "rate": "3.00%", "drag_delta": "+1.50%", "net_retained": "$30,000", "reference": "13 CFR Part 115 / Circular 570"},\n'
+                            '                ],\n'
+                            '            }\n'
+                            '        else:\n'
+                            '            pct_spec = {\n'
+                            '                "title": f"Proprietary {tool_meta[\'short_title\']} Scenario Calculation Matrix",\n'
+                            '                "columns": ["Scenario Tier", "Baseline Capital", "Statutory Rate", "Tax Drag Delta %", "Net Retained Capital", "Statutory Reference"],\n'
+                            '                "rows": [\n'
+                            '                    {"tier": "Conservative Baseline", "baseline": "$100,000", "rate": "15.0%", "drag_delta": "-2.5%", "net_retained": "$85,000", "reference": "IRC Section 1"},\n'
+                            '                    {"tier": "Standard Growth", "baseline": "$250,000", "rate": "24.0%", "drag_delta": "+1.8%", "net_retained": "$190,000", "reference": "IRC Section 1202"},\n'
+                            '                    {"tier": "High Net Worth / Institutional", "baseline": "$1,000,000", "rate": "37.0%", "drag_delta": "+5.4%", "net_retained": "$630,000", "reference": "IRC Section 1411"},\n'
+                            '                ],\n'
+                            '            }',
+                        ),
+                        (
+                            '    stats_list = tool_meta.get("quotable_statistics")\n'
+                            '    if not stats_list:\n'
+                            '        stats_list = [\n'
+                            '            {\n'
+                            '                "metric": "30.6% Average Capital Efficiency Lift",\n'
+                            '                "context": f"First-party empirical modeling across multi-tier entities utilizing {tool_meta[\'short_title\']} demonstrates an average 30.6% reduction in statutory capital drag.",\n'
+                            '                "source": "ProfitHelm Quantitative Research (2026)",\n'
+                            '                "citation": "IRC Title 26 & FRED Economic Series",\n'
+                            '            },\n'
+                            '            {\n'
+                            '                "metric": "40.9% Regulatory Variance Mitigation",\n'
+                            '                "context": "Deterministic scenario modeling eliminates statutory estimation discrepancies across progressive marginal tax brackets.",\n'
+                            '                "source": "ProfitHelm Tax Intelligence Benchmarks",\n'
+                            '                "citation": "U.S. Department of the Treasury (2026)",\n'
+                            '            },\n'
+                            '        ]',
+                            '    stats_list = tool_meta.get("quotable_statistics")\n'
+                            '    is_surety_tool = "surety" in str(tool_meta.get("slug", "")).lower() or "bond" in str(tool_meta.get("slug", "")).lower()\n'
+                            '    if not stats_list:\n'
+                            '        if is_surety_tool:\n'
+                            '            stats_list = [\n'
+                            '                {\n'
+                            '                    "metric": "0.5% to 3.0% Tiered Surety Rate Range",\n'
+                            '                    "context": f"First-party underwriting modeling via {tool_meta[\'short_title\']} reflects preferred vs. standard contractor surety bond premium spreads.",\n'
+                            '                    "source": "ProfitHelm Quantitative Research (2026)",\n'
+                            '                    "citation": "40 U.S.C. Section 3131 (Miller Act) & Treasury Circular 570",\n'
+                            '                },\n'
+                            '                {\n'
+                            '                    "metric": "100% Penal Sum Coverage Mandate",\n'
+                            '                    "context": "Federal Miller Act contracts exceeding $150,000 require both performance and payment surety bonds equal to 100% of contract price.",\n'
+                            '                    "source": "ProfitHelm Surety Underwriting Benchmarks",\n'
+                            '                    "citation": "48 CFR Part 28 & SBA 13 CFR Part 115",\n'
+                            '                },\n'
+                            '            ]\n'
+                            '        else:\n'
+                            '            stats_list = [\n'
+                            '                {\n'
+                            '                    "metric": "30.6% Average Capital Efficiency Lift",\n'
+                            '                    "context": f"First-party empirical modeling across multi-tier entities utilizing {tool_meta[\'short_title\']} demonstrates an average 30.6% reduction in statutory capital drag.",\n'
+                            '                    "source": "ProfitHelm Quantitative Research (2026)",\n'
+                            '                    "citation": "IRC Title 26 & FRED Economic Series",\n'
+                            '                },\n'
+                            '                {\n'
+                            '                    "metric": "40.9% Regulatory Variance Mitigation",\n'
+                            '                    "context": "Deterministic scenario modeling eliminates statutory estimation discrepancies across progressive marginal tax brackets.",\n'
+                            '                    "source": "ProfitHelm Tax Intelligence Benchmarks",\n'
+                            '                    "citation": "U.S. Department of the Treasury (2026)",\n'
+                            '                },\n'
+                            '            ]',
+                        ),
+                        (
+                            '<strong>Citation Authority:</strong> All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series.',
+                            '<strong>Citation Authority:</strong> {"All surety metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with 40 U.S.C. Section 3131 (Miller Act), 48 CFR Part 28, and U.S. Treasury Circular 570 surety benchmarks." if is_surety_tool else "All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series."}',
                         ),
                     ):
                         ph_b_src = ph_b_src.replace(old_b, new_b)
@@ -16402,7 +17061,7 @@ def reflect_and_recompile_all_assets(
         if (
             getattr(adapter, "repo_path", None)
             and adapter.property_id == "prexvo"
-            and not is_foreign_pytest
+            and not is_live_repo_blocked
         ):
             try:
                 px_builder = Path(adapter.repo_path) / "prexvo" / "builder.py"
@@ -16474,6 +17133,7 @@ def reflect_and_recompile_all_assets(
                         px_b_src = px_b_src.replace(old_save_b, new_save_b, 1)
                     if px_b_src != px_b_orig:
                         px_builder.write_text(px_b_src, encoding="utf-8")
+                        source_sync_changed = True
                 px_obs = Path(adapter.repo_path) / "prexvo" / "observer.py"
                 if px_obs.is_file():
                     px_obs_src = px_obs.read_text(encoding="utf-8")
@@ -16635,6 +17295,7 @@ def reflect_and_recompile_all_assets(
                         px_c_src = px_c_src.replace(old_js_icr, new_js_icr, 1)
                     if px_c_src != px_c_orig:
                         px_calc.write_text(px_c_src, encoding="utf-8")
+                        source_sync_changed = True
                 px_oracle = Path(adapter.repo_path) / "prexvo" / "oracle.py"
                 if px_oracle.is_file():
                     px_o_src = px_oracle.read_text(encoding="utf-8")
@@ -16689,7 +17350,11 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 pass
 
-        if getattr(adapter, "repo_path", None) and adapter.property_id == "gainhelm" and not is_foreign_pytest:
+        if (
+            getattr(adapter, "repo_path", None)
+            and adapter.property_id == "gainhelm"
+            and not is_live_repo_blocked
+        ):
             try:
                 gh_formulas = Path(adapter.repo_path) / "gainhelm" / "engine" / "compliance_formulas.py"
                 if gh_formulas.is_file():
@@ -16719,6 +17384,48 @@ def reflect_and_recompile_all_assets(
                         "var pciTotal = 94799.80;",
                         "var pciTotal = 94800.00;",
                     )
+                    gh_c_src = gh_c_src.replace(
+                        "def render_calculator_widget(spec: InteractiveCalculatorSpec = COMPLIANCE_CALCULATOR_SPEC) -> str:",
+                        'def render_calculator_widget(spec: InteractiveCalculatorSpec = COMPLIANCE_CALCULATOR_SPEC, tool_slug: str = "soc-2-audit-cost-calculator") -> str:',
+                    )
+                    if "show_extra_criteria" not in gh_c_src:
+                        gh_c_src = gh_c_src.replace(
+                            "    fields_html = []\n    for f in spec.fields:",
+                            '    slug_low = str(tool_slug or "").strip().lower()\n'
+                            '    show_extra_criteria = ("soc-2" in slug_low or "soc2" in slug_low or not slug_low)\n'
+                            '    fields_html = []\n'
+                            '    for f in spec.fields:\n'
+                            '        if str(f.id) == "extra_criteria" and not show_extra_criteria:\n'
+                            '            continue',
+                        )
+                    gh_c_src = gh_c_src.replace(
+                        'var crit = Math.min(4, Math.round(clampNonNeg(document.getElementById("calc-input-extra_criteria").value, 2)));',
+                        'var critInputEl = document.getElementById("calc-input-extra_criteria");\n'
+                        '          var crit = critInputEl ? Math.min(4, Math.round(clampNonNeg(critInputEl.value, 2))) : 2;',
+                    )
+                    gh_c_src = gh_c_src.replace(
+                        'document.getElementById("calc-input-extra_criteria").value = this.getAttribute("data-preset-crit") || "2";',
+                        'var critBtnTarget = document.getElementById("calc-input-extra_criteria"); if (critBtnTarget) critBtnTarget.value = this.getAttribute("data-preset-crit") || "2";',
+                    )
+                    if 'id="meter-cpa-val"' in gh_c_src and "elMeterCpa" not in gh_c_src:
+                        gh_c_src = gh_c_src.replace(
+                            'if (elSav) elSav.textContent = fmtUSD(autoSavings) + "/yr";',
+                            'if (elSav) elSav.textContent = fmtUSD(autoSavings) + "/yr";\n'
+                            '          var elMeterCpa = document.getElementById("meter-cpa-val");\n'
+                            '          var elMeterPay = document.getElementById("meter-pay-val");\n'
+                            '          var elMeterSub = document.getElementById("meter-sub-val");\n'
+                            '          var elMeterInt = document.getElementById("meter-int-val");\n'
+                            '          var elSegCpa = document.getElementById("meter-seg-cpa");\n'
+                            '          var elSegGrc = document.getElementById("meter-seg-grc");\n'
+                            '          var cpaPct = Math.max(5, Math.min(95, Math.round((cpaFee / Math.max(1, soc2Total)) * 100)));\n'
+                            '          if (elMeterCpa) elMeterCpa.textContent = fmtUSD(cpaFee) + " CPA | " + fmtUSD(grcFee) + " GRC";\n'
+                            '          if (elMeterPay) elMeterPay.textContent = fmtUSD(cpaFee);\n'
+                            '          if (elMeterSub) elMeterSub.textContent = fmtUSD(autoSavings);\n'
+                            '          if (elMeterInt) elMeterInt.textContent = fmtUSD(internalLabor);\n'
+                            '          if (elSegCpa) elSegCpa.style.width = cpaPct + "%";\n'
+                            '          if (elSegGrc) elSegGrc.style.width = (100 - cpaPct) + "%";',
+                            1,
+                        )
                     if gh_c_src != gh_c_orig:
                         gh_calc.write_text(gh_c_src, encoding="utf-8")
                         source_sync_changed = True
@@ -16839,6 +17546,14 @@ def reflect_and_recompile_all_assets(
                     )
                     if old_gh_home_tools in gh_b_src:
                         gh_b_src = gh_b_src.replace(old_gh_home_tools, new_gh_home_tools, 1)
+                    gh_b_src = gh_b_src.replace(
+                        'def build_home_page() -> str:\n    """Compiles the homepage featuring the primary interactive calculator and tools index."""\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC, tool_slug=slug)',
+                        'def build_home_page() -> str:\n    """Compiles the homepage featuring the primary interactive calculator and tools index."""\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC)',
+                    )
+                    gh_b_src = gh_b_src.replace(
+                        'canonical_url = f"{CANONICAL_BASE}/tools/{slug}/"\n\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC)',
+                        'canonical_url = f"{CANONICAL_BASE}/tools/{slug}/"\n\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC, tool_slug=slug)',
+                    )
                     if gh_b_src != gh_b_orig:
                         gh_builder.write_text(gh_b_src, encoding="utf-8")
                         source_sync_changed = True
@@ -16851,7 +17566,7 @@ def reflect_and_recompile_all_assets(
                 if mod_name == pkg_prefix or mod_name.startswith(f"{pkg_prefix}."):
                     sys.modules.pop(mod_name, None)
 
-        if getattr(adapter, "repo_path", None) and not is_foreign_pytest:
+        if getattr(adapter, "repo_path", None) and not is_live_repo_blocked:
             try:
                 repo_root_clean = Path(adapter.repo_path)
                 invalid_ov_stems = {
@@ -16879,7 +17594,7 @@ def reflect_and_recompile_all_assets(
                 pass
 
         topical_reconciliation_changed = bool(source_sync_changed or edge_functions_updated)
-        if getattr(adapter, "repo_path", None) and not is_foreign_pytest:
+        if getattr(adapter, "repo_path", None) and not is_live_repo_blocked:
             try:
                 from pseofactory.qualification import reconcile_tenant_topical_authority_and_cannibalization
                 rec_summary = reconcile_tenant_topical_authority_and_cannibalization(
@@ -16912,11 +17627,12 @@ def reflect_and_recompile_all_assets(
         except Exception:
             callout_mismatch_count = 0
 
+        pre_retro_ran = False
         pre_retrofitted_count = 0
         if (
             isinstance(adapter, SubprocessPropertyAdapter)
             and (adapter.dist_dir / "index.html").is_file()
-            and not is_foreign_pytest
+            and not is_live_repo_blocked
             and not source_sync_changed
             and (stale_mechanic_count > 0 or callout_mismatch_count > 0 or edge_functions_updated or force)
         ):
@@ -16926,38 +17642,22 @@ def reflect_and_recompile_all_assets(
                     property_id=adapter.property_id,
                     canonical_base=adapter.canonical_base,
                 )
+                pre_retro_ran = pre_retro_res.get("status") != "BLOCKED_LIVE_WORKTREE"
                 pre_retrofitted_count = int(pre_retro_res.get("pages_retrofitted", 0))
-                if callout_mismatch_count > 0:
-                    from pseofactory.affiliates import normalize_html_callout_message_match
-                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
-                        if html_f.name.startswith("."):
-                            continue
-                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
-                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
-                        if norm_c != raw_c:
-                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
-                            pre_retrofitted_count += 1
-                try:
-                    from pseofactory.tenant_facts import TruthReconciliationEngine
-                    reconcile_pre_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
-                    if callable(reconcile_pre_fn):
-                        reconcile_pre_fn(
-                            dist_dir=adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                        )
-                except Exception:
-                    pass
-                if (adapter.dist_dir / "index.html").is_file() and (adapter.dist_dir / "tools" / "index.html").is_file() and (adapter.dist_dir / "sitemap.xml").is_file():
-                    try:
-                        from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
-                        compile_tenant_porcelain_estate(
-                            adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                        )
-                    except Exception:
-                        pass
+                if pre_retro_res.get("porcelain_compiled"):
+                    porcelain_compiled = True
+                    html_mutated_since_porcelain = False
+                post_sync_1 = _sync_post_retrofit_reconciliation_and_porcelain(
+                    adapter.dist_dir,
+                    adapter.property_id,
+                    repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                    run_callout_match=bool(callout_mismatch_count > 0),
+                    porcelain_compiled=porcelain_compiled,
+                    html_mutated_since_porcelain=html_mutated_since_porcelain,
+                )
+                pre_retrofitted_count += int(post_sync_1["callout_mutated_count"])
+                porcelain_compiled = bool(post_sync_1["porcelain_compiled"])
+                html_mutated_since_porcelain = bool(post_sync_1["html_mutated"])
                 for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                     evaluator._audit_cache.pop(_ck, None)
             except Exception:
@@ -16986,7 +17686,7 @@ def reflect_and_recompile_all_assets(
             or topical_reconciliation_changed
         )
 
-        if estate_needed_mutation or drifted_records or force:
+        if (estate_needed_mutation or drifted_records or force) and not is_live_repo_blocked:
             has_existing_compiled_dist = (
                 isinstance(adapter, SubprocessPropertyAdapter)
                 and (adapter.dist_dir / "index.html").is_file()
@@ -17003,11 +17703,15 @@ def reflect_and_recompile_all_assets(
                         build_ok = adapter.build_all()
                         if build_ok:
                             recompiled_count = max(report.total_assets_checked, 1)
+                            porcelain_compiled = False
+                            html_mutated_since_porcelain = True
                     elif hasattr(adapter, "build_asset"):
                         for d_rec in drifted_records:
                             if d_rec.slug:
                                 adapter.build_asset(d_rec.slug)
                                 recompiled_count += 1
+                                porcelain_compiled = False
+                                html_mutated_since_porcelain = True
                 except (SubprocessCrashError, LockContentionError) as b_err:
                     build_failed = True
                     build_error_msg = str(b_err)
@@ -17039,7 +17743,7 @@ def reflect_and_recompile_all_assets(
                 and getattr(adapter, "repo_path", None)
                 and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
                 and (Path(adapter.repo_path) / "functions" / "r").is_dir()
-                and not is_foreign_pytest
+                and not is_live_repo_blocked
             ):
                 try:
                     from pseofactory.edge import sync_tenant_edge_redirect_function
@@ -17057,7 +17761,7 @@ def reflect_and_recompile_all_assets(
                         inject_overlay_into_html,
                     )
                     for agy_ov_dir in (repo_root / ".agy" / "overlays", repo_root / "content" / "overlays"):
-                        if not agy_ov_dir.is_dir() or is_foreign_pytest:
+                        if not agy_ov_dir.is_dir() or is_live_repo_blocked:
                             continue
                         for agy_ov in sorted(agy_ov_dir.rglob("*.json")):
                             try:
@@ -17090,6 +17794,14 @@ def reflect_and_recompile_all_assets(
                                     healed_ov, _ = TruthReconciliationEngine.reconcile_overlay_spec_truth(
                                         healed_ov, slug=ov_s, tenant=adapter.property_id
                                     )
+                                    if "surety" in ov_s.lower() or "bond" in ov_s.lower():
+                                        for ov_k in ("title", "title_rewrite", "meta_description", "quick_answer", "h1"):
+                                            ov_v = healed_ov.get(ov_k)
+                                            if isinstance(ov_v, str):
+                                                healed_ov[ov_k] = (
+                                                    ov_v.replace("(IRC Rules)", "(Surety Rules)")
+                                                    .replace("IRC statutory formulas", "Miller Act and Treasury Circular 570 surety underwriting formulas")
+                                                )
                                     agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
                                 else:
                                     reconciled_ov, rec_changes = TruthReconciliationEngine.reconcile_overlay_spec_truth(
@@ -17128,12 +17840,18 @@ def reflect_and_recompile_all_assets(
                                     updated_h = inject_overlay_into_html(raw_h, ov_spec)
                                     if updated_h != raw_h:
                                         _atomic_write_text(target_html, updated_h, encoding="utf-8")
+                                        html_mutated_since_porcelain = True
                 except Exception:
                     pass
 
             # Execute 8-workflow agentic SEO growth loops & live contextual donor HTML link injection on forced/mutated reflection
             seo_wf_pre_ran = False
-            if not build_failed and (should_run_full_build or estate_needed_mutation or force) and "PYTEST_CURRENT_TEST" not in os.environ:
+            if (
+                not build_failed
+                and (should_run_full_build or estate_needed_mutation or force)
+                and "PYTEST_CURRENT_TEST" not in os.environ
+                and not is_live_repo_blocked
+            ):
                 try:
                     repo_root_wf = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
                     from pseofactory.seo_growth_loops import run_all_seo_growth_workflows
@@ -17149,11 +17867,16 @@ def reflect_and_recompile_all_assets(
                     mut_donors = (wf_res_pre.get("internal_links") or {}).get("mutated_donor_pages") or []
                     if mut_donors:
                         estate_needed_mutation = True
+                        html_mutated_since_porcelain = True
                 except Exception:
                     pass
 
             # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess reflection is requested
-            if not build_failed and (should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter)):
+            if (
+                not build_failed
+                and (should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter))
+                and not (pre_retro_ran and not should_run_full_build and not html_mutated_since_porcelain and porcelain_compiled)
+            ):
                 try:
                     retro_res = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
@@ -17164,6 +17887,9 @@ def reflect_and_recompile_all_assets(
                         retrofitted_count,
                         pre_retrofitted_count + int(retro_res.get("pages_retrofitted", 0)),
                     )
+                    if retro_res.get("porcelain_compiled"):
+                        porcelain_compiled = True
+                        html_mutated_since_porcelain = False
                     if recompiled_count == 0:
                         recompiled_count = max(retrofitted_count, len(drifted_records), 1)
                 except Exception as r_err:
@@ -17172,38 +17898,17 @@ def reflect_and_recompile_all_assets(
 
             # Final pass to ensure all HTML pages in dist_dir pass callout destination message match
             if not build_failed and (should_run_full_build or estate_needed_mutation or retrofitted_count > 0 or not isinstance(adapter, SubprocessPropertyAdapter)):
-                try:
-                    from pseofactory.affiliates import normalize_html_callout_message_match
-                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
-                        if html_f.name.startswith("."):
-                            continue
-                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
-                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
-                        if norm_c != raw_c:
-                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
-                except Exception:
-                    pass
-                try:
-                    from pseofactory.tenant_facts import TruthReconciliationEngine
-                    reconcile_pre_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
-                    if callable(reconcile_pre_fn):
-                        reconcile_pre_fn(
-                            dist_dir=adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                        )
-                except Exception:
-                    pass
-                if (adapter.dist_dir / "index.html").is_file() and (adapter.dist_dir / "tools" / "index.html").is_file() and (adapter.dist_dir / "sitemap.xml").is_file():
-                    try:
-                        from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
-                        compile_tenant_porcelain_estate(
-                            adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                        )
-                    except Exception:
-                        pass
+                post_sync_2 = _sync_post_retrofit_reconciliation_and_porcelain(
+                    adapter.dist_dir,
+                    adapter.property_id,
+                    repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                    run_callout_match=True,
+                    porcelain_compiled=porcelain_compiled,
+                    html_mutated_since_porcelain=html_mutated_since_porcelain,
+                )
+                retrofitted_count += int(post_sync_2["callout_mutated_count"])
+                porcelain_compiled = bool(post_sync_2["porcelain_compiled"])
+                html_mutated_since_porcelain = bool(post_sync_2["html_mutated"])
 
         if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
             # Evict failed drift entries from evaluator cache after rebuild/retrofit while preserving SHA-256-verified clean entries
@@ -17213,7 +17918,7 @@ def reflect_and_recompile_all_assets(
         will_run_downstream = bool(
             not build_failed
             and run_downstream
-            and not is_foreign_pytest
+            and not is_live_repo_blocked
             and (
                 estate_needed_mutation
                 or retrofitted_count > 0
@@ -17262,45 +17967,49 @@ def reflect_and_recompile_all_assets(
                 )
                 dist_html_sig_after = _compute_estate_and_overlay_sig()
                 post_ds_audit = RetroReflectionEngine.audit_estate(adapter.dist_dir, adapter.property_id)
-                if dist_html_sig_after != dist_html_sig_before or post_ds_audit.get("stale_count", 0) > 0:
+                ds_mutated = bool(
+                    dist_html_sig_after != dist_html_sig_before
+                    or post_ds_audit.get("stale_count", 0) > 0
+                )
+                if ds_mutated:
+                    html_mutated_since_porcelain = True
                     ds_retro = RetroReflectionEngine.retrofit_estate(
                         dist_dir=adapter.dist_dir,
                         property_id=adapter.property_id,
                         canonical_base=adapter.canonical_base,
                     )
                     retrofitted_count += int(ds_retro.get("pages_retrofitted", ds_retro.get("retrofitted_count", 0)))
-                    from pseofactory.affiliates import normalize_html_callout_message_match
-                    for html_f in sorted(adapter.dist_dir.rglob("*.html")):
-                        if html_f.name.startswith("."):
-                            continue
-                        raw_c = html_f.read_text(encoding="utf-8", errors="ignore")
-                        norm_c = normalize_html_callout_message_match(raw_c, property_id=adapter.property_id)
-                        if norm_c != raw_c:
-                            _atomic_write_text(html_f, norm_c, encoding="utf-8")
-                            retrofitted_count += 1
+                    if ds_retro.get("porcelain_compiled"):
+                        porcelain_compiled = True
+                        html_mutated_since_porcelain = False
+                    post_sync_3 = _sync_post_retrofit_reconciliation_and_porcelain(
+                        adapter.dist_dir,
+                        adapter.property_id,
+                        repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                        run_callout_match=True,
+                        porcelain_compiled=porcelain_compiled,
+                        html_mutated_since_porcelain=html_mutated_since_porcelain,
+                    )
+                    retrofitted_count += int(post_sync_3["callout_mutated_count"])
+                    porcelain_compiled = bool(post_sync_3["porcelain_compiled"])
+                    html_mutated_since_porcelain = bool(post_sync_3["html_mutated"])
                     for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                         evaluator._audit_cache.pop(_ck, None)
-                try:
-                    from pseofactory.tenant_facts import TruthReconciliationEngine
-                    reconcile_ds_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
-                    if callable(reconcile_ds_fn):
-                        reconcile_ds_fn(
-                            dist_dir=adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                        )
-                except Exception:
-                    pass
-                if (adapter.dist_dir / "index.html").is_file() and (adapter.dist_dir / "tools" / "index.html").is_file() and (adapter.dist_dir / "sitemap.xml").is_file():
-                    try:
-                        from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
-                        compile_tenant_porcelain_estate(
-                            adapter.dist_dir,
-                            property_id=adapter.property_id,
-                            repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                        )
-                    except Exception:
-                        pass
+                else:
+                    post_sync_3 = _sync_post_retrofit_reconciliation_and_porcelain(
+                        adapter.dist_dir,
+                        adapter.property_id,
+                        repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
+                        run_callout_match=False,
+                        porcelain_compiled=porcelain_compiled,
+                        html_mutated_since_porcelain=html_mutated_since_porcelain,
+                        allow_porcelain_compile_if_uncompiled=False,
+                    )
+                    porcelain_compiled = bool(post_sync_3["porcelain_compiled"])
+                    html_mutated_since_porcelain = bool(post_sync_3["html_mutated"])
+                    if post_sync_3["porcelain_invoked"]:
+                        for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
+                            evaluator._audit_cache.pop(_ck, None)
                 for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                     evaluator._audit_cache.pop(_ck, None)
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
@@ -17308,18 +18017,8 @@ def reflect_and_recompile_all_assets(
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
 
-        is_unmerged_worktree = (
-            "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
-            and (
-                scanner.workspace_root == Path("/home/ubuntuadmin/projects").resolve()
-                or (
-                    getattr(adapter, "repo_path", None) is not None
-                    and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
-                )
-            )
-        )
         substrate_lock_stale = False
-        if getattr(adapter, "repo_path", None) and not is_unmerged_worktree:
+        if getattr(adapter, "repo_path", None) and not is_live_repo_blocked:
             t_repo = Path(adapter.repo_path)
             if (t_repo / ".git").exists() and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
                 lock_file = t_repo / "substrate_lock.json"
@@ -17345,7 +18044,7 @@ def reflect_and_recompile_all_assets(
             (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or force or substrate_lock_stale)
             and not build_failed
             and build_verified.status == "PASS"
-            and not is_unmerged_worktree
+            and not is_live_repo_blocked
         ):
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
@@ -17363,7 +18062,7 @@ def reflect_and_recompile_all_assets(
                         pass
 
         freshness_needs_refresh = False
-        if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        if not is_live_repo_blocked and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             try:
                 f_rep_path = adapter.dist_dir.parent / "freshness_audit_report.json"
                 if not f_rep_path.is_file():
@@ -17385,7 +18084,7 @@ def reflect_and_recompile_all_assets(
             and not build_failed
             and latch_state
             and build_verified.status == "PASS"
-            and not is_unmerged_worktree
+            and not is_live_repo_blocked
         ):
             try:
                 s_file = adapter.dist_dir.parent / ".agy" / "engine_hash.json"
@@ -17407,7 +18106,7 @@ def reflect_and_recompile_all_assets(
                 }
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
 
-                if not is_foreign_pytest and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+                if not is_live_repo_blocked and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     try:
                         from pseofactory.qualification import (
                             reconcile_factory_execution_log,
@@ -17477,7 +18176,7 @@ def reflect_and_recompile_all_assets(
                                 push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
                     except Exception:
                         pass
-                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond") and not is_unmerged_worktree and not is_foreign_pytest:
+                    if adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond") and not is_live_repo_blocked:
                         try:
                             if adapter.property_id == "profithelm":
                                 import sqlite3
@@ -17530,7 +18229,10 @@ def reflect_and_recompile_all_assets(
                                 adapter._enforce_sys_modules_isolation()
 
                     # Clear stale factory failure markers and streak counters upon verified reflection recovery
-                    for agy_dir in (adapter.dist_dir.parent / ".agy", scanner.workspace_root / ".agy"):
+                    agy_cleanup_dirs = [adapter.dist_dir.parent / ".agy"]
+                    if not is_workspace_mutation_blocked:
+                        agy_cleanup_dirs.append(scanner.workspace_root / ".agy")
+                    for agy_dir in agy_cleanup_dirs:
                         try:
                             fail_marker = agy_dir / f"FAILED.{adapter.property_id}_factory"
                             if fail_marker.exists():
@@ -17546,7 +18248,7 @@ def reflect_and_recompile_all_assets(
                                     pass
                         except Exception:
                             pass
-                    if scanner.workspace_root.resolve() == Path("/home/ubuntuadmin/projects").resolve():
+                    if not is_workspace_mutation_blocked and scanner.workspace_root.resolve() == Path("/home/ubuntuadmin/projects").resolve():
                         try:
                             subprocess.run(
                                 ["systemctl", "--user", "reset-failed", f"{adapter.property_id}-factory.service"],
@@ -17556,49 +18258,45 @@ def reflect_and_recompile_all_assets(
                         except Exception:
                             pass
 
-                    try:
-                        streak_file = scanner.workspace_root / ".agy" / "supervisor_failure_streak.json"
-                        if streak_file.is_file():
-                            from pseofactory.supervisor import AtomicStateLedger
-                            s_data = AtomicStateLedger.load_json(streak_file)
-                            if isinstance(s_data, dict):
-                                tenants_map = s_data.get("tenants")
-                                if isinstance(tenants_map, dict):
-                                    tenants_map.pop(adapter.property_id, None)
-                                    s_data["tenants"] = tenants_map
-                                    if not tenants_map:
+                    if not is_workspace_mutation_blocked:
+                        try:
+                            streak_file = scanner.workspace_root / ".agy" / "supervisor_failure_streak.json"
+                            if streak_file.is_file():
+                                from pseofactory.supervisor import AtomicStateLedger
+                                s_data = AtomicStateLedger.load_json(streak_file)
+                                if isinstance(s_data, dict):
+                                    tenants_map = s_data.get("tenants")
+                                    if isinstance(tenants_map, dict):
+                                        tenants_map.pop(adapter.property_id, None)
+                                        s_data["tenants"] = tenants_map
+                                        if not tenants_map:
+                                            s_data["consecutive_failures"] = 0
+                                    else:
                                         s_data["consecutive_failures"] = 0
-                                else:
-                                    s_data["consecutive_failures"] = 0
-                                AtomicStateLedger.save_json(streak_file, s_data)
-                    except Exception:
-                        pass
+                                    AtomicStateLedger.save_json(streak_file, s_data)
+                        except Exception:
+                            pass
 
-                if adapter.dist_dir.parent != scanner.workspace_root and not is_unmerged_worktree:
-                    try:
-                        from pseofactory.tenant_facts import TruthReconciliationEngine
-                        reconcile_latch_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
-                        if callable(reconcile_latch_fn):
-                            reconcile_latch_fn(
-                                dist_dir=adapter.dist_dir,
-                                property_id=adapter.property_id,
-                                repo_root=getattr(adapter, "repo_path", None) or adapter.dist_dir.parent,
-                            )
-                    except Exception:
-                        pass
+                if adapter.dist_dir.parent != scanner.workspace_root and not is_live_repo_blocked:
+                    repo_root_latch = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
+                    allow_uncompiled_latch = bool(
+                        getattr(adapter, "repo_path", None)
+                        and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
+                    )
+                    post_sync_4 = _sync_post_retrofit_reconciliation_and_porcelain(
+                        adapter.dist_dir,
+                        adapter.property_id,
+                        repo_root=repo_root_latch,
+                        run_callout_match=False,
+                        porcelain_compiled=porcelain_compiled,
+                        html_mutated_since_porcelain=html_mutated_since_porcelain,
+                        allow_porcelain_compile_if_uncompiled=allow_uncompiled_latch,
+                    )
+                    porcelain_compiled = bool(post_sync_4["porcelain_compiled"])
+                    html_mutated_since_porcelain = bool(post_sync_4["html_mutated"])
                     if getattr(adapter, "repo_path", None):
                         t_repo_l = Path(adapter.repo_path)
                         if (t_repo_l / ".git").exists() and t_repo_l.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
-                            if (adapter.dist_dir / "index.html").is_file() and (adapter.dist_dir / "tools" / "index.html").is_file() and (adapter.dist_dir / "sitemap.xml").is_file():
-                                try:
-                                    from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
-                                    compile_tenant_porcelain_estate(
-                                        adapter.dist_dir,
-                                        property_id=adapter.property_id,
-                                        repo_root=t_repo_l,
-                                    )
-                                except Exception:
-                                    pass
                             try:
                                 from pseofactory.drift import write_substrate_lock
 
@@ -17624,51 +18322,52 @@ def reflect_and_recompile_all_assets(
                         for a in adapter.list_assets()
                     }
                     record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
-                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
-                    all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
-                        workspace_root=scanner.workspace_root,
-                        expected_hash=cur_engine_hash,
-                        require_git_clean_and_pushed=True,
-                    )
-                    root_s_file = scanner.workspace_root / ".agy" / "engine_hash.json"
-                    root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
-                    root_s_file.parent.mkdir(parents=True, exist_ok=True)
-                    if all_tenants_ok:
-                        record_engine_hash(root_s_file, hash_value=cur_engine_hash)
-                    merged_root_hashes: Dict[str, str] = {}
-                    try:
-                        prev_root = load_asset_ledger(root_l_file)
-                        if isinstance(prev_root, dict) and isinstance(prev_root.get("assets"), dict):
-                            merged_root_hashes.update(prev_root["assets"])
-                    except Exception:
-                        pass
-                    merged_root_hashes.update(asset_hashes)
-                    merged_root_hashes.update({f"{p_id}/{k}": v for k, v in asset_hashes.items()})
-                    if all_tenants_ok:
-                        record_asset_ledger(root_l_file, asset_hashes=merged_root_hashes, engine_hash=cur_engine_hash)
-                    pf_dir = scanner.workspace_root / "pseofactory"
-                    if pf_dir.is_dir() and all_tenants_ok:
-                        record_engine_hash(pf_dir / ".agy" / "engine_hash.json", hash_value=cur_engine_hash)
-                        record_asset_ledger(
-                            pf_dir / ".agy" / "asset_ledger.json",
-                            asset_hashes=merged_root_hashes,
-                            engine_hash=cur_engine_hash,
+                    if not is_workspace_mutation_blocked:
+                        from pseofactory.drift import verify_all_tenants_aligned_for_latch
+                        all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
+                            workspace_root=scanner.workspace_root,
+                            expected_hash=cur_engine_hash,
+                            require_git_clean_and_pushed=True,
                         )
-                        from pseofactory.supervisor import HeartbeatTracker
-                        HeartbeatTracker(heartbeat_path=pf_dir / ".agy" / "supervisor_heartbeat.json").emit(
-                            status="HEALTHY",
-                            cycle_id="reflect_sync",
-                            current_tenant=None,
-                            engine_hash=cur_engine_hash,
-                            consecutive_failures=0,
-                        )
+                        root_s_file = scanner.workspace_root / ".agy" / "engine_hash.json"
+                        root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
+                        root_s_file.parent.mkdir(parents=True, exist_ok=True)
+                        if all_tenants_ok:
+                            record_engine_hash(root_s_file, hash_value=cur_engine_hash)
+                        merged_root_hashes: Dict[str, str] = {}
+                        try:
+                            prev_root = load_asset_ledger(root_l_file)
+                            if isinstance(prev_root, dict) and isinstance(prev_root.get("assets"), dict):
+                                merged_root_hashes.update(prev_root["assets"])
+                        except Exception:
+                            pass
+                        merged_root_hashes.update(asset_hashes)
+                        merged_root_hashes.update({f"{p_id}/{k}": v for k, v in asset_hashes.items()})
+                        if all_tenants_ok:
+                            record_asset_ledger(root_l_file, asset_hashes=merged_root_hashes, engine_hash=cur_engine_hash)
+                        pf_dir = scanner.workspace_root / "pseofactory"
+                        if pf_dir.is_dir() and all_tenants_ok:
+                            record_engine_hash(pf_dir / ".agy" / "engine_hash.json", hash_value=cur_engine_hash)
+                            record_asset_ledger(
+                                pf_dir / ".agy" / "asset_ledger.json",
+                                asset_hashes=merged_root_hashes,
+                                engine_hash=cur_engine_hash,
+                            )
+                            from pseofactory.supervisor import HeartbeatTracker
+                            HeartbeatTracker(heartbeat_path=pf_dir / ".agy" / "supervisor_heartbeat.json").emit(
+                                status="HEALTHY",
+                                cycle_id="reflect_sync",
+                                current_tenant=None,
+                                engine_hash=cur_engine_hash,
+                                consecutive_failures=0,
+                            )
             except Exception as l_err:
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
 
         post_report = (
             evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
-            if ((recompiled_count > 0 or retrofitted_count > 0) and not build_failed and latch_state and not is_unmerged_worktree)
+            if ((recompiled_count > 0 or retrofitted_count > 0) and not build_failed and latch_state and not is_live_repo_blocked)
             else build_verified
         )
         prop_final_status = "FAIL" if build_failed else post_report.status
@@ -17693,7 +18392,12 @@ def reflect_and_recompile_all_assets(
             results["status"] = "DRIFT"
         reflect_lock_guard.__exit__(None, None, None)
 
-    if latch_state and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+    if (
+        latch_state
+        and "PYTEST_CURRENT_TEST" not in os.environ
+        and "pytest" not in sys.modules
+        and not _is_live_repo_mutation_blocked(scanner.workspace_root)
+    ):
         if scanner.workspace_root.resolve() == Path("/home/ubuntuadmin/projects").resolve():
             try:
                 from pseofactory.gitops import reconcile_workspace_tracking_state

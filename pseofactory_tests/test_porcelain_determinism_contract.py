@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,7 @@ from pseofactory.porcelain_shell import (
     assert_porcelain_palette_wcag,
     audit_porcelain_estate_structure,
     audit_porcelain_shell_page,
+    build_governance_pages,
     classify_porcelain_blueprint,
     compile_tenant_porcelain_estate,
     compute_wcag_contrast_ratio,
@@ -482,3 +484,53 @@ def test_sandbox_standalone_substrate_real_verification_and_sha256_parity(tmp_pa
     home_html = (dist_dir / "index.html").read_text(encoding="utf-8")
     assert "linkedin.com/in/" not in home_html.lower()
     assert "linkedin.com/company/" not in home_html.lower()
+
+
+def test_mobile_calculator_grid_zero_overflow_min_width_and_track_sizing():
+    """Verify grid children use min-width: 0 and <=768px collapses to minmax(0, 1fr) so wide tables scroll in .table-wrap."""
+    for tid in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        css = generate_porcelain_stylesheet(tid)
+        assert re.search(
+            r"\.calc-grid\s*>\s*\*,\s*\.calculator-grid\s*>\s*\*,\s*\.grid-2\s*>\s*\*,\s*\.card\s*\{\s*min-width:\s*0;",
+            css,
+        ), f"{tid}: missing min-width: 0 on .calculator-grid > * / .card"
+        assert "grid-template-columns: minmax(0, 1fr);" in css, f"{tid}: missing minmax(0, 1fr) mobile collapse"
+        assert "max-width: 100%;" in css and "overflow-x: auto;" in css
+
+
+def test_publisher_head_injects_og_image_idempotently_across_tenants_and_governance():
+    """Verify missing <meta property='og:image'> is injected deterministically across normalization and governance pages."""
+    for tid in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        prof = get_porcelain_tenant_profile(tid)
+        expected_og = f"{prof['canonical_base'].rstrip('/')}/static/img/{tid}-og.png"
+
+        raw_missing_og = (
+            "<!DOCTYPE html><html lang='en'><head><title>Statutory Estimator</title>"
+            "<meta name='description' content='Deterministic model.'>"
+            "<meta property='og:url' content='https://example.com/tools/demo/'>"
+            "</head><body><main><h1>Estimator</h1></main></body></html>"
+        )
+        norm1, _ = normalize_html_to_porcelain_shell(raw_missing_og, "tools/demo/index.html", prof)
+        norm2, _ = normalize_html_to_porcelain_shell(norm1, "tools/demo/index.html", prof)
+        assert norm1 == norm2
+        og_hits = re.findall(r'<meta\b[^>]*property=["\']og:image["\'][^>]*>', norm1, flags=re.IGNORECASE)
+        assert len(og_hits) == 1 and expected_og in og_hits[0], f"{tid}: {og_hits}"
+
+        gov_pages = build_governance_pages(prof)
+        assert set(gov_pages.keys()) == set(GOVERNANCE_ROUTES)
+        for route_slug, gov_html in gov_pages.items():
+            assert f'content="{expected_og}"' in gov_html, f"{tid}/{route_slug}: missing {expected_og}"
+
+    prexvo_prof = get_porcelain_tenant_profile("prexvo")
+    for existing_tag in (
+        '<meta property="og:image" content="https://prexvo.com/static/img/custom-a.png">',
+        "<meta content='https://prexvo.com/static/img/custom-b.png' property='og:image'>",
+    ):
+        raw_with_og = (
+            f"<!DOCTYPE html><html lang='en'><head><title>Prexvo Tool</title>{existing_tag}"
+            "</head><body><main><h1>Prexvo Tool</h1></main></body></html>"
+        )
+        norm_kept, _ = normalize_html_to_porcelain_shell(raw_with_og, "tools/custom/index.html", prexvo_prof)
+        matches = re.findall(r"<meta\b[^>]*og:image[^>]*>", norm_kept, flags=re.IGNORECASE)
+        assert len(matches) == 1 and existing_tag in matches[0], matches
+

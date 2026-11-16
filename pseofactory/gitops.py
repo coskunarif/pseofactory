@@ -1940,6 +1940,8 @@ class GitOpsCoordinator:
             # Stage 6: Edge deployment parity check (cloud_deploy_lead)
             edge_res: Optional[Dict[str, Any]] = None
             if not skip_edge and edge_url:
+                if not eff_dry_run:
+                    purge_cloudflare_zone_cache(property_id)
                 verifier = LiveEdgeVerifier()
                 edge_res = verifier.verify_edge_deployment(
                     base_url=edge_url,
@@ -2259,12 +2261,14 @@ class CICDWatcher:
                         timeout=min(self.timeout, 300),
                     )
                     if w_res.returncode == 0:
+                        purge_res = purge_cloudflare_zone_cache("gainhelm")
                         return {
                             "status": "PASSED",
                             "run_id": f"local-wrangler-{rid}",
                             "head_sha": head_sha.strip(),
                             "conclusion": "success",
                             "deployment_mode": "local_wrangler_pages",
+                            "cache_purge": purge_res,
                         }
                     return {
                         "status": "FAILED",
@@ -2469,6 +2473,7 @@ class CICDWatcher:
                                                         "conclusion": "wrangler_deploy_failed",
                                                         "error": f"Wrangler Pages deploy failed for '{proj_name}': {(w_res.stderr or w_res.stdout or '').strip()}",
                                                     }
+                                                purge_cloudflare_zone_cache(proj_name)
                                             else:
                                                 return {
                                                     "status": "FAIL",
@@ -2616,6 +2621,83 @@ class CICDWatcher:
     watch_run = watch
 
 
+def purge_cloudflare_zone_cache(
+    property_id: str,
+    zone_id: Optional[str] = None,
+    api_token: Optional[str] = None,
+    urls: Optional[List[str]] = None,
+    timeout: float = 15.0,
+) -> Dict[str, Any]:
+    """
+    Optionally purges Cloudflare edge cache after deploy when zone ID and token env vars exist.
+    Gracefully skips on missing env vars or 401/403 insufficient token scopes.
+    Zero em-dashes. Zero en-dashes.
+    """
+    pid = str(property_id or "").strip().upper()
+    eff_token = (
+        api_token
+        or os.getenv("CLOUDFLARE_CACHE_PURGE_TOKEN")
+        or os.getenv("CLOUDFLARE_API_TOKEN")
+        or ""
+    ).strip()
+    eff_zone = (
+        zone_id
+        or (os.getenv(f"CLOUDFLARE_ZONE_ID_{pid}") if pid else "")
+        or os.getenv("CLOUDFLARE_ZONE_ID")
+        or ""
+    ).strip()
+    if not eff_token or not eff_zone:
+        return {
+            "status": "SKIPPED",
+            "reason": "missing_cloudflare_zone_or_token",
+            "property_id": property_id,
+        }
+    payload = {"files": list(urls)} if urls else {"purge_everything": True}
+    endpoint = f"https://api.cloudflare.com/client/v4/zones/{eff_zone}/purge_cache"
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {eff_token}",
+            "Content-Type": "application/json",
+            "User-Agent": "pseofactory-edge-purge/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body_txt = resp.read().decode("utf-8", errors="ignore")
+            data = json.loads(body_txt or "{}") if body_txt else {}
+            if resp.getcode() == 200 and data.get("success", True):
+                return {"status": "PURGED", "property_id": property_id, "zone_id": eff_zone}
+            return {
+                "status": "SKIPPED",
+                "reason": "cloudflare_purge_unsuccessful",
+                "property_id": property_id,
+                "status_code": resp.getcode(),
+            }
+    except urllib.error.HTTPError as he:
+        if he.code in (401, 403):
+            return {
+                "status": "SKIPPED",
+                "reason": f"cloudflare_scope_denied_{he.code}",
+                "property_id": property_id,
+                "status_code": he.code,
+            }
+        return {
+            "status": "SKIPPED",
+            "reason": f"cloudflare_http_{he.code}",
+            "property_id": property_id,
+            "status_code": he.code,
+        }
+    except Exception as exc:
+        return {
+            "status": "SKIPPED",
+            "reason": f"cloudflare_purge_error: {exc}",
+            "property_id": property_id,
+        }
+
+
 class LiveEdgeVerifier:
     """
     Deep live edge reachability and structural parity verifier:
@@ -2679,8 +2761,11 @@ class LiveEdgeVerifier:
                             "latency_ms": latency_ms,
                             "error": f"HTTP status {status_code}",
                         }
-                    body = resp.read().decode("utf-8", errors="ignore")
+                    raw_bytes = resp.read()
+                    body = raw_bytes.decode("utf-8", errors="ignore")
                     size_bytes = len(body.encode("utf-8"))
+                    raw_size_bytes = len(raw_bytes)
+                    raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
 
                     canonical = None
                     can_match = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', body, re.IGNORECASE)
@@ -2707,11 +2792,13 @@ class LiveEdgeVerifier:
                         "status_code": 200,
                         "latency_ms": latency_ms,
                         "size_bytes": size_bytes,
+                        "raw_size_bytes": raw_size_bytes,
                         "entries": entries,
                         "canonical": canonical,
                         "title": title,
                         "date_modified": date_modified,
                         "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                        "raw_sha256": raw_sha256,
                         "has_layout_containment": ("contain: layout style" in body),
                         "has_min_width_table": ("min-width: 110px" in body),
                         "has_visual_primitives": ('id="pseo-visual-primitives"' in body),
@@ -3426,30 +3513,130 @@ class LiveEdgeVerifier:
                 and not hasattr(self.verify_url, "mock_calls")
             )
         )
-        if should_sample_tools and dist_dir and (Path(dist_dir) / "tools").is_dir():
-            tools_root = Path(dist_dir) / "tools"
-            sampled_slugs: List[str] = []
-            for item in sorted(tools_root.iterdir()):
-                if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
-                    sampled_slugs.append(item.name)
-            for s_slug in sampled_slugs:
-                t_ep = f"{base}/tools/{s_slug}/"
-                endpoints.append(t_ep)
+        static_asset_expectations: Dict[str, Path] = {}
+        local_robots_txt: Optional[str] = None
+        if should_sample_tools and dist_dir:
+            d_root = Path(dist_dir)
+            robots_path = d_root / "robots.txt"
+            if robots_path.is_file():
                 try:
-                    t_txt = (tools_root / s_slug / "index.html").read_text(encoding="utf-8", errors="ignore")
-                    tool_expectations[t_ep] = {
-                        "has_visual_primitives": ('id="pseo-visual-primitives"' in t_txt),
-                        "has_runtime_sync": ('id="pseo-runtime-sync"' in t_txt),
-                        "local_html": t_txt,
-                        "rel_path": f"tools/{s_slug}/index.html",
-                    }
+                    local_robots_txt = robots_path.read_text(encoding="utf-8", errors="ignore").strip()
                 except Exception:
-                    tool_expectations[t_ep] = {
-                        "has_visual_primitives": False,
-                        "has_runtime_sync": False,
-                        "local_html": None,
-                        "rel_path": f"tools/{s_slug}/index.html",
-                    }
+                    local_robots_txt = None
+
+            for gov_rel, ep_path in (
+                ("tools/index.html", "/tools/"),
+                ("methodology/index.html", "/methodology/"),
+                ("404.html", "/404.html"),
+            ):
+                gov_file = d_root / gov_rel
+                if gov_file.is_file():
+                    g_ep = f"{base}{ep_path}"
+                    if g_ep not in endpoints:
+                        endpoints.append(g_ep)
+                    try:
+                        g_txt = gov_file.read_text(encoding="utf-8", errors="ignore")
+                        tool_expectations[g_ep] = {
+                            "has_visual_primitives": ('id="pseo-visual-primitives"' in g_txt),
+                            "has_runtime_sync": ('id="pseo-runtime-sync"' in g_txt),
+                            "local_html": g_txt,
+                            "rel_path": gov_rel,
+                            "is_404_template": (ep_path == "/404.html"),
+                        }
+                    except Exception:
+                        pass
+
+            def _collect_static_refs(html_src: Optional[str]) -> None:
+                if not html_src:
+                    return
+                for css_u in re.findall(
+                    r'<link\b[^>]*rel=["\'][^"\']*stylesheet[^"\']*["\'][^>]*href=["\'](/(?:static/)?css/[^"\']+)["\']',
+                    html_src,
+                    flags=re.IGNORECASE,
+                ):
+                    rel_p = css_u.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+                    if (d_root / rel_p).is_file():
+                        static_asset_expectations[f"{base}{css_u}"] = d_root / rel_p
+                for js_u in re.findall(
+                    r'<script\b[^>]*src=["\'](/(?:static/)?js/[^"\']+)["\']',
+                    html_src,
+                    flags=re.IGNORECASE,
+                ):
+                    rel_p = js_u.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+                    if (d_root / rel_p).is_file():
+                        static_asset_expectations[f"{base}{js_u}"] = d_root / rel_p
+                for og_u in re.findall(
+                    r'<meta\b[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
+                    html_src,
+                    flags=re.IGNORECASE,
+                ):
+                    og_path = og_u
+                    if og_path.startswith(base):
+                        og_path = og_path[len(base) :]
+                    elif og_path.startswith(("https://", "http://")):
+                        parsed_og = urllib.parse.urlsplit(og_path)
+                        og_path = parsed_og.path if property_id in parsed_og.netloc.lower() else ""
+                    if og_path.startswith("/"):
+                        rel_p = og_path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+                        if (d_root / rel_p).is_file():
+                            static_asset_expectations[f"{base}{og_path}"] = d_root / rel_p
+
+            _collect_static_refs(local_index_txt)
+
+            if (d_root / "tools").is_dir():
+                tools_root = d_root / "tools"
+                sampled_slugs: List[str] = []
+                nested_spokes: List[Tuple[str, Path]] = []
+                for item in sorted(tools_root.iterdir()):
+                    if item.is_dir() and not item.name.startswith("."):
+                        if (item / "index.html").is_file():
+                            sampled_slugs.append(item.name)
+                        sub_picked = 0
+                        for child in sorted(item.iterdir()):
+                            if child.is_dir() and not child.name.startswith(".") and (child / "index.html").is_file():
+                                if len(nested_spokes) < 6 and sub_picked < 2:
+                                    nested_spokes.append((f"{item.name}/{child.name}", child / "index.html"))
+                                    sub_picked += 1
+                for s_slug in sampled_slugs:
+                    t_ep = f"{base}/tools/{s_slug}/"
+                    endpoints.append(t_ep)
+                    try:
+                        t_txt = (tools_root / s_slug / "index.html").read_text(encoding="utf-8", errors="ignore")
+                        _collect_static_refs(t_txt)
+                        tool_expectations[t_ep] = {
+                            "has_visual_primitives": ('id="pseo-visual-primitives"' in t_txt),
+                            "has_runtime_sync": ('id="pseo-runtime-sync"' in t_txt),
+                            "local_html": t_txt,
+                            "rel_path": f"tools/{s_slug}/index.html",
+                        }
+                    except Exception:
+                        tool_expectations[t_ep] = {
+                            "has_visual_primitives": False,
+                            "has_runtime_sync": False,
+                            "local_html": None,
+                            "rel_path": f"tools/{s_slug}/index.html",
+                        }
+                for n_rel_slug, n_file in nested_spokes:
+                    n_ep = f"{base}/tools/{n_rel_slug}/"
+                    endpoints.append(n_ep)
+                    try:
+                        n_txt = n_file.read_text(encoding="utf-8", errors="ignore")
+                        tool_expectations[n_ep] = {
+                            "has_visual_primitives": ('id="pseo-visual-primitives"' in n_txt),
+                            "has_runtime_sync": ('id="pseo-runtime-sync"' in n_txt),
+                            "local_html": n_txt,
+                            "rel_path": f"tools/{n_rel_slug}/index.html",
+                        }
+                    except Exception:
+                        pass
+
+            for fav_rel in ("favicon.ico", "favicon.svg"):
+                if (d_root / fav_rel).is_file():
+                    static_asset_expectations[f"{base}/{fav_rel}"] = d_root / fav_rel
+
+            for s_ep in static_asset_expectations:
+                if s_ep not in endpoints:
+                    endpoints.append(s_ep)
 
         results: Dict[str, Any] = {}
         all_passed = True
@@ -3589,8 +3776,22 @@ class LiveEdgeVerifier:
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET / -> HTTP {status_code} ({res.get('error', 'probe failed')})")
             elif ep == f"{base}/robots.txt":
                 if res.get("status") == "PASS" and res.get("size_bytes", 0) > 0:
-                    size = res.get("size_bytes", 0)
-                    print(f"[DISPATCH:CLOUD_DEPLOY] GET /robots.txt -> HTTP 200 (size: {size}B)")
+                    if local_robots_txt is not None and live_body.strip() != local_robots_txt:
+                        try:
+                            cb_r = _normalize_probe_res(self.verify_url(f"{ep}?_cb={int(time.time() * 1000)}"), ep)
+                            cb_r_body = str(cb_r.pop("body", "") or "")
+                            if cb_r.get("status") == "PASS" and cb_r_body.strip() == local_robots_txt:
+                                live_body = cb_r_body
+                        except Exception:
+                            pass
+                    if local_robots_txt is not None and live_body.strip() != local_robots_txt:
+                        res["status"] = "FAIL"
+                        res["error"] = "Stale edge robots.txt differs from local dist/robots.txt"
+                        all_passed = False
+                        print("[DISPATCH:CLOUD_DEPLOY] GET /robots.txt -> FAIL (differs from local dist/robots.txt)")
+                    else:
+                        size = res.get("size_bytes", 0)
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET /robots.txt -> HTTP 200 (size: {size}B)")
                 else:
                     all_passed = False
                     if res.get("status") == "PASS":
@@ -3617,17 +3818,43 @@ class LiveEdgeVerifier:
                         res["status"] = "FAIL"
                         res["error"] = "Empty llms.txt"
                     print(f"[DISPATCH:CLOUD_DEPLOY] GET /llms.txt -> HTTP {status_code} ({res.get('error', 'missing or empty')})")
+            elif ep in static_asset_expectations:
+                rel_ep = ep[len(base):]
+                disk_asset = static_asset_expectations[ep]
+                if res.get("status") != "PASS":
+                    all_passed = False
+                    print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> HTTP {status_code} ({res.get('error', 'missing static asset')})")
+                else:
+                    exp_sha = hashlib.sha256(disk_asset.read_bytes()).hexdigest()
+                    live_sha = str(res.get("raw_sha256") or res.get("sha256") or "")
+                    if live_sha and live_sha != exp_sha:
+                        cb_sep = "&" if "?" in ep else "?"
+                        try:
+                            cb_s = _normalize_probe_res(self.verify_url(f"{ep}{cb_sep}_cb={int(time.time() * 1000)}"), ep)
+                            cb_sha = str(cb_s.get("raw_sha256") or cb_s.get("sha256") or "")
+                            if cb_s.get("status") == "PASS" and cb_sha == exp_sha:
+                                live_sha = cb_sha
+                        except Exception:
+                            pass
+                    if live_sha and live_sha != exp_sha:
+                        res["status"] = "FAIL"
+                        res["error"] = f"Stale static asset hash mismatch on {rel_ep}"
+                        all_passed = False
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> FAIL (hash mismatch vs disk)")
+                    else:
+                        print(f"[DISPATCH:CLOUD_DEPLOY] GET {rel_ep} -> HTTP 200 (bytes: {res.get('raw_size_bytes', res.get('size_bytes', 0))})")
             elif ep in tool_expectations:
                 rel_ep = ep[len(base):]
                 exp = tool_expectations[ep]
+                is_404_tpl = bool(exp.get("is_404_template"))
                 if res.get("status") == "PASS":
                     title = res.get("title", "")
                     canon = res.get("canonical", "")
                     if not title:
                         res["status"] = "FAIL"
-                        res["error"] = f"Empty title on tool endpoint {rel_ep}"
+                        res["error"] = f"Empty title on endpoint {rel_ep}"
                         all_passed = False
-                    elif not canon or not canon.startswith(base):
+                    elif not is_404_tpl and (not canon or not canon.startswith(base)):
                         res["status"] = "FAIL"
                         res["error"] = f"Mismatched canonical on {rel_ep}: got '{canon}'"
                         all_passed = False
@@ -5344,6 +5571,10 @@ def sync_tenant_test_isolation_guards(
                     "        run: pip install pytest\n\n"
                     "      - name: Run LienBond Estate Tests\n"
                     "        run: pytest -q tests/\n\n"
+                    "      - name: Verify LienBond Static Distribution & Audit\n"
+                    "        env:\n"
+                    "          WORKSPACE_ROOT: .\n"
+                    "        run: PYTHONPATH=\".:lienbond/_pseo_substrate:${PYTHONPATH:-}\" python3 -m lienbond.cli audit\n\n"
                     "      - name: Set up Node.js\n"
                     "        if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
                     "        uses: actions/setup-node@v4\n"

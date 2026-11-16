@@ -1845,6 +1845,12 @@ def _resolve_secondary_title_modifier(
         return "IRC 199A"
     if any(k in primary_low for k in ("burn", "runway", "saas", "cac")):
         return "2026 Model"
+    if any(k in primary_low for k in ("surety", "miller act", "miller-act", "license bond", "performance bond", "fidelity bond")):
+        return "Miller Act" if "miller" in primary_low else "Surety Rules"
+    if any(k in primary_low for k in ("workers comp", "workers-comp", "payroll burden", "emr")):
+        return "NCCI Rate"
+    if any(k in primary_low for k in ("factoring", "tariff", "301")):
+        return "2026 Cost" if ("tariff" in primary_low or "301" in primary_low) else "APR Schedule"
     if "1031" in low or "8824" in low:
         return "Form 8824"
     if "179" in low or "4562" in low:
@@ -1981,10 +1987,62 @@ def _normalize_title_50_60(
 
     # Strip robotic bare parenthetical tokens and filler pads from prior normalizations
     base = re.sub(r"\s*\((?:Rules|Tax|Guide|Model)\)(?:\s+Model)?", "", base, flags=re.IGNORECASE)
+    if any(k in base.lower() for k in ("surety", "bond", "miller", "workers comp", "emr")):
+        base = re.sub(r"\s*\(IRC\s+(?:Rules|Guide)\)", "", base, flags=re.IGNORECASE)
     base = re.sub(r"\b(?:Model\s+Tool(?:\s+Guide)?|Tool\s+Guide)\b", "", base, flags=re.IGNORECASE)
     base = re.sub(r"\b1099\s+Da\b", "1099-DA", base, flags=re.IGNORECASE)
     base = re.sub(r"\bRap\s+Vs\s+Ibr\b", "RAP vs IBR", base, flags=re.IGNORECASE)
     base = re.sub(r"\s+", " ", base).strip(" |-:")
+
+    _dangling_trailing = frozenset({
+        "by", "vs", "versus", "for", "of", "in", "on", "at", "to", "from",
+        "and", "or", "with", "under", "into", "between", "as", "per",
+        "the", "a", "an", "preliminary", "section", "sec", "irc", "form",
+        "part", "title", "chapter", "new", "south", "north", "west", "rhode",
+    })
+
+    def _is_dangling_tok(tok: str) -> bool:
+        return tok.lower().rstrip(".,;:-()") in _dangling_trailing
+
+    def _strip_dangling_trailing(text: str) -> str:
+        t_clean = re.sub(
+            r"\bCalculator\s+(?:by|vs|versus|for|of|in|on|at|to|from|and|or|with|per)(?=\s*(?:\(|$|\b202\d\b))",
+            "Calculator",
+            text.strip(" |-&:,"),
+            flags=re.IGNORECASE,
+        )
+        words_t = t_clean.split()
+        while len(words_t) > 1 and _is_dangling_tok(words_t[-1]):
+            words_t.pop()
+        res_t = " ".join(words_t).strip(" |-&:,")
+        return re.sub(r"\bCalculator\s+Calculator\b", "Calculator", res_t, flags=re.IGNORECASE)
+
+    def _unwrap_outer_parens(raw_mod: str) -> str:
+        ms = _strip_forbidden_dashes(str(raw_mod or "")).strip(" |-:")
+        while ms.startswith("(") and ms.endswith(")") and ms.count("(") == ms.count(")"):
+            depth = 0
+            wraps_all = True
+            for i_c, ch_c in enumerate(ms):
+                if ch_c == "(":
+                    depth += 1
+                elif ch_c == ")":
+                    depth -= 1
+                    if depth == 0 and i_c < len(ms) - 1:
+                        wraps_all = False
+                        break
+            if wraps_all:
+                ms = ms[1:-1].strip(" |-:")
+            else:
+                break
+        return ms
+
+    def _pop_to_limit(words_list: List[str], limit: int) -> str:
+        w_buf = list(words_list)
+        while len(w_buf) > 1 and (len(" ".join(w_buf)) > limit or _is_dangling_tok(w_buf[-1])):
+            w_buf.pop()
+        while len(w_buf) > 1 and _is_dangling_tok(w_buf[-1]):
+            w_buf.pop()
+        return _strip_dangling_trailing(" ".join(w_buf))
 
     # Expand short Prexvo abbreviations naturally instead of padding with robotic filler words
     if tenant_id == "prexvo":
@@ -2070,16 +2128,12 @@ def _normalize_title_50_60(
         base = re.sub(r"\s+Calculator\b", "", base, flags=re.IGNORECASE).strip()
         base = re.sub(r"\bCalculator\b", "", base, flags=re.IGNORECASE).strip()
 
+    base = _strip_dangling_trailing(base)
     if "calculator" not in base.lower() and not is_non_calc_title:
         max_for_calc = max_base - len(" Calculator")
         if len(base) > max_for_calc:
-            b_words = base.split()
-            while len(b_words) > 1 and len(" ".join(b_words)) > max_for_calc:
-                b_words.pop()
-            trimmed_b = " ".join(b_words).rstrip(" |-&:")
-            if len(trimmed_b) > max_for_calc:
-                trimmed_b = trimmed_b[:max_for_calc].rstrip(" |-&:")
-            base = f"{trimmed_b} Calculator"
+            trimmed_b = _pop_to_limit(base.split(), max_for_calc)
+            base = f"{trimmed_b} Calculator" if trimmed_b else "Calculator"
         else:
             base = f"{base} Calculator"
 
@@ -2087,7 +2141,21 @@ def _normalize_title_50_60(
         return bool(re.search(r"\b(202[4-9]|203\d)\b", s))
 
     base_low = base.lower()
-    if "crypto" in base_low:
+    is_non_tax_commercial = any(
+        k in base_low
+        for k in (
+            "surety", "bond", "miller", "workers comp", "emr",
+            "saas", "runway", "tariff", "factoring", "prediction",
+            "kalshi", "polymarket",
+        )
+    )
+    if tenant_id == "prexvo":
+        vertical_paren_mod = "Title IV" if "rap" in base_low else "IDR & RAP"
+    elif tenant_id == "gainhelm":
+        vertical_paren_mod = "GRC Audit"
+    elif tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")):
+        vertical_paren_mod = "Miller Act" if "miller" in base_low else ("Surety Rules" if ("surety" in base_low or "bond" in base_low) else "50-State Law" if ("lien" in base_low or "preliminary" in base_low or "retainage" in base_low) else "Surety & Lien")
+    elif "crypto" in base_low:
         vertical_paren_mod = "Form 8949"
     elif "179" in base_low:
         vertical_paren_mod = "Form 4562"
@@ -2097,24 +2165,27 @@ def _normalize_title_50_60(
         vertical_paren_mod = "FTB 540"
     elif "bracket" in base_low:
         vertical_paren_mod = "IRS Table"
-    elif tenant_id == "prexvo":
-        vertical_paren_mod = "Title IV" if "rap" in base_low else "IDR & RAP"
-    elif tenant_id == "gainhelm":
-        vertical_paren_mod = "GRC Audit"
-    elif tenant_id == "lienbond":
-        vertical_paren_mod = "Surety & Lien"
+    elif is_non_tax_commercial:
+        vertical_paren_mod = "2026 Model"
     else:
         vertical_paren_mod = "IRC Guide"
 
     # Attempt parenthetical secondary modifier injection if requested or beneficial
-    mod_clean = _strip_forbidden_dashes(str(secondary_modifier or "")).strip(" ()|-:")
+    mod_clean = _unwrap_outer_parens(secondary_modifier or "")
     if mod_clean.lower() == "non_tool":
         mod_clean = ""
     if mod_clean and _has_year(base) and _has_year(mod_clean):
-        mod_clean = re.sub(r"\b(202[4-9]|203\d)\b", "", mod_clean).strip(" ()|-:")
+        mod_clean = re.sub(r"\b(202[4-9]|203\d)\b", "", mod_clean).strip(" |-:")
+        mod_clean = _unwrap_outer_parens(mod_clean)
         mod_clean = re.sub(r"\s+", " ", mod_clean)
     if mod_clean.lower() in {"rules", "tax", "guide", "model", "plan"}:
-        mod_clean = vertical_paren_mod if vertical_paren_mod != "IRC Guide" else "IRC Rules"
+        mod_clean = (
+            vertical_paren_mod
+            if (vertical_paren_mod != "IRC Guide" or is_non_tax_commercial)
+            else "IRC Rules"
+        )
+    if is_non_tax_commercial and mod_clean.lower() in {"irc rules", "irc guide"}:
+        mod_clean = vertical_paren_mod
     if mod_clean and "(" not in base and ")" not in base:
         paren_token = f"({mod_clean})"
         if mod_clean.lower() not in base.lower():
@@ -2130,13 +2201,17 @@ def _normalize_title_50_60(
                         if tenant_id == "gainhelm"
                         else (
                             [mod_clean, "Surety Rate", "50-State", "2026 Bond", "2026"]
-                            if tenant_id == "lienbond"
-                            else [mod_clean, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                            if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller")))
+                            else (
+                                [mod_clean, "2026 Model", "2026 Cost", "2026"]
+                                if is_non_tax_commercial
+                                else [mod_clean, vertical_paren_mod, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                            )
                         )
                     )
                 )
                 for sm in short_mods:
-                    sm_clean = _strip_forbidden_dashes(sm).strip(" ()|-:")
+                    sm_clean = _unwrap_outer_parens(sm)
                     if not sm_clean or (_has_year(base) and _has_year(sm_clean)):
                         continue
                     pt = f"({sm_clean})"
@@ -2147,21 +2222,19 @@ def _normalize_title_50_60(
     if len(base) > max_base:
         if needs_calc:
             allowed_len = max_base - len(" Calculator")
-            clean_words = [w for w in base.split() if w.lower() != "calculator"]
-            while len(clean_words) > 1 and len(" ".join(clean_words)) > allowed_len:
-                clean_words.pop()
-            base = f"{' '.join(clean_words).rstrip(' |-&:')} Calculator"
+            clean_words = [w for w in _strip_dangling_trailing(base).split() if w.lower() != "calculator"]
+            trimmed_core = _pop_to_limit(clean_words, allowed_len)
+            base = f"{trimmed_core} Calculator" if trimmed_core else "Calculator"
         else:
-            b_words = base.split()
-            while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
-                b_words.pop()
-            base = " ".join(b_words).rstrip(" |-&:")
+            base = _pop_to_limit(base.split(), max_base)
         if "calculator" not in base.lower() and needs_calc and len(base) + len(" Calculator") <= max_base:
-            base = f"{base} Calculator"
+            base = f"{_strip_dangling_trailing(base)} Calculator"
 
+    base = _strip_dangling_trailing(base)
     cand = f"{base}{suffix}"
     if 50 <= len(cand) <= 60:
-        return _strip_forbidden_dashes(cand)
+        cand = re.sub(r"\bVs\b", "vs", cand)
+        return _strip_forbidden_dashes(normalize_statutory_acronym_casing(cand))
 
     # Pad with parenthetical modifier or whole domain words if shorter than 50 chars
     pad_tokens = (
@@ -2172,8 +2245,12 @@ def _normalize_title_50_60(
             if tenant_id == "gainhelm"
             else (
                 [f"({vertical_paren_mod})", "(2026 Rates)", "2026", "Bond", "Rate", "Schedule", "Estimator", "Rules"]
-                if tenant_id == "lienbond"
-                else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+                if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")))
+                else (
+                    [f"({vertical_paren_mod})", "(2026 Model)", "2026", "Cost", "Schedule", "Estimator", "Model"]
+                    if is_non_tax_commercial
+                    else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+                )
             )
         )
     )
@@ -2186,7 +2263,7 @@ def _normalize_title_50_60(
             continue
         tok_plain = tok.strip("()")
         if tok_plain.lower() not in base.lower():
-            trial_base = f"{base} {tok}".strip()
+            trial_base = f"{_strip_dangling_trailing(base)} {tok}".strip()
             if len(trial_base) <= max_base:
                 base = trial_base
                 cand = f"{base}{suffix}"
@@ -2200,13 +2277,17 @@ def _normalize_title_50_60(
                 if tenant_id == "gainhelm"
                 else (
                     ["& Surety Rate Schedule", "& Bond Cost Estimator", "Simulator", "Schedule", "Estimator"]
-                    if tenant_id == "lienbond"
-                    else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+                    if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")))
+                    else (
+                        ["& Cost Schedule", "& Scenario Estimator", "Simulator", "Schedule", "Estimator"]
+                        if is_non_tax_commercial
+                        else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+                    )
                 )
             )
         )
         for ep in extra_pads:
-            trial_base = f"{base} {ep}".strip()
+            trial_base = f"{_strip_dangling_trailing(base)} {ep}".strip()
             if min_base <= len(trial_base) <= max_base:
                 base = trial_base
                 cand = f"{base}{suffix}"
@@ -2222,9 +2303,22 @@ def _normalize_title_50_60(
         elif "rules" not in base.lower():
             add_tok = "Rules"
         else:
-            add_tok = "Plan" if tenant_id == "prexvo" else ("Audit" if tenant_id == "gainhelm" else ("Bond" if tenant_id == "lienbond" else "Tax"))
-        if len(base) + 1 + len(add_tok) <= max_base and add_tok.lower() not in base.lower():
-            base = f"{base} {add_tok}"
+            add_tok = (
+                "Plan"
+                if tenant_id == "prexvo"
+                else (
+                    "Audit"
+                    if tenant_id == "gainhelm"
+                    else (
+                        "Bond"
+                        if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller")))
+                        else ("Model" if is_non_tax_commercial else "Tax")
+                    )
+                )
+            )
+        clean_curr = _strip_dangling_trailing(base)
+        if len(clean_curr) + 1 + len(add_tok) <= max_base and add_tok.lower() not in clean_curr.lower():
+            base = f"{clean_curr} {add_tok}"
         else:
             break
         cand = f"{base}{suffix}"
@@ -2232,27 +2326,25 @@ def _normalize_title_50_60(
     if len(cand) > 60:
         if needs_calc:
             allowed_len = max_base - len(" Calculator")
-            clean_words = [w for w in base.split() if w.lower() != "calculator"]
-            while len(clean_words) > 1 and len(" ".join(clean_words)) > allowed_len:
-                clean_words.pop()
-            trimmed = f"{' '.join(clean_words).rstrip(' |-&:')} Calculator"
+            clean_words = [w for w in _strip_dangling_trailing(base).split() if w.lower() != "calculator"]
+            trimmed_core = _pop_to_limit(clean_words, allowed_len)
+            trimmed = f"{trimmed_core} Calculator" if trimmed_core else "Calculator"
         else:
-            b_words = base.split()
-            while len(b_words) > 1 and len(" ".join(b_words)) > max_base:
-                b_words.pop()
-            trimmed = " ".join(b_words).rstrip(" |-&:")
+            trimmed = _pop_to_limit(base.split(), max_base)
             if len(trimmed) < min_base:
                 for short_tok in ("2026", "Tax", "Plan", "Rules", "Rate", "Cap"):
                     if _has_year(trimmed) and _has_year(short_tok):
                         continue
+                    if is_non_tax_commercial and short_tok == "Tax":
+                        continue
                     if short_tok.lower() not in trimmed.lower() and min_base <= len(f"{trimmed} {short_tok}") <= max_base:
                         trimmed = f"{trimmed} {short_tok}"
                         break
-            if len(trimmed) > max_base or len(trimmed) < min_base:
-                trimmed = base[:max_base].rstrip(" |-&:")
-        cand = f"{trimmed}{suffix}"
+        cand = f"{_strip_dangling_trailing(trimmed)}{suffix}"
 
     cand = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", cand, flags=re.IGNORECASE)
+    cand = re.sub(r"\bVs\b", "vs", cand)
+    cand = normalize_statutory_acronym_casing(cand)
     return _strip_forbidden_dashes(cand)
 
 
@@ -2342,6 +2434,25 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
             and "double" not in q_low
             and "consolidation" not in q_low
             and "double consolidation" in clean.lower()
+        )
+        or clean.lower().count("form 1099-da") >= 2
+        or (
+            slug_low == "crypto-tax-calculator"
+            and "crypto tax form 1099-da" in clean.lower()
+        )
+        or (
+            ("surety" in q_low or ("bond" in q_low and "280g" not in slug_low))
+            and any(
+                bad_irc in clean.lower()
+                for bad_irc in (
+                    "irc statutory",
+                    "(irc rules)",
+                    "irc section 1",
+                    "irc title 26",
+                    "internal revenue code",
+                    "irs compliance",
+                )
+            )
         )
     )
     if (
@@ -2623,9 +2734,34 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824.",
             )
         if "crypto" in q_low or "8949" in q_low or "1099-da" in q_low or "1099 da" in q_low:
+            if "1099-da" in slug_low or "mandatory-reporting" in slug_low or (not slug_low and "1099" in lbl.lower()):
+                return (
+                    "Model IRS Form 1099-DA digital asset broker proceeds, IRC Section 1012 per-wallet "
+                    "cost basis, and Rev. Proc. 2024-28 reconciliation rules.",
+                    " Grounded in IRS Form 1099-DA and Rev. Proc. 2024-28 rules.",
+                )
+            if "8949" in slug_low or "rev-proc" in slug_low:
+                return (
+                    "Calculate Form 8949 digital asset capital gains and losses under Rev. Proc. "
+                    "2024-28 specific identification and IRC Section 1012 basis rules.",
+                    " Grounded in IRS Form 8949 and Schedule D compliance rules.",
+                )
+            if "staking" in slug_low or "defi" in slug_low:
+                return (
+                    "Model digital asset staking income under IRS Rev. Rul. 2023-14, IRC Section "
+                    "1012 basis tracking, Form 8949 capital gains, and 3.8% NIIT.",
+                    " Grounded in IRS Rev. Rul. 2023-14 and Form 8949 schedules.",
+                )
+            if slug_low == "crypto-tax-calculator" or not slug_low:
+                return (
+                    "Calculate crypto capital gains, staking yield, short-term vs long-term tax "
+                    "brackets, and 3.8% Section 1411 NIIT under IRC Section 1012.",
+                    " Grounded in IRS Form 8949 and Schedule D compliance rules.",
+                )
+            lbl_crypto = re.sub(r"\s*Form\s*1099-DA\b", "", lbl, flags=re.IGNORECASE).strip() or "crypto tax"
             return (
-                f"Calculate {lbl} liability under IRC Section 1012 and Form 1099-DA, modeling capital "
-                f"gains, staking yield, and 3.8% NIIT compliance rules.",
+                f"Calculate {lbl_crypto} liability under IRC Section 1012 and Form 8949, modeling "
+                f"capital gains, staking yield, and 3.8% NIIT compliance rules.",
                 " Grounded in IRS Form 8949 and Schedule D compliance rules.",
             )
         if "saas" in q_low or "runway" in q_low or "burn" in q_low:
@@ -2681,6 +2817,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 f"Calculate {lbl} liability under IRC Section 1(j), comparing marginal rates (10% to 37%), "
                 f"standard deductions, and enacted OBBBA brackets.",
                 " Grounded in IRC Section 1(j) federal statutory schedules.",
+            )
+        if "surety" in q_low or ("bond" in q_low and "280g" not in slug_low):
+            return (
+                "Estimate commercial contractor surety bond costs under federal Miller Act "
+                "40 U.S.C. Section 3131, state penal sums, and credit-tier underwriting rates.",
+                " Grounded in U.S. Treasury Circular 570 surety schedules.",
             )
         return (
             f"Calculate {lbl} using deterministic IRC statutory formulas, federal "
@@ -4578,7 +4720,9 @@ def compile_remediation_overlay_spec(
         "csf", "iso", "iec", "nist", "sprs", "dfars", "pci", "dss", "qsa", "roc",
         "asv", "soc", "ssae", "aicpa", "grc", "phi", "poa&m", "poam", "plus", "mfs",
         "mfj", "idr", "obbba", "hea", "tila", "apr", "apy", "hysa", "fica", "seca",
-        "niit", "ftb",
+        "niit", "ftb", "dora", "ict", "eu", "ai", "sdi", "emr", "hpsl", "nhsc",
+        "cpa", "amt", "camt", "qbi", "far", "usc", "sfaa", "cbp", "mpf", "hmf",
+        "fob", "aia", "fha", "hud", "hhs", "fpl", "se", "ltv",
     }
 
     def _cap_word(w: str) -> str:
@@ -4611,7 +4755,7 @@ def compile_remediation_overlay_spec(
             else "Statutory Tax Calculator"
         )
     )
-    heading_label = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
+    heading_label = re.sub(r"(?<![.\w&/-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", heading_label)
     heading_label = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", heading_label)
     from pseofactory.contracts import normalize_statutory_acronym_casing
     heading_label = normalize_statutory_acronym_casing(heading_label)
@@ -9005,6 +9149,18 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
         flags=re.DOTALL | re.IGNORECASE,
     )
     html = re.sub(
+        r'<details\b[^>]*\bdata-overlay-faq=["\']true["\'][^>]*>.*?</details>\s*',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    html = re.sub(
+        r'(<section\b[^>]*class=["\'][^"\']*\bfaq-section\b[^"\']*)\s+\boverlay-faqs\b([^"\']*["\'])',
+        r"\1\2",
+        html,
+        flags=re.IGNORECASE,
+    )
+    html = re.sub(
         r'<div\s+id=["\']gsc-striking-overlay["\'][^>]*>\s*</div>\s*',
         "",
         html,
@@ -9199,6 +9355,25 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 ("lease-vs-buy" in ov_slug_q.lower() or "lease vs buy" in ov_slug_q.lower())
                 and "calculate commercial equipment operating lease tax deductions" in meta_desc.lower()
             )
+            or meta_desc.lower().count("form 1099-da") >= 2
+            or (
+                "crypto-tax-calculator" in ov_slug_q.lower()
+                and "crypto tax form 1099-da" in meta_desc.lower()
+            )
+            or (
+                ("surety" in ov_slug_q.lower() or ("bond" in ov_slug_q.lower() and "280g" not in ov_slug_q.lower()))
+                and any(
+                    bad_irc in meta_desc.lower()
+                    for bad_irc in (
+                        "irc statutory",
+                        "(irc rules)",
+                        "irc section 1",
+                        "irc title 26",
+                        "internal revenue code",
+                        "irs compliance",
+                    )
+                )
+            )
         ):
             q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
             ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
@@ -9321,7 +9496,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             h2_norm = re.sub(r"\bR\s+(?:And|&)\s+D\b", "R&D", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bK\s+1\b", "K-1", h2_norm, flags=re.IGNORECASE)
             h2_norm = re.sub(r"\bW\s+([249])\b", r"W-\1", h2_norm, flags=re.IGNORECASE)
-            h2_norm = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", h2_norm)
+            h2_norm = re.sub(r"(?<![.\w&/-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", h2_norm)
             h2_norm = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", h2_norm)
             h2_norm = h2_norm.replace("31-U.S.C.", "31 U.S.C.").replace("Audit-Ready-S-Corp", "Audit-Ready S-Corp")
             clean_h2 = html_lib.escape(h2_norm)
@@ -9628,31 +9803,164 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         "answer": _strip_forbidden_dashes(str(a_text)),
                     })
 
+    def _find_existing_non_overlay_faq_section(doc: str) -> Optional[Tuple[int, int, str, str, str]]:
+        stack: List[Tuple[int, int, str]] = []
+        candidates: List[Tuple[int, int, int, int, str, str, str]] = []
+        for sec_m in re.finditer(r'<(/?)section\b[^>]*>', doc, flags=re.IGNORECASE):
+            if not sec_m.group(1):
+                stack.append((sec_m.start(), sec_m.end(), sec_m.group(0)))
+            elif stack:
+                sec_start, inner_start, sec_open_tag = stack.pop()
+                sec_end = sec_m.end()
+                sec_close_tag = sec_m.group(0)
+                cls_m = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', sec_open_tag, flags=re.IGNORECASE | re.DOTALL)
+                cls_val = cls_m.group(2) if cls_m else ""
+                if re.search(r'\boverlay-section\b', cls_val, flags=re.IGNORECASE):
+                    continue
+                inner_html = doc[inner_start:sec_m.start()]
+                has_faq_cls = bool(re.search(r'\bfaq-section\b', cls_val, flags=re.IGNORECASE))
+                own_inner = re.sub(r'<section\b[\s\S]*?</section>', '', inner_html, flags=re.IGNORECASE)
+                has_faq_heading = bool(
+                    re.search(
+                        r'<h[1-4]\b[^>]*>(?:(?!</h[1-4]>).)*?\bFrequently\s+Asked\s+Questions\b',
+                        own_inner,
+                        flags=re.IGNORECASE | re.DOTALL,
+                    )
+                )
+                if has_faq_cls or has_faq_heading:
+                    prio = 0 if has_faq_cls else 1
+                    candidates.append((prio, -len(stack), sec_start, sec_end, sec_open_tag, inner_html, sec_close_tag))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        _, _, s_start, s_end, o_tag, i_html, c_tag = candidates[0]
+        return (s_start, s_end, o_tag, i_html, c_tag)
+
     faq_section_markup = ""
     if faq_items:
-        faq_parts = ['<section class="overlay-section overlay-faqs">']
-        faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
-        faq_parts.append('  <div class="faq-list">')
-        schema_entities = []
-        for f in faq_items:
-            q = f["question"]
-            a = f["answer"]
-            faq_parts.append('    <details class="faq-item faq-card" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">')
-            faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
-            faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
-            faq_parts.append("    </details>")
-            schema_entities.append({
+        m_standalone_ov_faq = re.search(
+            r'<section\s+class=["\']overlay-section\s+overlay-faqs\b[^>]*>(.*?)</section>',
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        schema_entities = [
+            {
                 "@type": "Question",
-                "name": q,
+                "name": f["question"],
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": a,
+                    "text": f["answer"],
                 },
-            })
-        faq_parts.append("  </div>")
-        faq_parts.append("</section>")
-        faq_section_markup = "\n".join(faq_parts)
-        injected_sections.append(faq_section_markup)
+            }
+            for f in faq_items
+        ]
+        existing_faq = _find_existing_non_overlay_faq_section(html)
+        is_post_overlay_tenant_facts_faq = bool(
+            existing_faq is not None
+            and 'class="faq-section card"' in existing_faq[2]
+            and 'style="margin-top: 2rem; padding: 1.5rem;"' in existing_faq[2]
+        )
+        has_standalone_overlay_faqs = bool(
+            'id="gsc-striking-overlay"' in html
+            and m_standalone_ov_faq is not None
+            and 'data-overlay-faq="true"' in m_standalone_ov_faq.group(1)
+            and (existing_faq is None or is_post_overlay_tenant_facts_faq)
+        )
+        if has_standalone_overlay_faqs:
+            existing_faq = None
+        if existing_faq is not None:
+            # Remove any stale standalone overlay-faqs section and previously merged overlay FAQ items
+            html = re.sub(
+                r'<section\s+class=["\']overlay-section\s+overlay-faqs\b[^>]*>.*?</section>\s*',
+                "",
+                html,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            html = re.sub(
+                r'<details\b[^>]*\bdata-overlay-faq=["\']true["\'][^>]*>.*?</details>\s*',
+                "",
+                html,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            existing_faq = _find_existing_non_overlay_faq_section(html)
+        if existing_faq is not None:
+            faq_start, faq_end, open_tag, inner_faq_html, close_tag = existing_faq
+            existing_q_norms = {
+                re.sub(r"[^a-z0-9]+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", sm)).lower()).strip()
+                for sm in re.findall(r"<summary[^>]*>(.*?)</summary>", inner_faq_html, flags=re.DOTALL | re.IGNORECASE)
+            }
+            existing_q_norms.update(
+                re.sub(r"[^a-z0-9]+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", hm)).lower()).strip()
+                for hm in re.findall(r"<h[34][^>]*>(.*?)</h[34]>", inner_faq_html, flags=re.DOTALL | re.IGNORECASE)
+            )
+            new_faq_cards: List[str] = []
+            for f in faq_items:
+                q_norm = re.sub(r"[^a-z0-9]+", " ", f["question"].lower()).strip()
+                if q_norm and q_norm in existing_q_norms:
+                    continue
+                if q_norm:
+                    existing_q_norms.add(q_norm)
+                new_faq_cards.append(
+                    '    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">\n'
+                    f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(f["question"])}</summary>\n'
+                    f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(f["answer"])}</p>\n'
+                    "    </details>"
+                )
+            add_cls: List[str] = []
+            if not re.search(r'\bfaq-section\b', open_tag, flags=re.IGNORECASE):
+                add_cls.append("faq-section")
+            if not re.search(r'\boverlay-faqs\b', open_tag, flags=re.IGNORECASE):
+                add_cls.append("overlay-faqs")
+            if add_cls:
+                add_str = " ".join(add_cls)
+                if re.search(r'\bclass\s*=\s*["\']', open_tag, flags=re.IGNORECASE):
+                    open_tag = re.sub(
+                        r'(\bclass\s*=\s*["\'])([^"\']*)(["\'])',
+                        lambda m: f'{m.group(1)}{(m.group(2).strip() + " " + add_str).strip()}{m.group(3)}',
+                        open_tag,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                else:
+                    open_tag = re.sub(
+                        r'^<section\b',
+                        f'<section class="{add_str}"',
+                        open_tag,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+            if new_faq_cards:
+                cards_block = "\n".join(new_faq_cards)
+                if 'class="faq-list"' in inner_faq_html or "class='faq-list'" in inner_faq_html:
+                    updated_inner = re.sub(
+                        r"(</div>\s*)$",
+                        lambda m: f"\n{cards_block}\n{m.group(1)}",
+                        inner_faq_html,
+                        count=1,
+                    )
+                    if updated_inner == inner_faq_html:
+                        updated_inner = f"{inner_faq_html.rstrip()}\n{cards_block}\n"
+                else:
+                    updated_inner = f"{inner_faq_html.rstrip()}\n{cards_block}\n"
+            else:
+                updated_inner = inner_faq_html
+            merged_faq_section = f"{open_tag}{updated_inner}{close_tag}"
+            html = html[:faq_start] + merged_faq_section + html[faq_end:]
+        else:
+            faq_parts = ['<section class="overlay-section overlay-faqs">']
+            faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
+            faq_parts.append('  <div class="faq-list">')
+            for f in faq_items:
+                q = f["question"]
+                a = f["answer"]
+                faq_parts.append('    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">')
+                faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
+                faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
+                faq_parts.append("    </details>")
+            faq_parts.append("  </div>")
+            faq_parts.append("</section>")
+            faq_section_markup = "\n".join(faq_parts)
+            injected_sections.append(faq_section_markup)
 
         if schema_entities:
             faq_ld_json = {
@@ -9810,14 +10118,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     )
                 else:
                     incremental_parts.append(dm_section_markup)
-            if faq_section_markup and 'class="overlay-section overlay-faqs' in html:
-                html = re.sub(
-                    r'<section\s+class=["\']overlay-section\s+overlay-faqs[^>]*>.*?</section>',
-                    faq_section_markup,
-                    html,
-                    count=1,
-                    flags=re.DOTALL | re.IGNORECASE,
-                )
+            if faq_section_markup:
+                if 'class="overlay-section overlay-faqs' in html:
+                    html = re.sub(
+                        r'<section\s+class=["\']overlay-section\s+overlay-faqs[^>]*>.*?</section>',
+                        lambda _: faq_section_markup,
+                        html,
+                        count=1,
+                        flags=re.DOTALL | re.IGNORECASE,
+                    )
+                elif not re.search(r'<section\b[^>]*class=["\'][^"\']*\bfaq-section\b', html, re.IGNORECASE):
+                    incremental_parts.append(faq_section_markup)
             if hub_links_markup:
                 if 'class="overlay-section overlay-hub-links' in html:
                     html = re.sub(

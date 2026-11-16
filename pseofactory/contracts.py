@@ -9111,6 +9111,205 @@ def assert_asset_partner_roster_and_slot_integrity(
     return True
 
 
+_US_STATE_SLUG_TOKENS: Tuple[str, ...] = (
+    "alabama",
+    "alaska",
+    "arizona",
+    "arkansas",
+    "california",
+    "colorado",
+    "connecticut",
+    "delaware",
+    "district-of-columbia",
+    "florida",
+    "georgia",
+    "hawaii",
+    "idaho",
+    "illinois",
+    "indiana",
+    "iowa",
+    "kansas",
+    "kentucky",
+    "louisiana",
+    "maine",
+    "maryland",
+    "massachusetts",
+    "michigan",
+    "minnesota",
+    "mississippi",
+    "missouri",
+    "montana",
+    "nebraska",
+    "nevada",
+    "new-hampshire",
+    "new-jersey",
+    "new-mexico",
+    "new-york",
+    "north-carolina",
+    "north-dakota",
+    "ohio",
+    "oklahoma",
+    "oregon",
+    "pennsylvania",
+    "rhode-island",
+    "south-carolina",
+    "south-dakota",
+    "tennessee",
+    "texas",
+    "utah",
+    "vermont",
+    "virginia",
+    "washington",
+    "washington-dc",
+    "west-virginia",
+    "wisconsin",
+    "wyoming",
+)
+
+_NON_STATE_INTERNATIONAL_TOKENS: Tuple[str, ...] = (
+    "philippines",
+    "eu-ai-act",
+    "dora-ict",
+    "iso-27001",
+    "iso27001",
+    "gdpr",
+    "canada",
+    "united-kingdom",
+)
+
+_NON_STATE_FEDERAL_OR_GENERAL_TOKENS: Tuple[str, ...] = (
+    "soc-2",
+    "soc2",
+    "pci-dss",
+    "fedramp",
+    "nist-800-171",
+    "cmmc",
+    "hitrust",
+    "pentest",
+    "penetration-testing",
+    "sec-8k",
+    "8k-item-105",
+    "sec-cybersecurity",
+    "cyber-liability",
+    "hipaa",
+    "student-loans-gov",
+    "pslf",
+    "ibr",
+    "paye",
+    "icr",
+    "tiered-standard",
+    "parent-plus",
+    "grad-plus",
+    "hpsl",
+    "nhsc",
+    "double-consolidation",
+    "student-loan-tax-bomb",
+    "tax-bomb",
+    "save-plan-litigation",
+    "repayment-estimator",
+    "how-do-you-calculate-student-loan",
+    "student-loan-forgiveness-2026",
+    "student-loan-repayment-calculator",
+    "married-filing-separately-student-loan",
+    "miller-act",
+    "erisa",
+    "davis-bacon",
+    "saas-runway",
+    "section-301-tariff",
+    "prediction-market",
+    "kalshi",
+    "polymarket",
+    "r-and-d-tax-credit",
+    "r-d-tax-credit",
+    "s-corp",
+    "corporate-amt",
+    "camt",
+    "irs-interest-calculator",
+    "section-199a",
+    "section-280g",
+    "invoice-factoring",
+    "overhead-and-profit",
+    "markup-vs-margin",
+    "subcontractor-default-insurance",
+    "bid-bond",
+)
+
+_STATE_DEPENDENT_TOOL_TOKENS: Tuple[str, ...] = (
+    "irs-2027-tax-brackets",
+    "ca-tax-brackets",
+    "section-1031",
+    "1031-exchange",
+    "section-179",
+    "crypto-tax",
+    "1099-da",
+    "workers-comp",
+    "mechanics-lien",
+    "lien-release",
+    "preliminary-notice",
+    "retainage-interest-penalty",
+    "contractor-license-bond",
+    "contractor-surety-bond",
+    "student-loan-refinance",
+    "treasury-yield",
+    "tcja-sunset",
+    "equipment-lease-tax-deduction",
+)
+
+
+def is_state_jurisdiction_tool(slug: str, property_id: str = "") -> bool:
+    """
+    Canonical classifier determining whether a calculator models US-state-dependent
+    law, tax brackets, conformity, statutory lien/retainage windows, state workers comp,
+    state-licensed bonds, or state-licensed private student loan refinancing.
+    Returns False for federal, international, and non-state calculators.
+    Zero em-dashes. Zero en-dashes.
+    """
+    s_low = str(slug or "").strip().strip("/").lower()
+    if not s_low or s_low in (
+        "index",
+        "tools",
+        "about",
+        "methodology",
+        "privacy",
+        "terms",
+        "disclaimers",
+        "contact",
+        "404",
+        "404.html",
+    ):
+        return False
+
+    s_hyphen = s_low.replace("/", "-")
+    s_bounded = f"-{s_hyphen}-"
+
+    if any(tok in s_low for tok in _NON_STATE_INTERNATIONAL_TOKENS):
+        return False
+
+    if (
+        "-by-state-" in s_bounded
+        or "-50-state-" in s_bounded
+        or "-state-conformity-" in s_bounded
+        or "-ca-tax-" in s_bounded
+        or "-cslb-" in s_bounded
+        or any(f"-{st}-" in s_bounded for st in _US_STATE_SLUG_TOKENS)
+    ):
+        return True
+
+    if "student-loan-refinance" in s_low or "refinance-break-even" in s_low:
+        return True
+
+    if s_low.startswith("rap-") or "-rap-" in s_bounded:
+        return False
+
+    if any(tok in s_low for tok in _NON_STATE_FEDERAL_OR_GENERAL_TOKENS):
+        return False
+
+    if any(tok in s_low for tok in _STATE_DEPENDENT_TOOL_TOKENS):
+        return True
+
+    return False
+
+
 UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"\bCalculator\s+Calculator\b", re.IGNORECASE), "Calculator"),
     (re.compile(r"(?<![-/])\bPslf\b(?![-/])"), "PSLF"),
@@ -9119,16 +9318,36 @@ UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"(?<![-/])\bHipaa\b(?![-/])"), "HIPAA"),
     (re.compile(r"(?<![-/])\bHitrust\s+Csf\b(?![-/])"), "HITRUST CSF"),
     (re.compile(r"(?<![-/])\bHitrust\b(?![-/])"), "HITRUST"),
+    (re.compile(r"(?<![-/])\bCsf\b(?![-/])"), "CSF"),
     (re.compile(r"(?<![-/])\bFedramp\b(?![-/])"), "FedRAMP"),
-    (re.compile(r"(?<![-/])\bC3pao\b(?![-/])"), "C3PAO"),
-    (re.compile(r"(?<![-/])\b3pao\b(?![-/])"), "3PAO"),
+    (re.compile(r"(?<![-/])\bC3[Pp]ao\b(?![-/])"), "C3PAO"),
+    (re.compile(r"(?<![-/])\b3[Pp]ao\b(?![-/])"), "3PAO"),
     (re.compile(r"(?<![-/])\bCmmc\b(?![-/])"), "CMMC"),
     (re.compile(r"(?<![-/])\bTcja\b(?![-/])"), "TCJA"),
     (re.compile(r"(?<![-/])\bQsbs\b(?![-/])"), "QSBS"),
     (re.compile(r"(?<![-/])\bPci\s+Dss\b(?![-/])"), "PCI DSS"),
+    (re.compile(r"(?<![-/])\bPci\b(?![-/])"), "PCI"),
+    (re.compile(r"(?<![-/])\bDss\b(?![-/])"), "DSS"),
     (re.compile(r"(?<![-/])\bNist\b(?![-/])"), "NIST"),
     (re.compile(r"(?<![-/])\bSprs\b(?![-/])"), "SPRS"),
     (re.compile(r"(?<![-/])\bDfars\b(?![-/])"), "DFARS"),
+    (re.compile(r"(?<![-/])\bDora\b(?![-/])"), "DORA"),
+    (re.compile(r"(?<![-/])\bIct\b(?![-/])"), "ICT"),
+    (re.compile(r"(?<![-/])\bEu\b(?![-/])"), "EU"),
+    (re.compile(r"(?<![-/])\bAi\b(?![-/])"), "AI"),
+    (re.compile(r"(?<![-/])\bSdi\b(?![-/])"), "SDI"),
+    (re.compile(r"(?<![-/])\bEmr\b(?![-/])"), "EMR"),
+    (re.compile(r"(?<![-/])\bHpsl\b(?![-/])"), "HPSL"),
+    (re.compile(r"(?<![-/])\bNhsc\b(?![-/])"), "NHSC"),
+    (re.compile(r"(?<![-/])\bCpa\b(?![-/])"), "CPA"),
+    (re.compile(r"(?<![-/])\bGrc\b(?![-/])"), "GRC"),
+    (re.compile(r"(?<![-/])\bSsae\b(?![-/])"), "SSAE"),
+    (re.compile(r"(?<![-/])\bSoc\b(?![-/])"), "SOC"),
+    (re.compile(r"(?<![-/])\bAmt\b(?![-/])"), "AMT"),
+    (re.compile(r"(?<![-/])\bCamt\b(?![-/])"), "CAMT"),
+    (re.compile(r"(?<![-/])\bQbi\b(?![-/])"), "QBI"),
+    (re.compile(r"(?<![-/])\b199a\b(?![-/])"), "199A"),
+    (re.compile(r"(?<![-/])\b280g\b(?![-/])"), "280G"),
 )
 
 
@@ -9161,7 +9380,7 @@ def tokenize_preserving_url_slugs(text: str) -> List[Tuple[bool, str]]:
 
 
 _FAST_STATUTORY_ACRONYM_GATE_RE = re.compile(
-    r"(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|C3pao|3pao|Cmmc|Tcja|Qsbs|Pci\s+Dss|Nist|Sprs|Dfars|HITRUST\s+Csf|CSF\s+E1|E1\s+I1|CMMC\s+2\s+0|PCI\s+DSS\s+4\s+0|/tools/[^\s\"'<>)\]]*[A-Z])"
+    r"(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Csf|Fedramp|C3[Pp]ao|3[Pp]ao|Cmmc|Tcja|Qsbs|Pci|Dss|Nist|Sprs|Dfars|Dora|Ict|Eu|Ai|Sdi|Emr|Hpsl|Nhsc|Cpa|Grc|Ssae|Soc|Amt|Camt|Qbi|199a|280g|HITRUST\s+Csf|CSF\s+E1|E1\s+I1|CMMC\s+2\s+0|PCI\s+DSS\s+4\s+0|/tools/[^\s\"'<>)\]]*[A-Z])"
 )
 _EXTRA_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"\bHITRUST\s+Csf\b"), "HITRUST CSF"),
@@ -9730,6 +9949,7 @@ __all__ = [
     "UNNORMALIZED_STATUTORY_ACRONYM_PATTERNS",
     "tokenize_preserving_url_slugs",
     "normalize_statutory_acronym_casing",
+    "is_state_jurisdiction_tool",
     "ZeroSignupInstantResultHTMLParser",
     "detect_zero_signup_instant_result_issues",
     "assert_zero_signup_instant_result_contract",

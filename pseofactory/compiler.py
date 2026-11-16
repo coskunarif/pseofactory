@@ -20,6 +20,7 @@ import os
 import json
 import re
 import ast
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
 from pseofactory.affiliates import (
@@ -36,6 +37,7 @@ from pseofactory.contracts import (
     assert_proprietary_model_integrity,
     assert_no_forbidden_dashes,
     assert_touch_targets,
+    is_state_jurisdiction_tool,
 )
 from pseofactory.verifier import verify_html_unique_first_party_information
 
@@ -534,6 +536,225 @@ def compile_ast_to_js(
 
 
 compile_formula_to_js = compile_ast_to_js
+
+
+_READABLE_FORMULA_ACRONYMS = {
+    "emr": "EMR",
+    "ncci": "NCCI",
+    "fha": "FHA",
+    "agi": "AGI",
+    "magi": "MAGI",
+    "hhs": "HHS",
+    "fpl": "FPL",
+    "pslf": "PSLF",
+    "idr": "IDR",
+    "rap": "RAP",
+    "ibr": "IBR",
+    "dora": "DORA",
+    "ict": "ICT",
+    "eu": "EU",
+    "ai": "AI",
+    "sdi": "SDI",
+    "hpsl": "HPSL",
+    "nhsc": "NHSC",
+    "erisa": "ERISA",
+    "fica": "FICA",
+    "futa": "FUTA",
+    "suta": "SUTA",
+    "se": "SE",
+    "qbi": "QBI",
+    "apr": "APR",
+    "irr": "IRR",
+    "roi": "ROI",
+    "cac": "CAC",
+    "ltv": "LTV",
+    "hipaa": "HIPAA",
+    "pci": "PCI",
+    "dss": "DSS",
+    "soc": "SOC",
+    "cmmc": "CMMC",
+    "nist": "NIST",
+    "sprs": "SPRS",
+    "hud": "HUD",
+    "sfaa": "SFAA",
+    "cbp": "CBP",
+    "mpf": "MPF",
+    "hmf": "HMF",
+    "fob": "FOB",
+    "qre": "QRE",
+    "asc": "ASC",
+    "gvwr": "GVWR",
+    "cbct": "CBCT",
+    "aia": "AIA",
+    "wh347": "WH-347",
+    "irc": "IRC",
+    "irs": "IRS",
+    "sec": "Sec",
+    "us": "US",
+}
+
+
+def _format_formula_variable_label(var_name: str) -> str:
+    """Converts a snake_case formula identifier into readable business notation."""
+    parts = [p for p in str(var_name or "").strip().split("_") if p]
+    if not parts:
+        return str(var_name or "")
+    out: List[str] = []
+    for idx, p in enumerate(parts):
+        low = p.lower()
+        if low == "pct":
+            out.append("(%)")
+        elif low in _READABLE_FORMULA_ACRONYMS:
+            out.append(_READABLE_FORMULA_ACRONYMS[low])
+        elif idx > 0 and low in ("per", "of", "and", "or", "to", "in", "by", "vs"):
+            out.append(low)
+        else:
+            out.append(p.capitalize())
+    return " ".join(out)
+
+
+def _format_human_readable_formula(formula_str: str) -> str:
+    """
+    Formats a Python mathematical formula string into clean human-readable arithmetic notation,
+    stripping outer `round(..., digits)` wrappers and converting snake_case variables to labels.
+    """
+    raw = str(formula_str or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = ast.parse(raw, mode="eval")
+    except SyntaxError:
+        cleaned = re.sub(r"\bround\(\s*", "", raw)
+        cleaned = re.sub(r",\s*\d+\s*\)", "", cleaned)
+        return cleaned.replace("\u2014", "-").replace("\u2013", "-")
+
+    def _prec(n: ast.AST) -> int:
+        if isinstance(n, ast.BinOp):
+            if isinstance(n.op, (ast.Add, ast.Sub)):
+                return 1
+            if isinstance(n.op, (ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)):
+                return 2
+            if isinstance(n.op, ast.Pow):
+                return 4
+        if isinstance(n, ast.UnaryOp):
+            return 3
+        return 5
+
+    def _fmt(n: ast.AST) -> str:
+        if isinstance(n, ast.Expression):
+            return _fmt(n.body)
+        if isinstance(n, ast.Constant):
+            val = n.value
+            if isinstance(val, bool):
+                return str(val)
+            if isinstance(val, float):
+                if val.is_integer():
+                    iv = int(val)
+                    return f"{iv:,}" if abs(iv) >= 1000 else str(iv)
+                return str(val)
+            if isinstance(val, int):
+                return f"{val:,}" if abs(val) >= 1000 else str(val)
+            return str(val)
+        if isinstance(n, ast.Name):
+            return _format_formula_variable_label(n.id)
+        if isinstance(n, ast.UnaryOp):
+            op_s = "-" if isinstance(n.op, ast.USub) else "+"
+            sub = _fmt(n.operand)
+            if isinstance(n.operand, ast.BinOp):
+                return f"{op_s}({sub})"
+            return f"{op_s}{sub}"
+        if isinstance(n, ast.BinOp):
+            p = _prec(n)
+            left_s = _fmt(n.left)
+            right_s = _fmt(n.right)
+            if isinstance(n.left, ast.BinOp) and _prec(n.left) < p:
+                left_s = f"({left_s})"
+            need_right_parens = False
+            if isinstance(n.right, ast.BinOp):
+                rp = _prec(n.right)
+                if rp < p:
+                    need_right_parens = True
+                elif isinstance(n.op, ast.Div) and rp <= p:
+                    need_right_parens = True
+                elif isinstance(n.op, ast.Sub) and isinstance(n.right.op, (ast.Add, ast.Sub)):
+                    need_right_parens = True
+            if need_right_parens:
+                right_s = f"({right_s})"
+            op_map = {
+                ast.Add: " + ",
+                ast.Sub: " - ",
+                ast.Mult: " x ",
+                ast.Div: " / ",
+                ast.FloorDiv: " // ",
+                ast.Mod: " mod ",
+                ast.Pow: " ^ ",
+            }
+            op_s = op_map.get(type(n.op), " ")
+            return f"{left_s}{op_s}{right_s}"
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+            fn = n.func.id
+            if fn == "round" and n.args:
+                return _fmt(n.args[0])
+            args_s = [_fmt(a) for a in n.args]
+            return f"{fn}({', '.join(args_s)})"
+        if isinstance(n, ast.IfExp):
+            return f"({_fmt(n.body)} if {_fmt(n.test)} else {_fmt(n.orelse)})"
+        if isinstance(n, ast.Compare):
+            chunks = [_fmt(n.left)]
+            cmp_map = {
+                ast.Eq: "=",
+                ast.NotEq: "!=",
+                ast.Lt: "<",
+                ast.LtE: "<=",
+                ast.Gt: ">",
+                ast.GtE: ">=",
+            }
+            for op, comp in zip(n.ops, n.comparators):
+                chunks.append(cmp_map.get(type(op), "?"))
+                chunks.append(_fmt(comp))
+            return " ".join(chunks)
+        return raw
+
+    formatted = _fmt(parsed).strip()
+    return formatted.replace("\u2014", "-").replace("\u2013", "-")
+
+
+def _sanitize_visible_sample_calculation(sample_calc: str) -> str:
+    """Replaces any leaked raw Python `round((...))` calls in visible prose with readable math."""
+    text = str(sample_calc or "").strip()
+    if "round(" not in text:
+        return text
+    out_parts: List[str] = []
+    idx = 0
+    while idx < len(text):
+        pos = text.find("round(", idx)
+        if pos == -1:
+            out_parts.append(text[idx:])
+            break
+        if pos > 0 and (text[pos - 1].isalnum() or text[pos - 1] == "_"):
+            out_parts.append(text[idx : pos + 6])
+            idx = pos + 6
+            continue
+        out_parts.append(text[idx:pos])
+        depth = 0
+        end_pos = pos + 5
+        while end_pos < len(text):
+            ch = text[end_pos]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            end_pos += 1
+        if depth == 0:
+            expr_str = text[pos : end_pos + 1]
+            out_parts.append(_format_human_readable_formula(expr_str))
+            idx = end_pos + 1
+        else:
+            out_parts.append(text[pos:])
+            break
+    return "".join(out_parts)
 
 
 def _eval_compiled_js_expr(js_expr: str, clamped_inputs: Dict[str, float]) -> float:
@@ -1251,13 +1472,14 @@ def _build_compiler_faq_entities(
     is_lienbond: bool = False,
 ) -> List[Dict[str, Any]]:
     """Builds conversational FAQPage entities tailored to tenant and tool cluster."""
+    readable_formula = _format_human_readable_formula(formula)
     faq_entities: List[Dict[str, Any]] = [
         {
             "@type": "Question",
             "name": f"How is {title} determined under statutory authority guidelines?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": f"The deterministic calculation model evaluates {formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}.",
+                "text": f"The deterministic calculation model evaluates {readable_formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}.",
             },
         },
         {
@@ -1685,6 +1907,8 @@ def _build_hero_range_and_state_bar_html(
     display_output: str,
     monetization_section_html: str,
     is_gainhelm: bool,
+    slug: str = "",
+    property_id: str = "",
 ) -> tuple[str, str]:
     """Renders the above-the-fold Instant Range Anchor and Step 1 State Selector bar."""
     conservative_range_str = _format_scenario_number(published_output * 0.8)
@@ -1713,6 +1937,8 @@ def _build_hero_range_and_state_bar_html(
         f'        </div>{hero_register_firm_link_html}\n'
         f'      </div>'
     )
+    if slug and not is_state_jurisdiction_tool(slug, property_id):
+        return hero_range_anchor_html, ""
     default_hero_state = "DE" if is_gainhelm else "CA"
     hero_us_states = (
         ("CA", "California (CA)"),
@@ -2206,7 +2432,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         display_output=display_output,
         monetization_section_html=monetization_section_html,
         is_gainhelm=is_gainhelm,
+        slug=slug,
+        property_id=resolved_tenant,
     )
+    readable_formula = _format_human_readable_formula(formula)
+    visible_sample_calc = _sanitize_visible_sample_calculation(sample_calc)
     playbook_footer_html = (
         ""
         if is_restricted_asset
@@ -2268,16 +2498,16 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
     default_takeaway_html = (
-        f"The {model_name} produces a baseline output of <strong>{display_output}</strong>.\n"
-        f"          Executive operators evaluate deterministic calculations derived from formula <code>{formula}</code>\n"
+        f"The {safe_model_h2} produces a baseline output of <strong>{display_output}</strong>.\n"
+        f"          Executive operators evaluate deterministic calculations derived from formula <code>{readable_formula}</code>\n"
         f"          joined with statutory rules from {statutory_authority} and empirical economic benchmarks from {economic_dataset}\n"
         f"          to compute exact quantitative projections and variance across multi-tier planning scenarios."
     )
     takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
     if takeaway_wc > 60:
         default_takeaway_html = (
-            f"The {model_name} produces a baseline output of <strong>{display_output}</strong> "
-            f"from formula <code>{formula}</code> under {statutory_authority} and {economic_dataset}."
+            f"The {safe_model_h2} produces a baseline output of <strong>{display_output}</strong> "
+            f"from formula <code>{readable_formula}</code> under {statutory_authority} and {economic_dataset}."
         )
         takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
         pad_tokens = [
@@ -2613,9 +2843,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </form>
       <div class="result-box" style="min-height: 110px; margin-top: 20px;">
         <h3>Published Baseline Calculation</h3>
-        <p>Formula: <code>{formula}</code></p>
+        <p>Formula: <code>{readable_formula}</code></p>
         <p>Evaluated Output Result: <strong class="output-value">{display_output}</strong></p>
-        <p>Sample Calculation Methodology: {sample_calc}</p>
+        <p>Sample Calculation Methodology: {visible_sample_calc}</p>
         <div class="calculation-variant" id="variant-baseline" style="font-size: 13px; margin-top: 8px;">Baseline Statutory Schedule (= {display_output}, 100.0% baseline{"; Title IV RAP $65k AGI benchmark: $248.23/mo, $59,575.20 total" if is_prexvo else ""}) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Compare Accelerated Stress Variant</a>)</div>
         <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress{"; Title IV RAP $95k AGI benchmark: $498.23/mo" if is_prexvo else ""}) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>{inline_calc_cta_html}
       </div>
@@ -2674,7 +2904,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         Governing statutory authority {statutory_authority} establishes the exact legal formulas, phaseout rates, and deduction caps, while empirical dataset series from {economic_dataset} validate inflation adjustments and cost basis indices:
       </p>
       <ul style="padding-left: 20px; margin-top: 10px; margin-bottom: 0;">
-        <li style="margin-bottom: 6px;"><strong>Deterministic Formula Execution:</strong> Evaluates <code>{formula}</code> with non-negative parameter clamping to produce the verified baseline output of <strong>{display_output}</strong>.</li>
+        <li style="margin-bottom: 6px;"><strong>Deterministic Formula Execution:</strong> Evaluates <code>{readable_formula}</code> with non-negative parameter clamping to produce the verified baseline output of <strong>{display_output}</strong>.</li>
         <li style="margin-bottom: 6px;"><strong>Statutory Authority Grounding:</strong> Enforces regulatory thresholds, phaseout schedules, and compliance limits established under {statutory_authority}.</li>
         <li style="margin-bottom: 6px;"><strong>Empirical Benchmark Corroboration:</strong> Anchors macroeconomic and inflation assumptions to {economic_dataset} alongside the <a href="{canonical_base}/tools/{secondary_sibling_slug}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">{secondary_sibling_title}</a>.</li>
       </ul>
@@ -2764,10 +2994,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     }}
 
     var debounceTimer = null;
-    function updateQueryParams(inputs) {{
+    function updateQueryParams(inputs, immediate) {{
       if (!window.history || !window.history.replaceState) return;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(function() {{
+      if (debounceTimer) {{
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }}
+      function _applyQueryParams() {{
         try {{
           var url = new URL(window.location.href);
           for (var k in inputs) {{
@@ -2775,7 +3008,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
           }}
           window.history.replaceState({{}}, "", url.toString());
         }} catch (e) {{}}
-      }}, 150);
+      }}
+      if (immediate) {{
+        _applyQueryParams();
+        return;
+      }}
+      debounceTimer = setTimeout(_applyQueryParams, 150);
     }}
 
     function syncInputsFromParams() {{
@@ -2797,9 +3035,9 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 {calc_js_body}
     }}
 
-    function handleRecompute() {{
+    function handleRecompute(immediate) {{
       var inputs = getInputs();
-      updateQueryParams(inputs);
+      updateQueryParams(inputs, immediate);
       var result = calculate(inputs);
       if (outputElem) {{
         outputElem.textContent = formatNumber(result);
@@ -2828,7 +3066,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     }});
     form.addEventListener("submit", function(e) {{
       e.preventDefault();
-      handleRecompute();
+      handleRecompute(true);
       return false;
     }});
   }})();
@@ -2904,6 +3142,7 @@ def _build_lienbond_support_page_html(
     gsc_token: str,
 ) -> str:
     """Renders a support/hub page (tools/index, methodology/index, disclaimers/index, 404) with full SEO/GEO parity."""
+    current_utc_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     page_json_ld = json.dumps(
         {
             "@context": "https://schema.org",
@@ -2940,7 +3179,7 @@ def _build_lienbond_support_page_html(
                     "inLanguage": "en-US",
                     "isPartOf": {"@id": "https://lienbond.com/#website"},
                     "datePublished": "2026-01-15",
-                    "dateModified": "2026-11-06",
+                    "dateModified": current_utc_date,
                     "speakable": {
                         "@type": "SpeakableSpecification",
                         "cssSelector": [".quick-answer", "h1"],
@@ -3104,7 +3343,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
                         "model_name": str(
                             dv.get("model_name")
                             or cm.get("model_name")
-                            or f"LienBond-{dv_slug[:32]}-Model-2026"
+                            or f"{dv_title} Underwriting Model"
                         ),
                         "formula": str(dv.get("formula") or cm.get("formula") or ""),
                         "inputs": dict(dv.get("inputs") or cm.get("inputs") or {}),
@@ -3144,7 +3383,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
                 "statutory_authority": spec["statutory_authority"],
                 "economic_dataset": spec["economic_dataset"],
                 "formula": spec["formula"],
-                "sample_calculation": spec["sample_calculation"],
+                "readable_formula": _format_human_readable_formula(spec["formula"]),
+                "sample_calculation": _sanitize_visible_sample_calculation(spec["sample_calculation"]),
             }
         )
         catalog_tools.append(
@@ -3177,7 +3417,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         f'            <tr>\n'
         f'              <td><a href="https://lienbond.com/tools/{p["slug"]}/" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;color:var(--accent);">{p["title"]}</a></td>\n'
         f'              <td>{p["statutory_authority"]}</td>\n'
-        f'              <td><code>{p["formula"]}</code></td>\n'
+        f'              <td><code>{p["readable_formula"]}</code></td>\n'
         f'              <td>{p["published_output"]:,.2f}</td>\n'
         f'            </tr>'
         for p in compiled_pages
@@ -3191,10 +3431,11 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         "formula": "round((bond_amount * credit_tier_rate_pct / 100.0) * term_years, 2)",
         "inputs": {"bond_amount": 25000, "credit_tier_rate_pct": 1.5, "term_years": 1},
         "published_output": 375.0,
-        "sample_calculation": "Evaluating round((bond_amount * credit_tier_rate_pct / 100.0) * term_years, 2) with bond_amount=25000, credit_tier_rate_pct=1.5, term_years=1 yields $375.00 annual surety bond premium",
+        "sample_calculation": "Evaluating a $25,000 statutory bond at a 1.5% underwriter credit tier rate across a 1-year term yields a $375.00 annual surety bond premium",
         "statutory_authority": "U.S. Treasury Department Circular 570, 40 U.S.C. Section 3131, and State Contractors License Law Bond Schedules",
         "economic_dataset": "Surety and Fidelity Association of America (SFAA) Loss Ratio Benchmark and U.S. Census Bureau Construction Spending (VIP) Series",
     }
+    hub_readable_formula = _format_human_readable_formula(home_manifest_dict["formula"])
     _enrich_manifest_with_proprietary_signals(
         home_manifest_dict,
         {"property_id": "lienbond", "domain": "lienbond.com"},
@@ -3301,7 +3542,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       <h1>Construction Surety Bond, Workers Comp &amp; Statutory Lien Calculators</h1>
       <aside class="takeaway quick-answer">
         <p class="takeaway">
-          The Contractor License Bond Credit Tier Underwriting Model produces a baseline output of <strong>375.00</strong> from formula <code>round((bond_amount * credit_tier_rate_pct / 100.0) * term_years, 2)</code> under 40 U.S.C. Section 3131 and U.S. Treasury Circular 570. Operators model surety bonds, NCCI workers comp EMR, and 50-state mechanics lien deadlines.
+          The Contractor License Bond Credit Tier Underwriting Model produces a baseline output of <strong>375.00</strong> from formula <code>{hub_readable_formula}</code> under 40 U.S.C. Section 3131 and U.S. Treasury Circular 570. Operators model surety bonds, NCCI workers comp EMR, and 50-state mechanics lien deadlines.
         </p>
       </aside>
     </header>
@@ -3334,7 +3575,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       </form>
       <div class="result-box">
         <h3>Published Baseline Calculation</h3>
-        <p>Formula: <code>round((bond_amount * credit_tier_rate_pct / 100.0) * term_years, 2)</code></p>
+        <p>Formula: <code>{hub_readable_formula}</code></p>
         <p>Evaluated Output Result: <strong class="output-value">375.00</strong></p>
         <div class="calculation-variant" id="variant-baseline" style="font-size:13px;margin-top:8px;">Preferred Credit Tier Schedule ($375.00 = 1.5% rate) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;color:var(--accent);">Compare Standard Market Variant</a>)</div>
         <div class="calculation-variant" id="variant-accelerated" style="font-size:13px;margin-top:4px;">Standard Market Indemnity Variant ($750.00 = 3.0% rate) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;color:var(--accent);">Return to Preferred Schedule</a>)</div>
@@ -3635,8 +3876,9 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     leaf_urls = [f'https://lienbond.com/tools/{p["slug"]}/' for p in compiled_pages]
     all_sitemap_urls = hub_urls + leaf_urls
 
+    sitemap_lastmod_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sitemap_full_rows = "\n".join(
-        f"  <url><loc>{u}</loc><lastmod>2026-11-06</lastmod></url>" for u in all_sitemap_urls
+        f"  <url><loc>{u}</loc><lastmod>{sitemap_lastmod_utc}</lastmod></url>" for u in all_sitemap_urls
     )
     sitemap_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -3644,7 +3886,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 </urlset>
 """
     sitemap_hubs_rows = "\n".join(
-        f"  <url><loc>{u}</loc><lastmod>2026-11-06</lastmod></url>" for u in hub_urls
+        f"  <url><loc>{u}</loc><lastmod>{sitemap_lastmod_utc}</lastmod></url>" for u in hub_urls
     )
     sitemap_hubs = f"""<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -3652,7 +3894,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 </urlset>
 """
     sitemap_leaves_rows = "\n".join(
-        f"  <url><loc>{u}</loc><lastmod>2026-11-06</lastmod></url>" for u in leaf_urls
+        f"  <url><loc>{u}</loc><lastmod>{sitemap_lastmod_utc}</lastmod></url>" for u in leaf_urls
     )
     sitemap_leaves = f"""<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -3759,6 +4001,14 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     )
     if not (dist / "_redirects").exists():
         (dist / "_redirects").write_text("", encoding="utf-8")
+
+    from pseofactory.distributor import generate_ai_benchmark_nodes
+
+    ai_benchmarks_dir = dist / "ai-benchmarks"
+    ai_benchmarks_dir.mkdir(parents=True, exist_ok=True)
+    lb_ai_res = generate_ai_benchmark_nodes(tenant="lienbond")
+    for fname, fcontent in (lb_ai_res.get("files") or {}).items():
+        (ai_benchmarks_dir / fname).write_text(fcontent, encoding="utf-8")
 
     pseo_meta = {
         "property_id": "lienbond",
@@ -3924,6 +4174,7 @@ def build_all(dist_dir: Any = None) -> Path:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -3968,11 +4219,31 @@ def main(argv=None) -> int:
             from lienbond.builder import build_estate
 
             build_estate(repo_root)
-        from pseofactory.maintenance import AssetIntegrityEvaluator, TenantRegistry
+        from pseofactory.maintenance import AssetIntegrityEvaluator, TenantRegistry, WorkspacePropertyScanner
 
-        adp = TenantRegistry.default().get_adapter("lienbond")
+        adp = None
+        if os.environ.get("WORKSPACE_ROOT") or not (repo_root / ".pseofactory.json").is_file():
+            try:
+                adp = TenantRegistry.default().get_adapter("lienbond")
+            except KeyError:
+                adp = None
+        if adp is None:
+            reg = TenantRegistry()
+            for scanned_adp in WorkspacePropertyScanner(workspace_root=repo_root).discover_properties():
+                reg.register_adapter(scanned_adp)
+            try:
+                adp = reg.get_adapter("lienbond")
+            except KeyError:
+                adp = TenantRegistry.default().get_adapter("lienbond")
         report = AssetIntegrityEvaluator().audit_all(adp)
-        drifted_cnt = int(getattr(report, "drifted", 0) if not isinstance(report, dict) else report.get("drifted", 0))
+        if isinstance(report, dict):
+            drifted_cnt = int(report.get("drifted_assets_count", report.get("drifted", 0)))
+            total_assets_cnt = int(report.get("total_assets_checked", report.get("total_assets", 0)))
+            compliant_cnt = int(report.get("compliant_assets_count", report.get("compliant", 0)))
+        else:
+            drifted_cnt = int(getattr(report, "drifted_assets_count", getattr(report, "drifted", 0)))
+            total_assets_cnt = int(getattr(report, "total_assets_checked", getattr(report, "total_assets", 0)))
+            compliant_cnt = int(getattr(report, "compliant_assets_count", getattr(report, "compliant", 0)))
         passed = drifted_cnt == 0
         if getattr(args, "envelope", False):
             print(json.dumps({
@@ -3987,9 +4258,9 @@ def main(argv=None) -> int:
         else:
             rep_dict = report.to_dict() if hasattr(report, "to_dict") else {
                 "property_id": "lienbond",
-                "total_assets": int(getattr(report, "total_assets", 0)),
-                "compliant": int(getattr(report, "compliant", 0)),
-                "drifted": drifted_cnt,
+                "total_assets_checked": total_assets_cnt,
+                "compliant_assets_count": compliant_cnt,
+                "drifted_assets_count": drifted_cnt,
                 "status": "PASS" if passed else "FAIL",
             }
             print(json.dumps(rep_dict, indent=2))

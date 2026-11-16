@@ -4099,14 +4099,19 @@ class TruthReconciliationEngine:
 
         # 9. Reconcile FAQPage visibility in HTML body
         if "FAQPage" in updated:
+            import html as _html_lib
+
             updated = re.sub(
-                r'\s*<section class="faq-section card" style="margin-top: 2rem; padding: 1.5rem;">[\s\S]*?</section>',
+                r'\s*<section class="faq-section card" style="margin-top:\s*2rem;(?:\s*padding:\s*1\.5rem;?)?">[\s\S]*?</section>',
                 '',
                 updated,
                 flags=re.IGNORECASE,
             )
             body_no_scripts = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', updated, flags=re.DOTALL | re.IGNORECASE)
-            norm_visible_body = " ".join(re.sub(r'<[^>]+>', ' ', body_no_scripts).split())
+            vis_norm_lower = " ".join(
+                _html_lib.unescape(re.sub(r'<[^>]+>', ' ', body_no_scripts)).split()
+            ).lower()
+            raw_unesc_lower = " ".join(_html_lib.unescape(body_no_scripts).split()).lower()
             missing_faqs: List[Tuple[str, str]] = []
             for ld_match in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>', updated, re.I):
                 try:
@@ -4116,10 +4121,11 @@ class TruthReconciliationEngine:
                         if isinstance(node, dict) and node.get("@type") == "FAQPage":
                             for q_node in node.get("mainEntity", []):
                                 if isinstance(q_node, dict):
-                                    q_name = str(q_node.get("name") or "").strip()
+                                    q_name = _html_lib.unescape(str(q_node.get("name") or "")).strip()
                                     a_obj = q_node.get("acceptedAnswer", {})
-                                    a_txt = str(a_obj.get("text") or "").strip() if isinstance(a_obj, dict) else ""
-                                    if q_name and q_name not in body_no_scripts and " ".join(q_name.split()) not in norm_visible_body:
+                                    a_txt = _html_lib.unescape(str(a_obj.get("text") or "")).strip() if isinstance(a_obj, dict) else ""
+                                    q_norm = " ".join(q_name.split()).lower()
+                                    if q_norm and q_norm not in vis_norm_lower and q_norm not in raw_unesc_lower:
                                         missing_faqs.append((q_name, a_txt))
                 except Exception:
                     pass
@@ -4127,33 +4133,92 @@ class TruthReconciliationEngine:
                 deduped_missing: List[Tuple[str, str]] = []
                 seen_q = set()
                 for q, a in missing_faqs:
-                    q_clean = " ".join(q.split())
+                    q_clean = " ".join(q.split()).lower()
                     if q_clean not in seen_q:
                         seen_q.add(q_clean)
                         deduped_missing.append((q, a))
                 missing_faqs = deduped_missing
 
-                has_h2_faq = bool(re.search(r'<h2[^>]*>\s*Frequently Asked Questions\s*</h2>', updated, re.I))
-                heading_tag = "h3" if has_h2_faq else "h2"
-                faq_items_html = "\n".join(
-                    f'    <div class="faq-item" style="margin-bottom: 1.25rem;">\n'
-                    f'      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">{q}</h3>\n'
-                    f'      <p style="font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary);">{a}</p>\n'
-                    f'    </div>'
-                    for q, a in missing_faqs
-                )
-                faq_markup = (
-                    f'\n  <section class="faq-section card" style="margin-top: 2rem; padding: 1.5rem;">\n'
-                    f'    <{heading_tag} style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem;">Frequently Asked Questions</{heading_tag}>\n'
-                    f'{faq_items_html}\n'
-                    f'  </section>\n'
-                )
-                if "</main>" in updated:
-                    updated = updated.replace("</main>", f"{faq_markup}</main>", 1)
+                # Check if an existing FAQ <section> already exists to avoid duplicate FAQ sections
+                sec_stack: List[Tuple[int, int, str]] = []
+                faq_sec_candidates: List[Tuple[int, int, int, int, str, str, str]] = []
+                for sec_m in re.finditer(r'<(/?)section\b[^>]*>', updated, flags=re.IGNORECASE):
+                    if not sec_m.group(1):
+                        sec_stack.append((sec_m.start(), sec_m.end(), sec_m.group(0)))
+                    elif sec_stack:
+                        s_start, inner_start, o_tag = sec_stack.pop()
+                        s_end = sec_m.end()
+                        c_tag = sec_m.group(0)
+                        cls_m = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', o_tag, flags=re.IGNORECASE | re.DOTALL)
+                        cls_val = cls_m.group(2) if cls_m else ""
+                        inner_sec = updated[inner_start:sec_m.start()]
+                        has_faq_cls = bool(re.search(r'\b(?:faq-section|overlay-faqs)\b', cls_val, flags=re.IGNORECASE))
+                        own_inner = re.sub(r'<section\b[\s\S]*?</section>', '', inner_sec, flags=re.IGNORECASE)
+                        has_faq_hd = bool(
+                            re.search(
+                                r'<h[1-4]\b[^>]*>(?:(?!</h[1-4]>).)*?\bFrequently\s+Asked\s+Questions\b',
+                                own_inner,
+                                flags=re.IGNORECASE | re.DOTALL,
+                            )
+                        )
+                        if has_faq_cls or has_faq_hd:
+                            faq_sec_candidates.append((0 if has_faq_cls else 1, -len(sec_stack), s_start, s_end, o_tag, inner_sec, c_tag))
+
+                if faq_sec_candidates:
+                    faq_sec_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+                    _, _, faq_s, faq_e, f_open, f_inner, f_close = faq_sec_candidates[0]
+                    uses_details = ('<details' in f_inner.lower()) or ('class="faq-list"' in f_inner.lower()) or ("class='faq-list'" in f_inner.lower())
+                    if uses_details:
+                        add_faq_html = "\n".join(
+                            f'    <details class="faq-item faq-card" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">\n'
+                            f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{_html_lib.escape(q, quote=False)}</summary>\n'
+                            f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{_html_lib.escape(a, quote=False)}</p>\n'
+                            f'    </details>'
+                            for q, a in missing_faqs
+                        )
+                    else:
+                        add_faq_html = "\n".join(
+                            f'    <div class="faq-item" style="margin-bottom: 1.25rem;">\n'
+                            f'      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">{_html_lib.escape(q, quote=False)}</h3>\n'
+                            f'      <p style="font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary);">{_html_lib.escape(a, quote=False)}</p>\n'
+                            f'    </div>'
+                            for q, a in missing_faqs
+                        )
+                    if 'class="faq-list"' in f_inner.lower() or "class='faq-list'" in f_inner.lower():
+                        new_inner = re.sub(
+                            r'(</div>\s*)$',
+                            lambda m: f'\n{add_faq_html}\n{m.group(1)}',
+                            f_inner,
+                            count=1,
+                        )
+                        if new_inner == f_inner:
+                            new_inner = f"{f_inner.rstrip()}\n{add_faq_html}\n"
+                    else:
+                        new_inner = f"{f_inner.rstrip()}\n{add_faq_html}\n"
+                    updated = updated[:faq_s] + f"{f_open}{new_inner}{f_close}" + updated[faq_e:]
                     repairs.append("faq_section_rendered_in_body")
-                elif "<footer" in updated:
-                    updated = updated.replace("<footer", f"{faq_markup}<footer", 1)
-                    repairs.append("faq_section_rendered_in_body")
+                else:
+                    has_h2_faq = bool(re.search(r'<h2[^>]*>\s*Frequently Asked Questions\s*</h2>', updated, re.I))
+                    heading_tag = "h3" if has_h2_faq else "h2"
+                    faq_items_html = "\n".join(
+                        f'    <div class="faq-item" style="margin-bottom: 1.25rem;">\n'
+                        f'      <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">{_html_lib.escape(q, quote=False)}</h3>\n'
+                        f'      <p style="font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary);">{_html_lib.escape(a, quote=False)}</p>\n'
+                        f'    </div>'
+                        for q, a in missing_faqs
+                    )
+                    faq_markup = (
+                        f'\n  <section class="faq-section card" style="margin-top: 2rem; padding: 1.5rem;">\n'
+                        f'    <{heading_tag} style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem;">Frequently Asked Questions</{heading_tag}>\n'
+                        f'{faq_items_html}\n'
+                        f'  </section>\n'
+                    )
+                    if "</main>" in updated:
+                        updated = updated.replace("</main>", f"{faq_markup}</main>", 1)
+                        repairs.append("faq_section_rendered_in_body")
+                    elif "<footer" in updated:
+                        updated = updated.replace("<footer", f"{faq_markup}<footer", 1)
+                        repairs.append("faq_section_rendered_in_body")
 
         return updated, repairs
 

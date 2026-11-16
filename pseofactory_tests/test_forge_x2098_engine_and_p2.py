@@ -93,16 +93,26 @@ def test_state_first_hero_and_instant_range_anchor_and_partner_registration_dom(
     assert 'data-mechanic="partner_supply_registration"' in ph_html
     assert 'id="partner-registration-form"' in ph_html
 
-    # Verify GainHelm commercial page
+    # Verify ProfitHelm state-dependent IRS 2027 tax brackets tool includes hero-state selector
+    ph_tax_res = compile_high_effort_page(
+        _build_sample_spec("profithelm", "irs-2027-tax-brackets", "irs 2027 tax brackets")
+    )
+    ph_tax_html = ph_tax_res["html"]
+    assert 'id="hero-range-anchor"' in ph_tax_html
+    assert 'id="quote-intake-hero-state"' in ph_tax_html
+    assert 'id="state-first-hero-bar"' in ph_tax_html
+
+    # Verify GainHelm commercial non-state page suppresses hero state bar while keeping range anchor
     gh_res = compile_high_effort_page(
         _build_sample_spec("gainhelm", "soc-2-audit-cost-calculator", "soc 2 audit cost")
     )
     gh_html = gh_res["html"]
     assert 'id="hero-range-anchor"' in gh_html
-    assert 'id="quote-intake-hero-state"' in gh_html
+    assert 'id="quote-intake-hero-state"' not in gh_html
+    assert 'id="state-first-hero-bar"' not in gh_html
     assert 'id="partner-registration-drawer"' in gh_html
 
-    # Verify Prexvo commercial refinance page has partner registration drawer
+    # Verify Prexvo commercial refinance page has partner registration drawer and hero state selector
     px_refi_res = compile_high_effort_page(
         _build_sample_spec("prexvo", "student-loan-refinance-rate-calculator", "student loan refinance rate")
     )
@@ -111,13 +121,14 @@ def test_state_first_hero_and_instant_range_anchor_and_partner_registration_dom(
     assert 'id="quote-intake-hero-state"' in px_refi_html
     assert 'id="partner-registration-drawer"' in px_refi_html
 
-    # Verify Prexvo restricted YMYL public-service page suppresses partner registration drawer
+    # Verify Prexvo restricted YMYL federal public-service page suppresses partner registration drawer and hero state bar
     px_pslf_res = compile_high_effort_page(
         _build_sample_spec("prexvo", "pslf-qualifying-payment-simulator", "pslf qualifying payment simulator")
     )
     px_pslf_html = px_pslf_res["html"]
     assert 'id="hero-range-anchor"' in px_pslf_html
-    assert 'id="quote-intake-hero-state"' in px_pslf_html
+    assert 'id="quote-intake-hero-state"' not in px_pslf_html
+    assert 'id="state-first-hero-bar"' not in px_pslf_html
     assert 'id="partner-registration-drawer"' not in px_pslf_html
     assert 'href="#partner-registration-drawer"' not in px_pslf_html
 

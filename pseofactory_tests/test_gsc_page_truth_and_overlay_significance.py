@@ -2510,3 +2510,221 @@ def test_sync_tenant_test_isolation_guards_aligns_prexvo_and_profithelm_monetiza
     # Idempotency check
     assert sync_tenant_test_isolation_guards(px_root, "prexvo")["updated_files"] == 0
     assert sync_tenant_test_isolation_guards(ph_root, "profithelm")["updated_files"] == 0
+
+
+def test_inject_overlay_pass2_merged_faq_idempotency_and_update() -> None:
+    """
+    Verifies Pass 2 inject_overlay_into_html matches merged <section class="faq-section overlay-faqs">,
+    replaces stale data-overlay-faq items when faq_entries updates, preserves base FAQs,
+    keeps 1 FAQ section both with and without #gsc-striking-overlay, and stays idempotent.
+    """
+    import re
+
+    base_html = (
+        "<!DOCTYPE html><html><head><title>Test Tool | ProfitHelm</title></head>"
+        "<body><main><h1>Test Tool</h1>"
+        '<section class="faq-section card">'
+        "<h2>Frequently Asked Questions</h2>"
+        '<details class="faq-item"><summary>Base statutory question?</summary>'
+        "<p>Base statutory answer.</p></details>"
+        "</section></main></body></html>"
+    )
+    ov_faq_only_v1 = {
+        "slug": "test-tool",
+        "tenant_id": "profithelm",
+        "faq_entries": [{"question": "Overlay question v1?", "answer": "Overlay answer v1."}],
+    }
+    p1 = inject_overlay_into_html(base_html, ov_faq_only_v1)
+    assert 'id="gsc-striking-overlay"' not in p1
+    assert "Overlay question v1?" in p1
+    assert inject_overlay_into_html(p1, ov_faq_only_v1) == p1
+
+    ov_faq_only_v2 = {
+        "slug": "test-tool",
+        "tenant_id": "profithelm",
+        "faq_entries": [{"question": "Overlay question v2?", "answer": "Overlay answer v2."}],
+    }
+    p2 = inject_overlay_into_html(p1, ov_faq_only_v2)
+    vis_p2 = re.sub(r"<script\b[^>]*>.*?</script>", "", p2, flags=re.DOTALL | re.I)
+    assert "Base statutory question?" in vis_p2
+    assert "Overlay question v1?" not in vis_p2
+    assert "Overlay question v2?" in vis_p2
+    assert len(re.findall(r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b', vis_p2, re.I)) == 1
+    assert len(re.findall(r"<h[1-4]\b[^>]*>[^<]*Frequently Asked Questions", vis_p2, re.I)) == 1
+    assert inject_overlay_into_html(p2, ov_faq_only_v2) == p2
+
+    # Repeat verification when #gsc-striking-overlay is present (non-FAQ overlay section)
+    ov_full_v1 = {
+        "slug": "test-tool",
+        "tenant_id": "profithelm",
+        "h2_headings": ["Statutory Model Breakdown"],
+        "faq_entries": [{"question": "Overlay full v1?", "answer": "Full answer v1."}],
+    }
+    f1 = inject_overlay_into_html(base_html, ov_full_v1)
+    assert 'id="gsc-striking-overlay"' in f1
+    assert inject_overlay_into_html(f1, ov_full_v1) == f1
+
+    ov_full_v2 = {
+        "slug": "test-tool",
+        "tenant_id": "profithelm",
+        "h2_headings": ["Statutory Model Breakdown"],
+        "faq_entries": [{"question": "Overlay full v2?", "answer": "Full answer v2."}],
+    }
+    f2 = inject_overlay_into_html(f1, ov_full_v2)
+    vis_f2 = re.sub(r"<script\b[^>]*>.*?</script>", "", f2, flags=re.DOTALL | re.I)
+    assert "Overlay full v1?" not in vis_f2
+    assert "Overlay full v2?" in vis_f2
+    assert len(re.findall(r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b', vis_f2, re.I)) == 1
+    assert len(re.findall(r"<h[1-4]\b[^>]*>[^<]*Frequently Asked Questions", vis_f2, re.I)) == 1
+    assert inject_overlay_into_html(f2, ov_full_v2) == f2
+
+
+def test_crypto_tax_sibling_slugs_receive_distinct_meta_descriptions() -> None:
+    """
+    Verifies crypto-tax-calculator and crypto-tax-form-1099-da-mandatory-reporting
+    never share a duplicate meta description even when both use a 1099-DA query or
+    start with the legacy colliding meta description.
+    """
+    import re
+    from pseofactory.gsc_remediation import _normalize_meta_120_155, compile_remediation_overlay_spec
+
+    legacy_colliding = (
+        "Calculate Crypto Tax Form 1099-DA liability under IRC Section 1012 and Form 1099-DA, "
+        "modeling capital gains, staking yield, and 3.8% NIIT compliance rules."
+    )
+    meta_calc = _normalize_meta_120_155(
+        legacy_colliding,
+        tenant_id="profithelm",
+        query_label="crypto tax form 1099 da calculator",
+        slug="crypto-tax-calculator",
+    )
+    meta_1099 = _normalize_meta_120_155(
+        legacy_colliding,
+        tenant_id="profithelm",
+        query_label="crypto tax form 1099 da mandatory reporting",
+        slug="crypto-tax-form-1099-da-mandatory-reporting",
+    )
+    assert meta_calc != meta_1099
+    for md in (meta_calc, meta_1099):
+        assert 120 <= len(md) <= 155
+        assert md.lower().count("form 1099-da") <= 1
+        assert_no_forbidden_dashes(md, context="crypto meta_description")
+
+    ov_calc = compile_remediation_overlay_spec(
+        {
+            "slug": "crypto-tax-calculator",
+            "tenant_id": "profithelm",
+            "query": "crypto tax form 1099 da calculator",
+            "position": 8.0,
+            "impressions": 100,
+        },
+        tenant_id="profithelm",
+    )
+    ov_1099 = compile_remediation_overlay_spec(
+        {
+            "slug": "crypto-tax-form-1099-da-mandatory-reporting",
+            "tenant_id": "profithelm",
+            "query": "crypto tax form 1099 da mandatory reporting",
+            "position": 8.0,
+            "impressions": 100,
+        },
+        tenant_id="profithelm",
+    )
+    assert ov_calc["meta_description"] != ov_1099["meta_description"]
+
+    base_calc = (
+        '<html><head><meta name="description" content="old" />'
+        '<link rel="canonical" href="https://profithelm.com/tools/crypto-tax-calculator/" />'
+        "</head><body><main><h1>Crypto</h1></main></body></html>"
+    )
+    out_calc = inject_overlay_into_html(
+        base_calc,
+        {"slug": "crypto-tax-calculator", "tenant_id": "profithelm", "query": "crypto tax form 1099 da calculator", "meta_description": legacy_colliding},
+    )
+    m_calc_html = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']*)["\']', out_calc, re.I)
+    assert m_calc_html is not None
+    assert m_calc_html.group(1) != legacy_colliding
+    assert m_calc_html.group(1) != ov_1099["meta_description"]
+
+
+def test_profithelm_surety_bond_meta_avoids_irc_statutory_and_heals_stale_spec() -> None:
+    """
+    Verifies ProfitHelm surety/bond slugs generate federal Miller Act / Treasury Circular 570
+    meta descriptions (never IRC statutory / IRS / tax brackets) and heal stale specs.
+    """
+    from pseofactory.gsc_remediation import _normalize_meta_120_155, compile_remediation_overlay_spec
+
+    stale_irc_meta = (
+        "Calculate Contractor Surety Bond Cost using deterministic IRC statutory formulas, "
+        "federal brackets, depreciation limits, and IRS compliance benchmarks."
+    )
+    healed = _normalize_meta_120_155(
+        stale_irc_meta,
+        tenant_id="profithelm",
+        query_label="contractor surety bond cost calculator",
+        slug="contractor-surety-bond-cost-calculator",
+    )
+    assert 120 <= len(healed) <= 155
+    assert "40 U.S.C. Section 3131" in healed
+    for forbidden in ("irc statutory", "irs", "tax brackets", "(irc rules)"):
+        assert forbidden not in healed.lower()
+    assert_no_forbidden_dashes(healed, context="profithelm surety meta")
+
+    ov = compile_remediation_overlay_spec(
+        {
+            "slug": "contractor-surety-bond-cost-calculator",
+            "tenant_id": "profithelm",
+            "query": "contractor surety bond cost calculator",
+            "position": 9.0,
+            "impressions": 90,
+        },
+        tenant_id="profithelm",
+    )
+    assert ov["meta_description"] == healed
+
+    base_html = (
+        '<html><head><meta name="description" content="old" />'
+        '<link rel="canonical" href="https://profithelm.com/tools/contractor-surety-bond-cost-calculator/" />'
+        "</head><body><main><h1>Contractor Surety Bond Cost Calculator</h1></main></body></html>"
+    )
+    out_html = inject_overlay_into_html(
+        base_html,
+        {
+            "slug": "contractor-surety-bond-cost-calculator",
+            "tenant_id": "profithelm",
+            "query": "contractor surety bond cost calculator",
+            "meta_description": stale_irc_meta,
+        },
+    )
+    assert healed in out_html
+
+
+def test_serp_svg_breakdown_labels_stacked_without_overlap() -> None:
+    """
+    Verifies SERP SVG breakdown stacks #serp-svg-label-retained and #serp-svg-label-tax
+    on two separate y rows inside viewBox='0 0 600 92' so long labels cannot overlap.
+    """
+    import re
+    from pseofactory.competitor import render_serp_incumbent_depth_upgrade_block
+
+    for slug, prop, base in (
+        ("soc-2-audit-cost-calculator", "gainhelm", "https://gainhelm.com"),
+        ("miller-act-performance-and-payment-bond-premium-calculator", "lienbond", "https://lienbond.com"),
+        ("prediction-market-tax", "profithelm", "https://profithelm.com"),
+    ):
+        html = render_serp_incumbent_depth_upgrade_block(
+            slug=slug,
+            title=slug.replace("-", " ").title(),
+            property_id=prop,
+            canonical_base=base,
+        )
+        assert 'viewBox="0 0 600 92"' in html
+        m_ret = re.search(r'<text\b[^>]*id="serp-svg-label-retained"[^>]*>', html)
+        m_tax = re.search(r'<text\b[^>]*id="serp-svg-label-tax"[^>]*>', html)
+        assert m_ret is not None and m_tax is not None
+        y_ret = int(re.search(r'\by="(\d+)"', m_ret.group(0)).group(1))
+        y_tax = int(re.search(r'\by="(\d+)"', m_tax.group(0)).group(1))
+        assert y_ret != y_tax and abs(y_tax - y_ret) >= 18
+        assert 'x="8"' in m_tax.group(0)
+        assert 'text-anchor="start"' in m_tax.group(0)
+        assert_no_forbidden_dashes(html, context=f"serp svg {slug}")

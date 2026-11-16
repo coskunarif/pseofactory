@@ -188,14 +188,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         and "PYTEST_CURRENT_TEST" not in os.environ
         and os.environ.get("PSEOFACTORY_SKIP_DEFAULT_BROWSER_AUDIT") != "1"
     )
-    lock_file = Path(os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK", "/tmp/pseofactory_supervisor.lock"))
-    in_pipeline = (
-        os.environ.get("PSEUFACTORY_SUPERVISOR_LOCK_HELD") == "1"
-        or _ancestor_or_inherited_fd_holds_lock(lock_file)
-    )
     default_sample = getattr(args, "sample", None)
-    if default_sample is None and in_pipeline:
-        default_sample = 8
 
     from pseofactory.browser_verifier import (
         UnifiedBrowserAuditor as _DefaultBrowserAuditor,

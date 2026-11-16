@@ -1001,3 +1001,469 @@ def test_autonomous_downstream_chain_and_exception_routing(tmp_path):
     assert any("Syndication Dispatch Exception" in it.title for it in pending_items)
 
 
+def _write_porcelain_seed_estate(repo_dir, canonical_base="https://prexvo.com"):
+    """Builds a minimal dist estate in repo_dir/dist suitable for retrofit_estate and audit_estate."""
+    dist_dir = repo_dir / "dist"
+    (dist_dir / "tools" / "rap-payment-calculator").mkdir(parents=True, exist_ok=True)
+    home_ld = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@graph": [
+                {
+                    "@type": "WebPage",
+                    "name": "Prexvo Student Loan Repayment Hub",
+                    "url": f"{canonical_base}/",
+                    "inLanguage": "en-US",
+                    "dateModified": "2026-11-16",
+                    "speakable": {"@type": "SpeakableSpecification", "cssSelector": [".quick-answer"]},
+                },
+                {
+                    "@type": "ItemList",
+                    "name": "Prexvo Calculators",
+                    "itemListElement": [{"@type": "ListItem", "position": 1, "url": f"{canonical_base}/tools/rap-payment-calculator/"}],
+                },
+            ],
+        }
+    )
+    tools_ld = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@graph": [
+                {
+                    "@type": "WebPage",
+                    "name": "Prexvo Tools Directory",
+                    "url": f"{canonical_base}/tools/",
+                    "inLanguage": "en-US",
+                    "dateModified": "2026-11-16",
+                    "speakable": {"@type": "SpeakableSpecification", "cssSelector": [".quick-answer"]},
+                }
+            ],
+        }
+    )
+    calc_ld = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@graph": [
+                {
+                    "@type": "SoftwareApplication",
+                    "name": "RAP Payment Calculator - Prexvo",
+                    "url": f"{canonical_base}/tools/rap-payment-calculator/",
+                    "applicationCategory": "FinanceApplication",
+                    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+                    "inLanguage": "en-US",
+                    "dateModified": "2026-11-16",
+                    "isRelatedTo": [f"{canonical_base}/tools/"],
+                    "speakable": {"@type": "SpeakableSpecification", "cssSelector": [".quick-answer"]},
+                },
+                {"@type": "Dataset", "name": "Federal Poverty Guidelines", "description": "2026 HHS Poverty Guidelines"},
+                {"@type": "HowTo", "name": "How to Model RAP Payments", "step": [{"@type": "HowToStep", "text": "Enter AGI."}]},
+            ],
+        }
+    )
+    head_tmpl = (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '<title>{title}</title>'
+        '<meta name="description" content="{desc}">'
+        '<link rel="canonical" href="{url}">'
+        '<script type="application/ld+json">{ld_json}</script>'
+        "</head>"
+    )
+    (dist_dir / "index.html").write_text(
+        head_tmpl.format(
+            title="Prexvo Student Loan Repayment Hub",
+            desc="Compare statutory federal student loan repayment calculators built on verified Department of Education rules.",
+            url=f"{canonical_base}/",
+            ld_json=home_ld,
+        )
+        + '<body data-blueprint="home_hub"><main><h1>Prexvo Student Loan Calculators</h1>'
+        '<p>Browse statutory student loan modeling calculators below.</p>'
+        '<a href="/tools/">All Tools</a></main></body></html>',
+        encoding="utf-8",
+    )
+    base_qa_54 = " ".join(
+        [
+            "Prexvo provides interactive student loan calculators modeled directly on current federal statutory repayment schedules and IRS tax brackets.",
+            "Compare monthly obligations across plans before changing loan terms, and confirm eligibility rules directly with your servicer or studentaid.gov.",
+            "Use the directory below to open calculators covering income-driven plans, forgiveness, and refinancing.",
+        ]
+    )
+    assert len(base_qa_54.split()) <= 56
+    (dist_dir / "tools" / "index.html").write_text(
+        head_tmpl.format(
+            title="Prexvo Tools Directory",
+            desc="Directory of federal student loan repayment and refinancing calculators built on verified statutory formulas.",
+            url=f"{canonical_base}/tools/",
+            ld_json=tools_ld,
+        )
+        + '<body data-blueprint="tools_directory"><main><h1>Student Loan Tools Directory</h1>'
+        f'<aside class="quick-answer"><p>{base_qa_54}</p></aside>'
+        '<p>Compare student loan refinancing offers and federal IDR repayment options.</p>'
+        '<a href="/r/splash_financial?source_tool=tools" class="partner-btn btn-cta touch-target" rel="noopener sponsored">Compare Refinancing Rates</a>'
+        '<a href="/tools/rap-payment-calculator/">RAP Payment Calculator</a></main></body></html>',
+        encoding="utf-8",
+    )
+    tool_qa_40 = (
+        "Model monthly federal Repayment Assistance Plan payments using adjusted gross income, family size, and poverty guidelines. "
+        "Review minimum thresholds and married filing adjustments before certifying income with your loan servicer."
+    )
+    (dist_dir / "tools" / "rap-payment-calculator" / "index.html").write_text(
+        head_tmpl.format(
+            title="RAP Payment Calculator - Prexvo",
+            desc="Calculate 2026 federal RAP student loan monthly payments with poverty exclusions and servicer verification.",
+            url=f"{canonical_base}/tools/rap-payment-calculator/",
+            ld_json=calc_ld,
+        )
+        + '<body><main><h1>RAP Payment Calculator</h1>'
+        f'<aside class="quick-answer"><p>{tool_qa_40}</p></aside>'
+        '<div id="calc-root"><label for="agi">AGI</label><input id="agi" type="number" value="65000">'
+        '<input id="rate-range" type="range" min="3" max="10" value="6" class="touch-target"></div>'
+        '<p>Verified calculation steps using official poverty guidelines.</p>'
+        "</main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"  <url><loc>{canonical_base}/</loc><lastmod>2026-11-16</lastmod></url>\n"
+        f"  <url><loc>{canonical_base}/tools/</loc><lastmod>2026-11-16</lastmod></url>\n"
+        f"  <url><loc>{canonical_base}/tools/rap-payment-calculator/</loc><lastmod>2026-11-16</lastmod></url>\n"
+        "</urlset>\n",
+        encoding="utf-8",
+    )
+    return dist_dir
+
+
+def test_live_repo_mutation_guard_blocks_writes_allows_tmp_and_audits(tmp_path, monkeypatch):
+    """
+    Verifies live-repo protection fails closed in retrofit_estate and reflect_and_recompile_all_assets
+    while still permitting read-only audits on live paths and mutations in .agy/worktrees or /tmp.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+    import pseofactory.maintenance as maint_mod
+    from pseofactory.maintenance import (
+        RetroReflectionEngine,
+        _is_live_repo_mutation_blocked,
+        reflect_and_recompile_all_assets,
+    )
+
+    assert _is_live_repo_mutation_blocked(Path("/home/ubuntuadmin/projects/prexvo/dist")) is True
+    assert _is_live_repo_mutation_blocked(Path("/home/ubuntuadmin/projects/.agy/worktrees/porcelain-fix-p1/pseofactory")) is False
+    assert _is_live_repo_mutation_blocked(tmp_path / "plain_tmp_repo") is False
+
+    fake_projects = tmp_path / "projects"
+    fake_wt_root = fake_projects / ".agy" / "worktrees"
+    monkeypatch.setattr(maint_mod, "_LIVE_PROJECTS_ROOT", fake_projects.resolve())
+    monkeypatch.setattr(maint_mod, "_WORKTREES_ROOT", fake_wt_root.resolve())
+
+    live_repo = fake_projects / "prexvo"
+    live_dist = _write_porcelain_seed_estate(live_repo)
+    overlay_dir = live_repo / ".agy" / "overlays"
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+    invalid_ov = overlay_dir / "index.json"
+    invalid_ov.write_text('{"slug": "index"}', encoding="utf-8")
+    before_index = (live_dist / "index.html").read_bytes()
+
+    blocked_retro = RetroReflectionEngine.retrofit_estate(live_dist, "prexvo", "https://prexvo.com")
+    assert blocked_retro["status"] == "BLOCKED_LIVE_WORKTREE"
+    assert blocked_retro["pages_retrofitted"] == 0
+    assert blocked_retro["retrofitted_paths"] == []
+    assert (live_dist / "index.html").read_bytes() == before_index
+
+    adapter = SubprocessPropertyAdapter(
+        property_id="prexvo",
+        brand_name="Prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        dist_dir=live_dist,
+        repo_path=live_repo,
+    )
+    registry = TenantRegistry()
+    registry.register_adapter(adapter)
+
+    build_calls = []
+    downstream_calls = []
+    monkeypatch.setattr(adapter, "build_all", lambda: build_calls.append("build_all") or True)
+    monkeypatch.setattr(
+        maint_mod,
+        "_execute_autonomous_downstream_chain",
+        lambda *a, **kw: downstream_calls.append(kw) or {"status": "RAN"},
+    )
+
+    res = reflect_and_recompile_all_assets(
+        properties=["prexvo"],
+        force=True,
+        latch_state=True,
+        run_downstream=True,
+        registry=registry,
+        workspace_root=fake_projects,
+    )
+
+    assert build_calls == []
+    assert downstream_calls == []
+    assert invalid_ov.is_file()
+    assert (live_dist / "index.html").read_bytes() == before_index
+    assert not (live_repo / ".agy" / "engine_hash.json").exists()
+    assert not (fake_projects / ".agy" / "engine_hash.json").exists()
+    rep = res["property_reports"]["prexvo"]
+    assert res["total_assets_checked"] >= 1
+    assert rep["recompiled"] == 0
+    assert rep["retrofitted"] == 0
+
+    wt_repo = fake_wt_root / "porcelain-fix-p1" / "prexvo"
+    wt_dist = _write_porcelain_seed_estate(wt_repo)
+    assert _is_live_repo_mutation_blocked(wt_dist) is False
+    wt_retro = RetroReflectionEngine.retrofit_estate(wt_dist, "prexvo", "https://prexvo.com")
+    assert wt_retro["status"] == "PASS"
+    assert wt_retro["porcelain_compiled"] is True
+
+
+def test_post_retrofit_governance_renormalization_and_no_redundant_porcelain_compile(tmp_path, monkeypatch):
+    """
+    Verifies governance reconciliation HTML mutations are re-normalized relative to Porcelain
+    and reflect_and_recompile_all_assets does not redundantly recompile Porcelain after retrofit_estate
+    when zero post-retrofit HTML files changed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import pseofactory.maintenance as maint_mod
+    import pseofactory.porcelain_shell as porcelain_mod
+    from pseofactory.maintenance import (
+        AssetIntegrityEvaluator,
+        AssetIntegrityReport,
+        RetroReflectionEngine,
+        _sync_post_retrofit_reconciliation_and_porcelain,
+        reflect_and_recompile_all_assets,
+    )
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+
+    repo_a = tmp_path / "tenant_a"
+    dist_a = _write_porcelain_seed_estate(repo_a)
+    (dist_a / "about").mkdir(parents=True, exist_ok=True)
+    about_html = dist_a / "about" / "index.html"
+    about_html.write_text(
+        "<!DOCTYPE html><html><head><title>About</title></head><body><h1>About</h1></body></html>",
+        encoding="utf-8",
+    )
+
+    renorm_calls = []
+    orig_renorm = maint_mod._renormalize_html_paths_to_porcelain
+
+    def spy_renorm(d, pid, paths):
+        renorm_calls.append((str(d), pid, [str(p) for p in paths]))
+        return orig_renorm(d, pid, paths)
+
+    monkeypatch.setattr(maint_mod, "_renormalize_html_paths_to_porcelain", spy_renorm)
+    monkeypatch.setattr(
+        porcelain_mod,
+        "compile_tenant_porcelain_estate_with_profile",
+        lambda *a, **kw: {"mutated_paths": ["index.html"], "governance_written": True},
+    )
+
+    def fake_gov_reconcile(*, dist_dir, property_id, repo_root):
+        target = dist_dir / "about" / "index.html"
+        target.write_text(
+            "<!DOCTYPE html><html><head><title>About Reconciled</title></head>"
+            "<body><main><h1>About Reconciled</h1><!-- gov --></main></body></html>",
+            encoding="utf-8",
+        )
+        return ["about/index.html"]
+
+    monkeypatch.setattr(TruthReconciliationEngine, "reconcile_estate_assets", fake_gov_reconcile)
+    retro_a = RetroReflectionEngine.retrofit_estate(dist_a, "prexvo", "https://prexvo.com")
+    assert retro_a["status"] == "PASS"
+    assert renorm_calls and "about/index.html" in renorm_calls[0][2][0]
+    assert "about/index.html" in retro_a["retrofitted_paths"]
+    about_after = about_html.read_text(encoding="utf-8")
+    assert 'data-theme="porcelain"' in about_after
+    assert 'id="pseo-visual-primitives"' in about_after
+
+    monkeypatch.undo()
+
+    repo_b = tmp_path / "tenant_b"
+    dist_b = _write_porcelain_seed_estate(repo_b)
+    compile_calls = []
+    orig_sync_compile = maint_mod._sync_dist_ai_benchmarks_and_compile_porcelain
+
+    def spy_sync_compile(dist_dir, property_id, repo_root=None, compile_always=False):
+        compile_calls.append(
+            {"dist_dir": str(dist_dir), "property_id": property_id, "compile_always": compile_always}
+        )
+        return orig_sync_compile(dist_dir, property_id, repo_root=repo_root, compile_always=compile_always)
+
+    monkeypatch.setattr(maint_mod, "_sync_dist_ai_benchmarks_and_compile_porcelain", spy_sync_compile)
+    monkeypatch.setattr(TruthReconciliationEngine, "reconcile_estate_assets", lambda *a, **kw: [])
+    monkeypatch.setattr(
+        AssetIntegrityEvaluator,
+        "audit_all",
+        lambda self, adp, **kw: AssetIntegrityReport(
+            property_id="prexvo",
+            status="PASS",
+            total_assets_checked=3,
+            compliant_assets_count=3,
+            drifted_assets=[],
+        ),
+    )
+    import pseofactory.affiliates as affiliates_mod
+    monkeypatch.setattr(
+        affiliates_mod,
+        "audit_callout_destination_message_match",
+        lambda *a, **kw: {"mismatch_count": 0},
+    )
+
+    adapter_b = SubprocessPropertyAdapter(
+        property_id="prexvo",
+        brand_name="Prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        dist_dir=dist_b,
+        repo_path=repo_b,
+    )
+    reg_b = TenantRegistry()
+    reg_b.register_adapter(adapter_b)
+
+    reflect_and_recompile_all_assets(
+        properties=["prexvo"],
+        force=False,
+        latch_state=True,
+        run_downstream=False,
+        registry=reg_b,
+        workspace_root=tmp_path,
+    )
+    assert len(compile_calls) == 1
+
+    monkeypatch.setattr(
+        TruthReconciliationEngine,
+        "reconcile_estate_assets",
+        lambda *a, **kw: ["tools/rap-payment-calculator/index.html"],
+    )
+    sync_mutated = _sync_post_retrofit_reconciliation_and_porcelain(
+        dist_b,
+        "prexvo",
+        repo_root=repo_b,
+        run_callout_match=False,
+        porcelain_compiled=True,
+        html_mutated_since_porcelain=False,
+    )
+    assert sync_mutated["porcelain_invoked"] is True
+    assert len(compile_calls) == 2
+
+
+def test_prexvo_tools_index_ymyl_audit_estate_passes_while_broken_ctas_fail(tmp_path):
+    """
+    Verifies compliant Prexvo Porcelain tools/index.html with appended YMYL forfeiture disclaimer
+    passes RetroReflectionEngine.audit_estate cleanly while cramped CTAs, missing attribution/rel,
+    and bloated calculator quick-answers still fail.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import re
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    repo = tmp_path / "prexvo"
+    dist = _write_porcelain_seed_estate(repo)
+    RetroReflectionEngine.retrofit_estate(dist, "prexvo", "https://prexvo.com")
+
+    tools_index = dist / "tools" / "index.html"
+    compliant_tools_html = tools_index.read_text(encoding="utf-8")
+    assert "waives federal protections" in compliant_tools_html.lower()
+
+    audit_ok = RetroReflectionEngine.audit_estate(dist, "prexvo")
+    assert audit_ok["status"] == "PASS", audit_ok
+    assert audit_ok["stale_count"] == 0, audit_ok
+
+    tools_index.write_text(
+        compliant_tools_html.replace(
+            'class="partner-btn btn-cta touch-target"',
+            'style="display:inline; min-height:24px;" class="partner-btn"',
+        ),
+        encoding="utf-8",
+    )
+    cramped_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
+    assert cramped_audit["status"] == "STALE"
+    assert "deterministic_visual_primitives" in cramped_audit["stale_pages"].get("tools/index.html", [])
+
+    broken_cta_html = re.sub(r"source_tool=[^&\"']+", "src=none", compliant_tools_html)
+    broken_cta_html = re.sub(r'\s*rel="[^"]*"', "", broken_cta_html)
+    tools_index.write_text(broken_cta_html, encoding="utf-8")
+    bad_cta_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
+    assert bad_cta_audit["status"] == "STALE"
+    assert bad_cta_audit["stale_pages"].get("tools/index.html")
+
+    tools_index.write_text(compliant_tools_html, encoding="utf-8")
+    calc_page = dist / "tools" / "rap-payment-calculator" / "index.html"
+    orig_calc = calc_page.read_text(encoding="utf-8")
+    bloated_qa = " ".join(["word"] * 68) + "."
+    updated_calc = re.sub(
+        r'(<aside\b[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)',
+        rf"\1<p>{bloated_qa}</p>",
+        orig_calc,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    assert updated_calc != orig_calc
+    calc_page.write_text(updated_calc, encoding="utf-8")
+    bloated_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
+    assert bloated_audit["status"] == "STALE"
+    assert "deterministic_visual_primitives" in bloated_audit["stale_pages"].get(
+        "tools/rap-payment-calculator/index.html", []
+    )
+
+
+def test_overlay_spec_needs_heal_allows_irc_section_162_163_on_surety_bond() -> None:
+    """
+    Verifies _overlay_spec_needs_heal allows valid commercial deductibility citations like
+    IRC Section 162/163 and IRC Section 3111 on surety/bond overlays while still flagging
+    individual-rate citations (IRC Section 1 / IRC Section 1(j)) and IRC taxonomy drift.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    clean_surety_ov = {
+        "slug": "contractor-surety-bond-cost-calculator",
+        "query": "contractor surety bond cost calculator",
+        "title": "Contractor Surety Bond Cost Calculator (Surety Rules) | ProfitHelm",
+        "meta_description": (
+            "Estimate commercial contractor surety bond costs under federal Miller Act "
+            "40 U.S.C. Section 3131, state penal sums, and credit-tier underwriting rates."
+        ),
+        "quick_answer": (
+            "Contractor surety bond premiums depend on Treasury Circular 570 underwriting tiers, "
+            "credit score, and bond penalty amount rather than flat percentage rules. Verify "
+            "IRC Section 162/163 deductibility schedules before locking annual indemnity costs."
+        ),
+        "ai_mode_decision_matrix": [
+            {
+                "scenario": "Commercial Bond Premium Deduction",
+                "authority": "IRC Section 162/163 Deductibility and IRC Section 3111",
+            }
+        ],
+    }
+    assert RetroReflectionEngine._overlay_spec_needs_heal("contractor-surety-bond-cost-calculator", clean_surety_ov) is False
+
+    polluted_sec1 = {
+        **clean_surety_ov,
+        "quick_answer": (
+            "Contractor surety bond premiums are compared against IRC Section 1 individual tax brackets "
+            "when evaluating commercial capital retention schedules."
+        ),
+    }
+    assert RetroReflectionEngine._overlay_spec_needs_heal("contractor-surety-bond-cost-calculator", polluted_sec1) is True
+
+    polluted_sec1j = {
+        **clean_surety_ov,
+        "quick_answer": (
+            "Contractor surety bond premiums are compared against IRC Section 1(j) rate schedules "
+            "when evaluating commercial capital retention."
+        ),
+    }
+    assert RetroReflectionEngine._overlay_spec_needs_heal("contractor-surety-bond-cost-calculator", polluted_sec1j) is True
+
+    polluted_irc_rules = {
+        **clean_surety_ov,
+        "title": "Contractor Surety Bond Cost Calculator (IRC Rules) | ProfitHelm",
+    }
+    assert RetroReflectionEngine._overlay_spec_needs_heal("contractor-surety-bond-cost-calculator", polluted_irc_rules) is True
+
+
+
+

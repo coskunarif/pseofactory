@@ -21,8 +21,10 @@ import json
 import os
 import re
 import shutil
+import struct
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils as saxutils
+import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -194,8 +196,10 @@ def get_porcelain_tenant_profile(property_id: str) -> Dict[str, Any]:
             "Public-Service Statutory Notice (Title IV & 16 CFR Part 255): Calculations on this public-service "
             "estimator are for educational and informational purposes only and do not constitute legal or "
             "financial advice. Prexvo is an independent research publisher and is not affiliated with the U.S. "
-            "Department of Education or StudentAid.gov. No private refinancing offers are displayed on dedicated "
-            "public-service forgiveness or litigation transition calculators to protect federal IDR and PSLF eligibility."
+            "Department of Education or StudentAid.gov. Refinancing federal student loans permanently waives "
+            "federal protections including Income-Driven Repayment (IDR) and Public Service Loan Forgiveness "
+            "(PSLF), so no private refinancing offers are displayed on dedicated public-service forgiveness "
+            "or litigation transition calculators."
         )
         partner_list_summary = "Splash Financial, SoFi, Credible, Earnest, LendKey, and Juno"
         disclaimers_sections_html = f"""      <section class="card">
@@ -1014,6 +1018,13 @@ a.affiliate-cta-link:hover {{
   align-items: start;
 }}
 
+.calc-grid > *,
+.calculator-grid > *,
+.grid-2 > *,
+.card {{
+  min-width: 0;
+}}
+
 .tools-grid,
 .card-grid,
 .grid-3 {{
@@ -1584,6 +1595,1300 @@ details.faq-accordion > summary::-webkit-details-marker {{
   box-sizing: border-box;
 }}
 
+/* Complete Porcelain Light Coverage for All Estate UI Components */
+.brand-name {{
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}}
+
+.hero-subtitle,
+.hero-desc,
+.section-subtitle,
+.section-desc,
+.section-lead,
+.tool-desc,
+.partners-desc {{
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 0 0.75rem 0;
+}}
+
+.section-subtitle {{
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}}
+
+.hero-register-firm-link {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--brand-primary);
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-decoration: none;
+  cursor: pointer;
+}}
+
+.hero-register-firm-link:hover {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-primary);
+  color: var(--brand-hover);
+}}
+
+.byline-wrap {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0.75rem 0;
+}}
+
+.byline-author {{
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-style: normal;
+}}
+
+.byline-label,
+.byline-sep,
+.byline-date {{
+  color: var(--text-muted);
+}}
+
+.byline-link {{
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.25rem 0.375rem;
+  color: var(--brand-primary);
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}}
+
+.byline-link:hover {{
+  text-decoration: underline;
+}}
+
+.byline-org {{
+  color: var(--brand-primary);
+  font-weight: 600;
+}}
+
+.badge-tag {{
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background-color: var(--brand-soft);
+  color: var(--brand-hover);
+  border: 1px solid var(--brand-border);
+  margin-bottom: 0.5rem;
+}}
+
+.pill-trust-group {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}}
+
+.pill-trust {{
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3125rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background-color: var(--bg-subtle);
+  color: var(--brand-primary);
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}}
+
+.separator {{
+  color: var(--text-muted);
+  margin: 0 0.25rem;
+  user-select: none;
+}}
+
+.quick-answer-title {{
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.375rem;
+}}
+
+.direct-answer-block {{
+  margin-bottom: 1rem;
+}}
+
+/* Card Sub-Regions & Semantic Section Containers */
+.card-header {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.875rem;
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--border-hairline);
+}}
+
+.card-body,
+.quotable-stats {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}}
+
+.article-content,
+.benchmark-table-section,
+.calculation-methodology-section,
+.calculation-scenarios-section,
+.commercial-handoff-vetting,
+.comparison-container,
+.faq-section,
+.methodology,
+.partner-cta-section,
+.partners-section,
+.related-tools-section,
+.scenario-container,
+.sensitivity-matrix-section,
+.statutory-comparison-table-section,
+.statutory-compliance-section,
+.statutory-provenance-box,
+.three-tier-cluster-section,
+.tools-directory-section,
+.cluster-nav,
+.regulatory-lead-magnet-card {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}}
+
+.regulatory-lead-magnet-card {{
+  background-color: var(--bg-subtle);
+}}
+
+.baseline-output-summary,
+.commentary-box,
+.statutory-edge-case-trap,
+.ymyl-public-service-guardrail {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--brand-primary);
+  border-radius: var(--radius-card);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+}}
+
+.statutory-edge-case-trap {{
+  border-left-color: var(--status-warning);
+}}
+
+.ymyl-public-service-guardrail {{
+  border-left-color: var(--status-positive);
+  background-color: var(--bg-subtle);
+}}
+
+.ymyl-disclaimer-banner,
+.ymyl-warning-card,
+.above-the-fold-compliance,
+.ftc-disclosure-card,
+.regulatory-forfeiture-warning {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--status-warning);
+  border-radius: var(--radius-md);
+  padding: 0.875rem 1.125rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}}
+
+.statutory-accuracy-benchmarks {{
+  display: none;
+}}
+
+.commentary-title,
+.variant-title {{
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}}
+
+.commentary-text,
+.framework-objective,
+.statutory-provenance-note {{
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 0.75rem;
+}}
+
+.section-takeaways,
+.commentary-takeaways,
+.calculation-steps,
+.procedure-steps,
+.extractable-steps-list,
+.autonomous-citation-list,
+.related-tools-list,
+.overlay-hub-list {{
+  margin: 0.5rem 0 0 1.25rem;
+  padding: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}}
+
+.related-tools-list,
+.overlay-hub-list {{
+  list-style: none;
+  margin-left: 0;
+  display: grid;
+  gap: 0.625rem;
+}}
+
+.takeaway {{
+  background-color: var(--brand-soft);
+  border-left: 3px solid var(--brand-primary);
+  border-radius: var(--radius-sm);
+  padding: 0.625rem 0.875rem;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+}}
+
+.highlight {{
+  background-color: var(--brand-soft);
+  color: var(--text-primary);
+  border-color: var(--brand-border);
+}}
+
+.framework-steps-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1rem;
+}}
+
+/* Interactive Calculator Components (.interactive-calculator-container & .calc-*) */
+.interactive-calculator-container {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}}
+
+.calc-header {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  border-bottom: 1px solid var(--border-hairline);
+  padding-bottom: 0.875rem;
+}}
+
+.calc-title {{
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}}
+
+.calc-desc {{
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  margin: 0;
+}}
+
+.calc-hub-subtitle,
+.calc-column-title,
+.calc-panel-title {{
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}}
+
+.calc-switcher-panel {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}}
+
+.calc-switcher-header,
+.calc-panel-header,
+.calc-scenarios-header,
+.calc-matrix-header,
+.calc-entrypoints-header {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}}
+
+.calc-switcher-title {{
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+}}
+
+.calc-switcher-hint {{
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}}
+
+.calc-switcher-pills,
+.preset-wrap,
+.scenario-presets-bar,
+.runway-preset-chips {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}}
+
+.calc-switcher-dot {{
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: var(--brand-primary);
+  flex-shrink: 0;
+}}
+
+.calc-switcher-text {{
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: inherit;
+}}
+
+.calc-inputs-column,
+.calc-results-column,
+.calc-inputs-panel,
+.calc-outputs-panel {{
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}}
+
+.calc-inputs-panel {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+}}
+
+.calc-outputs-panel {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+}}
+
+.calculator-form {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}}
+
+.calc-field-group {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-bottom: 0.625rem;
+}}
+
+.calc-label-row {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}}
+
+.calc-label,
+.form-label {{
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}}
+
+.calc-unit {{
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}}
+
+.calc-input-wrap {{
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  overflow: hidden;
+}}
+
+.calc-input-prefix {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  background-color: var(--bg-subtle);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  border-right: 1px solid var(--border-subtle);
+}}
+
+.calc-input-wrap .calc-number-input {{
+  border: none;
+  border-radius: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}}
+
+.calc-input,
+.calc-number-input,
+.calc-select,
+.form-input,
+.form-select {{
+  width: 100%;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.625rem 0.875rem;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}}
+
+.calc-slider-wrap {{
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}}
+
+.calc-slider,
+.form-range,
+.range-slider,
+.slider-control {{
+  width: 100%;
+  min-height: 44px;
+  accent-color: var(--brand-primary);
+  cursor: pointer;
+  background: transparent;
+}}
+
+.calc-value-badge,
+.calc-audit-pill,
+.calc-live-pill,
+.calc-scenarios-badge,
+.calc-matrix-badge {{
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--brand-soft);
+  color: var(--brand-hover);
+  border: 1px solid var(--brand-border);
+  white-space: nowrap;
+}}
+
+.calc-live-pill,
+.calc-audit-pill {{
+  background-color: var(--status-positive-bg);
+  color: var(--status-positive);
+  border-color: var(--status-positive-border);
+}}
+
+.calc-metrics-grid,
+.metric-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 0.875rem;
+}}
+
+.metric-box,
+.result-card,
+.kpi-block {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  min-width: 0;
+}}
+
+.calc-metric-label,
+.metric-label {{
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}}
+
+.calc-metric-sub {{
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}}
+
+.calc-metric-highlight {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-border);
+}}
+
+.calc-geo-answer-box,
+.calc-statutory-box {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-left: 4px solid var(--brand-primary);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+}}
+
+.calc-geo-answer-title,
+.calc-statutory-label {{
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.375rem;
+}}
+
+.calc-geo-answer-text {{
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  margin: 0;
+}}
+
+.calc-statutory-list {{
+  margin: 0.375rem 0 0 1.25rem;
+  padding: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}}
+
+.calc-objection-takeaway {{
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}}
+
+.calc-scenarios-container,
+.calc-matrix-container,
+.calc-entrypoints-container {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}}
+
+.calc-scenarios-grid,
+.calc-entrypoints-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1rem;
+}}
+
+.calc-scenario-card,
+.calc-entrypoint-card {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--text-primary);
+}}
+
+.calc-entrypoint-card:hover {{
+  border-color: var(--brand-primary);
+  background-color: var(--brand-soft);
+}}
+
+.calc-scenario-q,
+.calc-entrypoint-title {{
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}}
+
+.calc-scenario-ans {{
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}}
+
+.calc-scenario-footer {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-hairline);
+}}
+
+.calc-scenario-cite {{
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}}
+
+.calc-entrypoint-action {{
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--brand-primary);
+}}
+
+.calc-scenario-btn,
+.preset-btn,
+.runway-chip,
+.scenario-preset-pill,
+.query-pill,
+.contextual-cluster-link,
+.btn-share {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.875rem;
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}}
+
+.calc-scenario-btn:hover,
+.preset-btn:hover,
+.runway-chip:hover,
+.scenario-preset-pill:hover,
+.query-pill:hover,
+.contextual-cluster-link:hover,
+.btn-share:hover {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-primary);
+  color: var(--brand-hover);
+}}
+
+.breakdown-list {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}}
+
+.breakdown-item {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-hairline);
+}}
+
+.breakdown-item:last-child {{
+  border-bottom: none;
+}}
+
+.breakdown-label {{
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}}
+
+.breakdown-val,
+.breakdown-value {{
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}}
+
+.runway-chart-wrap {{
+  width: 100%;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  overflow-x: auto;
+}}
+
+.share-pro-container {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}}
+
+.calculation-variant {{
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  margin-top: 0.75rem;
+}}
+
+/* Subsidy Meter & Legend */
+.subsidy-meter-wrap {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+}}
+
+.subsidy-meter-header,
+.subsidy-meter-label {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}}
+
+.subsidy-meter-bar {{
+  display: flex;
+  width: 100%;
+  height: 12px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background-color: var(--bg-muted);
+  gap: 2px;
+}}
+
+.subsidy-meter-seg {{
+  height: 100%;
+  transition: width 0.2s ease;
+}}
+
+.subsidy-meter-seg-pay {{
+  background-color: var(--brand-primary);
+}}
+
+.subsidy-meter-seg-sub {{
+  background-color: var(--status-positive);
+}}
+
+.subsidy-meter-legend {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-top: 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}}
+
+.legend-item {{
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}}
+
+.dot-pay,
+.dot-sub,
+.dot-int {{
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}}
+
+.dot-pay {{
+  background-color: var(--brand-primary);
+}}
+
+.dot-sub {{
+  background-color: var(--status-positive);
+}}
+
+.dot-int {{
+  background-color: var(--status-warning);
+}}
+
+/* Quick Unlock, Lead Capture, Post-Calc Upgrade & Partner Quote Forms */
+.calc-result-quick-unlock-bar,
+.inline-lead-box {{
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--brand-border);
+  border-left: 4px solid var(--status-positive);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}}
+
+.calc-inline-cta-copy,
+.quick-unlock-value-summary {{
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+}}
+
+.lead-capture-form,
+.inline-worksheet-capture-form,
+.newsletter-form,
+.partner-registration-form {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+}}
+
+.lead-capture-status-readout,
+.partner-registration-status,
+.partner-quote-status,
+.serp-blueprint-status {{
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--status-positive);
+  min-height: 1.25rem;
+}}
+
+.post-calc-upgrade-header,
+.partner-quote-header {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-bottom: 0.875rem;
+}}
+
+.post-calc-upgrade-badge,
+.partner-quote-badge,
+.partner-badge,
+.affiliate-badge,
+.affiliate-disclosure-badge {{
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--brand-soft);
+  color: var(--brand-hover);
+  border: 1px solid var(--brand-border);
+}}
+
+.affiliate-disclosure-badge {{
+  background-color: var(--bg-subtle);
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+}}
+
+.post-calc-upgrade-title,
+.partner-title,
+.affiliate-title {{
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0.25rem 0;
+}}
+
+.post-calc-upgrade-summary,
+.post-calc-pillar-copy,
+.affiliate-desc,
+.partner-quote-frictionless-note,
+.partner-status-note {{
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}}
+
+.post-calc-pillar-heading {{
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}}
+
+.post-calc-sample-schedule-preview {{
+  background-color: var(--bg-subtle);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.875rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}}
+
+.post-calc-preview-slot {{
+  min-height: 0;
+}}
+
+.post-calc-upgrade-actions,
+.partner-quote-actions {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}}
+
+.post-calc-quick-unlock-btn,
+.post-calc-upgrade-btn,
+.partner-quote-submit-btn,
+.pro-hook-link,
+.pro-hook-direct-checkout,
+.pro-hook-quote-jump,
+.pro-hook-sample-unlock {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.625rem 1rem;
+  background-color: var(--brand-primary);
+  color: var(--cta-fg);
+  border: 1px solid var(--brand-primary);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}}
+
+.post-calc-quick-unlock-btn:hover,
+.post-calc-upgrade-btn:hover,
+.partner-quote-submit-btn:hover,
+.pro-hook-link:hover,
+.pro-hook-direct-checkout:hover,
+.pro-hook-quote-jump:hover,
+.pro-hook-sample-unlock:hover {{
+  background-color: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: var(--cta-fg);
+}}
+
+.pro-hook-quote-jump,
+.pro-hook-sample-unlock {{
+  background-color: var(--bg-surface);
+  color: var(--brand-primary);
+}}
+
+.pro-hook-quote-jump:hover,
+.pro-hook-sample-unlock:hover {{
+  background-color: var(--brand-soft);
+  color: var(--brand-hover);
+}}
+
+.partner-matrix-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1rem;
+}}
+
+.partner-quote-form-body {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}}
+
+.partner-quote-consent-row {{
+  margin: 0.5rem 0;
+}}
+
+.partner-quote-consent-label {{
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.375rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  cursor: pointer;
+}}
+
+/* SERP Workbench, Cliff Visualizer, Comparator & Blueprint */
+.serp-workbench-intro {{
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}}
+
+.serp-intent-banner {{
+  background-color: var(--brand-soft);
+  border: 1px solid var(--brand-border);
+  border-left: 4px solid var(--brand-primary);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.875rem;
+  margin: 0.75rem 0;
+}}
+
+.serp-intent-banner-text {{
+  flex: 1 1 280px;
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  line-height: 1.55;
+}}
+
+.serp-intent-banner-btn,
+.serp-blueprint-btn,
+.serp-comparator-btn {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.875rem;
+  background-color: var(--brand-primary);
+  color: var(--cta-fg);
+  border: 1px solid var(--brand-primary);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}}
+
+.serp-intent-banner-btn:hover,
+.serp-blueprint-btn:hover,
+.serp-comparator-btn:hover {{
+  background-color: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: var(--cta-fg);
+}}
+
+.serp-field-group {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}}
+
+.serp-field-label,
+.serp-metric-label {{
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}}
+
+.serp-metric-val {{
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}}
+
+.serp-input-cell,
+.serp-select-input {{
+  width: 100%;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.75rem;
+  font-size: 16px;
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}}
+
+.serp-svg-chart-wrap {{
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}}
+
+.serp-visual-breakdown-svg {{
+  max-width: 100%;
+  height: auto;
+  display: block;
+}}
+
+.serp-cliff-visualizer,
+.serp-scenario-comparator,
+.serp-decision-blueprint {{
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-hairline);
+}}
+
+/* Tables, Scenarios, Overlays, Affiliates & Topic Clusters */
+.comparison-table,
+.data-table,
+.calc-matrix-table,
+.calculation-table,
+.proprietary-calculation-table,
+.scenario-table,
+.serp-cliff-matrix-table,
+.serp-scenario-comparator-table,
+.serp-statutory-reference-table,
+.statutory-pitfalls-table,
+.overlay-comparison-table,
+.overlay-decision-matrix-table {{
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}}
+
+.td-num {{
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}}
+
+.td-plan-name {{
+  font-weight: 600;
+  color: var(--text-primary);
+}}
+
+.scenario-baseline,
+.scenario-conservative,
+.scenario-moderate-contraction,
+.scenario-moderate-expansion,
+.scenario-aggressive {{
+  font-variant-numeric: tabular-nums;
+}}
+
+.scenario-ast-eval {{
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text-primary);
+}}
+
+.scenario-cliff-delta {{
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}}
+
+.scenario-presets-section,
+.scenario-presets-group {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}}
+
+.topic-cluster-tier {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  margin-bottom: 0.875rem;
+}}
+
+.connected-queries-block {{
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-hairline);
+}}
+
+.connected-query {{
+  margin-bottom: 0.875rem;
+}}
+
+.next-step-prompt {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-left: 3px solid var(--brand-primary);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}}
+
+.overlay-autonomous-assertions,
+.overlay-headings,
+.overlay-scenarios,
+.overlay-comparison,
+.overlay-ai-decision-matrix,
+.overlay-hub-links,
+.overlay-partner-offer,
+.overlay-faqs {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}}
+
+.overlay-comparison-row,
+.overlay-decision-matrix-row {{
+  transition: background-color 0.15s ease;
+}}
+
+.overlay-comparison-row:hover,
+.overlay-decision-matrix-row:hover {{
+  background-color: var(--bg-subtle);
+}}
+
+.affiliate-info {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}}
+
+.affiliate-disclosure {{
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}}
+
+.affiliate-cta {{
+  margin-top: 0.75rem;
+}}
+
 /* Mobile Responsive Breakpoints */
 @media (max-width: 900px) {{
   .footer-grid {{
@@ -1593,6 +2898,8 @@ details.faq-accordion > summary::-webkit-details-marker {{
 
 @media (max-width: 768px) {{
   .nav-links,
+  a.btn.btn-cta.nav-cta-desktop,
+  a.btn-cta.nav-cta-desktop,
   .nav-cta-desktop {{
     display: none;
   }}
@@ -1623,8 +2930,47 @@ details.faq-accordion > summary::-webkit-details-marker {{
     padding: 1.25rem;
   }}
 
-  .footer-grid {{
-    grid-template-columns: 1fr;
+  .footer-grid,
+  .calc-grid,
+  .calculator-grid,
+  .grid-2,
+  .calc-metrics-grid,
+  .metric-grid,
+  .serp-sub-inputs-grid,
+  .serp-metrics-grid,
+  .calc-scenarios-grid,
+  .calc-entrypoints-grid,
+  .partner-matrix-grid,
+  .framework-steps-grid,
+  .post-calc-upgrade-pillars,
+  .features-grid,
+  .scenarios-grid,
+  .tools-grid,
+  .card-grid,
+  .grid-3 {{
+    grid-template-columns: minmax(0, 1fr);
+  }}
+
+  div[style*="grid-template-columns"] {{
+    grid-template-columns: minmax(0, 1fr) !important;
+  }}
+
+  .pill-trust-group,
+  .calc-switcher-pills,
+  .scenario-presets-bar,
+  .runway-preset-chips,
+  .post-calc-upgrade-actions,
+  .partner-quote-actions {{
+    flex-wrap: wrap;
+  }}
+
+  .pill-trust,
+  .badge,
+  .badge-tag,
+  .pill,
+  .status-badge,
+  .authority-badge {{
+    max-width: 100%;
   }}
 
   .calc-inline-cta a,
@@ -2091,6 +3437,8 @@ def sanitize_inline_styles_outside_svg(html_content: str, known_css_vars: Set[st
         is_card = bool(re.search(r'\bclass\s*=\s*["\'][^"\']*\b(?:card|pseo-card|hero-section|tool-hero)\b', tag_lower))
         is_heading = bool(re.match(r"^<h[1-4]\b", tag_lower))
         is_control = bool(re.match(r"^<(?:a|button|input|select|summary)\b", tag_lower))
+        is_input_or_select = bool(re.match(r"^<(?:input|select)\b", tag_lower))
+        is_div = bool(re.match(r"^<div\b", tag_lower))
 
         def _rewrite_style_attr(sm: re.Match[str]) -> str:
             quote = sm.group(1)
@@ -2126,12 +3474,27 @@ def sanitize_inline_styles_outside_svg(html_content: str, known_css_vars: Set[st
                 v_clean = pval.replace("!important", "").strip()
 
                 # Drop inline overrides that violate card geometry, typography hierarchy, or touch targets
-                if is_card and p_low in ("border-radius", "padding", "padding-top", "max-width", "margin", "margin-left", "margin-right", "background", "background-color"):
+                if is_card and p_low in (
+                    "border-radius",
+                    "padding",
+                    "padding-top",
+                    "max-width",
+                    "margin",
+                    "margin-left",
+                    "margin-right",
+                    "background",
+                    "background-color",
+                    "text-align",
+                ):
                     continue
                 if is_heading and p_low in ("font-size", "line-height"):
                     continue
-                if is_control and p_low in ("height", "min-height", "width", "min-width", "padding") and any(
-                    tok in v_clean for tok in ("22px", "24px", "28px", "32px", "1px", "2px")
+                if is_input_or_select and p_low == "font-size" and v_clean.lower() not in ("16px", "1rem"):
+                    continue
+                if is_div and p_low == "grid-template-columns" and re.match(r"^\s*1fr\s+1fr\s*$", v_clean, flags=re.IGNORECASE):
+                    v_clean = "repeat(auto-fit, minmax(min(100%, 220px), 1fr))"
+                if is_control and p_low in ("height", "min-height", "width", "min-width", "padding") and re.search(
+                    r"(?<![0-9.])(?:22|24|28|32|1|2)px\b", v_clean
                 ):
                     continue
                 if is_control and p_low == "display" and v_clean.lower() == "inline":
@@ -2465,6 +3828,38 @@ def _ensure_porcelain_publisher_head_tags(head_html: str, profile: Dict[str, Any
         else:
             cleaned = cleaned.rstrip() + "\n" + inject_str + "\n"
 
+    canon_base = str(profile.get("canonical_base") or "").strip().rstrip("/")
+    prop_id = str(profile.get("property_id") or "").strip().lower()
+    has_og_image = bool(
+        re.search(
+            r'<meta\b[^>]*\bproperty=["\']og:image["\'][^>]*\bcontent=["\'][^"\']+["\']|'
+            r'<meta\b[^>]*\bcontent=["\'][^"\']+["\'][^>]*\bproperty=["\']og:image["\']',
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    )
+    if canon_base and prop_id and not has_og_image:
+        cleaned = re.sub(
+            r'(?:(?<=^)|(?<=\n))[ \t]*<meta\b[^>]*\bproperty=["\']og:image["\'][^>]*>\r?\n?|<meta\b[^>]*\bproperty=["\']og:image["\'][^>]*>',
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        og_img_url = f"{canon_base}/static/img/{prop_id}-og.png"
+        og_tag = f'  <meta property="og:image" content="{html_lib.escape(og_img_url)}">'
+        og_anchors = list(
+            re.finditer(
+                r'<meta\b[^>]*\bproperty=["\']og:(?:url|description|title|type)["\'][^>]*>',
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+        )
+        if og_anchors:
+            anchor = og_anchors[-1]
+            cleaned = cleaned[: anchor.end()] + "\n" + og_tag + cleaned[anchor.end() :]
+        else:
+            cleaned = cleaned.rstrip() + "\n" + og_tag + "\n"
+
     return cleaned
 
 
@@ -2598,6 +3993,268 @@ def _strip_legacy_shell_chrome(raw_body: str) -> Tuple[str, List[str]]:
     return inner_main, trailing_scripts
 
 
+_LEGACY_CLUTTER_CLASSES: Tuple[str, ...] = (
+    "compliance-strip",
+    "ftc-disclosure-banner",
+    "ymyl-disclaimer-banner",
+    "ftc-disclosure-card",
+    "ymyl-warning-card",
+    "above-the-fold-compliance",
+    "statutory-disclaimer-box",
+    "ymyl-forfeiture-banner",
+    "affiliate-disclosure-note",
+)
+
+_NON_LEAF_CLUTTER_CLASSES: Tuple[str, ...] = (
+    "ymyl-disclaimer-banner",
+    "ftc-disclosure-card",
+    "ymyl-warning-card",
+    "above-the-fold-compliance",
+)
+
+
+def _strip_legacy_disclaimer_clutter(
+    html_fragment: str,
+    classes: Sequence[str] = _LEGACY_CLUTTER_CLASSES,
+) -> str:
+    """Removes legacy YMYL/FTC disclaimer wrapper elements matching any class in classes."""
+    work = html_fragment
+    for legacy_cls in classes:
+        while True:
+            dm = re.search(
+                rf'<(div|aside|section|p)\b[^>]*class=["\'][^"\']*\b{re.escape(legacy_cls)}\b[^"\']*["\'][^>]*>',
+                work,
+                flags=re.IGNORECASE,
+            )
+            if not dm:
+                break
+            _, work = _extract_balanced_element(work, dm, dm.group(1))
+    return work
+
+
+def _clean_visible_raw_python_formulas(html_content: str) -> str:
+    """Rewrites leaked raw Python round((...), N) calls in visible HTML outside <script>/<style>/<template>."""
+    if "round((" not in html_content:
+        return html_content
+    stashed: List[str] = []
+
+    def _stash(m: re.Match[str]) -> str:
+        idx = len(stashed)
+        stashed.append(m.group(0))
+        return f"__PSEO_FORMULA_STASH_{idx}__"
+
+    work = re.sub(r"<(script|style|template)\b[^>]*>[\s\S]*?</\1>", _stash, html_content, flags=re.IGNORECASE)
+    if "round((" in work:
+        out: List[str] = []
+        pos = 0
+        while True:
+            idx = work.find("round((", pos)
+            if idx == -1:
+                out.append(work[pos:])
+                break
+            out.append(work[pos:idx])
+            depth = 0
+            j = idx + len("round")
+            n = len(work)
+            while j < n:
+                ch = work[j]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        j += 1
+                        break
+                j += 1
+            if depth == 0:
+                inner = work[idx + len("round(") : j - 1]
+                inner = re.sub(r",\s*\d+\s*$", "", inner).strip()
+                out.append(inner)
+                pos = j
+            else:
+                out.append("round(")
+                pos = idx + len("round(")
+        work = "".join(out)
+
+    for idx, block in enumerate(stashed):
+        work = work.replace(f"__PSEO_FORMULA_STASH_{idx}__", block)
+    return work
+
+
+def _scrub_operator_pwa_gsc_token(html_content: str, profile: Dict[str, Any]) -> str:
+    """Replaces placeholder GSC verification tokens inside /signal/ operator PWA pages."""
+    gsc_default = str(profile.get("default_gsc_token") or "").strip()
+    if not gsc_default:
+        return html_content
+    cleaned = html_content
+    for fake_gsc in (
+        "google-site-verification-profithelm-2026",
+        "google-site-verification-verified-2026",
+        "google-site-verification-prexvo-2026",
+        "google-site-verification-gainhelm-2026",
+        "google-site-verification-lienbond-2026",
+    ):
+        if fake_gsc in cleaned:
+            cleaned = cleaned.replace(fake_gsc, gsc_default)
+    return cleaned
+
+
+def _ensure_prexvo_ymyl_forfeiture_notice(
+    html_text: str,
+    profile: Dict[str, Any],
+    blueprint: str,
+) -> str:
+    """
+    Ensures every non-registry Prexvo HTML page mentioning refinancing includes the mandatory
+    YMYL federal-protection forfeiture notice inside an existing quick-answer, intro paragraph,
+    or footer container without emitting legacy clutter banners.
+    """
+    if str(profile.get("property_id") or "").strip().lower() != "prexvo" or blueprint == "operator_pwa":
+        return html_text
+    low = html_text.lower()
+    is_route_or_index_registry = (
+        "verified_routes_count" in low
+        or "autonomous facebook group discovery & topic routing matrix" in low
+        or "github seed discovery & authority architecture" in low
+    )
+    if ("refinance" not in low and "refinancing" not in low) or is_route_or_index_registry:
+        return html_text
+    if any(
+        phrase in low
+        for phrase in (
+            "waives federal protections",
+            "eliminates federal protections",
+            "waive federal protections",
+            "permanently forfeits",
+            "forfeits access to federal",
+        )
+    ):
+        return html_text
+
+    sentence = "Refinancing federal student loans permanently waives federal protections, including IDR and PSLF."
+    qa_match = re.search(
+        r'(<aside\b[^>]*class=["\'][^"\']*\bquick-answer\b[^"\']*["\'][^>]*>)([\s\S]*?)(</aside>)',
+        html_text,
+        flags=re.IGNORECASE,
+    )
+    if qa_match:
+        qa_inner = qa_match.group(2)
+        last_p_close = qa_inner.lower().rfind("</p>")
+        if last_p_close != -1:
+            new_inner = qa_inner[:last_p_close] + f" {sentence}" + qa_inner[last_p_close:]
+        else:
+            new_inner = qa_inner.rstrip() + f"\n      <p>{sentence}</p>\n    "
+        return (
+            html_text[: qa_match.start()]
+            + qa_match.group(1)
+            + new_inner
+            + qa_match.group(3)
+            + html_text[qa_match.end() :]
+        )
+
+    hero_p_match = re.search(
+        r'(<p\b[^>]*class=["\'][^"\']*\bhero-desc\b[^"\']*["\'][^>]*>)([\s\S]*?)(</p>)',
+        html_text,
+        flags=re.IGNORECASE,
+    )
+    if hero_p_match:
+        return (
+            html_text[: hero_p_match.start()]
+            + hero_p_match.group(1)
+            + hero_p_match.group(2).rstrip()
+            + f" {sentence}"
+            + hero_p_match.group(3)
+            + html_text[hero_p_match.end() :]
+        )
+
+    fb_match = re.search(
+        r'(<div\b[^>]*class=["\'][^"\']*\bfooter-bottom\b[^"\']*["\'][^>]*>)([\s\S]*?)(</div>)',
+        html_text,
+        flags=re.IGNORECASE,
+    )
+    if fb_match:
+        return (
+            html_text[: fb_match.start()]
+            + fb_match.group(1)
+            + fb_match.group(2).rstrip()
+            + f"\n        <span>{sentence}</span>\n      "
+            + fb_match.group(3)
+            + html_text[fb_match.end() :]
+        )
+
+    return html_text
+
+
+def _read_local_js_bytes(
+    raw_src: str,
+    profile: Dict[str, Any],
+    dist_dir: Optional[Path] = None,
+) -> Optional[bytes]:
+    """Reads local /static/js/ or /js/ bytes from dist_dir or its sibling package directory when present."""
+    if dist_dir is None:
+        return None
+    clean_src = raw_src.split("?", 1)[0].split("#", 1)[0]
+    rel_js = clean_src.lstrip("/")
+    base_dist = Path(dist_dir)
+    for cand in (
+        base_dist / rel_js,
+        base_dist.parent / str(profile.get("package_name") or "") / rel_js,
+    ):
+        if cand.is_file():
+            return cand.read_bytes()
+    return None
+
+
+def _resolve_local_js_version_hash(
+    raw_src: str,
+    profile: Dict[str, Any],
+    dist_dir: Optional[Path] = None,
+) -> str:
+    """Computes a deterministic 10-char SHA-256 cache-bust token for local /static/js/ or /js/ assets."""
+    clean_src = raw_src.split("?", 1)[0].split("#", 1)[0]
+    js_bytes = _read_local_js_bytes(clean_src, profile, dist_dir=dist_dir)
+    if js_bytes is not None:
+        return hashlib.sha256(js_bytes).hexdigest()[:10]
+    seed = f"{PORCELAIN_SHELL_VERSION}:{profile.get('property_id', 'profithelm')}:{clean_src}".encode("utf-8")
+    return hashlib.sha256(seed).hexdigest()[:10]
+
+
+def _rewrite_local_js_version_tags(
+    html_content: str,
+    profile: Dict[str, Any],
+    dist_dir: Optional[Path] = None,
+) -> str:
+    """Sets or refreshes ?v=<hash10> on local <script src='/static/js/...'> and <script src='/js/...'> tags."""
+    def _rew_script_tag(m: re.Match[str]) -> str:
+        prefix = m.group(1)
+        quote = m.group(2)
+        src_val = m.group(3)
+        suffix = m.group(4)
+        clean_src = src_val.split("?", 1)[0]
+        has_v = bool(re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_val))
+        disk_bytes = _read_local_js_bytes(clean_src, profile, dist_dir=dist_dir)
+        if disk_bytes is not None:
+            v_hash = hashlib.sha256(disk_bytes).hexdigest()[:10]
+            if has_v:
+                updated_src = re.sub(r"([?&])v=[a-zA-Z0-9._-]+", rf"\g<1>v={v_hash}", src_val)
+            else:
+                sep = "&" if "?" in src_val else "?"
+                updated_src = f"{src_val}{sep}v={v_hash}"
+            return f"<script{prefix}{quote}{updated_src}{quote}{suffix}>"
+        if has_v:
+            return m.group(0)
+        v_hash = _resolve_local_js_version_hash(clean_src, profile, dist_dir=None)
+        sep = "&" if "?" in src_val else "?"
+        return f"<script{prefix}{quote}{src_val}{sep}v={v_hash}{quote}{suffix}>"
+
+    return re.sub(
+        r'<script\b([^>]*\bsrc\s*=\s*)(["\'])(/(?:static/)?js/[^"\']+)\2([^>]*)>',
+        _rew_script_tag,
+        html_content,
+        flags=re.IGNORECASE,
+    )
+
+
 def _enforce_calculator_leaf_slot_order(
     inner_html: str,
     rel_path: str,
@@ -2620,24 +4277,7 @@ def _enforce_calculator_leaf_slot_order(
     )
 
     # Strip all duplicate legacy YMYL / FTC disclaimer blocks anywhere in the leaf body
-    for legacy_cls in (
-        "compliance-strip",
-        "ftc-disclosure-banner",
-        "ymyl-disclaimer-banner",
-        "ftc-disclosure-card",
-        "statutory-disclaimer-box",
-        "ymyl-forfeiture-banner",
-        "affiliate-disclosure-note",
-    ):
-        while True:
-            dm = re.search(
-                rf'<(div|aside|section|p)\b[^>]*class=["\'][^"\']*\b{legacy_cls}\b[^"\']*["\'][^>]*>',
-                work,
-                flags=re.IGNORECASE,
-            )
-            if not dm:
-                break
-            _, work = _extract_balanced_element(work, dm, dm.group(1))
+    work = _strip_legacy_disclaimer_clutter(work, _LEGACY_CLUTTER_CLASSES)
 
     # 1. Extract or synthesize <nav class="breadcrumbs">
     bm = re.search(r'<nav\b[^>]*class=["\'][^"\']*\bbreadcrumbs\b[^"\']*["\'][^>]*>', work, flags=re.IGNORECASE)
@@ -2733,24 +4373,7 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
         or any(tok in rel_low for tok in ("pslf-", "save-plan", "save-to-rap", "buyback"))
     )
 
-    for legacy_cls in (
-        "compliance-strip",
-        "ftc-disclosure-banner",
-        "ymyl-disclaimer-banner",
-        "ftc-disclosure-card",
-        "statutory-disclaimer-box",
-        "ymyl-forfeiture-banner",
-        "affiliate-disclosure-note",
-    ):
-        while True:
-            dm = re.search(
-                rf'<(div|aside|section|p)\b[^>]*class=["\'][^"\']*\b{legacy_cls}\b[^"\']*["\'][^>]*>',
-                work,
-                flags=re.IGNORECASE,
-            )
-            if not dm:
-                break
-            _, work = _extract_balanced_element(work, dm, dm.group(1))
+    work = _strip_legacy_disclaimer_clutter(work, _LEGACY_CLUTTER_CLASSES)
 
     h1_m = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", work, flags=re.IGNORECASE)
     h1_plain = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else (
@@ -2867,6 +4490,7 @@ def normalize_html_to_porcelain_shell(
     active_tools: Optional[Sequence[Tuple[str, str]]] = None,
     known_css_vars: Optional[Set[str]] = None,
     existing_hubs: Optional[Set[str]] = None,
+    dist_dir: Optional[Path] = None,
 ) -> Tuple[str, str]:
     """
     Transforms any public HTML file into its locked Porcelain Light blueprint while preserving
@@ -2876,7 +4500,7 @@ def normalize_html_to_porcelain_shell(
     """
     blueprint = classify_porcelain_blueprint(rel_path, html_content)
     if blueprint == "operator_pwa":
-        return html_content, blueprint
+        return _scrub_operator_pwa_gsc_token(html_content, profile), blueprint
 
     porcelain_css_for_hash = generate_porcelain_stylesheet_from_profile(profile)
     if known_css_vars is None:
@@ -2894,7 +4518,7 @@ def normalize_html_to_porcelain_shell(
     body_attrs = body_m.group(1) or ""
     raw_body = body_m.group(2)
 
-    # 1. Clean <head>: remove inline <style> blocks and duplicate stylesheet links, enforce publisher tags & JSON-LD
+    # 1. Clean <head>: remove inline <style> blocks, duplicate stylesheet links, and data:, icons; enforce publisher tags & JSON-LD
     clean_head = re.sub(r"\s*<style\b[^>]*>[\s\S]*?</style>", "", raw_head, flags=re.IGNORECASE)
     clean_head = re.sub(
         r'\s*<link\b[^>]*rel=["\']stylesheet["\'][^>]*href=["\'][^"\']*style\.css[^"\']*["\'][^>]*/?>',
@@ -2908,10 +4532,26 @@ def normalize_html_to_porcelain_shell(
         clean_head,
         flags=re.IGNORECASE,
     )
-    clean_head = _consolidate_jsonld_head(clean_head, profile)
+    clean_head = re.sub(
+        r'\s*<link\b[^>]*rel=["\'][^"\']*icon[^"\']*["\'][^>]*href=["\']data:,["\'][^>]*/?>',
+        "",
+        clean_head,
+        flags=re.IGNORECASE,
+    )
+    clean_head = re.sub(
+        r'\s*<link\b[^>]*href=["\']data:,["\'][^>]*rel=["\'][^"\']*icon[^"\']*["\'][^>]*/?>',
+        "",
+        clean_head,
+        flags=re.IGNORECASE,
+    )
     clean_head = _ensure_porcelain_publisher_head_tags(clean_head, profile)
     if "content-language" not in clean_head.lower():
         clean_head = '  <meta http-equiv="content-language" content="en-US">\n' + clean_head.lstrip("\n")
+    if not re.search(r'<link\b[^>]*href=["\']/favicon\.svg["\']', clean_head, flags=re.IGNORECASE):
+        clean_head = clean_head.rstrip() + '\n  <link rel="icon" type="image/svg+xml" href="/favicon.svg">'
+    if not re.search(r'<link\b[^>]*href=["\']/favicon\.ico["\']', clean_head, flags=re.IGNORECASE):
+        clean_head = clean_head.rstrip() + '\n  <link rel="alternate icon" href="/favicon.ico">'
+    clean_head = _consolidate_jsonld_head(clean_head, profile)
     css_link = (
         f'  <link rel="stylesheet" id="pseo-visual-primitives" '
         f'data-version="{VISUAL_PRIMITIVES_LINK_VERSION}" href="{versioned_css_href}">'
@@ -2946,16 +4586,9 @@ def normalize_html_to_porcelain_shell(
         )
     elif blueprint == "error_404":
         # Guarantee zero YMYL/FTC banners on 404.html
-        for cls_name in ("compliance-strip", "ftc-disclosure-banner", "ymyl-disclaimer-banner", "ftc-disclosure-card"):
-            while True:
-                dm = re.search(
-                    rf'<(div|aside|section)\b[^>]*class=["\'][^"\']*\b{cls_name}\b[^"\']*["\'][^>]*>',
-                    inner_main,
-                    flags=re.IGNORECASE,
-                )
-                if not dm:
-                    break
-                _, inner_main = _extract_balanced_element(inner_main, dm, dm.group(1))
+        inner_main = _strip_legacy_disclaimer_clutter(inner_main, _LEGACY_CLUTTER_CLASSES)
+    else:
+        inner_main = _strip_legacy_disclaimer_clutter(inner_main, _NON_LEAF_CLUTTER_CLASSES)
 
     inner_main = _wrap_unwrapped_tables(inner_main)
 
@@ -3125,7 +4758,13 @@ def normalize_html_to_porcelain_shell(
                 + assembled[gm_e:]
             )
 
+    from pseofactory.visual_primitives import _collapse_duplicate_faq_sections
+
+    assembled = _ensure_prexvo_ymyl_forfeiture_notice(assembled, profile, blueprint)
+    assembled, _ = _collapse_duplicate_faq_sections(assembled)
     sanitized = sanitize_inline_styles_outside_svg(assembled, known_css_vars)
+    sanitized = _clean_visible_raw_python_formulas(sanitized)
+    sanitized = _rewrite_local_js_version_tags(sanitized, profile, dist_dir=dist_dir)
     sanitized = sanitized.replace("\u2014", "-").replace("\u2013", "-")
     return sanitized, blueprint
 
@@ -3644,8 +5283,166 @@ def _discover_estate_tools_and_gsc_token(dist_dir: Path, profile: Dict[str, Any]
     return discovered or list(profile.get("default_tools") or []), gsc_token
 
 
+_GLYPH_5X7: Dict[str, Tuple[str, ...]] = {
+    "P": (
+        "11110",
+        "10001",
+        "10001",
+        "11110",
+        "10000",
+        "10000",
+        "10000",
+    ),
+    "G": (
+        "01110",
+        "10001",
+        "10000",
+        "10111",
+        "10001",
+        "10001",
+        "01110",
+    ),
+    "L": (
+        "10000",
+        "10000",
+        "10000",
+        "10000",
+        "10000",
+        "10000",
+        "11111",
+    ),
+}
+
+
+def _png_chunk(tag: bytes, payload: bytes) -> bytes:
+    """Packs a single PNG chunk with length and CRC-32 checksum."""
+    return (
+        struct.pack(">I", len(payload))
+        + tag
+        + payload
+        + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    )
+
+
+def _encode_png(width: int, height: int, rows: Sequence[bytes], color_type: int) -> bytes:
+    """Encodes raw pixel rows into a valid PNG byte stream using pure stdlib struct + zlib."""
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    raw_scanlines = b"".join(b"\x00" + r for r in rows)
+    idat = zlib.compress(raw_scanlines, level=9)
+    return b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", idat) + _png_chunk(b"IEND", b"")
+
+
+def _build_favicon_ico_bytes(profile: Dict[str, Any]) -> bytes:
+    """Deterministically builds a valid 32x32 RGBA PNG-wrapped ICO favicon for the tenant brand."""
+    size = 32
+    radius = 6.0
+    r, g, b = _hex_to_rgb(str(profile.get("brand_primary") or "#1d4ed8"))
+    brand_px = bytes((r, g, b, 255))
+    white_px = bytes((255, 255, 255, 255))
+    clear_px = bytes((0, 0, 0, 0))
+    ch = str(profile.get("badge_letter") or "P").strip().upper()[:1]
+    glyph = _GLYPH_5X7.get(ch, _GLYPH_5X7["P"])
+
+    rows: List[bytes] = []
+    for y in range(size):
+        row = bytearray()
+        for x in range(size):
+            inside = True
+            if (x < 6 or x >= size - 6) and (y < 6 or y >= size - 6):
+                cx = 5.5 if x < 6 else (size - 6.5)
+                cy = 5.5 if y < 6 else (size - 6.5)
+                dx = x - cx
+                dy = y - cy
+                if dx * dx + dy * dy > radius * radius:
+                    inside = False
+            if not inside:
+                row.extend(clear_px)
+                continue
+            gx = (x - 9) // 3
+            gy = (y - 6) // 3
+            if 9 <= x < 24 and 6 <= y < 27 and 0 <= gx < 5 and 0 <= gy < 7 and glyph[gy][gx] == "1":
+                row.extend(white_px)
+            else:
+                row.extend(brand_px)
+        rows.append(bytes(row))
+
+    png_bytes = _encode_png(size, size, rows, color_type=6)
+    icon_dir = struct.pack("<HHH", 0, 1, 1)
+    icon_entry = struct.pack("<BBBBHHII", size, size, 0, 0, 1, 32, len(png_bytes), 22)
+    return icon_dir + icon_entry + png_bytes
+
+
+def _build_og_image_png_bytes(profile: Dict[str, Any]) -> bytes:
+    """Deterministically builds a 1200x630 Porcelain Light branded OpenGraph PNG image."""
+    width = 1200
+    height = 630
+    c_canvas = bytes(_hex_to_rgb("#fbfcfd"))
+    c_white = bytes((255, 255, 255))
+    c_border = bytes(_hex_to_rgb("#cbd5e1"))
+    c_brand = bytes(_hex_to_rgb(str(profile.get("brand_primary") or "#1d4ed8")))
+    c_soft = bytes(_hex_to_rgb(str(profile.get("brand_soft") or "#eff6ff")))
+    c_ink = bytes(_hex_to_rgb("#0f172a"))
+    c_slate = bytes(_hex_to_rgb("#475569"))
+
+    ch = str(profile.get("badge_letter") or "P").strip().upper()[:1]
+    glyph = _GLYPH_5X7.get(ch, _GLYPH_5X7["P"])
+
+    top_bar_row = c_brand * width
+    canvas_row = c_canvas * width
+    card_hborder_row = (c_canvas * 56) + (c_border * 1088) + (c_canvas * 56)
+    card_body_base = (c_canvas * 56) + (c_border * 2) + (c_white * 1084) + (c_border * 2) + (c_canvas * 56)
+
+    def _fill(buf: bytearray, x0: int, x1: int, color_3: bytes) -> None:
+        buf[x0 * 3 : x1 * 3] = color_3 * (x1 - x0)
+
+    rows: List[bytes] = []
+    for y in range(height):
+        if y < 12:
+            rows.append(top_bar_row)
+            continue
+        if y < 56 or y >= 574:
+            rows.append(canvas_row)
+            continue
+        if y in (56, 57, 572, 573):
+            rows.append(card_hborder_row)
+            continue
+        buf = bytearray(card_body_base)
+        if 112 <= y < 208:
+            _fill(buf, 112, 208, c_brand)
+            if 125 <= y < 195:
+                gy = (y - 125) // 10
+                if 0 <= gy < 7:
+                    for gx in range(5):
+                        if glyph[gy][gx] == "1":
+                            _fill(buf, 135 + gx * 10, 145 + gx * 10, c_white)
+            if 128 <= y < 154:
+                _fill(buf, 240, 760, c_ink)
+            elif 172 <= y < 188:
+                _fill(buf, 240, 620, c_slate)
+        elif 260 <= y < 492:
+            for col_x in (112, 444, 776):
+                col_end = col_x + 300
+                if y < 268:
+                    _fill(buf, col_x, col_end, c_brand)
+                elif y >= 490:
+                    _fill(buf, col_x, col_end, c_border)
+                else:
+                    _fill(buf, col_x, col_end, c_soft)
+                    _fill(buf, col_x, col_x + 2, c_border)
+                    _fill(buf, col_end - 2, col_end, c_border)
+                    if 296 <= y < 312:
+                        _fill(buf, col_x + 24, col_x + 170, c_slate)
+                    elif 334 <= y < 370:
+                        _fill(buf, col_x + 24, col_x + 210, c_ink)
+                    elif 402 <= y < 416:
+                        _fill(buf, col_x + 24, col_x + 240, c_border)
+        rows.append(bytes(buf))
+
+    return _encode_png(width, height, rows, color_type=2)
+
+
 def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]) -> List[str]:
-    """Ensures all 6 governance routes are in sitemaps + _headers and scrubs cross-legal 301s."""
+    """Ensures all 6 governance routes, fresh crawler/feed cache policies, favicon.ico, and OG PNG exist."""
     base = profile["canonical_base"].rstrip("/")
     gov_urls = [f"{base}/{g}/" for g in GOVERNANCE_ROUTES]
     mutated: List[str] = []
@@ -3686,28 +5483,16 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 sm_path.write_text(updated_xml, encoding="utf-8")
                 mutated.append(sm_name)
 
-    # Sync dist/_headers so all 6 governance routes carry RFC 5988 canonical Link headers
+    # Sync dist/_headers so all 6 governance routes + crawler/feed endpoints + /* security headers are canonical
     # while deterministically keeping active Cloudflare _headers rules <= 95.
     headers_path = dist_dir / "_headers"
     if headers_path.is_file():
         orig_h_txt = headers_path.read_text(encoding="utf-8")
-        h_txt = orig_h_txt
-        add_blocks: List[str] = []
-        for g in GOVERNANCE_ROUTES:
-            route = f"/{g}/"
-            if f"\n{route}\n" not in f"\n{h_txt}\n" and f"# [edge-middleware-canonical] {route}" not in h_txt:
-                add_blocks.append(
-                    f"{route}\n"
-                    f'  Link: <{base}{route}>; rel="canonical"\n'
-                    f"  Cache-Control: public, max-age=0, s-maxage=86400, stale-while-revalidate=604800\n"
-                )
-        if add_blocks:
-            h_txt = h_txt.rstrip() + "\n\n" + "\n".join(add_blocks) + "\n"
         parsed_blocks: List[Tuple[str, List[str], bool]] = []
         cur_p: Optional[str] = None
         cur_h: List[str] = []
         cur_c = False
-        for raw_line in h_txt.splitlines():
+        for raw_line in orig_h_txt.splitlines():
             s_line = raw_line.strip()
             if not s_line:
                 if cur_p is not None and cur_c:
@@ -3741,24 +5526,102 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         if cur_p is not None:
             parsed_blocks.append((cur_p, cur_h, cur_c))
 
-        deduped_blocks: List[Tuple[str, List[str], bool]] = []
-        seen_hp: Set[str] = set()
+        deduped_blocks: List[List[Any]] = []
+        block_index: Dict[str, int] = {}
         for bp_path, bp_hdrs, bp_comm in parsed_blocks:
-            if bp_path in seen_hp:
+            if bp_path in block_index:
                 continue
-            seen_hp.add(bp_path)
-            deduped_blocks.append((bp_path, bp_hdrs, bp_comm))
+            block_index[bp_path] = len(deduped_blocks)
+            deduped_blocks.append([bp_path, list(bp_hdrs), bp_comm])
+
+        hdrs_changed = False
+
+        def _ensure_block(route: str, required_hdrs: List[str], replace_cc: bool = False, force_active: bool = False) -> None:
+            nonlocal hdrs_changed
+            if route not in block_index:
+                block_index[route] = len(deduped_blocks)
+                deduped_blocks.append([route, list(required_hdrs), False])
+                hdrs_changed = True
+                return
+            blk = deduped_blocks[block_index[route]]
+            if force_active and blk[2]:
+                blk[2] = False
+                hdrs_changed = True
+            hdr_list: List[str] = blk[1]
+            for req in required_hdrs:
+                req_key = req.split(":", 1)[0].strip().lower()
+                existing_idx = next(
+                    (i for i, h in enumerate(hdr_list) if ":" in h and h.split(":", 1)[0].strip().lower() == req_key),
+                    None,
+                )
+                if existing_idx is None:
+                    hdr_list.append(req)
+                    hdrs_changed = True
+                elif replace_cc and req_key == "cache-control" and hdr_list[existing_idx] != req:
+                    hdr_list[existing_idx] = req
+                    hdrs_changed = True
+
+        fresh_cc = "Cache-Control: public, max-age=0, s-maxage=60, must-revalidate"
+        for ep, ct_val in (
+            ("/robots.txt", "text/plain; charset=utf-8"),
+            ("/feed.xml", "application/xml; charset=utf-8"),
+            ("/llms.txt", "text/plain; charset=utf-8"),
+            ("/llms-full.txt", "text/plain; charset=utf-8"),
+            ("/sitemap.xml", "application/xml; charset=utf-8"),
+            ("/sitemap-hubs.xml", "application/xml; charset=utf-8"),
+            ("/sitemap-leaves.xml", "application/xml; charset=utf-8"),
+        ):
+            _ensure_block(
+                ep,
+                [f'Link: <{base}{ep}>; rel="canonical"', f"Content-Type: {ct_val}", fresh_cc],
+                replace_cc=True,
+                force_active=True,
+            )
+        _ensure_block("/ai-benchmarks/*", [fresh_cc], replace_cc=True, force_active=True)
+
+        for g in GOVERNANCE_ROUTES:
+            route = f"/{g}/"
+            if route not in block_index:
+                _ensure_block(
+                    route,
+                    [
+                        f'Link: <{base}{route}>; rel="canonical"',
+                        "Cache-Control: public, max-age=0, s-maxage=86400, stale-while-revalidate=604800",
+                    ],
+                )
+
+        if "/*" in block_index:
+            _ensure_block(
+                "/*",
+                [
+                    "X-Content-Type-Options: nosniff",
+                    "Strict-Transport-Security: max-age=31536000; includeSubDomains",
+                ],
+            )
 
         active_idx = [idx for idx, b in enumerate(deduped_blocks) if not b[2]]
-        new_h_txt: Optional[str] = None
-        if len(active_idx) > 95:
+        if hdrs_changed or len(active_idx) > 95:
             def _hdr_prio(idx_val: int) -> Tuple[int, int]:
                 rp = deduped_blocks[idx_val][0]
                 if rp == "/*":
                     return (0, idx_val)
-                if "*" in rp or rp.startswith("/css/") or rp.startswith("/js/") or rp.startswith("/static/"):
+                if "*" in rp and rp != "/ai-benchmarks/*":
                     return (1, idx_val)
-                if rp in ("/feed.xml", "/llms.txt", "/llms-full.txt", "/sitemap.xml", "/sitemap-hubs.xml", "/sitemap-leaves.xml", "/catalog.json", "/ai-plugin.json", "/robots.txt"):
+                if rp.startswith(("/css/", "/js/", "/static/")):
+                    return (1, idx_val)
+                if rp in (
+                    "/robots.txt",
+                    "/ai-benchmarks/*",
+                    "/feed.xml",
+                    "/llms.txt",
+                    "/llms-full.txt",
+                    "/sitemap.xml",
+                    "/sitemap-hubs.xml",
+                    "/sitemap-leaves.xml",
+                    "/catalog.json",
+                    "/media-kit.json",
+                    "/ai-plugin.json",
+                ):
                     return (2, idx_val)
                 if rp in ("/", "/tools/", "/guides/", "/about/", "/privacy/", "/terms/", "/disclaimers/", "/methodology/", "/contact/"):
                     return (3, idx_val)
@@ -3767,8 +5630,8 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                     return (4, idx_val)
                 return (5, idx_val)
 
-            keep_active = set(sorted(active_idx, key=_hdr_prio)[:95])
-            out_hdr_chunks: List[str] = []
+            keep_active = set(sorted(active_idx, key=_hdr_prio)[:95]) if len(active_idx) > 95 else set(active_idx)
+            out_hdr_chunks: List[str] = ["# Cloudflare Pages Edge Headers generated by pseofactory.edge"]
             for idx_val, (bp_path, bp_hdrs, bp_comm) in enumerate(deduped_blocks):
                 if not bp_comm and idx_val in keep_active:
                     out_hdr_chunks.append("\n".join([bp_path] + [f"  {hl}" for hl in bp_hdrs]))
@@ -3779,12 +5642,10 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                             + [f"#   {hl}" for hl in bp_hdrs]
                         )
                     )
-            new_h_txt = "\n\n".join(out_hdr_chunks) + "\n"
-        elif add_blocks:
-            new_h_txt = h_txt
-        if new_h_txt is not None and new_h_txt != orig_h_txt:
-            headers_path.write_text(new_h_txt, encoding="utf-8")
-            mutated.append("_headers")
+            new_h_txt = out_hdr_chunks[0] + "\n" + "\n\n".join(out_hdr_chunks[1:]) + "\n"
+            if new_h_txt != orig_h_txt:
+                headers_path.write_text(new_h_txt, encoding="utf-8")
+                mutated.append("_headers")
 
     # Scrub cross-legal 301s from dist/_redirects while preserving all legitimate non-legal 301s
     reds_path = dist_dir / "_redirects"
@@ -3838,7 +5699,7 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 robots_path.write_text(new_rob, encoding="utf-8")
                 mutated.append("robots.txt")
 
-    # Ensure favicon.svg and site.webmanifest exist so browsers never hit 404
+    # Ensure favicon.svg, favicon.ico, branded og:image PNG, and site.webmanifest exist so browsers never hit 404
     fav_path = dist_dir / "favicon.svg"
     if not fav_path.is_file():
         badge_ch = html_lib.escape(str(profile.get("badge_letter") or "P")[:2])
@@ -3851,6 +5712,18 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         )
         fav_path.write_text(fav_svg, encoding="utf-8")
         mutated.append("favicon.svg")
+
+    ico_path = dist_dir / "favicon.ico"
+    if not ico_path.is_file() or ico_path.stat().st_size == 0:
+        ico_path.write_bytes(_build_favicon_ico_bytes(profile))
+        mutated.append("favicon.ico")
+
+    og_rel = f"static/img/{profile['property_id']}-og.png"
+    og_path = dist_dir / og_rel
+    if not og_path.is_file() or og_path.stat().st_size == 0:
+        og_path.parent.mkdir(parents=True, exist_ok=True)
+        og_path.write_bytes(_build_og_image_png_bytes(profile))
+        mutated.append(og_rel)
 
     manifest_path = dist_dir / "site.webmanifest"
     if not manifest_path.is_file():
@@ -3865,28 +5738,6 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         }
         manifest_path.write_text(json.dumps(web_manifest, indent=2) + "\n", encoding="utf-8")
         mutated.append("site.webmanifest")
-
-    # Ensure /* security headers (HSTS & X-Content-Type-Options) exist without adding extra _headers blocks
-    if headers_path.is_file():
-        cur_hdr_txt = headers_path.read_text(encoding="utf-8")
-        if "\n/*\n" in f"\n{cur_hdr_txt}\n":
-            add_sec: List[str] = []
-            if "x-content-type-options:" not in cur_hdr_txt.lower():
-                add_sec.append("  X-Content-Type-Options: nosniff")
-            if "strict-transport-security:" not in cur_hdr_txt.lower():
-                add_sec.append("  Strict-Transport-Security: max-age=31536000; includeSubDomains")
-            if add_sec:
-                upd_hdr_txt = re.sub(
-                    r"(^/\*\r?\n)",
-                    lambda m: m.group(1) + "\n".join(add_sec) + "\n",
-                    cur_hdr_txt,
-                    count=1,
-                    flags=re.MULTILINE,
-                )
-                if upd_hdr_txt != cur_hdr_txt:
-                    headers_path.write_text(upd_hdr_txt, encoding="utf-8")
-                    if "_headers" not in mutated:
-                        mutated.append("_headers")
 
     return mutated
 
@@ -3960,6 +5811,7 @@ def compile_tenant_porcelain_estate_with_profile(
                     or "How to Calculate Legal Disclaimers" in existing_gov
                     or "How to Calculate Methodology" in existing_gov
                     or "Q499388" in existing_gov
+                    or "round((" in existing_gov
                 )
                 existing_plain = re.sub(
                     r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", existing_gov, flags=re.IGNORECASE
@@ -3974,6 +5826,7 @@ def compile_tenant_porcelain_estate_with_profile(
                 active_tools=active_tools,
                 known_css_vars=known_vars,
                 existing_hubs=existing_hubs,
+                dist_dir=target_dist,
             )
             gov_file.parent.mkdir(parents=True, exist_ok=True)
             if not gov_file.is_file() or gov_file.read_text(encoding="utf-8", errors="ignore") != norm_gov_html:
@@ -3989,6 +5842,7 @@ def compile_tenant_porcelain_estate_with_profile(
             active_tools=active_tools,
             known_css_vars=known_vars,
             existing_hubs=existing_hubs,
+            dist_dir=target_dist,
         )
         err_404_file = target_dist / "404.html"
         if not err_404_file.is_file() or err_404_file.read_text(encoding="utf-8", errors="ignore") != norm_404_html:
@@ -4011,6 +5865,7 @@ def compile_tenant_porcelain_estate_with_profile(
             active_tools=active_tools,
             known_css_vars=known_vars,
             existing_hubs=existing_hubs,
+            dist_dir=target_dist,
         )
         blueprint_counts[bp] = blueprint_counts.get(bp, 0) + 1
         compiled_count += 1
@@ -4282,6 +6137,28 @@ def _scrub_tenant_personal_maker_and_inline_js(repo_path: Path, profile: Dict[st
             if ds_new != ds_src:
                 ds_file.write_text(ds_new, encoding="utf-8")
                 updated.append("profithelm/directory_submitter.py")
+
+        for sig_rel in ("profithelm/static/signal/index.html", "dist/signal/index.html", "dist/static/signal/index.html"):
+            sig_file = repo / sig_rel
+            if not sig_file.is_file():
+                continue
+            sig_src = sig_file.read_text(encoding="utf-8")
+            sig_new = _scrub_operator_pwa_gsc_token(sig_src, profile)
+            if sig_new != sig_src:
+                sig_file.write_text(sig_new, encoding="utf-8")
+                updated.append(sig_rel)
+
+    if pkg_name == "lienbond":
+        cli_file = repo / "lienbond" / "cli.py"
+        if cli_file.is_file():
+            cli_src = cli_file.read_text(encoding="utf-8")
+            cli_new = cli_src.replace(
+                'getattr(report, "drifted", 0) if not isinstance(report, dict) else report.get("drifted", 0)',
+                'getattr(report, "drifted_assets_count", getattr(report, "drifted", 0)) if not isinstance(report, dict) else report.get("drifted_assets_count", report.get("drifted", 0))',
+            )
+            if cli_new != cli_src:
+                cli_file.write_text(cli_new, encoding="utf-8")
+                updated.append("lienbond/cli.py")
 
     manifest_candidates: List[Path] = [
         repo / "syndication" / "directory_manifest.json",
@@ -4831,20 +6708,274 @@ def _find_personal_attribution_violations(raw_text: str, rel_label: str) -> List
     return found
 
 
+_STATE_OR_JS_HOOK_CLASSES: Set[str] = {
+    "active",
+    "open",
+    "closed",
+    "collapsed",
+    "expanded",
+    "selected",
+    "disabled",
+    "hidden",
+    "visible",
+    "sr-only",
+    "visually-hidden",
+}
+
+
+def _parse_css_blocks_for_audit(css_text: str) -> List[Tuple[str, str, Optional[str]]]:
+    """Parses CSS rules into (selector_header, declaration_body, enclosing_media_query)."""
+    cleaned = re.sub(r"/\*[\s\S]*?\*/", "", css_text or "")
+    rules: List[Tuple[str, str, Optional[str]]] = []
+
+    def _walk(chunk: str, media_ctx: Optional[str]) -> None:
+        i = 0
+        n = len(chunk)
+        while i < n:
+            while i < n and chunk[i].isspace():
+                i += 1
+            if i >= n:
+                break
+            brace_idx = chunk.find("{", i)
+            if brace_idx < 0:
+                break
+            header = chunk[i:brace_idx].strip()
+            depth = 1
+            j = brace_idx + 1
+            while j < n and depth > 0:
+                if chunk[j] == "{":
+                    depth += 1
+                elif chunk[j] == "}":
+                    depth -= 1
+                j += 1
+            body = chunk[brace_idx + 1 : j - 1]
+            if header.startswith("@media"):
+                _walk(body, header)
+            elif header.startswith("@"):
+                if "{" in body:
+                    _walk(body, media_ctx)
+            else:
+                rules.append((header, body, media_ctx))
+            i = j
+
+    _walk(cleaned, None)
+    return rules
+
+
+def _extract_defined_css_classes_for_audit(css_text: str) -> Set[str]:
+    """Extracts all CSS class names defined in selector headers across style.css."""
+    defined: Set[str] = set()
+    for selector_header, _, _ in _parse_css_blocks_for_audit(css_text):
+        for sel in selector_header.split(","):
+            cleaned_sel = re.sub(r"\[[^\]]*\]", "", sel.strip())
+            for m in re.finditer(r"\.([a-zA-Z_-][a-zA-Z0-9_-]*)", cleaned_sel):
+                defined.add(m.group(1))
+    return defined
+
+
+def _selector_specificity_for_audit(selector: str) -> Tuple[int, int, int]:
+    """Computes (id_count, class_attr_pseudo_count, tag_count) for a CSS selector."""
+    s = re.sub(r"::?(?:not|is|where)\([^)]*\)", "", selector)
+    s = re.sub(r"\[[^\]]+\]", ".ATTR", s)
+    ids = len(re.findall(r"#[a-zA-Z_-][a-zA-Z0-9_-]*", s))
+    classes_pseudos = len(re.findall(r"(?:\.[a-zA-Z_-][a-zA-Z0-9_-]*|:[a-zA-Z_-][a-zA-Z0-9_-]*)", s))
+    no_ids_cls = re.sub(r"(?:#|\.|::?)[a-zA-Z_-][a-zA-Z0-9_-]*(?:\([^)]*\))?", " ", s)
+    tags = len(re.findall(r"\b[a-zA-Z][a-zA-Z0-9]*\b", no_ids_cls))
+    return (ids, classes_pseudos, tags)
+
+
+def _selector_matches_anchor_nav_cta_for_audit(selector: str) -> bool:
+    """Checks whether a CSS selector targets <a class='btn btn-cta nav-cta-desktop touch-target'>."""
+    if ".nav-cta-desktop" not in selector:
+        return False
+    parts = [p for p in re.split(r"[\s>+~]+", selector.strip()) if p]
+    if not parts:
+        return False
+    subject = parts[-1]
+    tag_m = re.match(r"^([a-zA-Z][a-zA-Z0-9]*)", subject)
+    if tag_m and tag_m.group(1).lower() != "a":
+        return False
+    req_classes = set(re.findall(r"\.([a-zA-Z_-][a-zA-Z0-9_-]*)", subject))
+    allowed = {"btn", "btn-cta", "nav-cta-desktop", "touch-target"}
+    return "nav-cta-desktop" in req_classes and req_classes.issubset(allowed)
+
+
+def _has_mobile_nav_cta_specificity(css_text: str) -> bool:
+    """Checks that @media (max-width: 768px) hides .nav-cta-desktop with specificity >= a.btn-cta."""
+    blocks = _parse_css_blocks_for_audit(css_text)
+    desktop_a_btn_spec = (0, 1, 1)
+    for selector_header, body, media_ctx in blocks:
+        if media_ctx is None and re.search(r"\bdisplay\s*:\s*inline-flex\b", body):
+            for sel in selector_header.split(","):
+                s = sel.strip()
+                if re.search(r"\.btn-cta(?![a-zA-Z0-9_-])", s):
+                    spec = _selector_specificity_for_audit(s)
+                    if spec > desktop_a_btn_spec:
+                        desktop_a_btn_spec = spec
+
+    for selector_header, body, media_ctx in blocks:
+        if media_ctx and "max-width" in media_ctx and "768px" in media_ctx and re.search(r"\bdisplay\s*:\s*none\b", body):
+            has_imp = bool(re.search(r"\bdisplay\s*:\s*none\s*!important\b", body))
+            for sel in selector_header.split(","):
+                s = sel.strip()
+                if _selector_matches_anchor_nav_cta_for_audit(s) and (
+                    has_imp or _selector_specificity_for_audit(s) >= desktop_a_btn_spec
+                ):
+                    return True
+    return False
+
+
+def _resolve_local_dist_asset_url(dist_dir: Path, domain: str, raw_url: str) -> Optional[Path]:
+    """Resolves a local or same-tenant asset URL to its file path inside dist_dir."""
+    u = str(raw_url or "").strip()
+    if u.startswith((f"https://{domain}", f"http://{domain}")):
+        path_part = re.sub(r"^https?://[^/]+", "", u).split("?", 1)[0].split("#", 1)[0]
+    elif u.startswith("/"):
+        path_part = u.split("?", 1)[0].split("#", 1)[0]
+    else:
+        return None
+    if not path_part or path_part == "/":
+        return dist_dir / "index.html"
+    rel = path_part.lstrip("/")
+    direct = dist_dir / rel
+    if direct.is_file():
+        return direct
+    return dist_dir / rel.rstrip("/") / "index.html"
+
+
+def _find_undefined_ui_classes_in_html(html_content: str, defined_classes: Set[str]) -> Set[str]:
+    """Returns UI/layout classes rendered in visible HTML that are absent from defined_classes."""
+    visible = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", html_content or "", flags=re.IGNORECASE)
+    undef: Set[str] = set()
+    for cls_attr in re.findall(r'\bclass\s*=\s*["\']([^"\']+)["\']', visible):
+        for tok in cls_attr.split():
+            if (
+                tok
+                and tok not in _STATE_OR_JS_HOOK_CLASSES
+                and not tok.startswith(("js-", "is-", "has-"))
+                and tok not in defined_classes
+            ):
+                undef.add(tok)
+    return undef
+
+
+def _collect_html_asset_and_hygiene_issues(
+    html_content: str,
+    rel_path: str,
+    domain: str,
+    dist_dir: Optional[Path] = None,
+) -> List[str]:
+    """Collects raw-formula, favicon placeholder, script versioning, FAQ duplication, legacy clutter, and local asset issues."""
+    issues: List[str] = []
+    raw_html = html_content or ""
+    visible_no_script = re.sub(
+        r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", raw_html, flags=re.IGNORECASE
+    )
+    if "round((" in visible_no_script:
+        issues.append(f"Leaked raw Python formula 'round((' outside <script> in {rel_path}")
+
+    if re.search(
+        r'<link\b[^>]*rel=["\'][^"\']*icon[^"\']*["\'][^>]*href=["\']data:,["\']|'
+        r'<link\b[^>]*href=["\']data:,["\'][^>]*rel=["\'][^"\']*icon[^"\']*["\']',
+        raw_html,
+        flags=re.IGNORECASE,
+    ):
+        issues.append(f"Placeholder data:, favicon link present in {rel_path}")
+
+    faq_sections = re.findall(
+        r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b[^"\']*["\']',
+        visible_no_script,
+        flags=re.IGNORECASE,
+    )
+    faq_headings = re.findall(
+        r"<h[1-4]\b[^>]*>[^<]*Frequently Asked Questions",
+        visible_no_script,
+        flags=re.IGNORECASE,
+    )
+    if len(faq_sections) > 1 or len(faq_headings) > 1:
+        issues.append(
+            f"Duplicate FAQ sections/headings (sections={len(faq_sections)}, headings={len(faq_headings)}) in {rel_path}"
+        )
+
+    if re.search(
+        r'class=["\'][^"\']*\b(?:ymyl-disclaimer-banner|ftc-disclosure-card|ymyl-warning-card|above-the-fold-compliance)\b',
+        visible_no_script,
+        flags=re.IGNORECASE,
+    ):
+        issues.append(f"Legacy YMYL/FTC disclaimer clutter present in {rel_path}")
+
+    if dist_dir is not None:
+        d_root = Path(dist_dir)
+        has_compiled_estate = (
+            (d_root / "tools" / "index.html").is_file()
+            and (d_root / "sitemap.xml").is_file()
+        )
+        for js_m in re.finditer(
+            r'<script\b[^>]*\bsrc\s*=\s*["\'](/(?:static/)?js/[^"\']+)["\']',
+            raw_html,
+            flags=re.IGNORECASE,
+        ):
+            src_u = js_m.group(1)
+            clean_js_src = src_u.split("?", 1)[0].split("#", 1)[0]
+            local_js_exists = (d_root / clean_js_src.lstrip("/")).is_file()
+            if (local_js_exists or has_compiled_estate) and not re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_u):
+                issues.append(f"Unversioned local script '{src_u}' without ?v= in {rel_path}")
+        for og_u in re.findall(
+            r'<meta\b[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
+            raw_html,
+            flags=re.IGNORECASE,
+        ):
+            tgt = _resolve_local_dist_asset_url(d_root, domain, og_u)
+            if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
+                issues.append(f"Missing local og:image asset '{og_u}' referenced in {rel_path}")
+        for fav_u in re.findall(
+            r'<link\b[^>]*rel=["\'][^"\']*icon[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
+            raw_html,
+            flags=re.IGNORECASE,
+        ):
+            if fav_u.startswith("data:"):
+                continue
+            tgt = _resolve_local_dist_asset_url(d_root, domain, fav_u)
+            if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
+                issues.append(f"Missing local favicon asset '{fav_u}' referenced in {rel_path}")
+        for jtxt in re.findall(
+            r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+            raw_html,
+            flags=re.IGNORECASE,
+        ):
+            for img_u in re.findall(r'"(?:logo|image)"\s*:\s*"([^"]+)"', jtxt):
+                tgt = _resolve_local_dist_asset_url(d_root, domain, img_u)
+                if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
+                    issues.append(f"Missing JSON-LD image/logo asset '{img_u}' in {rel_path}")
+
+    return issues
+
+
 def audit_porcelain_shell_page(
     html_content: str,
     rel_path: str,
     css_defined_vars: Optional[Set[str]] = None,
     check_shell_landmarks: bool = True,
     property_id: Optional[str] = None,
+    css_defined_classes: Optional[Set[str]] = None,
+    dist_dir: Optional[Path] = None,
 ) -> List[str]:
     """
-    Fail-closed Porcelain Light shell, inline-color, custom-property, publisher-tag, and
-    personal-attribution contract auditor for a single HTML page.
-    Exempts operator_pwa (/signal/) by explicit blueprint classification.
+    Fail-closed Porcelain Light shell, inline-color, custom-property, undefined-class,
+    asset-integrity, publisher-tag, and personal-attribution contract auditor for a single HTML page.
+    Exempts operator_pwa (/signal/) layout while enforcing non-placeholder GSC verification tokens.
     """
     blueprint = classify_porcelain_blueprint(rel_path, html_content)
     if blueprint == "operator_pwa":
+        for fake_tok in (
+            "google-site-verification-profithelm-2026",
+            "google-site-verification-prexvo-2026",
+            "google-site-verification-gainhelm-2026",
+            "google-site-verification-lienbond-2026",
+            "google-site-verification-verified-2026",
+        ):
+            if fake_tok in (html_content or ""):
+                return [f"Placeholder GSC token '{fake_tok}' present in {rel_path}"]
         return []
 
     issues: List[str] = []
@@ -4866,10 +6997,12 @@ def audit_porcelain_shell_page(
             )
             break
 
+    base_css_text = ""
+    if css_defined_vars is None or (check_shell_landmarks and css_defined_classes is None):
+        base_css_text = generate_porcelain_stylesheet_from_profile(get_porcelain_tenant_profile(property_id or "profithelm"))
+
     if css_defined_vars is None:
-        base_defined, _ = extract_defined_and_referenced_css_vars(
-            generate_porcelain_stylesheet_from_profile(get_porcelain_tenant_profile(property_id or "profithelm"))
-        )
+        base_defined, _ = extract_defined_and_referenced_css_vars(base_css_text)
         allowed_vars = set(base_defined)
     else:
         allowed_vars = set(css_defined_vars)
@@ -4896,6 +7029,25 @@ def audit_porcelain_shell_page(
 
     if not check_shell_landmarks:
         return issues
+
+    allowed_classes = (
+        set(css_defined_classes)
+        if css_defined_classes is not None
+        else _extract_defined_css_classes_for_audit(base_css_text)
+    )
+    undef_classes = sorted(_find_undefined_ui_classes_in_html(html_content or "", allowed_classes))
+    if undef_classes:
+        issues.append(f"Undefined CSS class(es) {undef_classes[:8]} in {rel_path}")
+
+    prof_for_dom = get_porcelain_tenant_profile(property_id or "profithelm")
+    issues.extend(
+        _collect_html_asset_and_hygiene_issues(
+            html_content or "",
+            rel_path,
+            prof_for_dom["domain"],
+            dist_dir,
+        )
+    )
 
     if re.search(r"<style\b", html_content or "", flags=re.IGNORECASE):
         issues.append(f"Competing inline <style> block present in {rel_path}; must use single external style.css")
@@ -4979,8 +7131,6 @@ def audit_porcelain_shell_page(
         )
         if strip_count != 1:
             issues.append(f"Expected exact 1 .compliance-strip.ftc-disclosure-banner on {rel_path}, found {strip_count}")
-        if re.search(r'class=["\'][^"\']*\b(?:ymyl-disclaimer-banner|ftc-disclosure-card)\b', html_content or "", flags=re.IGNORECASE):
-            issues.append(f"Duplicate legacy disclaimer banner (.ymyl-disclaimer-banner/.ftc-disclosure-card) on {rel_path}")
     elif blueprint == "error_404":
         if "status 404" not in (html_content or "").lower():
             issues.append(f"404 page missing 'Status 404' marker in {rel_path}")
@@ -4992,9 +7142,10 @@ def audit_porcelain_shell_page(
 
 def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[str]:
     """
-    Fail-closed estate-level audit verifying canonical Porcelain CSS, 6 real HTTP-200 governance pages,
-    sitemap governance coverage, zero cross-legal 301 redirects, zero .xz snapshot bundles, and zero
-    personal LinkedIn or personal maker strings across .py, .json, .js, and .html files.
+    Fail-closed estate-level audit verifying canonical Porcelain CSS, class coverage, mobile
+    specificity, favicon/OG assets, 6 real HTTP-200 governance pages, sitemap governance
+    coverage, zero cross-legal 301 redirects, zero .xz snapshot bundles, and zero personal
+    LinkedIn or personal maker strings across .py, .json, .js, and .html files.
     """
     d = Path(dist_dir).resolve()
     issues: List[str] = []
@@ -5003,6 +7154,7 @@ def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[s
 
     profile = get_porcelain_tenant_profile(property_id)
     is_full_estate = (d / "tools" / "index.html").is_file()
+    defined_classes: Optional[Set[str]] = None
     if is_full_estate:
         css_candidates = [d / "css" / "style.css"]
         if profile["property_id"] == "profithelm":
@@ -5022,6 +7174,17 @@ def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[s
                     issues.append(f"Stylesheet {css_p.relative_to(d).as_posix()} missing canonical Porcelain token '{req_tok}'")
             if "#calculate-btn" not in css_txt or "min-height: 44px" not in css_txt:
                 issues.append(f"Stylesheet {css_p.relative_to(d).as_posix()} missing >=44px #calculate-btn rule")
+            if not _has_mobile_nav_cta_specificity(css_txt):
+                issues.append(
+                    f"Stylesheet {css_p.relative_to(d).as_posix()} @media (max-width: 768px) .nav-cta-desktop loses specificity to a.btn-cta"
+                )
+            if defined_classes is None:
+                defined_classes = _extract_defined_css_classes_for_audit(css_txt)
+
+        for req_icon in ("favicon.svg", "favicon.ico"):
+            icon_p = d / req_icon
+            if not icon_p.is_file() or icon_p.stat().st_size == 0:
+                issues.append(f"Missing required favicon asset: dist/{req_icon}")
 
         sitemap_concat = ""
         for sm_name in ("sitemap.xml", "sitemap-hubs.xml"):
@@ -5045,6 +7208,26 @@ def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[s
                 parts = s.split()
                 if len(parts) >= 2 and parts[0] in CROSS_LEGAL_REDIRECT_SOURCES:
                     issues.append(f"Forbidden cross-legal redirect rule '{s}' in dist/_redirects")
+
+    estate_undef_classes: Set[str] = set()
+    dom = profile["domain"]
+    for hp in sorted(d.rglob("*.html")):
+        if hp.name.startswith("."):
+            continue
+        rel_hp = hp.relative_to(d).as_posix()
+        txt_hp = hp.read_text(encoding="utf-8", errors="ignore")
+        bp_hp = classify_porcelain_blueprint(rel_hp, txt_hp)
+        if bp_hp == "operator_pwa":
+            if "google-site-verification-profithelm-2026" in txt_hp:
+                issues.append(f"Placeholder GSC token 'google-site-verification-profithelm-2026' present in {rel_hp}")
+            continue
+        if defined_classes is not None:
+            estate_undef_classes.update(_find_undefined_ui_classes_in_html(txt_hp, defined_classes))
+        issues.extend(_collect_html_asset_and_hygiene_issues(txt_hp, rel_hp, dom, d))
+
+    if estate_undef_classes:
+        top_u = sorted(estate_undef_classes)
+        issues.append(f"Undefined UI CSS class(es) against style.css ({len(top_u)}): {top_u[:12]}")
 
     repo_root = d.parent
     pkg_dir = repo_root / profile["package_name"]

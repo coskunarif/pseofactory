@@ -3287,11 +3287,15 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
     is_raw_spoke_title = "/" in slug_clean and raw.lower().startswith(
         ("irs 2027 tax brackets ", "section 1031 calculator ", "section 179 calculator ")
     )
+    is_internal_hyphen_model = bool(
+        re.match(r"^(?:prexvo|profithelm|gainhelm|lienbond|lien\s+bond)[-\s]+[a-z0-9-]+$", raw, re.IGNORECASE)
+    ) or ("model-2026" in raw.lower())
     if (
         not raw
         or is_raw_spoke_title
+        or is_internal_hyphen_model
         or ("-" in raw and " " not in raw)
-        or raw.lower().startswith(("prexvo-", "profithelm-", "gainhelm-"))
+        or raw.lower().startswith(("prexvo-", "profithelm-", "gainhelm-", "lienbond-", "lien bond-"))
         or raw.lower()
         in (
             "tax & capital allocation intelligence",
@@ -3314,12 +3318,15 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
                 raw = re.sub(r"\s+(?:Tax\s+)?(?:Deduction|Write-Off|Depreciation)?\s*Calculator.*$", "", v_full, flags=re.IGNORECASE).strip()
             else:
                 raw = slug_clean.replace("/", " ").replace("-", " ").title()
-        else:
+        elif slug_clean:
             veh_map = dict(PROFITHELM_SECTION_179_VEHICLES)
             if slug_clean in veh_map:
                 raw = re.sub(r"\s+(?:Tax\s+)?(?:Deduction|Write-Off|Depreciation)?\s*Calculator.*$", "", veh_map[slug_clean], flags=re.IGNORECASE).strip()
             else:
                 raw = str(slug_clean or "statutory-model").replace("/", " ").replace("-", " ").title()
+        else:
+            raw = re.sub(r"^(?:prexvo|profithelm|gainhelm|lienbond|lien\s+bond)[-\s]+", "", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"-Model-20\d{2}$", "", raw, flags=re.IGNORECASE).replace("-", " ").strip().title()
 
     raw = re.sub(r"\bS\s+Corp\b", "S-Corp", raw, flags=re.IGNORECASE)
     raw = re.sub(r"\bC\s+Corp\b", "C-Corp", raw, flags=re.IGNORECASE)
@@ -3328,10 +3335,11 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
     raw = re.sub(r"\bW\s+([249])\b", r"W-\1", raw, flags=re.IGNORECASE)
     for acr in (
         "Rap", "Ibr", "Pslf", "Plus", "Save", "Paye", "Icr", "Irs", "Irc", "Tcja", "Qsbs",
-        "Niit", "Amt", "Hysa", "Fica", "Qbi", "Gvwr", "Suv", "Apr", "Apy", "Roi", "Cmmc",
+        "Niit", "Amt", "Camt", "Hysa", "Fica", "Qbi", "Gvwr", "Suv", "Apr", "Apy", "Roi", "Cmmc",
         "C3pao", "3pao", "Hipaa", "Hitrust", "Csf", "Iso", "Iec", "Nist", "Sprs", "Dfars",
         "Pci", "Dss", "Qsa", "Roc", "Asv", "Soc", "Ssae", "Aicpa", "Grc", "Obbba", "Hea",
-        "Tila", "Mfs", "Mfj", "Idr", "Agi", "Seca", "Ftb",
+        "Tila", "Mfs", "Mfj", "Idr", "Agi", "Seca", "Ftb", "Dora", "Ict", "Eu", "Ai",
+        "Sdi", "Emr", "Hpsl", "Nhsc", "Cpa", "199a", "280g",
     ):
         raw = re.sub(rf"\b{acr}\b", acr.upper(), raw, flags=re.IGNORECASE)
     raw = re.sub(r"\bSaas\b", "SaaS", raw, flags=re.IGNORECASE)
@@ -3346,8 +3354,8 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
 
-    # Join standalone single-letter uppercase tokens (B-HJ-Z) to adjacent words without touching S-Corp/W-2
-    raw = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", raw)
+    # Join standalone single-letter uppercase tokens (B-HJ-Z) to adjacent words without touching S-Corp/W-2/R&D
+    raw = re.sub(r"(?<![.\w&/-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", raw)
     raw = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", raw)
     raw = re.sub(r"\s+", " ", raw).strip(" :-,")
     words = raw.split()
@@ -3357,7 +3365,7 @@ def _format_safe_heading_topic(title: str, slug: str) -> str:
         while words and words[-1].lower() in ("and", "or", "vs", "vs.", "for", "with", "to", "in", "of", "on", "&", "&amp;", "section"):
             words.pop()
     result = " ".join(words).strip(" :-,")
-    result = re.sub(r"(?<![.\w-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", result)
+    result = re.sub(r"(?<![.\w&/-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", result)
     result = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", result)
     return result or "Statutory Calculation Model"
 
@@ -4532,17 +4540,17 @@ def _render_multi_year_cliff_visualizer_html(
         f'        <div class="serp-svg-chart-wrap">\n'
         f'          <svg id="serp-cliff-trajectory-svg" class="serp-visual-breakdown-svg" viewBox="0 0 600 92" role="img" aria-label="Multi-Year Statutory and Repayment Cliff Trajectory">\n'
         f'            <desc>Multi-Year Statutory and Repayment Cliff Trajectory</desc>\n'
-        f'            <rect x="0" y="6" width="600" height="80" rx="6" fill="var(--bg-inset, #0b1329)" />\n'
-        f'            <rect id="cliff-bar-2024" x="28" y="42" width="76" height="26" rx="4" fill="var(--status-positive, #10b981)" />\n'
-        f'            <rect id="cliff-bar-2025" x="142" y="34" width="76" height="34" rx="4" fill="var(--accent, #38bdf8)" />\n'
-        f'            <rect id="cliff-bar-2026" x="256" y="20" width="88" height="48" rx="4" fill="#f59e0b" />\n'
-        f'            <rect id="cliff-bar-2027" x="380" y="14" width="76" height="54" rx="4" fill="#ef4444" />\n'
-        f'            <rect id="cliff-bar-2028" x="494" y="12" width="76" height="56" rx="4" fill="#ec4899" />\n'
-        f'            <text x="66" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2024</text>\n'
-        f'            <text x="180" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2025</text>\n'
-        f'            <text x="300" y="81" text-anchor="middle" fill="var(--status-warning)" font-size="11" font-weight="700">2026 Cliff</text>\n'
-        f'            <text x="418" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2027</text>\n'
-        f'            <text x="532" y="81" text-anchor="middle" fill="var(--text, #f8fafc)" font-size="11" font-weight="600">2028-2030</text>\n'
+        f'            <rect x="0" y="6" width="600" height="80" rx="6" fill="var(--bg-elevated)" stroke="var(--border-subtle)" stroke-width="1" />\n'
+        f'            <rect id="cliff-bar-2024" x="28" y="42" width="76" height="26" rx="4" fill="var(--border-strong)" />\n'
+        f'            <rect id="cliff-bar-2025" x="142" y="34" width="76" height="34" rx="4" fill="var(--text-muted)" />\n'
+        f'            <rect id="cliff-bar-2026" x="256" y="20" width="88" height="48" rx="4" fill="var(--brand-primary)" />\n'
+        f'            <rect id="cliff-bar-2027" x="380" y="14" width="76" height="54" rx="4" fill="var(--brand-hover)" />\n'
+        f'            <rect id="cliff-bar-2028" x="494" y="12" width="76" height="56" rx="4" fill="var(--text-secondary)" />\n'
+        f'            <text x="66" y="81" text-anchor="middle" fill="var(--text-secondary)" font-size="11" font-weight="600">2024</text>\n'
+        f'            <text x="180" y="81" text-anchor="middle" fill="var(--text-secondary)" font-size="11" font-weight="600">2025</text>\n'
+        f'            <text x="300" y="81" text-anchor="middle" fill="var(--brand-primary)" font-size="11" font-weight="700">2026 Cliff</text>\n'
+        f'            <text x="418" y="81" text-anchor="middle" fill="var(--text-primary)" font-size="11" font-weight="600">2027</text>\n'
+        f'            <text x="532" y="81" text-anchor="middle" fill="var(--text-secondary)" font-size="11" font-weight="600">2028-2030</text>\n'
         f'          </svg>\n'
         f'        </div>\n'
         f'        <div class="table-wrap pseo-table-wrap">\n'
@@ -4839,6 +4847,14 @@ def render_partner_quote_intake_html(
         for b_code, b_label in bands
     )
 
+    from pseofactory.contracts import is_state_jurisdiction_tool
+
+    is_state_tool = is_state_jurisdiction_tool(slug_clean, prop_clean)
+    is_intl_tool = any(
+        tok in slug_clean
+        for tok in ("philippines", "eu-ai-act", "dora-ict", "iso-27001", "iso27001", "gdpr")
+    )
+
     if prop_clean == "prexvo":
         is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
         heading_text = f"Qualified Borrower Rate-Match Intake ({threshold_fmt}+ Balance Threshold)"
@@ -4872,7 +4888,9 @@ def render_partner_quote_intake_html(
             f"Sub-threshold calculations stay 100% frictionless."
         )
         email_label = "Work or Security Operations Email Address"
-        state_label = "Corporate Headquarters State"
+        state_label = "Organization Operating State (US)" if is_intl_tool else (
+            "Corporate Headquarters State" if is_state_tool else "Organization Billing / HQ State"
+        )
         band_label = "Annual Compliance & Audit Budget Band"
         consent_copy = (
             "I provide explicit TCPA partner_sharing_consent authorizing GainHelm to share my work email, "
@@ -4882,21 +4900,34 @@ def render_partner_quote_intake_html(
         )
         btn_text = "Request Matched GRC & Audit Quote"
     elif prop_clean == "lienbond":
-        heading_text = f"Commercial Surety Bond, Workers Comp & Lien Filing Quote Intake ({threshold_fmt}+ Project Threshold)"
-        sub_text = (
-            f"Construction bond penalties, payroll exposures, and contract values at or above {threshold_fmt} qualify for "
-            f"instant Treasury Circular 570 surety underwriting, NCCI class-code rate matching, and statutory lien filing quotes. "
-            f"Sub-threshold calculations stay 100% frictionless."
-        )
+        if is_intl_tool:
+            heading_text = f"Commercial Surety Bond Underwriting Quote Intake ({threshold_fmt}+ Project Threshold)"
+            sub_text = (
+                f"Construction bond penalties and contract values at or above {threshold_fmt} qualify for "
+                f"commercial surety underwriting and carrier rate matching. Sub-threshold calculations stay 100% frictionless."
+            )
+            state_label = "Underwriting Contact State (US Billing)"
+            consent_copy = (
+                "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
+                "contact state, and bond/contract band with matched surety underwriters and commercial insurance partners "
+                "(including SuretyBondsDirect.com, Simply Business, and Thimble) to prepare a customized underwriting quote."
+            )
+        else:
+            heading_text = f"Commercial Surety Bond, Workers Comp & Lien Filing Quote Intake ({threshold_fmt}+ Project Threshold)"
+            sub_text = (
+                f"Construction bond penalties, payroll exposures, and contract values at or above {threshold_fmt} qualify for "
+                f"instant Treasury Circular 570 surety underwriting, NCCI class-code rate matching, and statutory lien filing quotes. "
+                f"Sub-threshold calculations stay 100% frictionless."
+            )
+            state_label = "Project & License Jurisdiction State" if is_state_tool else "Company / Contracting State"
+            consent_copy = (
+                "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
+                "project jurisdiction state, and bond/payroll band with matched Treasury-listed surety underwriters, "
+                "commercial workers compensation carriers, and statutory lien service partners (including SuretyBondsDirect.com, "
+                "Simply Business, Thimble, and Levelset) to prepare a customized underwriting quote."
+            )
         email_label = "Contractor or Project Accounting Email Address"
-        state_label = "Project & License Jurisdiction State"
         band_label = "Bond Penalty / Annual Payroll / Contract Band"
-        consent_copy = (
-            "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
-            "project jurisdiction state, and bond/payroll band with matched Treasury-listed surety underwriters, "
-            "commercial workers compensation carriers, and statutory lien service partners (including SuretyBondsDirect.com, "
-            "Simply Business, Thimble, and Levelset) to prepare a customized underwriting quote."
-        )
         btn_text = "Request Instant Surety & Insurance Quote"
     else:
         if vertical == "1031_exchange":
@@ -5225,7 +5256,30 @@ def resolve_quick_unlock_contextual_copy(
         }
 
     if prop == "lienbond":
-        loc_prefix = f"{state_label} " if state_label else "50-State "
+        from pseofactory.contracts import is_state_jurisdiction_tool
+
+        if state_label:
+            loc_prefix = f"{state_label} "
+        elif "philippines" in s_low:
+            loc_prefix = "Commercial Surety Bond "
+        elif not is_state_jurisdiction_tool(s_low, prop):
+            loc_prefix = "Federal & Commercial Surety "
+        else:
+            loc_prefix = "50-State "
+        if "philippines" in s_low:
+            return {
+                "heading": "Get Your Surety Bond Premium &amp; Indemnity Underwriting Worksheet",
+                "badge": "Underwriting PDF/CSV + Free Email Summary",
+                "summary": (
+                    "Unlocks surety bond rate tier comparison, collateral requirement worksheet, "
+                    "and contractor underwriting checklist."
+                ),
+                "email_label": "Email Address for Free Surety Bond Summary",
+                "email_btn": "Email Me Free Summary",
+                "quick_btn_label": f"Download Surety Bond Worksheet (${quick_price_int}) &rarr;",
+                "drawer_quick_btn_label": f"Download Surety Bond Worksheet (${quick_price_int})",
+                "full_link_label": f"Or Full Surety &amp; Underwriting Packet (${full_price_int})",
+            }
         return {
             "heading": f"Get Your {loc_prefix}Statutory Lien Waiver, Notice &amp; Bond Packet",
             "badge": "Statutory PDF/CSV + Free Email Summary",
@@ -5391,7 +5445,7 @@ def render_calc_result_quick_unlock_bar_html(
         f'            </form>\n'
         f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border);">\n'
         f'              <a id="btn-calc-result-quick-unlock" rel="nofollow" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--status-positive); color: var(--cta-fg); font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;">{ctx_q["quick_btn_label"]}</a>\n'
-        f'              <a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent); text-decoration: underline; white-space: normal; max-width: 100%; box-sizing: border-box;">{ctx_q["full_link_label"]}</a>\n'
+        f'              <a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; background-color: var(--bg-surface); border: 1px solid var(--brand-border); border-radius: 6px; color: var(--accent); text-decoration: underline; white-space: normal; max-width: 100%; box-sizing: border-box;">{ctx_q["full_link_label"]}</a>\n'
         f'            </div>\n'
         f'          </div>\n'
     )
@@ -5472,9 +5526,10 @@ def render_serp_incumbent_depth_upgrade_block(
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
     s_low = str(slug or "").strip().lower()
-    is_prexvo = property_id.strip().lower() == "prexvo"
-    is_gainhelm = property_id.strip().lower() == "gainhelm"
-    is_lienbond = property_id.strip().lower() == "lienbond"
+    prop_norm = str(property_id or "profithelm").strip().lower()
+    is_prexvo = prop_norm == "prexvo"
+    is_gainhelm = prop_norm == "gainhelm"
+    is_lienbond = prop_norm == "lienbond"
     topic_label = _format_safe_heading_topic(title, slug)
     veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
@@ -5601,7 +5656,7 @@ def render_serp_incumbent_depth_upgrade_block(
     return (
         f'    <section id="serp-incumbent-depth-workbench" class="serp-depth-workbench card pseo-card" '
         f'data-mechanic="serp_incumbent_depth_upgrade" data-workbench-mode="{spec["workbench_mode"]}">\n'
-        f'      <h2>{spec["workbench_h2"]}</h2>\n'
+        f'      <h2>Scenario Sensitivity &amp; Multi-Year Stress Ledger: {topic_label}</h2>\n'
         f'      <p class="serp-workbench-intro">{spec["workbench_intro"]}</p>\n'
         f'      <div class="serp-preset-bar" role="group" aria-label="One-Click Statutory Scenario Archetypes">\n'
         f'{preset_buttons_html}\n'
@@ -5613,13 +5668,13 @@ def render_serp_incumbent_depth_upgrade_block(
         f'{metrics_cards_html}\n'
         f'      </div>\n'
         f'      <div class="serp-svg-chart-wrap">\n'
-        f'        <svg class="serp-visual-breakdown-svg" viewBox="0 0 600 76" role="img" aria-label="Interactive Retained Capital versus Statutory Exposure Breakdown">\n'
+        f'        <svg class="serp-visual-breakdown-svg" viewBox="0 0 600 92" role="img" aria-label="Interactive Retained Capital versus Statutory Exposure Breakdown">\n'
         f'          <desc>Interactive Retained Capital versus Statutory Exposure Breakdown</desc>\n'
-        f'          <rect x="0" y="8" width="600" height="26" rx="6" fill="var(--bg-inset, #0b1329)" />\n'
-        f'          <rect id="serp-svg-bar-retained" x="0" y="8" width="{spec["svg_left_width"]}" height="26" rx="6" fill="var(--status-positive, #10b981)" />\n'
-        f'          <rect id="serp-svg-bar-tax" x="{spec["svg_right_x"]}" y="8" width="{spec["svg_right_width"]}" height="26" rx="6" fill="var(--accent, #38bdf8)" />\n'
-        f'          <text id="serp-svg-label-retained" x="8" y="58" fill="var(--text, #f8fafc)" font-size="13" font-weight="600">{spec["svg_left_label"]}</text>\n'
-        f'          <text id="serp-svg-label-tax" x="592" y="58" text-anchor="end" fill="var(--text-secondary, #cbd5e1)" font-size="13" font-weight="600">{spec["svg_right_label"]}</text>\n'
+        f'          <rect x="0" y="8" width="600" height="26" rx="6" fill="var(--bg-elevated)" stroke="var(--border-subtle)" stroke-width="1" />\n'
+        f'          <rect id="serp-svg-bar-retained" x="0" y="8" width="{spec["svg_left_width"]}" height="26" rx="6" fill="var(--brand-primary)" />\n'
+        f'          <rect id="serp-svg-bar-tax" x="{spec["svg_right_x"]}" y="8" width="{spec["svg_right_width"]}" height="26" rx="6" fill="var(--border-strong)" />\n'
+        f'          <text id="serp-svg-label-retained" x="8" y="56" fill="var(--text-primary)" font-size="13" font-weight="600">{spec["svg_left_label"]}</text>\n'
+        f'          <text id="serp-svg-label-tax" x="8" y="78" text-anchor="start" fill="var(--text-secondary)" font-size="13" font-weight="600">{spec["svg_right_label"]}</text>\n'
         f'        </svg>\n'
         f'      </div>\n'
         f'{spec["banner_html"]}\n'
@@ -5702,7 +5757,7 @@ def render_competitor_winning_pattern_blocks(
         '      <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px;">On This Page: Rapid Decision Navigation</div>\n'
         '      <div style="display: flex; flex-wrap: wrap; gap: 8px;">\n'
         '        <a href="#statutory-trap-alert" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">1. Statutory Deadline &amp; Edge-Case Trap</a>\n'
-        '        <a href="#serp-incumbent-depth-workbench" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">2. Interactive Sub-Ledger &amp; Rate Schedule</a>\n'
+        '        <a href="#serp-incumbent-depth-workbench" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">2. Scenario Sensitivity &amp; Stress Ledger</a>\n'
         '        <a href="#vetted-commercial-handoff" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">3. Provider Vetting Checklist</a>\n'
         '        <a href="#statutory-compliance-checklist" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">4. Beyond the Calculator Checklist</a>\n'
         '        <a href="#statutory-pitfalls-matrix" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">5. Common Statutory Pitfalls</a>\n'

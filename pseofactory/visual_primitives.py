@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from pseofactory.contracts import is_state_jurisdiction_tool
+
 VISUAL_PRIMITIVES_VERSION = "pseo-primitives-v4"
 
 SCREEN_ARCHETYPE_CONTRACTS: Dict[str, Dict[str, Any]] = {
@@ -1090,6 +1092,7 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
 def _render_runtime_sync_maps_js() -> str:
     return """    var _syncing = false;
     var _userInteracted = false;
+    var _initialUrlHydrated = false;
     var _lastInteractionScope = "primary";
     var SLIDER_TO_INPUT_MAP = {
       "field-income_slider": "field-gross_income",
@@ -1937,11 +1940,127 @@ def _render_runtime_sync_workbench_js() -> str:
       } catch (e) {}
     }
 
+    function fmtUsd2(val) {
+      if (isNaN(val) || !isFinite(val)) return "$0.00";
+      return "$" + new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+    }
+
+    function fmtNum2(val) {
+      if (isNaN(val) || !isFinite(val)) return "0.00";
+      return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+    }
+
+    function syncComplianceAuditFormOutputs(outNodes) {
+      var auditForm = document.querySelector("form[id$='-compliance-form']");
+      if (!auditForm) return false;
+      var hcEl = document.getElementById("calc-input-headcount");
+      var critEl = document.getElementById("calc-input-extra_criteria");
+      var u5El = document.getElementById("calc-input-unimplemented_5pt");
+      var u3El = document.getElementById("calc-input-unimplemented_3pt");
+      var u1El = document.getElementById("calc-input-unimplemented_1pt");
+      var recEl = document.getElementById("calc-input-compromised_records");
+      var hc = Math.max(1, Math.round(Math.max(0, parseFloat(hcEl ? hcEl.value : "75") || 75)));
+      var crit = Math.min(4, Math.max(0, Math.round(parseFloat(critEl ? critEl.value : "2"))));
+      if (isNaN(crit)) crit = 2;
+      var u5 = Math.min(42, Math.max(0, Math.round(parseFloat(u5El ? u5El.value : "3") || 0)));
+      var u3 = Math.min(14, Math.max(0, Math.round(parseFloat(u3El ? u3El.value : "2") || 0)));
+      var u1 = Math.min(54, Math.max(0, Math.round(parseFloat(u1El ? u1El.value : "2") || 0)));
+      var rec = Math.max(0, Math.round(parseFloat(recEl ? recEl.value : "1500") || 0));
+
+      var scaleFactor = hc / 75.0;
+      var cpaFee = 28000.0 + (crit * 4500.0);
+      var internalLabor = Math.round((120.0 * scaleFactor * 121.67) * 100) / 100;
+      var soc2Total = Math.round((cpaFee + 11500.0 + 15000.0 + internalLabor) * 100) / 100;
+      var autoSavings = Math.round((internalLabor * 0.55) * 100) / 100;
+      var sprsScore = Math.max(-203, 110 - ((u5 * 5) + (u3 * 3) + (u1 * 1)));
+      var cmmcTotal = Math.round((48500.0 + 26400.0 + (380.0 * 115.0 * Math.max(0.5, scaleFactor)) + 13400.0) * 100) / 100;
+      var isoDays = Math.max(5.0, Math.round(11.0 * Math.pow(scaleFactor, 0.35)));
+      var isoTotal = Math.round(((isoDays * 1950.0) + 14500.0 + 8500.0 + (180.0 * 125.28)) * 100) / 100;
+      var ocrFine = Math.min(rec * 13795.0, 2067813.0);
+      var hipaaTotal = Math.round((ocrFine + 95000.0 + (rec * 195.0)) * 100) / 100;
+
+      var elSoc2 = document.getElementById("metric-soc2_total_cost");
+      var elSprs = document.getElementById("metric-nist_sprs_score");
+      var elCmmc = document.getElementById("metric-cmmc_total_cost");
+      var elIso = document.getElementById("metric-iso27001_total_cost");
+      var elHipaa = document.getElementById("metric-hipaa_exposure");
+      var elSav = document.getElementById("metric-soc2_automation_savings");
+      if (elSoc2) elSoc2.textContent = fmtUsd2(soc2Total);
+      if (elSprs) elSprs.textContent = sprsScore + " pts";
+      if (elCmmc) elCmmc.textContent = fmtUsd2(cmmcTotal);
+      if (elIso) elIso.textContent = fmtUsd2(isoTotal);
+      if (elHipaa) elHipaa.textContent = fmtUsd2(hipaaTotal);
+      if (elSav) elSav.textContent = fmtUsd2(autoSavings) + "/yr";
+
+      var primaryOutEl = outNodes && outNodes.length ? outNodes[0] : null;
+      if (!primaryOutEl || (primaryOutEl.classList && primaryOutEl.classList.contains("overlay-preset-readout"))) {
+        return true;
+      }
+      var slugLow = resolveCurrentToolSlug().toLowerCase();
+      if (slugLow.indexOf("soc-2") !== -1 || slugLow.indexOf("soc2") !== -1) {
+        primaryOutEl.textContent = fmtNum2(soc2Total);
+      } else if (slugLow.indexOf("sprs") !== -1 || slugLow.indexOf("nist-800-171") !== -1) {
+        primaryOutEl.textContent = String(sprsScore);
+      } else if (slugLow.indexOf("cmmc") !== -1) {
+        primaryOutEl.textContent = fmtNum2(cmmcTotal);
+      } else if (slugLow.indexOf("iso-27001") !== -1 || slugLow.indexOf("iso27001") !== -1) {
+        primaryOutEl.textContent = fmtNum2(isoTotal);
+      } else if (slugLow.indexOf("hipaa") !== -1) {
+        primaryOutEl.textContent = fmtNum2(hipaaTotal);
+      } else {
+        var baseOut = parseFloat(primaryOutEl.getAttribute("data-baseline-output") || "");
+        if (!isNaN(baseOut) && baseOut > 0 && _userInteracted) {
+          var combinedScale = scaleFactor;
+          if (slugLow.indexOf("cyber-liability") !== -1 || slugLow.indexOf("sec-cyber") !== -1) {
+            combinedScale = (0.4 * scaleFactor) + (0.6 * Math.max(0.1, rec / 1500.0));
+          } else {
+            var baseGaps = 17.0;
+            var curGaps = (u5 * 5) + (u3 * 3) + u1 + 1e-6;
+            combinedScale = (0.7 * scaleFactor) + (0.3 * (curGaps / baseGaps));
+          }
+          primaryOutEl.textContent = formatOutNum(Math.round(baseOut * Math.max(0.05, combinedScale) * 100) / 100);
+        }
+      }
+      return true;
+    }
+
     function updateOutputsSynchronously(triggerScale) {
       try {
         if (_userInteracted && _lastInteractionScope !== "serp") bridgePrimaryInputsToSerpWorkbench();
         if (typeof window.updateTaxCalculator === "function" && document.getElementById("tax-income")) window.updateTaxCalculator("input");
-        if (typeof window.updateCryptoCalculator === "function" && document.getElementById("crypto-short-term")) window.updateCryptoCalculator();
+        if (typeof window.updateCryptoCalculator === "function" && document.getElementById("crypto-short-term")) {
+          window.updateCryptoCalculator();
+          var csG = Math.max(0, parseFloat((document.getElementById("crypto-short-term") || {}).value) || 0);
+          var clG = Math.max(0, parseFloat((document.getElementById("crypto-long-term") || {}).value) || 0);
+          var ckG = Math.max(0, parseFloat((document.getElementById("crypto-staking") || {}).value) || 0);
+          var cstRate = parseFloat((document.getElementById("crypto-state") || {}).value) || 0.0;
+          var cAllG = csG + clG + ckG;
+          var cStateOut = document.getElementById("res-crypto-state");
+          if (cStateOut) cStateOut.textContent = fmtUsd(cAllG * cstRate);
+          var cStatEl = document.getElementById("crypto-status");
+          var cStatVal = cStatEl ? String(cStatEl.value || "single") : "single";
+          if (cStatVal === "married_joint" || cStatVal === "head_of_household") {
+            var coEl = document.getElementById("crypto-ordinary-income");
+            var coInc = (coEl && !isNaN(parseFloat(coEl.value))) ? Math.max(0, parseFloat(coEl.value)) : 85000;
+            var totOrd = coInc + csG + ckG;
+            var cTiers = cStatVal === "married_joint" ? [24100, 97800, 208800, 398600, 506300, 759600] : [17200, 66400, 171600, 334500, 506300, 633100];
+            var oRate = totOrd > cTiers[5] ? 0.37 : (totOrd > cTiers[4] ? 0.35 : (totOrd > cTiers[3] ? 0.32 : (totOrd > cTiers[2] ? 0.24 : (totOrd > cTiers[1] ? 0.22 : (totOrd > cTiers[0] ? 0.12 : 0.10)))));
+            var cLtcgCfg = cStatVal === "married_joint" ? { t0: 96700, t15: 600050, niit: 250000 } : { t0: 64750, t15: 566700, niit: 200000 };
+            var cAt0 = Math.max(0, Math.min(totOrd + clG, cLtcgCfg.t0) - Math.max(totOrd, 0));
+            var cAt15 = Math.max(0, Math.min(totOrd + clG, cLtcgCfg.t15) - Math.max(totOrd, cLtcgCfg.t0));
+            var cAt20 = Math.max(0, (totOrd + clG) - Math.max(totOrd, cLtcgCfg.t15));
+            var cNiit = Math.min(Math.max(0, (totOrd + clG) - cLtcgCfg.niit), csG + clG) * 0.038;
+            var cTotTax = (csG * oRate) + (ckG * oRate) + (cAt15 * 0.15) + (cAt20 * 0.20) + cNiit + (cAllG * cstRate);
+            var cTaxOut = document.getElementById("res-crypto-tax");
+            var cNetOut = document.getElementById("res-crypto-net");
+            var cRateOut = document.getElementById("res-crypto-rate");
+            var cNiitOut = document.getElementById("res-crypto-niit");
+            if (cTaxOut) cTaxOut.textContent = fmtUsd(cTotTax);
+            if (cNetOut) cNetOut.textContent = fmtUsd(cAllG - cTotTax);
+            if (cRateOut) cRateOut.textContent = (cAllG > 0 ? ((cTotTax / cAllG) * 100).toFixed(1) : "0.0") + "%";
+            if (cNiitOut) cNiitOut.textContent = fmtUsd(cNiit);
+          }
+        }
         if (typeof window.updateRunwayCalculator === "function" && document.getElementById("runway-cash")) window.updateRunwayCalculator();
         if (typeof window.updateArbitrageCalculator === "function" && document.getElementById("arb-yes-cents")) window.updateArbitrageCalculator();
         if (typeof window.updateCapitalGainsCalculator === "function" && document.getElementById("cg-amount")) window.updateCapitalGainsCalculator("gain-input");
@@ -1954,6 +2073,7 @@ def _render_runtime_sync_workbench_js() -> str:
       updateSerpWorkbenchSynchronously();
 
       var outNodes = document.querySelectorAll(".output-value");
+      syncComplianceAuditFormOutputs(outNodes);
       if (!outNodes.length) {
         syncOutboundAffiliateLinks();
         return;
@@ -2790,8 +2910,11 @@ def _render_runtime_sync_events_js() -> str:
           sel.setAttribute("data-pseo-base-idx", String(sel.selectedIndex || 0));
         }
       }
-      restoreSavedBlueprintIfPresent();
-      hydrateInputsFromLocationSearch();
+      if (!_initialUrlHydrated && !_userInteracted) {
+        _initialUrlHydrated = true;
+        restoreSavedBlueprintIfPresent();
+        hydrateInputsFromLocationSearch();
+      }
       hydrateCheckoutFulfillmentFromUrl();
       syncOutboundAffiliateLinks();
     }
@@ -2861,6 +2984,203 @@ def _render_runtime_sync_events_js() -> str:
       }
     }, false);
 
+    // [retCapPct, statutoryPenaltyAprPct, topStateTaxPct, prelimNoticeDays, bondPenalSumUsd, wcClassRatePer100]
+    var STATE_STATUTORY_PARAMS = {
+      AL: [5.0, 12.0, 5.0, 30, 10000, 5.4],
+      AK: [8.0, 10.5, 0.0, 15, 25000, 6.9],
+      AZ: [10.0, 18.0, 2.5, 20, 15000, 4.9],
+      AR: [5.0, 10.0, 3.9, 10, 10000, 4.4],
+      CA: [5.0, 24.0, 13.3, 20, 25000, 8.9],
+      CO: [5.0, 18.0, 4.4, 10, 10000, 5.1],
+      CT: [5.0, 12.0, 6.99, 90, 20000, 7.6],
+      DE: [5.0, 12.0, 6.6, 60, 10000, 6.2],
+      DC: [5.0, 18.0, 10.75, 90, 25000, 7.4],
+      FL: [5.0, 9.5, 0.0, 45, 20000, 6.8],
+      GA: [10.0, 12.0, 5.39, 30, 10000, 5.8],
+      HI: [5.0, 18.0, 11.0, 45, 25000, 7.2],
+      ID: [5.0, 12.0, 5.695, 20, 10000, 5.5],
+      IL: [10.0, 9.0, 4.95, 90, 25000, 7.9],
+      IN: [10.0, 12.0, 3.0, 60, 10000, 4.2],
+      IA: [5.0, 12.0, 3.8, 10, 25000, 5.3],
+      KS: [10.0, 18.0, 5.58, 90, 10000, 5.0],
+      KY: [10.0, 12.0, 4.0, 75, 10000, 4.9],
+      LA: [10.0, 15.0, 3.0, 30, 10000, 6.7],
+      ME: [5.0, 12.0, 7.15, 90, 10000, 6.1],
+      MD: [5.0, 12.0, 5.75, 120, 20000, 6.4],
+      MA: [5.0, 12.0, 9.0, 90, 25000, 7.8],
+      MI: [10.0, 12.0, 4.25, 20, 20000, 6.3],
+      MN: [5.0, 18.0, 9.85, 45, 15000, 7.1],
+      MS: [5.0, 12.0, 4.4, 90, 10000, 5.6],
+      MO: [5.0, 18.0, 4.7, 10, 10000, 5.9],
+      MT: [5.0, 12.0, 5.9, 20, 10000, 6.5],
+      NE: [10.0, 12.0, 5.2, 60, 10000, 4.8],
+      NV: [5.0, 12.0, 0.0, 31, 15000, 5.7],
+      NH: [10.0, 12.0, 0.0, 30, 10000, 5.8],
+      NJ: [2.0, 12.0, 10.75, 60, 25000, 8.6],
+      NM: [0.0, 18.0, 5.9, 60, 10000, 6.0],
+      NY: [5.0, 12.0, 10.9, 30, 25000, 9.4],
+      NC: [5.0, 12.0, 4.25, 15, 10000, 5.5],
+      ND: [10.0, 18.0, 2.5, 10, 10000, 3.6],
+      OH: [8.0, 18.0, 3.5, 21, 20000, 3.8],
+      OK: [5.0, 12.0, 4.75, 75, 10000, 5.2],
+      OR: [5.0, 18.0, 9.9, 8, 20000, 6.3],
+      PA: [10.0, 12.0, 3.07, 30, 20000, 6.9],
+      RI: [5.0, 12.0, 5.99, 10, 10000, 6.6],
+      SC: [3.5, 12.0, 6.2, 90, 15000, 5.7],
+      SD: [10.0, 12.0, 0.0, 60, 10000, 4.7],
+      TN: [5.0, 10.0, 0.0, 90, 10000, 5.1],
+      TX: [10.0, 18.0, 0.0, 45, 10000, 5.2],
+      UT: [5.0, 24.0, 4.55, 20, 15000, 4.5],
+      VT: [5.0, 12.0, 8.75, 120, 10000, 6.2],
+      VA: [5.0, 12.0, 5.75, 30, 25000, 5.4],
+      WA: [5.0, 12.0, 0.0, 60, 30000, 7.1],
+      WV: [10.0, 12.0, 4.82, 100, 10000, 5.3],
+      WI: [5.0, 12.0, 7.65, 60, 15000, 6.0],
+      WY: [5.0, 18.0, 0.0, 30, 10000, 4.1]
+    };
+
+    function setNumAndPairedRange(id, val) {
+      var el = document.getElementById(id);
+      if (!el) return null;
+      el.value = String(val);
+      var rEl = findPairedRangeInput(el);
+      if (rEl && !/^retro-range-/.test(rEl.id || "")) {
+        rEl.value = String(val);
+      }
+      return el;
+    }
+
+    function applyHeroStateJurisdictionToCalculator(stVal) {
+      try {
+        var code = String(stVal || "").trim().toUpperCase();
+        var rec = STATE_STATUTORY_PARAMS[code];
+        if (!rec) return;
+        var retPct = rec[0];
+        var aprPct = rec[1];
+        var taxPct = rec[2];
+        var prelimDays = rec[3];
+        var bondPen = rec[4];
+        var wcRate = rec[5];
+
+        var retEl = setNumAndPairedRange("input-retainage_holdback_pct", retPct);
+        var aprEl = setNumAndPairedRange("input-credit_line_apr_pct", aprPct);
+        var disEl = retEl || aprEl;
+        if (disEl) {
+          disEl.dispatchEvent(new Event("input", { bubbles: true }));
+          disEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var lookEl = setNumAndPairedRange("input-statutory_lookback_window_days", prelimDays);
+        if (lookEl) {
+          lookEl.dispatchEvent(new Event("input", { bubbles: true }));
+          lookEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var resEl = setNumAndPairedRange("input-statutory_reserved_pct", retPct);
+        if (resEl) {
+          resEl.dispatchEvent(new Event("input", { bubbles: true }));
+          resEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var bondEl = setNumAndPairedRange("input-bond_penalty_amount", bondPen) || setNumAndPairedRange("input-bond_amount", bondPen);
+        if (bondEl) {
+          bondEl.dispatchEvent(new Event("input", { bubbles: true }));
+          bondEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var wcEl = setNumAndPairedRange("input-class_code_rate_per_100", wcRate) || setNumAndPairedRange("field-workers_comp_rate_per_100", wcRate);
+        if (wcEl) {
+          wcEl.dispatchEvent(new Event("input", { bubbles: true }));
+          wcEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var emrPremEl = setNumAndPairedRange("input-manual_workers_comp_premium", Math.round(7500 * wcRate));
+        if (emrPremEl) {
+          emrPremEl.dispatchEvent(new Event("input", { bubbles: true }));
+          emrPremEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var forfeitEl = setNumAndPairedRange("input-daily_forfeiture_rate", Math.round(bondPen / 20));
+        if (forfeitEl) {
+          forfeitEl.dispatchEvent(new Event("input", { bubbles: true }));
+          forfeitEl.dispatchEvent(new Event("change", { bubbles: true }));
+          var serpB2bRateEl = document.getElementById("serp-b2b-rate");
+          if (serpB2bRateEl) {
+            serpB2bRateEl.value = String(aprPct);
+            serpB2bRateEl.dispatchEvent(new Event("input", { bubbles: true }));
+            serpB2bRateEl.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+
+        var stateSelectIds = ["field-state_jurisdiction", "tey-state", "field-relinquished_state", "sec1031-from-state"];
+        for (var sIdx = 0; sIdx < stateSelectIds.length; sIdx++) {
+          var sEl = document.getElementById(stateSelectIds[sIdx]);
+          if (!sEl || !sEl.options) continue;
+          var matchedOpt = null;
+          var fedOpt = null;
+          for (var oIdx = 0; oIdx < sEl.options.length; oIdx++) {
+            var ov = String(sEl.options[oIdx].value || "").toUpperCase();
+            if (ov === code) {
+              matchedOpt = sEl.options[oIdx].value;
+              break;
+            }
+            if (ov === "FED_ONLY" || ov === "TX") fedOpt = sEl.options[oIdx].value;
+          }
+          if (matchedOpt !== null) {
+            sEl.value = matchedOpt;
+          } else if (taxPct === 0 && fedOpt !== null) {
+            sEl.value = fedOpt;
+          }
+          sEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var rateSelectIds = ["crypto-state", "cg-state", "pm-tax-state"];
+        var targetRateDec = taxPct / 100.0;
+        for (var rIdx = 0; rIdx < rateSelectIds.length; rIdx++) {
+          var rsEl = document.getElementById(rateSelectIds[rIdx]);
+          if (!rsEl || !rsEl.options || !rsEl.options.length) continue;
+          var bestOptVal = rsEl.options[0].value;
+          var bestDist = Infinity;
+          for (var ro = 0; ro < rsEl.options.length; ro++) {
+            var rv = parseFloat(rsEl.options[ro].value);
+            if (!isNaN(rv)) {
+              var d = Math.abs(rv - targetRateDec);
+              if (d < bestDist) {
+                bestDist = d;
+                bestOptVal = rsEl.options[ro].value;
+              }
+            }
+          }
+          rsEl.value = bestOptVal;
+          rsEl.dispatchEvent(new Event("change", { bubbles: true }));
+          if (rsEl.id === "crypto-state" && typeof window.updateCryptoCalculator === "function") {
+            window.updateCryptoCalculator();
+          }
+        }
+
+        var mRateEl = document.getElementById("field-marginal_tax_rate_pct");
+        if (mRateEl && !document.getElementById("field-state_jurisdiction")) {
+          if (!mRateEl.hasAttribute("data-pseo-fed-base")) {
+            mRateEl.setAttribute("data-pseo-fed-base", String(parseFloat(mRateEl.value || "35") || 35));
+          }
+          var baseMarg = parseFloat(mRateEl.getAttribute("data-pseo-fed-base") || "35") || 35;
+          var adjMarg = Math.max(10, Math.min(55, Math.round((baseMarg + ((taxPct - 13.3) * 0.5)) * 100) / 100));
+          setNumAndPairedRange("field-marginal_tax_rate_pct", adjMarg);
+          mRateEl.dispatchEvent(new Event("input", { bubbles: true }));
+          mRateEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        var sgEl = document.getElementById("field-state_group");
+        if (sgEl) {
+          var nextGroup = code === "AK" ? "alaska" : (code === "HI" ? "hawaii" : "contiguous");
+          if (sgEl.value !== nextGroup) {
+            sgEl.value = nextGroup;
+            sgEl.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+      } catch (stErr) {}
+    }
+
     document.addEventListener("change", function(e) {
       if (_syncing) return;
       var target = e.target;
@@ -2883,6 +3203,11 @@ def _render_runtime_sync_events_js() -> str:
               window.history.replaceState({}, "", u.toString());
             }
           } catch (uErr) {}
+          _userInteracted = true;
+          _lastInteractionScope = "primary";
+          applyHeroStateJurisdictionToCalculator(stVal);
+          updateOutputsSynchronously();
+          mirrorPrimaryToLegacyBenchmarks();
           syncOutboundAffiliateLinks();
         } else {
           _userInteracted = true;
@@ -3520,6 +3845,7 @@ def _render_runtime_sync_events_js() -> str:
           return;
         }
         e.preventDefault();
+        _userInteracted = true;
         initBaseValues();
         var presetType = (scenarioLink.getAttribute("data-preset") || "baseline").toLowerCase();
         var mult = presetType === "conservative" ? 0.8 : (presetType === "aggressive" ? 1.2 : 1.0);
@@ -5130,9 +5456,15 @@ def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]
 
     bp_match = re.search(r'<div\b[^>]*id=["\']saveable-decision-blueprint["\'][^>]*>', updated, re.IGNORECASE)
     bp_tag = bp_match.group(0) if bp_match else ""
+    canon_m = re.search(
+        r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\'][^"\']*/tools/([^/"\'?#]+)/?',
+        updated,
+        re.IGNORECASE,
+    )
     tool_slug = (
         _extract_attr(q_tag, "data-tool-slug")
         or _extract_attr(bp_tag, "data-blueprint-slug")
+        or (canon_m.group(1) if canon_m else "")
         or "index"
     ).strip().lower()
     raw_amt = _extract_attr(q_tag, "data-calculated-amount") or ""
@@ -5196,9 +5528,10 @@ def _retrofit_pro_hook_and_lead_capture_cards(
             r'<a\b[^>]*href=["\']#lead-capture-form["\'][^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>',
             (
                 f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" '
-                f'data-checkout-nav="1" style="color: var(--brand-primary); font-weight: 700; '
+                f'data-checkout-nav="1" style="background-color: var(--bg-surface); color: var(--brand-primary); '
+                f'border: 1px solid var(--brand-border); border-radius: 6px; font-weight: 700; '
                 f'text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; '
-                f'min-height: 44px; min-width: 44px; padding: 6px 10px;">'
+                f'min-height: 44px; min-width: 44px; padding: 6px 12px;">'
                 f'Export Audit Workpaper (${offer_price}) &rarr;</a>'
             ),
             new_pro_doc,
@@ -5273,7 +5606,7 @@ def _retrofit_pro_hook_and_lead_capture_cards(
         injected_pro_card = (
             f'\n          <div class="pro-hook-card" style="background: var(--brand-soft); border: 1px dashed var(--brand-border); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8125rem; color: var(--text-secondary); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem;">'
             f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>'
-            f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="color: var(--brand-primary); font-weight: 700; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">Export Audit Workpaper (${offer_price}) &rarr;</a>'
+            f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="background-color: var(--bg-surface); color: var(--brand-primary); border: 1px solid var(--brand-border); border-radius: 6px; font-weight: 700; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 12px;">Export Audit Workpaper (${offer_price}) &rarr;</a>'
             f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
             f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
             f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Reconciliation Schedule (Unlocked) | Line 2 Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
@@ -5355,6 +5688,34 @@ def _retrofit_pro_hook_and_lead_capture_cards(
         actions.append("lead_capture_consumer_email_placeholder")
 
     return updated
+
+
+def _normalize_pro_hook_link_contrast(html_fragment: str) -> Tuple[str, bool]:
+    """Ensures .pro-hook-link tags with accent/brand-primary inline text color pair it with a light surface."""
+    if "pro-hook-link" not in html_fragment or (
+        "var(--brand-primary)" not in html_fragment and "var(--accent)" not in html_fragment
+    ):
+        return html_fragment, False
+
+    def _fix_tag(m: re.Match) -> str:
+        tag = m.group(0)
+        if "background" in tag.lower():
+            return tag
+        return re.sub(
+            r'style=(["\'])([^"\']*?)(color:\s*var\(--(?:brand-primary|accent)\)\s*;?)',
+            r'style=\1\2background-color: var(--bg-surface); border: 1px solid var(--brand-border); border-radius: 6px; \3',
+            tag,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    repaired = re.sub(
+        r'<a\b[^>]*\bclass=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>',
+        _fix_tag,
+        html_fragment,
+        flags=re.IGNORECASE,
+    )
+    return repaired, repaired != html_fragment
 
 
 def _retrofit_partner_reg_and_quick_unlock(
@@ -5494,6 +5855,7 @@ def _retrofit_partner_reg_and_quick_unlock(
             baseline_amount=q_calc_amt,
         )
         if quick_bar_html:
+            quick_bar_html, _ = _normalize_pro_hook_link_contrast(quick_bar_html)
             qb_open_m = re.search(
                 r'<div\b[^>]*\bid=["\']calc-result-quick-unlock-bar["\'][^>]*>',
                 updated,
@@ -5677,6 +6039,45 @@ def _retrofit_partner_reg_and_quick_unlock(
     return updated
 
 
+def _strip_enclosing_div_containing(html_text: str, marker: str, div_class_hint: str = "") -> Tuple[str, bool]:
+    """Removes the innermost <div ...>...</div> enclosing `marker` (optionally matching `div_class_hint`)."""
+    idx = html_text.find(marker)
+    if idx == -1:
+        return html_text, False
+    # If marker sits inside the opening <div ...> tag itself (e.g. id= before class=), extend search_limit past '>'.
+    lt_pos = html_text.rfind("<", 0, idx)
+    gt_pos = html_text.rfind(">", 0, idx)
+    search_limit = idx
+    if lt_pos != -1 and lt_pos > gt_pos and html_text[lt_pos : lt_pos + 4].lower() == "<div":
+        close_gt = html_text.find(">", idx)
+        if close_gt != -1:
+            search_limit = close_gt + 1
+    if div_class_hint:
+        open_pat = re.compile(rf'<div\b[^>]*class=["\'][^"\']*\b{re.escape(div_class_hint)}\b[^"\']*["\'][^>]*>', re.IGNORECASE)
+    else:
+        open_pat = re.compile(r"<div\b[^>]*>", re.IGNORECASE)
+    matches = [m for m in open_pat.finditer(html_text[:search_limit])]
+    if not matches:
+        return html_text, False
+    start = matches[-1].start()
+    depth = 0
+    end = -1
+    for tok in re.finditer(r"<div\b[^>]*>|</div>", html_text[start:], re.IGNORECASE):
+        tag = tok.group(0).lower()
+        if tag.startswith("</"):
+            depth -= 1
+            if depth == 0:
+                end = start + tok.end()
+                break
+        else:
+            depth += 1
+    if end == -1:
+        return html_text, False
+    before = html_text[:start].rstrip(" \t")
+    after = html_text[end:].lstrip(" \t\r\n")
+    return f"{before}\n{after}", True
+
+
 def _retrofit_hero_range_and_jurisdiction_bars(
     updated: str,
     *,
@@ -5685,6 +6086,7 @@ def _retrofit_hero_range_and_jurisdiction_bars(
     has_quote_intake: bool,
     us_jurisdictions: Any,
     actions: List[str],
+    property_id: str = "",
 ) -> str:
     """Retrofits #hero-range-anchor, #state-first-hero-bar, state selects, and GSC overlay container alignment."""
     has_hero_section = bool(
@@ -5772,7 +6174,22 @@ def _retrofit_hero_range_and_jurisdiction_bars(
             updated = healed_hra
             actions.append("heal_hero_range_baseline_currency")
 
-    if (
+    needs_state_bar = is_state_jurisdiction_tool(tool_slug, property_id)
+    if not needs_state_bar:
+        for _ in range(5):
+            if 'id="state-first-hero-bar"' not in updated:
+                break
+            stripped_bar, did_strip = _strip_enclosing_div_containing(
+                updated, 'id="state-first-hero-bar"', div_class_hint="state-first-hero-bar"
+            )
+            if not did_strip:
+                stripped_bar, did_strip = _strip_enclosing_div_containing(updated, 'id="state-first-hero-bar"')
+            if not did_strip:
+                break
+            updated = stripped_bar
+            if "strip_non_state_hero_bar" not in actions:
+                actions.append("strip_non_state_hero_bar")
+    elif (
         has_quote_intake
         and has_hero_section
         and 'id="state-first-hero-bar"' not in updated
@@ -5885,9 +6302,15 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
             prop_id = "profithelm"
     bp_match = re.search(r'<div\b[^>]*id=["\']saveable-decision-blueprint["\'][^>]*>', updated, re.IGNORECASE)
     bp_tag = bp_match.group(0) if bp_match else ""
+    canon_m = re.search(
+        r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\'][^"\']*/tools/([^/"\'?#]+)/?',
+        updated,
+        re.IGNORECASE,
+    )
     tool_slug = (
         _extract_attr(q_tag, "data-tool-slug")
         or _extract_attr(bp_tag, "data-blueprint-slug")
+        or (canon_m.group(1) if canon_m else "")
         or "index"
     ).strip().lower()
     default_state = resolve_state_code_from_slug(tool_slug, prop_id)
@@ -5949,8 +6372,131 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         has_quote_intake=has_quote_intake,
         us_jurisdictions=US_51_JURISDICTIONS,
         actions=actions,
+        property_id=prop_id,
     )
+    updated, ph_contrast_changed = _normalize_pro_hook_link_contrast(updated)
+    if ph_contrast_changed and "pro_hook_link_contrast" not in actions:
+        actions.append("pro_hook_link_contrast")
     return updated, actions
+
+
+def _collapse_duplicate_faq_sections(html_text: str) -> Tuple[str, bool]:
+    """Collapse multiple FAQ <section> blocks into the first canonical FAQ section using balanced tag bounds."""
+    import html as _faq_html_mod
+
+    open_sec_re = re.compile(r"<section\b([^>]*)>", re.IGNORECASE)
+    tag_re = re.compile(r"<(/?)section\b[^>]*>", re.IGNORECASE)
+    faq_spans: List[Tuple[int, int]] = []
+    pos = 0
+    while True:
+        m_open = open_sec_re.search(html_text, pos)
+        if not m_open:
+            break
+        attrs = m_open.group(1) or ""
+        depth = 1
+        end_idx = -1
+        for tm in tag_re.finditer(html_text, m_open.end()):
+            if tm.group(1) == "/":
+                depth -= 1
+                if depth == 0:
+                    end_idx = tm.end()
+                    break
+            else:
+                depth += 1
+        if end_idx == -1:
+            break
+        block = html_text[m_open.start() : end_idx]
+        is_faq_cls = bool(
+            re.search(r'class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b[^"\']*["\']', attrs, re.IGNORECASE)
+        )
+        has_faq_heading = bool(
+            re.search(r"<h[1-4]\b[^>]*>[^<]*Frequently Asked Questions\b", block[:600], re.IGNORECASE)
+        )
+        if is_faq_cls or has_faq_heading:
+            faq_spans.append((m_open.start(), end_idx))
+            pos = end_idx
+        else:
+            pos = m_open.end()
+
+    if len(faq_spans) <= 1:
+        return html_text, False
+
+    def _norm_q(raw_q: str) -> str:
+        return _faq_html_mod.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw_q))).strip().lower()
+
+    # Prefer keeping the first <details>-backed FAQ section (accessible accordions + schema parity)
+    keep_idx = 0
+    for idx_cand, (cand_s, cand_e) in enumerate(faq_spans):
+        if "<details" in html_text[cand_s:cand_e].lower():
+            keep_idx = idx_cand
+            break
+
+    keep_s, keep_e = faq_spans[keep_idx]
+    keep_block = html_text[keep_s:keep_e]
+    seen_q = set()
+    for sm in re.finditer(r"<summary\b[^>]*>([\s\S]*?)</summary>", keep_block, re.IGNORECASE):
+        qn = _norm_q(sm.group(1))
+        if qn:
+            seen_q.add(qn)
+    for hm in re.finditer(
+        r'<div[^>]*class=["\'][^"\']*\bfaq-item\b[^"\']*["\'][^>]*>[\s\S]*?<h[34][^>]*>([\s\S]*?)</h[34]>',
+        keep_block,
+        re.IGNORECASE,
+    ):
+        qn = _norm_q(hm.group(1))
+        if qn:
+            seen_q.add(qn)
+
+    extra_blocks_to_append: List[str] = []
+    for idx_other, (sec_s, sec_e) in enumerate(faq_spans):
+        if idx_other == keep_idx:
+            continue
+        sec_html = html_text[sec_s:sec_e]
+        for det_m in re.finditer(r"<details\b[^>]*>[\s\S]*?</details>", sec_html, re.IGNORECASE):
+            det_str = det_m.group(0)
+            sm = re.search(r"<summary\b[^>]*>([\s\S]*?)</summary>", det_str, re.IGNORECASE)
+            qn = _norm_q(sm.group(1)) if sm else ""
+            if qn and qn not in seen_q:
+                seen_q.add(qn)
+                extra_blocks_to_append.append(det_str)
+        for div_m in re.finditer(
+            r'<div\b[^>]*>\s*<h[34][^>]*>([\s\S]*?)</h[34]>\s*<p[^>]*>([\s\S]*?)</p>\s*</div>',
+            sec_html,
+            re.IGNORECASE,
+        ):
+            q_raw, a_raw = div_m.group(1).strip(), div_m.group(2).strip()
+            qn = _norm_q(q_raw)
+            if qn and qn not in seen_q:
+                seen_q.add(qn)
+                extra_blocks_to_append.append(
+                    '<details class="faq-item faq-card" style="margin-bottom: 10px; padding: 12px; '
+                    'border: 1px solid var(--border); border-radius: 6px;">'
+                    '<summary class="touch-target" style="font-weight: 600; cursor: pointer; '
+                    'min-height: 44px; min-width: 44px; display: flex; align-items: center;">'
+                    f"{q_raw}</summary>"
+                    f'<p style="margin: 8px 0 0; line-height: 1.55;">{a_raw}</p></details>'
+                )
+
+    rebuilt_parts: List[str] = []
+    last_pos = 0
+    for idx_sec, (sec_s, sec_e) in enumerate(faq_spans):
+        rebuilt_parts.append(html_text[last_pos:sec_s])
+        if idx_sec == keep_idx:
+            merged_keep = keep_block
+            if extra_blocks_to_append:
+                close_i = merged_keep.rfind("</section>")
+                if close_i != -1:
+                    merged_keep = (
+                        merged_keep[:close_i].rstrip()
+                        + "\n"
+                        + "\n".join(extra_blocks_to_append)
+                        + "\n    </section>"
+                    )
+            rebuilt_parts.append(merged_keep)
+        last_pos = sec_e
+    rebuilt_parts.append(html_text[last_pos:])
+    collapsed = "".join(rebuilt_parts)
+    return collapsed, collapsed != html_text
 
 
 def normalize_html_visual_primitives(
@@ -6383,6 +6929,51 @@ def normalize_html_visual_primitives(
                 if n_hero > 0:
                     updated = hero_injected
                     repaired.append("above_fold_preset_salience")
+
+    # 5j. Strip dead #calc-input-extra_criteria field group on non-SOC-2 GainHelm calculators and null-guard inline JS
+    if 'id="gainhelm-compliance-form"' in updated or "gainhelm.com" in updated:
+        gh_slug_m = re.search(
+            r'data-(?:tool|blueprint)-slug=["\']([^"\']+)["\']|<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\'][^"\']*/tools/([^/"\'?#]+)/?',
+            updated,
+            re.IGNORECASE,
+        )
+        gh_slug = ((gh_slug_m.group(1) or gh_slug_m.group(2)) if gh_slug_m else "").strip().lower()
+        if gh_slug and "soc-2" not in gh_slug and "soc2" not in gh_slug:
+            if 'id="calc-input-extra_criteria"' in updated:
+                stripped_extra, did_strip_extra = _strip_enclosing_div_containing(
+                    updated,
+                    'id="calc-input-extra_criteria"',
+                    div_class_hint="calc-field-group",
+                )
+                if did_strip_extra:
+                    updated = stripped_extra
+                    repaired.append("strip_non_soc2_extra_criteria")
+            if 'document.getElementById("calc-input-extra_criteria").value =' in updated:
+                updated = updated.replace(
+                    'document.getElementById("calc-input-extra_criteria").value = this.getAttribute("data-preset-crit") || "2";',
+                    'var _critEl = document.getElementById("calc-input-extra_criteria"); if (_critEl) _critEl.value = this.getAttribute("data-preset-crit") || "2";',
+                )
+            if 'document.getElementById("calc-input-extra_criteria").value' in updated:
+                updated = updated.replace(
+                    'document.getElementById("calc-input-extra_criteria").value',
+                    '(document.getElementById("calc-input-extra_criteria") || {}).value',
+                )
+
+    updated_faq, faq_collapsed = _collapse_duplicate_faq_sections(updated)
+    if faq_collapsed:
+        updated = updated_faq
+        repaired.append("collapse_duplicate_faq_sections")
+
+    if "<h2" in updated and "card-title" in updated:
+        h2_fixed = re.sub(
+            r'(<h2\b[^>]*\bclass=["\'][^"\']*)\bcard-title\b([^"\']*["\'])',
+            r"\1section-title\2",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if h2_fixed != updated:
+            updated = h2_fixed
+            repaired.append("h2_card_title_to_section_title")
 
     # 6. Inject or repair <script id="pseo-runtime-sync">
     has_interactive_controls = any(

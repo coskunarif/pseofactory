@@ -987,9 +987,12 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
             assert report["partner_registration_and_slot_checkout"]["present"] is True
             assert report["partner_registration_and_slot_checkout"]["passed"] is True
             assert report["partner_registration_and_slot_checkout"]["slot_price_usd"] == 299
+            from pseofactory.contracts import is_state_jurisdiction_tool
+
             assert report["hash_navigation_and_focus"]["links_tested_count"] >= 1
             assert report["hash_navigation_and_focus"]["passed"] is True
-            assert report["hero_state_and_range_anchor"]["present"] is True
+            assert report["hero_state_and_range_anchor"]["range_anchor_present"] is True
+            assert report["hero_state_and_range_anchor"]["present"] is is_state_jurisdiction_tool(slug, prop_id)
             assert report["hero_state_and_range_anchor"]["passed"] is True
             assert report["validation_focus_and_error_states"]["present"] is True
             assert report["validation_focus_and_error_states"]["passed"] is True
