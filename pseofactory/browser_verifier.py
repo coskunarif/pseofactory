@@ -13,10 +13,12 @@ import inspect
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
 
 from pseofactory.server import EphemeralDistServer
@@ -477,6 +479,10 @@ class RouteManifestExtractor:
                 break
             _pick(r)
         return selected
+
+
+class CDPEvalError(RuntimeError):
+    """Raised when CDP Runtime.evaluate returns a protocol error or JS exceptionDetails."""
 
 
 class UnifiedBrowserAuditor:
@@ -2440,7 +2446,7 @@ class UnifiedBrowserAuditor:
         return failures
 
     def _postprocess_interactive_report(self, base_url: str, route: str, report: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(report, dict):
+        if not isinstance(report, dict) or not report:
             return {"passed": False, "route": route, "error": "invalid_eval_result"}
         links_audit = report.get("links_audit")
         if isinstance(links_audit, dict):
@@ -2639,7 +2645,258 @@ class UnifiedBrowserAuditor:
             {"expression": expr, "returnByValue": True, "awaitPromise": True},
             msg_id=msg_id,
         )
-        return res.get("result", {}).get("result", {}).get("value")
+        if not isinstance(res, dict):
+            raise CDPEvalError(f"Malformed CDP response: {res!r}")
+        if res.get("error"):
+            err = res["error"]
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            raise CDPEvalError(f"CDP Runtime.evaluate error: {msg}")
+        result_obj = res.get("result") or {}
+        if isinstance(result_obj, dict) and result_obj.get("exceptionDetails"):
+            exc_details = result_obj["exceptionDetails"]
+            if isinstance(exc_details, dict):
+                exc_obj = exc_details.get("exception") or {}
+                exc_text = (
+                    (exc_obj.get("description") if isinstance(exc_obj, dict) else "")
+                    or exc_details.get("text")
+                    or str(exc_details)
+                )
+            else:
+                exc_text = str(exc_details)
+            raise CDPEvalError(f"JS exception during Runtime.evaluate: {exc_text}")
+        inner = result_obj.get("result") if isinstance(result_obj, dict) else {}
+        return inner.get("value") if isinstance(inner, dict) else None
+
+    @staticmethod
+    def _normalize_route_path(path_or_route: str) -> str:
+        raw_path = urllib.parse.urlsplit(path_or_route or "/").path or "/"
+        if raw_path.endswith("/index.html"):
+            raw_path = raw_path[: -len("/index.html")] or "/"
+        if len(raw_path) > 1 and raw_path.endswith("/"):
+            raw_path = raw_path[:-1]
+        if raw_path.endswith(".html"):
+            raw_path = raw_path[:-5] or "/"
+        return raw_path or "/"
+
+    async def _configure_cdp_session(self, ws: Any, msg_counter: List[int]) -> None:
+        """Enables CDP domains, injects synthetic error/test hook, disables cache, and blocks external URLs."""
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Page.enable", msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(
+            ws,
+            "Page.addScriptToEvaluateOnNewDocument",
+            {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
+            msg_id=msg_counter[0],
+        )
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Runtime.enable", msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Network.enable", msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(
+            ws,
+            "Network.setBlockedURLs",
+            {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
+            msg_id=msg_counter[0],
+        )
+
+    async def _wait_for_layout_settle(
+        self,
+        ws: Any,
+        msg_counter: List[int],
+        expected_width: Optional[int] = None,
+    ) -> None:
+        """Flushes layout and waits two animation frames (capped at 60ms if rAF throttled)."""
+        width_check = (
+            f"window.innerWidth === {int(expected_width)}"
+            if expected_width is not None
+            else "true"
+        )
+        js_settle = f"""new Promise(resolve => {{
+            let done = false;
+            const finish = () => {{
+                if (done) return;
+                done = true;
+                resolve({width_check});
+            }};
+            if (document.documentElement) {{
+                void document.documentElement.offsetWidth;
+            }}
+            setTimeout(finish, 60);
+            if (typeof requestAnimationFrame === 'function') {{
+                requestAnimationFrame(() => requestAnimationFrame(finish));
+            }} else {{
+                setTimeout(finish, 20);
+            }}
+        }})"""
+        msg_counter[0] += 1
+        await self._eval_js(ws, js_settle, msg_id=msg_counter[0])
+
+    async def _set_viewport_and_settle(
+        self,
+        ws: Any,
+        width: int,
+        height: int,
+        device_scale_factor: int,
+        mobile: bool,
+        msg_counter: List[int],
+        settle_layout: bool = True,
+    ) -> None:
+        """Applies CDP device metrics override and waits for layout/animation-frame settle."""
+        msg_counter[0] += 1
+        await self._send_cdp(
+            ws,
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": width,
+                "height": height,
+                "deviceScaleFactor": device_scale_factor,
+                "mobile": mobile,
+            },
+            msg_id=msg_counter[0],
+        )
+        if settle_layout:
+            await self._wait_for_layout_settle(ws, msg_counter, expected_width=width)
+        else:
+            await asyncio.sleep(0.02)
+
+    async def _prepare_audit_viewport(self, ws: Any, msg_counter: List[int]) -> None:
+        """Brings the CDP tab forward, enables focus emulation, and resets initial 1440x900 viewport."""
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
+        msg_counter[0] += 1
+        await self._send_cdp(ws, "Emulation.clearDeviceMetricsOverride", {}, msg_id=msg_counter[0])
+        await self._set_viewport_and_settle(
+            ws,
+            1440,
+            900,
+            1,
+            False,
+            msg_counter,
+            settle_layout=False,
+        )
+        try:
+            msg_counter[0] += 1
+            await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
+        except CDPEvalError:
+            pass
+
+    async def _navigate_and_wait_ready(
+        self,
+        ws: Any,
+        base_url: str,
+        route: str,
+        msg_counter: List[int],
+        timeout_s: Optional[float] = None,
+        poll_interval: float = 0.025,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Navigates a fresh or reused CDP tab to `route` and waits until a fresh document
+        has committed (__pseoNavNonce cleared), reached document.readyState === 'complete',
+        populated document.body, and finished loading same-origin stylesheets.
+        """
+        eff_timeout = float(timeout_s if timeout_s is not None else getattr(self, "nav_timeout_s", 5.0))
+        normalized_base = base_url.rstrip("/")
+        normalized_route = route if route.startswith("/") else f"/{route}"
+        page_url = f"{normalized_base}{normalized_route}"
+        base_prefix_json = json.dumps(normalized_base)
+        expected_norm_json = json.dumps(self._normalize_route_path(normalized_route))
+
+        nav_nonce = f"nav_{msg_counter[0]}_{uuid.uuid4().hex[:12]}"
+        nonce_json = json.dumps(nav_nonce)
+
+        stamped = False
+        try:
+            msg_counter[0] += 1
+            pre_info = await self._eval_js(
+                ws,
+                f"(() => {{ window.__pseoNavNonce = {nonce_json}; return {{ stamped: true }}; }})()",
+                msg_id=msg_counter[0],
+            )
+            stamped = bool(isinstance(pre_info, dict) and pre_info.get("stamped"))
+        except CDPEvalError:
+            stamped = False
+
+        msg_counter[0] += 1
+        nav_res = await self._send_cdp(ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
+        if isinstance(nav_res, dict):
+            if nav_res.get("error"):
+                return False, f"CDP Page.navigate error for {route}: {nav_res['error']}"
+            nav_result = nav_res.get("result")
+            if isinstance(nav_result, dict) and nav_result.get("errorText"):
+                return False, f"Page.navigate failed for {route}: {nav_result['errorText']}"
+
+        ready_expr = f"""(() => {{
+            const nonceCleared = window.__pseoNavNonce !== {nonce_json};
+            const href = String(window.location.href || '');
+            const readyComplete = document.readyState === 'complete';
+            const hasBody = Boolean(document.body && document.body.children.length > 0);
+            const cssReady = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).every(
+                l => !l.href || !l.href.startsWith(window.location.origin) || l.sheet !== null
+            );
+            const normPath = (p) => {{
+                let s = String(p || '/').split('?')[0].split('#')[0];
+                if (s.endsWith('/index.html')) s = s.slice(0, -11) || '/';
+                if (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1);
+                if (s.endsWith('.html')) s = s.slice(0, -5) || '/';
+                return s || '/';
+            }};
+            const actualPath = normPath(window.location.pathname);
+            return {{
+                nonce_cleared: nonceCleared,
+                href_ok: href.startsWith({base_prefix_json}),
+                ready_complete: readyComplete,
+                has_body: hasBody,
+                css_ready: cssReady,
+                target_matched: actualPath === {expected_norm_json},
+                actual_path: String(window.location.pathname || ''),
+                ready_state: String(document.readyState || ''),
+            }};
+        }})()"""
+
+        deadline = time.monotonic() + eff_timeout
+        last_state: Any = None
+        last_err: Optional[str] = None
+        redirect_confirmed = False
+        while time.monotonic() < deadline:
+            await asyncio.sleep(poll_interval)
+            try:
+                msg_counter[0] += 1
+                rs = await self._eval_js(ws, ready_expr, msg_id=msg_counter[0])
+                last_state = rs
+            except CDPEvalError as exc:
+                last_err = str(exc)
+                continue
+
+            if not isinstance(rs, dict):
+                continue
+
+            base_ready = bool(
+                rs.get("href_ok")
+                and rs.get("ready_complete")
+                and rs.get("has_body")
+                and rs.get("css_ready")
+            )
+            if not base_ready:
+                redirect_confirmed = False
+                continue
+
+            if stamped:
+                if rs.get("nonce_cleared"):
+                    if rs.get("target_matched"):
+                        return True, None
+                    if redirect_confirmed:
+                        return True, None
+                    redirect_confirmed = True
+            elif rs.get("target_matched"):
+                return True, None
+
+        return False, f"Navigation timeout waiting for {page_url} (last_state={last_state!r}, last_error={last_err!r})"
 
     async def _audit_route_on_ws(
         self,
@@ -2649,7 +2906,6 @@ class UnifiedBrowserAuditor:
         msg_counter: List[int],
     ) -> Dict[str, Any]:
         """Executes full multi-viewport and visual primitive checks on an active CDP websocket."""
-        page_url = f"{base_url}{route}"
         defects: Dict[str, Any] = {
             "route": route,
             "screen_archetype": "statutory_guide",
@@ -2681,265 +2937,227 @@ class UnifiedBrowserAuditor:
             "cta_density_violations",
         )
 
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Emulation.clearDeviceMetricsOverride", {}, msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(
-            ws,
-            "Emulation.setDeviceMetricsOverride",
-            {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
-            msg_id=msg_counter[0],
-        )
-        await asyncio.sleep(0.04)
-        msg_counter[0] += 1
-        await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
-        base_prefix_json = json.dumps(base_url.rstrip("/"))
-        for _ in range(75):
-            await asyncio.sleep(0.02)
+        await self._prepare_audit_viewport(ws, msg_counter)
+        nav_ok, nav_err = await self._navigate_and_wait_ready(ws, base_url, route, msg_counter)
+        if not nav_ok:
+            defects["widget_failures"].append({
+                "widget_id": "navigation_barrier",
+                "detail": nav_err or f"Navigation failed for {route}",
+            })
+            defects["interactive_surface"] = {
+                "passed": False,
+                "route": route,
+                "error": nav_err or "navigation_timeout",
+            }
+            return defects
+
+        try:
             msg_counter[0] += 1
-            rs = await self._eval_js(
+            await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
+            await self._wait_for_layout_settle(ws, msg_counter, expected_width=1440)
+
+            # 1a. Wide Desktop Viewport (1440x900)
+            msg_counter[0] += 1
+            overflow_1440 = await self._eval_js(
                 ws,
-                f"window.location.href.startsWith({base_prefix_json}) && (document.readyState === 'interactive' || document.readyState === 'complete') && document.body && document.body.children.length > 0 && Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).every(l => !l.href || !l.href.startsWith(window.location.origin) || l.sheet !== null)",
+                "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
                 msg_id=msg_counter[0],
             )
-            if rs:
-                break
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-        await asyncio.sleep(0.02)
+            if overflow_1440:
+                defects["overflow_1440"] = True
 
-        # 1a. Wide Desktop Viewport (1440x900)
-        msg_counter[0] += 1
-        overflow_1440 = await self._eval_js(
-            ws,
-            "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
-            msg_id=msg_counter[0],
-        )
-        if overflow_1440:
-            defects["overflow_1440"] = True
+            msg_counter[0] += 1
+            prim_1440 = await self._eval_js(ws, self.JS_CHECK_VISUAL_PRIMITIVES, msg_id=msg_counter[0])
+            if isinstance(prim_1440, dict):
+                if prim_1440.get("screen_archetype"):
+                    defects["screen_archetype"] = prim_1440["screen_archetype"]
+                for k in prim_keys:
+                    if prim_1440.get(k):
+                        defects[k].extend(prim_1440[k])
 
-        msg_counter[0] += 1
-        prim_1440 = await self._eval_js(ws, self.JS_CHECK_VISUAL_PRIMITIVES, msg_id=msg_counter[0])
-        if isinstance(prim_1440, dict):
-            if prim_1440.get("screen_archetype"):
-                defects["screen_archetype"] = prim_1440["screen_archetype"]
-            for k in prim_keys:
-                if prim_1440.get(k):
-                    defects[k].extend(prim_1440[k])
+            msg_counter[0] += 1
+            targets_1440 = await self._eval_js(ws, self.JS_CHECK_TARGETS, msg_id=msg_counter[0])
+            if targets_1440:
+                defects["targets_under_44"].extend(targets_1440)
 
-        msg_counter[0] += 1
-        targets_1440 = await self._eval_js(ws, self.JS_CHECK_TARGETS, msg_id=msg_counter[0])
-        if targets_1440:
-            defects["targets_under_44"].extend(targets_1440)
+            # 4a. Initial load & scroll CLS check before Emulation.setDeviceMetricsOverride resizes viewport
+            msg_counter[0] += 1
+            cls_val = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
+            if cls_val and cls_val > 0.0:
+                defects["cls_value"] = cls_val
 
-        # 4a. Initial load & scroll CLS check before Emulation.setDeviceMetricsOverride resizes viewport
-        msg_counter[0] += 1
-        cls_val = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
-        if cls_val and cls_val > 0.0:
-            defects["cls_value"] = cls_val
+            # 1b. Standard Desktop Viewport (1280x800)
+            await self._set_viewport_and_settle(ws, 1280, 800, 1, False, msg_counter)
+            msg_counter[0] += 1
+            desktop_overflow = await self._eval_js(
+                ws,
+                "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
+                msg_id=msg_counter[0],
+            )
+            if desktop_overflow:
+                defects["overflow_1280"] = True
 
-        # 1b. Standard Desktop Viewport (1280x800)
-        msg_counter[0] += 1
-        await self._send_cdp(
-            ws,
-            "Emulation.setDeviceMetricsOverride",
-            {"width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": False},
-            msg_id=msg_counter[0],
-        )
-        await asyncio.sleep(0.02)
-        msg_counter[0] += 1
-        desktop_overflow = await self._eval_js(
-            ws,
-            "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
-            msg_id=msg_counter[0],
-        )
-        if desktop_overflow:
-            defects["overflow_1280"] = True
+            # Tablet viewport transition (768x1024)
+            await self._set_viewport_and_settle(ws, 768, 1024, 2, True, msg_counter)
 
-        # Tablet viewport transition (768x1024)
-        msg_counter[0] += 1
-        await self._send_cdp(
-            ws,
-            "Emulation.setDeviceMetricsOverride",
-            {"width": 768, "height": 1024, "deviceScaleFactor": 2, "mobile": True},
-            msg_id=msg_counter[0],
-        )
-        await asyncio.sleep(0.02)
+            # Narrow viewport transition (320x568)
+            await self._set_viewport_and_settle(ws, 320, 568, 2, True, msg_counter)
 
-        # Narrow viewport transition (320x568)
-        msg_counter[0] += 1
-        await self._send_cdp(
-            ws,
-            "Emulation.setDeviceMetricsOverride",
-            {"width": 320, "height": 568, "deviceScaleFactor": 2, "mobile": True},
-            msg_id=msg_counter[0],
-        )
-        await asyncio.sleep(0.02)
+            # 2. Mobile Viewport (375x812)
+            await self._set_viewport_and_settle(ws, 375, 812, 2, True, msg_counter)
+            msg_counter[0] += 1
+            mobile_overflow = await self._eval_js(
+                ws,
+                "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
+                msg_id=msg_counter[0],
+            )
+            if mobile_overflow:
+                defects["overflow_375"] = True
 
-        # 2. Mobile Viewport (375x812)
-        msg_counter[0] += 1
-        await self._send_cdp(
-            ws,
-            "Emulation.setDeviceMetricsOverride",
-            {"width": 375, "height": 812, "deviceScaleFactor": 2, "mobile": True},
-            msg_id=msg_counter[0],
-        )
-        await asyncio.sleep(0.04)
-        msg_counter[0] += 1
-        mobile_overflow = await self._eval_js(
-            ws,
-            "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
-            msg_id=msg_counter[0],
-        )
-        if mobile_overflow:
-            defects["overflow_375"] = True
+            msg_counter[0] += 1
+            prim_375 = await self._eval_js(ws, self.JS_CHECK_VISUAL_PRIMITIVES, msg_id=msg_counter[0])
+            if isinstance(prim_375, dict):
+                for k in prim_keys:
+                    if prim_375.get(k):
+                        existing_reprs = {json.dumps(item, sort_keys=True) for item in defects[k]}
+                        for item in prim_375[k]:
+                            if json.dumps(item, sort_keys=True) not in existing_reprs:
+                                defects[k].append(item)
 
-        msg_counter[0] += 1
-        prim_375 = await self._eval_js(ws, self.JS_CHECK_VISUAL_PRIMITIVES, msg_id=msg_counter[0])
-        if isinstance(prim_375, dict):
-            for k in prim_keys:
-                if prim_375.get(k):
-                    existing_reprs = {json.dumps(item, sort_keys=True) for item in defects[k]}
-                    for item in prim_375[k]:
-                        if json.dumps(item, sort_keys=True) not in existing_reprs:
-                            defects[k].append(item)
+            # 3. Touch targets check (>= 43.5x43.5px)
+            msg_counter[0] += 1
+            targets = await self._eval_js(ws, self.JS_CHECK_TARGETS, msg_id=msg_counter[0])
+            if targets:
+                existing_t = {json.dumps(item, sort_keys=True) for item in defects["targets_under_44"]}
+                for item in targets:
+                    if json.dumps(item, sort_keys=True) not in existing_t:
+                        defects["targets_under_44"].append(item)
 
-        # 3. Touch targets check (>= 43.5x43.5px)
-        msg_counter[0] += 1
-        targets = await self._eval_js(ws, self.JS_CHECK_TARGETS, msg_id=msg_counter[0])
-        if targets:
-            existing_t = {json.dumps(item, sort_keys=True) for item in defects["targets_under_44"]}
-            for item in targets:
-                if json.dumps(item, sort_keys=True) not in existing_t:
-                    defects["targets_under_44"].append(item)
+            # 4b. Interactive CLS check (PerformanceObserver layout-shift must be 0.0)
+            msg_counter[0] += 1
+            interaction_cls = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
+            if interaction_cls and interaction_cls > defects["cls_value"]:
+                defects["cls_value"] = interaction_cls
 
-        # 4b. Interactive CLS check (PerformanceObserver layout-shift must be 0.0)
-        msg_counter[0] += 1
-        interaction_cls = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
-        if interaction_cls and interaction_cls > defects["cls_value"]:
-            defects["cls_value"] = interaction_cls
+            # 5. Dashes check (zero forbidden em/en dashes and spaced hyphens)
+            msg_counter[0] += 1
+            dashes = await self._eval_js(ws, self.JS_CHECK_DASHES, msg_id=msg_counter[0])
+            if dashes:
+                defects["dashes"] = dashes
 
-        # 5. Dashes check (zero forbidden em/en dashes and spaced hyphens)
-        msg_counter[0] += 1
-        dashes = await self._eval_js(ws, self.JS_CHECK_DASHES, msg_id=msg_counter[0])
-        if dashes:
-            defects["dashes"] = dashes
+            # 6. Broken asset check
+            msg_counter[0] += 1
+            has_full_sitemap = (self.dist_dir / "sitemap.xml").is_file()
+            has_local_scripts = (
+                has_full_sitemap
+                or (self.dist_dir / "static" / "js").is_dir()
+                or (self.dist_dir / "js").is_dir()
+            )
+            broken_assets = await self._eval_js(
+                ws,
+                self._build_broken_assets_js(
+                    check_meta_assets=has_full_sitemap,
+                    check_script_assets=has_local_scripts,
+                ),
+                msg_id=msg_counter[0],
+            )
+            if broken_assets:
+                defects["broken_assets"] = broken_assets
 
-        # 6. Broken asset check
-        msg_counter[0] += 1
-        has_full_sitemap = (self.dist_dir / "sitemap.xml").is_file()
-        has_local_scripts = (
-            has_full_sitemap
-            or (self.dist_dir / "static" / "js").is_dir()
-            or (self.dist_dir / "js").is_dir()
-        )
-        broken_assets = await self._eval_js(
-            ws,
-            self._build_broken_assets_js(
-                check_meta_assets=has_full_sitemap,
-                check_script_assets=has_local_scripts,
-            ),
-            msg_id=msg_counter[0],
-        )
-        if broken_assets:
-            defects["broken_assets"] = broken_assets
-
-        # 7. Reactive widget updates and popstate hydration
-        for spec in self.widget_specs:
-            if spec.route == route:
-                msg_counter[0] += 1
-                in_sel_json = json.dumps(spec.input_selector)
-                out_sel_json = json.dumps(spec.output_selector)
-                in_val_json = json.dumps(spec.input_value)
-                trig_json = json.dumps(spec.trigger_event)
-                js_widget = f"""(() => {{
-                    const pickFirst = (selList) => {{
-                        for (const s of selList.split(',').map(x => x.trim()).filter(Boolean)) {{
-                            const el = document.querySelector(s);
-                            if (el) return el;
+            # 7. Reactive widget updates and popstate hydration
+            for spec in self.widget_specs:
+                if spec.route == route:
+                    msg_counter[0] += 1
+                    in_sel_json = json.dumps(spec.input_selector)
+                    out_sel_json = json.dumps(spec.output_selector)
+                    in_val_json = json.dumps(spec.input_value)
+                    trig_json = json.dumps(spec.trigger_event)
+                    js_widget = f"""(() => {{
+                        const pickFirst = (selList) => {{
+                            for (const s of selList.split(',').map(x => x.trim()).filter(Boolean)) {{
+                                const el = document.querySelector(s);
+                                if (el) return el;
+                            }}
+                            return document.querySelector(selList);
+                        }};
+                        const inputEl = pickFirst({in_sel_json});
+                        const outEl = pickFirst({out_sel_json});
+                        if (!inputEl || !outEl) return {{ success: false, reason: 'elements_missing' }};
+                        const origInputVal = inputEl.value;
+                        const initialVal = outEl.innerText.trim();
+                        const specVal = {in_val_json};
+                        const trigEv = {trig_json};
+                        const targetVal = (Number(inputEl.value) === Number(specVal)) ? String(Number(specVal) * 2) : specVal;
+                        inputEl.value = targetVal;
+                        inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
+                        inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        let finalVal = outEl.innerText.trim();
+                        if (initialVal === finalVal) {{
+                            const altInputs = document.querySelectorAll('[data-calc-input], input:not([type=hidden])');
+                            for (const alt of altInputs) {{
+                                if (alt === inputEl) continue;
+                                const origAlt = alt.value;
+                                alt.value = targetVal;
+                                alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
+                                alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                finalVal = outEl.innerText.trim();
+                                alt.value = origAlt;
+                                alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
+                                alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                if (initialVal !== finalVal) break;
+                            }}
                         }}
-                        return document.querySelector(selList);
-                    }};
-                    const inputEl = pickFirst({in_sel_json});
-                    const outEl = pickFirst({out_sel_json});
-                    if (!inputEl || !outEl) return {{ success: false, reason: 'elements_missing' }};
-                    const origInputVal = inputEl.value;
-                    const initialVal = outEl.innerText.trim();
-                    const specVal = {in_val_json};
-                    const trigEv = {trig_json};
-                    const targetVal = (Number(inputEl.value) === Number(specVal)) ? String(Number(specVal) * 2) : specVal;
-                    inputEl.value = targetVal;
-                    inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
-                    inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    let finalVal = outEl.innerText.trim();
-                    if (initialVal === finalVal) {{
-                        const altInputs = document.querySelectorAll('[data-calc-input], input:not([type=hidden])');
-                        for (const alt of altInputs) {{
-                            if (alt === inputEl) continue;
-                            const origAlt = alt.value;
-                            alt.value = targetVal;
-                            alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
-                            alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                            finalVal = outEl.innerText.trim();
-                            alt.value = origAlt;
-                            alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
-                            alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                            if (initialVal !== finalVal) break;
+                        inputEl.value = origInputVal;
+                        inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
+                        inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        let popstateOk = true;
+                        if ({'true' if spec.verify_popstate else 'false'}) {{
+                            try {{
+                                window.dispatchEvent(new PopStateEvent('popstate'));
+                            }} catch(e) {{
+                                popstateOk = false;
+                            }}
                         }}
-                    }}
-                    inputEl.value = origInputVal;
-                    inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
-                    inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    let popstateOk = true;
-                    if ({'true' if spec.verify_popstate else 'false'}) {{
-                        try {{
-                            window.dispatchEvent(new PopStateEvent('popstate'));
-                        }} catch(e) {{
-                            popstateOk = false;
-                        }}
-                    }}
-                    return {{ success: true, updated: initialVal !== finalVal, popstate_ok: popstateOk }};
-                }})()"""
-                widget_res = await self._eval_js(ws, js_widget, msg_id=msg_counter[0])
-                if not (widget_res and widget_res.get("success") and widget_res.get("updated") and widget_res.get("popstate_ok", True)):
-                    defects["widget_failures"].append({
-                        "widget_id": spec.widget_id,
-                        "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
-                    })
+                        return {{ success: true, updated: initialVal !== finalVal, popstate_ok: popstateOk }};
+                    }})()"""
+                    widget_res = await self._eval_js(ws, js_widget, msg_id=msg_counter[0])
+                    if not (widget_res and widget_res.get("success") and widget_res.get("updated") and widget_res.get("popstate_ok", True)):
+                        defects["widget_failures"].append({
+                            "widget_id": spec.widget_id,
+                            "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
+                        })
 
-        # 8. Restore desktop viewport (1440x900) and run universal interactive state + E2E surface verification
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(
-            ws,
-            "Emulation.setDeviceMetricsOverride",
-            {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
-            msg_id=msg_counter[0],
-        )
-        await asyncio.sleep(0.02)
-        msg_counter[0] += 1
-        univ_failures = await self._eval_js(ws, self.JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC, msg_id=msg_counter[0])
-        if isinstance(univ_failures, list) and univ_failures:
-            defects["widget_failures"].extend(univ_failures)
+            # 8. Restore desktop viewport (1440x900) and run universal interactive state + E2E surface verification
+            msg_counter[0] += 1
+            await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
+            msg_counter[0] += 1
+            await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
+            await self._set_viewport_and_settle(ws, 1440, 900, 1, False, msg_counter)
+            msg_counter[0] += 1
+            univ_failures = await self._eval_js(ws, self.JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC, msg_id=msg_counter[0])
+            if isinstance(univ_failures, list) and univ_failures:
+                defects["widget_failures"].extend(univ_failures)
 
-        msg_counter[0] += 1
-        raw_e2e = await self._eval_js(ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
-        e2e_rep = self._postprocess_interactive_report(base_url, route, raw_e2e if isinstance(raw_e2e, dict) else {})
-        defects["interactive_surface"] = e2e_rep
-        if not e2e_rep.get("passed", False):
+            msg_counter[0] += 1
+            raw_e2e = await self._eval_js(ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+            e2e_rep = self._postprocess_interactive_report(base_url, route, raw_e2e)
+            defects["interactive_surface"] = e2e_rep
+            if not e2e_rep.get("passed", False):
+                defects["widget_failures"].append({
+                    "widget_id": "e2e_interactive_surface",
+                    "detail": f"Interactive surface verification failed on {route}",
+                })
+        except CDPEvalError as exc:
             defects["widget_failures"].append({
-                "widget_id": "e2e_interactive_surface",
-                "detail": f"Interactive surface verification failed on {route}",
+                "widget_id": "cdp_eval_error",
+                "detail": str(exc),
             })
+            if "interactive_surface" not in defects:
+                defects["interactive_surface"] = {
+                    "passed": False,
+                    "route": route,
+                    "error": str(exc),
+                }
 
         return defects
 
@@ -2969,28 +3187,7 @@ class UnifiedBrowserAuditor:
 
         try:
             async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as new_ws:
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Page.enable", msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(
-                    new_ws,
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
-                    msg_id=msg_counter[0],
-                )
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Runtime.enable", msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Network.enable", msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(
-                    new_ws,
-                    "Network.setBlockedURLs",
-                    {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
-                    msg_id=msg_counter[0],
-                )
+                await self._configure_cdp_session(new_ws, msg_counter)
                 return await self._audit_route_on_ws(new_ws, base_url, route, msg_counter)
         finally:
             self._close_cdp_tab_and_leaked_loopback(tab_id, active_origin=base_url, cleanup_stale_loopback=False)
@@ -3047,32 +3244,16 @@ class UnifiedBrowserAuditor:
             msg_counter = [1]
 
         async def _run_on_ws(active_ws: Any) -> Dict[str, Any]:
-            page_url = f"{base_url.rstrip('/')}{route}"
-            msg_counter[0] += 1
-            await self._send_cdp(active_ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-            msg_counter[0] += 1
-            await self._send_cdp(
-                active_ws,
-                "Emulation.setDeviceMetricsOverride",
-                {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
-                msg_id=msg_counter[0],
-            )
-            msg_counter[0] += 1
-            await self._send_cdp(active_ws, "Page.navigate", {"url": page_url}, msg_id=msg_counter[0])
-            base_prefix_json = json.dumps(base_url.rstrip("/"))
-            for _ in range(125):
-                await asyncio.sleep(0.04)
+            await self._prepare_audit_viewport(active_ws, msg_counter)
+            nav_ok, nav_err = await self._navigate_and_wait_ready(active_ws, base_url, route, msg_counter)
+            if not nav_ok:
+                return {"passed": False, "route": route, "error": nav_err or "navigation_timeout"}
+            try:
+                await self._wait_for_layout_settle(active_ws, msg_counter, expected_width=1440)
                 msg_counter[0] += 1
-                rs = await self._eval_js(
-                    active_ws,
-                    f"window.location.href.startsWith({base_prefix_json}) && document.readyState === 'complete' && document.body && document.body.children.length > 0",
-                    msg_id=msg_counter[0],
-                )
-                if rs:
-                    break
-            await asyncio.sleep(0.05)
-            msg_counter[0] += 1
-            res = await self._eval_js(active_ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+                res = await self._eval_js(active_ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+            except CDPEvalError as exc:
+                return {"passed": False, "route": route, "error": str(exc)}
             if not isinstance(res, dict):
                 return {"passed": False, "route": route, "error": "invalid_eval_result"}
             return self._postprocess_interactive_report(base_url, route, res)
@@ -3087,28 +3268,7 @@ class UnifiedBrowserAuditor:
 
         try:
             async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as new_ws:
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Page.enable", msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(
-                    new_ws,
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
-                    msg_id=msg_counter[0],
-                )
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Runtime.enable", msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Network.enable", msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(new_ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
-                msg_counter[0] += 1
-                await self._send_cdp(
-                    new_ws,
-                    "Network.setBlockedURLs",
-                    {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
-                    msg_id=msg_counter[0],
-                )
+                await self._configure_cdp_session(new_ws, msg_counter)
                 return await _run_on_ws(new_ws)
         finally:
             self._close_cdp_tab_and_leaked_loopback(tab_id, active_origin=base_url, cleanup_stale_loopback=False)
@@ -3178,28 +3338,7 @@ class UnifiedBrowserAuditor:
                     ws_url = info["webSocketDebuggerUrl"]
                     try:
                         async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
-                            msg_counter[0] += 1
-                            await self._send_cdp(ws, "Page.enable", msg_id=msg_counter[0])
-                            msg_counter[0] += 1
-                            await self._send_cdp(
-                                ws,
-                                "Page.addScriptToEvaluateOnNewDocument",
-                                {"source": self.JS_INIT_ERROR_AND_SYNTHETIC_HOOK},
-                                msg_id=msg_counter[0],
-                            )
-                            msg_counter[0] += 1
-                            await self._send_cdp(ws, "Runtime.enable", msg_id=msg_counter[0])
-                            msg_counter[0] += 1
-                            await self._send_cdp(ws, "Network.enable", msg_id=msg_counter[0])
-                            msg_counter[0] += 1
-                            await self._send_cdp(ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
-                            msg_counter[0] += 1
-                            await self._send_cdp(
-                                ws,
-                                "Network.setBlockedURLs",
-                                {"urls": self.BLOCKED_EXTERNAL_URL_PATTERNS},
-                                msg_id=msg_counter[0],
-                            )
+                            await self._configure_cdp_session(ws, msg_counter)
                             for r in routes_to_audit:
                                 res = await self.verify_route(base_url, r, msg_counter, ws=ws)
                                 findings.append(res)

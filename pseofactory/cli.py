@@ -11,7 +11,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure package root takes precedence in sys.path when invoked directly
 _project_root = str(Path(__file__).resolve().parent.parent)
@@ -62,6 +62,131 @@ def _run_seo_fix_checklist_gate(property_id: str, as_json: bool) -> bool:
         for issue in rep["issues"][:20]:
             print(f"  - {issue}")
     return bool(rep["passed"])
+
+
+def _format_widget_failure_item(item: Any) -> str:
+    if isinstance(item, dict):
+        wid = str(item.get("widget_id") or item.get("id") or "widget")
+        detail = str(item.get("detail") or item.get("reason") or "failed").strip()
+        return f"{wid}: {detail[:120]}"
+    return str(item)[:120]
+
+
+def _summarize_interactive_surface_failures(isurf: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    if isurf.get("error"):
+        reasons.append(f"interactive_surface.error={str(isurf['error'])[:120]}")
+    console_errs = isurf.get("console_errors") or []
+    if console_errs:
+        reasons.append(f"console_errors({len(console_errs)}): {str(console_errs[0])[:100]}")
+    page_errs = isurf.get("page_errors") or []
+    if page_errs:
+        reasons.append(f"page_errors({len(page_errs)}): {str(page_errs[0])[:100]}")
+    links_audit = isurf.get("links_audit")
+    if isinstance(links_audit, dict):
+        inv_links = links_audit.get("invalid_links") or []
+        if inv_links:
+            reasons.append(f"invalid_links({len(inv_links)}): {', '.join(str(x) for x in inv_links[:3])}")
+        unrouted = links_audit.get("unrouted_affiliate_links") or []
+        if unrouted:
+            reasons.append(f"unrouted_affiliate_links({len(unrouted)})")
+    for sub_key, sub_val in isurf.items():
+        if not isinstance(sub_val, dict) or sub_val.get("passed", True):
+            continue
+        detail_bits: List[str] = []
+        if sub_val.get("detail"):
+            detail_bits.append(str(sub_val["detail"])[:80])
+        for list_k in (
+            "failures",
+            "input_failures",
+            "button_failures",
+            "partner_failures",
+            "zero_outline_failures",
+            "accordion_failures",
+            "focus_failures",
+            "positive_tabindex_traps",
+        ):
+            lv = sub_val.get(list_k)
+            if lv:
+                detail_bits.append(f"{list_k}={lv[:3]}")
+        if not detail_bits and sub_val.get("skip_link_valid") is False:
+            detail_bits.append("skip_link_valid=False")
+        if not detail_bits and sub_val.get("submission_state"):
+            detail_bits.append(f"submission_state={sub_val['submission_state']}")
+        reasons.append(f"interactive_surface.{sub_key}({'; '.join(detail_bits) or 'failed'})")
+    if not reasons and not isurf.get("passed", True):
+        reasons.append("interactive_surface failed")
+    return reasons
+
+
+def _summarize_browser_finding_failures(finding: Dict[str, Any]) -> List[str]:
+    """Extracts human-readable failure reasons from a single route's CDP audit finding."""
+    reasons: List[str] = []
+    overflow_vps = [
+        vp
+        for vp, key in (("375px", "overflow_375"), ("1280px", "overflow_1280"), ("1440px", "overflow_1440"))
+        if finding.get(key)
+    ]
+    if overflow_vps:
+        reasons.append(f"horizontal overflow ({', '.join(overflow_vps)})")
+    if finding.get("targets_under_44"):
+        reasons.append(f"{len(finding['targets_under_44'])} undersized touch targets")
+    if float(finding.get("cls_value") or 0.0) > 0.0:
+        reasons.append(f"CLS {finding['cls_value']}")
+    if finding.get("dashes"):
+        reasons.append(f"{len(finding['dashes'])} forbidden dashes")
+    if finding.get("broken_assets"):
+        assets = finding["broken_assets"]
+        sample = [str(a.get("src") or a) if isinstance(a, dict) else str(a) for a in assets[:3]]
+        reasons.append(f"{len(assets)} broken assets ({', '.join(sample)})")
+    if finding.get("widget_failures"):
+        wf = finding["widget_failures"]
+        items_str = "; ".join(_format_widget_failure_item(item) for item in wf[:4])
+        suffix = f" (+{len(wf) - 4} more)" if len(wf) > 4 else ""
+        reasons.append(f"widget_failures({len(wf)}): [{items_str}]{suffix}")
+    isurf = finding.get("interactive_surface")
+    if isinstance(isurf, dict) and not isurf.get("passed", True):
+        reasons.extend(_summarize_interactive_surface_failures(isurf))
+    for prim_key in (
+        "hierarchy_violations",
+        "unwrapped_tables",
+        "transparent_controls",
+        "clipped_elements",
+        "card_geometry_violations",
+        "whitespace_rhythm_violations",
+        "calculator_ergonomics_violations",
+        "cta_density_violations",
+    ):
+        items = finding.get(prim_key)
+        if items:
+            samples = [
+                str(it.get("type") or it.get("cls") or it.get("id") or it)[:60] if isinstance(it, dict) else str(it)[:60]
+                for it in items[:3]
+            ]
+            reasons.append(f"{prim_key}({len(items)}): {', '.join(samples)}")
+    return reasons
+
+
+def _print_browser_audit_report(label: str, report: Dict[str, Any], max_routes: int = 10) -> None:
+    """Prints Browser CDP Audit summary plus capped per-route failure details."""
+    status = report.get("status", "UNKNOWN")
+    print(
+        f"[{status}] Browser CDP Audit for '{label}': "
+        f"Total: {report.get('total_routes', 0)} | Audited: {report.get('routes_audited', 0)} | Failed: {report.get('failed_count', 0)}"
+    )
+    failed_routes: List[Tuple[str, List[str]]] = []
+    for finding in report.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        reasons = _summarize_browser_finding_failures(finding)
+        if reasons:
+            failed_routes.append((str(finding.get("route") or "<unknown>"), reasons))
+    for route, reasons in failed_routes[:max_routes]:
+        print(f"  - {route}: {' | '.join(reasons)}")
+    if len(failed_routes) > max_routes:
+        print(f"  ... and {len(failed_routes) - max_routes} more failing route(s)")
+    if not failed_routes and status == "FAIL" and report.get("message"):
+        print(f"  - {report['message']}")
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -123,11 +248,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 rep = auditor.run_audit(sample_size=getattr(args, "sample", None))
                 browser_reports[p_id] = rep
                 if not args.json:
-                    status = rep.get("status", "UNKNOWN")
-                    print(
-                        f"[{status}] Browser CDP Audit for '{p_id}': "
-                        f"Total: {rep.get('total_routes', 0)} | Audited: {rep.get('routes_audited', 0)} | Failed: {rep.get('failed_count', 0)}"
-                    )
+                    _print_browser_audit_report(p_id, rep)
                 if rep.get("status") != "PASS":
                     all_browser_ok = False
             if args.json:
@@ -145,20 +266,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         if args.json:
             print(json.dumps(report, indent=2))
         else:
-            status = report.get("status", "UNKNOWN")
-            print(f"[{status}] Browser CDP Audit for '{args.property or 'dist'}': Total: {report.get('total_routes', 0)} | Audited: {report.get('routes_audited', 0)} | Failed: {report.get('failed_count', 0)}")
-            for f in report.get("findings", []):
-                route = f.get("route")
-                if f.get("targets_under_44"):
-                    print(f"  - {route}: {len(f['targets_under_44'])} undersized touch targets")
-                if f.get("cls_value", 0.0) > 0.0:
-                    print(f"  - {route}: CLS {f['cls_value']}")
-                if f.get("overflow_375") or f.get("overflow_1280"):
-                    print(f"  - {route}: horizontal overflow detected")
-                if f.get("dashes"):
-                    print(f"  - {route}: forbidden dashes detected")
-                if f.get("widget_failures"):
-                    print(f"  - {route}: {len(f['widget_failures'])} interactive/widget failures")
+            _print_browser_audit_report(args.property or "dist", report)
         return 0 if report.get("status") in ("PASS", "SKIPPED_CDP_OFFLINE") else 1
 
     reg = TenantRegistry.default()
@@ -238,11 +346,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                         f"({'; '.join(d.details)})"
                     )
                 if "browser_audit" in rep_dict:
-                    b_rep = rep_dict["browser_audit"]
-                    print(
-                        f"[{b_rep.get('status', 'UNKNOWN')}] Browser CDP Audit for '{p_id}': "
-                        f"Total: {b_rep.get('total_routes', 0)} | Audited: {b_rep.get('routes_audited', 0)} | Failed: {b_rep.get('failed_count', 0)}"
-                    )
+                    _print_browser_audit_report(p_id, rep_dict["browser_audit"])
             if rep.status != "PASS":
                 all_passed = False
             if not _run_seo_fix_checklist_gate(p_id, args.json):
@@ -279,11 +383,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         for d in report.drifted_assets:
             print(f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} ({'; '.join(d.details)})")
         if "browser_audit" in rep_dict:
-            b_rep = rep_dict["browser_audit"]
-            print(
-                f"[{b_rep.get('status', 'UNKNOWN')}] Browser CDP Audit for '{property_id}': "
-                f"Total: {b_rep.get('total_routes', 0)} | Audited: {b_rep.get('routes_audited', 0)} | Failed: {b_rep.get('failed_count', 0)}"
-            )
+            _print_browser_audit_report(property_id, rep_dict["browser_audit"])
     seo_fix_ok = _run_seo_fix_checklist_gate(property_id, args.json)
     return 0 if (report.status == "PASS" and browser_ok and seo_fix_ok) else 1
 
