@@ -2938,6 +2938,24 @@ class LiveTruthAuditEngine:
         return drifted
 
 
+def _collect_adapter_asset_hashes(adapter: Any) -> Dict[str, str]:
+    """Collect deterministic SHA-256 asset fingerprints keyed for .agy/asset_ledger.json."""
+    repo_path = getattr(adapter, "repo_path", None)
+    dist_parent = adapter.dist_dir.parent
+    asset_hashes: Dict[str, str] = {}
+    for asset in adapter.list_assets():
+        if asset.is_relative_to(adapter.dist_dir):
+            rel = asset.relative_to(adapter.dist_dir).as_posix()
+        elif repo_path and asset.is_relative_to(repo_path):
+            rel = asset.relative_to(repo_path).as_posix()
+        elif asset.is_relative_to(dist_parent):
+            rel = asset.relative_to(dist_parent).as_posix()
+        else:
+            rel = asset.name
+        asset_hashes[rel] = compute_asset_fingerprint(asset)
+    return asset_hashes
+
+
 class AssetIntegrityEvaluator:
     """
     Audits compiled static assets against engine baselines:
@@ -5211,19 +5229,7 @@ class MaintenanceLifecycle:
                     pass
 
             # Stage 7: HWL-1349 Post-Pipeline State & Ledger Latch
-            all_assets = adapter.list_assets()
-            asset_hashes: Dict[str, str] = {}
-            for a in all_assets:
-                rel = (
-                    a.relative_to(adapter.dist_dir).as_posix()
-                    if a.is_relative_to(adapter.dist_dir)
-                    else (
-                        a.relative_to(adapter.repo_path).as_posix()
-                        if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
-                        else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
-                    )
-                )
-                asset_hashes[rel] = compute_asset_fingerprint(a)
+            asset_hashes = _collect_adapter_asset_hashes(adapter)
 
             b_dirs = getattr(adapter, "base_dirs", None)
             if not dry_run:
@@ -7618,7 +7624,18 @@ def _normalize_page_structure_and_geo_parity(
 
     if (
         slug
-        and slug not in ("index", "tools-directory", "tools")
+        and slug not in (
+            "index",
+            "tools-directory",
+            "tools",
+            "about",
+            "methodology",
+            "privacy",
+            "terms",
+            "disclaimers",
+            "contact",
+            "404",
+        )
         and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond"))
         and '"@graph"' in updated
         and ('"@type": "Dataset"' not in updated or '"@type": "HowTo"' not in updated)
@@ -9058,221 +9075,9 @@ class RetroReflectionEngine:
         },
     }
 
-    GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
-        "soc-2-audit-cost-calculator": {
-            "model_name": "GainHelm-AICPA-SSAE18-SOC2-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)",
-            "inputs": {
-                "cpa_base_fee": 28000.0,
-                "extra_tsc_count": 2.0,
-                "fee_per_extra_tsc": 4500.0,
-                "grc_platform_annual": 15000.0,
-                "pentest_fee": 11500.0,
-                "remediation_hours": 120.0,
-                "engineering_hourly_rate": 121.67,
-            },
-            "published_output": 78100.4,
-            "statutory_authority": "AICPA SSAE 18 (AT-C Section 205) & Trust Services Criteria (TSP Section 100)",
-            "economic_dataset": "BLS OEWS Information Security Analysts (SOC 15-1212) & AICPA Peer Review Fee Survey",
-            "sample_calculation": "For a 75-employee SaaS company selecting SOC 2 Type II across Security, Availability, and Confidentiality (3 TSC): CPA audit fee ($37,000.00 = $28,000 base + 2 extra TSC at $4,500) + GRC platform ($15,000.00) + penetration testing ($11,500.00) + 120 engineering hours at $121.67/hr ($14,600.40) = $78,100.40 total first-year compliance investment.",
-        },
-        "cmmc-2-0-compliance-cost-calculator": {
-            "model_name": "GainHelm-DoD-CMMC-Level2-Audit-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(c3pao_assessment_fee + enclave_licensing_annual + (remediation_hours * engineering_hourly_rate) + rpo_advisory_fee, 2)",
-            "inputs": {
-                "c3pao_assessment_fee": 48500.0,
-                "enclave_licensing_annual": 26400.0,
-                "remediation_hours": 380.0,
-                "engineering_hourly_rate": 115.0,
-                "rpo_advisory_fee": 13400.0,
-            },
-            "published_output": 132000.0,
-            "statutory_authority": "32 CFR Part 170 (CMMC 2.0 Final Rule) & DFARS 252.204-7012 / 252.204-7021",
-            "economic_dataset": "DoD CMMC 2.0 Regulatory Impact Analysis (RIA) & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Defense contractor (75 employees) pursuing CMMC 2.0 Level 2 C3PAO certification across 110 NIST SP 800-171 controls: C3PAO fee ($48,500.00) + FedRAMP enclave licensing ($26,400.00) + 380 remediation hours at $115/hr ($43,700.00) + RPO advisory ($13,400.00) = $132,000.00 total certification investment.",
-        },
-        "nist-800-171-sprs-score-calculator": {
-            "model_name": "GainHelm-DoD-NIST800171-SPRS-Scoring-Engine-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(110.0 - (missing_5pt_controls * 5.0) - (missing_3pt_controls * 3.0) - (missing_1pt_controls * 1.0), 2)",
-            "inputs": {
-                "missing_5pt_controls": 3.0,
-                "missing_3pt_controls": 2.0,
-                "missing_1pt_controls": 2.0,
-            },
-            "published_output": 87.0,
-            "statutory_authority": "DFARS 252.204-7019 / 252.204-7020 & NIST SP 800-171 DoD Assessment Methodology v1.2.1",
-            "economic_dataset": "DoD Supplier Performance Risk System (SPRS) Weighting Schedule & BLS SOC 15-1212",
-            "sample_calculation": "Starting from the statutory maximum of 110 points across 110 NIST SP 800-171 Rev 2 controls: deducting 3 unimplemented 5-point controls (-15), 2 unimplemented 3-point controls (-6), and 2 unimplemented 1-point controls (-2) yields a verified DoD SPRS score of 87.00.",
-        },
-        "iso-27001-certification-cost-calculator": {
-            "model_name": "GainHelm-ISO27006-AuditorDay-ISMS-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round((auditor_days * daily_auditor_rate) + isms_platform_cost + internal_audit_fee + (remediation_hours * engineering_hourly_rate), 2)",
-            "inputs": {
-                "auditor_days": 11.0,
-                "daily_auditor_rate": 1950.0,
-                "isms_platform_cost": 14500.0,
-                "internal_audit_fee": 8500.0,
-                "remediation_hours": 180.0,
-                "engineering_hourly_rate": 125.28,
-            },
-            "published_output": 67000.4,
-            "statutory_authority": "ISO/IEC 27001:2022 & ISO/IEC 27006-1:2024 Mandatory Auditor-Day Tables",
-            "economic_dataset": "IAF MD 5 / ISO 27006 Auditor-Day Schedule & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "For a 75-employee organization requiring 11.0 accredited Stage 1 and Stage 2 auditor days under ISO/IEC 27006-1:2024 at $1,950/day ($21,450.00) + ISMS platform ($14,500.00) + Clause 9.2 internal audit ($8,500.00) + 180 Annex A remediation hours at $125.28/hr ($22,550.40) = $67,000.40 total first-year ISO 27001:2022 cost.",
-        },
-        "hipaa-violation-penalty-breach-cost-calculator": {
-            "model_name": "GainHelm-HHS-OCR-HIPAA-Breach-Penalty-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(min(compromised_records * tier_penalty_per_record, statutory_annual_cap) + forensic_legal_retainer + (compromised_records * notification_cost_per_record), 2)",
-            "inputs": {
-                "compromised_records": 1500.0,
-                "tier_penalty_per_record": 13795.0,
-                "statutory_annual_cap": 2067813.0,
-                "forensic_legal_retainer": 95000.0,
-                "notification_cost_per_record": 195.0,
-            },
-            "published_output": 2455313.0,
-            "statutory_authority": "45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act) & 45 CFR Part 164 Subpart D",
-            "economic_dataset": "HHS Annual Civil Monetary Penalty Inflation Adjustment Rule & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "For a 1,500-record ePHI breach classified under Tier 3 Willful Neglect Corrected (45 CFR 160.404): statutory civil penalty capped at the $2,067,813.00 annual limit ($13,795/record * 1,500 = $20,692,500 raw) + forensic and legal retainer ($95,000.00) + patient notification and credit monitoring ($195/record * 1,500 = $292,500.00) = $2,455,313.00 total exposure.",
-        },
-        "pci-dss-4-0-compliance-cost-calculator": {
-            "model_name": "GainHelm-PCIDSS-v401-QSA-ROC-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(qsa_roc_fee + asv_annual_cost + (cde_system_count * fee_per_cde_system) + segmentation_pentest_fee + remediation_labor_cost, 2)",
-            "inputs": {
-                "qsa_roc_fee": 42000.0,
-                "asv_annual_cost": 3800.0,
-                "cde_system_count": 6.0,
-                "fee_per_cde_system": 2200.0,
-                "segmentation_pentest_fee": 12500.0,
-                "remediation_labor_cost": 23300.0,
-            },
-            "published_output": 94800.0,
-            "statutory_authority": "PCI DSS v4.0.1 Standard (PCI SSC) & Requirement 11.3 / 11.4 Testing Rules",
-            "economic_dataset": "PCI SSC QSA Assessment Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Level 1 Merchant requiring an annual QSA Report on Compliance (ROC) across 6 CDE systems: QSA ROC fee ($42,000.00) + quarterly ASV scans ($3,800.00) + 6 CDE systems at $2,200 ($13,200.00) + segmentation pentesting ($12,500.00) + 180 remediation hours ($23,300.00) = $94,800.00 total annual PCI DSS v4.0.1 cost.",
-        },
-        "fedramp-authorization-3pao-cost-calculator": {
-            "model_name": "GainHelm-FedRAMP-NIST80053-3PAO-ATO-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(threepao_rar_sar_fee + (boundary_engineering_hours * federal_eng_hourly_rate) + conmon_annual_cost + pmo_documentation_cost, 2)",
-            "inputs": {
-                "threepao_rar_sar_fee": 165000.0,
-                "boundary_engineering_hours": 1400.0,
-                "federal_eng_hourly_rate": 155.0,
-                "conmon_annual_cost": 68000.0,
-                "pmo_documentation_cost": 50000.0,
-            },
-            "published_output": 500000.0,
-            "statutory_authority": "FedRAMP Authorization Act (44 U.S.C. 3607) & NIST SP 800-53 Rev 5 Baselines",
-            "economic_dataset": "GSA FedRAMP PMO 3PAO Assessment Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Cloud Service Provider pursuing FedRAMP Moderate Authorization (325 NIST SP 800-53 Rev 5 controls): 3PAO RAR and SAR assessment ($165,000.00) + 1,400 FIPS 140-3 boundary engineering hours at $155/hr ($217,000.00) + Year-1 ConMon ($68,000.00) + PMO SSP documentation ($50,000.00) = $500,000.00 total authorization investment.",
-        },
-        "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
-            "model_name": "GainHelm-HITRUST-CSF-v11-Assurance-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(mycsf_subscription_fee + external_assessor_fee + hitrust_certification_fee + (remediation_hours * engineering_hourly_rate), 2)",
-            "inputs": {
-                "mycsf_subscription_fee": 22500.0,
-                "external_assessor_fee": 54000.0,
-                "hitrust_certification_fee": 14500.0,
-                "remediation_hours": 200.0,
-                "engineering_hourly_rate": 120.0,
-            },
-            "published_output": 115000.0,
-            "statutory_authority": "HITRUST CSF v11.x Assurance Program Requirements (e1, i1, r2 Tiers) & HIPAA / NIST Mapping",
-            "economic_dataset": "HITRUST Authorized External Assessor Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Healthcare technology vendor completing a HITRUST i1 Validated Assessment (182 controls): MyCSF portal subscription ($22,500.00) + External Assessor validation ($54,000.00) + HITRUST central certification review ($14,500.00) + 200 control remediation hours at $120/hr ($24,000.00) = $115,000.00 total certification cost.",
-        },
-        "penetration-testing-scoping-cost-calculator": {
-            "model_name": "GainHelm-NIST800115-Pentest-Scoping-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(base_engagement_fee + (web_and_api_endpoints * fee_per_endpoint) + cloud_iam_network_fee + retest_attestation_fee, 2)",
-            "inputs": {
-                "base_engagement_fee": 8500.0,
-                "web_and_api_endpoints": 18.0,
-                "fee_per_endpoint": 450.0,
-                "cloud_iam_network_fee": 4200.0,
-                "retest_attestation_fee": 2500.0,
-            },
-            "published_output": 23300.0,
-            "statutory_authority": "NIST SP 800-115 Technical Guide to Information Security Testing & PCI DSS Req 11.4",
-            "economic_dataset": "CREST / OSCP Senior Security Consultant Billing Benchmarks & BLS SOC 15-1212",
-            "sample_calculation": "Grey-box penetration test for SOC 2 and PCI DSS 11.4 compliance: base engagement ($8,500.00) + 18 web application and API endpoints at $450/endpoint ($8,100.00) + cloud IAM and external network testing ($4,200.00) + remediation retesting and attestation letter ($2,500.00) = $23,300.00 total engagement fee.",
-        },
-        "cyber-liability-insurance-breach-exposure-calculator": {
-            "model_name": "GainHelm-NAIC-SEC-Cyber-Insurance-Premium-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(round(policy_limit_millions * base_rate_per_million * sector_hazard_multiplier * control_modifier + surplus_lines_fee, 2) + retention_reserve_allocation, 2)",
-            "inputs": {
-                "policy_limit_millions": 5.0,
-                "base_rate_per_million": 3400.0,
-                "sector_hazard_multiplier": 1.35,
-                "control_modifier": 0.80,
-                "surplus_lines_fee": 2055.0,
-                "retention_reserve_allocation": 20485.0,
-            },
-            "published_output": 40900.0,
-            "statutory_authority": "NAIC Cyber Insurance Supplement & SEC Cybersecurity Risk Governance Rule (17 CFR 229.106)",
-            "economic_dataset": "NAIC Property & Casualty Cyber Loss Ratio Series & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Enterprise purchasing a $5M cyber liability limit ($3,400/M base rate * 1.35 sector hazard * 0.80 MFA/EDR/immutable-backup credit + $2,055 surplus lines fee = $20,415.00 annual premium) plus $20,485.00 self-insured retention reserve = $40,900.00 total annual risk transfer cost.",
-        },
-        "dora-ict-third-party-risk-compliance-cost-calculator": {
-            "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
-            "inputs": {
-                "tlpt_red_team_fee": 42000.0,
-                "critical_ict_vendors": 12.0,
-                "fee_per_ict_vendor": 2800.0,
-                "register_of_information_cost": 16500.0,
-                "remediation_hours": 160.0,
-                "engineering_hourly_rate": 125.0,
-            },
-            "published_output": 112100.0,
-            "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
-            "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation ($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost.",
-        },
-        "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
-            "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
-            "inputs": {
-                "high_risk_ai_systems": 2.0,
-                "notified_body_audit_fee": 28500.0,
-                "annex_iv_technical_dossier_cost": 18000.0,
-                "qms_article_17_setup_fee": 24000.0,
-                "validation_hours": 140.0,
-                "ml_compliance_hourly_rate": 150.0,
-            },
-            "published_output": 120000.0,
-            "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
-            "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
-            "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
-        },
-        "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": {
-            "model_name": "GainHelm-SEC-8K-Item105-Materiality-Readiness-Cost-Model-2026",
-            "entity_type": "FinancialProductOrService",
-            "formula": "round(outside_securities_counsel_retainer + dfir_tabletop_retainer + (board_reg_sk_106_hours * governance_advisory_hourly_rate) + materiality_workflow_platform_fee, 2)",
-            "inputs": {
-                "outside_securities_counsel_retainer": 65000.0,
-                "dfir_tabletop_retainer": 48000.0,
-                "board_reg_sk_106_hours": 160.0,
-                "governance_advisory_hourly_rate": 225.0,
-                "materiality_workflow_platform_fee": 31000.0,
-            },
-            "published_output": 180000.0,
-            "statutory_authority": "SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 & Form 8-K Item 1.05 4-Business-Day Mandate)",
-            "economic_dataset": "SEC Division of Economic and Risk Analysis (DERA) Cyber Disclosure Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-            "sample_calculation": "Public registrant operationalizing SEC Form 8-K Item 1.05 4-business-day materiality determination and Regulation S-K Item 106 board governance disclosures: outside securities counsel retainer ($65,000.00) + DFIR forensic readiness and tabletop exercises ($48,000.00) + 160 Regulation S-K Item 106 governance hours at $225/hr ($36,000.00) + automated materiality evidentiary workflow platform ($31,000.00) = $180,000.00 total annual SEC cyber disclosure readiness investment.",
-        },
-    }
+    from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
+
+    GAINHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = GAINHELM_FALLBACK_MANIFESTS_MAP
 
     LIENBOND_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "workers-compensation-class-code-rate-calculator-by-state": {
@@ -13830,6 +13635,10 @@ class RetroReflectionEngine:
             from pseofactory.compiler import compile_lienbond_estate
 
             compile_lienbond_estate(d.parent if d.name == "dist" else d, run_retrofit=False)
+        elif property_id.lower() == "gainhelm" and not (d / "index.html").is_file():
+            from pseofactory.compiler import compile_gainhelm_estate
+
+            compile_gainhelm_estate(d.parent if d.name == "dist" else d, run_retrofit=False)
 
         # Sanitize any truncated CFR/EU descriptions or chopped short_titles in deployed_voids.json
         if d.parent.is_dir():
@@ -16044,9 +15853,13 @@ def reflect_and_recompile_all_assets(
                 "prexvo/interactive_calculator.py",
                 "gainhelm/builder.py",
                 "gainhelm/interactive_calculator.py",
+                "gainhelm/_pseo_substrate/pseofactory/compiler.py",
+                "gainhelm/_pseo_substrate/pseofactory/gainhelm_estate.py",
+                "gainhelm/_pseo_substrate/pseofactory/estate_common.py",
                 "lienbond/builder.py",
                 "lienbond/cli.py",
                 "lienbond/_pseo_substrate/pseofactory/compiler.py",
+                "lienbond/_pseo_substrate/pseofactory/estate_common.py",
             )
         )
         if (
@@ -17355,216 +17168,6 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 pass
 
-        if (
-            getattr(adapter, "repo_path", None)
-            and adapter.property_id == "gainhelm"
-            and not is_live_repo_blocked
-        ):
-            try:
-                gh_formulas = Path(adapter.repo_path) / "gainhelm" / "engine" / "compliance_formulas.py"
-                if gh_formulas.is_file():
-                    gh_f_src = gh_formulas.read_text(encoding="utf-8")
-                    gh_f_orig = gh_f_src
-                    gh_f_src = gh_f_src.replace(
-                        "    cde_hardening_eng_hours: float = 220.0,\n    hourly_rate: float = 134.09,",
-                        "    cde_hardening_eng_hours: float = 200.0,\n    hourly_rate: float = 147.50,",
-                    )
-                    gh_f_src = gh_f_src.replace(
-                        "(or 25 violations * $13,795 + $95,000 + 1,500 * $121.75 = $622,500.00).",
-                        "(capped at $2,067,813.00 OCR civil penalty + $95,000.00 forensics + 1,500 * $195.00 notification = $2,455,313.00).",
-                    )
-                    if gh_f_src != gh_f_orig:
-                        gh_formulas.write_text(gh_f_src, encoding="utf-8")
-                        source_sync_changed = True
-
-                gh_calc = Path(adapter.repo_path) / "gainhelm" / "interactive_calculator.py"
-                if gh_calc.is_file():
-                    gh_c_src = gh_calc.read_text(encoding="utf-8")
-                    gh_c_orig = gh_c_src
-                    gh_c_src = gh_c_src.replace(
-                        "incurs a baseline SOC 2 Type II total outlay of $78,100.00 (comprising $37,000.00 CPA fees,",
-                        "incurs a baseline SOC 2 Type II total outlay of $78,100.40 (comprising $37,000.00 CPA fees,",
-                    )
-                    gh_c_src = gh_c_src.replace(
-                        "var pciTotal = 94799.80;",
-                        "var pciTotal = 94800.00;",
-                    )
-                    gh_c_src = gh_c_src.replace(
-                        "def render_calculator_widget(spec: InteractiveCalculatorSpec = COMPLIANCE_CALCULATOR_SPEC) -> str:",
-                        'def render_calculator_widget(spec: InteractiveCalculatorSpec = COMPLIANCE_CALCULATOR_SPEC, tool_slug: str = "soc-2-audit-cost-calculator") -> str:',
-                    )
-                    if "show_extra_criteria" not in gh_c_src:
-                        gh_c_src = gh_c_src.replace(
-                            "    fields_html = []\n    for f in spec.fields:",
-                            '    slug_low = str(tool_slug or "").strip().lower()\n'
-                            '    show_extra_criteria = ("soc-2" in slug_low or "soc2" in slug_low or not slug_low)\n'
-                            '    fields_html = []\n'
-                            '    for f in spec.fields:\n'
-                            '        if str(f.id) == "extra_criteria" and not show_extra_criteria:\n'
-                            '            continue',
-                        )
-                    gh_c_src = gh_c_src.replace(
-                        'var crit = Math.min(4, Math.round(clampNonNeg(document.getElementById("calc-input-extra_criteria").value, 2)));',
-                        'var critInputEl = document.getElementById("calc-input-extra_criteria");\n'
-                        '          var crit = critInputEl ? Math.min(4, Math.round(clampNonNeg(critInputEl.value, 2))) : 2;',
-                    )
-                    gh_c_src = gh_c_src.replace(
-                        'document.getElementById("calc-input-extra_criteria").value = this.getAttribute("data-preset-crit") || "2";',
-                        'var critBtnTarget = document.getElementById("calc-input-extra_criteria"); if (critBtnTarget) critBtnTarget.value = this.getAttribute("data-preset-crit") || "2";',
-                    )
-                    if 'id="meter-cpa-val"' in gh_c_src and "elMeterCpa" not in gh_c_src:
-                        gh_c_src = gh_c_src.replace(
-                            'if (elSav) elSav.textContent = fmtUSD(autoSavings) + "/yr";',
-                            'if (elSav) elSav.textContent = fmtUSD(autoSavings) + "/yr";\n'
-                            '          var elMeterCpa = document.getElementById("meter-cpa-val");\n'
-                            '          var elMeterPay = document.getElementById("meter-pay-val");\n'
-                            '          var elMeterSub = document.getElementById("meter-sub-val");\n'
-                            '          var elMeterInt = document.getElementById("meter-int-val");\n'
-                            '          var elSegCpa = document.getElementById("meter-seg-cpa");\n'
-                            '          var elSegGrc = document.getElementById("meter-seg-grc");\n'
-                            '          var cpaPct = Math.max(5, Math.min(95, Math.round((cpaFee / Math.max(1, soc2Total)) * 100)));\n'
-                            '          if (elMeterCpa) elMeterCpa.textContent = fmtUSD(cpaFee) + " CPA | " + fmtUSD(grcFee) + " GRC";\n'
-                            '          if (elMeterPay) elMeterPay.textContent = fmtUSD(cpaFee);\n'
-                            '          if (elMeterSub) elMeterSub.textContent = fmtUSD(autoSavings);\n'
-                            '          if (elMeterInt) elMeterInt.textContent = fmtUSD(internalLabor);\n'
-                            '          if (elSegCpa) elSegCpa.style.width = cpaPct + "%";\n'
-                            '          if (elSegGrc) elSegGrc.style.width = (100 - cpaPct) + "%";',
-                            1,
-                        )
-                    if gh_c_src != gh_c_orig:
-                        gh_calc.write_text(gh_c_src, encoding="utf-8")
-                        source_sync_changed = True
-
-                gh_builder = Path(adapter.repo_path) / "gainhelm" / "builder.py"
-                if gh_builder.is_file():
-                    from pseofactory.gsc_remediation import _normalize_quick_answer_40_60_words
-                    gh_b_src = gh_builder.read_text(encoding="utf-8")
-                    gh_b_orig = gh_b_src
-                    gh_b_src = gh_b_src.replace(
-                        "Apply BLS OEWS SOC 15-1212 ($61.40/hr) loaded engineering wages",
-                        "Apply BLS OEWS SOC 15-1212 ($121.67/hr) loaded engineering wages",
-                    )
-                    gh_b_src = gh_b_src.replace(
-                        "benchmarked at $61.40 per hour base wage under BLS SOC 15-1212",
-                        "benchmarked at $121.67 per hour loaded wage under BLS SOC 15-1212",
-                    )
-                    gh_b_src = gh_b_src.replace(
-                        '<td class="td-plan-name">HIPAA HITECH Tier 2 Breach</td>',
-                        '<td class="td-plan-name">HIPAA HITECH Tier 3 Breach</td>',
-                    )
-                    old_meth_rows = (
-                        "            <tr>\n"
-                        "              <td>46 to 85 Employees</td>\n"
-                        "              <td>9.0 Auditor Days</td>\n"
-                        "              <td>3.0 Auditor Days</td>\n"
-                        "              <td>6.0 Auditor Days</td>\n"
-                        "            </tr>\n"
-                        "            <tr>\n"
-                        "              <td>86 to 175 Employees</td>\n"
-                        "              <td>11.0 Auditor Days</td>\n"
-                        "              <td>3.7 Auditor Days</td>\n"
-                        "              <td>7.5 Auditor Days</td>\n"
-                        "            </tr>"
-                    )
-                    new_meth_rows = (
-                        "            <tr>\n"
-                        "              <td>46 to 65 Employees</td>\n"
-                        "              <td>9.0 Auditor Days</td>\n"
-                        "              <td>3.0 Auditor Days</td>\n"
-                        "              <td>6.0 Auditor Days</td>\n"
-                        "            </tr>\n"
-                        "            <tr>\n"
-                        "              <td>66 to 85 Employees</td>\n"
-                        "              <td>11.0 Auditor Days</td>\n"
-                        "              <td>3.6 Auditor Days</td>\n"
-                        "              <td>7.3 Auditor Days</td>\n"
-                        "            </tr>\n"
-                        "            <tr>\n"
-                        "              <td>86 to 125 Employees</td>\n"
-                        "              <td>13.0 Auditor Days</td>\n"
-                        "              <td>4.3 Auditor Days</td>\n"
-                        "              <td>8.6 Auditor Days</td>\n"
-                        "            </tr>\n"
-                        "            <tr>\n"
-                        "              <td>126 to 175 Employees</td>\n"
-                        "              <td>15.0 Auditor Days</td>\n"
-                        "              <td>5.0 Auditor Days</td>\n"
-                        "              <td>9.9 Auditor Days</td>\n"
-                        "            </tr>"
-                    )
-                    if old_meth_rows in gh_b_src:
-                        gh_b_src = gh_b_src.replace(old_meth_rows, new_meth_rows, 1)
-
-                    gh_b_src = gh_b_src.replace(
-                        "Baseline 75-employee SaaS Type II program (3 TSC) equals $78,100.00.",
-                        "Baseline 75-employee SaaS Type II program (3 TSC) equals $78,100.40.",
-                    )
-                    gh_b_src = gh_b_src.replace(
-                        "(9.0 auditor days for 46-85 employees; $67,000.00 first-year total).",
-                        "(11.0 auditor days for 66-85 employees; $67,000.40 first-year total).",
-                    )
-                    gh_b_src = gh_b_src.replace(
-                        "($622,500.00 baseline exposure for 25,000 ePHI records under Tier 2).",
-                        "($2,455,313.00 baseline exposure for 1,500 ePHI records under Tier 3, including the $2,067,813.00 annual penalty cap).",
-                    )
-
-                    qa_entries = []
-                    gh_manifests_list = []
-                    for m_slug, m_item in RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS.items():
-                        qa_str = _normalize_quick_answer_40_60_words("", "gainhelm", slug=m_slug)
-                        qa_entries.append(f'    {json.dumps(m_slug)}: {json.dumps(qa_str)},')
-                        gh_manifests_list.append({"slug": m_slug, **m_item})
-                    new_qa_block = "TOOL_QUICK_ANSWERS: Dict[str, str] = {\n" + "\n".join(qa_entries) + "\n}"
-                    gh_b_src = re.sub(
-                        r"TOOL_QUICK_ANSWERS:\s*Dict\[str,\s*str\]\s*=\s*\{.*?\n\}",
-                        lambda _m: new_qa_block,
-                        gh_b_src,
-                        count=1,
-                        flags=re.DOTALL,
-                    )
-
-                    new_manifests_block = (
-                        "CALCULATION_MANIFESTS: List[Dict[str, Any]] = "
-                        + json.dumps(gh_manifests_list, indent=4)
-                    )
-                    gh_b_src = re.sub(
-                        r"CALCULATION_MANIFESTS:\s*List\[Dict\[str,\s*Any\]\]\s*=\s*\[.*?\n\]",
-                        lambda _m: new_manifests_block,
-                        gh_b_src,
-                        count=1,
-                        flags=re.DOTALL,
-                    )
-                    old_gh_home_tools = (
-                        "    tools_list_html = []\n"
-                        "    for tool in TOOLS:\n"
-                        "        tools_list_html.append(\n"
-                        '            f\'<li class="tool-link-item"><a href="/tools/{tool["slug"]}/" class="tool-link touch-target">{html.escape(tool["title"])}</a> <span class="tool-desc">- {html.escape(tool["description"])}</span></li>\'\n'
-                        "        )"
-                    )
-                    new_gh_home_tools = (
-                        "    from gainhelm.catalog import discover_all_tools\n"
-                        "    tools_list_html = []\n"
-                        "    for tool in discover_all_tools():\n"
-                        "        tools_list_html.append(\n"
-                        '            f\'<li class="tool-link-item"><a href="/tools/{tool["slug"]}/" class="tool-link touch-target">{html.escape(tool["title"])}</a> <span class="tool-desc">- {html.escape(tool["description"])}</span></li>\'\n'
-                        "        )"
-                    )
-                    if old_gh_home_tools in gh_b_src:
-                        gh_b_src = gh_b_src.replace(old_gh_home_tools, new_gh_home_tools, 1)
-                    gh_b_src = gh_b_src.replace(
-                        'def build_home_page() -> str:\n    """Compiles the homepage featuring the primary interactive calculator and tools index."""\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC, tool_slug=slug)',
-                        'def build_home_page() -> str:\n    """Compiles the homepage featuring the primary interactive calculator and tools index."""\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC)',
-                    )
-                    gh_b_src = gh_b_src.replace(
-                        'canonical_url = f"{CANONICAL_BASE}/tools/{slug}/"\n\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC)',
-                        'canonical_url = f"{CANONICAL_BASE}/tools/{slug}/"\n\n    calc_markup = render_calculator_widget(COMPLIANCE_CALCULATOR_SPEC, tool_slug=slug)',
-                    )
-                    if gh_b_src != gh_b_orig:
-                        gh_builder.write_text(gh_b_src, encoding="utf-8")
-                        source_sync_changed = True
-            except Exception:
-                pass
-
         if source_sync_changed and getattr(adapter, "property_id", None) in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             pkg_prefix = adapter.property_id
             for mod_name in list(sys.modules.keys()):
@@ -17632,7 +17235,7 @@ def reflect_and_recompile_all_assets(
         except Exception:
             callout_mismatch_count = 0
 
-        force_lienbond_build = bool(force and getattr(adapter, "property_id", None) == "lienbond")
+        force_compiled_build = bool(force and getattr(adapter, "property_id", None) in ("gainhelm", "lienbond"))
         pre_retro_ran = False
         pre_retrofitted_count = 0
         if (
@@ -17640,7 +17243,7 @@ def reflect_and_recompile_all_assets(
             and (adapter.dist_dir / "index.html").is_file()
             and not is_live_repo_blocked
             and not source_sync_changed
-            and not force_lienbond_build
+            and not force_compiled_build
             and (stale_mechanic_count > 0 or callout_mismatch_count > 0 or edge_functions_updated or force)
         ):
             try:
@@ -17701,11 +17304,13 @@ def reflect_and_recompile_all_assets(
             should_run_full_build = (
                 has_structural_drift
                 or bool(source_sync_changed)
-                or force_lienbond_build
+                or force_compiled_build
                 or (topical_reconciliation_changed and not has_existing_compiled_dist)
                 or not isinstance(adapter, SubprocessPropertyAdapter)
             )
             if should_run_full_build:
+                _prev_in_reflect = os.environ.get("PSEO_IN_REFLECT")
+                os.environ["PSEO_IN_REFLECT"] = "1"
                 try:
                     if hasattr(adapter, "build_all"):
                         build_ok = adapter.build_all()
@@ -17742,6 +17347,11 @@ def reflect_and_recompile_all_assets(
                         build_error_msg = str(b_err)
                     if verbose:
                         print(f"Error rebuilding assets for '{p_id}': {b_err}")
+                finally:
+                    if _prev_in_reflect is None:
+                        os.environ.pop("PSEO_IN_REFLECT", None)
+                    else:
+                        os.environ["PSEO_IN_REFLECT"] = _prev_in_reflect
             elif isinstance(adapter, SubprocessPropertyAdapter):
                 # Estate already passes structural audits; preserve or retrofit compiled dist/ in-place
                 recompiled_count = max(report.total_assets_checked, 1)
@@ -18100,18 +17710,7 @@ def reflect_and_recompile_all_assets(
                 s_file.parent.mkdir(parents=True, exist_ok=True)
                 b_dirs = getattr(adapter, "base_dirs", None)
                 cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
-                asset_hashes = {
-                    (
-                        a.relative_to(adapter.dist_dir).as_posix()
-                        if a.is_relative_to(adapter.dist_dir)
-                        else (
-                            a.relative_to(adapter.repo_path).as_posix()
-                            if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
-                            else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
-                        )
-                    ): compute_asset_fingerprint(a)
-                    for a in adapter.list_assets()
-                }
+                asset_hashes = _collect_adapter_asset_hashes(adapter)
                 record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
 
                 if not is_live_repo_blocked and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
@@ -18317,18 +17916,7 @@ def reflect_and_recompile_all_assets(
                             except Exception:
                                 pass
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
-                    asset_hashes = {
-                        (
-                            a.relative_to(adapter.dist_dir).as_posix()
-                            if a.is_relative_to(adapter.dist_dir)
-                            else (
-                                a.relative_to(adapter.repo_path).as_posix()
-                                if getattr(adapter, "repo_path", None) and a.is_relative_to(adapter.repo_path)
-                                else (a.relative_to(adapter.dist_dir.parent).as_posix() if a.is_relative_to(adapter.dist_dir.parent) else a.name)
-                            )
-                        ): compute_asset_fingerprint(a)
-                        for a in adapter.list_assets()
-                    }
+                    asset_hashes = _collect_adapter_asset_hashes(adapter)
                     record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
                     if not is_workspace_mutation_blocked:
                         from pseofactory.drift import verify_all_tenants_aligned_for_latch
@@ -18372,6 +17960,35 @@ def reflect_and_recompile_all_assets(
             except Exception as l_err:
                 if verbose:
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
+        elif (
+            not latch_state
+            and (recompiled_count > 0 or retrofitted_count > 0 or html_mutated_since_porcelain)
+            and not build_failed
+            and build_verified.status == "PASS"
+            and not is_live_repo_blocked
+        ):
+            # Keep pre-existing asset_ledger.json synchronized when dist/ changed without touching engine_hash.json
+            l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
+            if not l_file.is_file() and getattr(adapter, "repo_path", None):
+                cand_l_file = Path(adapter.repo_path) / ".agy" / "asset_ledger.json"
+                if cand_l_file.is_file():
+                    l_file = cand_l_file
+            if l_file.is_file():
+                try:
+                    existing_l = load_asset_ledger(l_file)
+                    existing_eh = (
+                        str(existing_l.get("engine_hash") or "").strip()
+                        if isinstance(existing_l, dict)
+                        else ""
+                    ) or None
+                    record_asset_ledger(
+                        l_file,
+                        asset_hashes=_collect_adapter_asset_hashes(adapter),
+                        engine_hash=existing_eh,
+                    )
+                except Exception as l_err:
+                    if verbose:
+                        print(f"Error refreshing existing asset ledger for '{p_id}': {l_err}")
 
         post_report = (
             evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)

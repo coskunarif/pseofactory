@@ -2441,6 +2441,14 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
             and "crypto tax form 1099-da" in clean.lower()
         )
         or (
+            tenant_id == "gainhelm"
+            and (
+                (not any(k in slug_low for k in ("soc-2", "soc2", "ssae")) and any(m in clean.lower() for m in ("aicpa", "ssae 18", "soc 2")))
+                or (not any(k in slug_low for k in ("cmmc", "sprs", "800-171")) and any(m in clean.lower() for m in ("32 cfr part 170", "cmmc", "c3pao")))
+                or (not any(k in slug_low for k in ("hipaa", "hitech")) and any(m in clean.lower() for m in ("45 cfr 160", "hipaa")))
+            )
+        )
+        or (
             ("surety" in q_low or ("bond" in q_low and "280g" not in slug_low))
             and any(
                 bad_irc in clean.lower()
@@ -2656,10 +2664,88 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "CMMC 2.0 C3PAO, NIST 800-171 SPRS, ISO 27001, and HIPAA penalties.",
                     " Grounded in AICPA SSAE 18 and 32 CFR Part 170 standards.",
                 )
+            if any(k in q_low for k in ("dora", "ict-third-party", "2022/2554")):
+                return (
+                    "Calculate EU DORA Regulation 2022/2554 compliance costs, Article 26 TLPT red "
+                    "teaming, ICT vendor audits, and Article 28 Register of Information.",
+                    " Verified under Regulation (EU) 2022/2554 rules.",
+                )
+            if any(k in q_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+                return (
+                    "Model EU AI Act Regulation 2024/1689 Article 43 conformity assessment fees, "
+                    "Annex IV technical dossiers, and Article 17 QMS engineering costs.",
+                    " Verified under Regulation (EU) 2024/1689 and NIST AI RMF.",
+                )
+            if any(k in q_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+                return (
+                    "Calculate SEC Rule 33-11216 Form 8-K Item 1.05 cybersecurity materiality readiness, "
+                    "DFIR incident retainers, and Regulation S-K Item 106 costs.",
+                    " Verified under 17 CFR 229.106 and Item 1.05 rules.",
+                )
+            if any(k in q_low for k in ("hipaa", "hitech", "ephi", "160.404")):
+                return (
+                    "Model HIPAA civil monetary penalty exposure under 45 CFR 160.404 across four "
+                    "culpability tiers plus 45 CFR Part 164 breach response costs.",
+                    " Verified under 45 CFR 160.404 and 42 U.S.C. 1320d-5.",
+                )
+            if any(k in q_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
+                return (
+                    "Calculate PCI DSS v4.0.1 Level 1 QSA Report on Compliance (ROC) fees, quarterly "
+                    "ASV scans, penetration tests, and CDE remediation labor.",
+                    " Verified under PCI Security Standards Council v4.0.1.",
+                )
+            if any(k in q_low for k in ("iso-27001", "iso 27001", "27006")):
+                return (
+                    "Estimate ISO/IEC 27001:2022 ISMS certification fees, Stage 1 and Stage 2 "
+                    "auditor-day schedules under ISO/IEC 27006-1:2024, and gap closure.",
+                    " Verified under ISO/IEC 27006-1:2024 Annex B tables.",
+                )
+            if any(k in q_low for k in ("fedramp", "3pao", "3607")):
+                return (
+                    "Model FedRAMP 20x and Rev 5 Moderate ATO budgets under 44 U.S.C. 3607, including "
+                    "3PAO SAR fees, FIPS 140-3 engineering, and annual ConMon.",
+                    " Verified under NIST SP 800-53 Rev 5 baselines.",
+                )
+            if any(k in q_low for k in ("hitrust", "mycsf")):
+                return (
+                    "Compare HITRUST CSF v11 e1, i1, and r2 Validated Assessment fees, MyCSF licensing, "
+                    "External Assessor validation costs, and gap remediation.",
+                    " Verified under HITRUST CSF v11 assurance standards.",
+                )
+            if any(k in q_low for k in ("pentest", "penetration", "800-115")):
+                return (
+                    "Scope CREST and OSCP technical penetration testing fees across web apps, APIs, "
+                    "cloud IAM, and retesting under NIST SP 800-115 and OWASP.",
+                    " Verified under NIST SP 800-115 and PCI Req 11.4.",
+                )
+            if any(k in q_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
+                return (
+                    "Estimate commercial cyber liability insurance premiums, self-insured retentions, "
+                    "and first-incident financial exposure under NAIC cyber rules.",
+                    " Verified against SEC Item 1.05 and NAIC data.",
+                )
+            if any(k in q_low for k in ("sprs", "800-171")):
+                return (
+                    "Calculate DoD NIST SP 800-171 Rev 2 SPRS scores from -203 to +110, 5/3/1-point "
+                    "control deductions, and 32 CFR 170.21 180-day POA&M eligibility.",
+                    " Verified under DFARS 252.204-7019 assessment rules.",
+                )
+            if any(k in q_low for k in ("cmmc", "c3pao", "32 cfr")):
+                return (
+                    "Model DoD CMMC 2.0 Level 2 C3PAO certification fees, 110 NIST 800-171 controls, "
+                    "enclave licensing, and RPO advisory under 32 CFR Part 170.",
+                    " Verified under 32 CFR Part 170 and DFARS 7021.",
+                )
+            if any(k in q_low for k in ("soc-2", "soc 2", "ssae")):
+                return (
+                    "Calculate SOC 2 Type I and Type II CPA attestation fees, Trust Services Criteria "
+                    "surcharges, GRC automation ROI, and BLS SOC 15-1212 labor.",
+                    " Verified under AICPA SSAE 18 AT-C Section 205.",
+                )
             return (
-                f"Calculate {lbl} audit fees, GRC automation savings, and engineering labor under "
-                f"AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212 wage benchmarks.",
-                " Verified under AICPA SSAE 18 and 32 CFR Part 170 rules.",
+                f"Calculate {lbl} compliance budgets, external assessor fees, automated control "
+                f"savings, and BLS SOC 15-1212 engineering labor.",
+                " Verified against statutory compliance benchmarks.",
             )
         if tenant_id == "lienbond":
             if "disclaimer" in q_low:
@@ -2968,15 +3054,29 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
                 "$112,100.00 in first-year compliance costs, combining $42,000.00 in threat-led penetration testing, "
                 "$33,600.00 in vendor exit-strategy audits, $16,500.00 in Register of Information automation, and $20,000.00 in engineering labor."
             ).split()
+        elif any(k in combined_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            base_words = (
+                "Under EU Artificial Intelligence Act Regulation (EU) 2024/1689 Articles 6 and 43 alongside "
+                "NIST AI RMF 1.0, an enterprise deploying 2 Annex III high-risk AI systems incurs $120,000.00 "
+                "in first-year conformity costs, combining $57,000.00 in Notified Body audits, $18,000.00 in "
+                "Annex IV technical dossiers, $24,000.00 in Article 17 QMS setup, and $21,000.00 in ML validation labor."
+            ).split()
+        elif any(k in combined_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+            base_words = (
+                "Pursuant to SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 and Form 8-K "
+                "Item 1.05 4-business-day materiality disclosure mandate), a public registrant incurs $180,000.00 "
+                "in readiness costs, combining $65,000.00 in securities counsel retainers, $48,000.00 in DFIR "
+                "tabletop retainers, $36,000.00 in board governance hours, and $31,000.00 in workflow automation."
+            ).split()
         else:
             base_words = (
-                f"Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024 "
-                f"auditor-day tables, {short_q} computes deterministic CPA and C3PAO attestation fees, "
-                f"continuous GRC evidence automation savings, and internal security engineering labor "
-                f"benchmarked against Bureau of Labor Statistics SOC 15-1212 wage percentiles ($121.67/hr loaded rate)."
+                f"Statutory compliance modeling for {short_q} quantifies accredited third-party assessor fees, "
+                f"continuous control automation licensing, and internal security engineering remediation hours "
+                f"benchmarked against Bureau of Labor Statistics SOC 15-1212 wage percentiles ($121.67/hr loaded rate). "
+                f"Deterministic sensitivity scenarios evaluate scope boundaries and remediation effort across assurance tiers."
             ).split()
         filler_pool = [
-            "Verified", "against", "NIST", "SP", "800-171", "Rev", "2", "and", "45", "CFR", "160.404."
+            "Verified", "deterministically", "against", "published", "BLS", "SOC", "15-1212", "wage", "benchmarks."
         ]
     elif tenant_id == "lienbond":
         if any(k in combined_low for k in ("workers-compensation", "workers comp", "class-code")):
@@ -4501,15 +4601,42 @@ def _append_query_subintent_blocks(
             faqs.append({"question": clean_q, "answer": clean_a})
 
     if tenant_id == "gainhelm":
-        _add_h2(f"{heading_label}: 2026 AICPA SSAE 18, 32 CFR Part 170 & GRC Automation Cost Breakdown")
-        _add_faq(
-            f"How does GRC automation impact {heading_label} total audit cost and engineering hours?",
-            (
-                "Continuous control monitoring via API integrations (Vanta, Drata, Sprinto) compresses "
-                "manual evidence collection by 60 percent to 75 percent while standardizing auditor-ready "
-                "workpapers under AICPA SSAE 18, DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024."
-            ),
-        )
+        if any(k in joined_low for k in ("dora", "ict-third-party", "2022/2554")):
+            _add_h2(f"{heading_label}: 2026 Regulation (EU) 2022/2554 TLPT & ICT Third-Party Risk Cost Breakdown")
+            _add_faq(
+                f"How does continuous ICT monitoring impact {heading_label} total compliance cost?",
+                (
+                    "Automated Register of Information governance and pre-mapped contractual exit clauses reduce "
+                    "manual vendor audit preparation while maintaining full ESAs oversight compliance under Regulation (EU) 2022/2554."
+                ),
+            )
+        elif any(k in joined_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            _add_h2(f"{heading_label}: 2026 Regulation (EU) 2024/1689 Article 43 & Annex IV Cost Breakdown")
+            _add_faq(
+                f"How does Article 17 QMS automation reduce {heading_label} Notified Body audit costs?",
+                (
+                    "Automated model lineage logging, dataset bias telemetry, and synchronized NIST AI RMF mappings "
+                    "streamline Annex IV technical dossier preparation prior to Article 43 conformity assessment."
+                ),
+            )
+        elif any(k in joined_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+            _add_h2(f"{heading_label}: 2026 SEC Rule 33-11216 Form 8-K Item 1.05 & Reg S-K Item 106 Breakdown")
+            _add_faq(
+                f"How do DFIR playbooks compress {heading_label} 4-business-day disclosure risk?",
+                (
+                    "Pre-staged materiality determination rubrics, retained DFIR counsel workflows, and documented Reg S-K "
+                    "Item 106 board governance cut external legal surge fees inside the 4-business-day SEC Form 8-K clock."
+                ),
+            )
+        else:
+            _add_h2(f"{heading_label}: 2026 Statutory Audit & Automated Control Cost Breakdown")
+            _add_faq(
+                f"How does control automation impact {heading_label} total audit cost and engineering hours?",
+                (
+                    "Continuous control monitoring via API integrations compresses manual evidence collection by 60 percent "
+                    "to 75 percent while standardizing auditor-ready workpapers under BLS OEWS SOC 15-1212 labor benchmarks."
+                ),
+            )
     elif tenant_id == "lienbond":
         _add_h2(f"{heading_label}: 2026 Treasury Circular 570, NCCI Basic Manual & 50-State Statutory Rules")
         _add_faq(
@@ -4838,68 +4965,14 @@ def compile_remediation_overlay_spec(
             query=query_clean,
         )
     elif resolved_tenant == "gainhelm":
-        v_blocks = {
-            "h2_headings": [
-                f"{heading_label}: 2026 CPA & C3PAO Attestation Fee Schedule",
-                f"Audit-Ready {heading_label} GRC Automation vs Manual Evidence Scenarios",
-            ],
-            "preset_scenarios": [
-                {
-                    "id": "preset-gainhelm-series-a",
-                    "label": f"{heading_label} Series A SaaS Baseline (45 Employees)",
-                    "query": query_clean,
-                    "target_position": pos,
-                    "baseline_ctr": ctr,
-                    "impressions": impr,
-                    "params": {"headcount": 45, "grc_tier": 1, "audit_type": 2},
-                    "description": "45-employee B2B SaaS modeling CPA or C3PAO attestation fees alongside continuous GRC automation.",
-                },
-                {
-                    "id": "preset-gainhelm-midmarket",
-                    "label": f"{heading_label} Mid-Market Multi-Cloud Scope (250 Employees)",
-                    "query": query_clean,
-                    "target_position": pos,
-                    "baseline_ctr": ctr,
-                    "impressions": impr,
-                    "params": {"headcount": 250, "grc_tier": 2, "audit_type": 2},
-                    "description": "250-employee enterprise evaluating multi-criteria audit fees, pentest scope, and BLS SOC 15-1212 labor.",
-                },
-            ],
-            "comparison_rows": [
-                {
-                    "scenario": "Manual Spreadsheet Evidence vs Continuous GRC Automation",
-                    "baseline": "420 Engineering Hours ($51,101.40 Labor Cost)",
-                    "optimized": "120 Engineering Hours ($14,600.40 Labor + GRC Platform)",
-                    "delta": "-300 Engineering Hours Saved",
-                    "authority": "AICPA SSAE 18 (AT-C Sec. 205) & BLS SOC 15-1212",
-                },
-                {
-                    "scenario": "Unscoped Multi-Criteria Audit vs Scoped Trust Services Baseline",
-                    "baseline": "$64,500 Unbundled CPA / C3PAO Attestation",
-                    "optimized": "$37,000 Scoped Attestation + Automated Evidence Readiness",
-                    "delta": "-$27,500 Direct Audit Fee Reduction",
-                    "authority": "32 CFR Part 170 & ISO/IEC 27006-1:2024",
-                },
-            ],
-            "faq_entries": [
-                {
-                    "question": f"How is {query_clean} calculated under 2026 audit standards?",
-                    "answer": (
-                        f"Our deterministic {query_clean} model sums external CPA or C3PAO attestation fees, "
-                        f"GRC automation licensing, penetration testing, and internal security engineering hours "
-                        f"valued at the BLS SOC 15-1212 mean loaded rate ($121.67/hr)."
-                    ),
-                },
-                {
-                    "question": f"What statutory and accreditation standards govern {query_clean}?",
-                    "answer": (
-                        "Attestation and certification engagements are governed by AICPA SSAE 18 (AT-C Section 205), "
-                        "DoD 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024 auditor-day "
-                        "tables, and 45 CFR 160.404 civil monetary penalty tiers."
-                    ),
-                },
-            ],
-        }
+        v_blocks = _build_vertical_gainhelm_overlay_blocks(
+            slug=slug,
+            query_clean=query_clean,
+            heading_label=heading_label,
+            pos=pos,
+            ctr=ctr,
+            impr=impr,
+        )
         v_blocks = _append_query_subintent_blocks(
             v_blocks,
             tenant_id=resolved_tenant,
@@ -5480,6 +5553,72 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "optimal_path": "Annual Senior Official Self-Affirmation in SPRS (No C3PAO Required)",
                     "net_dollar_impact": "$48,500.00 C3PAO Assessment Fee Avoided",
                     "next_action": "Verify FCI vs CUI Contract Clause Scope (DFARS 252.204-7021)",
+                },
+            ]
+        elif any(k in low for k in ("dora", "ict-third-party", "2022/2554")):
+            assertions = [
+                f"In 2026, {heading_label} quantifies EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26, and 28) ICT third-party risk and threat-led penetration testing costs.",
+                "Financial entities overseeing 12 critical ICT third-party service providers incur $112,100.00 in first-year DORA readiness ($42,000.00 Article 26 TLPT + $33,600.00 vendor exit-strategy audits + $16,500.00 Register of Information automation + $20,000.00 engineering hours).",
+                "Automating ESAs Register of Information schemas and ICT vendor exit plans reduces recurring annual third-party risk audit effort across regulated EU banking, payments, and cloud operations.",
+            ]
+            matrix = [
+                {
+                    "profile": "EU Regulated Financial Entity (12 Critical ICT Providers)",
+                    "statutory_threshold": "Regulation (EU) 2022/2554 Articles 17, 26 & 28",
+                    "optimal_path": "Article 26 TLPT ($42,000) + Vendor Audits ($33,600) + Register Automation ($16,500)",
+                    "net_dollar_impact": "$112,100.00 Total First-Year DORA Compliance Budget",
+                    "next_action": "Calculate Article 26 TLPT & ICT Vendor Oversight Cost",
+                },
+                {
+                    "profile": "Significant Payments or Capital Markets Institution (20+ ICT Vendors)",
+                    "statutory_threshold": "ESAs Joint Technical Standards & Triennial Red-Team TLPT Mandate",
+                    "optimal_path": "Standardized Article 28 Contractual Exit Clauses & Telemetry Repository",
+                    "net_dollar_impact": "Eliminates Fragmented Register of Information Submission Delays",
+                    "next_action": "Model Register of Information & Remediation Effort",
+                },
+            ]
+        elif any(k in low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            assertions = [
+                f"In 2026, {heading_label} evaluates EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 and 43) Annex III high-risk AI conformity assessment costs alongside NIST AI RMF 1.0 governance.",
+                "Deploying 2 Annex III high-risk AI systems under Article 43 totals $120,000.00 ($57,000.00 Notified Body audits + $18,000.00 Annex IV technical dossier + $24,000.00 Article 17 QMS setup + $21,000.00 ML compliance validation).",
+                "Centralized Article 17 quality management and automated Annex IV model documentation cut manual validation hours prior to CE marking registration.",
+            ]
+            matrix = [
+                {
+                    "profile": "Enterprise Deploying 2 Annex III High-Risk AI Systems",
+                    "statutory_threshold": "Regulation (EU) 2024/1689 Articles 6, 17 & 43",
+                    "optimal_path": "Notified Body Audits ($57,000) + Article 17 QMS ($24,000) + Annex IV Dossier ($18,000)",
+                    "net_dollar_impact": "$120,000.00 Total Conformity Assessment Budget",
+                    "next_action": "Calculate Article 43 Notified Body & Validation Cost",
+                },
+                {
+                    "profile": "Multi-Jurisdiction AI Vendor Aligning EU AI Act & NIST AI RMF",
+                    "statutory_threshold": "Annex IV Technical Documentation & Post-Market Monitoring Duty",
+                    "optimal_path": "Automated Model Cards, Dataset Governance & Bias Telemetry",
+                    "net_dollar_impact": "Avoids Duplicate Governance Audits Across EU and US Deployments",
+                    "next_action": "Simulate High-Risk AI Dossier & QMS Effort",
+                },
+            ]
+        elif any(k in low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+            assertions = [
+                f"In 2026, {heading_label} quantifies public registrant readiness costs under SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 and Form 8-K Item 1.05 4-business-day materiality disclosure mandate).",
+                "Operationalizing Item 1.05 materiality triage and Item 106 governance totals $180,000.00 ($65,000.00 outside securities counsel + $48,000.00 DFIR tabletop retainer + $36,000.00 board advisory hours + $31,000.00 materiality workflow automation).",
+                "Pre-negotiated DFIR forensic retainers and qualitative-quantitative materiality scoring rubrics preserve auditability during the 4-business-day Form 8-K reporting window.",
+            ]
+            matrix = [
+                {
+                    "profile": "Public Registrant Operationalizing Item 1.05 4-Day Clock",
+                    "statutory_threshold": "SEC Final Rule 33-11216 (17 CFR 229.106 & Form 8-K Item 1.05)",
+                    "optimal_path": "Securities Counsel ($65,000) + DFIR Tabletop ($48,000) + Workflow ($31,000)",
+                    "net_dollar_impact": "$180,000.00 Total Readiness & Governance Investment",
+                    "next_action": "Calculate Item 1.05 Triage & Reg S-K Item 106 Budget",
+                },
+                {
+                    "profile": "Audit Committee & CISO Preparing Annual Reg S-K Item 106",
+                    "statutory_threshold": "17 CFR 229.106 Board Oversight & Risk Management Disclosures",
+                    "optimal_path": "Pre-Incident Materiality Matrix & Sub-4-Day Disclosure Playbook",
+                    "net_dollar_impact": "Eliminates Emergency Counsel Surge Pricing During Active Incidents",
+                    "next_action": "Model Counsel Retainer & Board Governance Hours",
                 },
             ]
         else:
@@ -6200,6 +6339,100 @@ def _build_autonomous_citation_assertions_and_matrix(
         "ai_mode_decision_matrix": [
             {k: _strip_forbidden_dashes(str(v)) for k, v in row.items()}
             for row in matrix
+        ],
+    }
+
+
+def _build_vertical_gainhelm_overlay_blocks(
+    slug: str,
+    query_clean: str,
+    heading_label: str,
+    pos: float,
+    ctr: float,
+    impr: int,
+) -> Dict[str, Any]:
+    """
+    Builds framework-isolated h2_headings, preset_scenarios, comparison_rows, and faq_entries
+    for GainHelm overlays so DORA, EU AI Act, and SEC 8-K never receive SOC 2 / CMMC / HIPAA bleed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    comb = f"{slug.lower()} {query_clean.lower()}"
+    if any(k in comb for k in ("dora", "ict-third-party", "2022/2554")):
+        authority_primary = "Regulation (EU) 2022/2554 Articles 17, 26 & 28 (ESAs Oversight)"
+        authority_secondary = "EU DORA ICT Risk & Register of Information Technical Standards"
+        h2_a = f"{heading_label}: 2026 EU DORA TLPT & ICT Vendor Oversight Cost Schedule"
+        h2_b = f"Audit-Ready {heading_label} Register of Information vs Manual Spreadsheets"
+        preset_a_desc = "Financial entity modeling Article 26 threat-led pentesting and 12 critical ICT third-party vendor audits."
+        preset_b_desc = "Significant EU payments institution sizing 25+ critical ICT providers and Article 28 RoI automation."
+        row_a = ("Manual ICT Vendor Spreadsheets vs Automated Register of Information", "380 Hours ($47,500 Labor + Rework)", "160 Hours ($20,000 Labor + $16,500 RoI Platform)", "-220 Hours Saved", authority_primary)
+        row_b = ("Ad-Hoc Vendor Exit Audits vs Standardized Article 28 Oversight", "$68,000 Fragmented ICT Reviews", "$33,600 Scoped Exit-Strategy Audits", "-$34,400 Audit Fee Reduction", authority_secondary)
+        faq_a = (f"How is {query_clean} calculated under EU DORA Regulation (EU) 2022/2554?", "Our deterministic EU DORA model sums Article 26 TLPT red-team fees, per-provider critical ICT third-party risk audits, Article 28 Register of Information tooling, and engineering remediation hours.")
+        faq_b = (f"Which European supervisory standards govern {query_clean}?", "Obligations are governed by Regulation (EU) 2022/2554 (Articles 17, 26, and 28) and the Joint ESAs Regulatory Technical Standards for ICT risk management and threat-led penetration testing.")
+    elif any(k in comb for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+        authority_primary = "Regulation (EU) 2024/1689 Articles 6, 17 & 43 (EU AI Act)"
+        authority_secondary = "Annex IV Technical Documentation & NIST AI RMF 1.0"
+        h2_a = f"{heading_label}: 2026 Article 43 Notified Body & Annex IV Conformity Schedule"
+        h2_b = f"Audit-Ready {heading_label} Article 17 QMS Automation vs Manual Dossiers"
+        preset_a_desc = "Enterprise sizing 2 Annex III high-risk AI systems under Article 43 Notified Body conformity review."
+        preset_b_desc = "Multi-product AI vendor scoping 5 high-risk AI systems, Annex IV technical dossiers, and post-market monitoring."
+        row_a = ("Manual Annex IV Dossiers vs Article 17 QMS Automation", "340 ML Compliance Hours ($51,000)", "140 ML Hours ($21,000 Labor + $24,000 QMS)", "-200 ML Hours Saved", authority_primary)
+        row_b = ("Fragmented EU/US AI Reviews vs Unified NIST AI RMF Cross-Map", "$84,000 Unbundled Conformity Fees", "$57,000 Scoped Notified Body Audits", "-$27,000 Direct Audit Savings", authority_secondary)
+        faq_a = (f"How is {query_clean} calculated under EU AI Act Regulation (EU) 2024/1689?", "Our deterministic EU AI Act model sums Article 43 Notified Body conformity fees across Annex III high-risk systems, Annex IV technical documentation costs, Article 17 QMS setup, and ML validation engineering hours.")
+        faq_b = (f"Which technical standards govern {query_clean}?", "Conformity assessments follow Regulation (EU) 2024/1689 (Articles 6, 17, 43, and Annex IV) paired with NIST AI RMF 1.0 governance controls and European Commission AI impact benchmarks.")
+    elif any(k in comb for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+        authority_primary = "SEC Final Rule 33-11216 (17 CFR 229.106 & Form 8-K Item 1.05)"
+        authority_secondary = "SEC DERA Cyber Governance & 4-Business-Day Disclosure Mandate"
+        h2_a = f"{heading_label}: 2026 SEC Item 1.05 Counsel & DFIR Readiness Cost Schedule"
+        h2_b = f"Audit-Ready {heading_label} Materiality Playbooks vs Emergency Counsel Surge"
+        preset_a_desc = "Small-cap public registrant modeling Item 1.05 materiality workflow and outside securities counsel retainer."
+        preset_b_desc = "Large accelerated filer sizing Form 8-K 4-business-day incident triage, DFIR retainer, and Reg S-K Item 106 governance."
+        row_a = ("Reactive Ad-Hoc Incident Counsel vs Pre-Staged Item 1.05 Retainer", "$115,000 Emergency Legal Surge", "$65,000 Retained Securities Counsel", "-$50,000 Legal Surge Avoided", authority_primary)
+        row_b = ("Manual Committee Spreadsheets vs Automated Reg S-K 106 Workflow", "280 Governance Hours ($63,000)", "160 Governance Hours ($36,000 + Platform)", "-120 Committee Hours Saved", authority_secondary)
+        faq_a = (f"How is {query_clean} calculated under SEC Rule 33-11216?", "Our deterministic SEC Item 1.05 model sums outside securities counsel retainers, DFIR incident response tabletop retainers, Regulation S-K Item 106 board governance hours, and materiality workflow software.")
+        faq_b = (f"Which SEC rules govern {query_clean}?", "Disclosures are governed by SEC Final Rule 33-11216, enforcing 17 CFR 229.106 (Regulation S-K Item 106 annual governance disclosures) and Form 8-K Item 1.05 mandatory 4-business-day materiality reporting.")
+    else:
+        authority_primary = "AICPA SSAE 18 (AT-C Sec. 205) & BLS SOC 15-1212"
+        authority_secondary = "32 CFR Part 170 & ISO/IEC 27006-1:2024"
+        h2_a = f"{heading_label}: 2026 Statutory Attestation & Assessor Fee Schedule"
+        h2_b = f"Audit-Ready {heading_label} GRC Automation vs Manual Evidence Scenarios"
+        preset_a_desc = "45-employee B2B SaaS modeling external assessor fees alongside continuous control automation."
+        preset_b_desc = "250-employee enterprise evaluating multi-framework audit scope and BLS SOC 15-1212 engineering labor."
+        row_a = ("Manual Spreadsheet Evidence vs Continuous GRC Automation", "420 Engineering Hours ($51,101.40 Labor Cost)", "120 Engineering Hours ($14,600.40 Labor + GRC Platform)", "-300 Engineering Hours Saved", authority_primary)
+        row_b = ("Unscoped Multi-Framework Audit vs Segmented Enclave Baseline", "$64,500 Unbundled External Assessment", "$37,000 Scoped Assessment + Automated Readiness", "-$27,500 Direct Audit Fee Reduction", authority_secondary)
+        faq_a = (f"How is {query_clean} calculated under 2026 audit standards?", f"Our deterministic {query_clean} model sums external accredited assessor fees, GRC automation licensing, technical testing, and internal security engineering hours valued at BLS SOC 15-1212 rates.")
+        faq_b = (f"What statutory and accreditation standards govern {query_clean}?", f"Models reference governing statutory fee rules ({authority_primary}) alongside {authority_secondary} and BLS OEWS SOC 15-1212 engineering wage percentiles.")
+
+    return {
+        "h2_headings": [h2_a, h2_b],
+        "preset_scenarios": [
+            {
+                "id": "preset-gainhelm-series-a",
+                "label": f"{heading_label} Core Scope Baseline",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"headcount": 45, "grc_tier": 1, "audit_type": 2},
+                "description": preset_a_desc,
+            },
+            {
+                "id": "preset-gainhelm-midmarket",
+                "label": f"{heading_label} Expanded Enterprise Scope",
+                "query": query_clean,
+                "target_position": pos,
+                "baseline_ctr": ctr,
+                "impressions": impr,
+                "params": {"headcount": 250, "grc_tier": 2, "audit_type": 2},
+                "description": preset_b_desc,
+            },
+        ],
+        "comparison_rows": [
+            {"scenario": row_a[0], "baseline": row_a[1], "optimized": row_a[2], "delta": row_a[3], "authority": row_a[4]},
+            {"scenario": row_b[0], "baseline": row_b[1], "optimized": row_b[2], "delta": row_b[3], "authority": row_b[4]},
+        ],
+        "faq_entries": [
+            {"question": faq_a[0], "answer": faq_a[1]},
+            {"question": faq_b[0], "answer": faq_b[1]},
         ],
     }
 
@@ -9245,12 +9478,19 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         return _strip_forbidden_dashes(html)
 
     # 1. Upgrade <title>
-    raw_ov_ctx = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or "").lower()
+    raw_ov_ctx = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or canon_url_early or "").lower()
     ov_tenant = (
         "prexvo"
         if "prexvo" in raw_ov_ctx
         else ("gainhelm" if "gainhelm" in raw_ov_ctx else ("lienbond" if "lienbond" in raw_ov_ctx else "profithelm"))
     )
+    if ov_tenant == "gainhelm":
+        from pseofactory.estate_common import strip_cross_framework_leaks_from_overlay
+
+        eff_ov_slug = ov_slug_early
+        if not eff_ov_slug and "/tools/" in canon_url_early:
+            eff_ov_slug = canon_url_early.split("/tools/", 1)[1].strip("/").split("/")[0]
+        overlay_data = strip_cross_framework_leaks_from_overlay(overlay_data, eff_ov_slug)
     ov_brand = (
         "Prexvo"
         if ov_tenant == "prexvo"

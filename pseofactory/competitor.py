@@ -355,6 +355,26 @@ class CompetitorGapEngine:
                 }
                 published_output = 2455313.0
                 sample_calculation = "1,500 ePHI records at $175/record ($262,500) plus $125,000 legal/credit monitoring ($387,500 response) plus $2,067,813 45 CFR 160.404 Tier 3 penalty cap yields $2,455,313.00 total HIPAA breach exposure"
+            elif any(
+                t in combined_q
+                for t in ("dora", "ict-third-party", "2022/2554", "eu-ai-act", "eu ai act", "article43", "conformity-assessment", "8k-item-105", "item-105", "item 1.05", "sec-cybersecurity", "materiality")
+            ):
+                from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
+
+                if any(t in combined_q for t in ("dora", "ict-third-party", "2022/2554")):
+                    gh_key = "dora-ict-third-party-risk-compliance-cost-calculator"
+                elif any(t in combined_q for t in ("eu-ai-act", "eu ai act", "article43", "conformity-assessment")):
+                    gh_key = "eu-ai-act-high-risk-conformity-assessment-cost-calculator"
+                else:
+                    gh_key = "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator"
+                mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP[gh_key]
+                statutory_authority = str(mf_ref["statutory_authority"])
+                economic_dataset = str(mf_ref["economic_dataset"])
+                model_name = str(mf_ref["model_name"])
+                formula = str(mf_ref["formula"])
+                inputs = dict(mf_ref["inputs"])
+                published_output = float(mf_ref["published_output"])
+                sample_calculation = str(mf_ref["sample_calculation"])
             else:
                 statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
                 economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
@@ -2952,42 +2972,117 @@ def _resolve_vertical_competitor_content(
             ),
         ]
     elif is_gainhelm:
-        trap_title = "Immediate Audit Observation Window and Control Scoping Trap Alert (AICPA AT-C 205 & 32 CFR Part 170)"
-        trap_body = (
-            "Under AICPA AT-C Section 205 (SOC 2 Type II), ISO/IEC 27006-1:2024 auditor-day tables, and DoD 32 CFR "
-            "Part 170 (CMMC 2.0 Level 2), failing to isolate production in-scope boundaries or allowing continuous "
-            "control evidence gaps during a 3-to-12-month observation window triggers qualified audit opinions, "
-            "mandatory re-testing surcharges, or SPRS score deductions below the 110-point NIST SP 800-171 threshold."
-        )
-        checklist_items = [
-            "Define an explicit System Description and Network Boundary Diagram isolating in-scope production assets or CUI enclaves prior to auditor readiness kick-off.",
-            "Automate continuous control evidence collection across identity (SSO/MFA), cloud infrastructure (AWS/GCP/Azure), endpoint MDM, and SDLC pull-request approvals.",
-            "Conduct an internal readiness gap assessment and remediate high-severity findings before opening the Type II observation window or C3PAO Stage 2 assessment.",
-            "Execute an independent CREST or OSCP penetration test and track critical/high CVE remediation SLAs prior to final auditor sign-off.",
-        ]
-        pitfalls = [
-            (
-                "Scoping the entire corporate IT network instead of a segmented production or CUI enclave boundary",
-                "Inflates ISO 27006 auditor-days, endpoint licensing, and C3PAO assessment fees by 150% to 300%",
-                "Deploy a zero-trust segmented enclave isolating regulated customer data or CUI before readiness scoping",
-            ),
-            (
-                "Relying on manual screenshot spreadsheets during a 6-to-12-month SOC 2 Type II observation window",
-                "Causes population sampling failures on access reviews, employee offboarding, and change management tickets",
-                "Connect automated GRC API integrations (Vanta, Drata, Sprinto) to collect timestamped control evidence daily",
-            ),
-            (
-                "Submitting an unverified DoD SPRS self-assessment score without a documented System Security Plan (SSP)",
-                "Exposes defense primes and subcontractors to False Claims Act liability and DFARS 252.204-7020 contract withholding",
-                "Substantiate all 110 NIST SP 800-171 Rev 2 controls in a live SSP and track open POA&M items with strict 180-day closeout rules",
-            ),
-        ]
-        handoff_title = "GRC Automation, CPA Audit & Assessor Vetting Checklist"
-        handoff_items = [
-            "Verify peer-reviewed AICPA CPA firm registration, ISO/IEC 17021 accreditation, or Cyber-AB C3PAO authorization status.",
-            "Confirm automated API evidence coverage across your cloud provider, identity provider, source control, and HRIS.",
-            "Audit multi-framework control cross-mapping (SOC 2 + ISO 27001 + HIPAA + NIST 800-171) to eliminate duplicate audit workpapers.",
-        ]
+        if any(k in s_low for k in ("dora", "ict-third-party", "2022/2554")):
+            trap_title = "Immediate DORA Article 26 TLPT & Register of Information Trap Alert (Regulation (EU) 2022/2554)"
+            trap_body = (
+                "Under EU Digital Operational Resilience Act Regulation (EU) 2022/2554 Articles 17, 26, and 28, "
+                "failing to maintain a standardized Article 28 Register of Information across critical ICT third-party "
+                "providers or delaying Article 26 threat-led penetration testing scoping exposes financial entities "
+                "to European Supervisory Authority administrative remediation mandates."
+            )
+            checklist_items = [
+                "Inventory all critical ICT third-party service contracts supporting critical or important operational functions under Article 28.",
+                "Verify TIBER-EU aligned Article 26 threat-led penetration testing (TLPT) scope across production banking and payment enclaves.",
+                "Automate ESAs joint Register of Information schemas (entity identifiers, contractual sub-outsourcing chains, exit plans).",
+                "Validate Article 17 major ICT incident classification thresholds and 4-hour initial supervisory notification playbooks.",
+            ]
+            pitfalls = [
+                ("Incomplete Article 28 ICT sub-contractor dependency mapping", "Triggers ESAs Register of Information rejection during supervisory review", "Populate fourth-party concentration chains in structured Register tables continuously"),
+                ("Scoping corporate dev sandboxes into Article 26 TLPT red-team exercises", "Inflates red-team assessor days and remediation costs without regulatory benefit", "Isolate critical financial production boundaries prior to TLPT scoping"),
+                ("Relying on manual legal review for Article 30 contractual exit clauses", "Delays vendor renewal sign-off and increases per-provider compliance engineering hours", "Deploy pre-approved DORA Article 30 addendum templates across ICT procurement"),
+            ]
+            handoff_title = "EU DORA ICT Risk & Supervisory Oversight Checklist"
+            handoff_items = [
+                "Confirm TIBER-EU / ESAs TLPT red-team accreditation and purple-team remediation SLA tracking.",
+                "Verify automated ESAs Register of Information export formats across ICT vendor tiers.",
+                "Audit incident response runbooks against Article 19 initial, intermediate, and final reporting deadlines.",
+            ]
+        elif any(k in s_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            trap_title = "Immediate EU AI Act Article 43 Conformity & Annex IV Dossier Trap Alert (Regulation (EU) 2024/1689)"
+            trap_body = (
+                "Under EU Artificial Intelligence Act Regulation (EU) 2024/1689 Articles 6, 17, and 43, placing an "
+                "Annex III high-risk AI system onto the European market without a validated Article 17 Quality "
+                "Management System and complete Annex IV technical dossier bars CE marking and triggers market withdrawal penalties."
+            )
+            checklist_items = [
+                "Classify every production model against Annex I product safety rules and Annex III high-risk AI use-case categories.",
+                "Assemble complete Annex IV technical documentation (training dataset provenance, validation metrics, robustness benchmarks).",
+                "Establish an Article 17 Quality Management System covering post-market monitoring, risk logging, and drift controls.",
+                "Cross-map controls with NIST AI RMF 1.0 to minimize duplicate Notified Body and engineering validation hours.",
+            ]
+            pitfalls = [
+                ("Deferring Annex IV dataset lineage documentation until model freeze", "Requires costly retrospective retraining audits prior to Article 43 Notified Body review", "Embed automated data-card and bias telemetry logging directly in ML training pipelines"),
+                ("Confusing Article 52 GPAI transparency duties with Annex III conformity", "Underbudgets mandatory Article 43 Notified Body assessments and CE declaration overhead", "Run formal Article 6 high-risk scope triage prior to EU market launch"),
+                ("Operating post-market monitoring manually without drift alerts", "Misses mandatory Article 72 serious incident reporting timelines across EU national authorities", "Connect continuous inference accuracy and bias alerting to your Article 17 QMS"),
+            ]
+            handoff_title = "EU AI Act Conformity & NIST AI RMF Governance Checklist"
+            handoff_items = [
+                "Confirm EU Notified Body scope alignment for Annex III system assessments.",
+                "Verify automated Annex IV model card generation from MLOps experiment tracking.",
+                "Audit Article 14 human oversight interfaces and Article 72 post-market incident logging.",
+            ]
+        elif any(k in s_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+            trap_title = "Immediate SEC Form 8-K Item 1.05 4-Business-Day Clock & Materiality Trap Alert (17 CFR 229.106)"
+            trap_body = (
+                "Under SEC Final Rule 33-11216 (Form 8-K Item 1.05 and 17 CFR 229.106 Regulation S-K Item 106), "
+                "public registrants must file a Form 8-K within 4 business days after determining a cybersecurity "
+                "incident is material. Unclear quantitative and qualitative materiality rubrics or missing DFIR "
+                "retainers create severe disclosure governance exposure."
+            )
+            checklist_items = [
+                "Establish a documented cybersecurity materiality committee charter spanning CISO, CFO, General Counsel, and Audit Chair.",
+                "Pre-define quantitative financial and qualitative operational materiality thresholds to anchor Item 1.05 triage.",
+                "Pre-negotiate external securities counsel and DFIR forensic tabletop retainers ahead of active incident response.",
+                "Verify annual Regulation S-K Item 106 disclosures documenting board oversight, third-party risk, and CISO credentials.",
+            ]
+            pitfalls = [
+                ("Engaging external securities counsel only after a major breach begins", "Emergency legal surge retainers inflate incident disclosure costs by $50,000+ inside the 4-day window", "Pre-retain disclosure counsel and run annual Form 8-K Item 1.05 tabletop exercises"),
+                ("Filing non-material voluntary notices directly under Item 1.05", "Triggers investor confusion contrary to SEC Division of Corporation Finance guidance (use Item 8.01 instead)", "Reserve Item 1.05 strictly for determined-material incidents and Item 8.01 for voluntary updates"),
+                ("Misaligning incident tabletop logs with Reg S-K Item 106 10-K language", "Exposes inconsistencies during SEC comment letters and Audit Committee reviews", "Reconcile incident governance playbooks directly against Form 10-K Item 1C disclosures"),
+            ]
+            handoff_title = "SEC Cyber Materiality & Reg S-K Item 106 Governance Checklist"
+            handoff_items = [
+                "Verify documented 4-business-day materiality escalation SLAs and Attorney General delay criteria.",
+                "Confirm annual Form 10-K Item 1C board oversight and third-party vendor governance alignment.",
+                "Audit DFIR retainer response SLAs and immutable forensic evidence preservation workflows.",
+            ]
+        else:
+            trap_title = "Immediate Audit Observation Window and Control Scoping Trap Alert (AICPA AT-C 205 & 32 CFR Part 170)"
+            trap_body = (
+                "Under AICPA AT-C Section 205 (SOC 2 Type II), ISO/IEC 27006-1:2024 auditor-day tables, and DoD 32 CFR "
+                "Part 170 (CMMC 2.0 Level 2), failing to isolate production in-scope boundaries or allowing continuous "
+                "control evidence gaps during a 3-to-12-month observation window triggers qualified audit opinions, "
+                "mandatory re-testing surcharges, or SPRS score deductions below the 110-point NIST SP 800-171 threshold."
+            )
+            checklist_items = [
+                "Define an explicit System Description and Network Boundary Diagram isolating in-scope production assets or CUI enclaves prior to auditor readiness kick-off.",
+                "Automate continuous control evidence collection across identity (SSO/MFA), cloud infrastructure (AWS/GCP/Azure), endpoint MDM, and SDLC pull-request approvals.",
+                "Conduct an internal readiness gap assessment and remediate high-severity findings before opening the Type II observation window or C3PAO Stage 2 assessment.",
+                "Execute an independent CREST or OSCP penetration test and track critical/high CVE remediation SLAs prior to final auditor sign-off.",
+            ]
+            pitfalls = [
+                (
+                    "Scoping the entire corporate IT network instead of a segmented production or CUI enclave boundary",
+                    "Inflates ISO 27006 auditor-days, endpoint licensing, and C3PAO assessment fees by 150% to 300%",
+                    "Deploy a zero-trust segmented enclave isolating regulated customer data or CUI before readiness scoping",
+                ),
+                (
+                    "Relying on manual screenshot spreadsheets during a 6-to-12-month SOC 2 Type II observation window",
+                    "Causes population sampling failures on access reviews, employee offboarding, and change management tickets",
+                    "Connect automated GRC API integrations (Vanta, Drata, Sprinto) to collect timestamped control evidence daily",
+                ),
+                (
+                    "Submitting an unverified DoD SPRS self-assessment score without a documented System Security Plan (SSP)",
+                    "Exposes defense primes and subcontractors to False Claims Act liability and DFARS 252.204-7020 contract withholding",
+                    "Substantiate all 110 NIST SP 800-171 Rev 2 controls in a live SSP and track open POA&M items with strict 180-day closeout rules",
+                ),
+            ]
+            handoff_title = "GRC Automation, CPA Audit & Assessor Vetting Checklist"
+            handoff_items = [
+                "Verify peer-reviewed AICPA CPA firm registration, ISO/IEC 17021 accreditation, or Cyber-AB C3PAO authorization status.",
+                "Confirm automated API evidence coverage across your cloud provider, identity provider, source control, and HRIS.",
+                "Audit multi-framework control cross-mapping (SOC 2 + ISO 27001 + HIPAA + NIST 800-171) to eliminate duplicate audit workpapers.",
+            ]
         tier_clusters = [
             (
                 "Tier 1: Core Commercial GRC & Attestation Pillar Models",
@@ -4160,17 +4255,115 @@ def _build_b2b_depth_spec(
 
 
 def _build_gainhelm_depth_spec(
-    topic_label: str, statutory_authority: str, economic_dataset: str
+    topic_label: str, statutory_authority: str, economic_dataset: str, slug: str = ""
 ) -> Dict[str, Any]:
-    return {
-        "workbench_mode": "cyber_grc",
-        "workbench_h2": f"Interactive Audit Scoping Sub-Ledger &amp; Automated GRC Savings Matrix: {topic_label}",
-        "workbench_intro": (
-            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, security and GRC "
-            f"operators compress external CPA/C3PAO assessment fees and internal engineering hours by pairing "
-            f"segmented enclave boundaries with automated API control evidence collection:"
-        ),
-        "presets": [
+    s_low = str(slug or "").strip().lower()
+    is_dora = any(k in s_low for k in ("dora", "ict-third-party", "2022/2554"))
+    is_eu_ai = any(k in s_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity"))
+    is_sec = any(k in s_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality"))
+
+    if is_dora:
+        intro_assessor = "third-party risk oversight fees and internal engineering hours"
+        presets = [
+            ("Small Bank / FinTech (6 Critical ICT Vendors)", '{"serp-b2b-gross":82000,"serp-b2b-deduction":24000,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("EU Payments Institution (12 Critical ICT Vendors)", '{"serp-b2b-gross":148000,"serp-b2b-deduction":35900,"serp-b2b-rate":24.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual Spreadsheets & Ad-Hoc TLPT (12 ICT Vendors)", '{"serp-b2b-gross":176000,"serp-b2b-deduction":0,"serp-b2b-rate":30.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Significant Cross-Border Entity (25+ Critical ICT Vendors)", '{"serp-b2b-gross":295000,"serp-b2b-deduction":68000,"serp-b2b-rate":28.0,"serp-b2b-regime":"stress_case"}'),
+        ]
+        table_rows = [
+            ("Article 26 Threat-Led Penetration Testing (TLPT)", "Regulation (EU) 2022/2554 Art. 26", "$42,000 red-team + purple-team remediation", "TIBER-EU aligned critical operational scope"),
+            ("Article 28 ICT Third-Party Risk &amp; Exit Audits", "Regulation (EU) 2022/2554 Art. 28 &amp; 30", "$2,800 per critical ICT provider annually", "Standardized termination &amp; portability addenda"),
+            ("Register of Information Automation", "ESAs Joint Technical Standards ITS", "$16,500 RoI schema &amp; dependency mapping", "Continuous automated fourth-party reporting"),
+            ("Article 17 Major ICT Incident Triage", "Regulation (EU) 2022/2554 Art. 17 &amp; 19", "160 engineering readiness hours ($20,000)", "4-hour initial &amp; 72-hour intermediate ESAs SLA"),
+        ]
+        banner_cta = "Review Vetted EU DORA &amp; ICT Governance Partners"
+        wb = {
+            "gross": 82000, "ded": 24000, "rate": 20.0,
+            "gross_label": "Unautomated DORA TLPT &amp; ICT Oversight Cost ($)",
+            "ded_label": "Automated RoI &amp; Vendor Exit Savings ($)",
+            "rate_label": "ICT Sub-Outsourcing Overhead Factor (%)",
+            "regime_label": "ICT Register &amp; TLPT Operating Model",
+            "opt1": "Automated Article 28 RoI + Segmented TLPT Scope",
+            "opt2": "Manual Vendor Spreadsheets + Unsegmented TLPT",
+            "opt3": "Multi-Jurisdiction Significant Entity (+20% Scope)",
+            "m1_lbl": "Net Automated DORA Readiness TCO",
+            "m2_lbl": "Manual ICT Oversight TCO",
+            "m3_lbl": "Annual RoI Automation Savings",
+            "m4_lbl": "Mitigated ESAs Supervisory Exposure",
+            "svg_l_pfx": "Automated DORA Readiness TCO",
+            "svg_r_pfx": "Automated RoI &amp; Audit Savings",
+            "banner_lead": "Deploying automated Article 28 Register of Information workflows and segmented TLPT scope compresses net DORA readiness cost to",
+            "banner_mid": "in manual vendor audit effort.",
+        }
+    elif is_eu_ai:
+        intro_assessor = "Notified Body conformity fees and ML engineering hours"
+        presets = [
+            ("Single High-Risk AI Product (1 Annex III System)", '{"serp-b2b-gross":79000,"serp-b2b-deduction":19500,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Dual High-Risk AI Suite (2 Annex III Systems)", '{"serp-b2b-gross":154000,"serp-b2b-deduction":34000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual Annex IV Dossier Build (2 High-Risk Systems)", '{"serp-b2b-gross":186000,"serp-b2b-deduction":0,"serp-b2b-rate":28.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Enterprise AI Platform (5 Annex III Systems)", '{"serp-b2b-gross":310000,"serp-b2b-deduction":74000,"serp-b2b-rate":26.0,"serp-b2b-regime":"stress_case"}'),
+        ]
+        table_rows = [
+            ("Article 43 Notified Body Conformity Audits", "Regulation (EU) 2024/1689 Art. 43", "$28,500 per Annex III high-risk AI system", "External EU Notified Body CE marking review"),
+            ("Annex IV Technical Documentation Dossier", "Regulation (EU) 2024/1689 Annex IV", "$18,000 automated model cards &amp; lineage", "Training provenance &amp; accuracy test logs"),
+            ("Article 17 Quality Management System (QMS)", "Regulation (EU) 2024/1689 Art. 17", "$24,000 QMS setup + post-market monitoring", "Continuous bias, drift &amp; risk mitigation"),
+            ("NIST AI RMF 1.0 Validation Engineering", "15 U.S.C. 278h-1 &amp; EU AI Act Cross-Map", "140 ML compliance validation hours ($21,000)", "Unified US/EU high-risk governance telemetry"),
+        ]
+        banner_cta = "Review Vetted AI Governance &amp; Risk Automation Partners"
+        wb = {
+            "gross": 79000, "ded": 19500, "rate": 20.0,
+            "gross_label": "Unautomated Article 43 &amp; Annex IV Readiness Cost ($)",
+            "ded_label": "Article 17 QMS &amp; Model Card Automation Savings ($)",
+            "rate_label": "Dataset Governance &amp; Validation Overhead (%)",
+            "regime_label": "QMS &amp; Annex IV Documentation Architecture",
+            "opt1": "Automated Article 17 QMS + Model Lineage Telemetry",
+            "opt2": "Manual Annex IV Dossiers + Unmapped NIST AI RMF",
+            "opt3": "Multi-Model High-Risk AI Expansion (+20% Scope)",
+            "m1_lbl": "Net Automated EU AI Act TCO",
+            "m2_lbl": "Manual Conformity Dossier TCO",
+            "m3_lbl": "QMS &amp; Dossier Automation Savings",
+            "m4_lbl": "Avoided Article 99 Market Penalty Risk",
+            "svg_l_pfx": "Automated Article 17 QMS TCO",
+            "svg_r_pfx": "Automated Conformity Savings",
+            "banner_lead": "Deploying automated Article 17 Quality Management and Annex IV model cards compresses net EU AI Act conformity cost to",
+            "banner_mid": "in manual ML compliance hours.",
+        }
+    elif is_sec:
+        intro_assessor = "outside securities counsel retainers and governance hours"
+        presets = [
+            ("Smaller Reporting Company (Item 1.05 Baseline)", '{"serp-b2b-gross":135000,"serp-b2b-deduction":29000,"serp-b2b-rate":18.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Accelerated Filer (4-Day Item 1.05 + Item 106)", '{"serp-b2b-gross":218000,"serp-b2b-deduction":38000,"serp-b2b-rate":21.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Ad-Hoc Unprepared Incident Disclosure Surge", '{"serp-b2b-gross":265000,"serp-b2b-deduction":0,"serp-b2b-rate":32.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Large Accelerated Filer (Multi-Subsidiary Reg S-K)", '{"serp-b2b-gross":385000,"serp-b2b-deduction":76000,"serp-b2b-rate":24.0,"serp-b2b-regime":"stress_case"}'),
+        ]
+        table_rows = [
+            ("Form 8-K Item 1.05 Outside Securities Counsel", "17 CFR 249.308 / SEC Rule 33-11216", "$65,000 annual materiality advisory retainer", "4-business-day material incident filing triage"),
+            ("DFIR Incident Tabletop &amp; Forensic Readiness", "SEC Release No. 33-11216 Governance", "$48,000 DFIR retainer + tabletop drills", "Pre-staged forensic containment &amp; timing review"),
+            ("Regulation S-K Item 106 Annual Governance", "17 CFR 229.106 (Form 10-K Item 1C)", "160 committee &amp; CISO hours ($36,000)", "Board cyber oversight &amp; third-party risk process"),
+            ("Materiality Scoring Workflow Platform", "SEC DERA Disclosure Cost Benchmark", "$31,000 workflow &amp; evidentiary audit trail", "Quantitative &amp; qualitative materiality rubric"),
+        ]
+        banner_cta = "Review Vetted Incident Governance &amp; Disclosure Partners"
+        wb = {
+            "gross": 135000, "ded": 29000, "rate": 18.0,
+            "gross_label": "Unprepared Item 1.05 Counsel &amp; Incident Surge ($)",
+            "ded_label": "Pre-Staged DFIR &amp; Materiality Playbook Savings ($)",
+            "rate_label": "Disclosure Committee &amp; Review Overhead (%)",
+            "regime_label": "Form 8-K Triage &amp; Reg S-K Item 106 Posture",
+            "opt1": "Pre-Staged Item 1.05 Playbook + Retained DFIR Panel",
+            "opt2": "Ad-Hoc Incident Counsel Surge + Manual Governance",
+            "opt3": "Multi-Subsidiary Global Registrant (+20% Scope)",
+            "m1_lbl": "Retained Item 1.05 Readiness TCO",
+            "m2_lbl": "Unprepared Incident Surge TCO",
+            "m3_lbl": "Retained Triage &amp; Legal Savings",
+            "m4_lbl": "Protected Market Cap Disclosure Value",
+            "svg_l_pfx": "Retained Item 1.05 Readiness TCO",
+            "svg_r_pfx": "Avoided Legal Surge Drag",
+            "banner_lead": "Operationalizing pre-staged Form 8-K Item 1.05 materiality rubrics and retained DFIR workflows compresses annual readiness cost to",
+            "banner_mid": "in emergency incident counsel surge.",
+        }
+    else:
+        intro_assessor = "external CPA/C3PAO assessment fees and internal engineering hours"
+        presets = [
             (
                 "Seed / Series A SaaS (35 Headcount / Segmented Enclave)",
                 '{"serp-b2b-gross":58200,"serp-b2b-deduction":18400,"serp-b2b-rate":24.0,"serp-b2b-regime":"optimal_election"}',
@@ -4187,48 +4380,8 @@ def _build_gainhelm_depth_spec(
                 "Defense / Healthcare High-Assurance (400 Headcount / CMMC + HITRUST)",
                 '{"serp-b2b-gross":245000,"serp-b2b-deduction":74000,"serp-b2b-rate":30.0,"serp-b2b-regime":"stress_case"}',
             ),
-        ],
-        "inputs_html": (
-            '        <div class="serp-field-group">\n'
-            '          <label for="serp-b2b-gross" class="serp-field-label">Gross Unoptimized Audit &amp; Engineering TCO ($)</label>\n'
-            '          <input type="number" id="serp-b2b-gross" name="serp-b2b-gross" class="touch-target serp-sub-input" min="0" max="5000000" step="1000" value="84000" />\n'
-            '        </div>\n'
-            '        <div class="serp-field-group">\n'
-            '          <label for="serp-b2b-deduction" class="serp-field-label">GRC Automation &amp; Enclave Scoping Savings ($)</label>\n'
-            '          <input type="number" id="serp-b2b-deduction" name="serp-b2b-deduction" class="touch-target serp-sub-input" min="0" max="2500000" step="1000" value="25800" />\n'
-            '        </div>\n'
-            '        <div class="serp-field-group">\n'
-            '          <label for="serp-b2b-rate" class="serp-field-label">Assessor &amp; Remediation Overhead Factor (%)</label>\n'
-            '          <input type="number" id="serp-b2b-rate" name="serp-b2b-rate" class="touch-target serp-sub-input" min="0" max="100" step="0.5" value="22.0" />\n'
-            '        </div>\n'
-            '        <div class="serp-field-group">\n'
-            '          <label for="serp-b2b-regime" class="serp-field-label">Control Evidence &amp; Boundary Architecture</label>\n'
-            '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
-            '            <option value="optimal_election" selected="selected">Automated Continuous GRC + Segmented Enclave Scope</option>\n'
-            '            <option value="unoptimized_baseline">Manual Spreadsheet Evidence + Unsegmented Network</option>\n'
-            '            <option value="stress_case">Multi-Region / High-Assurance Audit Expansion (+20% Scope)</option>\n'
-            '          </select>\n'
-            '        </div>'
-        ),
-        "metrics_meta": [
-            ("serp-out-primary", "Net Automated Audit &amp; GRC TCO", "$58,200"),
-            ("serp-out-secondary", "Manual Unsegmented Audit TCO", "$84,000"),
-            ("serp-out-tertiary", "Annual GRC Automation Hours Saved", "$25,800"),
-            ("serp-out-quaternary", "Avoided Breach &amp; Penalty Exposure", "$488,000"),
-        ],
-        "svg_left_label": "Automated Readiness Efficiency: $58,200 (69.3%)",
-        "svg_right_label": "Eliminated Manual Audit Drag: $25,800 (30.7%)",
-        "svg_left_width": "416",
-        "svg_right_x": "416",
-        "svg_right_width": "184",
-        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing Audit Standards &amp; Assessor Benchmarks",
-        "table_headers": [
-            "Compliance Framework / Audit Tier",
-            "Governing Statutory &amp; Technical Citation",
-            "2026 Auditor-Day or Penalty Schedule",
-            "Continuous Evidence &amp; Assessor Standard",
-        ],
-        "table_rows": [
+        ]
+        table_rows = [
             (
                 "SOC 2 Type I &amp; Type II Attestation",
                 "AICPA SSAE 18 / AT-C Section 205 &amp; TSP Section 100",
@@ -4259,13 +4412,98 @@ def _build_gainhelm_depth_spec(
                 "QSA ROC (>6M Visa tx/yr), 3PAO SAR ($95k to $220k), HITRUST e1/i1/r2",
                 "Continuous automated vulnerability scanning, CREST pentest, and 3PAO ConMon",
             ),
+        ]
+        banner_cta = "Review Vetted GRC Automation, CPA Audit &amp; Pentest Partners"
+        wb = {
+            "gross": 84000, "ded": 25800, "rate": 22.0,
+            "gross_label": "Gross Unoptimized Audit &amp; Engineering TCO ($)",
+            "ded_label": "GRC Automation &amp; Enclave Scoping Savings ($)",
+            "rate_label": "Assessor &amp; Remediation Overhead Factor (%)",
+            "regime_label": "Control Evidence &amp; Boundary Architecture",
+            "opt1": "Automated Continuous GRC + Segmented Enclave Scope",
+            "opt2": "Manual Spreadsheet Evidence + Unsegmented Network",
+            "opt3": "Multi-Region / High-Assurance Audit Expansion (+20% Scope)",
+            "m1_lbl": "Net Automated Audit &amp; GRC TCO",
+            "m2_lbl": "Manual Unsegmented Audit TCO",
+            "m3_lbl": "Annual GRC Automation Hours Saved",
+            "m4_lbl": "Avoided Breach &amp; Penalty Exposure",
+            "svg_l_pfx": "Automated Readiness Efficiency",
+            "svg_r_pfx": "Eliminated Manual Audit Drag",
+            "banner_lead": "Deploying continuous API control collection and enclave segmentation compresses net audit TCO to",
+            "banner_mid": "in manual engineering preparation.",
+        }
+
+    b_gross = float(wb["gross"])
+    b_ded = float(wb["ded"])
+    b_rate_pct = float(wb["rate"])
+    b_rate = b_rate_pct / 100.0
+    rate_adj = round((b_rate - 0.22) * b_gross * 0.25)
+    net_tco = max(1000, round(b_gross - b_ded + rate_adj))
+    unauto_tco = round(b_gross)
+    excess_grc = max(0, b_ded - max(0, b_gross + rate_adj - 1000))
+    grc_saved = max(0, unauto_tco - net_tco) + round(excess_grc * 0.25)
+    rev_protected = round(b_gross * (b_rate * 26.4069 if b_rate > 0 else 5.81))
+    svg_left_w = max(60, min(540, round(600 * net_tco / max(unauto_tco, 1))))
+    svg_right_w = 600 - svg_left_w
+    left_pct = (100.0 * net_tco / max(unauto_tco, 1))
+    right_pct = max(0.0, 100.0 - left_pct)
+
+    return {
+        "workbench_mode": "cyber_grc",
+        "workbench_h2": f"Interactive Audit Scoping Sub-Ledger &amp; Automated GRC Savings Matrix: {topic_label}",
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, security and GRC "
+            f"operators compress {intro_assessor} by pairing "
+            f"segmented enclave boundaries with automated API control evidence collection:"
+        ),
+        "presets": presets,
+        "inputs_html": (
+            '        <div class="serp-field-group">\n'
+            f'          <label for="serp-b2b-gross" class="serp-field-label">{wb["gross_label"]}</label>\n'
+            f'          <input type="number" id="serp-b2b-gross" name="serp-b2b-gross" class="touch-target serp-sub-input" min="0" max="5000000" step="1000" value="{unauto_tco}" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            f'          <label for="serp-b2b-deduction" class="serp-field-label">{wb["ded_label"]}</label>\n'
+            f'          <input type="number" id="serp-b2b-deduction" name="serp-b2b-deduction" class="touch-target serp-sub-input" min="0" max="2500000" step="1000" value="{int(b_ded)}" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            f'          <label for="serp-b2b-rate" class="serp-field-label">{wb["rate_label"]}</label>\n'
+            f'          <input type="number" id="serp-b2b-rate" name="serp-b2b-rate" class="touch-target serp-sub-input" min="0" max="100" step="0.5" value="{b_rate_pct:.1f}" />\n'
+            '        </div>\n'
+            '        <div class="serp-field-group">\n'
+            f'          <label for="serp-b2b-regime" class="serp-field-label">{wb["regime_label"]}</label>\n'
+            '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
+            f'            <option value="optimal_election" selected="selected">{wb["opt1"]}</option>\n'
+            f'            <option value="unoptimized_baseline">{wb["opt2"]}</option>\n'
+            f'            <option value="stress_case">{wb["opt3"]}</option>\n'
+            '          </select>\n'
+            '        </div>'
+        ),
+        "metrics_meta": [
+            ("serp-out-primary", wb["m1_lbl"], f"${net_tco:,}"),
+            ("serp-out-secondary", wb["m2_lbl"], f"${unauto_tco:,}"),
+            ("serp-out-tertiary", wb["m3_lbl"], f"${grc_saved:,}"),
+            ("serp-out-quaternary", wb["m4_lbl"], f"${rev_protected:,}"),
         ],
+        "svg_left_label": f'{wb["svg_l_pfx"]}: ${net_tco:,} ({left_pct:.1f}%)',
+        "svg_right_label": f'{wb["svg_r_pfx"]}: ${grc_saved:,} ({right_pct:.1f}%)',
+        "svg_left_width": str(svg_left_w),
+        "svg_right_x": str(svg_left_w),
+        "svg_right_width": str(svg_right_w),
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing Audit Standards &amp; Assessor Benchmarks",
+        "table_headers": [
+            "Compliance Framework / Audit Tier",
+            "Governing Statutory &amp; Technical Citation",
+            "2026 Auditor-Day or Penalty Schedule",
+            "Continuous Evidence &amp; Assessor Standard",
+        ],
+        "table_rows": table_rows,
         "banner_html": (
             '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="cyber_grc">\n'
             '        <div class="serp-intent-banner-text">\n'
-            '          <strong>Live GRC &amp; Assessor Readiness Signal:</strong> Deploying continuous API control collection and enclave segmentation compresses net audit TCO to <span id="serp-banner-metric-primary">$58,200</span> and saves <span id="serp-banner-metric-secondary">$25,800</span> in manual engineering preparation. Compare vetted GRC and CPA/C3PAO partners below.\n'
+            f'          <strong>Live GRC &amp; Assessor Readiness Signal:</strong> {wb["banner_lead"]} <span id="serp-banner-metric-primary">${net_tco:,}</span> and saves <span id="serp-banner-metric-secondary">${grc_saved:,}</span> {wb["banner_mid"]} Compare vetted compliance partners below.\n'
             '        </div>\n'
-            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted GRC Automation, CPA Audit &amp; Pentest Partners</a>\n'
+            f'        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">{banner_cta}</a>\n'
             '      </div>'
         ),
     }
@@ -4773,6 +5011,25 @@ def resolve_state_code_from_slug(slug: str, property_id: str = "profithelm") -> 
     return "DE" if prop_low == "gainhelm" else "CA"
 
 
+def _resolve_default_workbench_amount(prop_clean: str, slug_clean: str) -> float:
+    """Returns the vertical-appropriate SSR baseline dollar amount for conversion drawers."""
+    if prop_clean == "prexvo":
+        return 68500.0
+    if prop_clean == "gainhelm":
+        if any(k in slug_clean for k in ("dora", "ict-third-party", "2022/2554")):
+            return 57590.0
+        if any(k in slug_clean for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            return 59105.0
+        if any(k in slug_clean for k in ("sec-cybersecurity", "8k-item-105", "item-105", "229.106", "materiality")):
+            return 104650.0
+        return 58200.0
+    if any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
+        return 85000.0
+    if any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
+        return 450000.0
+    return 125000.0
+
+
 def render_partner_quote_intake_html(
     slug: str,
     property_id: str,
@@ -4799,16 +5056,7 @@ def render_partner_quote_intake_html(
 
     default_amt = baseline_amount
     if default_amt is None:
-        if prop_clean == "prexvo":
-            default_amt = 68500.0
-        elif prop_clean == "gainhelm":
-            default_amt = 58200.0
-        elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
-            default_amt = 85000.0
-        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
-            default_amt = 450000.0
-        else:
-            default_amt = 125000.0
+        default_amt = _resolve_default_workbench_amount(prop_clean, slug_clean)
 
     eval_info = evaluate_lead_quote_threshold(
         property_id=prop_clean,
@@ -5056,16 +5304,7 @@ def render_post_calculation_upgrade_drawer_html(
 
     default_amt = baseline_amount
     if default_amt is None:
-        if prop_clean == "prexvo":
-            default_amt = 68500.0
-        elif prop_clean == "gainhelm":
-            default_amt = 58200.0
-        elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
-            default_amt = 85000.0
-        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
-            default_amt = 450000.0
-        else:
-            default_amt = 125000.0
+        default_amt = _resolve_default_workbench_amount(prop_clean, slug_clean)
 
     amt_int = int(round(float(default_amt)))
     amt_fmt = f"${amt_int:,}"
@@ -5076,6 +5315,13 @@ def render_post_calculation_upgrade_drawer_html(
     quick_price_int = int(round(float(spec.get("quick_unlock_price_usd") or 19)))
     eff_stat = str(spec["statutory_authority"])
     regulator_name = str(spec["regulator_name"])
+    if prop_clean == "gainhelm":
+        if any(k in slug_clean for k in ("dora", "ict-third-party", "2022/2554")):
+            regulator_name = "European Supervisory Authorities (EBA, ESMA, EIOPA)"
+        elif any(k in slug_clean for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            regulator_name = "European AI Office and NIST AI RMF"
+        elif any(k in slug_clean for k in ("sec-cybersecurity", "8k-item-105", "item-105", "229.106", "materiality")):
+            regulator_name = "U.S. Securities and Exchange Commission (SEC)"
     trend_count = int(spec["trend_series_count"])
     trend_labels = [lbl for lbl in spec.get("trend_series_labels", []) if lbl]
     trend_preview = ", ".join(trend_labels[:2]) if trend_labels else "2024 to 2030 Statutory Benchmark Series"
@@ -5397,16 +5643,7 @@ def render_calc_result_quick_unlock_bar_html(
 
     default_amt = baseline_amount
     if default_amt is None:
-        if prop_clean == "prexvo":
-            default_amt = 68500.0
-        elif prop_clean == "gainhelm":
-            default_amt = 58200.0
-        elif any(tok in slug_clean for tok in ("factoring", "invoice", "line-of-credit", "working-capital")):
-            default_amt = 85000.0
-        elif any(tok in slug_clean for tok in ("1031", "like-kind", "exchange", "8824", "3840", "boot", "dst")):
-            default_amt = 450000.0
-        else:
-            default_amt = 125000.0
+        default_amt = _resolve_default_workbench_amount(prop_clean, slug_clean)
 
     amt_int = int(round(float(default_amt)))
     full_sku = str(spec["offer_sku"])
@@ -5466,8 +5703,12 @@ def _render_saveable_decision_blueprint_html(
         eff_stat = statutory_authority or "34 CFR Part 685 and Higher Education Act Title IV"
         eff_prop = property_id or "prexvo"
     elif is_gainhelm:
-        reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
-        eff_stat = statutory_authority or "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
+        if any(k in str(slug or "").lower() for k in ("dora", "eu-ai-act", "sec-cybersecurity", "8k-item-105")):
+            reviewer_label = "CISO, risk committee, or regulatory compliance review"
+            eff_stat = statutory_authority or "governing European or SEC cybersecurity regulations"
+        else:
+            reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
+            eff_stat = statutory_authority or "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
         eff_prop = property_id or "gainhelm"
     elif str(property_id).strip().lower() == "lienbond":
         reviewer_label = "surety underwriter, project CFO, or construction counsel review"
@@ -5536,7 +5777,7 @@ def render_serp_incumbent_depth_upgrade_block(
     if is_prexvo:
         spec = _build_repayment_loan_depth_spec(slug, topic_label, statutory_authority)
     elif is_gainhelm:
-        spec = _build_gainhelm_depth_spec(topic_label, statutory_authority, economic_dataset)
+        spec = _build_gainhelm_depth_spec(topic_label, statutory_authority, economic_dataset, slug=slug)
     elif is_lienbond:
         spec = _build_lienbond_depth_spec(topic_label, statutory_authority, economic_dataset)
     elif any(

@@ -2492,6 +2492,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         ):
             words_m.pop()
         raw_meta_desc = " ".join(words_m).rstrip(".,;:") + "."
+    if is_gainhelm:
+        from pseofactory.gsc_remediation import _normalize_meta_120_155
+
+        raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "gainhelm", title, slug=slug)
     if len(raw_meta_desc) < 120 and is_lienbond:
         raw_meta_desc = f"{raw_meta_desc.rstrip('.')} Grounded in U.S. Treasury Circular 570 and 50-state construction statutes."
         if len(raw_meta_desc) > 155:
@@ -2974,8 +2978,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         var name = el.name || el.id;
         if (!name) continue;
         var cleanName = name.replace(/^input-/, "");
-        var v = parseFloat(el.value);
-        inputs[cleanName] = isNaN(v) ? 0 : Math.max(0, v);
+        var rawVal = String(el.value == null ? "" : el.value).trim();
+        if (el.tagName && el.tagName.toUpperCase() === "SELECT" && rawVal && !/^-?\\d+(?:\\.\\d+)?$/.test(rawVal)) {{
+          inputs[cleanName] = rawVal;
+        }} else {{
+          var v = parseFloat(rawVal);
+          inputs[cleanName] = isNaN(v) ? 0 : Math.max(0, v);
+        }}
       }}
       return inputs;
     }}
@@ -3278,84 +3287,37 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       `.agy/asset_ledger.json`, and the `lienbond` Python package (`lienbond/`, `tests/`, `.github/workflows/ci.yml`)
     Zero em-dashes. Zero en-dashes.
     """
-    from pathlib import Path
-    from pseofactory.edge import build_edge_headers, sync_tenant_edge_redirect_function
+    from pseofactory.estate_common import (
+        finalize_estate_build,
+        load_and_enrich_deployed_voids,
+        prepare_estate_dirs,
+        write_machine_endpoints_and_headers,
+        write_sitemaps_and_robots,
+        write_tenant_edge_functions,
+    )
 
-    root = Path(output_dir).resolve()
-    dist = root / "dist"
-    tools_dir = dist / "tools"
+    root, dist, tools_dir = prepare_estate_dirs(output_dir, "lienbond")
     manifests_dir = dist / "manifests"
     disclaimers_dir = dist / "disclaimers"
     methodology_dir = dist / "methodology"
-    css_dir = dist / "css"
-    static_css_dir = dist / "static" / "css"
-    for d in (dist, tools_dir, manifests_dir, disclaimers_dir, methodology_dir, css_dir, static_css_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    from pseofactory.porcelain_shell import get_porcelain_tenant_profile
 
-    gsc_token = "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
-    from pseofactory.porcelain_shell import (
-        compile_tenant_porcelain_estate,
-        generate_porcelain_stylesheet,
-        sync_tenant_porcelain_shell,
-    )
-
-    style_css_content = generate_porcelain_stylesheet("lienbond")
-    (css_dir / "style.css").write_text(style_css_content, encoding="utf-8")
-    (static_css_dir / "style.css").write_text(style_css_content, encoding="utf-8")
+    gsc_token = str(get_porcelain_tenant_profile("lienbond").get("default_gsc_token") or "")
 
     specs = list(get_lienbond_expansion_specs())
     known_slugs = {str(s["slug"]).strip().lower() for s in specs}
-    dv_file = root / "content" / "deployed_voids.json"
-    if dv_file.is_file():
-        try:
-            loaded_dv = json.loads(dv_file.read_text(encoding="utf-8"))
-            if isinstance(loaded_dv, list):
-                from pseofactory.pipeline import CompetitorGapEngine, TenantFactStore
-                lb_profile = TenantFactStore.get_instance().get_profile("lienbond")
-                lb_gap_engine = CompetitorGapEngine(tenant_profile=lb_profile)
-                for dv in loaded_dv:
-                    if not isinstance(dv, dict):
-                        continue
-                    dv_slug = str(dv.get("slug") or "").strip().lower()
-                    if not dv_slug or dv_slug in known_slugs:
-                        continue
-                    cm = dv.get("calculation_manifest") if isinstance(dv.get("calculation_manifest"), dict) else {}
-                    dv_query = str(dv.get("query") or dv.get("primary_keyword") or dv_slug.replace("-", " ")).strip()
-                    dv_title = str(dv.get("title") or dv_query.title()).strip()
-                    dv_spec: Dict[str, Any] = {
-                        "slug": dv_slug,
-                        "query": dv_query,
-                        "title": dv_title,
-                        "property_id": "lienbond",
-                        "tenant": "lienbond",
-                        "domain": "lienbond.com",
-                        "brand_name": "LienBond",
-                        "canonical_base": "https://lienbond.com",
-                        "statutory_authority": str(
-                            dv.get("statutory_authority")
-                            or cm.get("statutory_authority")
-                            or "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes"
-                        ),
-                        "economic_dataset": str(
-                            dv.get("economic_dataset")
-                            or cm.get("economic_dataset")
-                            or "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001"
-                        ),
-                        "model_name": str(
-                            dv.get("model_name")
-                            or cm.get("model_name")
-                            or f"{dv_title} Underwriting Model"
-                        ),
-                        "formula": str(dv.get("formula") or cm.get("formula") or ""),
-                        "inputs": dict(dv.get("inputs") or cm.get("inputs") or {}),
-                        "published_output": dv.get("published_output", cm.get("published_output", 0.0)),
-                        "sample_calculation": str(dv.get("sample_calculation") or cm.get("sample_calculation") or ""),
-                    }
-                    dv_spec = lb_gap_engine.enrich_candidate_spec(dv_spec)
-                    specs.append(dv_spec)
-                    known_slugs.add(dv_slug)
-        except Exception:
-            pass
+    specs.extend(
+        load_and_enrich_deployed_voids(
+            repo_root=root,
+            property_id="lienbond",
+            domain="lienbond.com",
+            brand_name="LienBond",
+            canonical_base="https://lienbond.com",
+            known_slugs=known_slugs,
+            default_authority="40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes",
+            default_dataset="SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
+        )
+    )
     all_slugs = [str(s["slug"]) for s in specs]
     compiled_pages: List[Dict[str, Any]] = []
     catalog_tools: List[Dict[str, Any]] = []
@@ -3868,45 +3830,13 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     assert_no_forbidden_dashes(not_found_html, context="lienbond not_found_html")
     (dist / "404.html").write_text(not_found_html, encoding="utf-8")
 
-    hub_urls = [
-        "https://lienbond.com/",
-        "https://lienbond.com/tools/",
-        "https://lienbond.com/methodology/",
-        "https://lienbond.com/disclaimers/",
+    lb_hub_specs = [
+        ("https://lienbond.com/", "1.0", "daily"),
+        ("https://lienbond.com/tools/", "0.9", "daily"),
+        ("https://lienbond.com/methodology/", "0.9", "weekly"),
+        ("https://lienbond.com/disclaimers/", "0.9", "weekly"),
     ]
-    leaf_urls = [f'https://lienbond.com/tools/{p["slug"]}/' for p in compiled_pages]
-    all_sitemap_urls = hub_urls + leaf_urls
-
-    sitemap_lastmod_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    sitemap_full_rows = "\n".join(
-        f"  <url><loc>{u}</loc><lastmod>{sitemap_lastmod_utc}</lastmod></url>" for u in all_sitemap_urls
-    )
-    sitemap_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{sitemap_full_rows}
-</urlset>
-"""
-    sitemap_hubs_rows = "\n".join(
-        f"  <url><loc>{u}</loc><lastmod>{sitemap_lastmod_utc}</lastmod></url>" for u in hub_urls
-    )
-    sitemap_hubs = f"""<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{sitemap_hubs_rows}
-</urlset>
-"""
-    sitemap_leaves_rows = "\n".join(
-        f"  <url><loc>{u}</loc><lastmod>{sitemap_lastmod_utc}</lastmod></url>" for u in leaf_urls
-    )
-    sitemap_leaves = f"""<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{sitemap_leaves_rows}
-</urlset>
-"""
-    (dist / "sitemap.xml").write_text(sitemap_xml, encoding="utf-8")
-    (dist / "sitemap-hubs.xml").write_text(sitemap_hubs, encoding="utf-8")
-    (dist / "sitemap-leaves.xml").write_text(sitemap_leaves, encoding="utf-8")
-
-    ai_bots = [
+    lb_ai_bots = [
         "*",
         "GPTBot",
         "OAI-SearchBot",
@@ -3928,88 +3858,47 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         "cohere-ai",
         "Bytespider",
     ]
-    robots_blocks = []
-    for bot in ai_bots:
-        robots_blocks.append(
-            f"User-agent: {bot}\n"
-            "Allow: /\n"
-            "Disallow: /api/\n"
-            "Disallow: /cdn-cgi/\n"
-            "Disallow: /_astro/\n"
-            "Disallow: /private/\n"
-            "Disallow: /signal/\n"
-            "Disallow: /syndication/\n"
-            "Disallow: /staging/\n"
-            "Disallow: /test/\n"
-            "Disallow: /tests/\n"
-        )
-    robots_blocks.append(
-        "Sitemap: https://lienbond.com/sitemap.xml\n"
-        "Sitemap: https://lienbond.com/sitemap-hubs.xml\n"
-        "Sitemap: https://lienbond.com/sitemap-leaves.xml\n"
+    write_sitemaps_and_robots(
+        dist=dist,
+        canonical_base="https://lienbond.com",
+        hub_specs=lb_hub_specs,
+        leaf_tools=compiled_pages,
+        ai_bots=lb_ai_bots,
+        disallow_paths=["/api/", "/cdn-cgi/", "/_astro/", "/private/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        allow_paths=["/"],
+        include_changefreq_and_priority=False,
+        validate_governor=False,
     )
-    (dist / "robots.txt").write_text("\n".join(robots_blocks), encoding="utf-8")
-
-    rss_items = "\n".join(
-        f"    <item>\n"
-        f"      <title>{p['title']}</title>\n"
-        f"      <link>https://lienbond.com/tools/{p['slug']}/</link>\n"
-        f"      <guid>https://lienbond.com/tools/{p['slug']}/</guid>\n"
-        f"      <description>{p['sample_calculation']}.</description>\n"
-        f"    </item>"
-        for p in compiled_pages
-    )
-    feed_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>LienBond Statutory Construction Surety &amp; Mechanics Lien Feed</title>
-    <link>https://lienbond.com/</link>
-    <description>Deterministic construction surety bond, NCCI workers compensation class code/EMR, 50-state mechanics lien, and Davis-Bacon WH-347 calculators.</description>
-    <language>en-us</language>
-{rss_items}
-  </channel>
-</rss>
-"""
-    (dist / "feed.xml").write_text(feed_xml, encoding="utf-8")
 
     indexnow_key = hashlib.sha256(b"lienbond.com:indexnow:v1").hexdigest()[:32]
-    (dist / f"{indexnow_key}.txt").write_text(f"{indexnow_key}\n", encoding="utf-8")
-
-    (dist / "catalog.json").write_text(
-        json.dumps({"property_id": "lienbond", "domain": "lienbond.com", "tools": catalog_tools}, indent=2),
-        encoding="utf-8",
+    lb_feed_items = [
+        {
+            "title": p["title"],
+            "url": f"https://lienbond.com/tools/{p['slug']}/",
+            "description": f"{p['sample_calculation']}.",
+        }
+        for p in compiled_pages
+    ]
+    write_machine_endpoints_and_headers(
+        dist=dist,
+        property_id="lienbond",
+        domain="lienbond.com",
+        canonical_base="https://lienbond.com",
+        feed_title="LienBond Statutory Construction Surety & Mechanics Lien Feed",
+        feed_description="Deterministic construction surety bond, NCCI workers compensation class code/EMR, 50-state mechanics lien, and Davis-Bacon WH-347 calculators.",
+        feed_items=lb_feed_items,
+        indexnow_key=indexnow_key,
+        catalog_tools=catalog_tools,
+        media_kit_payload={
+            "property_id": "lienbond",
+            "brand_name": "LienBond",
+            "domain": "lienbond.com",
+            "vertical": "construction_surety_workers_comp_mechanics_lien",
+            "deliverable_skus": ["lb_surety_lien_wh347_packet", "lb_workers_comp_emr_audit_packet"],
+        },
+        header_routes=["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"]
+        + [f'/tools/{p["slug"]}/' for p in compiled_pages],
     )
-    (dist / "media-kit.json").write_text(
-        json.dumps(
-            {
-                "property_id": "lienbond",
-                "brand_name": "LienBond",
-                "domain": "lienbond.com",
-                "vertical": "construction_surety_workers_comp_mechanics_lien",
-                "deliverable_skus": ["lb_surety_lien_wh347_packet", "lb_workers_comp_emr_audit_packet"],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    (dist / "_headers").write_text(
-        build_edge_headers(
-            "https://lienbond.com",
-            routes=["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"]
-            + [f'/tools/{p["slug"]}/' for p in compiled_pages],
-        ),
-        encoding="utf-8",
-    )
-    if not (dist / "_redirects").exists():
-        (dist / "_redirects").write_text("", encoding="utf-8")
-
-    from pseofactory.distributor import generate_ai_benchmark_nodes
-
-    ai_benchmarks_dir = dist / "ai-benchmarks"
-    ai_benchmarks_dir.mkdir(parents=True, exist_ok=True)
-    lb_ai_res = generate_ai_benchmark_nodes(tenant="lienbond")
-    for fname, fcontent in (lb_ai_res.get("files") or {}).items():
-        (ai_benchmarks_dir / fname).write_text(fcontent, encoding="utf-8")
 
     pseo_meta = {
         "property_id": "lienbond",
@@ -4048,57 +3937,7 @@ Compiled tenant of `pseofactory` serving deterministic Construction Surety Bond,
 Do not edit directly. All changes must be made in `pseofactory` and compiled via `compile_lienbond_estate`.
 """
     (root / "README.md").write_text(readme_md, encoding="utf-8")
-
-    (root / "functions" / "r").mkdir(parents=True, exist_ok=True)
-    (root / "functions" / "api").mkdir(parents=True, exist_ok=True)
-    sync_res = sync_tenant_edge_redirect_function(root, property_id="lienbond")
-
-    api_dir = root / "functions" / "api"
-    api_dir.mkdir(parents=True, exist_ok=True)
-    checkout_js = """import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";
-
-function withCheckoutFlag(context) {
-  const url = new URL(context.request.url);
-  if (!url.searchParams.has("checkout")) url.searchParams.set("checkout", "1");
-  const req = new Request(url.toString(), context.request);
-  return { ...context, request: req };
-}
-
-export async function onRequestGet(context) {
-  return lcGet(withCheckoutFlag(context));
-}
-
-export async function onRequestPost(context) {
-  return lcPost(withCheckoutFlag(context));
-}
-
-export async function onRequestOptions(context) {
-  return lcOpt(context);
-}
-"""
-    fulfillment_js = """import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";
-
-function withFulfillFlag(context) {
-  const url = new URL(context.request.url);
-  if (!url.searchParams.has("fulfill")) url.searchParams.set("fulfill", "1");
-  const req = new Request(url.toString(), context.request);
-  return { ...context, request: req };
-}
-
-export async function onRequestGet(context) {
-  return lcGet(withFulfillFlag(context));
-}
-
-export async function onRequestPost(context) {
-  return lcPost(withFulfillFlag(context));
-}
-
-export async function onRequestOptions(context) {
-  return lcOpt(context);
-}
-"""
-    (api_dir / "checkout.js").write_text(checkout_js, encoding="utf-8")
-    (api_dir / "lead-fulfillment.js").write_text(fulfillment_js, encoding="utf-8")
+    sync_res = write_tenant_edge_functions(root, dist, "lienbond")
 
     # Scaffold Python package, CLI, tests, and CI workflow for full tenant parity
     pkg_dir = root / "lienbond"
@@ -4149,29 +3988,17 @@ testpaths = ["tests"]
         ),
         encoding="utf-8",
     )
+    from pseofactory.porcelain_shell import wire_tenant_substrate_bootstraps
+
     (pkg_dir / "__init__.py").write_text(
         '"""LienBond (lienbond.com) compiled tenant package."""\n\n__version__ = "0.1.0"\nPropertyId = "lienbond"\nDomain = "lienbond.com"\n',
         encoding="utf-8",
     )
+    wire_tenant_substrate_bootstraps(root, "lienbond", "LienBond")
+    from pseofactory.estate_common import build_thin_estate_builder_source
+
     (pkg_dir / "builder.py").write_text(
-        """\"\"\"Thin wrapper around pseofactory.compiler.compile_lienbond_estate.\"\"\"
-
-from pathlib import Path
-from typing import Any, Dict
-
-
-def build_estate(output_dir: Any = None) -> Dict[str, Any]:
-    from pseofactory.compiler import compile_lienbond_estate
-
-    target = Path(output_dir).resolve() if output_dir else Path(__file__).resolve().parent.parent
-    return compile_lienbond_estate(target, run_retrofit=True)
-
-
-def build_all(dist_dir: Any = None) -> Path:
-    repo_root = Path(__file__).resolve().parent.parent
-    build_estate(repo_root)
-    return Path(dist_dir).resolve() if dist_dir else (repo_root / "dist")
-""",
+        build_thin_estate_builder_source("lienbond"),
         encoding="utf-8",
     )
     (pkg_dir / "cli.py").write_text(
@@ -4347,94 +4174,14 @@ jobs:
         encoding="utf-8",
     )
 
-    for ov_dir in (root / "content" / "overlays", root / ".agy" / "overlays"):
-        if ov_dir.is_dir():
-            for ov_file in list(ov_dir.glob("*.json")):
-                if not (tools_dir / ov_file.stem / "index.html").is_file():
-                    ov_file.unlink(missing_ok=True)
-                    continue
-                try:
-                    raw_ov = ov_file.read_text(encoding="utf-8").lower()
-                    if any(
-                        bad_tok in raw_ov
-                        for bad_tok in ("profithelm", "section-179-calculator", "section-301-tariff", "coinledger")
-                    ):
-                        ov_file.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-    retrofit_report: Dict[str, Any] = {}
-    if run_retrofit:
-        from pseofactory.maintenance import RetroReflectionEngine
-
-        retrofit_report = RetroReflectionEngine.retrofit_estate(
-            dist,
-            "lienbond",
-            canonical_base="https://lienbond.com",
-        )
-        for mf_file in list(manifests_dir.glob("*.json")):
-            if not (tools_dir / mf_file.stem / "index.html").is_file():
-                mf_file.unlink(missing_ok=True)
-    else:
-        from pseofactory.maintenance import RetroReflectionEngine
-
-        RetroReflectionEngine.sync_tenant_llms_manifests(
-            dist,
-            property_id="lienbond",
-            canonical_base="https://lienbond.com",
-        )
-        RetroReflectionEngine.sync_tenant_publisher_prerequisites(
-            dist,
-            property_id="lienbond",
-            canonical_base="https://lienbond.com",
-        )
-
-    if not (
-        "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
-        and str(root.resolve()).startswith("/home/ubuntuadmin/projects/")
-    ):
-        sync_tenant_porcelain_shell(root, "lienbond")
-    compile_tenant_porcelain_estate(dist, "lienbond", repo_root=root)
-
-    try:
-        from pseofactory.drift import (
-            compute_asset_fingerprint,
-            compute_engine_hash,
-            record_asset_ledger,
-            record_engine_hash,
-            write_substrate_lock,
-        )
-
-        eng_hash = compute_engine_hash()
-        write_substrate_lock(
-            root,
-            property_id="lienbond",
-            expected_hash=eng_hash,
-            dist_dir=dist,
-            sync_ledgers=False,
-        )
-        agy_dir = root / ".agy"
-        agy_dir.mkdir(parents=True, exist_ok=True)
-        record_engine_hash(agy_dir / "engine_hash.json", hash_value=eng_hash)
-        html_assets = sorted(
-            p
-            for p in dist.glob("**/*")
-            if p.is_file()
-            and "syndication" not in p.relative_to(dist).parts
-            and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
-            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-        )
-        asset_hashes = {
-            p.relative_to(dist).as_posix(): compute_asset_fingerprint(p)
-            for p in html_assets
-        }
-        record_asset_ledger(
-            agy_dir / "asset_ledger.json",
-            asset_hashes=asset_hashes,
-            engine_hash=eng_hash,
-        )
-    except Exception:
-        pass
+    retrofit_report = finalize_estate_build(
+        root=root,
+        dist=dist,
+        property_id="lienbond",
+        canonical_base="https://lienbond.com",
+        run_retrofit=run_retrofit,
+        bad_overlay_tokens=("profithelm", "section-179-calculator", "section-301-tariff", "coinledger"),
+    )
 
     return {
         "status": "PASS",
@@ -4450,3 +4197,21 @@ jobs:
     }
 
 
+def compile_gainhelm_estate(
+    output_dir: Any,
+    run_retrofit: bool = True,
+    extra_tools: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Compiles the complete GainHelm (gainhelm.com) tenant estate into `output_dir`
+    backed by `pseofactory.gainhelm_estate` and `pseofactory.estate_common`.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.gainhelm_estate import compile_gainhelm_estate_impl
+
+    return compile_gainhelm_estate_impl(
+        output_dir=output_dir,
+        run_retrofit=run_retrofit,
+        extra_tools=extra_tools,
+        high_effort_page_fn=compile_high_effort_page,
+    )

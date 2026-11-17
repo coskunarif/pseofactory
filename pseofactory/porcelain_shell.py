@@ -1833,9 +1833,14 @@ details.faq-accordion > summary::-webkit-details-marker {{
   display: none;
 }}
 
-.commentary-title,
+.commentary-title {{
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}}
 .variant-title {{
-  font-size: 1.0625rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0 0 0.5rem 0;
@@ -5811,18 +5816,18 @@ def compile_tenant_porcelain_estate_with_profile(
             source_gov_html = gov_html
             if route_slug in ("disclaimers", "methodology") and gov_file.is_file():
                 existing_gov = gov_file.read_text(encoding="utf-8", errors="ignore")
+                existing_plain = re.sub(
+                    r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", existing_gov, flags=re.IGNORECASE
+                )
+                existing_plain = re.sub(r"<[^>]+>", " ", existing_plain)
                 has_polluted_calc = (
                     'id="calculation-manifest"' in existing_gov
                     or "id='calculation-manifest'" in existing_gov
                     or "How to Calculate Legal Disclaimers" in existing_gov
                     or "How to Calculate Methodology" in existing_gov
                     or "Q499388" in existing_gov
-                    or "round((" in existing_gov
+                    or "round((" in existing_plain
                 )
-                existing_plain = re.sub(
-                    r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", existing_gov, flags=re.IGNORECASE
-                )
-                existing_plain = re.sub(r"<[^>]+>", " ", existing_plain)
                 if not has_polluted_calc and len(existing_plain.strip()) >= 1800 and "<table" in existing_gov.lower():
                     source_gov_html = existing_gov
             norm_gov_html, _ = normalize_html_to_porcelain_shell(
@@ -5948,6 +5953,8 @@ _LAZY_EXPORT_MODULES = (
     "porcelain_shell",
     "visual_primitives",
     "tenant_facts",
+    "estate_common",
+    "gainhelm_estate",
 )
 
 
@@ -6048,7 +6055,9 @@ def _generate_tenant_porcelain_module_source(property_id: str) -> str:
         "from typing import Any, Dict, Optional, Sequence\n\n"
         "_SUBSTRATE_DIR = Path(__file__).resolve().parent / '_pseo_substrate'\n"
         "_PSEO_EXT = ('pseofactory' in sys.modules) or any(\n"
-        "    'pseofactory' in _p or 'porcelain-shell' in _p\n"
+        "    '_pseo_substrate' not in _p and (\n"
+        "        'pseofactory' in _p or 'porcelain-shell' in _p or Path(_p).joinpath('pseofactory', '__init__.py').is_file()\n"
+        "    )\n"
         "    for _p in (os.environ.get('PYTHONPATH') or '').split(os.pathsep) if _p\n"
         ")\n"
         "if not _PSEO_EXT and _SUBSTRATE_DIR.is_dir() and str(_SUBSTRATE_DIR) not in sys.path:\n"
@@ -6259,6 +6268,41 @@ def _scrub_tenant_personal_maker_and_inline_js(repo_path: Path, profile: Dict[st
     return updated
 
 
+def build_substrate_bootstrap_block(pkg_name: Optional[str] = None) -> str:
+    """Build deterministic sys.path _pseo_substrate bootstrap block for __init__.py or tests/conftest.py."""
+    if pkg_name is None:
+        sub_lines = [
+            "_PSEO_SUBSTRATE = _PseoPath(__file__).resolve().parent / '_pseo_substrate'",
+        ]
+        repo_root_line = ""
+    else:
+        sub_lines = [
+            "_PSEO_REPO_ROOT = _PseoPath(__file__).resolve().parent.parent",
+            f"_PSEO_SUBSTRATE = _PSEO_REPO_ROOT / {pkg_name!r} / '_pseo_substrate'",
+        ]
+        repo_root_line = (
+            "if str(_PSEO_REPO_ROOT) not in _pseo_sys.path:\n"
+            "    _pseo_sys.path.insert(0, str(_PSEO_REPO_ROOT))\n"
+        )
+    return "\n".join(
+        [
+            "# [PSEO_SUBSTRATE_BOOTSTRAP]",
+            "import os as _pseo_os",
+            "import sys as _pseo_sys",
+            "from pathlib import Path as _PseoPath",
+            *sub_lines,
+            "_PSEO_EXT = ('pseofactory' in _pseo_sys.modules) or any(",
+            "    '_pseo_substrate' not in _p and (",
+            "        'pseofactory' in _p or 'porcelain-shell' in _p or _PseoPath(_p).joinpath('pseofactory', '__init__.py').is_file()",
+            "    )",
+            "    for _p in (_pseo_os.environ.get('PYTHONPATH') or '').split(_pseo_os.pathsep) if _p",
+            ")",
+            "if not _PSEO_EXT and _PSEO_SUBSTRATE.is_dir() and str(_PSEO_SUBSTRATE) not in _pseo_sys.path:",
+            "    _pseo_sys.path.insert(0, str(_PSEO_SUBSTRATE))",
+        ]
+    ) + "\n" + repo_root_line + "# [/PSEO_SUBSTRATE_BOOTSTRAP]\n"
+
+
 def _wire_substrate_bootstrap(
     target_file: Path,
     bootstrap_block: str,
@@ -6299,6 +6343,35 @@ def _wire_substrate_bootstrap(
     return True
 
 
+def wire_tenant_substrate_bootstraps(
+    repo_path: Path,
+    pkg_name: str,
+    brand_name: str,
+) -> List[str]:
+    """Idempotently wire _pseo_substrate bootstrap into <pkg>/__init__.py and tests/conftest.py."""
+    repo = Path(repo_path).resolve()
+    pkg_dir = repo / pkg_name
+    if not pkg_dir.is_dir():
+        return []
+    updated: List[str] = []
+    if _wire_substrate_bootstrap(
+        pkg_dir / "__init__.py",
+        build_substrate_bootstrap_block(),
+        f'"""{brand_name} package."""\n',
+        insert_after_imports=False,
+    ):
+        updated.append(f"{pkg_name}/__init__.py")
+    if (repo / "tests").is_dir():
+        if _wire_substrate_bootstrap(
+            repo / "tests" / "conftest.py",
+            build_substrate_bootstrap_block(pkg_name=pkg_name),
+            f'"""{brand_name} test configuration."""\n\nfrom pathlib import Path\n',
+            insert_after_imports=True,
+        ):
+            updated.append("tests/conftest.py")
+    return updated
+
+
 def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, Any]:
     """
     Deterministically propagates the Porcelain Light contract and real pure-stdlib pseofactory
@@ -6330,53 +6403,9 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
         updated_files.append(f"{pkg_name}/_pseo_porcelain.py")
 
     # 3. Wire _pseo_substrate fallback into <pkg>/__init__.py and tests/conftest.py
-    pkg_bootstrap = (
-        "# [PSEO_SUBSTRATE_BOOTSTRAP]\n"
-        "import os as _pseo_os\n"
-        "import sys as _pseo_sys\n"
-        "from pathlib import Path as _PseoPath\n"
-        "_PSEO_SUBSTRATE = _PseoPath(__file__).resolve().parent / '_pseo_substrate'\n"
-        "_PSEO_EXT = ('pseofactory' in _pseo_sys.modules) or any(\n"
-        "    'pseofactory' in _p or 'porcelain-shell' in _p\n"
-        "    for _p in (_pseo_os.environ.get('PYTHONPATH') or '').split(_pseo_os.pathsep) if _p\n"
-        ")\n"
-        "if not _PSEO_EXT and _PSEO_SUBSTRATE.is_dir() and str(_PSEO_SUBSTRATE) not in _pseo_sys.path:\n"
-        "    _pseo_sys.path.insert(0, str(_PSEO_SUBSTRATE))\n"
-        "# [/PSEO_SUBSTRATE_BOOTSTRAP]\n"
+    updated_files.extend(
+        wire_tenant_substrate_bootstraps(repo, pkg_name, profile["brand_name"])
     )
-    if _wire_substrate_bootstrap(
-        pkg_dir / "__init__.py",
-        pkg_bootstrap,
-        f'"""{profile["brand_name"]} package."""\n',
-        insert_after_imports=False,
-    ):
-        updated_files.append(f"{pkg_name}/__init__.py")
-
-    if (repo / "tests").is_dir():
-        conftest_bootstrap = (
-            "# [PSEO_SUBSTRATE_BOOTSTRAP]\n"
-            "import os as _pseo_os\n"
-            "import sys as _pseo_sys\n"
-            "from pathlib import Path as _PseoPath\n"
-            "_PSEO_REPO_ROOT = _PseoPath(__file__).resolve().parent.parent\n"
-            f"_PSEO_SUBSTRATE = _PSEO_REPO_ROOT / {pkg_name!r} / '_pseo_substrate'\n"
-            "_PSEO_EXT = ('pseofactory' in _pseo_sys.modules) or any(\n"
-            "    'pseofactory' in _p or 'porcelain-shell' in _p\n"
-            "    for _p in (_pseo_os.environ.get('PYTHONPATH') or '').split(_pseo_os.pathsep) if _p\n"
-            ")\n"
-            "if not _PSEO_EXT and _PSEO_SUBSTRATE.is_dir() and str(_PSEO_SUBSTRATE) not in _pseo_sys.path:\n"
-            "    _pseo_sys.path.insert(0, str(_PSEO_SUBSTRATE))\n"
-            "if str(_PSEO_REPO_ROOT) not in _pseo_sys.path:\n"
-            "    _pseo_sys.path.insert(0, str(_PSEO_REPO_ROOT))\n"
-            "# [/PSEO_SUBSTRATE_BOOTSTRAP]\n"
-        )
-        if _wire_substrate_bootstrap(
-            repo / "tests" / "conftest.py",
-            conftest_bootstrap,
-            f'"""{profile["brand_name"]} test configuration."""\n\nfrom pathlib import Path\n',
-            insert_after_imports=True,
-        ):
-            updated_files.append("tests/conftest.py")
 
     # 4. Write canonical Porcelain stylesheet to <pkg>/static/css/style.css and dist
     css_text = generate_porcelain_stylesheet_from_profile(profile)
@@ -6396,36 +6425,10 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
         b_src = builder_path.read_text(encoding="utf-8")
         b_orig = b_src
 
-        if pkg_name == "lienbond":
-            b_src = (
-                '"""Deterministic LienBond estate builder backed by pseofactory compiler."""\n\n'
-                "import shutil\n"
-                "import tempfile\n"
-                "from pathlib import Path\n"
-                "from typing import Any, Dict\n\n"
-                "import lienbond  # noqa: F401\n\n\n"
-                "def build_estate(output_dir: Any = None) -> Dict[str, Any]:\n"
-                "    from pseofactory.compiler import compile_lienbond_estate\n\n"
-                "    target = Path(output_dir).resolve() if output_dir else Path(__file__).resolve().parent.parent\n"
-                "    return compile_lienbond_estate(target, run_retrofit=True)\n\n\n"
-                "def build_all(dist_dir: Any = None) -> Path:\n"
-                "    from lienbond._pseo_porcelain import compile_tenant_porcelain_estate\n\n"
-                "    repo_root = Path(__file__).resolve().parent.parent\n"
-                "    target_dist = Path(dist_dir).resolve() if dist_dir else (repo_root / 'dist')\n"
-                "    if target_dist == (repo_root / 'dist'):\n"
-                "        build_estate(repo_root)\n"
-                "    elif target_dist.name == 'dist':\n"
-                "        build_estate(target_dist.parent)\n"
-                "    else:\n"
-                "        with tempfile.TemporaryDirectory() as tmp_d:\n"
-                "            tmp_root = Path(tmp_d)\n"
-                "            build_estate(tmp_root)\n"
-                "            if target_dist.exists():\n"
-                "                shutil.rmtree(target_dist)\n"
-                "            shutil.copytree(tmp_root / 'dist', target_dist)\n"
-                "        compile_tenant_porcelain_estate(target_dist)\n"
-                "    return target_dist\n"
-            )
+        if pkg_name in ("lienbond", "gainhelm"):
+            from pseofactory.estate_common import build_thin_estate_builder_source
+
+            b_src = build_thin_estate_builder_source(pkg_name)
         else:
             for legal_301 in (
                 '        "/about /methodology/ 301\\n"\n',

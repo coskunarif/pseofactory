@@ -851,6 +851,45 @@ def compute_multi_year_longitudinal_trajectory(
                 ("2027 Full Mandate Phase", f"Surveillance &amp; CDE Re-Segmentation (${cpa27:,.0f} Base)", f"Continuous PTaaS &amp; ASV Scans / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$71,500 ISO / $101,200 PCI"),
                 ("2028-2030 Triennial Cycle", f"3-Yr ISO Recertification (${cpa30:,.0f} 2030 Base)", f"Automated Evidence &amp; EDR Mandate / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$79,800 ISO / $112,400 PCI"),
             ]
+        elif any(k in s_low for k in ("dora", "ict-third-party")):
+            summary = (
+                f"2026 EU DORA Operational Resilience &amp; TLPT Cliff: Under EU Regulation (EU) 2022/2554 Articles 17, 26, and 28, "
+                f"mandatory threat-led penetration testing (TLPT), Article 28 Register of Information reporting, and critical ICT third-party "
+                f"provider oversight scale remediation engineering budgets across ${wg24:.2f}/hr to ${wg30:.2f}/hr BLS SOC 15-1212 wage tiers. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Preparation Window", "DORA RTS / ITS Drafting &amp; ICT Inventory Scoping", f"Register of Information Baseline / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$89,400 DORA Prep"),
+                ("2025 Enforcement Ramp", "EU Reg 2022/2554 Jan 17 Application Date", f"Article 28 RoI Filings &amp; Vendor Exit Plans / ${wg25:.2f}/hr", "cliff-exposure-2025", "$103,800 DORA Scope"),
+                ("2026 Statutory Cliff Year", "Article 26 TLPT Red-Team &amp; 12 Critical ICT Vendors", f"ESAs Oversight &amp; 160 Remediation Hrs / ${wg26:.2f}/hr", "cliff-exposure-2026", "$112,100 DORA TCO"),
+                ("2027 Full Mandate Phase", "Triennial TLPT Cycle &amp; Sub-Contractor Audits", f"Continuous ICT SLA &amp; Incident Reporting / ${wg27:.2f}/hr", "cliff-exposure-2027", "$121,400 DORA Scope"),
+                ("2028-2030 Supervisory Cycle", "Ongoing ESAs Direct Critical ICT Oversight", f"Automated Article 28 RoI &amp; Resilience / ${wg30:.2f}/hr", "cliff-exposure-2028", "$136,900 DORA Horizon"),
+            ]
+        elif any(k in s_low for k in ("eu-ai-act", "conformity-assessment", "article43")):
+            summary = (
+                f"2026 EU AI Act Annex III High-Risk Conformity Cliff: Under Regulation (EU) 2024/1689 Articles 6, 17, and 43 alongside NIST AI RMF 1.0, "
+                f"mandatory Notified Body conformity assessments, Annex IV technical dossiers, and post-market validation scale engineering costs from "
+                f"${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Preparation Window", "Regulation (EU) 2024/1689 Entry Into Force", f"AI Inventory &amp; Risk Tiering / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$84,500 AI Act Prep"),
+                ("2025 Enforcement Ramp", "Prohibited AI Practices &amp; GPAI Transparency", f"Article 17 QMS Baseline / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$104,200 AI Act Scope"),
+                ("2026 Statutory Cliff Year", "Article 43 Notified Body &amp; Annex IV Dossier Gate", f"2 High-Risk Systems + 140 Validation Hrs / ${wg26:.2f}/hr", "cliff-exposure-2026", "$120,000 AI Act TCO"),
+                ("2027 Full Mandate Phase", "Annex III Conformity &amp; Post-Market Monitoring", f"Bias Drift &amp; Logging Telemetry / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$129,800 AI Act Scope"),
+                ("2028-2030 Supervisory Cycle", "Multi-Jurisdiction AI Conformity Renewal", f"Automated Annex IV Evidence Pipelines / ${wg30:.2f}/hr", "cliff-exposure-2028", "$146,500 AI Act Horizon"),
+            ]
+        elif any(k in s_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "materiality")):
+            summary = (
+                f"2026 SEC Form 8-K Item 1.05 &amp; Reg S-K Item 106 Cliff: Under SEC Final Rule 33-11216 (17 CFR 229.106), "
+                f"public registrants must maintain 4-business-day materiality determination workflows, outside securities counsel retainers, DFIR tabletop readiness, "
+                f"and board governance disclosures as engineering rates climb from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Initial Mandate", "SEC Reg S-K Item 106 10-K Governance Rollout", f"Materiality Committee Charter &amp; DFIR / ${wg24:.2f}/hr", "cliff-exposure-2024", "$148,000 SEC Readiness"),
+                ("2025 Enforcement Ramp", "Form 8-K Item 1.05 Clarifying Amendment Enforcement", f"4-Business-Day Escalation Playbooks / ${wg25:.2f}/hr", "cliff-exposure-2025", "$164,500 SEC Readiness"),
+                ("2026 Statutory Cliff Year", "Counsel + DFIR Retainers &amp; 160 Board Advisory Hrs", f"Automated Materiality Evidentiary Workflow / ${wg26:.2f}/hr", "cliff-exposure-2026", "$180,000 SEC 8-K TCO"),
+                ("2027 Full Mandate Phase", "Expanded Subsidiary &amp; Vendor Materiality Tracing", f"Continuous Telemetry &amp; Audit Committee Review / ${wg27:.2f}/hr", "cliff-exposure-2027", "$193,200 SEC Horizon"),
+                ("2028-2030 Supervisory Cycle", "Integrated SEC Cyber &amp; Enterprise Risk Disclosure", f"Real-Time Quantitative Exposure Ledger / ${wg30:.2f}/hr", "cliff-exposure-2028", "$214,000 SEC Horizon"),
+            ]
         else:
             summary = (
                 f"2026 AICPA SOC 2 Type II &amp; GRC Cost Cliff: Peer-reviewed AICPA SSAE 18 (AT-C Section 205) 3-TSC CPA "
@@ -1127,6 +1166,48 @@ def compute_stateful_comparator_defaults(
                 "tax_live": "$40,900 / $23,300",
                 "delta_b": "+$12,000 Control Deficiency Surcharge",
                 "delta_live": "NIST SP 800-115 &amp; NAIC Supplement",
+            }
+        if any(k in s_low for k in ("dora", "ict-third-party")):
+            return {
+                "base_a": "$112,100 Automated DORA RoI &amp; TLPT Scope",
+                "base_b": "$168,500 Manual Multi-Vendor DORA Scope",
+                "base_live": "$112,100 Verified EU DORA Baseline",
+                "ret_a": "$56,400 Register of Information &amp; Vendor Audit Savings",
+                "ret_b": "$0 ICT Exit Strategy Automation",
+                "ret_live": "$42,000 TLPT + $33,600 ICT Vendors + $16,500 RoI",
+                "tax_a": "$112,100 Net Year-1 DORA TCO",
+                "tax_b": "$168,500 Unautomated DORA TCO",
+                "tax_live": "$112,100.00",
+                "delta_b": "+$56,400 Manual DORA Oversight Drag",
+                "delta_live": "EU Regulation (EU) 2022/2554 Art. 17, 26 &amp; 28",
+            }
+        if any(k in s_low for k in ("eu-ai-act", "conformity-assessment", "article43")):
+            return {
+                "base_a": "$120,000 EU AI Act Article 43 Baseline (2 Systems)",
+                "base_b": "$184,000 Unstructured High-Risk AI Audit Scope",
+                "base_live": "$120,000 Verified EU AI Act Baseline",
+                "ret_a": "$64,000 Annex IV Dossier &amp; QMS Automation Savings",
+                "ret_b": "$0 Technical Documentation Reuse",
+                "ret_live": "$57,000 Notified Body + $24,000 QMS + $18,000 Annex IV",
+                "tax_a": "$120,000 Net Article 43 Conformity TCO",
+                "tax_b": "$184,000 Manual Conformity TCO",
+                "tax_live": "$120,000.00",
+                "delta_b": "+$64,000 Manual Technical Dossier Drag",
+                "delta_live": "Regulation (EU) 2024/1689 Articles 6 &amp; 43",
+            }
+        if any(k in s_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "materiality")):
+            return {
+                "base_a": "$180,000 SEC Item 1.05 &amp; Reg S-K Readiness Baseline",
+                "base_b": "$248,000 Ad-Hoc Outside Counsel Crisis Response",
+                "base_live": "$180,000 Verified SEC 8-K Readiness Baseline",
+                "ret_a": "$68,000 Pre-Incident Materiality Workflow Savings",
+                "ret_b": "$0 Automated Evidence Chain",
+                "ret_live": "$65,000 Counsel + $48,000 DFIR + $36,000 Board + $31,000 Platform",
+                "tax_a": "$180,000 Net Annual SEC Readiness TCO",
+                "tax_b": "$248,000 Unprepared Disclosure TCO",
+                "tax_live": "$180,000.00",
+                "delta_b": "+$68,000 4-Day Escalation Friction",
+                "delta_live": "SEC Rule 33-11216 (17 CFR 229.106 &amp; Form 8-K Item 1.05)",
             }
         return {
             "base_a": "$78,100.40 Automated GRC SOC 2 Type II",

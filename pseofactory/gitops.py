@@ -5549,22 +5549,14 @@ def sync_tenant_test_isolation_guards(
                     "      - name: Execute Full Test Suite\n"
                     "        run: |\n"
                     "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
-                    "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
-                    "          if [ -d /home/ubuntuadmin/projects/gainhelm/dist ] && [ -f /home/ubuntuadmin/projects/gainhelm/dist/catalog.json ] && [ \"$(pwd)\" != \"/home/ubuntuadmin/projects/gainhelm\" ]; then\n"
-                    "            mkdir -p dist\n"
-                    "            cp -rf /home/ubuntuadmin/projects/gainhelm/dist/. dist/\n"
-                    "          fi\n"
+                    "          export PYTHONPATH=\"$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/gainhelm/_pseo_substrate:${PYTHONPATH:-}\"\n"
+                    "          python3 -m gainhelm.cli build\n"
                     "          pytest tests/ -q\n\n"
                     "      - name: Verify Compiled Static Distribution & Statutory Audit\n"
                     "        run: |\n"
                     "          export PATH=\"/home/ubuntuadmin/.pyenv/shims:/home/ubuntuadmin/.pyenv/bin:/home/ubuntuadmin/.local/bin:$PATH\"\n"
-                    "          export PYTHONPATH=\"$GITHUB_WORKSPACE:/home/ubuntuadmin/projects/pseofactory:${PYTHONPATH:-}\"\n"
-                    "          if [ -d /home/ubuntuadmin/projects/gainhelm/dist ] && [ -f /home/ubuntuadmin/projects/gainhelm/dist/catalog.json ]; then\n"
-                    "            mkdir -p dist\n"
-                    "            cp -rf /home/ubuntuadmin/projects/gainhelm/dist/. dist/\n"
-                    "          elif [ ! -f dist/index.html ]; then\n"
-                    "            python3 -m gainhelm.cli build\n"
-                    "          elif [ ! -f dist/catalog.json ]; then\n"
+                    "          export PYTHONPATH=\"$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/gainhelm/_pseo_substrate:${PYTHONPATH:-}\"\n"
+                    "          if [ ! -f dist/index.html ] || [ ! -f dist/catalog.json ]; then\n"
                     "            python3 -m gainhelm.cli build\n"
                     "          fi\n"
                     "          python3 -m gainhelm.cli audit\n\n"
@@ -5804,7 +5796,7 @@ def sync_tenant_test_isolation_guards(
                 '        and (DIST_DIR / "catalog.json").is_file()\n'
                 '        and (DIST_DIR / "tools" / "index.html").is_file()\n'
                 '        and (DIST_DIR / "tools" / "treasury-yield-calculator" / "index.html").is_file()\n'
-                '        and (DIST_DIR / "tools" / "prediction-market-tax-calculator" / "index.html").is_file()\n'
+                '        and (DIST_DIR / "tools" / "prediction-market-tax" / "index.html").is_file()\n'
                 '    ):\n'
                 '        return DIST_DIR'
             )

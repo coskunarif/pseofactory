@@ -446,14 +446,14 @@ def write_substrate_lock(
         eh_file = agy_dir / "engine_hash.json"
         al_file = agy_dir / "asset_ledger.json"
         if eh_file.is_file():
-            record_engine_hash(eh_file, hash_value=eh)
+            record_engine_hash(eh_file, hash_value=eh, synced_substrate_hash=synced_sub_hash)
         if al_file.is_file():
             html_assets = sorted(
                 p
                 for p in eff_dist.glob("**/*")
                 if p.is_file()
                 and "syndication" not in p.relative_to(eff_dist).parts
-                and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+                and p.suffix.lower() in (".html", ".xml", ".txt", ".json", ".md")
                 and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
             )
             asset_hashes = {
@@ -794,23 +794,33 @@ def record_engine_hash(
     hash_value: Optional[str] = None,
     include_paths: Optional[List[Union[str, Path]]] = None,
     base_dirs: Optional[List[Union[str, Path]]] = None,
+    synced_substrate_hash: Optional[str] = None,
 ) -> str:
     """
     Persists the updated engine hash into state_file after a successful build/compilation.
+    Preserves synced_substrate_hash alongside engine_hash for standalone _pseo_substrate CI parity.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.supervisor import AtomicStateLedger
 
     s_path = Path(state_file)
+    in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
     final_hash = hash_value or compute_engine_hash(include_paths=include_paths, base_dirs=base_dirs)
-    substrate_hash = compute_engine_hash()
+    raw_substrate_hash = compute_engine_hash()
+    substrate_val = (
+        final_hash
+        if (in_synced_substrate and hash_value is not None and synced_substrate_hash == raw_substrate_hash)
+        else raw_substrate_hash
+    )
     _ENGINE_HASH_CACHE.clear()
     try:
         payload: Dict[str, Any] = {
             "engine_hash": final_hash,
-            "substrate_hash": substrate_hash,
+            "substrate_hash": substrate_val,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if synced_substrate_hash:
+            payload["synced_substrate_hash"] = str(synced_substrate_hash)
         if base_dirs:
             payload["base_dirs"] = [str(Path(b).resolve()) for b in base_dirs]
         AtomicStateLedger.save_json(s_path, payload)
