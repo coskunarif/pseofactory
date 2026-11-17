@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
+from pseofactory.contracts import is_non_tool_or_governance_route
 from pseofactory.supervisor import AtomicStateLedger
 from pseofactory.tenant_facts import (
     TENANT_DEFAULT_CPC_USD,
@@ -141,13 +142,20 @@ _GUIDE_INTENT_TOKENS = (
 
 _LOW_INTENT_HUB_OR_META_SLUGS = {
     "index",
+    "root",
+    "tools",
+    "tools-directory",
     "about",
     "privacy",
     "terms",
     "contact",
     "disclaimers",
     "methodology",
+    "404",
+    "404.html",
     "signal",
+    "static/signal",
+    "static-signal",
     "categories",
     "articles",
 }
@@ -172,9 +180,10 @@ def _classify_asset_intent_class(
     sec_norm = str(section or "").strip().lower()
     combined = f"{s_norm} {u_norm} {q_norm}"
 
-    if s_norm in _LOW_INTENT_HUB_OR_META_SLUGS or any(
-        u_norm.endswith(f"/{hub}") or u_norm.endswith(f"/{hub}/")
-        for hub in ("about", "privacy", "terms", "contact", "disclaimers", "methodology")
+    if (
+        s_norm in _LOW_INTENT_HUB_OR_META_SLUGS
+        or is_non_tool_or_governance_route(s_norm)
+        or is_non_tool_or_governance_route(u_norm)
     ):
         return {
             "intent_class": "general",
@@ -7476,6 +7485,17 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
     Zero em-dashes. Zero en-dashes.
     """
     path = Path(overlay_file)
+    from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
+    if _is_live_repo_mutation_blocked(path):
+        if path.is_file():
+            try:
+                existing_ro = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(existing_ro, dict):
+                    return existing_ro, False
+            except Exception:
+                pass
+        return dict(spec), False
     if path.is_file():
         try:
             existing = json.loads(path.read_text(encoding="utf-8"))
@@ -8075,6 +8095,84 @@ def _backfill_missing_overlay_body_fields(
     return changed
 
 
+def is_non_tool_overlay_target(
+    html: str = "",
+    overlay_data: Optional[Dict[str, Any]] = None,
+    slug: str = "",
+    target_url: str = "",
+) -> bool:
+    """Returns True when an HTML document or overlay spec targets a non-tool governance/utility route."""
+    ov = overlay_data if isinstance(overlay_data, dict) else {}
+    for candidate in (slug, str(ov.get("slug") or ""), target_url, str(ov.get("target_url") or "")):
+        if candidate and is_non_tool_or_governance_route(candidate):
+            return True
+    if html:
+        can_m = re.search(
+            r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        ) or re.search(
+            r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+            html,
+            re.IGNORECASE,
+        )
+        if can_m and is_non_tool_or_governance_route(can_m.group(1)):
+            return True
+    return False
+
+
+def _strip_overlay_dom_sections(html: str) -> str:
+    """Removes injected striking-distance overlay DOM sections without altering page title or metadata."""
+    html = re.sub(
+        r'<section\s+class=["\']overlay-section[^>]*>.*?</section>\s*',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    html = re.sub(
+        r'<details\b[^>]*\bdata-overlay-faq=["\']true["\'][^>]*>.*?</details>\s*',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    html = re.sub(
+        r'(<section\b[^>]*class=["\'][^"\']*\bfaq-section\b[^"\']*)\s+\boverlay-faqs\b([^"\']*["\'])',
+        r"\1\2",
+        html,
+        flags=re.IGNORECASE,
+    )
+    html = re.sub(
+        r'<div\s+id=["\']gsc-striking-overlay["\'][^>]*>\s*</div>\s*',
+        "",
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return html
+
+
+def _iter_overlay_target_html_paths(root: Path, slug: str) -> List[Path]:
+    """Resolves eligible dist/ HTML file paths for a tool overlay slug, skipping non-tool routes."""
+    cands = [slug]
+    for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+        if slug.startswith(f"{hub_pfx}-"):
+            cands.append(f"{hub_pfx}/{slug[len(hub_pfx) + 1:]}")
+    out_paths: List[Path] = []
+    seen: Set[Path] = set()
+    dist_dir = root / "dist"
+    for cand in cands:
+        if is_non_tool_or_governance_route(cand):
+            continue
+        for html_target in (
+            dist_dir / "tools" / cand / "index.html",
+            dist_dir / f"{cand}.html",
+            dist_dir / cand / "index.html",
+        ):
+            if html_target not in seen and html_target.is_file():
+                seen.add(html_target)
+                out_paths.append(html_target)
+    return out_paths
+
+
 def evaluate_expired_overlays(
     site_url: Optional[str] = None,
     days_threshold: int = 28,
@@ -8130,10 +8228,13 @@ def evaluate_expired_overlays(
         if "prexvo" in comb_site_root
         else ("gainhelm" if "gainhelm" in comb_site_root else ("lienbond" if "lienbond" in comb_site_root else "profithelm"))
     )
+    from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
+    live_blocked = _is_live_repo_mutation_blocked(root)
     explicit_live_queries_passed = live_queries is not None
     explicit_baseline_queries_passed = baseline_queries is not None
     in_pytest = "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("PROFITHELM_IN_TEST") == "1"
-    if in_pytest and not str(root.resolve()).startswith("/tmp"):
+    if live_blocked or (in_pytest and not str(root.resolve()).startswith("/tmp")):
         persist = False
         live_queries = None
         explicit_live_queries_passed = False
@@ -8147,7 +8248,8 @@ def evaluate_expired_overlays(
                 paths_by_slug.setdefault(rel_stem, []).append(p)
 
     if not paths_by_slug:
-        reconcile_metric_recovery_ledger(root, property_id=prop)
+        if persist and not live_blocked:
+            reconcile_metric_recovery_ledger(root, property_id=prop)
         return results
 
     eff_multidim: Dict[str, Any] = dict(multidim_telemetry) if isinstance(multidim_telemetry, dict) else {}
@@ -8281,13 +8383,18 @@ def evaluate_expired_overlays(
             overlay_data["slug"] = slug
             ov_dirty = True
 
-        if is_retired_or_consolidated_slug(slug, prop):
-            for p_ret in slug_paths:
-                try:
-                    if p_ret.is_file():
-                        p_ret.unlink()
-                except Exception:
-                    pass
+        if (
+            is_retired_or_consolidated_slug(slug, prop)
+            or is_non_tool_overlay_target(overlay_data=overlay_data, slug=slug)
+            or is_non_tool_or_governance_route(stem_slug)
+        ):
+            if persist and not live_blocked:
+                for p_ret in slug_paths:
+                    try:
+                        if not _is_live_repo_mutation_blocked(p_ret) and p_ret.is_file():
+                            p_ret.unlink()
+                    except Exception:
+                        pass
             continue
 
         was_rolled_back = str(overlay_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK"
@@ -8889,53 +8996,31 @@ def evaluate_expired_overlays(
                             p_write.write_text(json.dumps(overlay_data, indent=2), encoding="utf-8")
                         except Exception:
                             pass
-                act_slug_cands = [slug]
-                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
-                    if slug.startswith(f"{hub_pfx}-"):
-                        act_slug_cands.append(f"{hub_pfx}/{slug[len(hub_pfx) + 1:]}")
-                for act_s in act_slug_cands:
-                    if act_s.lower() in (
-                        "tools",
-                        "tools-directory",
-                        "disclaimers",
-                        "methodology",
-                        "privacy",
-                        "about",
-                        "terms",
-                        "contact",
-                        "index",
-                    ):
-                        continue
-                    for html_target in (
-                        root / "dist" / "tools" / act_s / "index.html",
-                        root / "dist" / f"{act_s}.html",
-                        root / "dist" / act_s / "index.html",
-                    ):
-                        if html_target.is_file():
-                            try:
-                                raw_h = html_target.read_text(encoding="utf-8")
-                                needs_full_reinject = bool(
-                                    just_self_healed
-                                    or (
-                                        'id="gsc-striking-overlay"' not in raw_h
-                                        and 'class="gsc-remediation-overlay"' not in raw_h
-                                    )
-                                    or (
-                                        overlay_data.get("h2_headings")
-                                        and 'class="overlay-section overlay-headings' not in raw_h
-                                    )
-                                )
-                                if needs_full_reinject:
-                                    base_h = (
-                                        rollback_degraded_overlay_from_html(raw_h, overlay_data)
-                                        if (just_self_healed and 'id="gsc-striking-overlay"' in raw_h)
-                                        else raw_h
-                                    )
-                                    inj_h = inject_overlay_into_html(base_h, overlay_data)
-                                    if inj_h != raw_h:
-                                        html_target.write_text(inj_h, encoding="utf-8")
-                            except Exception:
-                                pass
+                for html_target in _iter_overlay_target_html_paths(root, slug):
+                    try:
+                        raw_h = html_target.read_text(encoding="utf-8")
+                        needs_full_reinject = bool(
+                            just_self_healed
+                            or (
+                                'id="gsc-striking-overlay"' not in raw_h
+                                and 'class="gsc-remediation-overlay"' not in raw_h
+                            )
+                            or (
+                                overlay_data.get("h2_headings")
+                                and 'class="overlay-section overlay-headings' not in raw_h
+                            )
+                        )
+                        if needs_full_reinject:
+                            base_h = (
+                                rollback_degraded_overlay_from_html(raw_h, overlay_data)
+                                if (just_self_healed and 'id="gsc-striking-overlay"' in raw_h)
+                                else raw_h
+                            )
+                            inj_h = inject_overlay_into_html(base_h, overlay_data)
+                            if inj_h != raw_h:
+                                html_target.write_text(inj_h, encoding="utf-8")
+                    except Exception:
+                        pass
             eval_item = {
                 "slug": slug,
                 "status": "MONITORING",
@@ -9018,25 +9103,15 @@ def evaluate_expired_overlays(
                     except Exception:
                         pass
 
-                # Immediately roll back the degraded title/overlay from dist HTML if present on disk
-                rb_slug_cands = [slug]
-                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
-                    if slug.startswith(f"{hub_pfx}-"):
-                        rb_slug_cands.append(f"{hub_pfx}/{slug[len(hub_pfx) + 1:]}")
-                for rb_s in rb_slug_cands:
-                    for html_target in (
-                        root / "dist" / "tools" / rb_s / "index.html",
-                        root / "dist" / f"{rb_s}.html",
-                        root / "dist" / rb_s / "index.html",
-                    ):
-                        if html_target.is_file():
-                            try:
-                                raw_h = html_target.read_text(encoding="utf-8")
-                                cleaned_h = rollback_degraded_overlay_from_html(raw_h, overlay_data)
-                                if cleaned_h != raw_h:
-                                    html_target.write_text(cleaned_h, encoding="utf-8")
-                            except Exception:
-                                pass
+                # Immediately roll back the degraded title/overlay from eligible tool dist HTML if present on disk
+                for html_target in _iter_overlay_target_html_paths(root, slug):
+                    try:
+                        raw_h = html_target.read_text(encoding="utf-8")
+                        cleaned_h = rollback_degraded_overlay_from_html(raw_h, overlay_data)
+                        if cleaned_h != raw_h:
+                            html_target.write_text(cleaned_h, encoding="utf-8")
+                    except Exception:
+                        pass
 
             eval_item = {
                 "slug": slug,
@@ -9187,7 +9262,8 @@ def evaluate_expired_overlays(
         except Exception:
             pass
 
-    reconcile_metric_recovery_ledger(root, property_id=prop)
+    if persist and not live_blocked:
+        reconcile_metric_recovery_ledger(root, property_id=prop)
     return results
 
 
@@ -9315,6 +9391,9 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
     if not html or not isinstance(overlay_data, dict):
         return _strip_forbidden_dashes(html or "")
 
+    if is_non_tool_overlay_target(html=html, overlay_data=overlay_data):
+        return _strip_forbidden_dashes(_strip_overlay_dom_sections(html))
+
     rolled_title = _strip_forbidden_dashes(str(overlay_data.get("rolled_back_title_rewrite") or "")).strip()
     baseline_title = _strip_forbidden_dashes(str(overlay_data.get("baseline_title") or "")).strip()
     raw_ov_t = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").lower()
@@ -9375,30 +9454,7 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
             flags=re.IGNORECASE,
         )
 
-    html = re.sub(
-        r'<section\s+class=["\']overlay-section[^>]*>.*?</section>\s*',
-        "",
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    html = re.sub(
-        r'<details\b[^>]*\bdata-overlay-faq=["\']true["\'][^>]*>.*?</details>\s*',
-        "",
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    html = re.sub(
-        r'(<section\b[^>]*class=["\'][^"\']*\bfaq-section\b[^"\']*)\s+\boverlay-faqs\b([^"\']*["\'])',
-        r"\1\2",
-        html,
-        flags=re.IGNORECASE,
-    )
-    html = re.sub(
-        r'<div\s+id=["\']gsc-striking-overlay["\'][^>]*>\s*</div>\s*',
-        "",
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
+    html = _strip_overlay_dom_sections(html)
     try:
         from pseofactory.maintenance import _normalize_page_structure_and_geo_parity
         canon_m = re.search(
@@ -9445,6 +9501,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     if not html or not isinstance(overlay_data, dict):
         return _strip_forbidden_dashes(html or "")
 
+    if is_non_tool_overlay_target(html=html, overlay_data=overlay_data):
+        return _strip_forbidden_dashes(_strip_overlay_dom_sections(html))
+
     if str(overlay_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
         return rollback_degraded_overlay_from_html(html, overlay_data)
 
@@ -9459,23 +9518,6 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     )
     canon_url_early = canon_m_early.group(1).strip().lower() if canon_m_early else ""
     ov_slug_early = str(overlay_data.get("slug") or "").strip("/").lower()
-    if (
-        canon_url_early.rstrip("/").endswith(("/tools", "/disclaimers", "/methodology", "/about", "/privacy", "/terms"))
-        or ov_slug_early in ("tools", "disclaimers", "methodology", "about", "privacy", "terms")
-    ):
-        html = re.sub(
-            r'<section\s+class=["\']overlay-section[^>]*>.*?</section>\s*',
-            "",
-            html,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        html = re.sub(
-            r'<div\s+id=["\']gsc-striking-overlay["\'][^>]*>\s*</div>\s*',
-            "",
-            html,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        return _strip_forbidden_dashes(html)
 
     # 1. Upgrade <title>
     raw_ov_ctx = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or overlay_data.get("target_url") or canon_url_early or "").lower()
@@ -10898,6 +10940,8 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
     lock_28d_compliant_count = 0
     legacy_14d_upgraded_count = 0
 
+    from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
     for ov_dir in overlay_dirs:
         if not ov_dir.is_dir():
             continue
@@ -10911,10 +10955,17 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
                 continue
             if not isinstance(ov_data, dict):
                 continue
+            if is_non_tool_overlay_target(overlay_data=ov_data, slug=ov_file.stem):
+                continue
             total_overlays += 1
             st_val = str(ov_data.get("status") or "ACTIVE_LOCKED").upper()
             cur_lock_days = int(ov_data.get("measurement_lock_days") or ov_data.get("lock_days") or measurement_lock_days)
-            if cur_lock_days < measurement_lock_days and not dry_run and st_val == "ACTIVE_LOCKED":
+            if (
+                cur_lock_days < measurement_lock_days
+                and not dry_run
+                and st_val == "ACTIVE_LOCKED"
+                and not _is_live_repo_mutation_blocked(ov_file)
+            ):
                 ov_data["measurement_lock_days"] = measurement_lock_days
                 ov_data["lock_days"] = measurement_lock_days
                 try:

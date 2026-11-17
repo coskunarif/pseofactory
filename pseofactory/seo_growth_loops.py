@@ -27,7 +27,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.contracts import (
+    assert_no_forbidden_dashes,
+    is_non_tool_or_governance_route,
+)
 from pseofactory.supervisor import AtomicStateLedger
 from pseofactory.tenant_facts import (
     get_tenant_contract,
@@ -63,6 +66,50 @@ def _resolve_tenant_repo_root(property_id: str = "profithelm", repo_root: Option
     if contract is not None:
         return contract.repo_root_path
     return Path("/home/ubuntuadmin/projects/profithelm-platform")
+
+
+def _retrofit_tool_html_if_eligible(
+    html_content: str,
+    property_id: str,
+    slug: str,
+    dist_dir: Path,
+    html_path: Optional[Path] = None,
+    write_sidecar: bool = True,
+) -> Tuple[str, bool]:
+    """Runs RetroReflectionEngine.retrofit_html only for eligible tool/calculator HTML routes."""
+    if is_non_tool_or_governance_route(slug):
+        return html_content, False
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    if html_path is not None:
+        try:
+            rel_p = html_path.resolve().relative_to(dist_dir.resolve()).as_posix()
+        except Exception:
+            rel_p = html_path.name
+        if rel_p != "index.html" and is_non_tool_or_governance_route(rel_p):
+            return html_content, False
+        if not RetroReflectionEngine.is_tool_or_calculator_page(html_path, dist_dir, html_content):
+            return html_content, False
+    updated_html, repaired = RetroReflectionEngine.retrofit_html(
+        html_content,
+        property_id=property_id,
+        slug=slug,
+        dist_dir=dist_dir,
+        write_sidecar=write_sidecar,
+    )
+    return updated_html, bool(repaired)
+
+
+def _resolve_safe_persist_flag(
+    persist: bool,
+    *paths: Optional[Union[str, Path]],
+) -> bool:
+    """Disables filesystem writes when any target path falls inside a protected live checkout."""
+    if not persist:
+        return False
+    from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
+    return not any(_is_live_repo_mutation_blocked(p) for p in paths)
 
 
 def harvest_and_sync_gsc_daily_timeline(
@@ -165,8 +212,14 @@ def harvest_and_sync_gsc_daily_timeline(
             if main_repo_db.is_file():
                 target_db_path = main_repo_db
 
+        persist = _resolve_safe_persist_flag(
+            persist,
+            target_db_path,
+            root if (repo_root is not None or db_path is None) else None,
+        )
+
         if not fixture_records and target_db_path.is_file() and len(records) < 14:
-            with TrendHistoryDB(target_db_path) as tdb:
+            with TrendHistoryDB(target_db_path, read_only=True) as tdb:
                 db_recs = tdb.get_gsc_daily_metrics(prop, days=days)
                 by_dt = {r.date: r for r in db_recs}
                 for r in records:
@@ -180,7 +233,7 @@ def harvest_and_sync_gsc_daily_timeline(
                 ceil_analysis = detect_algorithmic_ceiling(records, updates=DEFAULT_GOOGLE_UPDATES)
                 tdb.record_gsc_ceiling_snapshot(ceil_analysis)
         elif not records and target_db_path.is_file():
-            with TrendHistoryDB(target_db_path) as tdb:
+            with TrendHistoryDB(target_db_path, read_only=True) as tdb:
                 records = tdb.get_gsc_daily_metrics(prop, days=days)
     except Exception:
         pass
@@ -846,6 +899,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
 
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
+    persist_root = _resolve_safe_persist_flag(persist, root)
     site_uri = f"sc-domain:{prop}.com"
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -879,7 +933,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
         if (time.monotonic() - cached_ts) < 180.0 and _is_valid_multidim_cache_payload(
             cached_payload, require_page_windows=bool(live_gsc)
         ):
-            if persist:
+            if persist_root:
                 out_path = root / ".agy" / "gsc_lifecycle_telemetry.json"
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 AtomicStateLedger.save_json(out_path, cached_payload)
@@ -909,6 +963,12 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
         main_repo_db = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
         if main_repo_db.is_file():
             target_db_path = main_repo_db
+
+    persist_db = _resolve_safe_persist_flag(
+        persist,
+        target_db_path,
+        root if (repo_root is not None or db_path is None) else None,
+    )
 
     device_records: List[GSCDeviceMetricRecord] = []
     appearance_records: List[GSCSearchAppearanceRecord] = []
@@ -1472,8 +1532,9 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
         raw_insp_items: List[Dict[str, Any]] = []
         if live_gsc and "PYTEST_CURRENT_TEST" not in os.environ and target_db_path.is_file():
             try:
-                with TrendHistoryDB(target_db_path) as tdb_pre:
-                    if valid_sitemap_norm:
+                can_mutate_pre_db = bool(persist_db and _resolve_safe_persist_flag(True, target_db_path))
+                with TrendHistoryDB(target_db_path, read_only=not can_mutate_pre_db) as tdb_pre:
+                    if can_mutate_pre_db and valid_sitemap_norm:
                         tdb_pre.sanitize_gsc_url_inspection_states(
                             prop,
                             valid_urls=[f"{u}/" for u in valid_sitemap_norm],
@@ -1554,8 +1615,9 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
 
     # Persist to or hydrate from TrendHistoryDB (each table isolated so no error skips URL inspection states)
     try:
-        if target_db_path.parent.is_dir() or db_path is not None:
-            with TrendHistoryDB(target_db_path) as tdb:
+        can_mutate_db = bool(persist_db and _resolve_safe_persist_flag(True, target_db_path))
+        if (can_mutate_db or target_db_path.is_file()) and (target_db_path.parent.is_dir() or db_path is not None):
+            with TrendHistoryDB(target_db_path, read_only=not can_mutate_db) as tdb:
                 if not fixture_payload:
                     try:
                         existing_db_insp = tdb.get_gsc_url_inspection_states(prop)
@@ -1571,7 +1633,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                     except Exception:
                         pass
 
-                if persist:
+                if can_mutate_db:
                     try:
                         if device_records:
                             tdb.upsert_gsc_device_metrics(device_records)
@@ -2288,7 +2350,7 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
         },
     }
 
-    if persist:
+    if persist_root:
         out_path = root / ".agy" / "gsc_lifecycle_telemetry.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         AtomicStateLedger.save_json(out_path, payload)
@@ -2501,7 +2563,7 @@ def load_consolidated_gsc_query_rows(
                     )
                 )
                 if t_path.is_file() and ("PYTEST_CURRENT_TEST" not in os.environ or str(root).startswith("/home/ubuntuadmin/projects/")):
-                    with TrendHistoryDB(t_path) as tdb:
+                    with TrendHistoryDB(t_path, read_only=True) as tdb:
                         curr_win_rows = tdb.get_gsc_query_page_windows(prop, window_key="recent_28d")
                         for cw in curr_win_rows:
                             snapshot_latest_rows.append(
@@ -2587,7 +2649,7 @@ def load_consolidated_gsc_query_rows(
             sibling_tdb = root.parent / "trend_history.db"
             t_path = local_tdb if local_tdb.parent.is_dir() else (sibling_tdb if sibling_tdb.is_file() else DEFAULT_DB_PATH)
             if t_path.is_file():
-                with TrendHistoryDB(t_path) as tdb:
+                with TrendHistoryDB(t_path, read_only=True) as tdb:
                     prior_win_rows = tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")
                     for pw in prior_win_rows:
                         raw_baseline_rows.append(
@@ -2726,6 +2788,7 @@ def identify_content_decay(
 
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
+    persist = _resolve_safe_persist_flag(persist, root)
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
 
     d_records = (
@@ -3089,6 +3152,7 @@ def discover_internal_linking_opportunities(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
 
     if not d_dir.is_dir():
@@ -3362,7 +3426,7 @@ def discover_internal_linking_opportunities(
 
     for site_p in sorted(path_to_file.keys()):
         if (
-            site_p in ("/", "/404", "/signal", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology")
+            (is_non_tool_or_governance_route(site_p) and site_p != "/tools")
             or site_p in noindex_paths
         ):
             continue
@@ -3714,6 +3778,8 @@ def compile_search_opportunity_briefs(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
+    apply_overlays = _resolve_safe_persist_flag(apply_overlays, root, d_dir)
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
@@ -3741,7 +3807,7 @@ def compile_search_opportunity_briefs(
                 t_url = str(rt.get("target_url") or "").strip()
                 t_slug = str(rt.get("slug") or "").strip()
                 c_p = urllib.parse.urlsplit(t_url).path.rstrip("/") if t_url else (f"/tools/{t_slug}" if t_slug else "")
-                if not c_p or c_p in ("/", "/tools"):
+                if not c_p or is_non_tool_or_governance_route(c_p):
                     continue
                 # Only include if the route exists on disk or in GSC rows
                 html_cand = d_dir / c_p.lstrip("/") / "index.html"
@@ -3770,7 +3836,7 @@ def compile_search_opportunity_briefs(
                     if not isinstance(inv, dict):
                         continue
                     c_slug = str(inv.get("canonical_slug") or inv.get("target_slug") or "").strip().lower()
-                    if not c_slug or c_slug in ("tools", "root", prop):
+                    if not c_slug or c_slug == prop or is_non_tool_or_governance_route(c_slug):
                         continue
                     c_p = f"/tools/{c_slug}"
                     html_cand = d_dir / "tools" / c_slug / "index.html"
@@ -3798,7 +3864,7 @@ def compile_search_opportunity_briefs(
             continue
         q = str(r.get("query") or "").strip()
         c_path = (str(r.get("canonical_path") or "").strip().rstrip("/")) or "/"
-        if not q or not c_path or c_path in ("/", "/tools", "/privacy", "/terms", "/about", "/contact"):
+        if not q or not c_path or is_non_tool_or_governance_route(c_path):
             continue
         if any(leg in f"{q.lower()} {c_path.lower()}" for leg in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
             continue
@@ -3918,6 +3984,8 @@ def compile_search_opportunity_briefs(
         target_url = f"https://{domain}{c_path}/"
         primary_query = _clean_dashes(str(primary.get("query") or ""))
         leaf_slug = _slug_from_url_or_query(target_url=target_url, query=primary_query)
+        if is_non_tool_or_governance_route(leaf_slug):
+            continue
         grouped_qs = []
         seen_q: Set[str] = set()
         for pr in (striking_4_15_rows + top_3_rows + striking_16_30_rows + dedup_p_rows):
@@ -4140,34 +4208,45 @@ def compile_search_opportunity_briefs(
             ),
         }
 
-        if apply_overlays and tot_impr >= min_impressions_floor:
+        if (
+            apply_overlays
+            and tot_impr >= min_impressions_floor
+            and not is_non_tool_or_governance_route(c_path)
+            and not is_non_tool_or_governance_route(leaf_slug)
+        ):
             try:
+                from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
                 is_prod_repo = (
                     str(root.resolve()).startswith("/home/ubuntuadmin/projects/")
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
                 content_ov_path = root / "content" / "overlays" / f"{overlay_file_stem}.json"
                 agy_ov_path = root / ".agy" / "overlays" / f"{overlay_file_stem}.json"
+                effective_ov = dict(overlay_spec)
                 if not agy_ov_path.is_file() and content_ov_path.is_file():
-                    effective_ov, _ = persist_overlay_respecting_lock(content_ov_path, overlay_spec)
+                    if not _is_live_repo_mutation_blocked(content_ov_path):
+                        effective_ov, _ = persist_overlay_respecting_lock(content_ov_path, overlay_spec)
+                        overlays_compiled += 1
                 else:
-                    effective_ov, _ = persist_overlay_respecting_lock(agy_ov_path, overlay_spec)
-                    if not is_prod_repo:
+                    if not _is_live_repo_mutation_blocked(agy_ov_path):
+                        effective_ov, _ = persist_overlay_respecting_lock(agy_ov_path, overlay_spec)
+                        overlays_compiled += 1
+                    if not is_prod_repo and not _is_live_repo_mutation_blocked(content_ov_path):
                         persist_overlay_respecting_lock(content_ov_path, effective_ov)
-                overlays_compiled += 1
 
                 html_rel = c_path.strip("/")
                 target_html = d_dir / html_rel / "index.html" if html_rel else d_dir / "index.html"
-                if target_html.is_file():
+                if target_html.is_file() and not _is_live_repo_mutation_blocked(target_html):
                     raw_h = target_html.read_text(encoding="utf-8")
                     updated_h = inject_overlay_into_html(raw_h, effective_ov)
                     try:
-                        from pseofactory.maintenance import RetroReflectionEngine
-                        updated_h, _ = RetroReflectionEngine.retrofit_html(
+                        updated_h, _ = _retrofit_tool_html_if_eligible(
                             updated_h,
                             property_id=prop,
                             slug=leaf_slug,
                             dist_dir=d_dir,
+                            html_path=target_html,
                         )
                     except Exception:
                         pass
@@ -4180,7 +4259,7 @@ def compile_search_opportunity_briefs(
                         if str(effective_ov.get("status") or "").upper() == "DEGRADED_ROLLED_BACK"
                         else "INJECTED_INTO_DIST_HTML"
                     )
-                else:
+                elif overlays_compiled:
                     brief["execution_status"] = "OVERLAY_SAVED"
             except Exception:
                 pass
@@ -4362,6 +4441,7 @@ def evaluate_content_portfolio_decisions(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(
@@ -4473,10 +4553,7 @@ def evaluate_content_portfolio_decisions(
             else:
                 site_p = "/" + str(rel).replace(".html", "")
             site_p = site_p.rstrip("/") or "/"
-            if (
-                site_p in ("/", "/tools", "/404", "/signal", "/static/signal", "/privacy", "/terms", "/about", "/contact", "/disclaimers", "/methodology")
-                or site_p.startswith(("/signal/", "/static/"))
-            ):
+            if is_non_tool_or_governance_route(site_p):
                 continue
 
             raw_hf = ""
@@ -5060,14 +5137,30 @@ def _apply_closed_loop_dom_mutation_to_dist_html(
     """
     if not html_path.is_file():
         return False
+    from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
+    if _is_live_repo_mutation_blocked(html_path) or _is_live_repo_mutation_blocked(dist_dir):
+        return False
+    target_slug = str(mutation_spec.get("target_slug") or "").strip()
+    try:
+        rel_p = html_path.resolve().relative_to(dist_dir.resolve()).as_posix()
+    except Exception:
+        rel_p = html_path.name
+    if is_non_tool_or_governance_route(target_slug) or (
+        rel_p != "index.html" and is_non_tool_or_governance_route(rel_p)
+    ):
+        return False
     try:
         raw_html = html_path.read_text(encoding="utf-8")
     except Exception:
         return False
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    if not RetroReflectionEngine.is_tool_or_calculator_page(html_path, dist_dir, raw_html):
+        return False
 
     updated_html = raw_html
     new_workbench = str(mutation_spec.get("serp_depth_upgrade_html") or "").strip()
-    target_slug = str(mutation_spec.get("target_slug") or "").strip()
 
     if new_workbench:
         wb_pattern = re.compile(
@@ -5080,13 +5173,12 @@ def _apply_closed_loop_dom_mutation_to_dist_html(
             updated_html = updated_html.replace("</main>", f"\n{new_workbench}\n</main>", 1)
 
     try:
-        from pseofactory.maintenance import RetroReflectionEngine
-
-        updated_html, _ = RetroReflectionEngine.retrofit_html(
+        updated_html, _ = _retrofit_tool_html_if_eligible(
             updated_html,
             property_id=property_id,
             slug=target_slug,
             dist_dir=dist_dir,
+            html_path=html_path,
         )
     except Exception:
         pass
@@ -5130,6 +5222,7 @@ def route_validated_inflection_signals(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = root / "dist"
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
     tools_dir = d_dir / "tools"
 
     existing_tools: List[Dict[str, Any]] = []
@@ -5323,6 +5416,7 @@ def investigate_competitor_traffic_spikes(
 
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
+    persist = _resolve_safe_persist_flag(persist, root, root / "dist")
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(prop, repo_root=root)
 
     profile = TenantFactStore.get_instance().get_profile(prop)
@@ -5396,19 +5490,19 @@ def investigate_competitor_traffic_spikes(
     main_repo_db = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
     if main_repo_db.is_file() and "PYTEST_CURRENT_TEST" not in os.environ:
         try:
-            conn = sqlite3.connect(str(main_repo_db))
-            cur = conn.cursor()
-            rows = cur.execute(
-                """
-                SELECT query, intent_cluster, latest_velocity, velocity_delta, acceleration_2nd_deriv, consecutive_cycles_count
-                FROM keyword_history
-                WHERE current_property_id = ? OR (current_property_id = 'unassigned' AND ? = 'profithelm')
-                ORDER BY latest_velocity DESC, consecutive_cycles_count DESC
-                LIMIT 20
-                """,
-                (prop, prop),
-            ).fetchall()
-            conn.close()
+            from pseofactory.trends.db import TrendHistoryDB
+
+            with TrendHistoryDB(main_repo_db, read_only=True) as ro_tdb:
+                rows = ro_tdb._execute_read(
+                    """
+                    SELECT query, intent_cluster, latest_velocity, velocity_delta, acceleration_2nd_deriv, consecutive_cycles_count
+                    FROM keyword_history
+                    WHERE current_property_id = ? OR (current_property_id = 'unassigned' AND ? = 'profithelm')
+                    ORDER BY latest_velocity DESC, consecutive_cycles_count DESC
+                    LIMIT 20
+                    """,
+                    (prop, prop),
+                )
             for q_str, cluster, vel, v_delta, accel, cycles in rows:
                 q_clean = _clean_dashes(str(q_str or "").strip())
                 if not q_clean or q_clean.lower() in seen_queries:
@@ -5575,7 +5669,12 @@ def investigate_competitor_traffic_spikes(
         eff_target_slug = canonical_slug or str(top_spec.get("slug", ""))
 
         dom_mutated = False
-        if persist and eff_target_slug and (d_dir / "tools" / eff_target_slug / "index.html").is_file():
+        if (
+            persist
+            and eff_target_slug
+            and not is_non_tool_or_governance_route(eff_target_slug)
+            and (d_dir / "tools" / eff_target_slug / "index.html").is_file()
+        ):
             mut_payload = matched_mut or {
                 "target_slug": eff_target_slug,
                 "property_id": prop,
@@ -5641,6 +5740,8 @@ def investigate_competitor_traffic_spikes(
     # Also apply any remaining live DOM snapshot mutations directly to dist/tools/<slug>/index.html
     if persist and d_dir.is_dir():
         for mut_slug, mut_spec in mutation_by_slug.items():
+            if is_non_tool_or_governance_route(mut_slug):
+                continue
             t_html = d_dir / "tools" / mut_slug / "index.html"
             if t_html.is_file() and mut_slug not in closed_loop_mutations_applied:
                 if _apply_closed_loop_dom_mutation_to_dist_html(t_html, mut_spec, prop, d_dir):
@@ -5728,6 +5829,7 @@ def compile_ai_citation_digital_pr_queue(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     ai_checker = TregChecker(check_ai_citations=True, tenant_domains=[domain])
 
@@ -5760,7 +5862,7 @@ def compile_ai_citation_digital_pr_queue(
                 t_url = str(rt.get("target_url") or "").strip()
                 t_slug = str(rt.get("slug") or "").strip()
                 c_p = urllib.parse.urlsplit(t_url).path.rstrip("/") if t_url else (f"/tools/{t_slug}" if t_slug else "")
-                if not c_p or c_p in ("/", "/tools"):
+                if not c_p or is_non_tool_or_governance_route(c_p):
                     continue
                 gsc_rem_evaluated += 1
                 rows.append(
@@ -6243,6 +6345,7 @@ def monitor_post_release_seo_regressions(
 
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
+    persist = _resolve_safe_persist_flag(persist, root)
     r_base = Path(runs_dir) if runs_dir else Path("/home/ubuntuadmin/projects/.agy/runs")
 
     # 1. Discover release manifests for this property
@@ -6637,6 +6740,7 @@ def compile_technical_seo_sprint(
     """
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
+    persist = _resolve_safe_persist_flag(persist, root)
 
     freshness_file = root / "freshness_audit_report.json"
     freshness_data: Dict[str, Any] = {}
@@ -7067,8 +7171,9 @@ def sync_real_gsc_baselines_to_recovery_ledger(
             "route_regressions_count": regression_report.get("route_regressions_count", 0),
         }
 
-    ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    AtomicStateLedger.save_json(ledger_path, m_data)
+    if _resolve_safe_persist_flag(True, root, ledger_path):
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        AtomicStateLedger.save_json(ledger_path, m_data)
     return {
         "updated_snapshots_count": updated_count,
         "updated_count": updated_count,
@@ -7099,6 +7204,7 @@ def evaluate_north_star_targets(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
 
     gsc_bundle = consolidated_gsc or load_consolidated_gsc_query_rows(
         prop, repo_root=root, multidim_telemetry=multidim_telemetry
@@ -7224,7 +7330,7 @@ def evaluate_north_star_targets(
             pass
 
     # Pillar 3: AI Citations, Entity Authority & Source Hygiene
-    verifier = MasterSEOVerifier(dist_dir=d_dir) if d_dir.is_dir() else None
+    verifier = MasterSEOVerifier(dist_dir=d_dir, allow_mutations=bool(persist)) if d_dir.is_dir() else None
     kw_inflation_res = verifier.check_source_keyword_inflation_gate(d_dir, max_ratio=3.0) if verifier else {"status": "PASS", "worst_observed_ratio": 1.0, "violations_count": 0}
 
     if briefs_report is None:
@@ -7425,6 +7531,7 @@ def evaluate_closed_loop_cohort_reflection(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     brand = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else ("LienBond" if prop == "lienbond" else "ProfitHelm"))
     r_base = Path(runs_dir) if runs_dir else Path("/home/ubuntuadmin/projects/.agy/runs")
@@ -7898,11 +8005,25 @@ def evaluate_closed_loop_cohort_reflection(
             continue
 
         t_url_ov = str(ov_data.get("target_url") or "").strip().rstrip("/")
+        raw_ov_slug = str(ov_data.get("slug") or ov_slug).strip("/")
+        if (
+            is_non_tool_or_governance_route(ov_slug)
+            or is_non_tool_or_governance_route(raw_ov_slug)
+            or (t_url_ov and is_non_tool_or_governance_route(t_url_ov))
+        ):
+            if persist:
+                from pseofactory.maintenance import _is_live_repo_mutation_blocked
+                for dst_ov_p in all_overlay_paths_by_slug.get(ov_slug, [ov_path]):
+                    if not _is_live_repo_mutation_blocked(dst_ov_p):
+                        dst_ov_p.unlink(missing_ok=True)
+            continue
         if "/tools/" in t_url_ov:
             canon_ov_slug = t_url_ov.split("/tools/", 1)[1].strip("/")
         else:
-            canon_ov_slug = bare_vehicle_canonical_map.get(ov_slug, str(ov_data.get("slug") or ov_slug).strip("/"))
+            canon_ov_slug = bare_vehicle_canonical_map.get(ov_slug, raw_ov_slug)
         canon_ov_slug = bare_vehicle_canonical_map.get(canon_ov_slug, canon_ov_slug)
+        if is_non_tool_or_governance_route(canon_ov_slug):
+            continue
         if canon_ov_slug in seen_canonical_ov_slugs:
             continue
         seen_canonical_ov_slugs.add(canon_ov_slug)
@@ -8012,18 +8133,7 @@ def evaluate_closed_loop_cohort_reflection(
                 top_html_cand = d_dir / canon_ov_slug / "index.html"
                 if (
                     persist
-                    and canon_ov_slug.lower()
-                    not in (
-                        "disclaimers",
-                        "methodology",
-                        "tools",
-                        "tools-directory",
-                        "privacy",
-                        "about",
-                        "terms",
-                        "contact",
-                        "index",
-                    )
+                    and not is_non_tool_or_governance_route(canon_ov_slug)
                     and top_html_cand.is_file()
                 ):
                     try:
@@ -8506,12 +8616,13 @@ def evaluate_closed_loop_cohort_reflection(
             updated_html = inject_overlay_into_html(raw_html, ov_spec)
             try:
                 updated_html = normalize_html_callout_message_match(updated_html, property_id=prop)
-                from pseofactory.maintenance import RetroReflectionEngine
-                updated_html, _ = RetroReflectionEngine.retrofit_html(
+                updated_html, _ = _retrofit_tool_html_if_eligible(
                     updated_html,
                     property_id=prop,
                     slug=rel_slug,
                     dist_dir=d_dir,
+                    html_path=html_path,
+                    write_sidecar=bool(persist),
                 )
             except Exception:
                 pass
@@ -9054,6 +9165,7 @@ def compile_quantitative_revenue_forecast(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
     domain = "prexvo.com" if prop == "prexvo" else ("gainhelm.com" if prop == "gainhelm" else ("lienbond.com" if prop == "lienbond" else "profithelm.com"))
     canonical_base = f"https://{domain}"
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -9191,7 +9303,7 @@ def compile_quantitative_revenue_forecast(
         else:
             continue
         s_key = _retired_seeded_tool_slug_map.get(s_key, s_key)
-        if not s_key or s_key in _non_tool_forecast_slugs or "." in s_key:
+        if not s_key or is_non_tool_or_governance_route(s_key) or s_key in _non_tool_forecast_slugs or "." in s_key:
             continue
         if prop == "gainhelm" and any(term in s_key.lower() for term in _GAINHELM_PRE_PIVOT_LEGACY_TERMS):
             continue
@@ -9203,7 +9315,7 @@ def compile_quantitative_revenue_forecast(
         if "/tools/" in p_u:
             s_key = p_u.split("/tools/", 1)[1].strip("/")
             s_key = _retired_seeded_tool_slug_map.get(s_key, s_key)
-            if not s_key or s_key in _non_tool_forecast_slugs:
+            if not s_key or is_non_tool_or_governance_route(s_key) or s_key in _non_tool_forecast_slugs:
                 continue
             if compiled_tool_slugs and s_key not in compiled_tool_slugs:
                 continue
@@ -9563,6 +9675,8 @@ def run_all_seo_growth_workflows(
     prop = _resolve_property_id(property_id, repo_root)
     root = _resolve_tenant_repo_root(prop, repo_root)
     d_dir = Path(dist_dir) if dist_dir else (root / "dist")
+    persist = _resolve_safe_persist_flag(persist, root, d_dir)
+    apply_overlays = _resolve_safe_persist_flag(apply_overlays, root, d_dir)
     caller_multidim_telemetry = multidim_telemetry
 
     daily_records = harvest_and_sync_gsc_daily_timeline(prop, repo_root=root, live_gsc=live_gsc, persist=persist)

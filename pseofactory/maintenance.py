@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import re
+import urllib.parse
 import fcntl
 import json
 import time
@@ -26,6 +27,8 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable, Tuple
+
+from pseofactory.contracts import is_non_tool_or_governance_route
 
 
 def _atomic_write_text(path: Union[Path, str], content: str, encoding: str = "utf-8") -> None:
@@ -4244,8 +4247,13 @@ class RefactorCascadeEngine:
         """
         if not slug or not target_path.is_file() or target_path.suffix.lower() != ".html":
             return
+        if is_non_tool_or_governance_route(slug):
+            return
         try:
-            rel_parts = target_path.relative_to(adapter.dist_dir).as_posix().split("/")
+            rel_path = target_path.relative_to(adapter.dist_dir).as_posix()
+            if is_non_tool_or_governance_route(rel_path):
+                return
+            rel_parts = rel_path.split("/")
             if len(rel_parts) > 4 and rel_parts[0] == "tools":
                 return
         except Exception:
@@ -4278,6 +4286,10 @@ class RefactorCascadeEngine:
             return
         try:
             overlay_data = json.loads(overlay_path.read_text(encoding="utf-8"))
+            if not isinstance(overlay_data, dict) or RetroReflectionEngine._is_non_tool_overlay_spec(
+                overlay_path.stem, overlay_data
+            ):
+                return
             from pseofactory.gsc_remediation import (
                 compile_remediation_overlay_spec,
                 inject_overlay_into_html,
@@ -9386,15 +9398,7 @@ class RetroReflectionEngine:
             rel = html_path.resolve().relative_to(dist_dir.resolve()).as_posix()
         except Exception:
             rel = html_path.name
-        if rel in (
-            "tools/index.html",
-            "about/index.html",
-            "methodology/index.html",
-            "privacy/index.html",
-            "terms/index.html",
-            "disclaimers/index.html",
-            "contact/index.html",
-        ):
+        if rel != "index.html" and is_non_tool_or_governance_route(rel):
             return False
         if rel.startswith("tools/") and html_path.suffix == ".html":
             return True
@@ -10507,16 +10511,13 @@ class RetroReflectionEngine:
     @classmethod
     def _sidecar_needs_sync(cls, sidecar_path: Path, html_content: str) -> bool:
         """Checks whether a sidecar manifest JSON is missing entity_type or out of lockstep with embedded HTML manifest."""
+        if is_non_tool_or_governance_route(sidecar_path.stem) or sidecar_path.stem in (
+            "tool",
+            "tax-bracket-capital-allocation-hub",
+        ):
+            return False
         if not sidecar_path.is_file():
-            return sidecar_path.parent.is_dir() and sidecar_path.stem not in (
-                "index",
-                "tool",
-                "tools",
-                "tools-directory",
-                "404",
-                "signal",
-                "tax-bracket-capital-allocation-hub",
-            )
+            return sidecar_path.parent.is_dir()
         try:
             from pseofactory.contracts import AI_MODE_ENTITY_TAXONOMY
             from pseofactory.proprietary_signals import PUBLISH_VOLATILE_TELEMETRY_KEYS
@@ -10562,12 +10563,58 @@ class RetroReflectionEngine:
         canonical_url: Optional[str] = None,
         dist_dir: Optional[Path] = None,
         manifest_override: Optional[Dict[str, Any]] = None,
+        write_sidecar: bool = True,
     ) -> Tuple[str, List[str]]:
         """
         Deterministically retro-reflects missing or stale pseofactory engine mechanics into an HTML document.
         Returns (updated_html, list_of_repaired_mechanics).
         Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
         """
+        early_canon = canonical_url or ""
+        if not early_canon and html_content:
+            early_can_m = re.search(
+                r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+                html_content,
+                re.IGNORECASE,
+            ) or re.search(
+                r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+                html_content,
+                re.IGNORECASE,
+            )
+            if early_can_m:
+                early_canon = early_can_m.group(1).strip()
+        early_canon_noq = early_canon.split("?", 1)[0].rstrip("/").lower()
+        parsed_canon = urllib.parse.urlsplit(early_canon.strip()) if early_canon else None
+        is_root_canon = bool(
+            parsed_canon is not None
+            and parsed_canon.scheme.lower() in ("http", "https")
+            and bool(parsed_canon.netloc)
+            and parsed_canon.path.strip("/") == ""
+        )
+        slug_norm_early = str(slug or "").strip("/").lower()
+        if (
+            slug_norm_early in ("404", "404.html")
+            or early_canon_noq.endswith(("/404", "/404.html"))
+            or early_canon_noq in ("404", "404.html")
+        ):
+            updated_404 = re.sub(
+                r'<meta\s+name=["\']robots["\']\s+content=["\']index,[^"\']*["\']\s*/?>',
+                '<meta name="robots" content="noindex, follow">',
+                html_content,
+                flags=re.IGNORECASE,
+            )
+            return updated_404, (["robots_noindex"] if updated_404 != html_content else [])
+        root_exempt_slugs = (
+            ("", "index", "index.html", "root", "tool")
+            if is_root_canon
+            else ("", "index", "root", "tool")
+        )
+        if (
+            (slug_norm_early not in root_exempt_slugs and is_non_tool_or_governance_route(slug_norm_early))
+            or (early_canon and not is_root_canon and is_non_tool_or_governance_route(early_canon))
+        ):
+            return html_content, []
+
         cache_key: Optional[Tuple[str, str, str, str]] = None
         if manifest_override is None and html_content:
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
@@ -11092,9 +11139,14 @@ class RetroReflectionEngine:
                     1,
                 )
 
-        if dist_dir is not None:
+        if dist_dir is not None and not is_non_tool_or_governance_route(slug) and slug not in ("tool", "tax-bracket-capital-allocation-hub"):
             sidecar_path = Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json"
-            if sidecar_path.is_file():
+            can_write_sidecar = (
+                bool(write_sidecar)
+                and not _is_live_repo_mutation_blocked(dist_dir)
+                and not _is_live_repo_mutation_blocked(sidecar_path)
+            )
+            if can_write_sidecar and sidecar_path.is_file():
                 try:
                     existing_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
                     sidecar_stat = str(existing_sidecar.get("statutory_authority") or "")
@@ -11149,8 +11201,10 @@ class RetroReflectionEngine:
                 except Exception:
                     pass
             elif (
-                "/" not in slug
-                and slug not in ("index", "tool", "tools", "tools-directory", "404", "signal", "tax-bracket-capital-allocation-hub")
+                can_write_sidecar
+                and "/" not in slug
+                and not is_non_tool_or_governance_route(slug)
+                and slug not in ("tool", "tax-bracket-capital-allocation-hub")
                 and sidecar_path.parent.is_dir()
             ):
                 try:
@@ -11513,6 +11567,76 @@ class RetroReflectionEngine:
         return False
 
     @classmethod
+    def _is_non_tool_overlay_spec(
+        cls,
+        rel_slug: str,
+        raw_ov: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Returns True when an overlay file stem or payload targets a non-tool governance/utility route."""
+        if is_non_tool_or_governance_route(rel_slug):
+            return True
+        if isinstance(raw_ov, dict):
+            spec_slug = str(raw_ov.get("slug") or "").strip("/")
+            target_url = str(raw_ov.get("target_url") or "").strip()
+            if spec_slug and is_non_tool_or_governance_route(spec_slug):
+                return True
+            if target_url and is_non_tool_or_governance_route(target_url):
+                return True
+        return False
+
+    @classmethod
+    def _prune_non_tool_overlays_and_manifests(
+        cls,
+        repo_root: Path,
+        dist_dir: Optional[Path] = None,
+    ) -> List[str]:
+        """Removes stale non-tool overlay files and bogus non-tool calculator manifests."""
+        removed: List[str] = []
+        for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+            if not ov_dir.is_dir():
+                continue
+            for ov_file in sorted(ov_dir.rglob("*.json")):
+                if _is_live_repo_mutation_blocked(ov_file):
+                    continue
+                rel_s = ov_file.relative_to(ov_dir).with_suffix("").as_posix().strip("/")
+                raw_ov: Optional[Dict[str, Any]] = None
+                try:
+                    parsed = json.loads(ov_file.read_text(encoding="utf-8"))
+                    if isinstance(parsed, dict):
+                        raw_ov = parsed
+                except Exception:
+                    raw_ov = None
+                if cls._is_non_tool_overlay_spec(rel_s, raw_ov):
+                    ov_file.unlink(missing_ok=True)
+                    removed.append(str(ov_file.relative_to(repo_root)))
+
+        if dist_dir is not None and (dist_dir / "manifests").is_dir():
+            tools_dir = dist_dir / "tools"
+            for mf_path in sorted((dist_dir / "manifests").glob("*.json")):
+                if _is_live_repo_mutation_blocked(mf_path):
+                    continue
+                stem = mf_path.stem.strip("/")
+                mf_slug = ""
+                try:
+                    mf_parsed = json.loads(mf_path.read_text(encoding="utf-8"))
+                    if isinstance(mf_parsed, dict):
+                        mf_slug = str(mf_parsed.get("slug") or "").strip("/")
+                except Exception:
+                    mf_slug = ""
+                has_matching_tool = (
+                    (tools_dir / stem / "index.html").is_file()
+                    or (tools_dir / stem.replace("-", "/") / "index.html").is_file()
+                    or (bool(mf_slug) and (tools_dir / mf_slug / "index.html").is_file())
+                )
+                if not has_matching_tool and (
+                    is_non_tool_or_governance_route(stem)
+                    or (bool(mf_slug) and is_non_tool_or_governance_route(mf_slug))
+                ):
+                    mf_path.unlink(missing_ok=True)
+                    removed.append(mf_path.relative_to(dist_dir).as_posix())
+        return removed
+
+    @classmethod
     def _resolve_active_estate_overlays(
         cls,
         dist_dir: Path,
@@ -11539,8 +11663,8 @@ class RetroReflectionEngine:
                 )
             )
         ).rstrip("/")
-        non_tool_slugs = {"disclaimers", "methodology", "tools", "tools-directory", "privacy", "about", "terms", "contact"}
         if heal_legacy:
+            cls._prune_non_tool_overlays_and_manifests(repo_root, dist_dir=None)
             try:
                 from pseofactory.gsc_remediation import compile_remediation_overlay_spec
                 from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
@@ -11555,23 +11679,13 @@ class RetroReflectionEngine:
                             if not isinstance(raw_ov, dict):
                                 continue
                             ov_s = str(raw_ov.get("slug") or ov_path.stem)
+                            if cls._is_non_tool_overlay_spec(ov_path.relative_to(ov_dir).with_suffix("").as_posix(), raw_ov):
+                                continue
                             raw_ov, ov_reconciled = TruthReconciliationEngine.reconcile_overlay_spec_truth(
                                 raw_ov,
                                 tenant=property_id,
                                 slug=ov_s,
                             )
-                            if ov_s.strip("/").lower() in non_tool_slugs:
-                                if (
-                                    ov_reconciled
-                                    or raw_ov.get("status") != "DEGRADED_ROLLED_BACK"
-                                    or raw_ov.get("partner_offer") is not None
-                                ):
-                                    raw_ov["status"] = "DEGRADED_ROLLED_BACK"
-                                    raw_ov["partner_offer"] = None
-                                    raw_ov.pop("partner_roster", None)
-                                    raw_ov.pop("slot_plan", None)
-                                    ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
-                                continue
                             if (
                                 str(raw_ov.get("status") or "ACTIVE_LOCKED").upper() == "ACTIVE_LOCKED"
                                 and int(raw_ov.get("measurement_lock_days") or raw_ov.get("lock_days") or 28) < 28
@@ -11836,8 +11950,7 @@ class RetroReflectionEngine:
                 if (
                     rel_slug in rolled_back_slugs
                     or (spec_slug and spec_slug in rolled_back_slugs)
-                    or rel_slug.lower() in non_tool_slugs
-                    or spec_slug.lower() in non_tool_slugs
+                    or cls._is_non_tool_overlay_spec(rel_slug, ov_spec)
                 ):
                     continue
                 target_url = str(ov_spec.get("target_url") or "")
@@ -11866,7 +11979,7 @@ class RetroReflectionEngine:
                                 candidates.append(veh_nested)
 
                 for cand in candidates:
-                    if cand in ("statutory-calculator", "index", "tools", ""):
+                    if cand == "statutory-calculator" or is_non_tool_or_governance_route(cand):
                         continue
                     rel_html = f"tools/{cand}/index.html"
                     if rel_html in resolved:
@@ -11973,6 +12086,9 @@ class RetroReflectionEngine:
             return normalize_statutory_acronym_casing(s)
 
         updated_files: List[str] = []
+        d_res = Path(dist_dir).resolve()
+        if _is_live_repo_mutation_blocked(d_res) or _is_live_repo_mutation_blocked(d_res.parent):
+            return updated_files
         tools_dir = dist_dir / "tools"
         if not tools_dir.is_dir():
             return updated_files
@@ -12513,11 +12629,7 @@ class RetroReflectionEngine:
         d = Path(dist_dir).resolve()
         if not d.is_dir():
             return []
-        if (
-            "PYTEST_CURRENT_TEST" in os.environ
-            and str(d).startswith("/home/ubuntuadmin/projects/")
-            and "/.agy/worktrees/" not in str(d)
-        ):
+        if _is_live_repo_mutation_blocked(d) or _is_live_repo_mutation_blocked(d.parent):
             return []
 
         updated_files: List[str] = []
@@ -13731,7 +13843,12 @@ class RetroReflectionEngine:
                 except Exception:
                     gsc_lifecycle_data = {}
 
-        # Scrub any DEGRADED_ROLLED_BACK overlays from dist HTML before overlay healing
+        # Prune stale non-tool overlays and bogus non-tool dist/manifests/*.json before rollback/healing
+        for pruned_rel in cls._prune_non_tool_overlays_and_manifests(d.parent, dist_dir=d):
+            if pruned_rel.startswith("manifests/") and pruned_rel not in retrofitted_paths:
+                retrofitted_paths.append(pruned_rel)
+
+        # Scrub any DEGRADED_ROLLED_BACK overlays from eligible tool dist HTML before overlay healing
         for overlays_dir in (d.parent / "content" / "overlays", agy_dir / "overlays"):
             if not overlays_dir.is_dir():
                 continue
@@ -13744,24 +13861,31 @@ class RetroReflectionEngine:
                     continue
                 rel_s = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
                 spec_s = str(ov_spec.get("slug") or "").strip("/")
-                rb_cands = [s for s in (rel_s, spec_s) if s]
+                if cls._is_non_tool_overlay_spec(rel_s, ov_spec):
+                    continue
+                rb_cands = [s for s in (rel_s, spec_s) if s and not is_non_tool_or_governance_route(s)]
                 for s in list(rb_cands):
                     for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
                         if s.startswith(f"{hub_pfx}-"):
                             rb_cands.append(f"{hub_pfx}/{s[len(hub_pfx) + 1:]}")
                 for rb_s in rb_cands:
+                    if not rb_s or is_non_tool_or_governance_route(rb_s):
+                        continue
                     for h_cand in (d / "tools" / rb_s / "index.html", d / f"{rb_s}.html", d / rb_s / "index.html"):
-                        if h_cand.is_file():
-                            try:
-                                raw_h = h_cand.read_text(encoding="utf-8", errors="ignore")
-                                cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_spec)
-                                if cleaned_h != raw_h:
-                                    h_cand.write_text(cleaned_h, encoding="utf-8")
-                                    rel_rb = h_cand.relative_to(d).as_posix()
-                                    if rel_rb not in retrofitted_paths:
-                                        retrofitted_paths.append(rel_rb)
-                            except Exception:
-                                pass
+                        if not h_cand.is_file():
+                            continue
+                        try:
+                            rel_rb = h_cand.relative_to(d).as_posix()
+                            if is_non_tool_or_governance_route(rel_rb):
+                                continue
+                            raw_h = h_cand.read_text(encoding="utf-8", errors="ignore")
+                            cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_spec)
+                            if cleaned_h != raw_h:
+                                h_cand.write_text(cleaned_h, encoding="utf-8")
+                                if rel_rb not in retrofitted_paths:
+                                    retrofitted_paths.append(rel_rb)
+                        except Exception:
+                            pass
 
         active_overlays = cls._resolve_active_estate_overlays(
             d,
@@ -17177,16 +17301,12 @@ def reflect_and_recompile_all_assets(
         if getattr(adapter, "repo_path", None) and not is_live_repo_blocked:
             try:
                 repo_root_clean = Path(adapter.repo_path)
-                invalid_ov_stems = {
-                    "tools",
-                    "disclaimers",
-                    "methodology",
-                    "about",
-                    "privacy",
-                    "terms",
-                    "robots-txt",
+                if RetroReflectionEngine._prune_non_tool_overlays_and_manifests(
+                    repo_root_clean, dist_dir=adapter.dist_dir
+                ):
+                    source_sync_changed = True
+                legacy_invalid_stems = {
                     "statutory-calculator",
-                    "index",
                     "cmmc-level-2-c3pao-audit-cost-calculator",
                     "field-service-scheduling",
                     "fieldedge-alternative",
@@ -17195,7 +17315,7 @@ def reflect_and_recompile_all_assets(
                 for ov_dir_clean in (repo_root_clean / ".agy" / "overlays", repo_root_clean / "content" / "overlays"):
                     if ov_dir_clean.is_dir():
                         for ov_f in list(ov_dir_clean.rglob("*.json")):
-                            if ov_f.stem in invalid_ov_stems:
+                            if ov_f.stem in legacy_invalid_stems:
                                 ov_f.unlink(missing_ok=True)
                                 source_sync_changed = True
             except Exception:
@@ -17435,7 +17555,11 @@ def reflect_and_recompile_all_assets(
                             continue
                         for ov_file in sorted(overlays_dir.rglob("*.json")):
                             ov_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix()
-                            if ov_slug in ("statutory-calculator", "index", "tools") or ov_slug in seen_ov_slugs:
+                            if (
+                                ov_slug == "statutory-calculator"
+                                or is_non_tool_or_governance_route(ov_slug)
+                                or ov_slug in seen_ov_slugs
+                            ):
                                 continue
                             seen_ov_slugs.add(ov_slug)
                             target_html = adapter.dist_dir / "tools" / ov_slug / "index.html"
@@ -17451,9 +17575,11 @@ def reflect_and_recompile_all_assets(
                                     cand_veh = adapter.dist_dir / "tools" / "section-179-calculator" / ov_slug / "index.html"
                                     if cand_veh.is_file():
                                         target_html = cand_veh
-                            if target_html.is_file():
+                            if target_html.is_file() and RetroReflectionEngine.is_tool_or_calculator_page(
+                                target_html, adapter.dist_dir
+                            ):
                                 ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                                if isinstance(ov_spec, dict):
+                                if isinstance(ov_spec, dict) and not RetroReflectionEngine._is_non_tool_overlay_spec(ov_slug, ov_spec):
                                     raw_h = target_html.read_text(encoding="utf-8")
                                     updated_h = inject_overlay_into_html(raw_h, ov_spec)
                                     if updated_h != raw_h:

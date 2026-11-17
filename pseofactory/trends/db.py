@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union, Generator
+from typing import List, Dict, Any, Optional, Union, Generator, Tuple
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -53,29 +53,59 @@ class TrendHistoryDB:
     Enforces WAL journal mode, 5000ms busy timeout, and non-blocking file advisory locks.
     """
 
-    def __init__(self, db_path: Optional[Union[str, Path]] = None):
+    def __init__(self, db_path: Optional[Union[str, Path]] = None, read_only: bool = False):
         self.db_path = Path(db_path or DEFAULT_DB_PATH).resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.read_only = bool(read_only)
+        if not self.read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = Path(f"{self.db_path}.lock")
         self._lock_file = None
         self._conn: Optional[sqlite3.Connection] = None
-        self.init_schema()
+        if not self.read_only:
+            self.init_schema()
 
     def get_connection(self) -> sqlite3.Connection:
-        """Returns SQLite connection with WAL mode and pragmas configured."""
+        """Returns SQLite connection with WAL mode and pragmas configured, or URI mode=ro when read_only."""
         if self._conn is None:
-            conn = sqlite3.connect(
-                str(self.db_path),
-                timeout=10.0,
-                isolation_level=None,  # Autocommit mode; transactions handled explicitly
-            )
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode = WAL;")
-            conn.execute("PRAGMA busy_timeout = 5000;")
-            conn.execute("PRAGMA synchronous = NORMAL;")
-            conn.execute("PRAGMA foreign_keys = ON;")
+            if self.read_only:
+                wal_path = Path(f"{self.db_path}-wal")
+                has_non_empty_wal = wal_path.is_file() and wal_path.stat().st_size > 0
+                ro_query = "mode=ro" if has_non_empty_wal else "mode=ro&immutable=1"
+                conn = sqlite3.connect(
+                    f"{self.db_path.as_uri()}?{ro_query}",
+                    uri=True,
+                    timeout=10.0,
+                    isolation_level=None,
+                )
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA busy_timeout = 5000;")
+                conn.execute("PRAGMA query_only = ON;")
+            else:
+                conn = sqlite3.connect(
+                    str(self.db_path),
+                    timeout=10.0,
+                    isolation_level=None,  # Autocommit mode; transactions handled explicitly
+                )
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode = WAL;")
+                conn.execute("PRAGMA busy_timeout = 5000;")
+                conn.execute("PRAGMA synchronous = NORMAL;")
+                conn.execute("PRAGMA foreign_keys = ON;")
             self._conn = conn
         return self._conn
+
+    def _execute_read(self, sql: str, params: Tuple[Any, ...] = ()) -> List[sqlite3.Row]:
+        """Executes a read query, returning [] safely when read_only=True hits a missing/empty file or missing table."""
+        if self.read_only and (not self.db_path.is_file() or self.db_path.stat().st_size == 0):
+            return []
+        conn = self.get_connection()
+        try:
+            return conn.execute(sql, params).fetchall()
+        except sqlite3.OperationalError as exc:
+            err_low = str(exc).lower()
+            if self.read_only and ("no such table" in err_low or "unable to open database file" in err_low):
+                return []
+            raise
 
     def close(self) -> None:
         """Closes the open database connection."""
@@ -142,6 +172,8 @@ class TrendHistoryDB:
 
     def init_schema(self) -> None:
         """Initializes idempotent relational schema across all 7 tables and indexes."""
+        if self.read_only:
+            return
         conn = self.get_connection()
         with conn:
             # 1. crawl_cycles
@@ -1386,8 +1418,7 @@ class TrendHistoryDB:
     def get_gsc_daily_metrics(self, property_id: str, days: int = 480) -> List[GSCDailyMetricRecord]:
         """Retrieves up to `days` daily Search Console metrics ordered chronologically (date ASC)."""
         assert_no_forbidden_dashes(property_id, "get_gsc_daily_metrics.property_id")
-        conn = self.get_connection()
-        rows = conn.execute(
+        rows = self._execute_read(
             """
             SELECT property_id, date, clicks, impressions, ctr, position, recorded_at
             FROM gsc_daily_metrics
@@ -1396,7 +1427,7 @@ class TrendHistoryDB:
             LIMIT ?;
             """,
             (property_id, days),
-        ).fetchall()
+        )
         return [
             GSCDailyMetricRecord(
                 property_id=r["property_id"],
@@ -1679,7 +1710,6 @@ class TrendHistoryDB:
         query: Optional[str] = None,
     ) -> List[GSCDeviceMetricRecord]:
         """Retrieves persisted device-level Search Console telemetry for a property."""
-        conn = self.get_connection()
         clauses = ["property_id = ?"]
         params: List[Any] = [str(property_id)]
         if window_key is not None:
@@ -1698,7 +1728,7 @@ class TrendHistoryDB:
             WHERE {' AND '.join(clauses)}
             ORDER BY impressions DESC, clicks DESC;
         """
-        rows = conn.execute(sql, tuple(params)).fetchall()
+        rows = self._execute_read(sql, tuple(params))
         return [
             GSCDeviceMetricRecord(
                 property_id=r["property_id"],
@@ -1775,8 +1805,7 @@ class TrendHistoryDB:
         window_key: str = "recent_90d",
     ) -> List[GSCSearchAppearanceRecord]:
         """Retrieves persisted Search Appearance telemetry records for a property."""
-        conn = self.get_connection()
-        rows = conn.execute(
+        rows = self._execute_read(
             """
             SELECT property_id, window_key, search_appearance,
                    clicks, impressions, ctr, position, recorded_at
@@ -1785,7 +1814,7 @@ class TrendHistoryDB:
             ORDER BY impressions DESC, clicks DESC;
             """,
             (str(property_id), str(window_key)),
-        ).fetchall()
+        )
         return [
             GSCSearchAppearanceRecord(
                 property_id=r["property_id"],
@@ -1870,9 +1899,8 @@ class TrendHistoryDB:
         page: Optional[str] = None,
     ) -> List[GSCQueryPageWindowRecord]:
         """Retrieves persisted time-windowed query + page telemetry snapshots."""
-        conn = self.get_connection()
         if page is not None:
-            rows = conn.execute(
+            rows = self._execute_read(
                 """
                 SELECT property_id, window_key, query, page,
                        clicks, impressions, ctr, position,
@@ -1882,9 +1910,9 @@ class TrendHistoryDB:
                 ORDER BY impressions DESC, clicks DESC;
                 """,
                 (str(property_id), str(window_key), str(page)),
-            ).fetchall()
+            )
         else:
-            rows = conn.execute(
+            rows = self._execute_read(
                 """
                 SELECT property_id, window_key, query, page,
                        clicks, impressions, ctr, position,
@@ -1894,7 +1922,7 @@ class TrendHistoryDB:
                 ORDER BY impressions DESC, clicks DESC;
                 """,
                 (str(property_id), str(window_key)),
-            ).fetchall()
+            )
         return [
             GSCQueryPageWindowRecord(
                 property_id=r["property_id"],
@@ -1992,9 +2020,8 @@ class TrendHistoryDB:
         page: Optional[str] = None,
     ) -> List[GSCPageWindowRecord]:
         """Retrieves persisted time-windowed page-only (-d page) telemetry snapshots."""
-        conn = self.get_connection()
         if page is not None:
-            rows = conn.execute(
+            rows = self._execute_read(
                 """
                 SELECT property_id, window_key, page,
                        clicks, impressions, ctr, position,
@@ -2004,9 +2031,9 @@ class TrendHistoryDB:
                 ORDER BY impressions DESC, clicks DESC;
                 """,
                 (str(property_id), str(window_key), str(page)),
-            ).fetchall()
+            )
         else:
-            rows = conn.execute(
+            rows = self._execute_read(
                 """
                 SELECT property_id, window_key, page,
                        clicks, impressions, ctr, position,
@@ -2016,7 +2043,7 @@ class TrendHistoryDB:
                 ORDER BY impressions DESC, clicks DESC;
                 """,
                 (str(property_id), str(window_key)),
-            ).fetchall()
+            )
         return [
             GSCPageWindowRecord(
                 property_id=r["property_id"],
@@ -2114,7 +2141,6 @@ class TrendHistoryDB:
         page: Optional[str] = None,
     ) -> List[GSCPageDailyRecord]:
         """Retrieves persisted daily page-level (-d date -d page) Search Console telemetry."""
-        conn = self.get_connection()
         clauses = ["property_id = ?"]
         params: List[Any] = [str(property_id)]
         if start_date:
@@ -2127,7 +2153,7 @@ class TrendHistoryDB:
             clauses.append("page = ?")
             params.append(str(page))
         where_sql = " AND ".join(clauses)
-        rows = conn.execute(
+        rows = self._execute_read(
             f"""
             SELECT property_id, metric_date, page,
                    clicks, impressions, ctr, position, recorded_at
@@ -2136,7 +2162,7 @@ class TrendHistoryDB:
             ORDER BY metric_date ASC, impressions DESC, clicks DESC;
             """,
             tuple(params),
-        ).fetchall()
+        )
         return [
             GSCPageDailyRecord(
                 property_id=r["property_id"],
@@ -2331,24 +2357,23 @@ class TrendHistoryDB:
         page_url: Optional[str] = None,
     ) -> List[GSCUrlInspectionRecord]:
         """Retrieves persisted URL Inspection states for a property."""
-        conn = self.get_connection()
         if page_url is not None:
-            rows = conn.execute(
+            rows = self._execute_read(
                 """
                 SELECT * FROM gsc_url_inspection_states
                 WHERE property_id = ? AND page_url = ?;
                 """,
                 (str(property_id), str(page_url)),
-            ).fetchall()
+            )
         else:
-            rows = conn.execute(
+            rows = self._execute_read(
                 """
                 SELECT * FROM gsc_url_inspection_states
                 WHERE property_id = ?
                 ORDER BY recorded_at DESC;
                 """,
                 (str(property_id),),
-            ).fetchall()
+            )
         return [
             GSCUrlInspectionRecord(
                 property_id=r["property_id"],

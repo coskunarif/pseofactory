@@ -133,15 +133,26 @@ def test_slice0_css_commentary_title_and_compiler_select_and_gitops_slug(tmp_pat
 
 def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path: Path) -> None:
     from pseofactory.drift import write_substrate_lock
+    from pseofactory.estate_common import build_thin_estate_builder_source
 
     tmp_repo = _extract_clean_gainhelm_repo(tmp_path / "gainhelm_isolated")
     sync_res = sync_tenant_porcelain_shell(tmp_repo, "gainhelm")
-    assert sync_res["status"] == "UPDATED"
-    assert "gainhelm/builder.py" in sync_res["updated_files"]
+    assert sync_res["status"] in ("UPDATED", "UNCHANGED")
+    expected_thin_builder = build_thin_estate_builder_source("gainhelm")
+    builder_path = tmp_repo / "gainhelm" / "builder.py"
+    thin_builder_txt = builder_path.read_text(encoding="utf-8")
+    assert thin_builder_txt == expected_thin_builder
+
+    # Also verify sync_tenant_porcelain_shell overwrites a modified/legacy builder.py in isolation.
+    builder_path.write_text("# legacy gainhelm builder stub\n", encoding="utf-8")
+    resync_res = sync_tenant_porcelain_shell(tmp_repo, "gainhelm")
+    assert resync_res["status"] == "UPDATED"
+    assert "gainhelm/builder.py" in resync_res["updated_files"]
+    thin_builder_txt = builder_path.read_text(encoding="utf-8")
+    assert thin_builder_txt == expected_thin_builder
+
     sync_tenant_test_isolation_guards(tmp_repo, "gainhelm")
     write_substrate_lock(tmp_repo, property_id="gainhelm", sync_ledgers=False)
-
-    thin_builder_txt = (tmp_repo / "gainhelm" / "builder.py").read_text(encoding="utf-8")
     assert len(thin_builder_txt.splitlines()) <= 60
     assert "compile_gainhelm_estate" in thin_builder_txt
     assert "CALCULATION_MANIFESTS" in thin_builder_txt

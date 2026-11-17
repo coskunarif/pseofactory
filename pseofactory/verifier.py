@@ -1627,8 +1627,10 @@ class MasterSEOVerifier:
         min_manifests: int = 8,
         strict_robots: bool = False,
         repo_root: Optional[Path] = None,
+        allow_mutations: bool = True,
     ):
         self.repo_root = Path(repo_root) if repo_root is not None else None
+        self.allow_mutations = bool(allow_mutations)
         self.canonical_base = (
             canonical_base
             if canonical_base is not None
@@ -1737,11 +1739,12 @@ class MasterSEOVerifier:
                             self.canonical_base = "https://lienbond.com"
                         if not self.brand_name:
                             self.brand_name = "LienBond"
-                    RetroReflectionEngine.sync_tenant_publisher_prerequisites(
-                        self.dist_dir,
-                        property_id=prop_id,
-                        canonical_base=safe_canon,
-                    )
+                    if self.allow_mutations:
+                        RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+                            self.dist_dir,
+                            property_id=prop_id,
+                            canonical_base=safe_canon,
+                        )
             except Exception:
                 pass
 

@@ -9833,6 +9833,63 @@ def assert_zero_signup_instant_result_contract(
     return True
 
 
+NON_TOOL_GOVERNANCE_SLUGS: frozenset = frozenset({
+    "index",
+    "root",
+    "tools",
+    "tools-directory",
+    "about",
+    "privacy",
+    "terms",
+    "contact",
+    "disclaimers",
+    "methodology",
+    "404",
+    "404.html",
+    "signal",
+    "static",
+    "static/signal",
+    "static-signal",
+    "robots.txt",
+    "robots-txt",
+    "sitemap.xml",
+    "sitemap-xml",
+})
+
+
+def normalize_route_or_slug_key(value: str) -> str:
+    """Normalizes a URL, path, relative HTML path, or slug into a lowercase route key."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if "://" in raw or raw.startswith("//"):
+        path = urllib.parse.urlsplit(raw).path
+    else:
+        path = raw.split("?", 1)[0].split("#", 1)[0]
+    norm = path.strip().lower().strip("/")
+    if norm.endswith("/index.html"):
+        norm = norm[: -len("/index.html")]
+    if norm in ("", "index.html"):
+        return "index"
+    return norm
+
+
+def is_non_tool_or_governance_route(value: str) -> bool:
+    """Returns True if a URL, path, or slug denotes a non-tool governance or utility route."""
+    if not str(value or "").strip():
+        return False
+    norm = normalize_route_or_slug_key(value)
+    if norm in NON_TOOL_GOVERNANCE_SLUGS or norm.removesuffix(".html") in NON_TOOL_GOVERNANCE_SLUGS:
+        return True
+    if norm.startswith(("signal/", "static/")) or norm.endswith((".xml", ".txt")):
+        return True
+    if norm.startswith("tools/"):
+        tail = norm[len("tools/"):].strip("/")
+        if tail in NON_TOOL_GOVERNANCE_SLUGS or tail.removesuffix(".html") in NON_TOOL_GOVERNANCE_SLUGS:
+            return True
+    return False
+
+
 
 
 from pseofactory.qualification import (
@@ -10081,6 +10138,9 @@ __all__ = [
     "ZeroSignupInstantResultHTMLParser",
     "detect_zero_signup_instant_result_issues",
     "assert_zero_signup_instant_result_contract",
+    "NON_TOOL_GOVERNANCE_SLUGS",
+    "normalize_route_or_slug_key",
+    "is_non_tool_or_governance_route",
     "DatasetManifest",
     "compute_file_sha256",
 ]
