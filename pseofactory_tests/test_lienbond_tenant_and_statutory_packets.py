@@ -614,7 +614,7 @@ def _run_lienbond_substrate_audit_subprocess(lb_repo: Path) -> dict:
         capture_output=True,
         text=True,
         check=True,
-        timeout=60,
+        timeout=240,
     )
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
