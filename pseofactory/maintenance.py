@@ -2450,6 +2450,8 @@ class TenantRegistry:
     """
 
     _global_registry: Optional[TenantRegistry] = None
+    _global_registry_in_pytest: Optional[bool] = None
+    _global_registry_workspace_root: Optional[str] = None
 
     def __init__(self):
         self._adapters: Dict[str, PropertyAdapter] = {}
@@ -2476,13 +2478,31 @@ class TenantRegistry:
     @classmethod
     def default(cls, workspace_root: Optional[Union[str, Path]] = None) -> TenantRegistry:
         """Returns or creates singleton registry preloaded dynamically via WorkspacePropertyScanner."""
-        if cls._global_registry is None:
+        if workspace_root is not None:
             reg = cls()
             scanner = WorkspacePropertyScanner(workspace_root=workspace_root)
             for adapter in scanner.discover_properties():
                 reg.register_adapter(adapter)
             cls._ensure_tenant_tools(reg, workspace_root=workspace_root)
+            return reg
+
+        curr_in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        curr_ws = str(
+            Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+        )
+        if (
+            cls._global_registry is None
+            or cls._global_registry_in_pytest != curr_in_pytest
+            or cls._global_registry_workspace_root != curr_ws
+        ):
+            reg = cls()
+            scanner = WorkspacePropertyScanner(workspace_root=None)
+            for adapter in scanner.discover_properties():
+                reg.register_adapter(adapter)
+            cls._ensure_tenant_tools(reg, workspace_root=None)
             cls._global_registry = reg
+            cls._global_registry_in_pytest = curr_in_pytest
+            cls._global_registry_workspace_root = curr_ws
         return cls._global_registry
 
     @classmethod
@@ -2518,6 +2538,8 @@ class TenantRegistry:
     def reset_default(cls) -> None:
         """Resets singleton default registry."""
         cls._global_registry = None
+        cls._global_registry_in_pytest = None
+        cls._global_registry_workspace_root = None
 
 
 class LiveTruthAuditEngine:
@@ -15517,7 +15539,14 @@ def _execute_autonomous_downstream_chain(
     else:
         default_tools = list(getattr(adapter, "tools", None) or [])
     discovered_tools = _discover_tenant_tools(adapter, default_tools)
-    if hasattr(adapter, "_tools"):
+    is_global_singleton_adapter = (
+        TenantRegistry._global_registry is not None
+        and any(a is adapter for a in TenantRegistry._global_registry._adapters.values())
+    )
+    if hasattr(adapter, "_tools") and not (
+        is_global_singleton_adapter
+        and ("PYTEST_CURRENT_TEST" in os.environ or TenantRegistry._global_registry_in_pytest)
+    ):
         adapter._tools = list(discovered_tools)
 
     # Stage 1: Indexing Preflight Airlock

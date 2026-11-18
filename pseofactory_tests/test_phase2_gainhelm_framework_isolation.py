@@ -470,6 +470,79 @@ run().catch((err) => {{ console.error(err); process.exit(1); }});
     assert "EDGE_ISOLATION_OK" in proc.stdout
 
 
+def _inject_legacy_gainhelm_drift(html_txt: str, slug: str) -> str:
+    """Builds an unhealed pre-Stage-3b legacy fixture with $79 SOC 2 / CMMC drift."""
+    from pseofactory.visual_primitives import _find_balanced_div_span
+
+    mutated = html_txt
+    replacements = (
+        (
+            "id",
+            "post-calculation-upgrade-drawer",
+            (
+                f'<div id="post-calculation-upgrade-drawer" class="post-calc-upgrade-drawer" '
+                f'data-mechanic="post_calculation_workpaper_upgrade" data-property-id="gainhelm" '
+                f'data-tool-slug="{slug}" data-offer-sku="gh_soc2_cmmc_audit_workpapers" '
+                f'data-offer-price="79">'
+                f'<h4 class="post-calc-upgrade-title">GainHelm SOC 2 Type II, CMMC 2.0 &amp; NIST 800-171 '
+                f'Audit Scoping Workpaper Suite ($79 One-Time Package)</h4>'
+                f'<p class="post-calc-pillar-copy">AICPA SOC 2 Type II CPA Firm Fee, DoD CMMC 2.0 C3PAO, '
+                f'HHS OCR HIPAA</p></div>'
+            ),
+        ),
+        (
+            "id",
+            "calc-result-quick-unlock-bar",
+            (
+                '<div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" '
+                'data-contextual-v2="1" data-offer-sku="gh_soc2_cmmc_audit_workpapers" '
+                'data-offer-price="79"><div>SOC 2 Type II &amp; CMMC 2.0 Audit Scope ($79)</div></div>'
+            ),
+        ),
+        (
+            "class",
+            "calc-inline-cta",
+            (
+                '<div class="calc-inline-cta" data-partner="vanta_security">'
+                '<div class="calc-inline-cta-copy"><div>Automated SOC 2, ISO 27001 &amp; HIPAA</div>'
+                '<div>Vanta Trust Management</div></div>'
+                '<a href="/r/vanta_security">Automate with Vanta &rarr;</a></div>'
+            ),
+        ),
+    )
+    for attr_name, target_val, legacy_block in replacements:
+        span = _find_balanced_div_span(mutated, target_val, attr_name=attr_name)
+        assert span is not None, f"Missing {attr_name}={target_val} in live fixture {slug}"
+        mutated = mutated[: span[0]] + legacy_block + mutated[span[1] :]
+
+    pro_span = _find_balanced_div_span(mutated, "pro-hook-card", attr_name="class")
+    assert pro_span is not None, f"Missing class=pro-hook-card in live fixture {slug}"
+    pro_block = mutated[pro_span[0] : pro_span[1]]
+    pro_block = (
+        pro_block.replace("gh_hipaa_iso27001_governance_kit", "gh_soc2_cmmc_audit_workpapers")
+        .replace('data-offer-price="49"', 'data-offer-price="79"')
+        .replace("($49)", "($79)")
+        .replace("Locked: $49", "Locked: $79")
+    )
+    pro_block = re.sub(
+        r"<span>[\s\S]*?</span>",
+        "<span><strong>Statutory Audit Workpaper:</strong> Export SOC 2 Type II, CMMC 2.0 &amp; HIPAA Schedule</span>",
+        pro_block,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    mutated = mutated[: pro_span[0]] + pro_block + mutated[pro_span[1] :]
+
+    mutated = re.sub(
+        r'(<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*\bdata-vertical=["\'])[^"\']+(["\'])',
+        r"\1soc2_grc_automation\2",
+        mutated,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return mutated
+
+
 def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_estate(tmp_path: Path) -> None:
     engine = RetroReflectionEngine()
 
@@ -478,14 +551,52 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         assert live_html_path.is_file(), f"Missing live fixture {live_html_path}"
         orig_live_html = live_html_path.read_text(encoding="utf-8")
 
-        # 1. Verify single-file RetroReflectionEngine.retrofit_html heals real already-instrumented live HTML
-        #    (even when mechanical primitives already exist and audit_html_mechanics returns []).
-        healed_single, repaired_single = engine.retrofit_html(
+        # 1a. Verify live gainhelm/dist HTML converges cleanly via retrofit_html & retrofit_estate
+        needs_live_repair = bool(
+            engine._gainhelm_needs_framework_isolation_heal(orig_live_html, slug)
+            or engine.audit_html_mechanics(orig_live_html)
+        )
+        healed_live, repaired_live = engine.retrofit_html(
             orig_live_html,
             property_id="gainhelm",
             slug=slug,
         )
-        assert repaired_single, f"Expected non-empty repairs on live {slug}"
+        if needs_live_repair:
+            assert repaired_live, f"Expected non-empty repairs on unhealed live {slug}"
+        _assert_live_fixture_healed(healed_live, slug, meta["vertical"])
+        healed_live_second, repaired_live_second = engine.retrofit_html(
+            healed_live,
+            property_id="gainhelm",
+            slug=slug,
+        )
+        assert repaired_live_second == []
+        assert healed_live_second == healed_live
+
+        live_copy_dist = tmp_path / f"live_estate_{slug[:12]}" / "dist"
+        live_copy_tool = live_copy_dist / "tools" / slug
+        live_copy_tool.mkdir(parents=True, exist_ok=True)
+        (live_copy_tool / "index.html").write_text(orig_live_html, encoding="utf-8")
+        engine.retrofit_estate(live_copy_dist, "gainhelm")
+        live_estate_html = (live_copy_tool / "index.html").read_text(encoding="utf-8")
+        _assert_live_fixture_healed(live_estate_html, slug, meta["vertical"])
+        _, live_estate_html_repairs = engine.retrofit_html(
+            live_estate_html,
+            property_id="gainhelm",
+            slug=slug,
+        )
+        assert live_estate_html_repairs == []
+        live_estate_second = engine.retrofit_estate(live_copy_dist, "gainhelm")
+        assert f"tools/{slug}/index.html" not in live_estate_second["retrofitted_paths"]
+
+        # 1b. Verify single-file RetroReflectionEngine.retrofit_html heals explicit unhealed legacy HTML
+        #     (even when mechanical primitives already exist and audit_html_mechanics returns []).
+        legacy_html = _inject_legacy_gainhelm_drift(orig_live_html, slug)
+        healed_single, repaired_single = engine.retrofit_html(
+            legacy_html,
+            property_id="gainhelm",
+            slug=slug,
+        )
+        assert repaired_single, f"Expected non-empty repairs on legacy fixture {slug}"
         _assert_live_fixture_healed(healed_single, slug, meta["vertical"])
 
         # Strict idempotency: second call on already-healed HTML returns empty repaired list and identical HTML
@@ -497,13 +608,13 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         assert repaired_second == []
         assert healed_second == healed_single
 
-        # 2. Verify RetroReflectionEngine.retrofit_estate also heals BOTH raw live HTML and overlaid HTML
+        # 2. Verify RetroReflectionEngine.retrofit_estate also heals overlaid legacy HTML
         #    where .calc-inline-cta was already cleaned but #post-calculation-upgrade-drawer + .pro-hook-card
         #    (with href before class and data-offer-price before data-offer-sku) remain stale $79.
         overlaid_html = re.sub(
             r'(<div\b[^>]*class=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>)[\s\S]*?(</div>\s*<a[^>]*>[\s\S]*?</a>\s*</div>)',
             r'\1<div class="calc-inline-cta-copy"><div>EU GRC Automation &bull; Partner Option</div><div>Vanta Trust Management</div></div><a href="/r/vanta_security">Automate with Vanta &rarr;</a></div>',
-            orig_live_html,
+            legacy_html,
             count=1,
             flags=re.IGNORECASE,
         )
@@ -520,6 +631,12 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         engine.retrofit_estate(dist_dir, "gainhelm")
         estate_healed = (tool_dir / "index.html").read_text(encoding="utf-8")
         _assert_live_fixture_healed(estate_healed, slug, meta["vertical"])
+        _, estate_repaired_second = engine.retrofit_html(
+            estate_healed,
+            property_id="gainhelm",
+            slug=slug,
+        )
+        assert estate_repaired_second == []
 
     # Bug 3 + Bug 4 adversarial probes
     from pseofactory.visual_primitives import _find_balanced_div_span

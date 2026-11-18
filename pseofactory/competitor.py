@@ -5884,7 +5884,12 @@ def _render_saveable_decision_blueprint_html(
             reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
         else:
             reviewer_label = "CISO, risk committee, or regulatory compliance review"
-        eff_stat = statutory_authority or fw_prof["statutory_authority"]
+        default_gh_stat = (
+            "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
+            if fw_prof["framework_key"] == "soc2"
+            else fw_prof["statutory_authority"]
+        )
+        eff_stat = statutory_authority or default_gh_stat
         eff_prop = property_id or "gainhelm"
     elif str(property_id).strip().lower() == "lienbond":
         reviewer_label = "surety underwriter, project CFO, or construction counsel review"

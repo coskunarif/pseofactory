@@ -293,6 +293,7 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
     subsequent normalize_html_callout_message_match calls without split-brain reversion.
     """
     import json
+    import re
     import shutil
     from bs4 import BeautifulSoup
     import pseofactory.affiliates as _aff
@@ -325,14 +326,55 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
             "h2_text": h2.get_text(" ", strip=True) if h2 else "",
         }
 
-    # 1. Unhealed static non-Vanta page (iso-27001 with stale vanta_security) heals to thoropass_audit & keeps <h2>
-    iso_raw = (live_gh_dist / "tools" / "iso-27001-certification-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    iso_healed = normalize_html_callout_message_match(iso_raw, property_id="gainhelm")
+    def _reset_to_baseline_unrepositioned(html_doc: str, inject_vanta_tm: bool = False) -> str:
+        s = html_doc
+        s = re.sub(r'data-gsc-repositioned=["\']true["\']', 'data-gsc-repositioned="false"', s, flags=re.IGNORECASE)
+        s = re.sub(
+            r'data-gsc-tier=["\'](?:EMPIRICAL_YIELD_SWAP|BASELINE_MULTI_SLOT)["\']',
+            'data-gsc-tier="baseline"',
+            s,
+            flags=re.IGNORECASE,
+        )
+        s = re.sub(r'data-yield-score=["\'][^"\']+["\']', 'data-yield-score="0"', s, flags=re.IGNORECASE)
+        s = re.sub(r'data-primary-partner=["\'][a-z0-9_]+["\']', 'data-primary-partner="vanta_security"', s, flags=re.IGNORECASE)
+
+        def _force_vanta_partner(m: re.Match) -> str:
+            return re.sub(r'data-partner=["\'][a-z0-9_]+["\']', 'data-partner="vanta_security"', m.group(0), flags=re.IGNORECASE)
+
+        for pat in (
+            r'<section\b[^>]*class=["\'][^"\']*(?:affiliates?-section|partners-section|refinance-partner-section)[^>]*>',
+            r'<div\b[^>]*class=["\'][^"\']*calc-inline-cta[^>]*>',
+            r'<div\b[^>]*class=["\'][^"\']*comparison-table-cta-bar[^>]*>',
+            r'<section\b[^>]*class=["\'][^"\']*overlay-partner-offer[^>]*>',
+            r'<div\b[^>]*class=["\'][^"\']*partner-card[^>]*>',
+        ):
+            s = re.sub(pat, _force_vanta_partner, s, count=1, flags=re.IGNORECASE)
+        if inject_vanta_tm:
+            s = re.sub(
+                r'(<div\b[^>]*class=["\'][^"\']*calc-inline-cta-copy[^>]*>)(.*?)(</div>\s*<a\b)',
+                r"\1<div>GRC Automation</div><div>Vanta Trust Management</div>\3",
+                s,
+                count=1,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+        return s
+
+    # 1. Verify live iso-27001 conforms cleanly AND unhealed static non-Vanta baseline heals to thoropass_audit & keeps <h2>
+    iso_live_raw = (live_gh_dist / "tools" / "iso-27001-certification-cost-calculator" / "index.html").read_text(encoding="utf-8")
+    live_iso_slots = _extract_slot_partners(iso_live_raw)
+    assert live_iso_slots["h2_text"] == "Recommended Partner Solutions"
+    assert live_iso_slots["sec_pk"] == live_iso_slots["card1_pk"] == live_iso_slots["inline_pk"] == live_iso_slots["ov_pk"]
+    assert normalize_html_callout_message_match(iso_live_raw, property_id="gainhelm") == iso_live_raw
+
+    iso_unhealed = _reset_to_baseline_unrepositioned(iso_live_raw, inject_vanta_tm=True)
+    iso_healed = normalize_html_callout_message_match(iso_unhealed, property_id="gainhelm")
     iso_slots = _extract_slot_partners(iso_healed)
     assert iso_slots["sec_pk"] == "thoropass_audit"
     assert iso_slots["card1_pk"] == "thoropass_audit"
     assert iso_slots["inline_pk"] == "thoropass_audit"
     assert iso_slots["h2_text"] == "Recommended Partner Solutions"
+    assert "Vanta Trust Management" not in iso_healed
+    assert not _aff.has_gainhelm_cross_framework_leak(str(iso_slots["sec"]), "iso-27001-certification-cost-calculator")
 
     # 2. Query-intent swap on SOC 2 (promoting thoropass_audit) with id= before class= on <section>
     soc2_raw = (live_gh_dist / "tools" / "soc-2-audit-cost-calculator" / "index.html").read_text(encoding="utf-8")
@@ -370,11 +412,20 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
     assert q_after_norm == q_rep
 
     # 3. Empirical-yield swap via run_gsc_affiliate_placement_feedback_pass on /tmp/ copy of real gainhelm/dist + engagement JSON
+    #    (resetting /tmp/ copy to baseline un-repositioned state first so Stage 3b post-cascade dist tests the full empirical swap)
     gh_repo = tmp_path / "gainhelm"
     gh_dist = gh_repo / "dist"
     (gh_repo / ".agy").mkdir(parents=True, exist_ok=True)
     shutil.copytree(live_gh_dist, gh_dist)
     shutil.copy2(live_gh_eng, gh_repo / ".agy" / "outbound_partner_engagement.json")
+    before_h2_by_slug = {}
+    for html_file in sorted((gh_dist / "tools").glob("*/index.html")):
+        orig_doc = html_file.read_text(encoding="utf-8")
+        before_h2_by_slug[html_file.parent.name] = _extract_slot_partners(orig_doc)["h2_text"]
+        html_file.write_text(
+            _reset_to_baseline_unrepositioned(orig_doc),
+            encoding="utf-8",
+        )
 
     fb_pass1 = run_gsc_affiliate_placement_feedback_pass(
         property_id="gainhelm",
@@ -391,7 +442,12 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
         t_slug = html_file.parent.name
         page_html = html_file.read_text(encoding="utf-8")
         slots = _extract_slot_partners(page_html)
-        assert slots["h2_text"] == "Recommended Partner Solutions", f"Missing <h2> on {t_slug}"
+        orig_h2 = before_h2_by_slug[t_slug]
+        assert slots["h2_text"], f"Missing <h2> on {t_slug}"
+        if orig_h2 == "Recommended Partner Solutions" or slots["sec_pk"] != "vanta_security":
+            assert slots["h2_text"] == "Recommended Partner Solutions", f"Mismatched <h2> on {t_slug}: {slots['h2_text']}"
+        else:
+            assert slots["h2_text"] == orig_h2 and "Vanta" in slots["h2_text"], f"Lost valid <h2> on {t_slug}: {slots['h2_text']}"
         assert slots["sec_pk"] == slots["card1_pk"] == slots["inline_pk"] == slots["ov_pk"], (t_slug, slots)
         if slots["sec_rep"] == "true":
             repositioned_slugs += 1

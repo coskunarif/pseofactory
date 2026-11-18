@@ -609,6 +609,51 @@ def test_tenant_registry_dynamic_discovery(tmp_path):
     TenantRegistry.reset_default()
 
 
+def test_tenant_registry_default_isolates_workspace_and_pytest_env(tmp_path, monkeypatch):
+    """Verifies TenantRegistry.default isolates workspace_root scans, PYTEST_CURRENT_TEST toggles, and singleton tools."""
+    from unittest.mock import patch
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.maintenance import (
+        PREXVO_DEFAULT_TOOLS,
+        _execute_autonomous_downstream_chain,
+    )
+
+    TenantRegistry.reset_default()
+    try:
+        # 1. Custom workspace_root must not poison or overwrite global singleton
+        scoped_reg = TenantRegistry.default(workspace_root=tmp_path)
+        assert scoped_reg.list_adapters() == {}
+
+        pytest_reg = TenantRegistry.default()
+        prexvo_pytest = pytest_reg.get_adapter("prexvo")
+        assert len(prexvo_pytest.tools) == len(PREXVO_DEFAULT_TOOLS)
+
+        # 2. Removing PYTEST_CURRENT_TEST rebuilds global registry with live tools, and restoring rebuilds pytest defaults
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        live_reg = TenantRegistry.default()
+        assert len(live_reg.get_adapter("prexvo").tools) > len(PREXVO_DEFAULT_TOOLS)
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_tenant_registry_default_isolates_workspace_and_pytest_env")
+        restored_reg = TenantRegistry.default()
+        restored_prexvo = restored_reg.get_adapter("prexvo")
+        assert len(restored_prexvo.tools) == len(PREXVO_DEFAULT_TOOLS)
+
+        # 3. _execute_autonomous_downstream_chain must not mutate singleton adapter _tools during pytest
+        bus = HumanActionBus(bus_path=str(tmp_path / "action_bus.json"))
+        with patch("pseofactory.distributor.dispatch_to_distribution_lead", return_value={"status": "SKIPPED"}), patch(
+            "pseofactory.indexer.PushIndexer.dispatch_automated_indexing", return_value={"status": "SKIPPED"}
+        ):
+            _execute_autonomous_downstream_chain(
+                restored_prexvo,
+                dry_run=True,
+                run_id="test-singleton-guard",
+                action_bus=bus,
+            )
+        assert len(restored_prexvo.tools) == len(PREXVO_DEFAULT_TOOLS)
+    finally:
+        TenantRegistry.reset_default()
+
+
 def test_stage_execution_order_airlock_before_gitops_and_push_indexing_post_deploy(tmp_path):
     """
     Verifies that MaintenanceLifecycle enforces sequential progression:
