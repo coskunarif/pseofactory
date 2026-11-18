@@ -948,17 +948,29 @@ def _build_partners_matrix_section(
     slug: str = "",
     engagement_metrics: Optional[Dict[str, Any]] = None,
 ) -> str:
+    from pseofactory.affiliates import classify_gainhelm_framework
+
+    fw_key = classify_gainhelm_framework(slug=slug)
+    is_us_audit = fw_key in ("soc2", "cmmc")
+    desc_cards = (
+        "Automated evidence collection platforms accelerate SOC 2, CMMC 2.0, ISO 27001, and HIPAA "
+        "readiness while reducing engineering remediation hours prior to independent third-party attestation."
+        if is_us_audit
+        else "Automated evidence collection platforms accelerate continuous compliance readiness while "
+        "reducing engineering remediation hours prior to independent third-party assessment."
+    )
+    desc_empty = (
+        "Automated evidence collection platforms accelerate audit readiness, while formal attestation "
+        "reports require independent licensed CPA firms, C3PAOs, or accredited certification bodies."
+        if is_us_audit
+        else "Automated evidence collection platforms accelerate continuous governance readiness, while "
+        "formal conformity reviews require qualified independent assessors or regulatory counsel."
+    )
     return build_partners_matrix_section(
         affiliates=GAINHELM_AFFILIATES,
-        section_title="Enterprise GRC Automation & Audit Partner Network",
-        section_desc_with_cards=(
-            "Automated evidence collection platforms accelerate SOC 2, CMMC 2.0, ISO 27001, and HIPAA "
-            "readiness while reducing engineering remediation hours prior to independent third-party attestation."
-        ),
-        section_desc_empty=(
-            "Automated evidence collection platforms accelerate audit readiness, while formal attestation "
-            "reports require independent licensed CPA firms, C3PAOs, or accredited certification bodies."
-        ),
+        section_title="Enterprise GRC Automation & Compliance Partner Network",
+        section_desc_with_cards=desc_cards,
+        section_desc_empty=desc_empty,
         default_cta_text="Compare GRC Automation",
         slug=slug,
         engagement_metrics=engagement_metrics,
@@ -966,15 +978,27 @@ def _build_partners_matrix_section(
 
 
 def _build_partner_cta(slug: str = "") -> str:
+    from pseofactory.affiliates import classify_gainhelm_framework
+
+    fw_key = classify_gainhelm_framework(slug=slug)
+    is_us_audit = fw_key in ("soc2", "cmmc")
     return build_partner_cta(
         affiliates=GAINHELM_AFFILIATES,
         preferred_key="vanta_security",
         restricted_badge="Statutory Audit Independence",
         restricted_title="Accredited Third-Party Assessment",
-        restricted_body="Formal attestation and federal certification require an independent CPA firm, Cyber-AB C3PAO, or accredited ISO registrar.",
+        restricted_body=(
+            "Formal attestation and federal certification require an independent CPA firm, Cyber-AB C3PAO, or accredited ISO registrar."
+            if is_us_audit
+            else "Formal regulatory conformity reviews require qualified independent assessors or accredited conformity bodies."
+        ),
         fallback_badge="Enterprise Compliance Education",
-        fallback_title="Independent Attestation Readiness",
-        fallback_body="Continuous control monitoring reduces manual evidence preparation prior to formal CPA or C3PAO audit fieldwork.",
+        fallback_title="Independent Assessment Readiness",
+        fallback_body=(
+            "Continuous control monitoring reduces manual evidence preparation prior to formal CPA or C3PAO audit fieldwork."
+            if is_us_audit
+            else "Continuous control monitoring reduces manual evidence preparation prior to formal external assessment."
+        ),
         default_featured_badge="Featured GRC Partner",
         default_cta_text="Automate Audit Evidence",
         slug=slug,

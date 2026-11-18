@@ -1271,15 +1271,21 @@ def _render_compiler_monetization_and_guardrail_html(
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
         partner_reg_drawer_html = _build_partner_registration_drawer_html()
-        partner_lead_copy = (
-            "Execute your modeled compliance or audit readiness scenario with a vetted GRC automation, CPA audit, or security assurance partner matched to this calculation:"
-            if is_gainhelm
-            else (
+        if is_gainhelm:
+            from pseofactory.affiliates import get_gainhelm_framework_profile
+
+            gh_fw_key = get_gainhelm_framework_profile(slug=slug)["framework_key"]
+            partner_lead_copy = (
+                "Execute your modeled compliance or audit readiness scenario with a vetted GRC automation, CPA audit, or security assurance partner matched to this calculation:"
+                if gh_fw_key in ("soc2", "cmmc")
+                else "Execute your modeled regulatory readiness scenario with a vetted GRC automation or independent security assurance partner matched to this calculation:"
+            )
+        else:
+            partner_lead_copy = (
                 "Execute your modeled surety bond, workers compensation, or statutory mechanics lien scenario with a vetted Treasury Circular 570 underwriter or commercial carrier matched to this calculation:"
                 if is_lienbond
                 else "Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:"
             )
-        )
 
         block_html = (
             f'    <section class="affiliate-cta-section affiliates-section card pseo-card" data-property="{prop_id}" '
@@ -2379,8 +2385,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     regulatory_disclosures_html = []
     if is_gainhelm:
+        from pseofactory.affiliates import get_gainhelm_statutory_disclaimer
+
         gh_disc = (
-            GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer")
+            get_gainhelm_statutory_disclaimer(slug)
+            or GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer")
             or GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer")
             or ""
         ).strip()

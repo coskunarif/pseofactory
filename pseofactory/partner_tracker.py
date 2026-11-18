@@ -3545,12 +3545,14 @@ class PartnerTrackingEngine:
         property_id: str,
         tool_slug: str,
         calculated_amount: float = 0.0,
+        vertical: str = "",
     ) -> Dict[str, Any]:
         """Instance wrapper around evaluate_lead_quote_threshold."""
         return evaluate_lead_quote_threshold(
             property_id=property_id,
             tool_slug=tool_slug,
             calculated_amount=calculated_amount,
+            vertical=vertical,
         )
 
     def ingest_qualified_lead(
@@ -3584,13 +3586,27 @@ class PartnerTrackingEngine:
         """
         import hashlib
         from urllib.parse import urlencode
-        from pseofactory.affiliates import is_restricted_public_service_slug
+        from pseofactory.affiliates import (
+            is_restricted_public_service_slug,
+            normalize_gainhelm_partner_key,
+            resolve_gainhelm_partner_rep_desk,
+            resolve_gainhelm_partner_url,
+        )
 
         prop_clean = (property_id or "profithelm").strip().lower()
         if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             raise ValueError(f"Unsupported property_id '{property_id}'.")
 
-        slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
+        raw_slug = (tool_slug or "").strip().strip("/").lower()
+        if raw_slug.startswith("tools/"):
+            raw_slug = raw_slug[len("tools/"):]
+        vert_input = (vertical or "").strip()
+        has_gh_explicit_vert = (
+            prop_clean == "gainhelm"
+            and bool(vert_input)
+            and vert_input.lower() not in ("general", "informational_governance")
+        )
+        slug_clean = raw_slug if has_gh_explicit_vert else (raw_slug or "index")
         if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
             raise ValueError(
                 f"Restricted public-service asset '{slug_clean}' cannot capture commercial student loan refinance leads."
@@ -3600,6 +3616,7 @@ class PartnerTrackingEngine:
             property_id=prop_clean,
             tool_slug=slug_clean,
             calculated_amount=calculated_amount,
+            vertical=vert_input,
         )
         if not eval_info["eligible"]:
             raise ValueError(
@@ -3608,8 +3625,17 @@ class PartnerTrackingEngine:
 
         amount_val = float(eval_info["calculated_amount"])
         threshold_val = float(eval_info["threshold_usd"])
-        eff_vertical = (vertical or eval_info["vertical"]).strip().lower()
-        eff_partner_key = (partner_key or eval_info["primary_partner_key"]).strip().lower()
+        eff_vertical = (
+            eval_info["vertical"]
+            if prop_clean == "gainhelm"
+            else (vertical or eval_info["vertical"]).strip().lower()
+        )
+        raw_partner_key = (partner_key or eval_info["primary_partner_key"]).strip().lower()
+        eff_partner_key = (
+            normalize_gainhelm_partner_key(raw_partner_key)
+            if prop_clean == "gainhelm"
+            else raw_partner_key
+        )
 
         if prop_clean == "prexvo":
             if (
@@ -3662,8 +3688,9 @@ class PartnerTrackingEngine:
 
         # Sub-threshold calculations stay frictionless without forced gating
         if not eval_info["qualifies_for_quote_intake"]:
-            fallback_route = f"/r/{eff_partner_key}?source={slug_clean}&slot=frictionless_direct"
-            return {
+            vert_q = f"&vertical={eff_vertical}" if prop_clean == "gainhelm" and eff_vertical else ""
+            fallback_route = f"/r/{eff_partner_key}?source={slug_clean}&slot=frictionless_direct{vert_q}"
+            sub_res = {
                 "status": "frictionless_sub_threshold",
                 "persisted": False,
                 "frictionless_mode": True,
@@ -3677,6 +3704,11 @@ class PartnerTrackingEngine:
                 "action_bus_dispatched": False,
                 "action_bus_item_id": None,
             }
+            if prop_clean == "gainhelm":
+                sub_res["partner_rep_desk"] = resolve_gainhelm_partner_rep_desk(
+                    eff_partner_key, slug=slug_clean, vertical=eff_vertical
+                )
+            return sub_res
 
         if partner_sharing_consent is not True:
             raise ValueError(
@@ -3700,22 +3732,37 @@ class PartnerTrackingEngine:
         ).hexdigest()[:12]
         lead_id = f"lead_{prop_clean}_{digest}"
 
-        subid_val = f"cpl_{slug_clean[:24]}_{state_clean.lower()}_{int(round(amount_val))}"
-        query_params = urlencode(
-            {
-                "source": slug_clean,
-                "slot": "partner_quote_intake",
-                "subid": subid_val,
-                "state": state_clean,
-                "capital_band": band_clean,
-                "amount": str(int(round(amount_val))),
-                "lead_id": lead_id,
-            }
-        )
+        subid_slug = (slug_clean or eff_vertical or prop_clean)[:24]
+        subid_val = f"cpl_{subid_slug}_{state_clean.lower()}_{int(round(amount_val))}"
+        query_dict = {
+            "source": slug_clean,
+            "slot": "partner_quote_intake",
+            "subid": subid_val,
+            "state": state_clean,
+            "capital_band": band_clean,
+            "amount": str(int(round(amount_val))),
+            "lead_id": lead_id,
+        }
+        if prop_clean == "gainhelm" and eff_vertical:
+            query_dict["vertical"] = eff_vertical
+        query_params = urlencode(query_dict)
         edge_redirect_url = f"/r/{eff_partner_key}?{query_params}"
 
         # Resolve highest-yielding live destination URL with pre-filled context
-        live_dest_base = eval_info["live_destination_url"]
+        if prop_clean == "gainhelm":
+            eff_partner_rep_desk = resolve_gainhelm_partner_rep_desk(
+                eff_partner_key,
+                slug=slug_clean,
+                vertical=eff_vertical,
+            )
+            live_dest_base = resolve_gainhelm_partner_url(
+                eff_partner_key,
+                tool_slug=slug_clean,
+                vertical=eff_vertical,
+            ) or eval_info["live_destination_url"]
+        else:
+            eff_partner_rep_desk = eval_info["partner_rep_desk"]
+            live_dest_base = eval_info["live_destination_url"]
         sep = "&" if "?" in live_dest_base else "?"
         live_destination_url = f"{live_dest_base}{sep}{query_params}"
 
@@ -3727,7 +3774,12 @@ class PartnerTrackingEngine:
         monetization_offer = resolve_lead_monetization_offer(
             property_id=prop_clean,
             tool_slug=slug_clean,
-            vertical=eff_vertical,
+            vertical=_resolve_gainhelm_offer_vertical_arg(
+                prop_clean,
+                slug_clean,
+                has_gh_explicit_vert,
+                eff_vertical,
+            ),
             lead_id=lead_id,
         )
 
@@ -3745,6 +3797,7 @@ class PartnerTrackingEngine:
             "lifecycle_stage": "captured",
             "tool_slug": slug_clean,
             "vertical": eff_vertical,
+            "has_explicit_vertical": has_gh_explicit_vert if prop_clean == "gainhelm" else bool(vertical),
             "email": email_clean,
             "state": state_clean,
             "capital_band": band_clean,
@@ -3753,7 +3806,7 @@ class PartnerTrackingEngine:
             "partner_sharing_consent": True,
             "tcpa_consent_text": tcpa_consent_text,
             "partner_key": eff_partner_key,
-            "partner_rep_desk": eval_info["partner_rep_desk"],
+            "partner_rep_desk": eff_partner_rep_desk,
             "redirect_url": edge_redirect_url,
             "live_destination_url": live_destination_url,
             "monetization_strategy": "dual_partner_and_checkout",
@@ -3809,6 +3862,7 @@ class PartnerTrackingEngine:
             "lifecycle_stage": "captured",
             "tool_slug": slug_clean,
             "vertical": eff_vertical,
+            "has_explicit_vertical": has_gh_explicit_vert if prop_clean == "gainhelm" else bool(vertical),
             "email": email_clean,
             "state": state_clean,
             "capital_band": band_clean,
@@ -3816,7 +3870,7 @@ class PartnerTrackingEngine:
             "threshold_usd": threshold_val,
             "partner_sharing_consent": True,
             "partner_key": eff_partner_key,
-            "partner_rep_desk": eval_info["partner_rep_desk"],
+            "partner_rep_desk": eff_partner_rep_desk,
             "redirect_url": edge_redirect_url,
             "live_destination_url": live_destination_url,
             "monetization_strategy": "dual_partner_and_checkout",
@@ -3849,6 +3903,7 @@ class PartnerTrackingEngine:
         scenario_inputs: Optional[Dict[str, Any]] = None,
         scenario_outputs: Optional[Dict[str, Any]] = None,
         blueprint_state: Optional[Dict[str, Any]] = None,
+        vertical: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Ingests a first-party regulatory playbook or calculation worksheet subscription,
@@ -3862,9 +3917,18 @@ class PartnerTrackingEngine:
         prop_clean = (property_id or "profithelm").strip().lower()
         if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             raise ValueError(f"Unsupported property_id '{property_id}'.")
-        slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
-        if slug_clean.startswith("tools/"):
-            slug_clean = slug_clean[len("tools/"):]
+        raw_slug = (tool_slug or "").strip().strip("/").lower()
+        if raw_slug.startswith("tools/"):
+            raw_slug = raw_slug[len("tools/"):]
+
+        bp_vert = str(blueprint_state.get("vertical") or "") if isinstance(blueprint_state, dict) else ""
+        vert_raw = (vertical or bp_vert or "").strip()
+        has_gh_explicit_vert = (
+            prop_clean == "gainhelm"
+            and bool(vert_raw)
+            and vert_raw.lower() not in ("general", "informational_governance")
+        )
+        slug_clean = raw_slug if has_gh_explicit_vert else (raw_slug or "general")
 
         if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
             raise ValueError(
@@ -3889,10 +3953,16 @@ class PartnerTrackingEngine:
             if prop_clean == "prexvo"
             else ("soc-2-audit-cost-calculator" if prop_clean == "gainhelm" else "section-1031-calculator")
         )
+        eval_slug = (
+            slug_clean
+            if (has_gh_explicit_vert or slug_clean not in {"general", "index", "about", "privacy"})
+            else default_eval_slug
+        )
         eval_info = evaluate_lead_quote_threshold(
             property_id=prop_clean,
-            tool_slug=slug_clean if slug_clean not in {"general", "index", "about", "privacy"} else default_eval_slug,
+            tool_slug=eval_slug,
             calculated_amount=raw_calc_amt,
+            vertical=vert_raw,
         )
         eff_vertical = eval_info["vertical"]
         eff_partner_key = eval_info["primary_partner_key"] or (
@@ -3900,19 +3970,26 @@ class PartnerTrackingEngine:
         )
         amount_val = max(0.0, float(raw_calc_amt or 0.0))
         now_iso = datetime.now(timezone.utc).isoformat()
+        hash_slug = f"{slug_clean}:{eff_vertical}" if has_gh_explicit_vert else slug_clean
         digest = hashlib.sha256(
-            f"playbook:{prop_clean}:{slug_clean}:{email_clean}:{int(round(amount_val))}".encode("utf-8")
+            f"playbook:{prop_clean}:{hash_slug}:{email_clean}:{int(round(amount_val))}".encode("utf-8")
         ).hexdigest()[:12]
         lead_id = f"lead_{prop_clean}_{digest}"
 
         monetization_offer = resolve_lead_monetization_offer(
             property_id=prop_clean,
             tool_slug=slug_clean,
-            vertical=eff_vertical,
+            vertical=_resolve_gainhelm_offer_vertical_arg(
+                prop_clean,
+                slug_clean,
+                has_gh_explicit_vert,
+                eff_vertical,
+            ),
             lead_id=lead_id,
         )
+        vert_q = f"&vertical={eff_vertical}" if prop_clean == "gainhelm" and eff_vertical else ""
         redirect_url = (
-            f"/r/{eff_partner_key}?source={slug_clean}&slot=playbook_subscription&lead_id={lead_id}"
+            f"/r/{eff_partner_key}?source={slug_clean}&slot=playbook_subscription&lead_id={lead_id}{vert_q}"
         )
 
         record: Dict[str, Any] = {
@@ -3922,6 +3999,7 @@ class PartnerTrackingEngine:
             "lifecycle_stage": "playbook_subscribed",
             "tool_slug": slug_clean,
             "vertical": eff_vertical,
+            "has_explicit_vertical": has_gh_explicit_vert if prop_clean == "gainhelm" else bool(vertical),
             "email": email_clean,
             "calculated_amount": amount_val,
             "capital_band": eval_info["capital_band"],
@@ -3929,6 +4007,7 @@ class PartnerTrackingEngine:
             "partner_key": eff_partner_key,
             "partner_rep_desk": eval_info["partner_rep_desk"],
             "redirect_url": redirect_url,
+            "live_destination_url": eval_info.get("live_destination_url", ""),
             "monetization_strategy": "playbook_to_toolkit_checkout",
             "offer_sku": monetization_offer["offer_sku"],
             "offer_title": monetization_offer["offer_title"],
@@ -5608,6 +5687,201 @@ class PartnerTrackingEngine:
         return report
 
 
+def _apply_gainhelm_quick_worksheet_override(
+    slug_clean: str,
+    vert_clean: str,
+    default_quick_slug: str,
+    statutory_authority: str,
+    deliverables: List[str],
+) -> Tuple[str, str, List[str]]:
+    """Applies framework-isolated GainHelm copy to the $19 instant worksheet when slug or vertical identifies a framework."""
+    from pseofactory.affiliates import get_gainhelm_framework_profile
+
+    has_specific_slug = bool(
+        slug_clean
+        and slug_clean not in ("index", "general", "home", "homepage")
+    )
+    fw_prof = get_gainhelm_framework_profile(
+        slug=slug_clean if has_specific_slug else "",
+        vertical=vert_clean,
+    )
+    has_framework_context = has_specific_slug or (
+        bool(vert_clean)
+        and (
+            fw_prof["framework_key"] != "soc2"
+            or vert_clean in ("soc2", "soc2_grc_automation")
+        )
+    )
+    if not has_framework_context:
+        return default_quick_slug, statutory_authority, deliverables
+    out_slug = str(fw_prof["default_sku_slug"])
+    out_auth = str(fw_prof["statutory_authority"])
+    out_deliv = deliverables
+    if fw_prof["framework_key"] != "soc2":
+        out_deliv = [
+            "Personalized Compliance Readiness & Scoping Worksheet (Print-Ready HTML/PDF)",
+            "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
+            f"{fw_prof['regulator_name']} Evidence & Checklist Summary (HTML/PDF)",
+            "Machine-Readable Security Governance Scenario Pack (JSON)",
+        ]
+    return out_slug, out_auth, out_deliv
+
+
+def _resolve_gainhelm_offer_fields(
+    slug_clean: str,
+    vert_clean: str,
+    sku_clean: str,
+) -> Tuple[str, float, int, str, str, List[str], str]:
+    """Resolves GainHelm framework-isolated checkout SKU metadata from slug, vertical, and optional explicit SKU override."""
+    from pseofactory.affiliates import get_gainhelm_framework_profile
+
+    has_specific_slug = bool(
+        slug_clean
+        and slug_clean not in ("index", "general", "home", "homepage")
+    )
+    fw_prof = get_gainhelm_framework_profile(
+        slug=slug_clean if has_specific_slug else "",
+        vertical=vert_clean,
+    )
+    fw_key = fw_prof["framework_key"]
+    has_framework_context = has_specific_slug or (
+        bool(vert_clean)
+        and (fw_key != "soc2" or vert_clean in ("soc2", "soc2_grc_automation"))
+    )
+    if sku_clean == "gh_soc2_cmmc_audit_workpapers":
+        target_prof = (
+            fw_prof
+            if has_framework_context and fw_key in ("soc2", "cmmc", "fedramp", "pentest")
+            else get_gainhelm_framework_profile("soc-2-audit-cost-calculator")
+        )
+        return (
+            "gh_soc2_cmmc_audit_workpapers",
+            79.0,
+            7900,
+            str(target_prof["offer_title"]),
+            str(target_prof["statutory_authority"]),
+            list(target_prof["deliverables"]),
+            str(target_prof["default_sku_slug"]),
+        )
+    if sku_clean == "gh_hipaa_iso27001_governance_kit" or (
+        not sku_clean and fw_prof["offer_sku"] == "gh_hipaa_iso27001_governance_kit"
+    ):
+        if has_framework_context and fw_prof["offer_sku"] == "gh_hipaa_iso27001_governance_kit":
+            return (
+                "gh_hipaa_iso27001_governance_kit",
+                49.0,
+                4900,
+                str(fw_prof["offer_title"]),
+                str(fw_prof["statutory_authority"]),
+                list(fw_prof["deliverables"]),
+                str(fw_prof["default_sku_slug"]),
+            )
+        return (
+            "gh_hipaa_iso27001_governance_kit",
+            49.0,
+            4900,
+            "GainHelm HIPAA Penalty, ISO 27001 & Cyber Breach Audit Workpaper Kit",
+            "45 CFR 160.404, ISO/IEC 27006-1:2024 & SEC Item 1.05 Form 8-K",
+            [
+                "ISO/IEC 27006-1 Stage 1 & Stage 2 Auditor-Day Calculation & Annex A Control Matrix",
+                "45 CFR 160.404 Tier 1-4 Civil Monetary Penalty Cap & Breach Notification Schedule",
+                "SEC Item 1.05 Materiality & Cyber Liability Retention Stress-Test Workpaper",
+                "Accredited Certification Body & QSA Scoping Checklist (CSV & Print-Ready Audit HTML)",
+            ],
+            "iso-27001-certification-cost-calculator",
+        )
+    return (
+        str(fw_prof["offer_sku"]),
+        float(fw_prof["offer_price_usd"]),
+        int(fw_prof["offer_price_cents"]),
+        str(fw_prof["offer_title"]),
+        str(fw_prof["statutory_authority"]),
+        list(fw_prof["deliverables"]),
+        str(fw_prof["default_sku_slug"]),
+    )
+
+
+def _normalize_offer_tool_slug(raw_slug: Any, default: str = "general") -> str:
+    """Normalizes a calculator slug or /tools/<slug>/ path into a bare lowercase slug."""
+    slug_clean = str(raw_slug or "").strip().strip("/").lower()
+    if slug_clean.startswith("tools/"):
+        slug_clean = slug_clean[len("tools/") :].strip("/")
+    elif slug_clean == "tools":
+        slug_clean = ""
+    return slug_clean or default
+
+
+def _resolve_gainhelm_offer_vertical_arg(
+    prop_clean: str,
+    slug_clean: str,
+    has_explicit_vertical: bool,
+    fallback_vertical: str,
+) -> str:
+    """Omits synthetic default vertical for bare GainHelm generic or hub leads without explicit vertical."""
+    if prop_clean != "gainhelm":
+        return fallback_vertical
+    is_generic_or_hub = (
+        slug_clean in ("", "index", "general", "home", "homepage")
+        or slug_clean.endswith("-hub")
+    )
+    if is_generic_or_hub and not has_explicit_vertical:
+        return ""
+    return fallback_vertical
+
+
+def _resolve_record_offer_args(
+    prop_id: str,
+    tool_slug: str,
+    record: Optional[Dict[str, Any]],
+    explicit_vertical: str = "",
+    explicit_sku: str = "",
+) -> Tuple[str, str]:
+    """Resolves (vertical, sku) offer args for a lead record while preserving bare GainHelm root leads."""
+    prop_clean = (prop_id or "profithelm").strip().lower()
+    slug_clean = _normalize_offer_tool_slug(tool_slug, default="")
+    rec = record if isinstance(record, dict) else {}
+
+    exp_vert = str(explicit_vertical or "").strip()
+    rec_vert = str(rec.get("vertical") or "").strip()
+    raw_vert = exp_vert or rec_vert
+    if exp_vert and (
+        prop_clean != "gainhelm"
+        or exp_vert.lower() not in ("general", "informational_governance")
+    ):
+        has_exp_vert = True
+    else:
+        rec_has_exp_vert = rec.get("has_explicit_vertical")
+        has_exp_vert = (
+            bool(rec_has_exp_vert)
+            if rec_has_exp_vert is not None
+            else bool(rec_vert and rec_vert.lower() not in ("general", "informational_governance"))
+        )
+    offer_vert = _resolve_gainhelm_offer_vertical_arg(
+        prop_clean,
+        slug_clean,
+        has_exp_vert,
+        raw_vert,
+    )
+
+    exp_sku = str(explicit_sku or "").strip().lower()
+    rec_sku = str(rec.get("offer_sku") or rec.get("sku") or "").strip().lower()
+    cand_sku = exp_sku or rec_sku
+    is_generic_or_hub = (
+        slug_clean in ("", "index", "general", "home", "homepage")
+        or slug_clean.endswith("-hub")
+    )
+    if (
+        prop_clean == "gainhelm"
+        and not exp_sku
+        and not rec.get("has_explicit_sku")
+        and is_generic_or_hub
+        and not has_exp_vert
+        and cand_sku == "gh_soc2_cmmc_audit_workpapers"
+    ):
+        cand_sku = ""
+    return offer_vert, cand_sku
+
+
 def resolve_lead_monetization_offer(
     property_id: str,
     tool_slug: str,
@@ -5626,7 +5900,7 @@ def resolve_lead_monetization_offer(
     from pseofactory.affiliates import is_restricted_public_service_slug
 
     prop_clean = (property_id or "profithelm").strip().lower()
-    slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
+    slug_clean = _normalize_offer_tool_slug(tool_slug)
     vert_clean = (vertical or "").strip().lower()
     sku_clean = (sku or offer_sku or "").strip().lower()
     eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
@@ -5699,6 +5973,16 @@ def resolve_lead_monetization_offer(
             statutory_authority,
             deliverables,
         ) = quick_prefix_map[sku_clean]
+        if sku_clean == "gh_instant_compliance_worksheet_19":
+            default_quick_slug, statutory_authority, deliverables = (
+                _apply_gainhelm_quick_worksheet_override(
+                    slug_clean,
+                    vert_clean,
+                    default_quick_slug,
+                    statutory_authority,
+                    deliverables,
+                )
+            )
         if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
             raise ValueError(
                 f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
@@ -5706,7 +5990,12 @@ def resolve_lead_monetization_offer(
         offer_sku = sku_clean
         offer_price_usd = 19.0
         offer_price_cents = 1900
-        eff_slug_for_path = slug_clean if slug_clean not in ("index", "general") else default_quick_slug
+        if slug_clean.endswith("-hub"):
+            eff_slug_for_path = ""
+        elif slug_clean in ("index", "general", "home", "homepage"):
+            eff_slug_for_path = default_quick_slug
+        else:
+            eff_slug_for_path = slug_clean
         tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
     elif sku_clean in (
         "ph_verified_partner_slot",
@@ -5826,44 +6115,41 @@ def resolve_lead_monetization_offer(
         "gh_hipaa_iso27001_governance_kit",
     ):
         prop_clean = "gainhelm"
-        if sku_clean == "gh_hipaa_iso27001_governance_kit" or (
-            not sku_clean
-            and any(
-                t in slug_clean or t in vert_clean
-                for t in ("hipaa", "iso-27001", "hitrust", "pci-dss", "cyber-liability", "insurance", "breach")
-            )
-        ):
-            offer_sku = "gh_hipaa_iso27001_governance_kit"
-            offer_title = "GainHelm HIPAA Penalty, ISO 27001 & Cyber Breach Audit Workpaper Kit"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "45 CFR 160.404, ISO/IEC 27006-1:2024 & SEC Item 1.05 Form 8-K"
-            deliverables = [
-                "ISO/IEC 27006-1 Stage 1 & Stage 2 Auditor-Day Calculation & Annex A Control Matrix",
-                "45 CFR 160.404 Tier 1-4 Civil Monetary Penalty Cap & Breach Notification Schedule",
-                "SEC Item 1.05 Materiality & Cyber Liability Retention Stress-Test Workpaper",
-                "Accredited Certification Body & QSA Scoping Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "iso-27001-certification-cost-calculator"
-        else:
-            offer_sku = "gh_soc2_cmmc_audit_workpapers"
-            offer_title = "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite"
-            offer_price_usd = 79.0
-            offer_price_cents = 7900
-            statutory_authority = "AICPA SSAE 18 AT-C 205, 32 CFR Part 170 & DFARS 252.204-7012 / 7019"
-            deliverables = [
-                "AICPA Trust Services Criteria (CC1-CC9) CPA Auditor Fee & Readiness Workpaper",
-                "NIST SP 800-171 Rev 2 110-Control Weighted SPRS Deduction & POA&M Remediation Ledger",
-                "CMMC 2.0 Level 2 C3PAO Assessment Cost & Enclave Boundary Scoping Matrix",
-                "Enterprise GRC Automation vs Manual Evidence Labor ROI Schedule (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "soc-2-audit-cost-calculator"
+        (
+            offer_sku,
+            offer_price_usd,
+            offer_price_cents,
+            offer_title,
+            statutory_authority,
+            deliverables,
+            default_sku_slug,
+        ) = _resolve_gainhelm_offer_fields(slug_clean, vert_clean, sku_clean)
         canonical_domain = "https://gainhelm.com"
-        eff_slug_for_path = (
-            slug_clean
-            if slug_clean not in ("index", "general")
-            else (default_sku_slug if sku_clean else "")
+        from pseofactory.affiliates import (
+            GAINHELM_FRAMEWORK_PROFILES,
+            classify_gainhelm_framework,
         )
+
+        valid_gh_verts = {
+            str(p.get("vertical") or "").strip().lower()
+            for p in GAINHELM_FRAMEWORK_PROFILES.values()
+        }
+        has_explicit_gh_vert = bool(vert_clean) and (
+            vert_clean in valid_gh_verts
+            or vert_clean in GAINHELM_FRAMEWORK_PROFILES
+            or (
+                vert_clean not in ("general", "informational_governance")
+                and classify_gainhelm_framework("", vert_clean) != "soc2"
+            )
+        )
+        if slug_clean.endswith("-hub"):
+            eff_slug_for_path = ""
+        elif slug_clean in ("index", "general", "home", "homepage"):
+            eff_slug_for_path = (
+                default_sku_slug if (sku_clean or has_explicit_gh_vert) else ""
+            )
+        else:
+            eff_slug_for_path = slug_clean
         tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
     elif prop_clean == "lienbond" or sku_clean in (
         "lb_surety_bond_underwriting_kit",
@@ -6026,29 +6312,30 @@ def resolve_lead_monetization_offer(
     for item in deliverables:
         assert_no_forbidden_dashes(item, context="offer_deliverable")
 
-    checkout_query = urlencode(
-        {
-            "checkout": "1",
-            "lead_id": eff_lead_id,
-            "sku": offer_sku,
-            "tool_slug": slug_clean,
-        }
+    vert_qs: Dict[str, str] = (
+        {"vertical": vert_clean}
+        if prop_clean == "gainhelm" and vert_clean and vert_clean != "informational_governance"
+        else {}
     )
-    playbook_query = urlencode(
-        {
-            "playbook": "1",
-            "lead_id": eff_lead_id,
-            "tool_slug": slug_clean,
-        }
+    include_sku_param = not (
+        prop_clean == "gainhelm"
+        and tool_path == "/"
+        and not sku_clean
+        and offer_sku == "gh_soc2_cmmc_audit_workpapers"
     )
-    fulfill_query = urlencode(
-        {
-            "fulfill": "1",
-            "lead_id": eff_lead_id,
-            "sku": offer_sku,
-            "tool_slug": slug_clean,
-        }
-    )
+    sku_qs: Dict[str, str] = {"sku": offer_sku} if include_sku_param else {}
+    checkout_query, playbook_query, fulfill_query = [
+        urlencode(
+            {
+                action_flag: "1",
+                "lead_id": eff_lead_id,
+                **sku_qs,
+                "tool_slug": slug_clean,
+                **vert_qs,
+            }
+        )
+        for action_flag in ("checkout", "playbook", "fulfill")
+    ]
     checkout_url = f"/api/lead-capture?{checkout_query}"
     playbook_url = f"/api/lead-capture?{playbook_query}"
     playbook_csv_url = f"{playbook_url}&format=csv"
@@ -6057,10 +6344,20 @@ def resolve_lead_monetization_offer(
     csv_fulfillment_url = f"{fulfillment_url}&format=csv"
     datapack_url = f"{fulfillment_url}&format=datapack"
     price_id_env = os.environ.get(f"STRIPE_PRICE_ID_{offer_sku.upper()}", "").strip()
+    resolved_vertical = vert_clean
+    if prop_clean == "gainhelm":
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        gh_slug_arg = "" if slug_clean in ("index", "general", "home", "homepage") else slug_clean
+        resolved_vertical = str(
+            get_gainhelm_framework_profile(slug=gh_slug_arg, vertical=vert_clean).get("vertical")
+            or "soc2_grc_automation"
+        )
 
     return {
         "property_id": prop_clean,
         "tool_slug": slug_clean,
+        "vertical": resolved_vertical,
         "offer_sku": offer_sku,
         "offer_title": offer_title,
         "offer_price_usd": offer_price_usd,
@@ -6140,8 +6437,11 @@ def resolve_post_calculation_upgrade_spec(
             regulator_name = "U.S. Department of Education (Federal Student Aid)"
             default_econ_ds = "Federal Reserve G.19 Consumer Credit and Title IV Rate Series"
         elif prop_clean == "gainhelm":
-            regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
-            default_econ_ds = "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Benchmarks"
+            from pseofactory.affiliates import get_gainhelm_framework_profile
+
+            fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
+            regulator_name = fw_prof["regulator_name"]
+            default_econ_ds = fw_prof["economic_dataset"]
         elif prop_clean == "lienbond":
             regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
             default_econ_ds = "SFAA Surety Loss Ratios, NCCI Class Rate Filings, and BLS Construction Wage Series"
@@ -6384,6 +6684,96 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
         "points": {"2024": 11.0, "2025": 11.0, "2026": 11.5, "2027": 11.5, "2028": 12.0, "2029": 12.0, "2030": 12.0},
     },
     {
+        "series_id": "bls_soc_15_1212_infosec_wage",
+        "property_id": "gainhelm",
+        "statutory_citation": "BLS OEWS SOC 15-1212",
+        "metric_key": "infosec_analyst_loaded_hourly_rate_usd",
+        "metric_label": "BLS SOC 15-1212 Information Security Analyst Loaded Hourly Engineering Rate",
+        "unit": "USD",
+        "source_agency": "BLS-OEWS",
+        "points": {"2024": 112.40, "2025": 117.10, "2026": 121.67, "2027": 126.30, "2028": 131.10, "2029": 136.20, "2030": 141.50},
+    },
+    {
+        "series_id": "eu_dora_tlpt_redteam_benchmark",
+        "property_id": "gainhelm",
+        "statutory_citation": "Regulation (EU) 2022/2554 Art. 26",
+        "metric_key": "dora_tlpt_accredited_redteam_usd",
+        "metric_label": "EU DORA Article 26 Threat-Led Penetration Testing (TLPT) Engagement Benchmark",
+        "unit": "USD",
+        "source_agency": "ESA-ENISA",
+        "points": {"2024": 68000.0, "2025": 74500.0, "2026": 82000.0, "2027": 86500.0, "2028": 91000.0, "2029": 95500.0, "2030": 99800.0},
+    },
+    {
+        "series_id": "eu_dora_ict_vendor_audit_unit_cost",
+        "property_id": "gainhelm",
+        "statutory_citation": "Regulation (EU) 2022/2554 Art. 28",
+        "metric_key": "dora_critical_ict_vendor_oversight_usd",
+        "metric_label": "EU DORA Article 28 Critical ICT Third-Party Oversight Cost per Vendor",
+        "unit": "USD",
+        "source_agency": "ESA-DORA",
+        "points": {"2024": 3400.0, "2025": 3850.0, "2026": 4200.0, "2027": 4450.0, "2028": 4700.0, "2029": 4950.0, "2030": 5200.0},
+    },
+    {
+        "series_id": "eu_ai_act_art43_notified_body_fee",
+        "property_id": "gainhelm",
+        "statutory_citation": "Regulation (EU) 2024/1689 Art. 43",
+        "metric_key": "eu_ai_act_notified_body_conformity_usd",
+        "metric_label": "EU AI Act Article 43 Notified Body Conformity & Annex IV Dossier Benchmark",
+        "unit": "USD",
+        "source_agency": "EU-AI-OFFICE",
+        "points": {"2024": 62000.0, "2025": 71000.0, "2026": 79000.0, "2027": 84500.0, "2028": 89000.0, "2029": 93500.0, "2030": 98000.0},
+    },
+    {
+        "series_id": "eu_ai_act_art99_high_risk_cap",
+        "property_id": "gainhelm",
+        "statutory_citation": "Regulation (EU) 2024/1689 Art. 99",
+        "metric_key": "eu_ai_act_high_risk_penalty_ceiling_eur",
+        "metric_label": "EU AI Act Article 99(4) High-Risk Non-Compliance Administrative Fine Ceiling (EUR)",
+        "unit": "EUR",
+        "source_agency": "EU-AI-OFFICE",
+        "points": {"2024": 15000000.0, "2025": 15000000.0, "2026": 15000000.0, "2027": 15000000.0, "2028": 15000000.0, "2029": 15000000.0, "2030": 15000000.0},
+    },
+    {
+        "series_id": "sec_8k_item105_counsel_dfir_retainer",
+        "property_id": "gainhelm",
+        "statutory_citation": "17 CFR 249.308 Form 8-K Item 1.05",
+        "metric_key": "sec_item105_dfir_counsel_readiness_usd",
+        "metric_label": "SEC Form 8-K Item 1.05 External Securities Counsel & 4-Day DFIR Retainer Benchmark",
+        "unit": "USD",
+        "source_agency": "SEC-EDGAR",
+        "points": {"2024": 118000.0, "2025": 127500.0, "2026": 135000.0, "2027": 141000.0, "2028": 147500.0, "2029": 154000.0, "2030": 161000.0},
+    },
+    {
+        "series_id": "sec_reg_sk_106_governance_cost",
+        "property_id": "gainhelm",
+        "statutory_citation": "17 CFR 229.106 Reg S-K Item 106",
+        "metric_key": "sec_reg_sk_106_annual_disclosure_usd",
+        "metric_label": "SEC Reg S-K Item 106 Annual Form 10-K Cyber Governance Readiness Benchmark",
+        "unit": "USD",
+        "source_agency": "SEC-EDGAR",
+        "points": {"2024": 38500.0, "2025": 42000.0, "2026": 45000.0, "2027": 47500.0, "2028": 50000.0, "2029": 52500.0, "2030": 55000.0},
+    },
+    {
+        "series_id": "pci_dss_qsa_roc_benchmark",
+        "property_id": "gainhelm",
+        "statutory_citation": "PCI DSS v4.0.1 ROC",
+        "metric_key": "pci_dss_level1_qsa_roc_usd",
+        "metric_label": "PCI DSS v4.0.1 Level 1 QSA Report on Compliance Assessment Benchmark",
+        "unit": "USD",
+        "source_agency": "PCI-SSC",
+        "points": {"2024": 46000.0, "2025": 51000.0, "2026": 54500.0, "2027": 57500.0, "2028": 60500.0, "2029": 63500.0, "2030": 66500.0},
+    },
+    {
+        "series_id": "fedramp_3pao_sar_benchmark",
+        "property_id": "gainhelm",
+        "statutory_citation": "NIST SP 800-53 / FedRAMP Rev 5",
+        "metric_key": "fedramp_moderate_3pao_sar_usd",
+        "metric_label": "FedRAMP Moderate Accredited 3PAO Security Assessment Report Benchmark",
+        "unit": "USD",
+        "source_agency": "FEDRAMP-PMO",
+        "points": {"2024": 155000.0, "2025": 168000.0, "2026": 180000.0, "2027": 189000.0, "2028": 198000.0, "2029": 207000.0, "2030": 216000.0},
+    },
+    {
         "series_id": "sfaa_contract_surety_loss_ratio",
         "property_id": "lienbond",
         "statutory_citation": "40 U.S.C. 3131 / 31 CFR Part 223 Circular 570",
@@ -6419,10 +6809,47 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
 _WORKPAPER_TREND_SERIES_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 
 
+_GAINHELM_WORKPAPER_SERIES_ALIAS: Dict[str, str] = {
+    "bls_soc_15_1212_infosec_hourly_wage_usd": "bls_soc_15_1212_infosec_wage",
+    "aicpa_soc2_type2_median_cpa_fee_usd": "aicpa_soc2_cpa_day_rate",
+    "dod_cmmc_l2_c3pao_mandatory_pct": "dod_cmmc_c3pao_assessment_base",
+    "hhs_ocr_hipaa_tier4_annual_cap_usd": "hhs_hipaa_tier4_annual_cap",
+}
+
+_GAINHELM_SERIES_FRAMEWORK_OWNERS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("aicpa_soc2", ("soc2",)),
+    ("dod_cmmc", ("cmmc", "soc2")),
+    ("hhs_hipaa", ("hipaa", "soc2")),
+    ("hhs_ocr_hipaa", ("hipaa", "soc2")),
+    ("eu_dora", ("dora",)),
+    ("eu_ai_act", ("eu_ai_act",)),
+    ("sec_8k", ("sec_8k",)),
+    ("sec_reg", ("sec_8k",)),
+    ("pci_dss", ("pci_dss",)),
+    ("fedramp", ("fedramp",)),
+)
+
+
+def _series_canonical_family(series_id: str) -> str:
+    sid = str(series_id or "").strip().lower()
+    return _GAINHELM_WORKPAPER_SERIES_ALIAS.get(sid, sid)
+
+
+def _is_gainhelm_series_allowed_for_framework(series: Dict[str, Any], fw_key: str) -> bool:
+    sid = str(series.get("series_id") or "").strip().lower()
+    if fw_key == "cmmc" and "iso_27006" in sid:
+        return False
+    for prefix, owners in _GAINHELM_SERIES_FRAMEWORK_OWNERS:
+        if sid.startswith(prefix):
+            return fw_key in owners
+    return True
+
+
 def _resolve_trend_statutory_timeseries_for_workpaper(
     property_id: str,
     tool_slug: str,
     offer_sku: str,
+    vertical: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Retrieves the longitudinal 2024-2030 statutory and macroeconomic trend time-series
@@ -6432,19 +6859,20 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
     prop_clean = (property_id or "profithelm").strip().lower()
     slug_clean = (tool_slug or "general").strip().lower()
     sku_clean = (offer_sku or "").strip().lower()
+    vert_clean = (vertical or "").strip()
 
     cached_base = _WORKPAPER_TREND_SERIES_CACHE.get(prop_clean)
     if cached_base is not None:
-        series_list = [dict(x, points=dict(x["points"])) for x in cached_base]
+        raw_series = [dict(x, points=dict(x["points"])) for x in cached_base]
     else:
-        series_list = []
+        raw_series = []
         try:
             from pseofactory.trends.db import TrendHistoryDB
             with TrendHistoryDB() as db:
                 mat = db.compile_statutory_economic_matrix(prop_clean, slug_clean.replace("-", " "))
             for s in mat.get("series") or []:
                 if isinstance(s, dict) and s.get("series_id") and isinstance(s.get("points"), dict):
-                    series_list.append({
+                    raw_series.append({
                         "series_id": str(s["series_id"]),
                         "property_id": str(s.get("property_id") or prop_clean),
                         "statutory_citation": str(s.get("statutory_citation") or ""),
@@ -6454,16 +6882,24 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
                         "source_agency": str(s.get("source_agency") or "FEDERAL"),
                         "points": {str(k): float(v) for k, v in s["points"].items()},
                     })
-            if series_list:
-                _WORKPAPER_TREND_SERIES_CACHE[prop_clean] = [dict(x, points=dict(x["points"])) for x in series_list]
+            if raw_series:
+                _WORKPAPER_TREND_SERIES_CACHE[prop_clean] = [dict(x, points=dict(x["points"])) for x in raw_series]
         except Exception:
-            series_list = []
+            raw_series = []
 
-    existing_sids = {s["series_id"] for s in series_list}
+    series_list: List[Dict[str, Any]] = []
+    seen_families: set = set()
+    for s in raw_series:
+        fam_id = _series_canonical_family(s["series_id"])
+        if fam_id not in seen_families:
+            series_list.append(s)
+            seen_families.add(fam_id)
+
     for s in _CANONICAL_STATUTORY_TIMESERIES_FALLBACK:
-        if s["property_id"] in (prop_clean, "shared") and s["series_id"] not in existing_sids:
+        fam_id = _series_canonical_family(s["series_id"])
+        if s["property_id"] in (prop_clean, "shared") and fam_id not in seen_families:
             series_list.append(dict(s))
-            existing_sids.add(s["series_id"])
+            seen_families.add(fam_id)
 
     preferred_ids: List[str] = []
     if prop_clean == "prexvo" or sku_clean == "px_refi_amortization_decision_audit":
@@ -6480,13 +6916,26 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
         "gh_soc2_cmmc_audit_workpapers",
         "gh_hipaa_iso27001_governance_kit",
     ):
-        preferred_ids = [
-            "aicpa_soc2_cpa_day_rate",
-            "dod_cmmc_c3pao_assessment_base",
-            "hhs_hipaa_tier4_annual_cap",
-            "iso_27006_stage2_auditor_days",
-            "fred_cpilfesl_inflation",
-            "fred_dgs10_yield",
+        from pseofactory.affiliates import get_gainhelm_framework_profile, has_gainhelm_cross_framework_leak
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)
+        fw_key = str(fw_prof.get("framework_key") or "soc2")
+        preferred_tail = ["bls_soc_15_1212_infosec_wage"]
+        if fw_key != "cmmc":
+            preferred_tail.append("iso_27006_stage2_auditor_days")
+        preferred_tail.extend(["fred_cpilfesl_inflation", "fred_dgs10_yield"])
+        preferred_ids = list(
+            dict.fromkeys(list(fw_prof.get("preferred_trend_ids") or ()) + preferred_tail)
+        )
+        series_list = [
+            s
+            for s in series_list
+            if _is_gainhelm_series_allowed_for_framework(s, fw_key)
+            and not has_gainhelm_cross_framework_leak(
+                f"{s.get('series_id', '')} {s.get('metric_label', '')} {s.get('statutory_citation', '')} {s.get('source_agency', '')}",
+                slug=slug_clean,
+                vertical=vert_clean,
+            )
         ]
     elif prop_clean == "lienbond" or sku_clean in (
         "lb_instant_lien_bond_worksheet_19",
@@ -6531,14 +6980,33 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
             "fred_dgs10_yield",
         ]
 
-    by_id = {s["series_id"]: s for s in series_list}
-    ordered: List[Dict[str, Any]] = []
-    for pid in preferred_ids:
-        if pid in by_id:
-            ordered.append(by_id[pid])
+    by_id: Dict[str, Dict[str, Any]] = {}
     for s in series_list:
-        if s["series_id"] not in {x["series_id"] for x in ordered}:
+        sid = s["series_id"]
+        by_id[sid] = s
+        fam = _series_canonical_family(sid)
+        if fam not in by_id:
+            by_id[fam] = s
+    ordered: List[Dict[str, Any]] = []
+    seen_ids: set = set()
+    seen_out_fams: set = set()
+    for pid in preferred_ids:
+        cand = by_id.get(pid) or by_id.get(_series_canonical_family(pid))
+        if cand is None:
+            continue
+        cid = cand["series_id"]
+        cfam = _series_canonical_family(cid)
+        if cid not in seen_ids and cfam not in seen_out_fams:
+            ordered.append(cand)
+            seen_ids.add(cid)
+            seen_out_fams.add(cfam)
+    for s in series_list:
+        cid = s["series_id"]
+        cfam = _series_canonical_family(cid)
+        if cid not in seen_ids and cfam not in seen_out_fams:
             ordered.append(s)
+            seen_ids.add(cid)
+            seen_out_fams.add(cfam)
     return ordered[:5]
 
 
@@ -6603,7 +7071,7 @@ def synthesize_personalized_audit_workpaper(
     """
     rec = dict(lead_record or {})
     prop_clean = str(rec.get("property_id") or property_id or "profithelm").strip().lower()
-    slug_clean = str(rec.get("tool_slug") or tool_slug or "general").strip().strip("/").lower() or "general"
+    slug_clean = _normalize_offer_tool_slug(rec.get("tool_slug") or tool_slug)
     lead_id = str(rec.get("lead_id") or f"lead_{prop_clean}_preview").strip()
     vert_clean = str(rec.get("vertical") or "").strip().lower()
     state_code = str(rec.get("state") or "US").strip().upper() or "US"
@@ -6636,13 +7104,15 @@ def synthesize_personalized_audit_workpaper(
         else:
             base_amount = 250000.0
 
-    eval_meta = evaluate_lead_quote_threshold(prop_clean, slug_clean, base_amount)
+    eval_meta = evaluate_lead_quote_threshold(prop_clean, slug_clean, base_amount, vertical=vert_clean)
     capital_band = str(rec.get("capital_band") or eval_meta["capital_band"])
-    req_sku = str(rec.get("offer_sku") or rec.get("sku") or "").strip().lower()
+    offer_vert, req_sku = _resolve_record_offer_args(prop_clean, slug_clean, rec)
+    if prop_clean != "gainhelm" and not offer_vert:
+        offer_vert = eval_meta["vertical"]
     offer = resolve_lead_monetization_offer(
         property_id=prop_clean,
         tool_slug=slug_clean,
-        vertical=vert_clean or eval_meta["vertical"],
+        vertical=offer_vert,
         lead_id=lead_id,
         sku=req_sku,
     )
@@ -6652,6 +7122,10 @@ def synthesize_personalized_audit_workpaper(
         "gh_soc2_cmmc_audit_workpapers",
         "gh_hipaa_iso27001_governance_kit",
     ):
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)
+        fw_key = fw_prof["framework_key"]
         auditor_fee = round(base_amount * 0.44, 2)
         manual_prep_cost = round(base_amount * 0.38, 2)
         grc_automation_fee = round(base_amount * 0.18, 2)
@@ -6660,35 +7134,101 @@ def synthesize_personalized_audit_workpaper(
         optimized_total = round(auditor_fee * 0.88 + grc_automation_fee + optimized_prep_cost + pentest_remediation * 0.85, 2)
         net_audit_savings = max(0.0, round(base_amount - optimized_total, 2))
 
+        gh_line_specs = {
+            "dora": (
+                "Accredited TLPT Red-Team & Competent Authority Readiness Fee",
+                "Regulation (EU) 2022/2554 Articles 25-27",
+                "Internal ICT Risk Register, Register of Information & Article 28 Vendor Mapping",
+                "Regulation (EU) 2022/2554 Articles 5-16 & Article 28",
+                "Automated DORA ICT Resilience & Third-Party Monitoring Platform",
+                "ESA / ENISA ICT Operational Resilience Controls",
+                "Threat-Led Penetration Testing, Incident Triage & Total DORA Budget",
+                "DORA Article 17-23 Incident & Article 25 Digital Resilience Testing",
+                "Multi-Entity Cross-Walk (EU DORA + ISO/IEC 27001 + NIS2)",
+            ),
+            "eu_ai_act": (
+                "EU Notified Body Article 43 Conformity & Annex VII Review Fee",
+                "Regulation (EU) 2024/1689 Article 43 & Annex VII",
+                "Internal QMS Engineering, Annex IV Dossier & FRIA Evidence Labor",
+                "Regulation (EU) 2024/1689 Articles 9-17 & Article 27",
+                "Continuous AI Governance & ISO/IEC 42001 Compliance Platform",
+                "ISO/IEC 42001:2023 & EU AI Act Quality Management System",
+                "Article 15 Cybersecurity Robustness Testing & Total Conformity Budget",
+                "EU AI Act Article 15 Accuracy, Robustness & Post-Market Monitoring",
+                "Multi-Regulation Cross-Walk (EU AI Act + ISO/IEC 42001 + ISO 27001)",
+            ),
+            "sec_8k": (
+                "External Securities Counsel & 4-Day DFIR Retainer Benchmark Fee",
+                "17 CFR 249.308 Form 8-K Item 1.05 & SEC Release 33-11216",
+                "Disclosure Committee, Materiality Rubric & Item 106 Evidence Labor",
+                "17 CFR 229.106 (Reg S-K Item 106(b)-(c))",
+                "Continuous Security Telemetry & Board Oversight GRC Platform",
+                "Reg S-K Item 106(c) Board & Management Risk Governance",
+                "Incident Forensics, Attorney General Delay Readiness & Total Program Budget",
+                "SEC Release 33-11216 Materiality & Breach Triage Controls",
+                "Dual SEC Cyber Governance Cross-Walk (Form 8-K Item 1.05 + Reg S-K Item 106)",
+            ),
+        }
+        default_spec = (
+            (
+                "Accredited External Auditor / C3PAO / QSA Assessment Fee",
+                "AICPA SSAE 18 AT-C 205 / ISO 27006-1 / 32 CFR Part 170",
+                "Internal Engineering Evidence Collection & Control Mapping Labor",
+                "NIST SP 800-53 Rev 5 / NIST SP 800-171 Rev 2 (110 Controls)",
+                "Continuous GRC Compliance Platform & Automated Control Monitoring",
+                "AICPA Trust Services Criteria CC1.1 - CC9.2",
+                "Grey-Box Penetration Testing, Vulnerability Triage & Total Program Cost",
+                "NIST SP 800-115 / PCI DSS v4.0.1 Req 11.4",
+                "Multi-Framework Cross-Walk (SOC 2 + ISO 27001 / HIPAA)",
+            )
+            if fw_key == "soc2"
+            else (
+                f"Accredited Independent Assessment & {fw_prof['regulator_name']} Fee",
+                fw_prof["statutory_authority"],
+                "Internal Engineering Evidence Collection & Control Mapping Labor",
+                fw_prof["statutory_authority"],
+                "Continuous GRC Compliance Platform & Automated Control Monitoring",
+                fw_prof["economic_dataset"],
+                "Adversarial Security Validation, Remediation & Total Compliance Budget",
+                "NIST SP 800-115 / Continuous Security Control Validation",
+                (
+                    "Unified Federal Defense Cross-Walk (CMMC 2.0 + NIST SP 800-171 Rev 2 + DFARS 252.204-7012)"
+                    if fw_key == "cmmc"
+                    else f"Unified Governance Cross-Walk ({fw_prof['framework_key'].upper().replace('_', ' ')} + ISO/IEC 27001)"
+                ),
+            )
+        )
+        l100_i, l100_a, l200_i, l200_a, l300_i, l300_a, l400_i, l400_a, s3_lbl = gh_line_specs.get(fw_key, default_spec)
+
         reconciliation_schedule = [
             {
                 "line_code": "GH-100",
-                "line_item": "Accredited External Auditor / C3PAO / QSA Assessment Fee",
-                "authority": "AICPA SSAE 18 AT-C 205 / ISO 27006-1 / 32 CFR Part 170",
+                "line_item": l100_i,
+                "authority": l100_a,
                 "baseline_value": f"${auditor_fee:,.2f}",
                 "optimized_value": f"${auditor_fee * 0.88:,.2f}",
                 "delta_impact": f"-${auditor_fee * 0.12:,.2f} Structured Evidence Discount",
             },
             {
                 "line_code": "GH-200",
-                "line_item": "Internal Engineering Evidence Collection & Control Mapping Labor",
-                "authority": "NIST SP 800-53 Rev 5 / NIST SP 800-171 Rev 2 (110 Controls)",
+                "line_item": l200_i,
+                "authority": l200_a,
                 "baseline_value": f"${manual_prep_cost:,.2f} (Manual Spreadsheets)",
                 "optimized_value": f"${optimized_prep_cost:,.2f} (Automated Agentic Collectors)",
                 "delta_impact": f"-${manual_prep_cost - optimized_prep_cost:,.2f} Engineering Labor Saved",
             },
             {
                 "line_code": "GH-300",
-                "line_item": "Continuous GRC Compliance Platform & Automated Control Monitoring",
-                "authority": "AICPA Trust Services Criteria CC1.1 - CC9.2",
+                "line_item": l300_i,
+                "authority": l300_a,
                 "baseline_value": "$0.00 (Unmonitored Posture)",
                 "optimized_value": f"${grc_automation_fee:,.2f}/yr",
                 "delta_impact": "Eliminates Sampling Failure & Audit Delay",
             },
             {
                 "line_code": "GH-400",
-                "line_item": "Grey-Box Penetration Testing, Vulnerability Triage & Total Program Cost",
-                "authority": "NIST SP 800-115 / PCI DSS v4.0.1 Req 11.4",
+                "line_item": l400_i,
+                "authority": l400_a,
                 "baseline_value": f"${base_amount:,.2f} Total Baseline",
                 "optimized_value": f"${optimized_total:,.2f} Total Optimized",
                 "delta_impact": f"-${net_audit_savings:,.2f} Net Program Cost Reduction",
@@ -6696,7 +7236,7 @@ def synthesize_personalized_audit_workpaper(
         ]
         sensitivity_matrix = [
             {
-                "scenario_label": "Manual Spreadsheet Evidence & Ad-Hoc Auditor Scoping",
+                "scenario_label": "Manual Spreadsheet Evidence & Ad-Hoc Assessor Scoping",
                 "modeled_principal": f"${base_amount:,.2f}",
                 "effective_rate": "100.0% Baseline Burn",
                 "estimated_net_benefit": "$0.00 Baseline",
@@ -6708,7 +7248,7 @@ def synthesize_personalized_audit_workpaper(
                 "estimated_net_benefit": f"+${net_audit_savings:,.2f} Audit Budget Saved",
             },
             {
-                "scenario_label": "Multi-Framework Cross-Walk (SOC 2 + ISO 27001 / HIPAA)",
+                "scenario_label": s3_lbl,
                 "modeled_principal": f"${base_amount * 1.45:,.2f}",
                 "effective_rate": "68.0% Shared Control Reuse",
                 "estimated_net_benefit": f"+${net_audit_savings * 1.65:,.2f} Dual-Audit Savings",
@@ -7091,6 +7631,7 @@ def synthesize_personalized_audit_workpaper(
         property_id=prop_clean,
         tool_slug=slug_clean,
         offer_sku=offer["offer_sku"],
+        vertical=vert_clean or str(eval_meta.get("vertical") or ""),
     )
     comparator_state = bp_state.get("comparator") if isinstance(bp_state.get("comparator"), dict) else {}
     custom_parameter_ledger = {
@@ -7194,10 +7735,12 @@ def synthesize_personalized_audit_workpaper(
     except Exception:
         if prop_clean == "prexvo":
             regulator_name = "U.S. Department of Education (Federal Student Aid)"
-        elif prop_clean == "gainhelm":
-            regulator_name = "AICPA Auditing Standards Board, DoD CIO, and HHS OCR"
         elif prop_clean == "lienbond":
             regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
+    if prop_clean == "gainhelm":
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        regulator_name = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)["regulator_name"]
 
     datapack_url = str(offer.get("datapack_url") or f"{offer['fulfillment_url']}&format=datapack")
     playbook_csv_url = f"{offer['playbook_url']}&format=csv"
@@ -7222,7 +7765,7 @@ def synthesize_personalized_audit_workpaper(
         "settlement_bank": "MERCURY, PARTNERING WITH CHOICE BANK (****1395)",
         "property_id": prop_clean,
         "tool_slug": slug_clean,
-        "vertical": str(eval_meta.get("vertical") or "general"),
+        "vertical": str(eval_meta.get("vertical") or vert_clean or "general"),
         "lead_id": lead_id,
         "offer_sku": offer["offer_sku"],
         "offer_title": offer["offer_title"],
@@ -7370,6 +7913,7 @@ def settle_post_calculation_datapack_upgrade(
     execute_live_checkout: bool = False,
     verified_payment: Optional[Dict[str, Any]] = None,
     offer_sku: Optional[str] = None,
+    vertical: str = "",
 ) -> Dict[str, Any]:
     """
     Settles a post-calculation upgrade ONLY when `verified_payment` carries a live Stripe
@@ -7387,7 +7931,7 @@ def settle_post_calculation_datapack_upgrade(
         and float(pay.get("amount_total_cents") or 0) > 0
     )
     prop_clean = (property_id or "profithelm").strip().lower()
-    slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
+    slug_clean = _normalize_offer_tool_slug(tool_slug)
     eff_ledger = (
         str(leads_ledger_path)
         if leads_ledger_path
@@ -7458,12 +8002,29 @@ def settle_post_calculation_datapack_upgrade(
     if scenario_outputs:
         base_rec["scenario_outputs"] = scenario_outputs
 
+    eff_vertical = str(vertical or base_rec.get("vertical") or "").strip()
+    if eff_vertical:
+        base_rec["vertical"] = eff_vertical
+    if vertical and (
+        prop_clean != "gainhelm"
+        or str(vertical).strip().lower() not in ("general", "informational_governance")
+    ):
+        base_rec["has_explicit_vertical"] = True
+    offer_vert, offer_sku_arg = _resolve_record_offer_args(
+        prop_clean,
+        eff_slug,
+        base_rec,
+        explicit_vertical=vertical or "",
+        explicit_sku=sku or offer_sku or "",
+    )
+
     checkout_session = create_stripe_checkout_session(
         property_id=prop_clean,
         tool_slug=eff_slug,
         customer_email=eff_customer_email,
         lead_id=eff_lead_id,
-        sku=sku or offer_sku or str(base_rec.get("offer_sku") or ""),
+        vertical=offer_vert,
+        sku=offer_sku_arg,
         execute_live=execute_live_checkout,
     )
     if not pay_ok:
@@ -8869,7 +9430,7 @@ def create_stripe_checkout_session(
     import urllib.error
 
     prop_clean = (property_id or "profithelm").strip().lower()
-    slug_clean = (tool_slug or "general").strip().strip("/").lower() or "general"
+    slug_clean = _normalize_offer_tool_slug(tool_slug)
     email_clean = (customer_email or "").strip().lower()
     has_routable_buyer_email = (
         bool(email_clean)
@@ -8888,6 +9449,7 @@ def create_stripe_checkout_session(
         sku=sku or offer_sku or "",
     )
     prop_clean = offer["property_id"]
+    eff_vertical = str(offer.get("vertical") or vertical or "").strip().lower()
     brand_display_name = _STRIPE_CHECKOUT_BRAND_TITLES.get(prop_clean) or prop_clean.capitalize()
     statement_suffix = _STRIPE_CHECKOUT_STATEMENT_SUFFIXES.get(prop_clean) or brand_display_name.upper()[:22]
     creds = _load_stripe_credentials()
@@ -8912,6 +9474,8 @@ def create_stripe_checkout_session(
         "metadata[workpaper_id]": f"wp_{eff_lead_id}",
         "metadata[merchant_email]": creds.get("merchant_email", "arif.coskun@profithelm.com"),
     }
+    if eff_vertical:
+        form_params["metadata[vertical]"] = eff_vertical
     if has_routable_buyer_email:
         form_params["customer_email"] = eff_buyer_email
     if isinstance(scenario_inputs, dict) and scenario_inputs:
@@ -8930,6 +9494,7 @@ def create_stripe_checkout_session(
     result: Dict[str, Any] = {
         "property_id": prop_clean,
         "tool_slug": slug_clean,
+        "vertical": eff_vertical,
         "lead_id": eff_lead_id,
         "customer_email": eff_buyer_email,
         "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
@@ -9074,17 +9639,24 @@ def render_transactional_playbook_email(lead_record: Dict[str, Any]) -> Dict[str
     playbook, paid audit workpaper toolkit, and matched institutional partner desk.
     """
     prop_clean = str(lead_record.get("property_id", "profithelm")).strip().lower()
-    tool_slug = str(lead_record.get("tool_slug", "general")).strip().lower()
+    raw_email_slug = str(lead_record.get("tool_slug", "general")).strip().strip("/").lower()
+    tool_slug = _normalize_offer_tool_slug(raw_email_slug, default="") if raw_email_slug else ""
     lead_id = str(lead_record.get("lead_id", f"lead_{prop_clean}_preview"))
     email = str(lead_record.get("email", "recipient@example.com"))
     amount_val = float(lead_record.get("calculated_amount") or 0.0)
     capital_band = str(lead_record.get("capital_band") or "standard")
     state_code = str(lead_record.get("state") or "US")
+    offer_email_vert, offer_email_sku = _resolve_record_offer_args(
+        prop_clean,
+        tool_slug or "general",
+        lead_record,
+    )
     offer = resolve_lead_monetization_offer(
         property_id=prop_clean,
         tool_slug=tool_slug,
-        vertical=str(lead_record.get("vertical") or ""),
+        vertical=offer_email_vert,
         lead_id=lead_id,
+        sku=offer_email_sku,
     )
     workpaper = synthesize_personalized_audit_workpaper(
         property_id=prop_clean,
@@ -9113,17 +9685,38 @@ def render_transactional_playbook_email(lead_record: Dict[str, Any]) -> Dict[str
             "Review state-specific borrower protections and cosigner release milestones before locking rates.",
         ]
     elif prop_clean == "gainhelm":
+        from pseofactory.affiliates import (
+            get_gainhelm_framework_profile,
+            resolve_gainhelm_partner_rep_desk,
+        )
+
+        vertical_clean = str(lead_record.get("vertical") or "").strip()
+        fw_prof = get_gainhelm_framework_profile(slug=tool_slug, vertical=vertical_clean)
         brand_name = "GainHelm GRC & Statutory Audit Research Desk"
         domain_base = "https://gainhelm.com"
-        partner_desk = str(lead_record.get("partner_rep_desk") or "GainHelm Enterprise GRC Partner Desk")
-        redirect_path = str(lead_record.get("redirect_url") or f"/r/vanta_security?source={tool_slug}")
+        primary_pk = str(fw_prof.get("primary_partner_key") or "vanta_security")
+        req_pk = str(lead_record.get("partner_key") or primary_pk)
+        partner_desk = str(
+            lead_record.get("partner_rep_desk")
+            or resolve_gainhelm_partner_rep_desk(req_pk, slug=tool_slug, vertical=vertical_clean)
+        )
+        redirect_path = str(lead_record.get("redirect_url") or f"/r/{req_pk}?source={tool_slug}")
         partner_url = f"{domain_base}{redirect_path}" if redirect_path.startswith("/") else redirect_path
-        subject = f"[GainHelm Playbook] Your Enterprise Audit Scoping & Compliance Worksheet ({tool_slug})"
-        checklist_items = [
-            "Lock system boundary, production data enclave scope, and in-scope employee headcount before engaging auditors.",
-            "Verify statutory control mappings across AICPA Trust Services Criteria, NIST SP 800-171, ISO 27001, and HIPAA.",
-            "Compare automated GRC evidence collection against manual spreadsheet labor before signing multi-year CPA or C3PAO letters.",
-        ]
+        label_slug = tool_slug or vertical_clean or "soc-2-audit-cost-calculator"
+        subject = f"[GainHelm Playbook] Your Compliance Scoping & Cost Worksheet ({label_slug})"
+        checklist_items = (
+            [
+                "Lock system boundary, production data enclave scope, and in-scope employee headcount before engaging assessors.",
+                "Verify statutory control mappings across AICPA Trust Services Criteria, NIST SP 800-171, ISO 27001, and HIPAA.",
+                "Compare automated GRC evidence collection against manual spreadsheet labor before signing multi-year CPA or C3PAO letters.",
+            ]
+            if fw_prof["framework_key"] == "soc2"
+            else [
+                "Lock entity scope, system boundary, and in-scope systems/personnel before initiating external reviews.",
+                f"Verify statutory control and evidence mappings under {fw_prof['statutory_authority']}.",
+                "Compare automated continuous GRC evidence collection against manual spreadsheet labor before locking vendor contracts.",
+            ]
+        )
     elif prop_clean == "lienbond":
         brand_name = "LienBond Surety & Statutory Compliance Desk"
         domain_base = "https://lienbond.com"
@@ -9171,7 +9764,7 @@ def render_transactional_playbook_email(lead_record: Dict[str, Any]) -> Dict[str
         f"{brand_name}</div>"
         f"<h2 style='margin:8px 0 12px;font-size:20px;color:#0f172a;'>Your Calculation Worksheet &amp; Action Plan</h2>"
         f"<p style='margin:0 0 12px;font-size:14px;color:#334155;'>"
-        f"Reference ID: <strong>{lead_id}</strong> | Scenario Tool: <strong>{tool_slug}</strong> | "
+        f"Reference ID: <strong>{lead_id}</strong> | Scenario Tool: <strong>{tool_slug or str(lead_record.get('vertical') or 'general')}</strong> | "
         f"Jurisdiction: <strong>{state_code}</strong> | Model Amount: <strong>${amount_val:,.2f}</strong> "
         f"(Band: <strong>{capital_band}</strong>)</p>"
         "<h3 style='font-size:15px;margin:16px 0 8px;color:#0f172a;'>Personalized Statutory Reconciliation Summary</h3>"
@@ -9204,7 +9797,7 @@ def render_transactional_playbook_email(lead_record: Dict[str, Any]) -> Dict[str
     )
     text_body = (
         f"{brand_name}\n"
-        f"Reference ID: {lead_id} | Scenario Tool: {tool_slug} | Jurisdiction: {state_code} | "
+        f"Reference ID: {lead_id} | Scenario Tool: {tool_slug or str(lead_record.get('vertical') or 'general')} | Jurisdiction: {state_code} | "
         f"Model Amount: ${amount_val:,.2f} (Band: {capital_band})\n\n"
         "Personalized Reconciliation Schedule:\n"
         + "\n".join(
@@ -9931,9 +10524,17 @@ def sync_edge_leads_to_ledger(
                     if ("_live_" in lid or lid.endswith("_direct")) and leads_ledger_path is None:
                         continue
                     slug = str(item.get("tool_slug") or "general")
-                    vert = str(item.get("vertical") or "")
-                    offer = resolve_lead_monetization_offer(prop_id, slug, vert, lead_id=lid)
+                    offer_vert_e, offer_sku_e = _resolve_record_offer_args(prop_id, slug, item)
+                    offer = resolve_lead_monetization_offer(
+                        prop_id,
+                        slug,
+                        offer_vert_e,
+                        lead_id=lid,
+                        sku=offer_sku_e,
+                    )
                     clean_item = {k: v for k, v in item.items() if v is not None}
+                    if clean_item.get("checkout_url") in ("", "1"):
+                        clean_item.pop("checkout_url", None)
                     enriched = {
                         "lead_type": clean_item.get("lead_type") or (
                             "qualified_quote" if clean_item.get("partner_sharing_consent") else "playbook_subscription"
@@ -10036,10 +10637,16 @@ def sync_edge_leads_to_ledger(
     for idx_r, rec in enumerate(existing_records):
         prop_r = str(rec.get("property_id") or "profithelm").strip().lower()
         slug_r = str(rec.get("tool_slug") or "general").strip().strip("/").lower() or "general"
-        vert_r = str(rec.get("vertical") or "")
         lid_r = str(rec.get("lead_id") or f"lead_{prop_r}_{idx_r}")
+        off_vert_r, off_sku_r = _resolve_record_offer_args(prop_r, slug_r, rec)
         try:
-            off_r = resolve_lead_monetization_offer(prop_r, slug_r, vert_r, lead_id=lid_r)
+            off_r = resolve_lead_monetization_offer(
+                prop_r,
+                slug_r,
+                off_vert_r,
+                lead_id=lid_r,
+                sku=off_sku_r,
+            )
         except Exception:
             off_r = {"offer_sku": "", "offer_title": "", "offer_price_usd": 49.0}
         if not rec.get("lead_type"):
@@ -10258,6 +10865,7 @@ def evaluate_lead_quote_threshold(
     property_id: str,
     tool_slug: str,
     calculated_amount: float = 0.0,
+    vertical: str = "",
 ) -> Dict[str, Any]:
     """
     Determines whether a calculator tool slug and user-entered calculation amount cross
@@ -10270,11 +10878,21 @@ def evaluate_lead_quote_threshold(
     from pseofactory.affiliates import is_restricted_public_service_slug
 
     prop_clean = (property_id or "profithelm").strip().lower()
-    slug_clean = (tool_slug or "index").strip().strip("/").lower() or "index"
+    raw_slug = (tool_slug or "").strip().strip("/").lower()
+    if raw_slug.startswith("tools/"):
+        raw_slug = raw_slug[len("tools/"):]
+    vert_clean = (vertical or "").strip()
     amount_val = max(0.0, float(calculated_amount or 0.0))
 
     non_tool_slugs = {"index", "about", "privacy", "terms", "disclaimers", "methodology"}
-    if slug_clean in non_tool_slugs:
+    gainhelm_explicit_vertical = (
+        prop_clean == "gainhelm"
+        and raw_slug in ("", "index", "general")
+        and bool(vert_clean)
+        and vert_clean.lower() not in ("general", "informational_governance")
+    )
+    slug_clean = raw_slug if gainhelm_explicit_vertical else (raw_slug or "index")
+    if slug_clean in non_tool_slugs and not gainhelm_explicit_vertical:
         return {
             "property_id": prop_clean,
             "tool_slug": slug_clean,
@@ -10316,35 +10934,21 @@ def evaluate_lead_quote_threshold(
             "https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1"
         )
     elif prop_clean == "gainhelm":
-        threshold_usd = 25000.0
-        gh_checkout_url = (
-            "https://gainhelm.com/api/lead-capture?checkout=1&sku=gh_soc2_cmmc_audit_readiness_packet&redirect=1"
+        from pseofactory.affiliates import (
+            get_gainhelm_framework_profile,
+            resolve_gainhelm_partner_url,
         )
-        if any(tok in slug_clean for tok in ("penetration", "pentest", "pci-dss")):
-            vertical = "offensive_security_pentest"
-            primary_partner_key = "cobalt_pentest"
-            partner_rep_desk = "Cobalt Offensive Security PtaaS Desk"
-            live_destination_url = gh_checkout_url
-        elif any(tok in slug_clean for tok in ("cyber-liability", "insurance", "breach", "hipaa")):
-            vertical = "cyber_liability_underwriting"
-            primary_partner_key = "coalition_cyber_insurance"
-            partner_rep_desk = "Coalition Active Cyber Insurance Underwriting Desk"
-            live_destination_url = gh_checkout_url
-        elif any(tok in slug_clean for tok in ("cmmc", "nist-800-171", "sprs", "fedramp")):
-            vertical = "federal_defense_grc"
-            primary_partner_key = "drata_compliance"
-            partner_rep_desk = "Drata Federal & CMMC GRC Automation Desk"
-            live_destination_url = gh_checkout_url
-        elif any(tok in slug_clean for tok in ("hitrust", "iso-27001")):
-            vertical = "enterprise_certification_audit"
-            primary_partner_key = "thoropass_audit"
-            partner_rep_desk = "Thoropass Integrated Audit & Compliance Desk"
-            live_destination_url = gh_checkout_url
-        else:
-            vertical = "soc2_grc_automation"
-            primary_partner_key = "vanta_security"
-            partner_rep_desk = "Vanta Trust Management & SOC 2 Audit Desk"
-            live_destination_url = gh_checkout_url
+
+        threshold_usd = 25000.0
+        fw_prof = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)
+        vertical = str(fw_prof["vertical"])
+        primary_partner_key = str(fw_prof.get("primary_partner_key") or "vanta_security")
+        partner_rep_desk = str(fw_prof["partner_rep_desk"])
+        live_destination_url = resolve_gainhelm_partner_url(
+            primary_partner_key,
+            tool_slug=slug_clean,
+            vertical=vertical,
+        )
     elif prop_clean == "lienbond":
         threshold_usd = 25000.0
         lb_checkout_url = (
@@ -10499,6 +11103,7 @@ def ingest_playbook_subscription(
     scenario_inputs: Optional[Dict[str, Any]] = None,
     scenario_outputs: Optional[Dict[str, Any]] = None,
     blueprint_state: Optional[Dict[str, Any]] = None,
+    vertical: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Top-level helper to ingest a first-party playbook subscription lead with Stripe Checkout offer."""
     engine = PartnerTrackingEngine()
@@ -10513,6 +11118,7 @@ def ingest_playbook_subscription(
         scenario_inputs=scenario_inputs,
         scenario_outputs=scenario_outputs,
         blueprint_state=blueprint_state,
+        vertical=vertical,
     )
 
 

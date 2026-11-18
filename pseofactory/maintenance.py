@@ -28,7 +28,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable, Tuple
 
-from pseofactory.contracts import is_non_tool_or_governance_route
+from pseofactory.contracts import is_non_tool_or_governance_route, normalize_statutory_acronym_casing
 
 
 def _atomic_write_text(path: Union[Path, str], content: str, encoding: str = "utf-8") -> None:
@@ -9461,6 +9461,234 @@ class RetroReflectionEngine:
         return not is_state_jurisdiction_tool(slug, prop)
 
     @classmethod
+    def _collect_gainhelm_workbench_spans(cls, html_content: str) -> List[Tuple[int, int]]:
+        """Returns sorted, start-deduplicated spans for all #serp-incumbent-depth-workbench sections."""
+        from pseofactory.visual_primitives import _iter_balanced_tag_spans
+
+        spans = list(
+            _iter_balanced_tag_spans(
+                html_content, "serp-incumbent-depth-workbench", tag_name="section", attr_name="id"
+            )
+        )
+        seen_starts = {s for s, _ in spans}
+        for sp in _iter_balanced_tag_spans(
+            html_content, "serp_incumbent_depth_upgrade", tag_name="section", attr_name="data-mechanic"
+        ):
+            if sp[0] not in seen_starts:
+                spans.append(sp)
+                seen_starts.add(sp[0])
+        if not spans:
+            for sp in _iter_balanced_tag_spans(
+                html_content, "serp-incumbent-depth-workbench", tag_name="div", attr_name="id"
+            ):
+                if sp[0] not in seen_starts:
+                    spans.append(sp)
+                    seen_starts.add(sp[0])
+        return sorted(spans)
+
+    @classmethod
+    def _gainhelm_workbench_has_outer_leak(cls, html_content: str, slug: str) -> bool:
+        """True if #serp-incumbent-depth-workbench is duplicated or leaks outside inner blocks on strict-isolated pages."""
+        from pseofactory.affiliates import get_gainhelm_framework_profile, has_gainhelm_cross_framework_leak
+        from pseofactory.visual_primitives import _iter_balanced_tag_spans
+
+        wb_spans = cls._collect_gainhelm_workbench_spans(html_content)
+        if len(wb_spans) > 1:
+            return True
+        fw_prof = get_gainhelm_framework_profile(slug=slug)
+        if not fw_prof.get("strict_isolated") and fw_prof.get("framework_key") != "fedramp":
+            return False
+        for wb_s, wb_e in wb_spans:
+            wb_chunk = html_content[wb_s:wb_e]
+            for inner_id in ("post-calculation-upgrade-drawer", "partner-quote-intake-step"):
+                for in_s, in_e in reversed(_iter_balanced_tag_spans(wb_chunk, inner_id, attr_name="id")):
+                    wb_chunk = wb_chunk[:in_s] + wb_chunk[in_e:]
+            if has_gainhelm_cross_framework_leak(wb_chunk, slug):
+                return True
+        return False
+
+    @classmethod
+    def _iter_gainhelm_workspace_anchor_spans(cls, html_content: str) -> List[Tuple[int, int]]:
+        """Returns sorted, start-deduplicated spans for all #calculator-workspace-anchor div/section blocks."""
+        from pseofactory.visual_primitives import _iter_balanced_tag_spans
+
+        spans: List[Tuple[int, int]] = []
+        seen_starts: Set[int] = set()
+        for tag in ("section", "div"):
+            for sp in _iter_balanced_tag_spans(
+                html_content, "calculator-workspace-anchor", tag_name=tag, attr_name="id"
+            ):
+                if sp[0] not in seen_starts:
+                    spans.append(sp)
+                    seen_starts.add(sp[0])
+        return sorted(spans)
+
+    @classmethod
+    def _heal_gainhelm_workspace_framework_isolation(
+        cls,
+        html_content: str,
+        slug: str,
+    ) -> Tuple[str, bool]:
+        """
+        Deterministically scrubs stray cross-framework tokens inside #calculator-workspace-anchor
+        on strict_isolated GainHelm calculators without mutating scripts, styles, or form bindings.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not html_content or not slug:
+            return html_content, False
+        from pseofactory.affiliates import (
+            get_gainhelm_framework_profile,
+            has_gainhelm_cross_framework_leak,
+        )
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug)
+        if not fw_prof.get("strict_isolated"):
+            return html_content, False
+        spans = cls._iter_gainhelm_workspace_anchor_spans(html_content)
+        if not spans:
+            return html_content, False
+
+        fw_labels = {
+            "dora": "EU DORA",
+            "eu_ai_act": "EU AI Act",
+            "sec_8k": "SEC Item 1.05 / 106",
+            "gdpr": "GDPR",
+            "ccpa": "CCPA / CPRA",
+            "nis2": "EU NIS2",
+        }
+        fw_key = str(fw_prof.get("framework_key") or "dora")
+        fw_label = fw_labels.get(fw_key, "Statutory Framework")
+        fw_auth = str(fw_prof.get("statutory_authority") or fw_label).split(",")[0].strip()
+        fw_vertical = str(fw_prof.get("vertical") or "")
+        forbidden = tuple(fw_prof.get("forbidden_leak_tokens", ()))
+
+        updated = html_content
+        changed = False
+        token_split_re = re.compile(
+            r"(<script\b[^>]*>[\s\S]*?</script>|<style\b[^>]*>[\s\S]*?</style>|<[^>]+>)",
+            flags=re.IGNORECASE,
+        )
+        for ws_s, ws_e in reversed(spans):
+            ws_html = updated[ws_s:ws_e]
+            if not has_gainhelm_cross_framework_leak(ws_html, slug):
+                continue
+            healed_ws = ws_html
+            if fw_vertical:
+                healed_ws = re.sub(
+                    r'(\bdata-vertical=["\'])([^"\']*(?:soc2|cmmc|hipaa|aicpa)[^"\']*)(["\'])',
+                    rf"\g<1>{fw_vertical}\g<3>",
+                    healed_ws,
+                    flags=re.IGNORECASE,
+                )
+            parts = token_split_re.split(healed_ws)
+            for idx in range(0, len(parts), 2):
+                txt = parts[idx]
+                if not txt or not txt.strip():
+                    continue
+                new_txt = txt
+                new_txt = re.sub(
+                    r"\bAICPA\s+SSAE\s+18(?:\s*\(AT-C\s*(?:Section\s*)?205\))?",
+                    fw_auth,
+                    new_txt,
+                    flags=re.IGNORECASE,
+                )
+                new_txt = re.sub(
+                    r"\b(?:AICPA\s+Trust\s+Services\s+Criteria|AICPA)\b",
+                    fw_label,
+                    new_txt,
+                    flags=re.IGNORECASE,
+                )
+                new_txt = re.sub(
+                    r"\bSOC\s*2(?:\s*Type\s*(?:II|I|1|2))?\b",
+                    fw_label,
+                    new_txt,
+                    flags=re.IGNORECASE,
+                )
+                new_txt = re.sub(
+                    r"\b(?:CMMC\s*2\.0|CMMC)\b",
+                    fw_label,
+                    new_txt,
+                    flags=re.IGNORECASE,
+                )
+                new_txt = re.sub(r"\bC3PAO\b", "Accredited Assessor", new_txt, flags=re.IGNORECASE)
+                new_txt = re.sub(r"\b(?:HIPAA\s*/\s*HITECH|HIPAA)\b", fw_label, new_txt, flags=re.IGNORECASE)
+                for tok in forbidden:
+                    if tok in new_txt.lower():
+                        new_txt = re.sub(re.escape(tok), fw_label, new_txt, flags=re.IGNORECASE)
+                parts[idx] = re.sub(r" {2,}", " ", new_txt)
+            healed_ws = "".join(parts)
+            if healed_ws != ws_html:
+                updated = updated[:ws_s] + healed_ws + updated[ws_e:]
+                changed = True
+        return updated, changed
+
+    @classmethod
+    def _gainhelm_needs_framework_isolation_heal(cls, html_content: str, slug: str) -> bool:
+        """
+        Detects cross-framework SOC 2 / CMMC / AICPA / HIPAA leaks or stale $79 SKU mismatches
+        across commercial/monetization/compliance containers on non-owning GainHelm tool pages
+        (and outer workbench/calculator containers on strict-isolated GainHelm pages).
+        """
+        if not html_content or not slug:
+            return False
+        from pseofactory.affiliates import get_gainhelm_framework_profile, has_gainhelm_cross_framework_leak
+        from pseofactory.visual_primitives import (
+            _gainhelm_drawer_has_mismatch,
+            _gainhelm_pro_card_has_mismatch,
+            _iter_balanced_tag_spans,
+        )
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug)
+        if not fw_prof.get("forbidden_leak_tokens"):
+            return False
+        exp_sku = str(fw_prof["offer_sku"]).strip().lower()
+        exp_price = str(int(round(float(fw_prof["offer_price_usd"]))))
+        is_strict = bool(fw_prof.get("strict_isolated"))
+
+        wb_spans = cls._collect_gainhelm_workbench_spans(html_content)
+        if len(wb_spans) > 1:
+            return True
+        if is_strict or fw_prof.get("framework_key") == "fedramp":
+            for wb_s, wb_e in wb_spans:
+                if has_gainhelm_cross_framework_leak(html_content[wb_s:wb_e], slug):
+                    return True
+        if is_strict:
+            for sp_s, sp_e in cls._iter_gainhelm_workspace_anchor_spans(html_content):
+                if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
+                    return True
+
+        for id_attr in (
+            "partner-quote-intake-step",
+            "calc-result-quick-unlock-bar",
+        ):
+            for sp_s, sp_e in _iter_balanced_tag_spans(html_content, id_attr, attr_name="id"):
+                if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
+                    return True
+
+        for sp_s, sp_e in _iter_balanced_tag_spans(html_content, "post-calculation-upgrade-drawer", attr_name="id"):
+            if _gainhelm_drawer_has_mismatch(html_content[sp_s:sp_e], slug):
+                return True
+
+        for cls_attr in ("calc-inline-cta", "compliance-strip"):
+            for sp_s, sp_e in _iter_balanced_tag_spans(html_content, cls_attr, attr_name="class"):
+                if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
+                    return True
+
+        for sp_s, sp_e in _iter_balanced_tag_spans(html_content, "pro-hook-card", attr_name="class"):
+            if _gainhelm_pro_card_has_mismatch(html_content[sp_s:sp_e], slug, exp_sku, exp_price):
+                return True
+
+        for sec_m in re.finditer(
+            r'<section\b[^>]*class=["\'][^"\']*(?:refinance-partner-section|affiliates?-section|partners-section)[^"\']*["\'][^>]*>[\s\S]*?</section>',
+            html_content,
+            flags=re.IGNORECASE,
+        ):
+            if has_gainhelm_cross_framework_leak(sec_m.group(0), slug):
+                return True
+
+        return False
+
+    @classmethod
     def audit_html_mechanics(cls, html_content: str) -> List[str]:
         """Returns list of missing upgraded engine mechanics for a tool/calculator HTML document."""
         missing: List[str] = []
@@ -10048,6 +10276,94 @@ class RetroReflectionEngine:
 
         return missing
 
+    _GAINHELM_FW_TO_CANONICAL_MANIFEST_SLUG: Dict[str, str] = {
+        "dora": "dora-ict-third-party-risk-compliance-cost-calculator",
+        "eu_ai_act": "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
+        "sec_8k": "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",
+        "iso_27001": "iso-27001-certification-cost-calculator",
+        "hipaa": "hipaa-violation-penalty-breach-cost-calculator",
+        "pci_dss": "pci-dss-4-0-compliance-cost-calculator",
+        "fedramp": "fedramp-authorization-3pao-cost-calculator",
+        "hitrust": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+        "cyber_insurance": "cyber-liability-insurance-breach-exposure-calculator",
+        "pentest": "penetration-testing-scoping-cost-calculator",
+        "cmmc": "cmmc-2-0-compliance-cost-calculator",
+        "soc2": "soc-2-audit-cost-calculator",
+    }
+
+    _GAINHELM_SYNTHETIC_MANIFEST_SPECS: Dict[str, Dict[str, Any]] = {
+        "ccpa": {
+            "model_name": "GainHelm-CCPA-CPRA-Privacy-DSAR-Cost-Model-2026",
+            "formula": "round(cppa_audit_fee + (annual_dsar_requests * cost_per_dsar_request) + gpc_consent_platform_fee + (privacy_engineering_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "cppa_audit_fee": 28000.0,
+                "annual_dsar_requests": 240.0,
+                "cost_per_dsar_request": 45.0,
+                "gpc_consent_platform_fee": 16500.0,
+                "privacy_engineering_hours": 88.0,
+                "engineering_hourly_rate": 145.0,
+            },
+            "published_output": 68060.0,
+            "sample_calculation": "At 240 annual DSAR requests ($45/request), $28,000 CPPA audit fee, $16,500 GPC consent tooling, and 88 privacy engineering hours at $145/hr = $68,060.00 Year-1 CCPA/CPRA readiness cost.",
+        },
+        "gdpr": {
+            "model_name": "GainHelm-EU-GDPR-RoPA-DPIA-Compliance-Cost-Model-2026",
+            "formula": "round(dpia_external_review_fee + (processing_activities_count * ropa_mapping_cost_per_activity) + dpo_retainer_annual + (privacy_engineering_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "dpia_external_review_fee": 19500.0,
+                "processing_activities_count": 25.0,
+                "ropa_mapping_cost_per_activity": 880.0,
+                "dpo_retainer_annual": 18000.0,
+                "privacy_engineering_hours": 100.0,
+                "engineering_hourly_rate": 145.0,
+            },
+            "published_output": 74000.0,
+            "sample_calculation": "At 25 Article 30 processing activities ($880/activity), $19,500 Article 35 DPIA review, $18,000 DPO retainer, and 100 engineering hours at $145/hr = $74,000.00 Year-1 EU GDPR compliance cost.",
+        },
+        "nis2": {
+            "model_name": "GainHelm-EU-NIS2-Directive-2022-2555-Readiness-Cost-Model-2026",
+            "formula": "round(art21_security_baseline_cost + (critical_suppliers_count * supplier_audit_unit_cost) + csirt_readiness_retainer + (security_engineering_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "art21_security_baseline_cost": 44000.0,
+                "critical_suppliers_count": 14.0,
+                "supplier_audit_unit_cost": 1500.0,
+                "csirt_readiness_retainer": 19000.0,
+                "security_engineering_hours": 80.0,
+                "engineering_hourly_rate": 150.0,
+            },
+            "published_output": 96000.0,
+            "sample_calculation": "At 14 critical suppliers ($1,500/supplier), $44,000 Article 21 10-measure security baseline, $19,000 24-hour CSIRT retainer, and 80 engineering hours at $150/hr = $96,000.00 Year-1 EU NIS2 readiness cost.",
+        },
+    }
+
+    @classmethod
+    def _resolve_gainhelm_fallback_manifest(cls, slug_lookup: str) -> Dict[str, Any]:
+        """Returns a framework-matched GainHelm fallback manifest for canonical or custom slugs."""
+        if slug_lookup in cls.GAINHELM_FALLBACK_MANIFESTS:
+            return dict(cls.GAINHELM_FALLBACK_MANIFESTS[slug_lookup])
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug_lookup)
+        fw_key = str(fw_prof.get("framework_key") or "soc2")
+        synth = cls._GAINHELM_SYNTHETIC_MANIFEST_SPECS.get(fw_key)
+        if synth is not None:
+            return {
+                "model_name": synth["model_name"],
+                "entity_type": "SoftwareApplication",
+                "formula": synth["formula"],
+                "inputs": dict(synth["inputs"]),
+                "published_output": float(synth["published_output"]),
+                "statutory_authority": str(fw_prof["statutory_authority"]),
+                "economic_dataset": str(fw_prof["economic_dataset"]),
+                "sample_calculation": synth["sample_calculation"],
+            }
+        mapped_slug = cls._GAINHELM_FW_TO_CANONICAL_MANIFEST_SLUG.get(fw_key, "soc-2-audit-cost-calculator")
+        preset = cls.GAINHELM_FALLBACK_MANIFESTS.get(mapped_slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
+        out = dict(preset)
+        out["statutory_authority"] = str(fw_prof["statutory_authority"])
+        out["economic_dataset"] = str(fw_prof["economic_dataset"])
+        return out
+
     @classmethod
     def _resolve_manifest_for_page(
         cls,
@@ -10100,6 +10416,13 @@ class RetroReflectionEngine:
                     pass
         prior_entity_type = str((raw.get("entity_type") if isinstance(raw, dict) else "") or sidecar_entity_type)
 
+        slug_lookup = slug.strip().strip("/")
+        if slug_lookup.startswith("tools/"):
+            slug_lookup = slug_lookup[len("tools/") :]
+        if slug_lookup.endswith("/index.html"):
+            slug_lookup = slug_lookup[: -len("/index.html")]
+        slug_lookup = slug_lookup.strip("/") or slug
+
         is_prexvo = property_id.lower() == "prexvo"
         is_gainhelm = property_id.lower() == "gainhelm"
         is_lienbond = property_id.lower() == "lienbond"
@@ -10109,21 +10432,21 @@ class RetroReflectionEngine:
                 "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
             )
         elif is_gainhelm:
-            gh_preset_0 = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
-            default_stat = str(gh_preset_0["statutory_authority"])
-            default_econ = str(gh_preset_0["economic_dataset"])
+            gh_fb_0 = cls._resolve_gainhelm_fallback_manifest(slug_lookup)
+            default_stat = str(gh_fb_0["statutory_authority"])
+            default_econ = str(gh_fb_0["economic_dataset"])
         elif is_lienbond:
-            lb_preset_0 = cls.LIENBOND_FALLBACK_MANIFESTS.get(slug) or cls.LIENBOND_FALLBACK_MANIFESTS["contractor-license-bond-cost-calculator-by-credit-score"]
+            lb_preset_0 = cls.LIENBOND_FALLBACK_MANIFESTS.get(slug) or cls.LIENBOND_FALLBACK_MANIFESTS.get(slug_lookup) or cls.LIENBOND_FALLBACK_MANIFESTS["contractor-license-bond-cost-calculator-by-credit-score"]
             default_stat = str(lb_preset_0["statutory_authority"])
             default_econ = str(lb_preset_0["economic_dataset"])
         else:
             default_stat, default_econ = _resolve_profithelm_statutory_provenance(slug, html_content)
-        slug_title = _format_safe_heading_topic("", slug)
+        slug_title = _format_safe_heading_topic("", slug_lookup)
         if manifest_override is None:
             from pseofactory.audit import detect_tautological_or_fabricated_manifest_issues
 
-            if is_prexvo and slug in cls.PREXVO_FALLBACK_MANIFESTS:
-                preset = cls.PREXVO_FALLBACK_MANIFESTS[slug]
+            if is_prexvo and slug_lookup in cls.PREXVO_FALLBACK_MANIFESTS:
+                preset = cls.PREXVO_FALLBACK_MANIFESTS[slug_lookup]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                 raw_taut = (
                     detect_tautological_or_fabricated_manifest_issues(
@@ -10139,8 +10462,8 @@ class RetroReflectionEngine:
                     or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
                 ):
                     raw = dict(preset)
-            elif is_gainhelm and slug in cls.GAINHELM_FALLBACK_MANIFESTS:
-                preset = cls.GAINHELM_FALLBACK_MANIFESTS[slug]
+            elif is_gainhelm and slug_lookup in cls.GAINHELM_FALLBACK_MANIFESTS:
+                preset = cls.GAINHELM_FALLBACK_MANIFESTS[slug_lookup]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                 raw_taut = (
                     detect_tautological_or_fabricated_manifest_issues(
@@ -10157,8 +10480,14 @@ class RetroReflectionEngine:
                     or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
                 ):
                     raw = dict(preset)
-            elif is_lienbond and slug in cls.LIENBOND_FALLBACK_MANIFESTS:
-                preset = cls.LIENBOND_FALLBACK_MANIFESTS[slug]
+            elif is_gainhelm and isinstance(raw, dict) and raw.get("formula"):
+                from pseofactory.affiliates import get_gainhelm_framework_profile, has_gainhelm_cross_framework_leak
+
+                fw_k_raw = str(get_gainhelm_framework_profile(slug=slug_lookup).get("framework_key") or "soc2")
+                if fw_k_raw != "soc2" and has_gainhelm_cross_framework_leak(json.dumps(raw), slug_lookup):
+                    raw = cls._resolve_gainhelm_fallback_manifest(slug_lookup)
+            elif is_lienbond and slug_lookup in cls.LIENBOND_FALLBACK_MANIFESTS:
+                preset = cls.LIENBOND_FALLBACK_MANIFESTS[slug_lookup]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                 raw_taut = (
                     detect_tautological_or_fabricated_manifest_issues(
@@ -10227,8 +10556,7 @@ class RetroReflectionEngine:
                 preset = cls.PREXVO_FALLBACK_MANIFESTS.get(slug) or cls.PREXVO_FALLBACK_MANIFESTS["rap-payment-calculator"]
                 raw = dict(preset)
             elif is_gainhelm:
-                preset = cls.GAINHELM_FALLBACK_MANIFESTS.get(slug) or cls.GAINHELM_FALLBACK_MANIFESTS["soc-2-audit-cost-calculator"]
-                raw = dict(preset)
+                raw = cls._resolve_gainhelm_fallback_manifest(slug_lookup)
             elif is_lienbond:
                 preset = cls.LIENBOND_FALLBACK_MANIFESTS.get(slug) or cls.LIENBOND_FALLBACK_MANIFESTS["contractor-license-bond-cost-calculator-by-credit-score"]
                 raw = dict(preset)
@@ -10615,6 +10943,13 @@ class RetroReflectionEngine:
         ):
             return html_content, []
 
+        slug_clean = str(slug or "tool").strip().strip("/")
+        if slug_clean.startswith("tools/"):
+            slug_clean = slug_clean[len("tools/"):]
+        if slug_clean.endswith("/index.html"):
+            slug_clean = slug_clean[:-len("/index.html")]
+        slug = slug_clean.strip("/") or "tool"
+
         cache_key: Optional[Tuple[str, str, str, str]] = None
         if manifest_override is None and html_content:
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
@@ -10689,6 +11024,14 @@ class RetroReflectionEngine:
                                 missing.append(pre_m)
                 except Exception:
                     pass
+        if property_id.lower() == "gainhelm" and cls._gainhelm_needs_framework_isolation_heal(html_content, slug):
+            if "gainhelm_framework_isolation" not in missing:
+                missing.append("gainhelm_framework_isolation")
+            if (
+                "serp_incumbent_depth_upgrade" not in missing
+                and cls._gainhelm_workbench_has_outer_leak(html_content, slug)
+            ):
+                missing.append("serp_incumbent_depth_upgrade")
         if not missing:
             if cache_key is not None:
                 if len(cls._RETROFIT_HTML_CACHE) > 512:
@@ -11080,8 +11423,16 @@ class RetroReflectionEngine:
                 economic_dataset=econ_ds,
             )
             if "serp_incumbent_depth_upgrade" in missing:
-                updated = re.sub(r'\s*<section[^>]+data-mechanic="serp_incumbent_depth_upgrade"[\s\S]*?</section>', "", updated)
-                injected_parts.append(winning_blocks["serp_depth_upgrade_html"])
+                existing_wb_spans = cls._collect_gainhelm_workbench_spans(updated)
+                if existing_wb_spans:
+                    first_s, first_e = existing_wb_spans[0]
+                    fresh_wb = winning_blocks["serp_depth_upgrade_html"].strip()
+                    for dup_s, dup_e in reversed(existing_wb_spans[1:]):
+                        updated = updated[:dup_s] + updated[dup_e:]
+                    updated = updated[:first_s] + fresh_wb + updated[first_e:]
+                else:
+                    updated = re.sub(r'\s*<section[^>]+data-mechanic="serp_incumbent_depth_upgrade"[\s\S]*?</section>', "", updated)
+                    injected_parts.append(winning_blocks["serp_depth_upgrade_html"])
                 repaired.append("serp_incumbent_depth_upgrade")
             if "instant_edge_case_trap_immediacy" in missing:
                 updated = re.sub(r'\s*<aside[^>]+data-mechanic="instant_edge_case_trap_immediacy"[\s\S]*?</aside>', "", updated)
@@ -11235,7 +11586,9 @@ class RetroReflectionEngine:
             if "title_dedup" not in repaired:
                 repaired.append("title_dedup")
         try:
+            from pseofactory.affiliates import has_gainhelm_cross_framework_leak
             from pseofactory.competitor import render_partner_quote_intake_html
+            from pseofactory.visual_primitives import _find_balanced_div_span
             quote_intake_html = render_partner_quote_intake_html(
                 slug=slug,
                 property_id=property_id,
@@ -11250,13 +11603,25 @@ class RetroReflectionEngine:
                         1,
                     )
                     repaired.append("partner_quote_intake")
-            elif quote_intake_html and 'id="partner-quote-intake-step"' in updated and "Tier)</h3>" in updated:
-                updated = re.sub(
-                    r'(<div class="partner-quote-header">[\s\S]{0,300}?)\s+Tier\)</h3>',
-                    r"\1 Threshold)</h3>",
-                    updated,
-                )
-                repaired.append("partner_quote_intake")
+            elif quote_intake_html and 'id="partner-quote-intake-step"' in updated:
+                from pseofactory.visual_primitives import _iter_balanced_tag_spans
+
+                q_spans = _iter_balanced_tag_spans(updated, "partner-quote-intake-step", attr_name="id")
+                if property_id.lower() == "gainhelm" and q_spans:
+                    q_replaced = False
+                    for qs, qe in reversed(q_spans):
+                        if has_gainhelm_cross_framework_leak(updated[qs:qe], slug):
+                            updated = updated[:qs] + quote_intake_html.strip() + updated[qe:]
+                            q_replaced = True
+                    if q_replaced:
+                        repaired.append("partner_quote_intake")
+                elif "Tier)</h3>" in updated:
+                    updated = re.sub(
+                        r'(<div class="partner-quote-header">[\s\S]{0,300}?)\s+Tier\)</h3>',
+                        r"\1 Threshold)</h3>",
+                        updated,
+                    )
+                    repaired.append("partner_quote_intake")
             elif not quote_intake_html and 'id="partner-quote-intake-step"' in updated:
                 updated = re.sub(
                     r'\s*<div id="partner-quote-intake-step"[\s\S]*?</form>\s*</div>',
@@ -11267,11 +11632,33 @@ class RetroReflectionEngine:
         except Exception:
             pass
         try:
-            from pseofactory.affiliates import normalize_html_callout_message_match
+            from pseofactory.affiliates import (
+                has_gainhelm_cross_framework_leak,
+                normalize_html_callout_message_match,
+            )
             norm_html = normalize_html_callout_message_match(updated, property_id=property_id)
             if norm_html != updated:
                 updated = norm_html
                 repaired.append("callout_message_match")
+            if property_id.lower() == "gainhelm":
+                from pseofactory.visual_primitives import _iter_balanced_tag_spans
+                from pseofactory.porcelain_shell import (
+                    get_porcelain_tenant_profile,
+                    render_porcelain_compliance_strip,
+                )
+                cs_spans = _iter_balanced_tag_spans(updated, "compliance-strip", attr_name="class")
+                if cs_spans:
+                    fresh_cs = render_porcelain_compliance_strip(
+                        get_porcelain_tenant_profile("gainhelm"),
+                        rel_path=f"tools/{slug}/index.html",
+                    ).strip()
+                    cs_changed = False
+                    for cs_s, cs_e in reversed(cs_spans):
+                        if has_gainhelm_cross_framework_leak(updated[cs_s:cs_e], slug):
+                            updated = updated[:cs_s] + fresh_cs + updated[cs_e:]
+                            cs_changed = True
+                    if cs_changed:
+                        repaired.append("compliance_strip_framework_isolation")
         except Exception:
             pass
 
@@ -11290,6 +11677,11 @@ class RetroReflectionEngine:
         if "deterministic_visual_primitives" in missing or vp_repaired or geo_norm_changed:
             if "deterministic_visual_primitives" not in repaired:
                 repaired.append("deterministic_visual_primitives")
+
+        if property_id.lower() == "gainhelm" and "gainhelm_framework_isolation" in missing:
+            updated, ws_iso_changed = cls._heal_gainhelm_workspace_framework_isolation(updated, slug)
+            if (ws_iso_changed or updated != html_content) and "gainhelm_framework_isolation" not in repaired:
+                repaired.append("gainhelm_framework_isolation")
 
         if cache_key is not None:
             if len(cls._RETROFIT_HTML_CACHE) > 512:
@@ -13893,6 +14285,14 @@ class RetroReflectionEngine:
             heal_legacy=True,
             canonical_base=canonical_base,
         )
+        from pseofactory.affiliates import (
+            load_persisted_gsc_placement_metrics_by_slug,
+            load_property_partner_engagement_metrics,
+            normalize_html_callout_message_match,
+            reposition_affiliate_placements_from_gsc_signals,
+        )
+        estate_eng_metrics = load_property_partner_engagement_metrics(agy_dir, property_id)
+        persisted_gsc_by_slug = load_persisted_gsc_placement_metrics_by_slug(agy_dir, property_id)
 
         for js_cand in (
             d / "static" / "js" / "app.js",
@@ -14293,7 +14693,7 @@ class RetroReflectionEngine:
             if rel in active_overlays:
                 _, ov_spec = active_overlays[rel]
                 try:
-                    ov_html = inject_overlay_into_html(working_content, ov_spec)
+                    ov_html = normalize_statutory_acronym_casing(inject_overlay_into_html(working_content, ov_spec))
                     if ov_html != working_content:
                         working_content = ov_html
                         overlay_injected = True
@@ -14354,9 +14754,24 @@ class RetroReflectionEngine:
                     stamped_any = True
                 if stamped_any and "gsc_lifecycle_telemetry_stamp" not in repaired:
                     repaired.append("gsc_lifecycle_telemetry_stamp")
+            gh_needs_heal = (
+                property_id.lower() == "gainhelm"
+                and cls._gainhelm_needs_framework_isolation_heal(updated_html, slug)
+            )
             if (
                 "/r/" in updated_html
                 or "overlay-partner-offer" in updated_html
+                or overlay_injected
+                or gh_needs_heal
+                or (
+                    property_id.lower() == "gainhelm"
+                    and (
+                        "refinance-partner-section" in updated_html
+                        or "affiliates-section" in updated_html
+                        or "affiliate-section" in updated_html
+                        or "partners-section" in updated_html
+                    )
+                )
                 or (
                     property_id.lower() == "lienbond"
                     and (
@@ -14367,23 +14782,37 @@ class RetroReflectionEngine:
                 )
             ):
                 try:
-                    from pseofactory.affiliates import normalize_html_callout_message_match
                     norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)
-                    if norm_tool_html != updated_html:
-                        norm_tool_html, _ = normalize_html_visual_primitives(norm_tool_html)
-                        updated_html = norm_tool_html
-                        if "callout_message_match" not in repaired:
-                            repaired.append("callout_message_match")
+                    callout_changed = norm_tool_html != updated_html
+                    post_callout_heal = (
+                        property_id.lower() == "gainhelm"
+                        and cls._gainhelm_needs_framework_isolation_heal(norm_tool_html, slug)
+                    )
+                    if callout_changed or overlay_injected or gh_needs_heal or post_callout_heal:
+                        norm_tool_html = normalize_statutory_acronym_casing(norm_tool_html)
+                        norm_tool_html, vp_rep = normalize_html_visual_primitives(norm_tool_html)
+                        if norm_tool_html != updated_html:
+                            updated_html = norm_tool_html
+                            if callout_changed and "callout_message_match" not in repaired:
+                                repaired.append("callout_message_match")
+                            if vp_rep and "deterministic_visual_primitives" not in repaired:
+                                repaired.append("deterministic_visual_primitives")
                 except Exception:
                     pass
-            if rel.startswith("tools/") and rel.endswith("/index.html") and rel.count("/") == 2:
+            if rel.startswith("tools/") and rel.endswith("/index.html") and rel.count("/") >= 2:
                 try:
-                    from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
-                    tool_slug = rel.split("/")[1]
+                    tool_slug = "/".join(rel.split("/")[1:-1])
+                    slug_gsc_metrics = (
+                        persisted_gsc_by_slug.get(tool_slug.lower())
+                        or persisted_gsc_by_slug.get(tool_slug.lower().replace("/", "-"))
+                    )
                     repositioned_html, rep_report = reposition_affiliate_placements_from_gsc_signals(
                         updated_html,
                         property_id=property_id,
                         slug=tool_slug,
+                        query=str((slug_gsc_metrics or {}).get("query") or ""),
+                        gsc_metrics=slug_gsc_metrics,
+                        engagement_metrics=estate_eng_metrics,
                     )
                     if repositioned_html != updated_html:
                         updated_html = repositioned_html

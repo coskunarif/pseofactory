@@ -16,9 +16,12 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
 from dataclasses import dataclass, asdict
+import html as html_lib
+import json
 import os
+from pathlib import Path
 import re
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Dict, Any, List, Optional, Sequence, Set, Tuple
 import urllib.parse
 
 from pseofactory.contracts import assert_no_forbidden_dashes
@@ -1843,6 +1846,1008 @@ GAINHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
     ),
 }
 
+
+def classify_gainhelm_framework(slug: str = "", vertical: str = "") -> str:
+    """
+    Classifies a GainHelm calculator slug or vertical into its canonical statutory framework key
+    so workpapers, disclosures, trend series, and partner copy never leak SOC 2 / CMMC / HIPAA
+    text onto EU DORA, EU AI Act, SEC Form 8-K, or other specialized framework calculators.
+    Zero em-dashes. Zero en-dashes.
+    """
+    combined = (
+        f"{slug or ''} {vertical or ''}".strip().lower().replace("_", "-")
+    )
+    if any(k in combined for k in ("dora", "ict-third-party", "2022/2554", "2022-2554")):
+        return "dora"
+    if any(k in combined for k in ("eu-ai-act", "eu ai act", "2024/1689", "2024-1689", "article43", "conformity-assessment")):
+        return "eu_ai_act"
+    if any(k in combined for k in ("sec-cybersecurity", "8k-item-105", "item-105", "229.106", "materiality-8k", "sec-8k", "sec-cyber-disclosure")):
+        return "sec_8k"
+    if "gdpr" in combined:
+        return "gdpr"
+    if any(k in combined for k in ("ccpa", "cpra")):
+        return "ccpa"
+    if any(k in combined for k in ("nis2", "nis-2")):
+        return "nis2"
+    if any(k in combined for k in ("hipaa", "hitech")):
+        return "hipaa"
+    if any(k in combined for k in ("iso-27001", "iso27001", "27001")):
+        return "iso_27001"
+    if any(k in combined for k in ("pci-dss", "pci-", "qsa")):
+        return "pci_dss"
+    if "hitrust" in combined:
+        return "hitrust"
+    if any(k in combined for k in ("fedramp", "stateramp", "txramp")):
+        return "fedramp"
+    if any(k in combined for k in ("penetration-test", "pentest", "penetration")):
+        return "pentest"
+    if any(k in combined for k in ("cyber-liability", "cyber-insurance", "breach-exposure")):
+        return "cyber_insurance"
+    if any(k in combined for k in ("cmmc", "sprs", "800-171", "federal-defense-grc")):
+        return "cmmc"
+    return "soc2"
+
+
+GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
+    "dora": {
+        "framework_key": "dora",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm DORA ICT Third-Party Risk & TLPT Compliance Workpaper Suite",
+        "statutory_authority": "Regulation (EU) 2022/2554 (DORA Articles 5-30), Commission Delegated Regulation (EU) 2024/1772 & EBA/ESMA/EIOPA RTS",
+        "economic_dataset": "ESA DORA Joint Technical Standards & ENISA ICT Resilience Cost Benchmarks",
+        "regulator_name": "European Supervisory Authorities (EBA, ESMA, EIOPA)",
+        "default_sku_slug": "dora-ict-third-party-risk-compliance-cost-calculator",
+        "vertical": "dora_eu_ict_resilience",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/solutions/dora",
+        "partner_rep_desk": "Vanta EU DORA & Enterprise GRC Automation Desk",
+        "deliverables": [
+            "JSON + CSV DORA ICT risk governance, Register of Information & Article 28 third-party matrix",
+            "Threat-Led Penetration Testing (TLPT Article 26) scoping schedule & Article 19 incident classification log",
+            "Statutory penalty model (Article 50/51 daily periodic fines up to 1% average daily worldwide turnover)",
+            "Controller and financial entity board approval workbook for multi-year ICT vendor resilience budgets",
+        ],
+        "preferred_trend_ids": (
+            "eu_dora_tlpt_redteam_benchmark",
+            "eu_dora_ict_vendor_audit_unit_cost",
+            "bls_soc_15_1212_infosec_wage",
+            "iso_27006_stage2_auditor_days",
+        ),
+        "compliance_sentence": (
+            "EU DORA Articles 26-27 Threat-Led Penetration Testing (TLPT) must be executed by accredited independent "
+            "testers or qualifying internal red teams under designated Competent Authority oversight."
+        ),
+        "statutory_disclaimer": (
+            "EU DORA Compliance Disclaimer: ICT risk, TLPT scoping, and Register of Information cost figures are "
+            "deterministic computational models and do not constitute EU legal counsel, Competent Authority clearance, "
+            "or a certified DORA TLPT attestation."
+        ),
+        "quick_unlock_heading": "Get Your DORA ICT Risk, TLPT &amp; Register of Information Worksheet",
+        "quick_unlock_summary": (
+            "Unlocks DORA Article 28 third-party contract checklist, TLPT scoping estimator, "
+            "and board budget approval schedule."
+        ),
+        "quick_btn_text": "Download DORA Compliance Worksheet",
+        "quote_heading_prefix": "DORA ICT Resilience &amp; Enterprise GRC Quote Intake",
+        "quote_sub_template": (
+            "DORA readiness budgets at or above {threshold_fmt} qualify for direct GRC automation platform quotes, "
+            "TLPT / red-team scoping, and Article 28 third-party risk monitoring matching. "
+            "Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": (
+            "matched GRC automation, ICT resilience, penetration testing, or cyber risk partners "
+            "(including Vanta, Drata, Sprinto, Thoropass, Coalition, and Cobalt)"
+        ),
+        "quote_btn_text": "Request Matched DORA GRC Quote",
+        "forbidden_leak_tokens": ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa"),
+    },
+    "eu_ai_act": {
+        "framework_key": "eu_ai_act",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm EU AI Act High-Risk Conformity & Article 99 Exposure Workpaper Suite",
+        "statutory_authority": "Regulation (EU) 2024/1689 (EU AI Act Annex III, Articles 9-17, 43 & 99) & ISO/IEC 42001:2023",
+        "economic_dataset": "European AI Office Implementing Rules & Notified Body Conformity Benchmarks",
+        "regulator_name": "European AI Office and National Market Surveillance Authorities",
+        "default_sku_slug": "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
+        "vertical": "eu_ai_act_conformity",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/solutions/ai-governance",
+        "partner_rep_desk": "Vanta AI Governance & EU AI Act Readiness Desk",
+        "deliverables": [
+            "JSON + CSV Annex III high-risk AI system classification & Article 11 technical documentation checklist",
+            "Article 43 Notified Body vs internal Annex VI conformity assessment & Article 17 QMS cost schedule",
+            "Statutory penalty model (Article 99 ceilings: EUR 35M / 7% prohibited, EUR 15M / 3% high-risk turnover)",
+            "Fundamental Rights Impact Assessment (Article 27) & post-market monitoring board budget workbook",
+        ],
+        "preferred_trend_ids": (
+            "eu_ai_act_art43_notified_body_fee",
+            "eu_ai_act_art99_high_risk_cap",
+            "bls_soc_15_1212_infosec_wage",
+            "iso_27006_stage2_auditor_days",
+        ),
+        "compliance_sentence": (
+            "Formal EU AI Act third-party conformity assessments under Article 43 and Annex VII require a designated "
+            "EU Notified Body where mandated or where harmonised standards are not applied in full."
+        ),
+        "statutory_disclaimer": (
+            "EU AI Act Compliance Disclaimer: High-risk conformity assessment fees, QMS scoping, and Article 99 "
+            "penalty exposure figures are deterministic computational models and do not constitute EU regulatory counsel "
+            "or a Notified Body EU-type examination certificate."
+        ),
+        "quick_unlock_heading": "Get Your EU AI Act High-Risk Conformity &amp; Annex IV Worksheet",
+        "quick_unlock_summary": (
+            "Unlocks Annex III system inventory checklist, Article 43 Notified Body readiness schedule, "
+            "and board budget model."
+        ),
+        "quick_btn_text": "Download EU AI Act Worksheet",
+        "quote_heading_prefix": "EU AI Act Governance &amp; Conformity Quote Intake",
+        "quote_sub_template": (
+            "AI governance budgets at or above {threshold_fmt} qualify for direct GRC platform fee quotes, "
+            "ISO/IEC 42001 &amp; Annex IV documentation workflow matching, and adversarial testing scoping. "
+            "Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": (
+            "matched AI governance, GRC automation, adversarial red-teaming, or cyber risk partners "
+            "(including Vanta, Drata, Sprinto, Thoropass, Coalition, and Cobalt)"
+        ),
+        "quote_btn_text": "Request Matched AI Governance Quote",
+        "forbidden_leak_tokens": ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa"),
+    },
+    "sec_8k": {
+        "framework_key": "sec_8k",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm SEC Form 8-K Item 1.05 & Reg S-K Item 106 Materiality Workpaper Suite",
+        "statutory_authority": "17 CFR 229.106 (Reg S-K Item 106), 17 CFR 249.308 (Form 8-K Item 1.05) & SEC Release 33-11216",
+        "economic_dataset": "SEC EDGAR Item 1.05 Filing Benchmarks, Legal Counsel & DFIR Retainer Surveys",
+        "regulator_name": "U.S. Securities and Exchange Commission (SEC)",
+        "default_sku_slug": "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",
+        "vertical": "sec_cyber_disclosure",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/platform",
+        "partner_rep_desk": "Vanta SEC Reg S-K Item 106 & Cyber Governance Desk",
+        "deliverables": [
+            "JSON + CSV 4-business-day Form 8-K Item 1.05 materiality determination & Attorney General delay log",
+            "Quantitative & qualitative materiality rubric, DFIR triage SLA tracker, and disclosure committee template",
+            "Reg S-K Item 106(b)-(c) annual Form 10-K board oversight & CISO governance mapping schedule",
+            "External securities counsel, DFIR retainer, and cyber insurance SIR board budget model",
+        ],
+        "preferred_trend_ids": (
+            "sec_8k_item105_counsel_dfir_retainer",
+            "sec_reg_sk_106_governance_cost",
+            "bls_soc_15_1212_infosec_wage",
+            "iso_27006_stage2_auditor_days",
+        ),
+        "compliance_sentence": (
+            "Formal SEC Form 8-K Item 1.05 materiality determinations and Reg S-K Item 106 disclosures require "
+            "qualified securities legal counsel and executive disclosure committee sign-off."
+        ),
+        "statutory_disclaimer": (
+            "SEC Cybersecurity Disclosure Disclaimer: Form 8-K Item 1.05 timing, materiality scoring, and counsel/DFIR "
+            "cost estimates are deterministic computational models and do not constitute federal securities legal advice, "
+            "an official SEC determination, or forensic incident clearance."
+        ),
+        "quick_unlock_heading": "Get Your SEC Form 8-K Item 1.05 &amp; Reg S-K 106 Worksheet",
+        "quick_unlock_summary": (
+            "Unlocks 4-business-day materiality decision matrix, Item 106 board governance checklist, "
+            "and disclosure budget schedule."
+        ),
+        "quick_btn_text": "Download SEC 8-K Worksheet",
+        "quote_heading_prefix": "SEC Cyber Disclosure &amp; Governance Quote Intake",
+        "quote_sub_template": (
+            "SEC cyber governance and incident readiness budgets at or above {threshold_fmt} qualify for direct "
+            "GRC monitoring fee quotes, disclosure readiness automation, and DFIR / cyber insurance matching. "
+            "Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": (
+            "matched GRC automation, cyber risk, penetration testing, or disclosure readiness partners "
+            "(including Vanta, Drata, Sprinto, Thoropass, Coalition, and Cobalt)"
+        ),
+        "quote_btn_text": "Request Matched SEC Readiness Quote",
+        "forbidden_leak_tokens": ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa"),
+    },
+    "gdpr": {
+        "framework_key": "gdpr",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm GDPR Article 83 Privacy Governance & DPIA Workpaper Suite",
+        "statutory_authority": "Regulation (EU) 2016/679 (GDPR Articles 30, 32, 35 & 83) & EDPB Fining Guidelines 04/2022",
+        "economic_dataset": "EDPB Supervisory Enforcement Benchmarks & EU DPO Cost Surveys",
+        "regulator_name": "European Data Protection Board (EDPB) & National DPAs",
+        "default_sku_slug": "gdpr-data-privacy-compliance-and-article-83-fine-exposure-calculator",
+        "vertical": "eu_gdpr_privacy",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/products/gdpr",
+        "partner_rep_desk": "Vanta GDPR & EU Privacy Automation Desk",
+        "deliverables": [
+            "JSON + CSV Article 30 ROPA, Article 35 DPIA, and Standard Contractual Clauses scoping checklist",
+            "Article 83 Tier 1 (EUR 10M / 2%) & Tier 2 (EUR 20M / 4%) supervisory exposure matrix",
+            "72-hour Article 33 personal data breach notification runbook and DPO cost schedule",
+            "Board privacy governance budget approval workbook",
+        ],
+        "preferred_trend_ids": ("iso_27006_stage2_auditor_days", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal EU GDPR compliance determinations and supervisory proceedings are governed by national Data Protection "
+            "Authorities and EDPB consistency mechanisms."
+        ),
+        "statutory_disclaimer": (
+            "EU GDPR Compliance Disclaimer: DPIA scoping and Article 83 administrative fine exposure models are "
+            "deterministic computational estimates and do not constitute EU privacy legal counsel."
+        ),
+        "quick_unlock_heading": "Get Your GDPR ROPA, DPIA &amp; Article 83 Worksheet",
+        "quick_unlock_summary": "Unlocks Article 30 ROPA checklist, 72-hour breach log, and privacy governance budget model.",
+        "quick_btn_text": "Download GDPR Privacy Worksheet",
+        "quote_heading_prefix": "GDPR Privacy Governance &amp; GRC Quote Intake",
+        "quote_sub_template": (
+            "GDPR privacy budgets at or above {threshold_fmt} qualify for direct GRC privacy automation quotes "
+            "and cross-border transfer scoping. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched GRC automation, privacy governance, and security partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched GDPR GRC Quote",
+        "forbidden_leak_tokens": ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa"),
+    },
+    "ccpa": {
+        "framework_key": "ccpa",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm CCPA/CPRA Privacy Compliance & Breach Liability Workpaper Suite",
+        "statutory_authority": "Cal. Civ. Code 1798.100 et seq. (CCPA/CPRA) & 11 CCR 7000 et seq.",
+        "economic_dataset": "CPPA Enforcement Benchmarks & California Privacy Compliance Surveys",
+        "regulator_name": "California Privacy Protection Agency (CPPA) & CA Attorney General",
+        "default_sku_slug": "ccpa-cpra-california-privacy-compliance-and-breach-liability-calculator",
+        "vertical": "ccpa_cpra_privacy",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/platform",
+        "partner_rep_desk": "Vanta CCPA/CPRA & Consumer Privacy Automation Desk",
+        "deliverables": [
+            "JSON + CSV DSAR fulfillment SLA, opt-out preference signal & vendor DPA checklist",
+            "Statutory administrative fine ($2,663-$7,988/violation) & breach statutory damages ($100-$750/consumer) schedule",
+            "CPPA annual cybersecurity audit and risk assessment scoping log",
+            "Executive privacy operations budget approval workbook",
+        ],
+        "preferred_trend_ids": ("bls_soc_15_1212_infosec_wage", "iso_27006_stage2_auditor_days"),
+        "compliance_sentence": (
+            "Formal CCPA/CPRA cybersecurity audit and risk assessment obligations are subject to CPPA regulations "
+            "and qualified privacy legal review."
+        ),
+        "statutory_disclaimer": (
+            "CCPA/CPRA Compliance Disclaimer: Consumer privacy compliance and statutory breach exposure estimates are "
+            "deterministic computational models and do not constitute California legal advice."
+        ),
+        "quick_unlock_heading": "Get Your CCPA/CPRA Privacy &amp; Breach Scoping Worksheet",
+        "quick_unlock_summary": "Unlocks DSAR workflow checklist, statutory penalty estimator, and privacy budget model.",
+        "quick_btn_text": "Download CCPA/CPRA Worksheet",
+        "quote_heading_prefix": "CCPA/CPRA Privacy &amp; GRC Quote Intake",
+        "quote_sub_template": (
+            "Privacy readiness budgets at or above {threshold_fmt} qualify for direct GRC automation quotes "
+            "and cybersecurity audit matching. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched GRC automation, privacy, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched Privacy Quote",
+        "forbidden_leak_tokens": ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa"),
+    },
+    "nis2": {
+        "framework_key": "nis2",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm EU NIS2 Directive Article 21 Compliance Workpaper Suite",
+        "statutory_authority": "Directive (EU) 2022/2555 (NIS2 Articles 20, 21, 23 & 34) & National Member State Transpositions",
+        "economic_dataset": "ENISA NIS2 Investment Surveys & National CSIRT Compliance Benchmarks",
+        "regulator_name": "ENISA & EU Member State Competent Authorities",
+        "default_sku_slug": "nis2-directive-cybersecurity-compliance-and-fine-calculator",
+        "vertical": "eu_nis2_resilience",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/platform",
+        "partner_rep_desk": "Vanta EU NIS2 & Critical Infrastructure GRC Desk",
+        "deliverables": [
+            "JSON + CSV Article 21 10-measure security baseline & Article 23 24h/72h CSIRT reporting runbook",
+            "Essential vs Important entity Article 34 penalty exposure model (EUR 10M / 2% or EUR 7M / 1.4%)",
+            "Supply-chain risk & Article 20 management body accountability checklist",
+            "Board cybersecurity budget approval workbook",
+        ],
+        "preferred_trend_ids": ("iso_27006_stage2_auditor_days", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "EU NIS2 supervisory reviews and incident reporting obligations are enforced by Member State Competent "
+            "Authorities and national CSIRTs."
+        ),
+        "statutory_disclaimer": (
+            "EU NIS2 Compliance Disclaimer: Article 21 control implementation costs and Article 34 penalty exposure figures "
+            "are deterministic computational models and do not constitute EU Member State legal advice."
+        ),
+        "quick_unlock_heading": "Get Your EU NIS2 Article 21 Compliance Worksheet",
+        "quick_unlock_summary": "Unlocks Article 21 control matrix, 24h/72h CSIRT reporting log, and budget model.",
+        "quick_btn_text": "Download NIS2 Compliance Worksheet",
+        "quote_heading_prefix": "EU NIS2 Governance &amp; GRC Quote Intake",
+        "quote_sub_template": (
+            "NIS2 readiness budgets at or above {threshold_fmt} qualify for direct GRC automation quotes "
+            "and supply-chain security scoping. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched GRC automation, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched NIS2 Quote",
+        "forbidden_leak_tokens": ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa"),
+    },
+    "iso_27001": {
+        "framework_key": "iso_27001",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm ISO/IEC 27001:2022 Certification & Stage 1/2 Audit Workpaper Kit",
+        "statutory_authority": "ISO/IEC 27001:2022, ISO/IEC 27006-1:2024 & IAF MD 5 Auditor-Day Rules",
+        "economic_dataset": "IAF MD 5 Certification Body Audit-Day Tables & ANAB Accredited Registrar Surveys",
+        "regulator_name": "ANAB / UKAS Accredited ISO/IEC 27001 Certification Bodies",
+        "default_sku_slug": "iso-27001-certification-cost-calculator",
+        "vertical": "iso27001_isms",
+        "primary_partner_key": "thoropass_audit",
+        "vanta_url": "https://www.vanta.com/products/iso-27001",
+        "partner_rep_desk": "Thoropass & Vanta ISO/IEC 27001:2022 ISMS Desk",
+        "deliverables": [
+            "JSON + CSV ISO/IEC 27001:2022 Annex A 93-control Statement of Applicability (SoA) template",
+            "ISO/IEC 27006-1:2024 Stage 1, Stage 2, and Year 2/3 surveillance audit-day calculator schedule",
+            "ISMS internal audit & management review board sign-off workbook",
+            "Risk treatment plan (RTP) and registrar quote comparison log",
+        ],
+        "preferred_trend_ids": ("iso_27006_stage2_auditor_days", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal ISO/IEC 27001:2022 certifications require Stage 1 and Stage 2 conformity audits by an accredited "
+            "Certification Body (such as ANAB or UKAS)."
+        ),
+        "statutory_disclaimer": (
+            "ISO 27001 Compliance Disclaimer: Stage 1/Stage 2 auditor-day and surveillance cost figures are "
+            "deterministic computational models and do not constitute an accredited Certification Body audit certificate."
+        ),
+        "quick_unlock_heading": "Get Your ISO/IEC 27001:2022 SoA &amp; Audit-Day Worksheet",
+        "quick_unlock_summary": "Unlocks Annex A 93-control SoA checklist, Stage 1/Stage 2 auditor-day estimator, and ISMS budget model.",
+        "quick_btn_text": "Download ISO 27001 Worksheet",
+        "quote_heading_prefix": "ISO/IEC 27001:2022 ISMS &amp; GRC Quote Intake",
+        "quote_sub_template": (
+            "ISO 27001 certification budgets at or above {threshold_fmt} qualify for direct GRC platform fee quotes "
+            "and accredited Certification Body scheduling. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched ISMS GRC automation, certification body, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched ISO 27001 Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "hipaa", "aicpa"),
+    },
+    "hipaa": {
+        "framework_key": "hipaa",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm HIPAA Penalty Tier, Security Rule & Breach Cost Workpaper Kit",
+        "statutory_authority": "45 CFR 160.404 (HIPAA CMP Tiers 1-4), 45 CFR Part 164 & 45 CFR 102.3 Inflation Index",
+        "economic_dataset": "HHS OCR Civil Monetary Penalty Schedules & Healthcare Breach Cost Benchmarks",
+        "regulator_name": "HHS Office for Civil Rights (OCR)",
+        "default_sku_slug": "hipaa-violation-penalty-breach-cost-calculator",
+        "vertical": "hipaa_healthcare_security",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/products/hipaa",
+        "partner_rep_desk": "Vanta HIPAA & Healthcare Security Compliance Desk",
+        "deliverables": [
+            "JSON + CSV 45 CFR 164.308-316 Administrative, Physical & Technical Safeguards readiness matrix",
+            "HHS OCR Tier 1-4 statutory CMP inflation-indexed exposure & corrective action plan (CAP) log",
+            "60-day HIPAA Breach Notification Rule triage & Business Associate Agreement (BAA) checklist",
+            "Healthcare compliance board budget approval workbook",
+        ],
+        "preferred_trend_ids": ("hhs_hipaa_tier4_annual_cap", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal HIPAA Security Rule compliance determinations and enforcement resolutions are administered by the "
+            "HHS Office for Civil Rights (OCR) and qualified healthcare privacy counsel."
+        ),
+        "statutory_disclaimer": (
+            "HIPAA Compliance Disclaimer: Statutory CMP tier exposure and breach remediation figures are deterministic "
+            "computational models and do not constitute legal advice or an HHS OCR compliance clearance."
+        ),
+        "quick_unlock_heading": "Get Your HIPAA Safeguards, SRA &amp; Penalty Worksheet",
+        "quick_unlock_summary": "Unlocks HIPAA Security Risk Analysis (SRA) checklist, BAA inventory, and remediation budget schedule.",
+        "quick_btn_text": "Download HIPAA Compliance Worksheet",
+        "quote_heading_prefix": "HIPAA Security &amp; GRC Readiness Quote Intake",
+        "quote_sub_template": (
+            "HIPAA compliance budgets at or above {threshold_fmt} qualify for direct GRC platform fee quotes "
+            "and Healthcare Security Risk Analysis matching. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched healthcare GRC automation, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched HIPAA Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "aicpa", "soc 2", "soc2"),
+    },
+    "pci_dss": {
+        "framework_key": "pci_dss",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm PCI DSS 4.0.1 ROC / SAQ & QSA Audit Workpaper Kit",
+        "statutory_authority": "PCI Security Standards Council PCI DSS v4.0.1 (Requirements 1-12, Req 11.4 & 12.10)",
+        "economic_dataset": "PCI SSC QSA Assessment Benchmarks & Card-Brand Acquirer Fee Schedules",
+        "regulator_name": "PCI Security Standards Council (PCI SSC) & Qualified Security Assessors (QSA)",
+        "default_sku_slug": "pci-dss-4-0-compliance-cost-calculator",
+        "vertical": "pci_dss_payments",
+        "primary_partner_key": "cobalt_pentest",
+        "vanta_url": "https://www.vanta.com/products/pci-dss",
+        "partner_rep_desk": "Cobalt & Vanta PCI DSS v4.0.1 Readiness Desk",
+        "deliverables": [
+            "JSON + CSV PCI DSS v4.0.1 Requirements 1-12 scoping & CDE network segmentation checklist",
+            "QSA Report on Compliance (ROC) vs SAQ A/D validation cost & ASV quarterly scan schedule",
+            "Requirement 11.3/11.4 segmentation & penetration testing scoping workbook",
+            "Card-brand non-compliance fine avoidance & payment compliance budget workbook",
+        ],
+        "preferred_trend_ids": ("pci_dss_qsa_roc_benchmark", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal PCI DSS 4.0.1 Level 1 Report on Compliance (ROC) validations require an independent PCI SSC "
+            "Qualified Security Assessor (QSA) and quarterly Approved Scanning Vendor (ASV) scans."
+        ),
+        "statutory_disclaimer": (
+            "PCI DSS Compliance Disclaimer: ROC, SAQ, and segmentation cost figures are deterministic computational "
+            "models and do not constitute an official QSA Attestation of Compliance (AOC)."
+        ),
+        "quick_unlock_heading": "Get Your PCI DSS 4.0.1 CDE Scope &amp; QSA Worksheet",
+        "quick_unlock_summary": "Unlocks Requirements 1-12 control checklist, CDE segmentation estimator, and QSA budget schedule.",
+        "quick_btn_text": "Download PCI DSS 4.0.1 Worksheet",
+        "quote_heading_prefix": "PCI DSS 4.0.1 &amp; QSA Readiness Quote Intake",
+        "quote_sub_template": (
+            "PCI DSS readiness budgets at or above {threshold_fmt} qualify for direct GRC automation quotes, "
+            "QSA scoping, and Requirement 11.4 penetration testing matching. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched PCI GRC automation, QSA audit, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched PCI DSS Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "hipaa"),
+    },
+    "hitrust": {
+        "framework_key": "hitrust",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm HITRUST CSF e1 / i1 / r2 Authorized Assessor Workpaper Kit",
+        "statutory_authority": "HITRUST CSF v11 (e1, i1, and r2 Validated Assessment & MyCSF Licensing Framework)",
+        "economic_dataset": "HITRUST Authorized External Assessor Pricing & MyCSF Subscription Benchmarks",
+        "regulator_name": "HITRUST Alliance & Authorized External Assessors",
+        "default_sku_slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+        "vertical": "hitrust_csf_assurance",
+        "primary_partner_key": "thoropass_audit",
+        "vanta_url": "https://www.vanta.com/platform",
+        "partner_rep_desk": "Thoropass & Vanta HITRUST CSF e1/i1/r2 Assessment Desk",
+        "deliverables": [
+            "JSON + CSV HITRUST CSF v11 e1/i1/r2 control inheritance & MyCSF domain scoping schedule",
+            "Authorized External Assessor fieldwork, QA review fee, and interim assessment budget model",
+            "Readiness gap remediation hours & policy maturity scoring tracker",
+            "Enterprise customer security assurance board budget workbook",
+        ],
+        "preferred_trend_ids": ("iso_27006_stage2_auditor_days", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal HITRUST CSF e1, i1, and r2 Validated Assessments require a HITRUST Authorized External Assessor "
+            "and HITRUST Alliance MyCSF quality assurance sign-off."
+        ),
+        "statutory_disclaimer": (
+            "HITRUST CSF Disclaimer: Assessment tier, MyCSF licensing, and assessor effort figures are deterministic "
+            "computational models and do not constitute an official HITRUST Validated Report."
+        ),
+        "quick_unlock_heading": "Get Your HITRUST e1 / i1 / r2 Scoping &amp; Budget Worksheet",
+        "quick_unlock_summary": "Unlocks e1 vs i1 vs r2 tier comparison, MyCSF licensing schedule, and assessor effort model.",
+        "quick_btn_text": "Download HITRUST Worksheet",
+        "quote_heading_prefix": "HITRUST CSF &amp; Enterprise GRC Quote Intake",
+        "quote_sub_template": (
+            "HITRUST readiness budgets at or above {threshold_fmt} qualify for direct GRC platform fee quotes "
+            "and Authorized External Assessor scoping. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched GRC automation, HITRUST assessor, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched HITRUST Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "aicpa"),
+    },
+    "cyber_insurance": {
+        "framework_key": "cyber_insurance",
+        "offer_sku": "gh_hipaa_iso27001_governance_kit",
+        "offer_price_usd": 49.0,
+        "offer_price_cents": 4900,
+        "offer_title": "GainHelm Cyber Liability Premium, SIR & Breach Exposure Workpaper Kit",
+        "statutory_authority": "NAIC Cyber Insurance Market Data, State Breach Notification Statutes & IBM/Ponemon Cost Factors",
+        "economic_dataset": "U.S. Cyber Insurance Rate-per-Million Underwriting & Breach Severity Benchmarks",
+        "regulator_name": "Cyber Underwriting Carriers & State Insurance Departments",
+        "default_sku_slug": "cyber-liability-insurance-breach-exposure-calculator",
+        "vertical": "cyber_liability_underwriting",
+        "primary_partner_key": "coalition_cyber_insurance",
+        "vanta_url": "https://www.vanta.com/platform",
+        "partner_rep_desk": "Coalition Active Cyber Insurance & GRC Underwriting Desk",
+        "deliverables": [
+            "JSON + CSV cyber insurance limit sizing, retention (SIR) optimization & MFA/EDR discount matrix",
+            "First-party DFIR, business interruption & third-party regulatory defense coverage schedule",
+            "Underwriting security questionnaire readiness checklist (MFA, immutable backups, PAM)",
+            "CFO risk transfer vs retention board budget workbook",
+        ],
+        "preferred_trend_ids": ("bls_soc_15_1212_infosec_wage", "iso_27006_stage2_auditor_days"),
+        "compliance_sentence": (
+            "Formal cyber liability policy terms, limits, and active risk credits require underwriting binding with a "
+            "licensed surplus lines or admitted cyber insurance carrier."
+        ),
+        "statutory_disclaimer": (
+            "Cyber Insurance & Breach Exposure Disclaimer: Premium benchmarks and breach loss figures are deterministic "
+            "computational models and do not constitute an insurance binder, policy quote, or coverage guarantee."
+        ),
+        "quick_unlock_heading": "Get Your Cyber Liability Coverage &amp; Underwriting Worksheet",
+        "quick_unlock_summary": "Unlocks limit/SIR tradeoff matrix, underwriting security control checklist, and premium budget model.",
+        "quick_btn_text": "Download Cyber Insurance Worksheet",
+        "quote_heading_prefix": "Active Cyber Insurance &amp; Security GRC Quote Intake",
+        "quote_sub_template": (
+            "Cyber risk budgets at or above {threshold_fmt} qualify for direct active cyber insurance quotes "
+            "and underwriting security posture matching. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched active cyber insurance, GRC automation, and pentest partners (Coalition, Vanta, Drata, Sprinto, Thoropass, Cobalt)",
+        "quote_btn_text": "Request Matched Cyber Policy Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "aicpa"),
+    },
+    "fedramp": {
+        "framework_key": "fedramp",
+        "offer_sku": "gh_soc2_cmmc_audit_workpapers",
+        "offer_price_usd": 79.0,
+        "offer_price_cents": 7900,
+        "offer_title": "GainHelm FedRAMP Moderate / High & 3PAO Authorization Workpaper Suite",
+        "statutory_authority": "NIST SP 800-53 Rev 5, FedRAMP Rev 5 Baselines & OMB M-24-15 Authorization Policy",
+        "economic_dataset": "FedRAMP PMO 3PAO Assessment Benchmarks & ConMon Engineering Cost Surveys",
+        "regulator_name": "FedRAMP PMO & Accredited 3PAO Assessors",
+        "default_sku_slug": "fedramp-authorization-3pao-cost-calculator",
+        "vertical": "fedramp_3pao_ato",
+        "primary_partner_key": "drata_compliance",
+        "vanta_url": "https://www.vanta.com/solutions/fedramp",
+        "partner_rep_desk": "Drata FedRAMP & 3PAO ATO Readiness Desk",
+        "deliverables": [
+            "JSON + CSV NIST SP 800-53 Rev 5 SSP, SAP, SAR & POA&M boundary scoping workbook",
+            "3PAO Readiness Assessment Report (RAR), full security assessment & annual ConMon budget model",
+            "FIPS 140-3 validated cryptography & federal boundary isolation engineering hours estimator",
+            "Executive federal market entry & Agency ATO budget workbook",
+        ],
+        "preferred_trend_ids": ("fedramp_3pao_sar_benchmark", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal FedRAMP Authorizations to Operate (ATOs) require independent assessment by an accredited FedRAMP "
+            "Third Party Assessment Organization (3PAO) and federal agency sponsorship."
+        ),
+        "statutory_disclaimer": (
+            "FedRAMP ATO Disclaimer: 3PAO assessment fees, boundary engineering, and ConMon estimates are deterministic "
+            "computational models and do not constitute a FedRAMP PMO or agency Authorization to Operate."
+        ),
+        "quick_unlock_heading": "Get Your FedRAMP SSP, 3PAO &amp; ConMon Budget Worksheet",
+        "quick_unlock_summary": "Unlocks NIST 800-53 control boundary checklist, 3PAO SAR estimator, and ConMon budget model.",
+        "quick_btn_text": "Download FedRAMP ATO Worksheet",
+        "quote_heading_prefix": "FedRAMP ATO &amp; 3PAO GRC Readiness Quote Intake",
+        "quote_sub_template": (
+            "FedRAMP authorization budgets at or above {threshold_fmt} qualify for direct FedRAMP GRC automation quotes "
+            "and accredited 3PAO / advisory matching. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched federal GRC automation, 3PAO readiness, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched FedRAMP Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "hipaa", "soc 2", "soc2", "aicpa"),
+    },
+    "pentest": {
+        "framework_key": "pentest",
+        "offer_sku": "gh_soc2_cmmc_audit_workpapers",
+        "offer_price_usd": 79.0,
+        "offer_price_cents": 7900,
+        "offer_title": "GainHelm CREST/OSCP Penetration Testing Scoping & RoE Workpaper Suite",
+        "statutory_authority": "NIST SP 800-115, PTES Execution Standard, OWASP ASVS v4 & PCI Req 11.4",
+        "economic_dataset": "CREST / PtaaS Penetration Testing Day-Rate & Retest Benchmarks",
+        "regulator_name": "CREST / OSCP Accredited Penetration Testing Providers",
+        "default_sku_slug": "penetration-testing-scoping-cost-calculator",
+        "vertical": "offensive_security_pentest",
+        "primary_partner_key": "cobalt_pentest",
+        "vanta_url": "https://www.vanta.com/platform",
+        "partner_rep_desk": "Cobalt CREST & OSCP PtaaS Scoping Desk",
+        "deliverables": [
+            "JSON + CSV Rules of Engagement (RoE), web/API/cloud asset scoping & credentialed test matrix",
+            "Gray-box vs black-box tester-day rate estimator & free retest remediation schedule",
+            "CVSS v3.1 finding SLA triage & board assurance report summary template",
+            "Annual offensive security & continuous validation budget workbook",
+        ],
+        "preferred_trend_ids": ("bls_soc_15_1212_infosec_wage", "iso_27006_stage2_auditor_days"),
+        "compliance_sentence": (
+            "Formal compliance penetration test letters of attestation require execution by qualified CREST, OSCP, or "
+            "GPEN certified offensive security testers with documented retesting."
+        ),
+        "statutory_disclaimer": (
+            "Penetration Testing Scoping Disclaimer: Tester-day estimates and remediation timelines are deterministic "
+            "computational models and do not constitute an executive Letter of Attestation."
+        ),
+        "quick_unlock_heading": "Get Your Penetration Testing RoE &amp; Scoping Worksheet",
+        "quick_unlock_summary": "Unlocks web/API/cloud asset count estimator, RoE checklist, and PtaaS budget schedule.",
+        "quick_btn_text": "Download Pentest Scoping Worksheet",
+        "quote_heading_prefix": "Certified Penetration Testing &amp; GRC Quote Intake",
+        "quote_sub_template": (
+            "Security testing budgets at or above {threshold_fmt} qualify for direct PtaaS scoping quotes, "
+            "CREST/OSCP tester matching, and compliance workflow automation. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched PtaaS, GRC automation, and cyber risk partners (Cobalt, Vanta, Drata, Sprinto, Thoropass, Coalition)",
+        "quote_btn_text": "Request Matched Pentest Quote",
+        "forbidden_leak_tokens": ("cmmc", "c3pao", "hipaa", "aicpa"),
+    },
+    "cmmc": {
+        "framework_key": "cmmc",
+        "offer_sku": "gh_soc2_cmmc_audit_workpapers",
+        "offer_price_usd": 79.0,
+        "offer_price_cents": 7900,
+        "offer_title": "GainHelm CMMC 2.0 Level 2 & NIST SP 800-171 SPRS Audit Workpaper Suite",
+        "statutory_authority": "32 CFR Part 170 (CMMC 2.0), DFARS 252.204-7012/7021 & NIST SP 800-171 Rev 2",
+        "economic_dataset": "DoD CIO 32 CFR Part 170 Regulatory Impact Analysis & Cyber-AB C3PAO Benchmarks",
+        "regulator_name": "DoD CIO, Cyber-AB & Authorized C3PAO Assessors",
+        "default_sku_slug": "cmmc-2-0-compliance-cost-calculator",
+        "vertical": "cmmc_dod_defense",
+        "primary_partner_key": "drata_compliance",
+        "vanta_url": "https://www.vanta.com/solutions/cmmc",
+        "partner_rep_desk": "Drata CMMC 2.0 & C3PAO Readiness Desk",
+        "deliverables": [
+            "JSON + CSV NIST SP 800-171 Rev 2 110-practice SPRS (-203 to 110) scoring & POA&M template",
+            "Cyber-AB C3PAO triennial Level 2 assessment cost breakdown & FedRAMP Moderate enclave estimator",
+            "32 CFR Part 170 SSP maturity & 180-day conditional certification POA&M closeout log",
+            "Defense Industrial Base (DIB) executive CUI enclave budget workbook",
+        ],
+        "preferred_trend_ids": ("dod_cmmc_c3pao_assessment_base", "bls_soc_15_1212_infosec_wage"),
+        "compliance_sentence": (
+            "Formal CMMC Level 2 certifications under 32 CFR Part 170 require assessment by an accredited Cyber-AB "
+            "Certified Third-Party Assessment Organization (C3PAO)."
+        ),
+        "statutory_disclaimer": (
+            "CMMC 2.0 & NIST 800-171 Disclaimer: SPRS scores, enclave engineering, and C3PAO assessment estimates are "
+            "deterministic computational models and do not constitute an official DoD CMMC certificate or SPRS filing."
+        ),
+        "quick_unlock_heading": "Get Your CMMC 2.0 SPRS, SSP &amp; POA&amp;M Worksheet",
+        "quick_unlock_summary": "Unlocks 110-practice SPRS scoring checklist, CUI enclave estimator, and C3PAO budget schedule.",
+        "quick_btn_text": "Download CMMC / SPRS Worksheet",
+        "quote_heading_prefix": "CMMC 2.0 &amp; C3PAO Readiness Quote Intake",
+        "quote_sub_template": (
+            "Defense compliance budgets at or above {threshold_fmt} qualify for direct GRC automation quotes, "
+            "C3PAO assessor matching, and CUI boundary scoping. Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": "matched CMMC GRC automation, C3PAO readiness, pentest, and cyber risk partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt)",
+        "quote_btn_text": "Request Matched CMMC Quote",
+        "forbidden_leak_tokens": (),
+    },
+    "soc2": {
+        "framework_key": "soc2",
+        "offer_sku": "gh_soc2_cmmc_audit_workpapers",
+        "offer_price_usd": 79.0,
+        "offer_price_cents": 7900,
+        "offer_title": "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite",
+        "statutory_authority": "AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) & 32 CFR Part 170",
+        "economic_dataset": "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Benchmarks",
+        "regulator_name": "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
+        "default_sku_slug": "soc-2-audit-cost-calculator",
+        "vertical": "soc2_grc_automation",
+        "primary_partner_key": "vanta_security",
+        "vanta_url": "https://www.vanta.com/products/soc-2",
+        "partner_rep_desk": "Vanta Trust Management & SOC 2 Audit Desk",
+        "deliverables": [
+            "JSON + CSV Control Scoping Matrix (AICPA Trust Services Criteria, NIST 800-171 & ISO 27001 Annex A)",
+            "Auditor-Day Rate & Readiness Gap Worksheet (Type I vs Type II observation window sensitivity)",
+            "CISO & CFO Board Budget Approval Template with GRC automation ROI comparison",
+            "3-Year Audit, Penetration Testing & Compliance Staffing Total Cost of Ownership (TCO) Schedule",
+        ],
+        "preferred_trend_ids": (
+            "aicpa_soc2_cpa_day_rate",
+            "dod_cmmc_c3pao_assessment_base",
+            "hhs_hipaa_tier4_annual_cap",
+            "iso_27006_stage2_auditor_days",
+            "fred_cpilfesl_inflation",
+        ),
+        "compliance_sentence": (
+            "Formal SOC 2 attestations require an independent AICPA CPA firm, and CMMC Level 2 certifications require "
+            "an authorized C3PAO."
+        ),
+        "statutory_disclaimer": GAINHELM_DISCLOSURES["statutory_compliance_disclaimer"],
+        "quick_unlock_heading": "Get Your Auditor-Ready Control Scope, POA&amp;M &amp; Budget Worksheet",
+        "quick_unlock_summary": (
+            "Unlocks control-by-control evidence collection checklist, engineering remediation hour estimator, "
+            "and board budget approval schedule."
+        ),
+        "quick_btn_text": "Download Audit Scope &amp; Budget Worksheet",
+        "quote_heading_prefix": "Enterprise GRC Automation &amp; Audit Readiness Quote Intake",
+        "quote_sub_template": (
+            "Compliance and audit readiness budgets at or above {threshold_fmt} qualify for direct GRC automation "
+            "platform fee quotes, AICPA CPA / C3PAO assessor matching, and multi-framework control scoping. "
+            "Sub-threshold calculations stay 100% frictionless."
+        ),
+        "quote_consent_scope": (
+            "matched GRC automation, CPA audit, penetration testing, or cyber insurance partners "
+            "(including Vanta, Drata, Sprinto, Thoropass, Coalition, and Cobalt)"
+        ),
+        "quote_btn_text": "Request Matched GRC &amp; Audit Quote",
+        "forbidden_leak_tokens": (),
+    },
+}
+
+GAINHELM_STRICT_ISOLATED_FRAMEWORKS: Tuple[str, ...] = (
+    "dora",
+    "eu_ai_act",
+    "sec_8k",
+    "gdpr",
+    "ccpa",
+    "nis2",
+)
+for _gh_fw_k, _gh_fw_v in GAINHELM_FRAMEWORK_PROFILES.items():
+    _gh_fw_v["strict_isolated"] = _gh_fw_k in GAINHELM_STRICT_ISOLATED_FRAMEWORKS
+
+
+GAINHELM_VANTA_URLS_BY_FRAMEWORK: Dict[str, str] = {
+    fw_k: str(fw_v["vanta_url"])
+    for fw_k, fw_v in GAINHELM_FRAMEWORK_PROFILES.items()
+}
+
+
+GAINHELM_PARTNER_ALIASES: Dict[str, str] = {
+    "vanta": "vanta_security",
+    "vanta_compliance": "vanta_security",
+    "drata": "drata_compliance",
+    "sprinto": "sprinto_compliance",
+    "sprinto_grc": "sprinto_compliance",
+    "thoropass": "thoropass_audit",
+    "coalition": "coalition_cyber_insurance",
+    "cobalt": "cobalt_pentest",
+}
+
+GAINHELM_PARTNER_REP_DESK_BY_KEY: Dict[str, str] = {
+    "vanta_security": "Vanta Continuous Trust & Compliance Automation Desk",
+    "drata_compliance": "Drata Enterprise GRC & Automated Audit Desk",
+    "sprinto_compliance": "Sprinto Continuous Security & Cloud Compliance Desk",
+    "thoropass_audit": "Thoropass Compliance Readiness & Advisory Desk",
+    "coalition_cyber_insurance": "Coalition Active Cyber Insurance & GRC Underwriting Desk",
+    "cobalt_pentest": "Cobalt CREST & OSCP PtaaS Scoping Desk",
+}
+
+
+def normalize_gainhelm_partner_key(partner_key: str) -> str:
+    """Normalizes GainHelm partner key aliases to their canonical registry key."""
+    pk_clean = (partner_key or "").strip().lower()
+    return GAINHELM_PARTNER_ALIASES.get(pk_clean, pk_clean)
+
+
+def resolve_gainhelm_partner_rep_desk(
+    partner_key: str,
+    slug: str = "",
+    vertical: str = "",
+) -> str:
+    """
+    Returns framework-matched rep desk copy for a GainHelm partner selection.
+    Uses the resolved framework profile desk when partner_key matches its primary
+    partner, and a framework-neutral partner desk otherwise. Zero em/en-dashes.
+    """
+    fw_prof = get_gainhelm_framework_profile(slug=slug or "", vertical=vertical or "")
+    pk_norm = normalize_gainhelm_partner_key(partner_key)
+    if not pk_norm or pk_norm == str(fw_prof.get("primary_partner_key") or ""):
+        return str(fw_prof.get("partner_rep_desk") or GAINHELM_PARTNER_REP_DESK_BY_KEY["vanta_security"])
+    return str(
+        GAINHELM_PARTNER_REP_DESK_BY_KEY.get(pk_norm)
+        or fw_prof.get("partner_rep_desk")
+        or GAINHELM_PARTNER_REP_DESK_BY_KEY["vanta_security"]
+    )
+
+
+def resolve_gainhelm_partner_url(
+    partner_key: str,
+    tool_slug: str = "",
+    default_url: str = "",
+    vertical: str = "",
+) -> str:
+    """
+    Returns the framework-matched default destination URL for a GainHelm partner.
+    Shared by Python route helpers and Edge /r/:partner + /api/lead-capture codegen.
+    Zero em-dashes. Zero en-dashes.
+    """
+    pk_clean = normalize_gainhelm_partner_key(partner_key)
+    if pk_clean == "vanta_security":
+        prof = get_gainhelm_framework_profile(slug=tool_slug or "", vertical=vertical or "")
+        return str(prof.get("vanta_url") or GAINHELM_FRAMEWORK_PROFILES["soc2"]["vanta_url"])
+    if not (default_url or "").strip() and pk_clean in GAINHELM_AFFILIATES:
+        return str(GAINHELM_AFFILIATES[pk_clean].default_url or "")
+    return (default_url or "").strip()
+
+
+def get_gainhelm_framework_profile(slug: str = "", vertical: str = "") -> Dict[str, Any]:
+    """Returns the canonical GainHelm framework profile for a calculator slug or vertical."""
+    fw_key = classify_gainhelm_framework(slug=slug, vertical=vertical)
+    return GAINHELM_FRAMEWORK_PROFILES.get(fw_key, GAINHELM_FRAMEWORK_PROFILES["soc2"])
+
+
+def get_gainhelm_compliance_strip_text(slug: str = "") -> str:
+    """Returns the GainHelm top-of-page YMYL + FTC 16 CFR Part 255 disclosure matched to the calculator framework."""
+    prof = get_gainhelm_framework_profile(slug=slug)
+    return (
+        "Statutory & FTC Disclosure (16 CFR Part 255): Audit scoping and penalty models are provided for "
+        "educational and informational purposes only and are not legal, tax, accounting, or certified audit advice. "
+        f"{prof['compliance_sentence']} "
+        "GainHelm may receive referral compensation from vetted compliance and security partners at no additional cost to your organization."
+    )
+
+
+def get_gainhelm_statutory_disclaimer(slug: str = "") -> str:
+    """Returns the framework-specific GainHelm statutory disclaimer for a calculator slug."""
+    return str(get_gainhelm_framework_profile(slug=slug).get("statutory_disclaimer", ""))
+
+
+def has_gainhelm_cross_framework_leak(
+    html_or_text: str,
+    slug: str = "",
+    vertical: str = "",
+) -> bool:
+    """
+    Detects forbidden cross-framework tokens (such as SOC 2 / CMMC / C3PAO / AICPA / HIPAA)
+    in visible copy or data-vertical attributes for non-owning GainHelm calculators while
+    ignoring canonical SKU identifiers and sibling /tools/ navigation URLs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prof = get_gainhelm_framework_profile(slug=slug, vertical=vertical)
+    forbidden = tuple(prof.get("forbidden_leak_tokens", ()))
+    if not forbidden or not html_or_text:
+        return False
+    cleaned = re.sub(r"<script\b[^>]*>.*?</script>", " ", html_or_text, flags=re.S | re.I)
+    cleaned = re.sub(r"<style\b[^>]*>.*?</style>", " ", cleaned, flags=re.S | re.I)
+    # Extract non-SKU data-vertical attributes too so soc2_grc_automation leaks are flagged
+    vertical_vals = " ".join(re.findall(r'data-vertical=["\']([^"\']+)["\']', cleaned, flags=re.I))
+    visible = html_lib.unescape(re.sub(r"<[^>]+>", " ", cleaned))
+    combined = f"{visible} {vertical_vals}".lower()
+    for sku_tok in (
+        "gh_soc2_cmmc_audit_workpapers",
+        "gh_hipaa_iso27001_governance_kit",
+        "gh_instant_compliance_worksheet_19",
+    ):
+        combined = combined.replace(sku_tok, " ")
+    return any(tok in combined for tok in forbidden)
+
+
+_GAINHELM_PARTNER_CONTEXTUAL_COPY: Dict[str, Dict[str, Tuple[str, str, str, str]]] = {
+    "dora": {
+        "vanta_security": (
+            "EU DORA & Enterprise GRC Automation",
+            "Vanta Trust Management & DORA Readiness Automation",
+            "Automate EU DORA Article 5-30 ICT risk evidence collection, continuous cloud monitoring, and Article 28 third-party vendor oversight.",
+            "Automate DORA Compliance with Vanta",
+        ),
+        "drata_compliance": (
+            "EU DORA & Continuous Control Monitoring",
+            "Drata Enterprise GRC & DORA ICT Risk Platform",
+            "Streamline EU DORA ICT resilience controls, asset inventory mapping, and Competent Authority audit trail readiness.",
+            "Launch DORA Readiness with Drata",
+        ),
+        "sprinto_compliance": (
+            "Automated DORA & ISO 27001 Readiness",
+            "Sprinto Multi-Framework GRC & DORA Automation",
+            "Rapid compliance automation for European financial entities and ICT service providers managing DORA controls and Register of Information workflows.",
+            "Compare DORA Pricing with Sprinto",
+        ),
+        "thoropass_audit": (
+            "Integrated GRC & Independent Assurance",
+            "Thoropass Enterprise Compliance & ICT Audit Readiness",
+            "Unified compliance automation and accredited technical review workflows for EU DORA ICT risk and ISO 27001 controls.",
+            "Scope DORA & ISO Controls with Thoropass",
+        ),
+        "coalition_cyber_insurance": (
+            "Active Cyber Insurance & ICT Risk Protection",
+            "Coalition Active Cyber Insurance & Incident Response",
+            "Active attack-surface monitoring, pre-breach digital forensics readiness, and cyber risk transfer aligned with EU DORA operational resilience.",
+            "Quote Active Cyber Coverage with Coalition",
+        ),
+        "cobalt_pentest": (
+            "CREST & TLPT Penetration Testing (PtaaS)",
+            "Cobalt Offensive Security & DORA Resilience Testing",
+            "On-demand CREST, OSCP, and GPEN certified Penetration Testing as a Service (PtaaS) supporting DORA Article 25-26 resilience testing and remediation workflows.",
+            "Scope DORA Resilience Testing with Cobalt",
+        ),
+    },
+    "eu_ai_act": {
+        "vanta_security": (
+            "AI Governance & EU AI Act Automation",
+            "Vanta Trust Management & EU AI Act Readiness",
+            "Automate ISO/IEC 42001, EU AI Act Annex III risk management evidence, and continuous governance monitoring across high-risk AI pipelines.",
+            "Automate AI Governance with Vanta",
+        ),
+        "drata_compliance": (
+            "ISO 42001 & EU AI Act Control Monitoring",
+            "Drata Enterprise GRC & AI Governance Automation",
+            "Streamline EU AI Act Article 9-17 Quality Management System controls, model lineage evidence, and continuous governance audits.",
+            "Launch EU AI Act Readiness with Drata",
+        ),
+        "sprinto_compliance": (
+            "Fast-Track AI Governance & ISO 42001",
+            "Sprinto Automated AI Risk & Conformity Readiness",
+            "Structured compliance automation for AI providers preparing Annex IV technical documentation, ISO 27001, and ISO 42001 governance evidence.",
+            "Compare AI Governance Pricing with Sprinto",
+        ),
+        "thoropass_audit": (
+            "Conformity Readiness & Accredited Assurance",
+            "Thoropass Enterprise Compliance & AI Governance Audit Prep",
+            "Unified GRC platform and technical review workflows for ISO/IEC 42001 and EU AI Act high-risk QMS readiness.",
+            "Scope AI Conformity Prep with Thoropass",
+        ),
+        "coalition_cyber_insurance": (
+            "Active Cyber & AI Operational Risk Insurance",
+            "Coalition Active Cyber Insurance & Incident Defense",
+            "Continuous security monitoring, incident response retainers, and cyber liability coverage protecting AI-enabled enterprise deployments.",
+            "Quote Active Cyber Coverage with Coalition",
+        ),
+        "cobalt_pentest": (
+            "CREST & AI Adversarial Testing (PtaaS)",
+            "Cobalt Offensive Security & AI System Pentesting",
+            "On-demand CREST and OSCP certified Penetration Testing as a Service (PtaaS) covering EU AI Act Article 15 cybersecurity robustness testing.",
+            "Scope AI Security Testing with Cobalt",
+        ),
+    },
+    "sec_8k": {
+        "vanta_security": (
+            "SEC Reg S-K Item 106 & Cyber Governance",
+            "Vanta Enterprise Security & SEC Cyber Disclosure Readiness",
+            "Automate continuous control monitoring, CISO board reporting evidence, and Reg S-K Item 106 governance documentation.",
+            "Automate SEC Cyber Governance with Vanta",
+        ),
+        "drata_compliance": (
+            "Continuous Control Monitoring & Item 106",
+            "Drata Enterprise GRC & Public-Company Cyber Governance",
+            "Centralize cyber risk register evidence, incident escalation workflows, and annual Form 10-K Item 106 board oversight tracking.",
+            "Launch Cyber Governance with Drata",
+        ),
+        "sprinto_compliance": (
+            "Automated Cyber Governance & Risk Monitoring",
+            "Sprinto Enterprise Security & SEC Readiness Automation",
+            "Continuous control monitoring and automated evidence audit trails supporting public-company risk management and incident triage SLAs.",
+            "Compare SEC Readiness Pricing with Sprinto",
+        ),
+        "thoropass_audit": (
+            "Enterprise Governance & Technical Assurance",
+            "Thoropass Cyber Governance & Readiness Assurance",
+            "Unified security governance automation and technical control validation supporting board-level cyber risk oversight.",
+            "Scope Cyber Governance with Thoropass",
+        ),
+        "coalition_cyber_insurance": (
+            "Active Cyber Insurance & DFIR Breach Retainer",
+            "Coalition Active Cyber Insurance & 4-Day Incident Defense",
+            "Active cyber monitoring, rapid DFIR forensic triage, and breach cost coverage calibrated for Form 8-K Item 1.05 response timelines.",
+            "Quote Active Cyber & DFIR Coverage with Coalition",
+        ),
+        "cobalt_pentest": (
+            "CREST & OSCP Certified PtaaS Validation",
+            "Cobalt Offensive Security & Material Risk Validation",
+            "On-demand CREST, OSCP, and GPEN certified Penetration Testing as a Service (PtaaS) verifying remediation of high-severity vulnerabilities.",
+            "Scope Security Validation with Cobalt",
+        ),
+    },
+    "non_audit_generic": {
+        "vanta_security": (
+            "Enterprise GRC & Regulatory Automation",
+            "Vanta Enterprise GRC & Continuous Security Automation",
+            "Automate multi-framework evidence collection, continuous cloud security monitoring, and regulator-ready risk management workflows.",
+            "Automate Security Compliance with Vanta",
+        ),
+        "drata_compliance": (
+            "Continuous Security & GRC Monitoring",
+            "Drata Enterprise GRC & Automated Control Monitoring",
+            "Centralize risk registers, security policies, and automated technical control checks across cloud and corporate infrastructure.",
+            "Automate Security Controls with Drata",
+        ),
+        "sprinto_compliance": (
+            "Automated Risk & Compliance Workflows",
+            "Sprinto Multi-Framework GRC Automation",
+            "Rapid compliance automation with pre-mapped security controls, vendor risk tracking, and continuous audit trail logging.",
+            "Compare GRC Pricing with Sprinto",
+        ),
+        "thoropass_audit": (
+            "Integrated GRC & Technical Assurance",
+            "Thoropass Enterprise Compliance & Audit Readiness",
+            "Unified compliance workflow automation and independent technical assessment support.",
+            "Scope Compliance Readiness with Thoropass",
+        ),
+        "coalition_cyber_insurance": (
+            "Active Cyber Insurance & Breach Defense",
+            "Coalition Active Cyber Insurance & Risk Transfer",
+            "Active attack-surface monitoring, pre-breach security controls, and rapid DFIR breach coverage.",
+            "Quote Active Cyber Coverage with Coalition",
+        ),
+        "cobalt_pentest": (
+            "CREST & OSCP Certified PtaaS",
+            "Cobalt Offensive Security & Pentest as a Service",
+            "On-demand CREST, OSCP, and GPEN certified Penetration Testing as a Service (PtaaS) with Jira/GitHub remediation workflows and free retesting.",
+            "Scope Certified PtaaS Engagement with Cobalt",
+        ),
+    },
+}
+
 LIENBOND_DISCLOSURES: Dict[str, str] = {
     "statutory_compliance_disclaimer": (
         "Statutory Surety, Workers Comp & Construction Lien Disclaimer: Bond premium, NCCI workers compensation "
@@ -2416,6 +3421,7 @@ def resolve_partner_url(
     value_tier: str = "starter",
     extra_params: Optional[Dict[str, str]] = None,
     tenant: Optional[str] = None,
+    source_tool: str = "",
 ) -> str:
     """
     Resolves destination URL for an affiliate partner.
@@ -2423,9 +3429,17 @@ def resolve_partner_url(
     Appends supported vendor-namespaced tracking parameters (ph_tier) without clobbering base parameters.
     Rejects sub-affiliate aggregator redirect domains if property is prexvo.
     """
+    prop = (tenant or partner.property_id or "").strip().lower()
     env_override = os.getenv(partner.env_var)
     if env_override and env_override.strip():
         raw_url = env_override.strip()
+    elif prop == "gainhelm":
+        eff_source_tool = (source_tool or ((extra_params or {}).get("source_tool", "")) or "").strip()
+        raw_url = resolve_gainhelm_partner_url(
+            partner.key,
+            tool_slug=eff_source_tool,
+            default_url=partner.default_url,
+        )
     else:
         raw_url = partner.default_url.strip()
 
@@ -2436,7 +3450,6 @@ def resolve_partner_url(
 
     parsed = urllib.parse.urlsplit(raw_url)
 
-    prop = (tenant or partner.property_id or "").strip().lower()
     if prop == "prexvo":
         netloc_lower = parsed.netloc.lower()
         if any(agg in netloc_lower for agg in ("sovrn", "skimlinks", "viglink")):
@@ -2883,12 +3896,15 @@ def resolve_optimal_partner_for_slug(
         return PREXVO_AFFILIATES.get("splash_financial")
 
     if prop == "gainhelm":
-        if "pentest" in s or "penetration" in s:
-            bucket_keys = INTENT_ROUTING_TABLE["pentest"]
-        elif "insurance" in s or "breach" in s or "hipaa" in s:
-            bucket_keys = INTENT_ROUTING_TABLE["cyber-insurance"]
+        fw_prof = get_gainhelm_framework_profile(slug=s)
+        primary_pk = str(fw_prof.get("primary_partner_key") or "vanta_security").strip().lower()
+        if primary_pk == "cobalt_pentest":
+            base_keys = INTENT_ROUTING_TABLE["pentest"]
+        elif primary_pk == "coalition_cyber_insurance":
+            base_keys = INTENT_ROUTING_TABLE["cyber-insurance"]
         else:
-            bucket_keys = INTENT_ROUTING_TABLE["cyber-compliance"]
+            base_keys = INTENT_ROUTING_TABLE["cyber-compliance"]
+        bucket_keys = list(dict.fromkeys([primary_pk] + list(base_keys)))
         candidates = [
             GAINHELM_AFFILIATES[k]
             for k in bucket_keys
@@ -3956,6 +4972,7 @@ def get_affiliate_route(
     tool_slug: str = "",
     value_tier: str = "starter",
     partner_key: Optional[str] = None,
+    source_tool: str = "",
 ) -> Dict[str, Any]:
     """
     Returns programmatic affiliate route contracts with guaranteed link attributes.
@@ -3969,8 +4986,17 @@ def get_affiliate_route(
     if prop_clean not in ("profithelm", "prexvo", "exchange1031", "gainhelm", "lienbond"):
         raise ValueError(f"Unknown or unsupported property: '{property_id}'")
 
-    selected_key = (partner_key or "").strip().lower()
-    slug_clean = (tool_slug or "").strip().lower()
+    catalog_preview = get_affiliates_for_property(prop_clean)
+    eff_partner_arg = partner_key
+    eff_slug_arg = tool_slug
+    if not eff_partner_arg and source_tool and tool_slug and tool_slug.strip().lower() in catalog_preview:
+        eff_partner_arg = tool_slug
+        eff_slug_arg = source_tool
+    elif source_tool and not eff_slug_arg:
+        eff_slug_arg = source_tool
+
+    selected_key = (eff_partner_arg or "").strip().lower()
+    slug_clean = (eff_slug_arg or "").strip().lower()
 
     if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean):
         raise ValueError(
@@ -4052,7 +5078,12 @@ def get_affiliate_route(
         raise ValueError(f"Partner '{selected_key}' could not be resolved for property '{property_id}'")
 
     # Resolve URL
-    resolved_url = resolve_partner_url(partner_obj, value_tier=value_tier)
+    resolved_url = resolve_partner_url(
+        partner_obj,
+        value_tier=value_tier,
+        tenant=prop_clean,
+        source_tool=slug_clean,
+    )
 
     # Escalated CTA text
     tier_clean = (value_tier or "starter").strip().lower()
@@ -4112,15 +5143,30 @@ def get_affiliate_route(
         cta_text = "Customize Precision Schedule with Earnest" if is_premium else "Check Rates with Earnest"
     elif partner_obj.key == "lendkey":
         cta_text = "Access Relationship Rates with LendKey" if is_premium else "Explore Community Rates with LendKey"
+    elif prop_clean == "gainhelm":
+        ctx_gh = resolve_contextual_partner_offer_copy(
+            partner_key=partner_obj.key,
+            p_obj=partner_obj,
+            slug=slug_clean,
+            property_id="gainhelm",
+        )
+        cta_text = (
+            f"Explore {ctx_gh['name']} Pro Solutions"
+            if is_premium
+            else (ctx_gh["cta_text"] or f"Explore {ctx_gh['name']} Solutions")
+        )
     else:
         cta_text = (
             f"Explore {partner_obj.name} Pro Solutions" if is_premium else (partner_obj.cta_text or f"Explore {partner_obj.name} Solutions")
         )
 
+    eff_name = ctx_gh["name"] if prop_clean == "gainhelm" else partner_obj.name
+    eff_badge = ctx_gh["badge"] if prop_clean == "gainhelm" else partner_obj.badge
+
     # Validate output for forbidden dashes
     assert_no_forbidden_dashes(cta_text, context=f"CTA text for {partner_obj.key}")
-    assert_no_forbidden_dashes(partner_obj.name, context=f"Partner name for {partner_obj.key}")
-    assert_no_forbidden_dashes(partner_obj.badge, context=f"Badge for {partner_obj.key}")
+    assert_no_forbidden_dashes(eff_name, context=f"Partner name for {partner_obj.key}")
+    assert_no_forbidden_dashes(eff_badge, context=f"Badge for {partner_obj.key}")
 
     disclosure_text = (
         PREXVO_DISCLOSURES.get("ftc_disclosure", "")
@@ -4139,7 +5185,7 @@ def get_affiliate_route(
         PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
         if prop_clean == "prexvo"
         else (
-            GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer", "")
+            get_gainhelm_statutory_disclaimer(slug_clean)
             if prop_clean == "gainhelm"
             else (
                 LIENBOND_DISCLOSURES.get("statutory_compliance_disclaimer", "")
@@ -4154,13 +5200,13 @@ def get_affiliate_route(
         "calculator_slug": slug_clean,
         "partner": partner_obj.key,
         "partner_key": partner_obj.key,
-        "name": partner_obj.name,
-        "partner_name": partner_obj.name,
+        "name": eff_name,
+        "partner_name": eff_name,
         "url": resolved_url,
         "cta_text": cta_text,
         "rel": "noopener sponsored nofollow",
         "target": "_blank",
-        "badge": partner_obj.badge,
+        "badge": eff_badge,
         "status": partner_obj.status,
         "partnership_model": partner_obj.partnership_model,
         "bounty_est": partner_obj.bounty_est,
@@ -5480,9 +6526,451 @@ def audit_merchant_coverage_and_yield(
     }
 
 
+def _extract_tool_slug_from_html_head(html_src: str) -> str:
+    """Extracts canonical /tools/<slug>, data-slug, or title slug from HTML."""
+    canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', html_src, re.I)
+    if not canon_m:
+        canon_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']', html_src, re.I)
+    if canon_m:
+        canon_u = canon_m.group(1).split("?")[0].rstrip("/")
+        if "/tools/" in canon_u:
+            return canon_u.split("/tools/", 1)[1].strip("/").replace("/", "-")
+        return "tools-directory" if canon_u.endswith("/tools") else "homepage"
+    data_slug_m = re.search(r'data-slug=["\']([^"\']+)["\']', html_src, re.I)
+    if data_slug_m:
+        return data_slug_m.group(1).strip("/").replace("/", "-")
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", html_src, re.S | re.I)
+    if title_m:
+        raw_t = re.sub(r"<[^>]+>", " ", title_m.group(1)).lower()
+        raw_t = re.sub(r"[^a-z0-9]+", "-", raw_t).strip("-")
+        return raw_t[:60].strip("-") or "calculator"
+    return "calculator"
+
+
+_COMPARISON_TABLE_CTA_BAR_RE = re.compile(
+    r'<div\b[^>]*\bclass=["\']([^"\']*\bcomparison-table-cta-bar\b[^"\']*)["\'][^>]*>.*?</div>',
+    flags=re.S | re.I,
+)
+_COMPARISON_TABLE_CTA_BAR_STRIP_RE = re.compile(
+    r'\s*<div\b[^>]*\bclass=["\'][^"\']*\bcomparison-table-cta-bar\b[^"\']*["\'][^>]*>.*?</div>',
+    flags=re.S | re.I,
+)
+
+
+def _extract_section_id_attr(open_tag: str) -> str:
+    """Extracts an HTML id attribute from an opening tag, returning ' id="..."' or ''."""
+    id_m = re.search(r'\bid=["\']([^"\']+)["\']', open_tag or "", flags=re.I)
+    return f' id="{html_lib.escape(id_m.group(1))}"' if id_m else ""
+
+
+def _extract_partner_registration_drawer(sec_html: str) -> str:
+    """Extracts <div id="partner-registration-drawer">...</div> preserving balanced div nesting."""
+    m_open = re.search(
+        r'<div\b[^>]*\bid=["\']partner-registration-drawer["\'][^>]*>',
+        sec_html or "",
+        flags=re.I,
+    )
+    if not m_open:
+        return ""
+    div_start = m_open.start()
+    depth = 0
+    div_end = -1
+    for tok in re.finditer(r"</?div\b[^>]*>", sec_html[div_start:], flags=re.I):
+        tok_l = tok.group(0).lower()
+        if tok_l.startswith("</div"):
+            depth -= 1
+            if depth == 0:
+                div_end = div_start + tok.end()
+                break
+        elif not tok_l.endswith("/>"):
+            depth += 1
+    if div_end > div_start:
+        return "\n      " + sec_html[div_start:div_end].strip()
+    reg_m = re.search(
+        r'\s*<div\b[^>]*id=["\']partner-registration-drawer["\'][^>]*>[\s\S]*?</form>\s*</div>',
+        sec_html,
+        flags=re.S | re.I,
+    )
+    return ("\n      " + reg_m.group(0).strip()) if reg_m else ""
+
+
+def _render_comparison_table_cta_bar(
+    pk: str,
+    name: str,
+    cta_text: str,
+    brand: str,
+    model: str,
+    href: str,
+    tool: str,
+    subid: str,
+    status: str,
+    gsc_tier: str,
+    tier_role: str = "primary",
+    existing_class_attr: str = "",
+) -> str:
+    """Renders .comparison-table-cta-bar while preserving any existing extra classes such as card pseo-card."""
+    cls_tokens = list(dict.fromkeys(existing_class_attr.split())) if existing_class_attr else []
+    if "comparison-table-cta-bar" not in cls_tokens:
+        cls_tokens.insert(0, "comparison-table-cta-bar")
+    cls_attr = html_lib.escape(" ".join(cls_tokens))
+    safe_pk = html_lib.escape(pk)
+    safe_name = html_lib.escape(name)
+    safe_cta = html_lib.escape(cta_text)
+    safe_brand = html_lib.escape(brand)
+    safe_model = html_lib.escape(model)
+    safe_href = html_lib.escape(href)
+    safe_tool = html_lib.escape(tool)
+    safe_sub = html_lib.escape(subid)
+    safe_status = html_lib.escape(status)
+    safe_tier_role = html_lib.escape(tier_role)
+    safe_gsc_tier = html_lib.escape(gsc_tier)
+    bar_style = (
+        "display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; border: 1px solid var(--border);"
+        if "pseo-card" in cls_tokens
+        else "display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;"
+    )
+    return (
+        f'<div class="{cls_attr}" data-mechanic="compliant_intent_monetization" '
+        f'data-partner="{safe_pk}" data-company-brand="{safe_brand}" data-partner-tier="{safe_tier_role}" '
+        f'data-partnership-model="{safe_model}" '
+        f'data-cta-slot="comparison_table_cta" data-gsc-tier="{safe_gsc_tier}" '
+        f'style="{bar_style}">\n'
+        f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">Scenario Execution Partner: <strong>{safe_name}</strong> ({safe_brand})</span>\n'
+        f'        <a href="{safe_href}" target="_blank" rel="noopener sponsored nofollow" '
+        f'data-partner="{safe_pk}" data-company-brand="{safe_brand}" data-partner-tier="{safe_tier_role}" '
+        f'data-partnership-model="{safe_model}" '
+        f'data-tool="{safe_tool}" data-subid="{safe_sub}" data-status="{safe_status}" '
+        f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
+        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_cta} &rarr;</a>\n'
+        f'      </div>'
+    )
+
+
+def _normalize_affiliates_section_h2(
+    raw_sec: str,
+    promoted_pk: str,
+    registry: Dict[str, AffiliatePartner],
+) -> str:
+    """Preserves valid affiliates-section <h2> headings while normalizing headings that name a non-promoted partner."""
+    default_h2 = '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
+    h2_m = re.search(r"<h2\b[^>]*>.*?</h2>", raw_sec, flags=re.S | re.I)
+    if not h2_m:
+        return default_h2
+    h2_raw = h2_m.group(0)
+    h2_low = re.sub(r"<[^>]+>", " ", html_lib.unescape(h2_raw)).lower()
+    prom_clean = (promoted_pk or "").strip().lower()
+    prom_brand = COMPANY_BRAND_BY_PARTNER_KEY.get(prom_clean, "").lower()
+    prom_name = (registry[prom_clean].name.lower() if prom_clean in registry else "")
+    other_tokens: List[str] = ["suretybonds.com", "next insurance"]
+    for other_pk, other_obj in registry.items():
+        if other_pk == prom_clean:
+            continue
+        other_brand = COMPANY_BRAND_BY_PARTNER_KEY.get(other_pk, "").lower()
+        if other_brand:
+            other_tokens.append(other_brand)
+        if other_obj and other_obj.name:
+            other_tokens.append(other_obj.name.lower())
+    names_other = any(tok in h2_low for tok in other_tokens if tok)
+    names_promoted = bool((prom_brand and prom_brand in h2_low) or (prom_name and prom_name in h2_low))
+    if ("verified commercial execution partner:" in h2_low or names_other) and not names_promoted:
+        return default_h2
+    return h2_raw
+
+
+def _replace_balanced_div_by_class(
+    container_html: str,
+    class_names: Tuple[str, ...],
+    replacement: str,
+) -> Optional[str]:
+    """Replaces the first <div class="...">...</div> matching any class_names using balanced div depth."""
+    cls_pat = "|".join(re.escape(c) for c in class_names)
+    m_open = re.search(
+        rf'<div\b[^>]*\bclass=["\'][^"\']*\b(?:{cls_pat})\b[^"\']*["\'][^>]*>',
+        container_html or "",
+        flags=re.I,
+    )
+    if not m_open:
+        return None
+    div_start = m_open.start()
+    if m_open.group(0).rstrip().endswith("/>"):
+        return container_html[:div_start] + replacement + container_html[m_open.end() :]
+    depth = 0
+    div_end = -1
+    for tok in re.finditer(r"</?div\b[^>]*>", container_html[div_start:], flags=re.I):
+        tok_l = tok.group(0).lower()
+        if tok_l.startswith("</div"):
+            depth -= 1
+            if depth == 0:
+                div_end = div_start + tok.end()
+                break
+        elif not tok_l.endswith("/>"):
+            depth += 1
+    if div_end <= div_start:
+        return None
+    return container_html[:div_start] + replacement + container_html[div_end:]
+
+
+def _resolve_prexvo_promoted_partner(
+    html_doc: str,
+    gsc_inline_meta: Dict[str, str],
+    preserve_promoted_primary: bool,
+) -> Tuple[str, str, Tuple[str, ...]]:
+    """Resolves any already-promoted valid Prexvo primary partner from DOM metadata."""
+    valid_px_keys = {
+        k
+        for k in ("splash_financial", "credible", "lendkey")
+        if PREXVO_AFFILIATES.get(k) and PREXVO_AFFILIATES[k].status not in ("declined", "rejected")
+    }
+    sec_m = re.search(
+        r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>',
+        html_doc or "",
+        flags=re.S | re.I,
+    )
+    sec_html_probe = sec_m.group(0) if sec_m else ""
+    sec_open_m = re.match(r"<section\b[^>]*>", sec_html_probe, flags=re.I) if sec_html_probe else None
+    sec_open = sec_open_m.group(0) if sec_open_m else ""
+    sec_pk_m = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', sec_open or sec_html_probe, flags=re.I) or re.search(
+        r'data-partner=["\']([a-z0-9_]+)["\']', sec_open, flags=re.I
+    )
+    sec_pk = sec_pk_m.group(1).lower() if sec_pk_m else ""
+    first_card_pk = ""
+    if sec_html_probe:
+        c_tag_m = re.search(
+            r'<div\b[^>]*\bclass=["\'][^"\']*\bpartner-card\b[^"\']*["\'][^>]*>',
+            sec_html_probe,
+            flags=re.I,
+        )
+        if c_tag_m:
+            c_pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', c_tag_m.group(0), flags=re.I)
+            if c_pk_m:
+                first_card_pk = c_pk_m.group(1).lower()
+    gsc_cand_probe = str(gsc_inline_meta.get("data-partner") or "").strip().lower()
+    sec_repositioned = bool(re.search(r'data-gsc-repositioned=["\']true["\']', sec_open, flags=re.I))
+    inline_repositioned = str(gsc_inline_meta.get("data-gsc-repositioned") or "").strip().lower() == "true"
+    sec_tier_m = re.search(r'data-gsc-tier=["\']([^"\']+)["\']', sec_open, flags=re.I)
+    sec_has_non_baseline_gsc = bool(
+        sec_tier_m and sec_tier_m.group(1).strip().upper() not in ("", "BASELINE", "BASELINE_MULTI_SLOT")
+    )
+
+    promoted_cand = ""
+    if sec_repositioned and sec_pk in valid_px_keys:
+        promoted_cand = sec_pk
+    elif inline_repositioned and gsc_cand_probe in valid_px_keys:
+        promoted_cand = gsc_cand_probe
+    elif preserve_promoted_primary:
+        if sec_pk in valid_px_keys:
+            promoted_cand = sec_pk
+        elif gsc_cand_probe in valid_px_keys:
+            promoted_cand = gsc_cand_probe
+    elif sec_has_non_baseline_gsc and sec_pk in valid_px_keys:
+        promoted_cand = sec_pk
+    elif (
+        sec_pk in valid_px_keys
+        and sec_pk != "splash_financial"
+        and sec_pk == first_card_pk
+        and "sofi" not in sec_html_probe.lower()
+        and "earnest" not in sec_html_probe.lower()
+    ):
+        promoted_cand = sec_pk
+
+    eff_pk = promoted_cand or "splash_financial"
+    ordered_keys = tuple(
+        [eff_pk] + [k for k in ("splash_financial", "credible", "lendkey") if k != eff_pk and k in valid_px_keys]
+    )
+    return promoted_cand, eff_pk, ordered_keys
+
+
+def _render_prexvo_partner_card(
+    pk: str,
+    idx: int,
+    slug_id: str,
+    page_v_fam: str,
+    offer: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Renders a single Prexvo .partner-card in deterministic slot/subid order."""
+    p_obj = PREXVO_AFFILIATES.get(pk)
+    if offer is None:
+        if not p_obj or p_obj.status in ("declined", "rejected"):
+            return ""
+        ctx_px = resolve_contextual_partner_offer_copy(
+            partner_key=pk,
+            p_obj=p_obj,
+            slug=slug_id,
+            vertical_family=page_v_fam,
+            property_id="prexvo",
+        )
+        badge = ctx_px["badge"]
+        name = ctx_px["name"]
+        desc = ctx_px["description"]
+        cta_text = ctx_px["cta_text"]
+        p_model = p_obj.partnership_model
+        slot = "calculator_primary_cta" if idx == 1 else "partner_matrix_card"
+        subid = f"{slug_id}_card_{idx}"
+        href = f"/r/{pk}?source_tool={slug_id}&subid={subid}&cta_slot={slot}"
+        status = p_obj.status
+    else:
+        badge = str(offer.get("badge") or (p_obj.badge if p_obj else "Partner Option"))
+        name = str(offer.get("name") or (p_obj.name if p_obj else pk))
+        desc = str(offer.get("description") or (p_obj.description if p_obj else ""))
+        cta_text = str(offer.get("cta_text") or (p_obj.cta_text if p_obj else "Explore Partner"))
+        p_model = str(offer.get("partnership_model") or (p_obj.partnership_model if p_obj else "CPA_BOUNTY"))
+        slot = str(offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card"))
+        subid = str(offer.get("subid") or f"{slug_id}_card_{idx}")
+        href = str(offer.get("attributed_href") or f"/r/{pk}?source_tool={slug_id}&subid={subid}&cta_slot={slot}")
+        status = str(offer.get("status") or (p_obj.status if p_obj else "pending"))
+
+    safe_pk = html_lib.escape(pk)
+    safe_model = html_lib.escape(p_model)
+    safe_s = html_lib.escape(slug_id)
+    safe_sub = html_lib.escape(subid)
+    return (
+        f'      <div class="partner-card" data-partner="{safe_pk}" data-partnership-model="{safe_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
+        f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(badge)}</span>\n'
+        f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(name)}</h3>\n'
+        f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(desc)}</p>\n'
+        f'        <a href="{html_lib.escape(href)}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{safe_pk}" data-partnership-model="{safe_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(status)}" data-cta-slot="{html_lib.escape(slot)}">\n'
+        f'          {html_lib.escape(cta_text)} &rarr;\n'
+        f'        </a>\n'
+        f'      </div>'
+    )
+
+
+def _build_prexvo_refinance_section_html(
+    raw_sec: str,
+    ordered_offers_or_keys: Sequence[Any],
+    slug_id: str,
+    page_v_fam: str,
+    lead_pk: str,
+    lead_model: str,
+    models_csv: str,
+    roster_keys_csv: str,
+    companies_csv: str,
+    gsc_tier: str = "",
+    gsc_repositioned: Optional[bool] = None,
+) -> str:
+    """Rebuilds Prexvo's refinance partner section while preserving classes, id, YMYL copy, and drawers."""
+    raw_open_m = re.match(r"<section\b[^>]*>", raw_sec, flags=re.I)
+    raw_open = raw_open_m.group(0) if raw_open_m else ""
+    sec_id_attr = _extract_section_id_attr(raw_open)
+    cls_m = re.search(r'\bclass=["\']([^"\']*)["\']', raw_open, flags=re.I)
+    cls_tokens = [c for c in (cls_m.group(1).split() if cls_m else []) if c]
+    if "refinance-partner-section" not in cls_tokens:
+        cls_tokens.append("refinance-partner-section")
+    sec_cls_attr = html_lib.escape(" ".join(dict.fromkeys(cls_tokens)))
+
+    extra_attrs = ""
+    for attr_name in ("data-property", "data-commercial-offers", "data-restricted-public-service"):
+        attr_m = re.search(rf'\b{attr_name}=["\']([^"\']+)["\']', raw_open, flags=re.I)
+        if attr_m:
+            extra_attrs += f' {attr_name}="{html_lib.escape(attr_m.group(1))}"'
+
+    eff_tier = gsc_tier
+    if not eff_tier:
+        tier_m = re.search(r'\bdata-gsc-tier=["\']([^"\']+)["\']', raw_open, flags=re.I)
+        if tier_m:
+            eff_tier = tier_m.group(1)
+    if eff_tier:
+        extra_attrs += f' data-gsc-tier="{html_lib.escape(eff_tier)}"'
+
+    if gsc_repositioned is not None:
+        extra_attrs += f' data-gsc-repositioned="{"true" if gsc_repositioned else "false"}"'
+    else:
+        rep_m = re.search(r'\bdata-gsc-repositioned=["\']([^"\']+)["\']', raw_open, flags=re.I)
+        if rep_m:
+            extra_attrs += f' data-gsc-repositioned="{html_lib.escape(rep_m.group(1))}"'
+
+    cards_html: List[str] = []
+    for idx, item in enumerate(ordered_offers_or_keys, start=1):
+        c_pk = str(item["partner_key"]) if isinstance(item, dict) else str(item)
+        c_html = _render_prexvo_partner_card(
+            pk=c_pk,
+            idx=idx,
+            slug_id=slug_id,
+            page_v_fam=page_v_fam,
+            offer=item if isinstance(item, dict) else None,
+        )
+        if c_html:
+            cards_html.append(c_html)
+    grid_inner = "\n".join(cards_html)
+    grid_html = (
+        '<div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
+        f"{grid_inner}\n"
+        "      </div>"
+    )
+    open_tag = (
+        f'<section{sec_id_attr} class="{sec_cls_attr}" data-mechanic="compliant_intent_monetization" '
+        f'data-partner="{html_lib.escape(lead_pk)}" data-primary-partner="{html_lib.escape(lead_pk)}" '
+        f'data-partnership-model="{html_lib.escape(lead_model)}" data-partner-models="{html_lib.escape(models_csv)}" '
+        f'data-partner-roster="{html_lib.escape(roster_keys_csv)}" data-partner-companies="{html_lib.escape(companies_csv)}"'
+        f'{extra_attrs} style="margin: 1.5rem 0;">'
+    )
+
+    close_idx = raw_sec.lower().rfind("</section>")
+    inner_body = raw_sec[len(raw_open) : close_idx] if raw_open and close_idx >= len(raw_open) else ""
+    replaced_inner = _replace_balanced_div_by_class(
+        inner_body,
+        ("partner-matrix-grid", "partner-roster-grid"),
+        grid_html,
+    )
+    if replaced_inner is not None:
+        lead_obj = PREXVO_AFFILIATES.get(lead_pk)
+        if lead_obj:
+            lead_ctx = resolve_contextual_partner_offer_copy(
+                partner_key=lead_pk,
+                p_obj=lead_obj,
+                slug=slug_id,
+                vertical_family=page_v_fam,
+                property_id="prexvo",
+            )
+            replaced_inner = re.sub(
+                r'(<h2\b[^>]*>\s*Private Student Loan Refinance Comparison:\s*)([^<]+)(</h2>)',
+                rf"\g<1>{html_lib.escape(lead_obj.name)}\g<3>",
+                replaced_inner,
+                count=1,
+                flags=re.I,
+            )
+            sa_href = html_lib.escape(
+                f"/r/{lead_pk}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
+            )
+            replaced_inner = re.sub(
+                r'(<a\b[^>]*\bdata-cta-slot=["\']standalone_primary_cta["\'][^>]*>)(.*?)(</a>)',
+                lambda m: (
+                    re.sub(
+                        r'data-partnership-model=["\'][^"\']*["\']',
+                        f'data-partnership-model="{html_lib.escape(lead_model)}"',
+                        re.sub(
+                            r'data-partner=["\'][^"\']*["\']',
+                            f'data-partner="{html_lib.escape(lead_pk)}"',
+                            re.sub(
+                                r'href=["\'][^"\']*["\']',
+                                f'href="{sa_href}"',
+                                m.group(1),
+                                count=1,
+                                flags=re.I,
+                            ),
+                            count=1,
+                            flags=re.I,
+                        ),
+                        count=1,
+                        flags=re.I,
+                    )
+                    + html_lib.escape(lead_ctx["cta_text"])
+                    + m.group(3)
+                ),
+                replaced_inner,
+                count=1,
+                flags=re.S | re.I,
+            )
+        return f"{open_tag}{replaced_inner}</section>"
+
+    reg_str = _extract_partner_registration_drawer(raw_sec)
+    return f"{open_tag}\n      {grid_html}{reg_str}\n    </section>"
+
+
 def normalize_html_callout_message_match(
     html: str,
     property_id: str = "profithelm",
+    preserve_promoted_primary: bool = False,
 ) -> str:
     """
     Normalizes rendered HTML partner callout cards and /r/<partner_key> CTA button labels
@@ -5501,7 +6989,21 @@ def normalize_html_callout_message_match(
         or "EMR Audit Packet ($89)" in html
         or "Next Insurance" in html
     )
-    if "/r/" not in html and "overlay-partner-offer" not in html and not has_lienbond_copy_drift:
+    has_gainhelm_copy_drift = (
+        prop == "gainhelm"
+        and any(
+            tok in html
+            for tok in (
+                "refinance-partner-section",
+                "affiliates-section",
+                "affiliate-section",
+                "partners-section",
+                "partner-badge",
+            )
+        )
+        and has_gainhelm_cross_framework_leak(html, _extract_tool_slug_from_html_head(html))
+    )
+    if "/r/" not in html and "overlay-partner-offer" not in html and not has_lienbond_copy_drift and not has_gainhelm_copy_drift:
         return html
     registry = PREXVO_AFFILIATES if prop == "prexvo" else (GAINHELM_AFFILIATES if prop == "gainhelm" else (LIENBOND_AFFILIATES if prop == "lienbond" else PROFITHELM_AFFILIATES))
     fallback_copy: Dict[str, Tuple[str, str, str]] = {}
@@ -5532,6 +7034,18 @@ def normalize_html_callout_message_match(
             return (ctx_copy["name"], ctx_copy["cta_text"], partner.default_url)
         return fallback_copy.get(pk)
 
+    def _resolve_desc(pk: str) -> str:
+        partner = registry.get(pk)
+        if not partner:
+            return ""
+        return resolve_contextual_partner_offer_copy(
+            partner_key=pk,
+            p_obj=partner,
+            slug=page_slug,
+            vertical_family=page_v_fam,
+            property_id=prop,
+        )["description"]
+
     def _effective_dom_status(pk: str, p_obj: Optional[AffiliatePartner]) -> str:
         if p_obj:
             return p_obj.status
@@ -5551,24 +7065,7 @@ def normalize_html_callout_message_match(
         re.sub(r"<[^>]+>", " ", h1_m.group(1) if h1_m else ""),
     ]).lower()
 
-    data_slug_m = re.search(r'data-slug=["\']([^"\']+)["\']', html, re.I)
-    page_slug = ""
-    if canon_m:
-        canon_u = canon_m.group(1).split("?")[0].rstrip("/")
-        if "/tools/" in canon_u:
-            page_slug = canon_u.split("/tools/", 1)[1].strip("/").replace("/", "-")
-        elif canon_u.endswith("/tools"):
-            page_slug = "tools-directory"
-        else:
-            page_slug = "homepage"
-    elif data_slug_m:
-        page_slug = data_slug_m.group(1).strip("/").replace("/", "-")
-    elif title_m:
-        raw_t = re.sub(r"<[^>]+>", " ", title_m.group(1)).lower()
-        raw_t = re.sub(r"[^a-z0-9]+", "-", raw_t).strip("-")
-        page_slug = raw_t[:60].strip("-") or "calculator"
-    else:
-        page_slug = "calculator"
+    page_slug = _extract_tool_slug_from_html_head(html)
 
     page_v_fam = ""
     try:
@@ -5679,41 +7176,65 @@ def normalize_html_callout_message_match(
 
     updated = html
 
-    gsc_inline_meta: Dict[str, str] = {}
-    m_gsc_in = re.search(
-        r'<div\s+class=["\']calc-inline-cta["\'][^>]*data-gsc-(?:repositioned=["\'](?:true|false)["\']|tier=["\'][^"\']+["\'])[^>]*>',
-        updated,
-        flags=re.I,
-    )
-    if m_gsc_in:
-        tag_str = m_gsc_in.group(0)
-        for attr_k in (
-            "data-partner",
-            "data-company-brand",
-            "data-partner-tier",
-            "data-gsc-tier",
-            "data-gsc-repositioned",
-            "data-yield-score",
-        ):
-            m_attr = re.search(rf'{attr_k}=["\']([^"\']+)["\']', tag_str, flags=re.I)
-            if m_attr:
-                gsc_inline_meta[attr_k] = m_attr.group(1)
-    m_gsc_in_block = re.search(
-        r'\n?[ \t]*<div\s+class=["\']calc-inline-cta["\'][^>]*data-gsc-tier=["\'][^"\']+["\'][^>]*>\s*<div\s+class=["\']calc-inline-cta-copy["\'][^>]*>.*?</div>\s*<a\s+[^>]*>.*?</a>\s*</div>',
-        updated,
-        flags=re.S | re.I,
-    )
-    preserved_gsc_inline_block = m_gsc_in_block.group(0) if m_gsc_in_block else ""
+    def _extract_balanced_inline_cta(doc_html: str) -> Tuple[str, str]:
+        """Extracts and strips the first `<div class="...calc-inline-cta...">...</div>` using balanced div depth."""
+        m_open = re.search(
+            r'\n?[ \t]*<div\b[^>]*\bclass=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>',
+            doc_html,
+            flags=re.I,
+        )
+        if not m_open:
+            return "", doc_html
+        tag_start = m_open.group(0).lower().find("<div")
+        if tag_start < 0:
+            return "", doc_html
+        if m_open.group(0).rstrip().endswith("/>"):
+            return doc_html[m_open.start() : m_open.end()], doc_html[: m_open.start()] + doc_html[m_open.end() :]
+        div_start = m_open.start() + tag_start
+        depth = 0
+        div_end = -1
+        for tok in re.finditer(r"</?div\b[^>]*>", doc_html[div_start:], flags=re.I):
+            tok_l = tok.group(0).lower()
+            if tok_l.startswith("</div"):
+                depth -= 1
+                if depth == 0:
+                    div_end = div_start + tok.end()
+                    break
+            elif not tok_l.endswith("/>"):
+                depth += 1
+        if div_end <= div_start:
+            return "", doc_html
+        block = doc_html[m_open.start() : div_end]
+        stripped = doc_html[: m_open.start()] + doc_html[div_end:]
+        return block, stripped
 
-    # Strip any prior idempotent inline calculator CTA and fold compaction style
+    gsc_inline_meta: Dict[str, str] = {}
+    preserved_gsc_inline_block = ""
+    while True:
+        found_inline_block, updated_after_strip = _extract_balanced_inline_cta(updated)
+        if not found_inline_block:
+            break
+        if not preserved_gsc_inline_block and (
+            "data-gsc-tier=" in found_inline_block or "data-gsc-repositioned=" in found_inline_block
+        ):
+            preserved_gsc_inline_block = found_inline_block
+            tag_str = found_inline_block.split(">", 1)[0] + ">"
+            for attr_k in (
+                "data-partner",
+                "data-company-brand",
+                "data-partner-tier",
+                "data-gsc-tier",
+                "data-gsc-repositioned",
+                "data-yield-score",
+            ):
+                m_attr = re.search(rf'{attr_k}=["\']([^"\']+)["\']', tag_str, flags=re.I)
+                if m_attr:
+                    gsc_inline_meta[attr_k] = m_attr.group(1)
+        updated = updated_after_strip
+
+    # Strip any prior idempotent inline calculator fold compaction style
     updated = re.sub(
         r'[ \t]*<style\s+id=["\']pseo-inline-cta-fold["\'][^>]*>.*?</style>\n?',
-        "",
-        updated,
-        flags=re.S | re.I,
-    )
-    updated = re.sub(
-        r'\s*<div\s+class=["\']calc-inline-cta["\'][^>]*>\s*<div\s+class=["\']calc-inline-cta-copy["\'][^>]*>.*?</div>\s*<a\s+[^>]*>.*?</a>\s*</div>',
         "",
         updated,
         flags=re.S | re.I,
@@ -5791,7 +7312,7 @@ def normalize_html_callout_message_match(
         elif prop == "prexvo" and pk in ("sofi_refi", "sofi", "earnest"):
             pk = "splash_financial"
         elif has_estate_structure and not (
-            "data-gsc-tier=" in sec_html
+            ("data-gsc-tier=" in sec_html or 'data-gsc-repositioned="true"' in sec_html or preserve_promoted_primary)
             and old_pk in registry
             and getattr(registry.get(old_pk), "status", "") not in ("declined", "rejected")
             and (prop not in ("profithelm", "exchange1031") or old_pk in SOVRN_VERIFIED_PAYING_MERCHANTS)
@@ -5875,10 +7396,12 @@ def normalize_html_callout_message_match(
             or p_cta.lower() not in sec_text_lower
             or any(f_tok in sec_text_lower for f_tok in forbidden_tokens)
             or (bool(expected_tokens) and not any(tok in sec_text_lower for tok in expected_tokens))
+            or (prop == "gainhelm" and has_gainhelm_cross_framework_leak(sec_html, page_slug))
         )
         if needs_fix:
             safe_name = html_lib.escape(p_name)
             safe_cta = html_lib.escape(p_cta)
+            p_desc = _resolve_desc(pk) or (p_obj.description if p_obj else "")
             sec_html = re.sub(
                 r'(<h3[^>]*>)(.*?)(</h3>)',
                 rf"\g<1>Recommended Partner Solution: {safe_name}\g<3>",
@@ -5886,10 +7409,10 @@ def normalize_html_callout_message_match(
                 count=1,
                 flags=re.S | re.I,
             )
-            if p_obj and p_obj.description:
+            if p_desc:
                 sec_html = re.sub(
                     r'(<p\s+class=["\']overlay-partner-desc["\'][^>]*>)(.*?)(</p>)',
-                    rf"\g<1>{html_lib.escape(p_obj.description)}\g<3>",
+                    rf"\g<1>{html_lib.escape(p_desc)}\g<3>",
                     sec_html,
                     count=1,
                     flags=re.S | re.I,
@@ -5925,13 +7448,28 @@ def normalize_html_callout_message_match(
         flags=re.S | re.I,
     )
 
+    def _resolve_badge(pk: str) -> str:
+        partner = registry.get(pk)
+        if not partner:
+            return ""
+        return resolve_contextual_partner_offer_copy(
+            partner_key=pk,
+            p_obj=partner,
+            slug=page_slug,
+            vertical_family=page_v_fam,
+            property_id=prop,
+        )["badge"]
+
     def _replace_card_heading(match: re.Match) -> str:
-        h_open = match.group(1)
-        h_text = match.group(2)
-        h_close = match.group(3)
-        between = match.group(4)
-        href_attr = match.group(5)
-        pk = match.group(6).lower()
+        badge_open = match.group(1) or ""
+        badge_text = match.group(2) or ""
+        badge_close = match.group(3) or ""
+        h_open = match.group(4)
+        h_text = match.group(5)
+        h_close = match.group(6)
+        between = match.group(7)
+        href_attr = match.group(8)
+        pk = match.group(9).lower()
         resolved = _resolve_copy(pk)
         if not resolved:
             return match.group(0)
@@ -5939,23 +7477,42 @@ def normalize_html_callout_message_match(
         forbidden_tokens = FORBIDDEN_REPLACED_BRAND_TOKENS.get(pk, ())
         expected_tokens = EXPECTED_PARTNER_BRAND_TOKENS.get(pk, ())
         combined_low = f"{h_text} {between}".lower()
-        if any(f_tok in combined_low for f_tok in forbidden_tokens) or (
-            bool(expected_tokens) and not any(tok in combined_low for tok in expected_tokens)
-        ):
-            partner = registry.get(pk)
-            if partner and partner.description:
+        new_badge = badge_text
+        badge_changed = False
+        if badge_open:
+            badge_low = badge_text.lower()
+            badge_drift = (
+                any(f_tok in badge_low for f_tok in forbidden_tokens)
+                or (prop == "gainhelm" and has_gainhelm_cross_framework_leak(badge_text, page_slug))
+            )
+            if badge_drift:
+                rep_badge = _resolve_badge(pk)
+                if rep_badge:
+                    new_badge = html_lib.escape(rep_badge)
+                    badge_changed = True
+        head_changed = (
+            any(f_tok in combined_low for f_tok in forbidden_tokens)
+            or (bool(expected_tokens) and not any(tok in combined_low for tok in expected_tokens))
+            or (prop == "gainhelm" and has_gainhelm_cross_framework_leak(f"{h_text} {between}", page_slug))
+        )
+        if not head_changed and not badge_changed:
+            return match.group(0)
+        new_head = f"{h_open}{html_lib.escape(p_name)}{h_close}" if head_changed else f"{h_open}{h_text}{h_close}"
+        if head_changed:
+            p_desc = _resolve_desc(pk)
+            if p_desc:
                 between = re.sub(
                     r'(<p[^>]*>)(.*?)(</p>)',
-                    rf"\g<1>{html_lib.escape(partner.description)}\g<3>",
+                    rf"\g<1>{html_lib.escape(p_desc)}\g<3>",
                     between,
                     count=1,
                     flags=re.S | re.I,
                 )
-            return f"{h_open}{html_lib.escape(p_name)}{h_close}{between}{href_attr}"
-        return match.group(0)
+        prefix_badge = f"{badge_open}{new_badge}{badge_close}" if badge_open else ""
+        return f"{prefix_badge}{new_head}{between}{href_attr}"
 
     updated = re.sub(
-        r'(<h[34][^>]*>)([^<]*)(</h[34]>)((?:(?!</a>).){0,400}?)(href=["\']/r/([a-z0-9_]+))',
+        r'(?:(<span\b[^>]*class=["\'][^"\']*\bpartner-badge\b[^"\']*["\'][^>]*>)([^<]*)(</span>\s*))?(<h[34][^>]*>)([^<]*)(</h[34]>)((?:(?!</a>).){0,400}?)(href=["\']/r/([a-z0-9_]+))',
         _replace_card_heading,
         updated,
         flags=re.S | re.I,
@@ -5988,7 +7545,9 @@ def normalize_html_callout_message_match(
         start_ctx = max(0, match.start() - 450)
         ctx_window = re.sub(r"<[^>]+>", " ", updated[start_ctx : match.end()])
         ctx_window = re.sub(r"\s+", " ", ctx_window).strip().lower()
-        has_forbidden = any(f_tok in btn_text.lower() for f_tok in forbidden_tokens)
+        has_forbidden = any(f_tok in btn_text.lower() for f_tok in forbidden_tokens) or (
+            prop == "gainhelm" and has_gainhelm_cross_framework_leak(btn_text, page_slug)
+        )
         missing_expected = bool(expected_tokens) and not any(tok in ctx_window for tok in expected_tokens)
         if has_forbidden or missing_expected:
             safe_cta = html_lib.escape(p_cta)
@@ -6005,90 +7564,99 @@ def normalize_html_callout_message_match(
     )
 
     primary_inline_pk: Optional[str] = None
+    eff_gh_pk: str = ""
+    promoted_px_cand: str = ""
 
     if prop == "prexvo":
+        promoted_px_cand, eff_px_pk, px_keys_ordered = _resolve_prexvo_promoted_partner(
+            updated,
+            gsc_inline_meta,
+            preserve_promoted_primary,
+        )
+        px_roster_csv = ",".join(px_keys_ordered)
+        px_companies_csv = ",".join(
+            COMPANY_BRAND_BY_PARTNER_KEY.get(k, k) for k in px_keys_ordered
+        )
+        px_models_list = list(
+            dict.fromkeys(
+                PREXVO_AFFILIATES[k].partnership_model
+                for k in px_keys_ordered
+                if PREXVO_AFFILIATES.get(k)
+            )
+        )
+        px_models_csv = ",".join(px_models_list) or "CPA_BOUNTY,QUALIFIED_LEAD_CPL"
+        eff_px_obj = PREXVO_AFFILIATES.get(eff_px_pk)
+        px_lead_model = (eff_px_obj.partnership_model if eff_px_obj else "CPA_BOUNTY")
+
         def _expand_prexvo_refinance_section(match: re.Match) -> str:
             sec_html = match.group(0)
+            has_any_px_route = any(
+                f"/r/{k}" in sec_html
+                for k in ("splash_financial", "credible", "lendkey", "sofi", "earnest")
+            )
+            first_card_m = re.search(
+                r'<div\b[^>]*\bclass=["\'][^"\']*\bpartner-card\b[^"\']*["\'][^>]*>(.*?)</a>',
+                sec_html,
+                flags=re.S | re.I,
+            )
+            first_card_blob = first_card_m.group(0) if first_card_m else ""
+            first_card_pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', first_card_blob, flags=re.I)
+            first_card_pk = first_card_pk_m.group(1).lower() if first_card_pk_m else ""
+            first_card_slot_m = re.search(r'data-cta-slot=["\']([^"\']+)["\']', first_card_blob, flags=re.I)
+            first_card_slot = first_card_slot_m.group(1).lower() if first_card_slot_m else ""
+            sec_card_pks = re.findall(
+                r'<div\b[^>]*\bclass=["\'][^"\']*\bpartner-card\b[^"\']*["\'][^>]*\bdata-partner=["\']([a-z0-9_]+)["\']',
+                sec_html,
+                flags=re.I,
+            )
+            is_already_valid = (
+                "data-partner-roster=" in sec_html
+                and "sofi" not in sec_html.lower()
+                and "earnest" not in sec_html.lower()
+                and (
+                    f'data-primary-partner="{eff_px_pk}"' in sec_html
+                    or f"data-primary-partner='{eff_px_pk}'" in sec_html
+                )
+                and len(sec_card_pks) >= len(px_keys_ordered)
+                and first_card_pk == eff_px_pk
+                and first_card_slot == "calculator_primary_cta"
+            )
             if (
                 'data-restricted-public-service="true"' in sec_html
                 or 'data-commercial-offers="none"' in sec_html
                 or "ymyl-public-service-guardrail" in sec_html
-                or (
-                    "/r/splash_financial" not in sec_html
-                    and "/r/sofi" not in sec_html
-                    and "/r/earnest" not in sec_html
-                )
-                or (
-                    "data-gsc-tier=" in sec_html
-                    and "data-partner-roster=" in sec_html
-                    and "sofi" not in sec_html
-                    and "earnest" not in sec_html
-                )
+                or not has_any_px_route
+                or is_already_valid
             ):
                 return sec_html
-            cards_html: List[str] = []
-            for idx, pk in enumerate(("splash_financial", "credible", "lendkey"), start=1):
-                p_obj = PREXVO_AFFILIATES.get(pk)
-                if not p_obj or p_obj.status in ("declined", "rejected"):
-                    continue
-                ctx_px = resolve_contextual_partner_offer_copy(
-                    partner_key=pk,
-                    p_obj=p_obj,
-                    slug=page_slug,
-                    vertical_family=page_v_fam,
-                    property_id=prop,
-                )
-                slot = "calculator_primary_cta" if pk == "splash_financial" else "partner_matrix_card"
-                card_href = _build_r_href(pk, f"card_{idx}", slot)
-                safe_s = html_lib.escape(page_slug)
-                safe_sub = html_lib.escape(f"{page_slug}_card_{idx}")
-                safe_p_model = html_lib.escape(p_obj.partnership_model)
-                cards_html.append(
-                    f'      <div class="partner-card" data-partner="{pk}" data-partnership-model="{safe_p_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
-                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(ctx_px["badge"])}</span>\n'
-                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(ctx_px["name"])}</h3>\n'
-                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(ctx_px["description"])}</p>\n'
-                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
-                    f'          {html_lib.escape(ctx_px["cta_text"])} &rarr;\n'
-                    f'        </a>\n'
-                    f'      </div>'
-                )
-            grid_inner = "\n".join(cards_html)
-            sec_cls = (
-                "partners-section refinance-partner-section"
-                if "partners-section" in sec_html
-                else "refinance-partner-section"
-            )
-            return (
-                f'<section class="{sec_cls}" data-mechanic="compliant_intent_monetization" '
-                'data-partner="splash_financial" data-primary-partner="splash_financial" '
-                'data-partnership-model="CPA_BOUNTY" '
-                'data-partner-models="CPA_BOUNTY,QUALIFIED_LEAD_CPL" '
-                'data-partner-roster="splash_financial,credible,lendkey" '
-                'data-partner-companies="Splash Financial,Credible,LendKey" '
-                'style="margin: 1.5rem 0;">\n'
-                '      <div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
-                f'{grid_inner}\n'
-                '      </div>\n'
-                '    </section>'
+            return _build_prexvo_refinance_section_html(
+                raw_sec=sec_html,
+                ordered_offers_or_keys=px_keys_ordered,
+                slug_id=page_slug,
+                page_v_fam=page_v_fam,
+                lead_pk=eff_px_pk,
+                lead_model=px_lead_model,
+                models_csv=px_models_csv,
+                roster_keys_csv=px_roster_csv,
+                companies_csv=px_companies_csv,
             )
 
         updated = re.sub(
-            r'<section\s+class=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>',
+            r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>',
             _expand_prexvo_refinance_section,
             updated,
             flags=re.S | re.I,
         )
         updated = re.sub(
             r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
-            r'<section class="partners-section"\g<1> data-partner="splash_financial" data-primary-partner="splash_financial" data-partnership-model="CPA_BOUNTY" data-partner-models="CPA_BOUNTY,QUALIFIED_LEAD_CPL" data-partner-roster="splash_financial,credible,lendkey" data-partner-companies="Splash Financial,Credible,LendKey">',
+            rf'<section class="partners-section"\g<1> data-partner="{eff_px_pk}" data-primary-partner="{eff_px_pk}" data-partnership-model="{html_lib.escape(px_lead_model)}" data-partner-models="{html_lib.escape(px_models_csv)}" data-partner-roster="{html_lib.escape(px_roster_csv)}" data-partner-companies="{html_lib.escape(px_companies_csv)}">',
             updated,
             count=1,
             flags=re.I,
         )
         updated = re.sub(
             r'(<section\s+class=["\']partners-section["\'][^>]*data-partner-roster=["\'][^"\']+["\'])(?![^>]*data-partnership-model=)([^>]*>)',
-            r'\g<1> data-partnership-model="CPA_BOUNTY" data-partner-models="CPA_BOUNTY,QUALIFIED_LEAD_CPL"\g<2>',
+            rf'\g<1> data-partnership-model="{html_lib.escape(px_lead_model)}" data-partner-models="{html_lib.escape(px_models_csv)}"\g<2>',
             updated,
             count=1,
             flags=re.I,
@@ -6096,12 +7664,14 @@ def normalize_html_callout_message_match(
         if (
             "ymyl-public-service-guardrail" not in updated
             and 'data-restricted-public-service="true"' not in updated
-            and "/r/splash_financial" in updated
+            and any(f"/r/{k}" in updated for k in ("splash_financial", "credible", "lendkey"))
         ):
-            primary_inline_pk = "splash_financial"
+            primary_inline_pk = eff_px_pk
 
     elif prop == "gainhelm":
-        gainhelm_roster_keys = (
+        gh_fw_prof = get_gainhelm_framework_profile(slug=page_slug, vertical=page_v_fam)
+        gh_primary_pk = str(gh_fw_prof.get("primary_partner_key") or "vanta_security")
+        gh_base_roster = (
             "vanta_security",
             "drata_compliance",
             "sprinto_compliance",
@@ -6109,29 +7679,142 @@ def normalize_html_callout_message_match(
             "coalition_cyber_insurance",
             "cobalt_pentest",
         )
+        valid_gh_keys = {
+            k
+            for k in gh_base_roster
+            if GAINHELM_AFFILIATES.get(k) and GAINHELM_AFFILIATES[k].status not in ("declined", "rejected")
+        }
+        if gh_primary_pk not in valid_gh_keys and GAINHELM_AFFILIATES.get(gh_primary_pk):
+            valid_gh_keys.add(gh_primary_pk)
+
+        gh_sec_pat = (
+            r'<section\b[^>]*\bclass=["\'][^"\']*'
+            r'(?:refinance-partner-section|affiliates?-section|partners-section)'
+            r'[^"\']*["\'][^>]*>.*?</section>'
+        )
+        gh_sec_m = re.search(gh_sec_pat, updated, flags=re.S | re.I)
+        sec_html_probe = gh_sec_m.group(0) if gh_sec_m else ""
+        sec_open_m = re.match(r"<section\b[^>]*>", sec_html_probe, flags=re.I) if sec_html_probe else None
+        sec_open = sec_open_m.group(0) if sec_open_m else ""
+        sec_pk_m = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', sec_open or sec_html_probe, flags=re.I)
+        sec_pk = sec_pk_m.group(1).lower() if sec_pk_m else ""
+        first_card_pk = ""
+        if sec_html_probe:
+            c_tag_m = re.search(
+                r'<div\b[^>]*\bclass=["\'][^"\']*\bpartner-card\b[^"\']*["\'][^>]*>',
+                sec_html_probe,
+                flags=re.I,
+            )
+            if c_tag_m:
+                c_pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', c_tag_m.group(0), flags=re.I)
+                if c_pk_m:
+                    first_card_pk = c_pk_m.group(1).lower()
+        gsc_cand_probe = str(gsc_inline_meta.get("data-partner") or "").strip().lower()
+        sec_repositioned = bool(re.search(r'data-gsc-repositioned=["\']true["\']', sec_open, flags=re.I))
+        inline_repositioned = str(gsc_inline_meta.get("data-gsc-repositioned") or "").strip().lower() == "true"
+
+        promoted_cand = ""
+        if sec_repositioned and sec_pk in valid_gh_keys:
+            promoted_cand = sec_pk
+        elif inline_repositioned and gsc_cand_probe in valid_gh_keys:
+            promoted_cand = gsc_cand_probe
+        elif preserve_promoted_primary:
+            if sec_pk in valid_gh_keys:
+                promoted_cand = sec_pk
+            elif gsc_cand_probe in valid_gh_keys:
+                promoted_cand = gsc_cand_probe
+        elif (
+            sec_pk in valid_gh_keys
+            and sec_pk != "vanta_security"
+            and sec_pk == first_card_pk
+            and not has_gainhelm_cross_framework_leak(sec_html_probe, page_slug)
+        ):
+            promoted_cand = sec_pk
+
+        eff_gh_pk = promoted_cand or gh_primary_pk
+        gainhelm_roster_keys = tuple(
+            [eff_gh_pk] + [k for k in gh_base_roster if k != eff_gh_pk]
+        )
         gainhelm_roster_csv = ",".join(gainhelm_roster_keys)
-        gainhelm_companies_csv = "Vanta,Drata,Sprinto,Thoropass,Coalition,Cobalt"
-        gainhelm_models_csv = "QUALIFIED_LEAD_CPL,HYBRID_CPA_REVSHARE,CPA_BOUNTY"
+        gainhelm_companies_csv = ",".join(
+            COMPANY_BRAND_BY_PARTNER_KEY.get(k, k) for k in gainhelm_roster_keys
+        )
+        gh_models_seen: List[str] = []
+        for k in gainhelm_roster_keys:
+            p_k = GAINHELM_AFFILIATES.get(k)
+            if p_k and p_k.partnership_model not in gh_models_seen:
+                gh_models_seen.append(p_k.partnership_model)
+        gainhelm_models_csv = ",".join(gh_models_seen) or "QUALIFIED_LEAD_CPL,HYBRID_CPA_REVSHARE,CPA_BOUNTY"
+        prim_p_obj = GAINHELM_AFFILIATES.get(eff_gh_pk)
+        gainhelm_primary_model = html_lib.escape(
+            (prim_p_obj.partnership_model if prim_p_obj else None) or "QUALIFIED_LEAD_CPL"
+        )
 
         def _expand_gainhelm_partner_section(match: re.Match) -> str:
             sec_html = match.group(0)
+            prim_obj = GAINHELM_AFFILIATES.get(eff_gh_pk)
+            prim_badge = (
+                resolve_contextual_partner_offer_copy(
+                    partner_key=eff_gh_pk,
+                    p_obj=prim_obj,
+                    slug=page_slug,
+                    vertical_family=page_v_fam,
+                    property_id=prop,
+                )["badge"]
+                if prim_obj
+                else ""
+            )
+            sec_has_leak = has_gainhelm_cross_framework_leak(sec_html, page_slug)
+            first_card_m = re.search(
+                r'<div\b[^>]*\bclass=["\'][^"\']*\bpartner-card\b[^"\']*["\'][^>]*>.*?'
+                r'(?=<div\b[^>]*\bclass=["\'][^"\']*\bpartner-card\b|</section>)',
+                sec_html,
+                flags=re.S | re.I,
+            )
+            first_card_scope = first_card_m.group(0) if first_card_m else sec_html
             if (
                 'data-restricted-public-service="true"' in sec_html
                 or 'data-commercial-offers="none"' in sec_html
                 or (
-                    "data-gsc-tier=" in sec_html
+                    "partners-section" in sec_html
+                    and "/r/" not in sec_html
+                    and "partner-card" not in sec_html
+                    and not sec_has_leak
+                )
+                or (
+                    (
+                        f'data-primary-partner="{eff_gh_pk}"' in sec_html
+                        or f"data-primary-partner='{eff_gh_pk}'" in sec_html
+                    )
+                    and not sec_has_leak
+                    and ("data-gsc-tier=" in sec_html or 'data-mechanic="compliant_intent_monetization"' in sec_html)
                     and "data-partner-roster=" in sec_html
                     and all(pk in sec_html for pk in gainhelm_roster_keys)
+                    and (not prim_badge or html_lib.escape(prim_badge) in first_card_scope)
                 )
             ):
                 return sec_html
+            sec_open_m = re.match(r"<section\b[^>]*>", sec_html, flags=re.I)
+            sec_id_attr = _extract_section_id_attr(sec_open_m.group(0) if sec_open_m else "")
             gsc_tier_m = re.search(r'data-gsc-tier=["\']([^"\']+)["\']', sec_html, flags=re.I)
             gsc_tier_attr = f' data-gsc-tier="{html_lib.escape(gsc_tier_m.group(1))}"' if gsc_tier_m else ""
+            gsc_rep_m = re.search(r'data-gsc-repositioned=["\']([^"\']+)["\']', sec_html, flags=re.I)
+            gsc_rep_attr = f' data-gsc-repositioned="{html_lib.escape(gsc_rep_m.group(1))}"' if gsc_rep_m else ""
+            h2_m = re.search(r"<h2\b[^>]*>.*?</h2>", sec_html, flags=re.S | re.I)
+            h2_block = f"      {h2_m.group(0)}\n" if h2_m else ""
+            reg_block = _extract_partner_registration_drawer(sec_html)
             cards_html: List[str] = []
             for idx, pk in enumerate(gainhelm_roster_keys, start=1):
                 p_obj = GAINHELM_AFFILIATES.get(pk)
                 if not p_obj:
                     continue
+                ctx_gh = resolve_contextual_partner_offer_copy(
+                    partner_key=pk,
+                    p_obj=p_obj,
+                    slug=page_slug,
+                    vertical_family=page_v_fam,
+                    property_id=prop,
+                )
                 slot = "calculator_primary_cta" if idx == 1 else "partner_matrix_card"
                 card_href = _build_r_href(pk, f"card_{idx}", slot)
                 safe_s = html_lib.escape(page_slug)
@@ -6140,45 +7823,52 @@ def normalize_html_callout_message_match(
                 c_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(pk, pk))
                 cards_html.append(
                     f'      <div class="partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
-                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(p_obj.badge)}</span>\n'
-                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(p_obj.name)}</h3>\n'
-                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(p_obj.description)}</p>\n'
+                    f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(ctx_gh["badge"])}</span>\n'
+                    f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(ctx_gh["name"])}</h3>\n'
+                    f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(ctx_gh["description"])}</p>\n'
                     f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
-                    f'          {html_lib.escape(p_obj.cta_text)} &rarr;\n'
+                    f'          {html_lib.escape(ctx_gh["cta_text"])} &rarr;\n'
                     f'        </a>\n'
                     f'      </div>'
                 )
             grid_inner = "\n".join(cards_html)
+            sec_cls = (
+                "partners-section refinance-partner-section affiliates-section"
+                if "partners-section" in sec_html
+                else "refinance-partner-section affiliates-section"
+            )
             return (
-                '<section class="refinance-partner-section affiliates-section" data-mechanic="compliant_intent_monetization" '
-                'data-partner="vanta_security" data-primary-partner="vanta_security" '
-                'data-partnership-model="QUALIFIED_LEAD_CPL" '
+                f'<section{sec_id_attr} class="{sec_cls}" data-mechanic="compliant_intent_monetization" '
+                f'data-partner="{eff_gh_pk}" data-primary-partner="{eff_gh_pk}" '
+                f'data-partnership-model="{gainhelm_primary_model}" '
                 f'data-partner-models="{gainhelm_models_csv}" '
                 f'data-partner-roster="{gainhelm_roster_csv}" '
                 f'data-partner-companies="{gainhelm_companies_csv}"'
-                f'{gsc_tier_attr} '
+                f'{gsc_tier_attr}{gsc_rep_attr} '
                 'style="margin: 1.5rem 0;">\n'
+                f'{h2_block}'
                 '      <div class="partner-matrix-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">\n'
                 f'{grid_inner}\n'
-                '      </div>\n'
+                '      </div>'
+                f'{reg_block}\n'
                 '    </section>'
             )
 
         updated = re.sub(
-            r'<section\s+class=["\'][^"\']*(?:refinance-partner-section|affiliates?-section)[^"\']*["\'][^>]*>.*?</section>',
+            gh_sec_pat,
             _expand_gainhelm_partner_section,
             updated,
             flags=re.S | re.I,
         )
         updated = re.sub(
-            r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
-            rf'<section class="partners-section"\g<1> data-partner="vanta_security" data-primary-partner="vanta_security" data-partnership-model="QUALIFIED_LEAD_CPL" data-partner-models="{gainhelm_models_csv}" data-partner-roster="{gainhelm_roster_csv}" data-partner-companies="{gainhelm_companies_csv}">',
+            r'<section\b[^>]*\bclass=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
+            rf'<section class="partners-section"\g<1> data-partner="{eff_gh_pk}" data-primary-partner="{eff_gh_pk}" data-partnership-model="{gainhelm_primary_model}" data-partner-models="{gainhelm_models_csv}" data-partner-roster="{gainhelm_roster_csv}" data-partner-companies="{gainhelm_companies_csv}">',
             updated,
             count=1,
             flags=re.I,
         )
         if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
-            primary_inline_pk = "vanta_security"
+            primary_inline_pk = eff_gh_pk
 
     elif prop == "lienbond":
         if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
@@ -6410,6 +8100,8 @@ def normalize_html_callout_message_match(
         gsc_cand_pk in registry
         and registry[gsc_cand_pk].status not in ("declined", "rejected")
         and (prop not in ("profithelm", "exchange1031") or gsc_cand_pk in SOVRN_VERIFIED_PAYING_MERCHANTS)
+        and (prop != "gainhelm" or not eff_gh_pk or gsc_cand_pk == eff_gh_pk)
+        and (prop != "prexvo" or not promoted_px_cand or gsc_cand_pk == promoted_px_cand)
     ):
         primary_inline_pk = gsc_cand_pk
     if (
@@ -6438,17 +8130,21 @@ def normalize_html_callout_message_match(
         if gsc_inline_meta:
             gsc_t = html_lib.escape(gsc_inline_meta.get("data-gsc-tier", "baseline"))
             gsc_y = html_lib.escape(gsc_inline_meta.get("data-yield-score", "0"))
-            gsc_rep_val = html_lib.escape(gsc_inline_meta.get("data-gsc-repositioned", "true"))
+            default_rep = "false" if gsc_t.strip().lower() in ("baseline", "baseline_multi_slot") else "true"
+            gsc_rep_val = html_lib.escape(gsc_inline_meta.get("data-gsc-repositioned", default_rep))
             gsc_extra_attrs = f'data-gsc-repositioned="{gsc_rep_val}" data-gsc-tier="{gsc_t}" data-yield-score="{gsc_y}" '
         if (
             preserved_gsc_inline_block
             and gsc_inline_meta.get("data-partner") == primary_inline_pk
+            and safe_badge in preserved_gsc_inline_block
+            and safe_name in preserved_gsc_inline_block
             and safe_cta in preserved_gsc_inline_block
             and f'data-status="{safe_status}"' in preserved_gsc_inline_block
             and not any(
                 f_tok in preserved_gsc_inline_block.lower()
                 for f_tok in FORBIDDEN_REPLACED_BRAND_TOKENS.get(primary_inline_pk, ())
             )
+            and (prop != "gainhelm" or not has_gainhelm_cross_framework_leak(preserved_gsc_inline_block, page_slug))
         ):
             inline_cta_html = (
                 preserved_gsc_inline_block
@@ -6593,9 +8289,10 @@ def normalize_html_callout_message_match(
             else:
                 updated = updated.replace("</head>", f"{fold_css}</head>", 1)
 
-        if 'class="comparison-table-cta-bar"' in updated or "class='comparison-table-cta-bar'" in updated:
+        if _COMPARISON_TABLE_CTA_BAR_RE.search(updated):
             def _replace_comparison_table_cta_bar(tbl_m: re.Match) -> str:
                 bar_raw = tbl_m.group(0)
+                existing_cls = tbl_m.group(1) or ""
                 pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', bar_raw, re.I)
                 if not pk_m:
                     pk_m = re.search(r'href=["\']/r/([a-z0-9_]+)', bar_raw, re.I)
@@ -6608,31 +8305,27 @@ def normalize_html_callout_message_match(
                 )
                 if not needs_tbl_upgrade:
                     return bar_raw
-                tbl_href = _build_r_href(primary_inline_pk, "table", "comparison_table_cta")
+                tbl_href = f"/r/{primary_inline_pk}?source_tool={page_slug}&subid={page_slug}_table&cta_slot=comparison_table_cta"
                 gsc_t_m = re.search(r'data-gsc-tier=["\']([^"\']+)["\']', bar_raw, re.I)
-                gsc_t_val = html_lib.escape(gsc_t_m.group(1)) if gsc_t_m else "baseline"
-                safe_tbl_sub = html_lib.escape(f"{page_slug}_table")
-                return (
-                    f'<div class="comparison-table-cta-bar" data-mechanic="compliant_intent_monetization" '
-                    f'data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
-                    f'data-partnership-model="{safe_inline_model}" '
-                    f'data-cta-slot="comparison_table_cta" data-gsc-tier="{gsc_t_val}" '
-                    f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;">\n'
-                    f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">Scenario Execution Partner: <strong>{safe_name}</strong> ({safe_brand})</span>\n'
-                    f'        <a href="{tbl_href}" target="_blank" rel="noopener sponsored nofollow" '
-                    f'data-partner="{primary_inline_pk}" data-company-brand="{safe_brand}" data-partner-tier="primary" '
-                    f'data-partnership-model="{safe_inline_model}" '
-                    f'data-tool="{safe_s}" data-subid="{safe_tbl_sub}" data-status="{safe_status}" '
-                    f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
-                    f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_cta} &rarr;</a>\n'
-                    f'      </div>'
+                gsc_t_val = gsc_t_m.group(1) if gsc_t_m else "baseline"
+                return _render_comparison_table_cta_bar(
+                    pk=primary_inline_pk,
+                    name=ctx_in["name"],
+                    cta_text=ctx_in["cta_text"],
+                    brand=COMPANY_BRAND_BY_PARTNER_KEY.get(primary_inline_pk, primary_inline_pk),
+                    model=p_inline.partnership_model,
+                    href=tbl_href,
+                    tool=page_slug,
+                    subid=f"{page_slug}_table",
+                    status=_effective_dom_status(primary_inline_pk, p_inline),
+                    gsc_tier=gsc_t_val,
+                    tier_role="primary",
+                    existing_class_attr=existing_cls,
                 )
 
-            updated = re.sub(
-                r'<div\s+class=["\']comparison-table-cta-bar["\'][^>]*>.*?</div>',
+            updated = _COMPARISON_TABLE_CTA_BAR_RE.sub(
                 _replace_comparison_table_cta_bar,
                 updated,
-                flags=re.S | re.I,
             )
 
     # Stamp any remaining bare /r/<partner> anchors with page (source_tool) and slot (subid, cta_slot) attribution
@@ -7480,8 +9173,10 @@ def select_conversion_slot_plan(
             in (
                 "QUERY_INTENT_PARTNER_SWAP",
                 "HIGH_IMPRESSION_CTR_SHORTFALL",
+                "STRIKING_DISTANCE_PROMOTION",
                 "MOBILE_CTR_DEFICIT_PROMOTION",
                 "RICH_APPEARANCE_MATRIX_PROMOTION",
+                "EMPIRICAL_YIELD_SWAP",
                 "WORKBENCH_ENGAGEMENT_SLOT_PROMOTION",
             )
         )
@@ -7652,6 +9347,13 @@ def resolve_contextual_partner_offer_copy(
             "transfer deeds with LawDepot customizable legal templates."
         )
         cta_text = "Draft Real Estate & LLC Agreements on LawDepot"
+    elif prop == "gainhelm":
+        fw_key = classify_gainhelm_framework(slug=s_low, vertical=v_fam)
+        fw_partner_map = _GAINHELM_PARTNER_CONTEXTUAL_COPY.get(fw_key)
+        if fw_partner_map is None and fw_key not in ("soc2", "cmmc"):
+            fw_partner_map = _GAINHELM_PARTNER_CONTEXTUAL_COPY.get("non_audit_generic")
+        if fw_partner_map and pk in fw_partner_map:
+            badge, name, description, cta_text = fw_partner_map[pk]
     elif prop == "prexvo" and pk == "splash_financial":
         if "tax-bomb" in s_low or "insolvency" in s_low:
             badge = "Skip the 2026 Forgiveness Tax Bomb (2-Min Soft Check)"
@@ -7668,6 +9370,319 @@ def resolve_contextual_partner_offer_copy(
         "description": description,
         "cta_text": cta_text,
     }
+
+
+def _build_roster_offer_entry(
+    pk: str,
+    p_obj: AffiliatePartner,
+    idx: int,
+    total_count: int,
+    prop: str,
+    s_norm: str,
+    slug_id: str,
+    vertical_family: str,
+    commercial_intent: str,
+    intent_multiplier: float,
+    resolved_archetype: str,
+    query: str,
+    ftc_disc: str,
+    r_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Builds a single enriched partner offer dictionary for roster binding and slot assignment."""
+    meta = r_meta or {}
+    model_spec = resolve_partnership_model_spec(pk, p_obj)
+    p_model = str(model_spec.get("partnership_model") or p_obj.partnership_model or "CPA_BOUNTY")
+    model_fit_mult = score_partnership_model_intent_fit(
+        partnership_model=p_model,
+        vertical_family=vertical_family,
+        commercial_intent=commercial_intent,
+        query=query,
+        page_archetype=resolved_archetype,
+    )
+    is_non_hr_rippling = pk == "rippling" and vertical_family in (
+        "federal_state_tax_brackets",
+        "section_179_equipment_capex",
+        "1031_like_kind_exchange",
+        "rd_section_174_bookkeeping",
+    )
+    if is_non_hr_rippling:
+        model_fit_mult = round(model_fit_mult * 0.45, 4)
+    emp_fit_scale = 0.0 if is_non_hr_rippling else 1.0
+    bounty_mid = float(
+        meta.get("bounty_midpoint_usd")
+        or model_spec.get("ltv_bounty_equivalent_usd")
+        or get_partner_bounty_midpoint(pk)
+    )
+    est_conv_rate = float(model_spec.get("click_to_conversion_rate") or (0.035 if prop != "prexvo" else 0.025))
+    expected_epc = round(bounty_mid * est_conv_rate * intent_multiplier * model_fit_mult, 2)
+    base_yield = float(meta.get("yield_score") or round(bounty_mid * 0.5 + (5.0 if idx == 0 else 0.0), 2))
+    company_brand = COMPANY_BRAND_BY_PARTNER_KEY.get(pk, p_obj.name.split()[0])
+    tier_role = "primary" if idx == 0 else ("secondary" if idx < total_count - 1 else "fallback")
+    slot_default = "calculator_primary_cta" if idx == 0 else "partner_matrix_card"
+    sub_default = f"{slug_id}_card_{idx + 1}"
+    ctx_copy = resolve_contextual_partner_offer_copy(
+        partner_key=pk,
+        p_obj=p_obj,
+        slug=s_norm,
+        vertical_family=vertical_family,
+        property_id=prop,
+    )
+    offer_status = str(meta.get("status") or p_obj.status or "pending")
+    return {
+        "partner_key": pk,
+        "name": ctx_copy["name"],
+        "partner_name": ctx_copy["name"],
+        "company_brand": company_brand,
+        "tier_role": tier_role,
+        "status": offer_status,
+        "partnership_model": p_model,
+        "partnership_model_spec": model_spec,
+        "intent_fit_multiplier": model_fit_mult,
+        "commission_est": p_obj.commission_est,
+        "bounty_est": p_obj.bounty_est,
+        "bounty_midpoint_usd": round(bounty_mid, 2),
+        "expected_epc_usd": expected_epc,
+        "yield_score": round(base_yield * intent_multiplier * model_fit_mult, 2),
+        "empirical_erpm_usd": round(float(meta.get("empirical_erpm_usd", 0.0) or 0.0) * emp_fit_scale, 2),
+        "empirical_cta_ctr": float(meta.get("cta_ctr", 0.0) or 0.0),
+        "outbound_clicks": int(meta.get("outbound_clicks", 0) or 0),
+        "estimated_revenue_yield_usd": round(float(meta.get("estimated_revenue_yield_usd", 0.0) or 0.0) * emp_fit_scale, 2),
+        "badge": ctx_copy["badge"],
+        "description": ctx_copy["description"],
+        "cta_text": ctx_copy["cta_text"],
+        "default_url": p_obj.default_url,
+        "redirect_path": f"/r/{pk}",
+        "attributed_href": f"/r/{pk}?source_tool={slug_id}&subid={sub_default}&cta_slot={slot_default}",
+        "rel_attributes": "noopener sponsored nofollow",
+        "disclosure": ftc_disc,
+    }
+
+
+def _property_partner_registry(prop: str) -> Dict[str, AffiliatePartner]:
+    if prop == "prexvo":
+        return PREXVO_AFFILIATES
+    if prop == "gainhelm":
+        return GAINHELM_AFFILIATES
+    if prop == "lienbond":
+        return LIENBOND_AFFILIATES
+    return PROFITHELM_AFFILIATES
+
+
+def _extract_existing_gsc_promoted_placement(html_content: str) -> Tuple[bool, str, str]:
+    """Reads existing data-gsc-repositioned, partner key, and data-gsc-tier from .calc-inline-cta or partner <section>."""
+    inline_m = re.search(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>',
+        html_content,
+        flags=re.I,
+    )
+    sec_m = re.search(
+        r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section|affiliates?-section)[^"\']*["\'][^>]*>',
+        html_content,
+        flags=re.I,
+    )
+    inline_tag = inline_m.group(0) if inline_m else ""
+    sec_tag = sec_m.group(0) if sec_m else ""
+    inline_rep = bool(re.search(r'data-gsc-repositioned=["\']true["\']', inline_tag, flags=re.I))
+    sec_rep = bool(re.search(r'data-gsc-repositioned=["\']true["\']', sec_tag, flags=re.I))
+    if not (inline_rep or sec_rep):
+        return False, "", ""
+    inline_pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', inline_tag, flags=re.I)
+    sec_pk_m = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', sec_tag, flags=re.I) or re.search(
+        r'data-partner=["\']([a-z0-9_]+)["\']', sec_tag, flags=re.I
+    )
+    promoted_pk = (
+        inline_pk_m.group(1).lower()
+        if (inline_rep and inline_pk_m)
+        else (sec_pk_m.group(1).lower() if (sec_rep and sec_pk_m) else (inline_pk_m.group(1).lower() if inline_pk_m else ""))
+    )
+    tier_m = re.search(r'data-gsc-tier=["\']([^"\']+)["\']', inline_tag, flags=re.I) or re.search(
+        r'data-gsc-tier=["\']([^"\']+)["\']', sec_tag, flags=re.I
+    )
+    return True, promoted_pk, (tier_m.group(1).strip() if tier_m else "")
+
+
+def _apply_preserved_promoted_partner_to_roster(
+    roster: Dict[str, Any],
+    promoted_pk: str,
+    existing_tier: str,
+    prop: str,
+    slug_id: str,
+    registry: Dict[str, AffiliatePartner],
+) -> None:
+    """Preserves a pre-existing valid GSC/empirical promoted partner on roster and slot_plan when gsc_metrics is None."""
+    slot_plan = roster["slot_plan"]
+    ordered_offers = [dict(o) for o in (slot_plan.get("ordered_offers") or roster.get("roster_offers") or [])]
+    target_len = max(len(ordered_offers), 1)
+    if any(str(o.get("partner_key") or "").lower() == promoted_pk for o in ordered_offers):
+        ordered_offers = [o for o in ordered_offers if str(o.get("partner_key") or "").lower() == promoted_pk] + [
+            o for o in ordered_offers if str(o.get("partner_key") or "").lower() != promoted_pk
+        ]
+    else:
+        p_obj = registry[promoted_pk]
+        ftc_disc = (
+            PREXVO_DISCLOSURES.get("ftc_disclosure", "")
+            if prop == "prexvo"
+            else get_contextual_ftc_disclosure(prop, slug=roster["slug"])
+        )
+        new_entry = _build_roster_offer_entry(
+            pk=promoted_pk,
+            p_obj=p_obj,
+            idx=0,
+            total_count=target_len,
+            prop=prop,
+            s_norm=roster["slug"],
+            slug_id=slug_id,
+            vertical_family=roster["vertical_family"],
+            commercial_intent=roster["commercial_intent"],
+            intent_multiplier=roster["intent_multiplier"],
+            resolved_archetype=roster["page_archetype"],
+            query="",
+            ftc_disc=ftc_disc,
+        )
+        ordered_offers = ([new_entry] + ordered_offers)[:target_len]
+
+    for idx, off in enumerate(ordered_offers):
+        off["tier_role"] = "primary" if idx == 0 else ("secondary" if idx < len(ordered_offers) - 1 else "fallback")
+
+    lead_offer = ordered_offers[0]
+    slot_weights = slot_plan.get("slot_weights") or {}
+
+    def _bind(off: Dict[str, Any], slot_name: str, sub_suffix: str) -> Dict[str, Any]:
+        pk = str(off.get("partner_key") or "")
+        sub_val = f"{slug_id}_{sub_suffix}"
+        return {
+            **off,
+            "cta_slot": slot_name,
+            "subid": sub_val,
+            "slot_weight": slot_weights.get(slot_name, 0.8),
+            "attributed_href": f"/r/{pk}?source_tool={slug_id}&subid={sub_val}&cta_slot={slot_name}",
+        }
+
+    eff_tier = (
+        existing_tier
+        if existing_tier and existing_tier.upper() not in ("BASELINE", "BASELINE_MULTI_SLOT")
+        else "PRESERVED_GSC_PLACEMENT"
+    )
+    slot_plan["ordered_offers"] = ordered_offers
+    slot_plan["gsc_repositioned"] = True
+    slot_plan["gsc_opportunity_tier"] = eff_tier
+    slot_plan["promoted_partner_key"] = promoted_pk
+    slot_plan["reposition_reason"] = f"Preserved existing promoted placement for '{promoted_pk}' ({eff_tier})."
+    slot_plan["slot_bindings"] = {
+        "calculator_result_inline": _bind(lead_offer, "calculator_result_inline", "inline"),
+        "comparison_table_cta": _bind(lead_offer, "comparison_table_cta", "table"),
+        "inline_callout_card": _bind(lead_offer, "inline_callout_card", "callout"),
+        "partner_matrix_cards": [
+            _bind(off, "calculator_primary_cta" if idx == 1 else "partner_matrix_card", f"card_{idx}")
+            for idx, off in enumerate(ordered_offers, start=1)
+        ],
+    }
+    roster["primary_offer"] = lead_offer
+    roster["secondary_offers"] = (
+        ordered_offers[1:-1] if len(ordered_offers) > 2 else (ordered_offers[1:] if len(ordered_offers) > 1 else [])
+    )
+    roster["fallback_offer"] = ordered_offers[-1] if len(ordered_offers) >= 2 else lead_offer
+    roster["roster_offers"] = ordered_offers
+    roster["roster_keys"] = [str(o.get("partner_key") or "") for o in ordered_offers]
+    roster["distinct_companies"] = list(
+        dict.fromkeys(str(o.get("company_brand") or "") for o in ordered_offers if o.get("company_brand"))
+    )
+    roster["distinct_companies_count"] = len(roster["distinct_companies"])
+    roster["partnership_models_represented"] = list(
+        dict.fromkeys(str(o.get("partnership_model") or "") for o in ordered_offers if o.get("partnership_model"))
+    )
+    roster["primary_partnership_model"] = str(lead_offer.get("partnership_model") or "")
+
+
+def load_property_partner_engagement_metrics(
+    agy_dir: Optional[Any],
+    property_id: str = "",
+) -> Dict[str, Any]:
+    """Loads persisted outbound partner engagement metrics from a property's .agy directory."""
+    if not agy_dir:
+        return {}
+    base_dir = Path(agy_dir)
+    if not base_dir.is_dir():
+        return {}
+    prop_clean = (property_id or "").strip().lower()
+    if prop_clean == "exchange1031":
+        prop_clean = "profithelm"
+    for eng_cand in (
+        base_dir / "outbound_partner_engagement.json",
+        base_dir / "partner_engagement_metrics.json",
+    ):
+        if not eng_cand.is_file():
+            continue
+        try:
+            loaded = json.loads(eng_cand.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                loaded_prop = str(loaded.get("property_id") or "").strip().lower()
+                if loaded_prop == "exchange1031":
+                    loaded_prop = "profithelm"
+                if not prop_clean or not loaded_prop or loaded_prop == prop_clean:
+                    return loaded
+        except Exception:
+            continue
+    return {}
+
+
+def load_persisted_gsc_placement_metrics_by_slug(
+    agy_dir: Optional[Any],
+    property_id: str = "",
+) -> Dict[str, Dict[str, Any]]:
+    """Loads per-slug GSC query, impression, CTR, position, and searchAppearance signals from .agy/gsc_affiliate_placement_ledger.json."""
+    if not agy_dir:
+        return {}
+    ledger_path = Path(agy_dir) / "gsc_affiliate_placement_ledger.json"
+    if not ledger_path.is_file():
+        return {}
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(ledger, dict):
+        return {}
+    prop_clean = (property_id or "").strip().lower()
+    if prop_clean == "exchange1031":
+        prop_clean = "profithelm"
+    ledger_prop = str(ledger.get("property_id") or "").strip().lower()
+    if ledger_prop == "exchange1031":
+        ledger_prop = "profithelm"
+    if prop_clean and ledger_prop and ledger_prop != prop_clean:
+        return {}
+    by_slug: Dict[str, Dict[str, Any]] = {}
+    for row in list(ledger.get("page_reports") or []) + list(ledger.get("repositioned_pages") or []):
+        if not isinstance(row, dict):
+            continue
+        r_slug = str(row.get("slug") or "").strip().strip("/").lower()
+        if not r_slug:
+            continue
+        impr = int(float(row.get("gsc_impressions", row.get("impressions", 0)) or 0))
+        clicks = int(float(row.get("gsc_clicks", row.get("clicks", 0)) or 0))
+        mob_impr = int(float(row.get("gsc_mobile_impressions", row.get("mobile_impressions", 0)) or 0))
+        desk_impr = int(float(row.get("gsc_desktop_impressions", row.get("desktop_impressions", 0)) or 0))
+        q_str = str(row.get("gsc_query") or row.get("query") or "").strip()
+        sa_list = [str(sa) for sa in (row.get("gsc_search_appearances") or row.get("search_appearances") or []) if sa]
+        if not (impr > 0 or mob_impr > 0 or desk_impr > 0 or q_str or sa_list):
+            continue
+        metrics = {
+            "slug": r_slug,
+            "impressions": impr,
+            "clicks": clicks,
+            "ctr": float(row.get("gsc_ctr", row.get("ctr", 0.0)) or 0.0),
+            "position": float(row.get("gsc_position", row.get("position", 0.0)) or 0.0),
+            "query": q_str,
+            "mobile_impressions": mob_impr,
+            "desktop_impressions": desk_impr,
+            "mobile_ctr": float(row.get("gsc_mobile_ctr", row.get("mobile_ctr", 0.0)) or 0.0),
+            "desktop_ctr": float(row.get("gsc_desktop_ctr", row.get("desktop_ctr", 0.0)) or 0.0),
+            "mobile_ctr_gap": float(row.get("gsc_mobile_ctr_gap", row.get("mobile_ctr_gap", 0.0)) or 0.0),
+            "device_focus": str(row.get("gsc_device_focus") or row.get("device_focus") or "BALANCED"),
+            "search_appearances": sa_list,
+        }
+        by_slug[r_slug] = metrics
+        by_slug.setdefault(r_slug.replace("/", "-"), metrics)
+    return by_slug
 
 
 def bind_asset_partner_roster(
@@ -7771,6 +9786,11 @@ def bind_asset_partner_roster(
         return True
 
     candidate_keys_ordered: List[str] = []
+    if prop == "gainhelm":
+        gh_prof = get_gainhelm_framework_profile(slug=s_norm, vertical=vertical_family)
+        gh_prim_pk = str(gh_prof.get("primary_partner_key") or "vanta_security")
+        if _is_roster_eligible(gh_prim_pk):
+            candidate_keys_ordered.append(gh_prim_pk)
     for k in vertical_template_keys:
         if _is_roster_eligible(k) and k not in candidate_keys_ordered:
             candidate_keys_ordered.append(k)
@@ -7828,78 +9848,25 @@ def bind_asset_partner_roster(
         if prop == "prexvo"
         else get_contextual_ftc_disclosure(prop, slug=s_norm)
     )
-    roster_offers: List[Dict[str, Any]] = []
-
-    for idx, pk in enumerate(selected_keys):
-        p_obj = registry[pk]
-        r_meta = ranked_by_key.get(pk) or {}
-        model_spec = resolve_partnership_model_spec(pk, p_obj)
-        p_model = str(model_spec.get("partnership_model") or p_obj.partnership_model or "CPA_BOUNTY")
-        model_fit_mult = score_partnership_model_intent_fit(
-            partnership_model=p_model,
+    roster_offers: List[Dict[str, Any]] = [
+        _build_roster_offer_entry(
+            pk=pk,
+            p_obj=registry[pk],
+            idx=idx,
+            total_count=len(selected_keys),
+            prop=prop,
+            s_norm=s_norm,
+            slug_id=slug_id,
             vertical_family=vertical_family,
             commercial_intent=commercial_intent,
+            intent_multiplier=intent_multiplier,
+            resolved_archetype=resolved_archetype,
             query=query,
-            page_archetype=resolved_archetype,
+            ftc_disc=ftc_disc,
+            r_meta=ranked_by_key.get(pk),
         )
-        is_non_hr_rippling = pk == "rippling" and vertical_family in (
-            "federal_state_tax_brackets",
-            "section_179_equipment_capex",
-            "1031_like_kind_exchange",
-            "rd_section_174_bookkeeping",
-        )
-        if is_non_hr_rippling:
-            model_fit_mult = round(model_fit_mult * 0.45, 4)
-        emp_fit_scale = 0.0 if is_non_hr_rippling else 1.0
-        bounty_mid = float(
-            r_meta.get("bounty_midpoint_usd")
-            or model_spec.get("ltv_bounty_equivalent_usd")
-            or get_partner_bounty_midpoint(pk)
-        )
-        est_conv_rate = float(model_spec.get("click_to_conversion_rate") or (0.035 if prop != "prexvo" else 0.025))
-        expected_epc = round(bounty_mid * est_conv_rate * intent_multiplier * model_fit_mult, 2)
-        base_yield = float(r_meta.get("yield_score") or round(bounty_mid * 0.5 + (5.0 if idx == 0 else 0.0), 2))
-        company_brand = COMPANY_BRAND_BY_PARTNER_KEY.get(pk, p_obj.name.split()[0])
-        tier_role = "primary" if idx == 0 else ("secondary" if idx < len(selected_keys) - 1 else "fallback")
-        slot_default = "calculator_primary_cta" if idx == 0 else "partner_matrix_card"
-        sub_default = f"{slug_id}_card_{idx + 1}"
-        ctx_copy = resolve_contextual_partner_offer_copy(
-            partner_key=pk,
-            p_obj=p_obj,
-            slug=s_norm,
-            vertical_family=vertical_family,
-            property_id=prop,
-        )
-        offer_status = str(r_meta.get("status") or p_obj.status or "pending")
-
-        roster_offers.append({
-            "partner_key": pk,
-            "name": ctx_copy["name"],
-            "partner_name": ctx_copy["name"],
-            "company_brand": company_brand,
-            "tier_role": tier_role,
-            "status": offer_status,
-            "partnership_model": p_model,
-            "partnership_model_spec": model_spec,
-            "intent_fit_multiplier": model_fit_mult,
-            "commission_est": p_obj.commission_est,
-            "bounty_est": p_obj.bounty_est,
-            "bounty_midpoint_usd": round(bounty_mid, 2),
-            "expected_epc_usd": expected_epc,
-            "yield_score": round(base_yield * intent_multiplier * model_fit_mult, 2),
-            "empirical_erpm_usd": round(float(r_meta.get("empirical_erpm_usd", 0.0) or 0.0) * emp_fit_scale, 2),
-            "empirical_cta_ctr": float(r_meta.get("cta_ctr", 0.0) or 0.0),
-            "outbound_clicks": int(r_meta.get("outbound_clicks", 0) or 0),
-            "estimated_revenue_yield_usd": round(float(r_meta.get("estimated_revenue_yield_usd", 0.0) or 0.0) * emp_fit_scale, 2),
-            "badge": ctx_copy["badge"],
-            "description": ctx_copy["description"],
-            "cta_text": ctx_copy["cta_text"],
-            "default_url": p_obj.default_url,
-            "redirect_path": f"/r/{pk}",
-            "attributed_href": f"/r/{pk}?source_tool={slug_id}&subid={sub_default}&cta_slot={slot_default}",
-            "rel_attributes": "noopener sponsored nofollow",
-            "disclosure": ftc_disc,
-        })
+        for idx, pk in enumerate(selected_keys)
+    ]
 
     slot_plan = select_conversion_slot_plan(
         property_id=prop,
@@ -7962,7 +9929,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         return html_content, {"repositioned": False, "status": "EMPTY_HTML"}
 
     prop = (property_id or "profithelm").strip().lower()
-    page_slug = (slug or _extract_page_slug_from_html(html_content)).strip().strip("/").lower()
+    page_slug = (slug or _extract_tool_slug_from_html_head(html_content)).strip().strip("/").lower()
     slug_id = page_slug.replace("/", "-")
 
     # Capture before state
@@ -7979,6 +9946,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         else (before_partners[0].lower() if before_partners else "")
     )
 
+    existing_gsc_rep, existing_promoted_pk, existing_gsc_tier = _extract_existing_gsc_promoted_placement(html_content)
     gsc_dict = dict(gsc_metrics) if isinstance(gsc_metrics, dict) else {}
     eff_query = str(query or gsc_dict.get("query") or gsc_dict.get("top_query") or "").strip()
 
@@ -8006,7 +9974,46 @@ def reposition_affiliate_placements_from_gsc_signals(
             "distinct_companies": [],
         }
 
+    registry = _property_partner_registry(prop)
     slot_plan = roster["slot_plan"]
+    existing_pk_obj = registry.get(existing_promoted_pk) if existing_promoted_pk else None
+    existing_pk_eligible = bool(
+        existing_pk_obj is not None
+        and str(existing_pk_obj.status or "").strip().lower() not in ("declined", "rejected", "terminated", "inactive")
+        and (
+            prop not in ("profithelm", "exchange1031")
+            or (
+                str(existing_pk_obj.status or "").strip().lower() == "live"
+                and existing_promoted_pk in SOVRN_VERIFIED_PAYING_MERCHANTS
+            )
+        )
+    )
+    existing_tier_upper = (existing_gsc_tier or "").strip().upper()
+    existing_is_non_empirical_gsc = existing_tier_upper not in (
+        "",
+        "BASELINE",
+        "BASELINE_MULTI_SLOT",
+        "EMPIRICAL_YIELD_SWAP",
+    )
+    if (
+        gsc_metrics is None
+        and not eff_query
+        and existing_gsc_rep
+        and existing_pk_eligible
+        and (
+            slot_plan.get("gsc_opportunity_tier") != "EMPIRICAL_YIELD_SWAP"
+            or existing_is_non_empirical_gsc
+        )
+    ):
+        _apply_preserved_promoted_partner_to_roster(
+            roster=roster,
+            promoted_pk=existing_promoted_pk,
+            existing_tier=existing_gsc_tier,
+            prop=prop,
+            slug_id=slug_id,
+            registry=registry,
+        )
+
     bindings = slot_plan["slot_bindings"]
     inline_offer = bindings["calculator_result_inline"]
     table_offer = bindings["comparison_table_cta"]
@@ -8159,42 +10166,33 @@ def reposition_affiliate_placements_from_gsc_signals(
                 )
 
     # 2. Inject or update comparison_table_cta when active in slot_plan (or heal any pre-existing bar in DOM)
-    has_existing_table_cta = 'class="comparison-table-cta-bar"' in updated or "class='comparison-table-cta-bar'" in updated
+    has_existing_table_cta = bool(_COMPARISON_TABLE_CTA_BAR_RE.search(updated))
     if ("comparison_table_cta" in slot_plan["active_slots"] or has_existing_table_cta) and table_offer:
         pk_tbl = str(table_offer["partner_key"])
-        safe_tbl_name = html_lib.escape(str(table_offer.get("name") or pk_tbl))
-        safe_tbl_cta = html_lib.escape(str(table_offer.get("cta_text") or "Compare Offer"))
-        safe_tbl_brand = html_lib.escape(str(table_offer.get("company_brand") or pk_tbl))
-        safe_tbl_model = html_lib.escape(str(table_offer.get("partnership_model") or resolve_partnership_model_spec(pk_tbl)["partnership_model"]))
-        safe_tbl_href = html_lib.escape(str(table_offer.get("attributed_href") or f"/r/{pk_tbl}"))
-        safe_tbl_sub = html_lib.escape(str(table_offer.get("subid") or f"{slug_id}_table"))
-        safe_tbl_status = html_lib.escape(str(table_offer.get("status") or "pending"))
-        safe_tool = html_lib.escape(slug_id)
-        safe_tier_role = html_lib.escape(str(table_offer.get("tier_role") or "primary"))
 
-        table_cta_bar = (
-            f'<div class="comparison-table-cta-bar" data-mechanic="compliant_intent_monetization" '
-            f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
-            f'data-partnership-model="{safe_tbl_model}" '
-            f'data-cta-slot="comparison_table_cta" data-gsc-tier="{html_lib.escape(gsc_tier)}" '
-            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.875rem; padding: 0.75rem 1rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;">\n'
-            f'        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">Scenario Execution Partner: <strong>{safe_tbl_name}</strong> ({safe_tbl_brand})</span>\n'
-            f'        <a href="{safe_tbl_href}" target="_blank" rel="noopener sponsored nofollow" '
-            f'data-partner="{pk_tbl}" data-company-brand="{safe_tbl_brand}" data-partner-tier="{safe_tier_role}" '
-            f'data-partnership-model="{safe_tbl_model}" '
-            f'data-tool="{safe_tool}" data-subid="{safe_tbl_sub}" data-status="{safe_tbl_status}" '
-            f'data-cta-slot="comparison_table_cta" class="btn-cta partner-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_tbl_cta} &rarr;</a>\n'
-            f'      </div>'
-        )
+        def _build_table_cta_bar(existing_cls: str = "") -> str:
+            return _render_comparison_table_cta_bar(
+                pk=pk_tbl,
+                name=str(table_offer.get("name") or pk_tbl),
+                cta_text=str(table_offer.get("cta_text") or "Compare Offer"),
+                brand=str(table_offer.get("company_brand") or pk_tbl),
+                model=str(table_offer.get("partnership_model") or resolve_partnership_model_spec(pk_tbl)["partnership_model"]),
+                href=str(table_offer.get("attributed_href") or f"/r/{pk_tbl}"),
+                tool=slug_id,
+                subid=f"{slug_id}_table",
+                status=str(table_offer.get("status") or "pending"),
+                gsc_tier=gsc_tier,
+                tier_role=str(table_offer.get("tier_role") or "primary"),
+                existing_class_attr=existing_cls,
+            )
+
         if has_existing_table_cta:
-            updated = re.sub(
-                r'<div\s+class=["\']comparison-table-cta-bar["\'][^>]*>.*?</div>',
-                table_cta_bar,
+            updated = _COMPARISON_TABLE_CTA_BAR_RE.sub(
+                lambda m: _build_table_cta_bar(m.group(1) or ""),
                 updated,
-                flags=re.S | re.I,
             )
         else:
+            new_table_cta_bar = _build_table_cta_bar("")
             for tbl_pat in (
                 r'(<section\s+class=["\'][^"\']*scenario-comparison[^"\']*["\'][^>]*>.*?</table>\s*</div>)',
                 r'(<section\s+class=["\'][^"\']*overlay-comparison[^"\']*["\'][^>]*>.*?</table>\s*</div>)',
@@ -8203,19 +10201,14 @@ def reposition_affiliate_placements_from_gsc_signals(
                 if re.search(tbl_pat, updated, flags=re.S | re.I):
                     updated = re.sub(
                         tbl_pat,
-                        rf"\g<1>\n      {table_cta_bar}",
+                        lambda m: f"{m.group(1)}\n      {new_table_cta_bar}",
                         updated,
                         count=1,
                         flags=re.S | re.I,
                     )
                     break
     elif has_existing_table_cta and not table_offer:
-        updated = re.sub(
-            r'\s*<div\s+class=["\']comparison-table-cta-bar["\'][^>]*>.*?</div>',
-            "",
-            updated,
-            flags=re.S | re.I,
-        )
+        updated = _COMPARISON_TABLE_CTA_BAR_STRIP_RE.sub("", updated)
 
     # 3. Rebuild or expand .affiliates-section / .affiliate-cta-section with the diversified multi-company roster
     if matrix_cards and prop != "prexvo":
@@ -8237,7 +10230,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{c_badge} ({c_role.title()} Offer)</span>\n'
-                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:var(--text-secondary);margin-left:0.5rem;font-weight:500;">Sponsored / {c_brand}</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem; font-weight: 500;">Sponsored / {c_brand}</span>\n'
                 f'        <h3 class="affiliate-title">{c_name}</h3>\n'
                 f'        <p class="affiliate-desc">{c_desc}</p>\n'
                 f'      </div>\n'
@@ -8260,53 +10253,80 @@ def reposition_affiliate_placements_from_gsc_signals(
         models_csv = html_lib.escape(",".join(roster.get("partnership_models_represented") or []))
         lead_model_attr = html_lib.escape(str(roster.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
 
-        if re.search(r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>', updated, flags=re.S | re.I):
+        aff_sec_pat = (
+            r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section|affiliates?-section)[^"\']*["\'][^>]*>.*?</section>'
+            if prop == "gainhelm"
+            else r'<section\b[^>]*\bclass=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>'
+        )
+        if re.search(aff_sec_pat, updated, flags=re.S | re.I):
             def _replace_aff_sec(m_sec: re.Match) -> str:
                 raw_sec = m_sec.group(0)
-                h2_m = re.search(r"<h2[^>]*>.*?</h2>", raw_sec, flags=re.S | re.I)
-                h2_str = h2_m.group(0) if h2_m else '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
-                reg_m = re.search(
-                    r'\s*<div\b[^>]*id=["\']partner-registration-drawer["\'][^>]*>[\s\S]*?</form>\s*</div>',
-                    raw_sec,
-                    flags=re.S | re.I,
-                )
-                reg_str = ("\n      " + reg_m.group(0).strip()) if reg_m else ""
-                lead_pk_attr = html_lib.escape(str(slot_plan.get("promoted_partner_key") or ""))
+                raw_open_m = re.match(r"<section\b[^>]*>", raw_sec, flags=re.I)
+                raw_open = raw_open_m.group(0) if raw_open_m else ""
+                sec_id_attr = _extract_section_id_attr(raw_open)
+                sec_classes = ["affiliate-section", "affiliates-section"]
+                for extra_cls in ("partners-section", "refinance-partner-section"):
+                    if re.search(rf"\b{re.escape(extra_cls)}\b", raw_open):
+                        sec_classes.append(extra_cls)
+                sec_cls_attr = " ".join(sec_classes)
+                lead_pk_str = str(slot_plan.get("promoted_partner_key") or "")
+                h2_str = _normalize_affiliates_section_h2(raw_sec, lead_pk_str, registry)
+                reg_str = _extract_partner_registration_drawer(raw_sec)
+                lead_pk_attr = html_lib.escape(lead_pk_str)
+                sec_rep_val = "true" if slot_plan.get("gsc_repositioned") else "false"
                 return (
-                    f'<section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization" '
+                    f'<section{sec_id_attr} class="{sec_cls_attr}" data-mechanic="compliant_intent_monetization" '
                     f'data-partner="{lead_pk_attr}" data-primary-partner="{lead_pk_attr}" '
                     f'data-partnership-model="{lead_model_attr}" data-partner-models="{models_csv}" '
                     f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
-                    f'data-gsc-tier="{html_lib.escape(gsc_tier)}">\n'
+                    f'data-gsc-tier="{html_lib.escape(gsc_tier)}" data-gsc-repositioned="{sec_rep_val}">\n'
                     f'        {h2_str}'
                     f'{cards_html}{reg_str}\n'
                     f'      </section>'
                 )
             updated = re.sub(
-                r'<section\s+class=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>',
+                aff_sec_pat,
                 _replace_aff_sec,
                 updated,
                 count=1,
                 flags=re.S | re.I,
             )
     elif matrix_cards and prop == "prexvo":
-        roster_keys_csv = html_lib.escape(",".join(roster["roster_keys"]))
-        companies_csv = html_lib.escape(",".join(roster["distinct_companies"]))
-        models_csv = html_lib.escape(",".join(roster.get("partnership_models_represented") or []))
-        lead_model_attr = html_lib.escape(str(roster.get("primary_partnership_model") or "CPA_BOUNTY"))
-        lead_pk_attr = html_lib.escape(str(slot_plan.get("promoted_partner_key") or "splash_financial"))
+        roster_keys_csv = ",".join(roster["roster_keys"])
+        companies_csv = ",".join(roster["distinct_companies"])
+        models_csv = ",".join(roster.get("partnership_models_represented") or [])
+        lead_model_val = str(roster.get("primary_partnership_model") or "CPA_BOUNTY")
+        lead_pk_val = str(slot_plan.get("promoted_partner_key") or "splash_financial")
+        px_sec_pat = r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>'
+
+        def _replace_prexvo_sec(m_sec: re.Match) -> str:
+            raw_sec = m_sec.group(0)
+            if (
+                'data-restricted-public-service="true"' in raw_sec
+                or 'data-commercial-offers="none"' in raw_sec
+                or "ymyl-public-service-guardrail" in raw_sec
+            ):
+                return raw_sec
+            return _build_prexvo_refinance_section_html(
+                raw_sec=raw_sec,
+                ordered_offers_or_keys=matrix_cards,
+                slug_id=slug_id,
+                page_v_fam=roster["vertical_family"],
+                lead_pk=lead_pk_val,
+                lead_model=lead_model_val,
+                models_csv=models_csv,
+                roster_keys_csv=roster_keys_csv,
+                companies_csv=companies_csv,
+                gsc_tier=gsc_tier,
+                gsc_repositioned=bool(slot_plan.get("gsc_repositioned")),
+            )
+
         updated = re.sub(
-            r'<section\s+class=["\'][^"\']*refinance-partner-section[^"\']*["\'][^>]*>',
-            (
-                f'<section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" '
-                f'data-partner="{lead_pk_attr}" data-primary-partner="{lead_pk_attr}" '
-                f'data-partnership-model="{lead_model_attr}" data-partner-models="{models_csv}" '
-                f'data-partner-roster="{roster_keys_csv}" data-partner-companies="{companies_csv}" '
-                f'data-gsc-tier="{html_lib.escape(gsc_tier)}" style="margin: 1.5rem 0;">'
-            ),
+            px_sec_pat,
+            _replace_prexvo_sec,
             updated,
             count=1,
-            flags=re.I,
+            flags=re.S | re.I,
         )
 
     # 4. Update #gsc-striking-overlay .overlay-partner-offer if present
@@ -8341,7 +10361,11 @@ def reposition_affiliate_placements_from_gsc_signals(
             flags=re.S | re.I,
         )
 
-    updated = normalize_html_callout_message_match(updated, property_id=prop)
+    updated = normalize_html_callout_message_match(
+        updated,
+        property_id=prop,
+        preserve_promoted_primary=True,
+    )
     after_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', updated, flags=re.I)))
     after_primary = str(slot_plan.get("promoted_partner_key") or "")
 
@@ -8436,14 +10460,7 @@ def run_gsc_affiliate_placement_feedback_pass(
         raw_rows = list(gsc_rows)
 
     if engagement_metrics is None:
-        eng_file = r_root / ".agy" / "partner_engagement_metrics.json"
-        if eng_file.is_file():
-            try:
-                engagement_metrics = json.loads(eng_file.read_text(encoding="utf-8"))
-            except Exception:
-                engagement_metrics = {}
-        else:
-            engagement_metrics = {}
+        engagement_metrics = load_property_partner_engagement_metrics(r_root / ".agy", prop)
 
     # Aggregate GSC metrics per tool slug (retaining top query by impressions/striking-distance)
     gsc_by_slug: Dict[str, Dict[str, Any]] = {}
@@ -8547,7 +10564,11 @@ def run_gsc_affiliate_placement_feedback_pass(
             )
             if updated_html != raw_html:
                 try:
-                    updated_html = normalize_html_callout_message_match(updated_html, property_id=prop)
+                    updated_html = normalize_html_callout_message_match(
+                        updated_html,
+                        property_id=prop,
+                        preserve_promoted_primary=True,
+                    )
                 except Exception:
                     pass
                 try:
@@ -8573,8 +10594,8 @@ def run_gsc_affiliate_placement_feedback_pass(
         "pages_updated": pages_updated,
         "gsc_signal_slugs_count": len(gsc_by_slug),
         "repositioned_pages_count": len(repositioned_pages),
-        "repositioned_pages": repositioned_pages[:50],
-        "page_reports": page_reports[:100],
+        "repositioned_pages": repositioned_pages,
+        "page_reports": page_reports,
     }
 
     if not dry_run and r_root.is_dir():

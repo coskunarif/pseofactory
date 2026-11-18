@@ -9487,6 +9487,32 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
     return _strip_forbidden_dashes(html)
 
 
+def _norm_overlay_faq_key(text: str) -> str:
+    """Normalizes FAQ question text case-insensitively for overlay HTML and JSON-LD deduplication."""
+    stripped = re.sub(r"<[^>]+>", " ", str(text or ""))
+    return re.sub(r"[^a-z0-9]+", " ", html_lib.unescape(stripped).lower()).strip()
+
+
+def _merge_overlay_faq_schema_entities(
+    faq_node: Dict[str, Any],
+    schema_entities: List[Dict[str, Any]],
+) -> bool:
+    """Appends missing FAQPage Question entries to faq_node case-insensitively; returns True if modified."""
+    existing_qs = {
+        _norm_overlay_faq_key(str(q.get("name") or ""))
+        for q in faq_node.get("mainEntity", [])
+        if isinstance(q, dict)
+    }
+    faq_modified = False
+    for q in schema_entities:
+        q_norm = _norm_overlay_faq_key(str(q.get("name") or ""))
+        if q_norm and q_norm not in existing_qs:
+            faq_node.setdefault("mainEntity", []).append(q)
+            existing_qs.add(q_norm)
+            faq_modified = True
+    return faq_modified
+
+
 def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     """
     Non-destructively injects remediated overlay components into rendered page HTML:
@@ -10168,16 +10194,16 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         if existing_faq is not None:
             faq_start, faq_end, open_tag, inner_faq_html, close_tag = existing_faq
             existing_q_norms = {
-                re.sub(r"[^a-z0-9]+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", sm)).lower()).strip()
+                _norm_overlay_faq_key(sm)
                 for sm in re.findall(r"<summary[^>]*>(.*?)</summary>", inner_faq_html, flags=re.DOTALL | re.IGNORECASE)
             }
             existing_q_norms.update(
-                re.sub(r"[^a-z0-9]+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", hm)).lower()).strip()
+                _norm_overlay_faq_key(hm)
                 for hm in re.findall(r"<h[34][^>]*>(.*?)</h[34]>", inner_faq_html, flags=re.DOTALL | re.IGNORECASE)
             )
             new_faq_cards: List[str] = []
             for f in faq_items:
-                q_norm = re.sub(r"[^a-z0-9]+", " ", f["question"].lower()).strip()
+                q_norm = _norm_overlay_faq_key(f["question"])
                 if q_norm and q_norm in existing_q_norms:
                     continue
                 if q_norm:
@@ -10278,17 +10304,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         faq_node = next((n for n in existing_data["@graph"] if n.get("@type") == "FAQPage"), None)
                         faq_modified = False
                         if faq_node:
-                            existing_qs = {
-                                html_lib.unescape(str(q.get("name") or "")).strip()
-                                for q in faq_node.get("mainEntity", [])
-                                if isinstance(q, dict)
-                            }
-                            for q in schema_entities:
-                                q_norm = html_lib.unescape(str(q.get("name") or "")).strip()
-                                if q_norm not in existing_qs:
-                                    faq_node.setdefault("mainEntity", []).append(q)
-                                    existing_qs.add(q_norm)
-                                    faq_modified = True
+                            faq_modified = _merge_overlay_faq_schema_entities(faq_node, schema_entities)
                         else:
                             faq_copy = dict(faq_ld_json)
                             faq_copy.pop("@context", None)
@@ -10303,18 +10319,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                             new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
                             html = html[: match.start()] + new_script + html[match.end() :]
                     elif existing_data.get("@type") == "FAQPage":
-                        faq_modified = False
-                        existing_qs = {
-                            html_lib.unescape(str(q.get("name") or "")).strip()
-                            for q in existing_data.get("mainEntity", [])
-                            if isinstance(q, dict)
-                        }
-                        for q in schema_entities:
-                            q_norm = html_lib.unescape(str(q.get("name") or "")).strip()
-                            if q_norm not in existing_qs:
-                                existing_data.setdefault("mainEntity", []).append(q)
-                                existing_qs.add(q_norm)
-                                faq_modified = True
+                        faq_modified = _merge_overlay_faq_schema_entities(existing_data, schema_entities)
                         if faq_modified:
                             new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
                             html = html[: match.start()] + new_script + html[match.end() :]
@@ -10368,12 +10373,12 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 )
             if tbl_section_markup and 'class="overlay-section overlay-comparison' in html:
                 m_existing_bar = re.search(
-                    r'<section\s+class=["\']overlay-section\s+overlay-comparison[^>]*>.*?(\n\s*<div\s+class=["\']comparison-table-cta-bar["\'][^>]*>.*?</div>)\s*</section>',
+                    r'<section\s+class=["\']overlay-section\s+overlay-comparison[^>]*>.*?(\n\s*<div\b[^>]*\bclass=["\'][^"\']*\bcomparison-table-cta-bar\b[^"\']*["\'][^>]*>.*?</div>)\s*</section>',
                     html,
                     flags=re.DOTALL | re.IGNORECASE,
                 )
                 eff_tbl_markup = tbl_section_markup
-                if m_existing_bar and 'class="comparison-table-cta-bar"' not in eff_tbl_markup:
+                if m_existing_bar and not re.search(r'\bcomparison-table-cta-bar\b', eff_tbl_markup):
                     bar_block = m_existing_bar.group(1)
                     eff_tbl_markup = re.sub(
                         r"(</table>\s*</div>)(\s*</section>)$",

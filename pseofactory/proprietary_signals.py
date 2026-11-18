@@ -812,18 +812,30 @@ def compute_multi_year_longitudinal_trajectory(
         hp30 = hipaa_pts.get("2030", 2327341.0)
 
         h3_title = f"Multi-Year Statutory Compliance &amp; Enforcement Cliff Visualizer (2024 to 2030): {topic_label}"
-        if any(k in s_low for k in ("cmmc", "nist-800-171", "sprs", "fedramp")):
+        if any(k in s_low for k in ("cmmc", "nist-800-171", "sprs")):
             summary = (
-                f"2026 DoD &amp; Federal Authorization Cliff: Under 32 CFR Part 170 and DFARS 252.204-7021, mandatory "
+                f"2026 DoD CMMC 2.0 &amp; CUI Enclave Cliff: Under 32 CFR Part 170 and DFARS 252.204-7021, mandatory "
                 f"CMMC Level 2 C3PAO solicitation gates ramp from {cm25:.0f}% (2025) and {cm26:.0f}% (2026) to {cm27:.0f}% (2027) "
                 f"and {cm30:.0f}% full enforcement while BLS SOC 15-1212 engineering wages climb from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
             )
             rows = [
                 ("2024 Baseline Window", f"DFARS 252.204-7019 Self-Attest ({cm24:.0f}% C3PAO Gate)", f"110-Pt NIST 800-171 / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$98,500 CMMC / 87.0 SPRS"),
-                ("2025 Enforcement Ramp", f"32 CFR Part 170 Phase 1 ({cm25:.0f}% C3PAO Rollout)", f"180-Day POA&amp;M Gate / ${wg25:.2f}/hr InfoSec Wage", "cliff-exposure-2025", "$114,200 CMMC / $465k 3PAO"),
-                ("2026 Statutory Cliff Year", f"DFARS 252.204-7021 Phase 2 ({cm26:.0f}% C3PAO Gate)", f"FedRAMP Rev 5 &amp; CUI Enclave / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$132,000 CMMC / $500k 3PAO"),
-                ("2027 Full Mandate Phase", f"Phase 3 Contract Option Gate ({cm27:.0f}% C3PAO)", f"Zero Unclosed 5-Pt Controls / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$144,800 CMMC / $532k 3PAO"),
-                ("2028-2030 Triennial Cycle", f"Phase 4 Full Mandate ({cm30:.0f}% C3PAO &amp; 3-Yr Re-Audit)", f"Triennial C3PAO + Annual ConMon / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$162,400 CMMC / $578k 3PAO"),
+                ("2025 Enforcement Ramp", f"32 CFR Part 170 Phase 1 ({cm25:.0f}% C3PAO Rollout)", f"180-Day POA&amp;M Gate / ${wg25:.2f}/hr InfoSec Wage", "cliff-exposure-2025", "$114,200 CMMC / 87.0 SPRS"),
+                ("2026 Statutory Cliff Year", f"DFARS 252.204-7021 Phase 2 ({cm26:.0f}% C3PAO Gate)", f"Segmented CUI Enclave / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$132,000 CMMC / 87.0 SPRS"),
+                ("2027 Full Mandate Phase", f"Phase 3 Contract Option Gate ({cm27:.0f}% C3PAO)", f"Zero Unclosed 5-Pt Controls / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$144,800 CMMC / 110 Ctrl"),
+                ("2028-2030 Triennial Cycle", f"Phase 4 Full Mandate ({cm30:.0f}% C3PAO &amp; 3-Yr Re-Audit)", f"Triennial C3PAO + Annual Affirmation / ${wg30:.2f}/hr", "cliff-exposure-2028", "$162,400 CMMC Scope"),
+            ]
+        elif "fedramp" in s_low:
+            summary = (
+                f"2026 FedRAMP Rev 5 &amp; OMB M-24-15 Authorization Cliff: Accredited 3PAO SAR assessment fees and ConMon continuous monitoring "
+                f"scale with NIST SP 800-53 Rev 5 control boundaries as BLS SOC 15-1212 engineering wages climb from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Baseline Window", "FedRAMP Rev 5 Baseline Transition (325 Controls)", f"FIPS 140-3 Validation / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$440,000 Moderate ATO"),
+                ("2025 Enforcement Ramp", "OMB M-24-15 Automated ConMon Modernization", f"Inherited Federal PaaS / ${wg25:.2f}/hr InfoSec Wage", "cliff-exposure-2025", "$465,000 Moderate 3PAO"),
+                ("2026 Statutory Cliff Year", "3PAO Security Assessment Report (SAR) &amp; Agency ATO", f"Continuous POA&amp;M Tracking / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$500,000 Moderate 3PAO"),
+                ("2027 Full Mandate Phase", "Annual 3PAO Control Re-Assessment Cycle", f"Monthly DevSecOps ConMon / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$532,000 Moderate 3PAO"),
+                ("2028-2030 Triennial Cycle", "FedRAMP 20x Machine-Readable Authorization Scale", f"OSCAL Automated Telemetry / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$578,000 3PAO Horizon"),
             ]
         elif any(k in s_low for k in ("hipaa", "hitrust")):
             summary = (
@@ -889,6 +901,45 @@ def compute_multi_year_longitudinal_trajectory(
                 ("2026 Statutory Cliff Year", "Counsel + DFIR Retainers &amp; 160 Board Advisory Hrs", f"Automated Materiality Evidentiary Workflow / ${wg26:.2f}/hr", "cliff-exposure-2026", "$180,000 SEC 8-K TCO"),
                 ("2027 Full Mandate Phase", "Expanded Subsidiary &amp; Vendor Materiality Tracing", f"Continuous Telemetry &amp; Audit Committee Review / ${wg27:.2f}/hr", "cliff-exposure-2027", "$193,200 SEC Horizon"),
                 ("2028-2030 Supervisory Cycle", "Integrated SEC Cyber &amp; Enterprise Risk Disclosure", f"Real-Time Quantitative Exposure Ledger / ${wg30:.2f}/hr", "cliff-exposure-2028", "$214,000 SEC Horizon"),
+            ]
+        elif any(k in s_low for k in ("ccpa", "cpra", "cppa")):
+            summary = (
+                f"2026 California CCPA/CPRA &amp; CPPA Audit Cliff: Under Cal. Civ. Code 1798.100 et seq. and 11 CCR Section 7025, "
+                f"automated 45-day DSAR workflows, Global Privacy Control signals, and CPPA cybersecurity audit readiness track BLS SOC 15-1212 "
+                f"wages climbing from ${wg24:.2f}/hr to ${wg30:.2f}/hr. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 CPRA Cure Removal", "Cal. Civ. Code 1798.155 Enforcement Active", f"45-Day DSAR Triage / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$52,400 CPRA Scope"),
+                ("2025 CPPA Rulemaking", "11 CCR Section 7025 Global Privacy Control", f"Automated Opt-Out Consent / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$60,800 CPRA Scope"),
+                ("2026 Cybersecurity Audit Gate", "Cal. Civ. Code 1798.185(a)(15) Risk Assessments", f"Annual CPPA Audit &amp; DSAR / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$68,000 CPRA TCO"),
+                ("2027 Multi-State Privacy Scale", "Unified US Privacy DSAR &amp; PI Deletion Ledger", f"Continuous Tag Governance / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$73,400 Privacy TCO"),
+                ("2028-2030 Enforcement Horizon", "Indexed CPPA Administrative Fine Schedule", f"Automated Consumer Rights / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$82,100 Privacy Horizon"),
+            ]
+        elif any(k in s_low for k in ("gdpr", "dsar", "2016/679")):
+            summary = (
+                f"2026 EU GDPR RoPA, DPIA &amp; Transfer Cliff: Under Regulation (EU) 2016/679 Articles 28, 30, 35, and 83, "
+                f"continuous records of processing (RoPA), 30-day DSAR SLAs, and cross-border Transfer Impact Assessments scale across "
+                f"${wg24:.2f}/hr to ${wg30:.2f}/hr BLS SOC 15-1212 engineering tiers. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Transfer Enforcement", "EU-US Data Privacy Framework &amp; SCC Audits", f"Article 30 RoPA Mapping / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$58,900 GDPR Scope"),
+                ("2025 EDPB AI &amp; DPIA Focus", "Article 35 High-Risk Processing DPIAs", f"30-Day DSAR Orchestration / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$66,500 GDPR Scope"),
+                ("2026 Statutory Cliff Year", "Article 33 72-Hr Breach &amp; RoPA Verification", f"Continuous DPO Readiness / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$74,000 GDPR TCO"),
+                ("2027 Multi-DPA Coordination", "One-Stop-Shop Supervisory Audit Telemetry", f"Automated Vendor DPAs / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$80,200 GDPR Scope"),
+                ("2028-2030 Supervisory Cycle", "Article 83 4% Global Turnover Risk Shielding", f"Live Cross-Border Ledger / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$90,400 GDPR Horizon"),
+            ]
+        elif any(k in s_low for k in ("nis2", "2022/2555")):
+            summary = (
+                f"2026 EU NIS2 Essential &amp; Important Entity Cliff: Under Directive (EU) 2022/2555 Articles 20, 21, and 23, "
+                f"10-measure risk management, supply-chain security audits, and 24-hour CSIRT early warning readiness scale across "
+                f"${wg24:.2f}/hr to ${wg30:.2f}/hr BLS SOC 15-1212 engineering tiers. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Member-State Transposition", "Directive (EU) 2022/2555 Art. 41 Effective Oct 2024", f"Entity Classification &amp; Gap Plan / ${wg24:.2f}/hr Wage", "cliff-exposure-2024", "$78,000 NIS2 Prep"),
+                ("2025 Supervisory Registration", "National CSIRT Registry &amp; Board Training (Art. 20)", f"Article 21 10-Measure Stack / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$87,500 NIS2 Scope"),
+                ("2026 Statutory Cliff Year", "24-Hr CSIRT Warning &amp; Supplier Security Audits", f"Continuous Vulnerability Hygiene / ${wg26:.2f}/hr", "cliff-exposure-2026", "$96,000 NIS2 TCO"),
+                ("2027 Essential Entity Audits", "Article 32 Random &amp; Targeted Inspections", f"Automated Incident Runbooks / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$103,800 NIS2 Scope"),
+                ("2028-2030 Supervisory Cycle", "Article 34 2% Global Turnover Fine Shielding", f"Live Supply-Chain Resilience / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$116,500 NIS2 Horizon"),
             ]
         else:
             summary = (
@@ -1208,6 +1259,48 @@ def compute_stateful_comparator_defaults(
                 "tax_live": "$180,000.00",
                 "delta_b": "+$68,000 4-Day Escalation Friction",
                 "delta_live": "SEC Rule 33-11216 (17 CFR 229.106 &amp; Form 8-K Item 1.05)",
+            }
+        if any(k in s_low for k in ("ccpa", "cpra", "cppa")):
+            return {
+                "base_a": "$47,000 Automated CCPA/CPRA DSAR &amp; GPC Stack",
+                "base_b": "$158,000 Manual Privacy &amp; Ad-Tech Leak Scope",
+                "base_live": "$68,000 Verified CCPA/CPRA Baseline",
+                "ret_a": "$21,000 DSAR Discovery &amp; Opt-Out Savings",
+                "ret_b": "$0 Automated Consumer Rights Handling",
+                "ret_live": "$24,000 DSAR + $16,500 GPC + $28,000 CPPA Audit",
+                "tax_a": "$47,000 Net CCPA/CPRA Readiness TCO",
+                "tax_b": "$158,000 Manual Compliance TCO",
+                "tax_live": "$68,000.00",
+                "delta_b": "+$111,000 Manual Privacy Drag",
+                "delta_live": "Cal. Civ. Code 1798.100 &amp; 11 CCR 7025",
+            }
+        if any(k in s_low for k in ("gdpr", "dsar", "2016/679")):
+            return {
+                "base_a": "$52,000 Automated EU GDPR RoPA &amp; DPIA Suite",
+                "base_b": "$172,000 Manual Cross-Border &amp; Transfer Scope",
+                "base_live": "$74,000 Verified EU GDPR Baseline",
+                "ret_a": "$22,000 RoPA &amp; 30-Day DSAR Savings",
+                "ret_b": "$0 Automated Transfer Impact Workflow",
+                "ret_live": "$22,000 RoPA + $19,500 DPIA + $18,000 SCCs",
+                "tax_a": "$52,000 Net EU GDPR Readiness TCO",
+                "tax_b": "$172,000 Manual Privacy TCO",
+                "tax_live": "$74,000.00",
+                "delta_b": "+$120,000 Manual Privacy Governance Drag",
+                "delta_live": "Regulation (EU) 2016/679 Art. 30, 35 &amp; 83",
+            }
+        if any(k in s_low for k in ("nis2", "2022/2555")):
+            return {
+                "base_a": "$69,000 Automated EU NIS2 Article 21 Stack",
+                "base_b": "$205,000 Manual Supplier &amp; CSIRT Scope",
+                "base_live": "$96,000 Verified EU NIS2 Baseline",
+                "ret_a": "$27,000 Supplier &amp; CSIRT Telemetry Savings",
+                "ret_b": "$0 Automated 24-Hr Warning Pipeline",
+                "ret_live": "$44,000 Art. 21 + $21,000 Vendors + $19,000 CSIRT",
+                "tax_a": "$69,000 Net EU NIS2 Readiness TCO",
+                "tax_b": "$205,000 Manual Oversight TCO",
+                "tax_live": "$96,000.00",
+                "delta_b": "+$136,000 Manual Supply-Chain Oversight Drag",
+                "delta_live": "Directive (EU) 2022/2555 Art. 20, 21 &amp; 23",
             }
         return {
             "base_a": "$78,100.40 Automated GRC SOC 2 Type II",

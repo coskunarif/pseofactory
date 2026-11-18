@@ -1658,6 +1658,105 @@ export default {{
     return script
 
 
+def _render_gainhelm_framework_routing_js(include_deliverables: bool = False) -> str:
+    """
+    Emits shared GainHelm framework classification and partner routing/desk JS
+    derived from canonical Python GAINHELM_FRAMEWORK_PROFILES so /r/:partner
+    redirects, /api/lead-capture, and Stripe checkout agree 100% across all 15 frameworks.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import (
+        GAINHELM_FRAMEWORK_PROFILES,
+        GAINHELM_PARTNER_ALIASES,
+        GAINHELM_PARTNER_REP_DESK_BY_KEY,
+        GAINHELM_VANTA_URLS_BY_FRAMEWORK,
+    )
+
+    vanta_map_json = json.dumps(GAINHELM_VANTA_URLS_BY_FRAMEWORK, indent=2)
+    default_slug_json = json.dumps(
+        {k: str(v.get("default_sku_slug") or "soc-2-audit-cost-calculator") for k, v in GAINHELM_FRAMEWORK_PROFILES.items()},
+        indent=2,
+    )
+    vertical_map_json = json.dumps(
+        {k: str(v.get("vertical") or "soc2_grc_automation") for k, v in GAINHELM_FRAMEWORK_PROFILES.items()},
+        indent=2,
+    )
+    primary_partner_json = json.dumps(
+        {k: str(v.get("primary_partner_key") or "vanta_security") for k, v in GAINHELM_FRAMEWORK_PROFILES.items()},
+        indent=2,
+    )
+    fw_desk_json = json.dumps(
+        {k: str(v.get("partner_rep_desk") or GAINHELM_PARTNER_REP_DESK_BY_KEY["vanta_security"]) for k, v in GAINHELM_FRAMEWORK_PROFILES.items()},
+        indent=2,
+    )
+    aliases_json = json.dumps(GAINHELM_PARTNER_ALIASES, indent=2)
+    neutral_desk_json = json.dumps(GAINHELM_PARTNER_REP_DESK_BY_KEY, indent=2)
+    deliverables_block = ""
+    if include_deliverables:
+        deliverables_json = json.dumps(
+            {
+                k: [str(d) for d in (v.get("deliverables") or ())]
+                for k, v in GAINHELM_FRAMEWORK_PROFILES.items()
+            },
+            indent=2,
+        )
+        deliverables_block = f"const GAINHELM_DELIVERABLES_BY_FRAMEWORK = {deliverables_json};\n\n"
+    return (
+        f"const GAINHELM_VANTA_DESTINATION_MAP = {vanta_map_json};\n\n"
+        f"const GAINHELM_DEFAULT_SLUG_BY_FRAMEWORK = {default_slug_json};\n\n"
+        f"const GAINHELM_VERTICAL_BY_FRAMEWORK = {vertical_map_json};\n\n"
+        f"const GAINHELM_PRIMARY_PARTNER_BY_FRAMEWORK = {primary_partner_json};\n\n"
+        f"const GAINHELM_FRAMEWORK_DESK_BY_KEY = {fw_desk_json};\n\n"
+        f"{deliverables_block}"
+        f"const GAINHELM_PARTNER_ALIASES = {aliases_json};\n\n"
+        f"const GAINHELM_PARTNER_REP_DESK_BY_KEY = {neutral_desk_json};\n\n"
+        "const GAINHELM_VALID_VERTICALS = new Set(Object.values(GAINHELM_VERTICAL_BY_FRAMEWORK));\n\n"
+        "function isGenericGainHelmToolSlug(toolSlug) {\n"
+        '  const norm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools(?:\\/|$)/, "");\n'
+        '  return !norm || norm === "general" || norm === "index" || norm === "home" || norm === "homepage";\n'
+        "}\n\n"
+        "function isExplicitGainHelmVertical(rawVertical) {\n"
+        '  const v = String(rawVertical || "").trim().toLowerCase();\n'
+        '  if (!v || v === "general" || v === "informational_governance") return false;\n'
+        "  if (GAINHELM_VALID_VERTICALS.has(v) || Object.prototype.hasOwnProperty.call(GAINHELM_DEFAULT_SLUG_BY_FRAMEWORK, v)) {\n"
+        "    return true;\n"
+        "  }\n"
+        '  return classifyGainHelmFramework("", v) !== "soc2";\n'
+        "}\n\n"
+        "function classifyGainHelmFramework(toolSlug, vertical) {\n"
+        '  const s = `${toolSlug || ""} ${vertical || ""}`.trim().toLowerCase().replace(/_/g, "-");\n'
+        '  if (s.includes("dora") || s.includes("ict-third-party") || s.includes("2022/2554") || s.includes("2022-2554")) return "dora";\n'
+        '  if (s.includes("eu-ai-act") || s.includes("eu ai act") || s.includes("2024/1689") || s.includes("2024-1689") || s.includes("article43") || s.includes("conformity-assessment")) return "eu_ai_act";\n'
+        '  if (s.includes("sec-cybersecurity") || s.includes("8k-item-105") || s.includes("item-105") || s.includes("229.106") || s.includes("materiality-8k") || s.includes("sec-8k") || s.includes("sec-cyber-disclosure")) return "sec_8k";\n'
+        '  if (s.includes("gdpr")) return "gdpr";\n'
+        '  if (s.includes("ccpa") || s.includes("cpra")) return "ccpa";\n'
+        '  if (s.includes("nis2") || s.includes("nis-2")) return "nis2";\n'
+        '  if (s.includes("hipaa") || s.includes("hitech")) return "hipaa";\n'
+        '  if (s.includes("iso-27001") || s.includes("iso27001") || s.includes("27001")) return "iso_27001";\n'
+        '  if (s.includes("pci-dss") || s.includes("pci-") || s.includes("qsa")) return "pci_dss";\n'
+        '  if (s.includes("hitrust")) return "hitrust";\n'
+        '  if (s.includes("fedramp") || s.includes("stateramp") || s.includes("txramp")) return "fedramp";\n'
+        '  if (s.includes("penetration-test") || s.includes("pentest") || s.includes("penetration")) return "pentest";\n'
+        '  if (s.includes("cyber-liability") || s.includes("cyber-insurance") || s.includes("breach-exposure")) return "cyber_insurance";\n'
+        '  if (s.includes("cmmc") || s.includes("sprs") || s.includes("800-171") || s.includes("federal-defense-grc")) return "cmmc";\n'
+        '  return "soc2";\n'
+        "}\n\n"
+        "function resolveGainHelmPartnerRepDesk(partnerKey, fwKey) {\n"
+        '  const pkRaw = String(partnerKey || "").trim().toLowerCase();\n'
+        "  const pkNorm = GAINHELM_PARTNER_ALIASES[pkRaw] || pkRaw;\n"
+        '  const fwPrimary = GAINHELM_PRIMARY_PARTNER_BY_FRAMEWORK[fwKey] || "vanta_security";\n'
+        '  const fwDesk = GAINHELM_FRAMEWORK_DESK_BY_KEY[fwKey] || "Vanta Trust Management & SOC 2 Audit Desk";\n'
+        "  if (!pkNorm || pkNorm === fwPrimary) {\n"
+        "    return fwDesk;\n"
+        "  }\n"
+        "  return GAINHELM_PARTNER_REP_DESK_BY_KEY[pkNorm] || fwDesk;\n"
+        "}\n\n"
+        "function resolveVantaDestinationUrl(fwKey) {\n"
+        '  return GAINHELM_VANTA_DESTINATION_MAP[fwKey] || GAINHELM_VANTA_DESTINATION_MAP.soc2 || "https://www.vanta.com/products/soc-2";\n'
+        "}"
+    )
+
+
 def generate_edge_redirect_function(
     property_id: str = "profithelm",
     hub: Optional[Any] = None,
@@ -2222,6 +2321,7 @@ export async function onRequest(context) {{
                     f'  }},'
                 )
         gainhelm_catalog_block = "\n".join(gainhelm_catalog_entries)
+        gainhelm_routing_js = _render_gainhelm_framework_routing_js()
         gainhelm_js = f"""/**
  * Cloudflare Pages Function: GainHelm Outbound Enterprise GRC & Security Audit Redirect Handler
  * Intercepts /r/:partner requests and executes low-latency server-side 302 redirects (<15ms TTFB).
@@ -2233,6 +2333,8 @@ export async function onRequest(context) {{
 const PARTNER_CATALOG = {{
 {gainhelm_catalog_block}
 }};
+
+{gainhelm_routing_js}
 
 const EDUCATIONAL_CALCULATOR_URL = "https://gainhelm.com/tools/soc-2-audit-cost-calculator/";
 
@@ -2424,12 +2526,18 @@ export async function onRequest(context) {{
       }},
     }});
   }}
+  const sourceTool = normParams.get("source_tool") || normParams.get("source") || "";
+  const verticalParam = normParams.get("vertical") || "";
+  const defaultDestUrl =
+    partnerConfig.envVar === "AFFILIATE_VANTA_SECURITY_URL"
+      ? resolveVantaDestinationUrl(classifyGainHelmFramework(sourceTool, verticalParam))
+      : partnerConfig.defaultUrl;
   const rawTargetUrl = (
     hasDirectConfig
       ? envUrl
       : hasDirectContract
       ? partnerConfig.directContractUrl
-      : partnerConfig.defaultUrl
+      : defaultDestUrl
   ).trim();
   const contractTier = hasDirectConfig
     ? "direct_env_override"
@@ -2453,7 +2561,6 @@ export async function onRequest(context) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
-  const sourceTool = normParams.get("source_tool") || normParams.get("source") || "";
   const ctaSlot = normParams.get("cta_slot") || normParams.get("slot") || "";
   const phTier = normParams.get("ph_tier") || "";
   const effectiveSubid =
@@ -2549,7 +2656,7 @@ export async function onRequest(context) {{
       "X-Edge-Partner": rawPartner,
       "X-Edge-Subid": effectiveSubid || "default",
       "X-Edge-Contract-Tier": contractTier,
-      "X-Edge-Native-Destination": partnerConfig.defaultUrl,
+      "X-Edge-Native-Destination": defaultDestUrl,
       "X-Edge-Telemetry": isSyntheticProbe ? "synthetic_suppressed" : "recorded",
       ...(isSyntheticProbe ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
     }},
@@ -5495,7 +5602,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSyntheticProbe = false, bundle = null) {
-  const playbookUrl = bundle ? bundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = bundle ? bundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookCsvUrl = bundle && bundle.playbook_csv_url ? bundle.playbook_csv_url : `${playbookUrl}&format=csv`;
   const playbookDatapackUrl = bundle && bundle.playbook_datapack_url ? bundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
   const fulfillmentUrl = bundle ? bundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
@@ -5670,12 +5777,13 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "LienBond Underwriting & Statutory Desk";
   const emailSubject = `[LienBond Playbook] Your Construction Surety, Lien & Audit Worksheet (${record.tool_slug})`;
-  const fallbackLbCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}&redirect=1`;
+  const lbSkuQs = record && record.offer_sku ? `&sku=${encodeURIComponent(record.offer_sku)}` : "";
+  const fallbackLbCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}&redirect=1`;
   const rawLbCheckout = String(record.checkout_url || fallbackLbCheckoutPath);
   const fullLbCheckoutUrl = rawLbCheckout.startsWith("http")
     ? rawLbCheckout
     : `https://lienbond.com${rawLbCheckout}${rawLbCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const lbPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}`);
+  const lbPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}`);
   const lbPlaybookHtmlUrl = `https://lienbond.com${lbPlaybookPath}${lbPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const lbPlaybookCsvUrl = `https://lienbond.com${record.playbook_csv_url || (lbPlaybookPath + "&format=csv")}`;
   const lbSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -5809,27 +5917,50 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
+async function resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email) {
+  const record = await lookupEdgeLeadRecord(
+    env,
+    leadId,
+    rawToolSlug,
+    reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "",
+    reqUrl.searchParams.get("state") || "",
+    email,
+    reqUrl.searchParams.get("inputs_json") || "",
+    reqUrl.searchParams.get("outputs_json") || ""
+  );
+  const storedSlug = String((record && record.tool_slug) || "").trim().toLowerCase();
+  const toolSlug =
+    rawToolSlug && rawToolSlug !== "general"
+      ? rawToolSlug
+      : (storedSlug && storedSlug !== "general"
+          ? storedSlug
+          : "contractor-license-bond-cost-calculator-by-credit-score");
+  if (record && (!storedSlug || storedSlug === "general")) {
+    record.tool_slug = toolSlug;
+  }
+  const effSku = reqSku || String((record && record.offer_sku) || "").trim().toLowerCase();
+  const offer = selectOfferForSlug(toolSlug, effSku);
+  return { record, toolSlug, effSku, offer };
+}
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://lienbond.com/api/lead-capture");
   const isSynth =
     (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
     reqUrl.searchParams.get("synthetic_test") === "1";
-  const toolSlug = (
+  const rawToolSlug = (
     reqUrl.searchParams.get("tool_slug") ||
     reqUrl.searchParams.get("slug") ||
     reqUrl.searchParams.get("source_tool") ||
     reqUrl.searchParams.get("source") ||
-    "contractor-license-bond-cost-calculator-by-credit-score"
-  ).toLowerCase();
-  const reqSku = reqUrl.searchParams.get("sku") || "";
-  const offer = selectOfferForSlug(toolSlug, reqSku);
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_lienbond_direct";
   const email = reqUrl.searchParams.get("email") || "";
-  const amountParam = reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "";
-  const stateParam = reqUrl.searchParams.get("state") || "CA";
-  const inputsJsonParam = reqUrl.searchParams.get("inputs_json") || "";
-  const outputsJsonParam = reqUrl.searchParams.get("outputs_json") || "";
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
 
   if (reqUrl.searchParams.get("health") === "1") {
@@ -5846,21 +5977,15 @@ export async function onRequestGet(context) {
     modeParam === "playbook"
   ) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
-    const record = await lookupEdgeLeadRecord(
-      env,
-      leadId,
-      toolSlug,
-      amountParam,
-      stateParam,
-      email,
-      inputsJsonParam,
-      outputsJsonParam
-    );
+    const { record, offer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
     let gatedRecord = record;
+    if (reqSku && gatedRecord) {
+      gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+    }
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, record, payment, isSynth);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, gatedRecord, payment, isSynth);
     }
     const bundle = buildLienBondWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "playbook");
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
@@ -5916,18 +6041,9 @@ export async function onRequestGet(context) {
   }
 
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
-    const record = await lookupEdgeLeadRecord(
-      env,
-      leadId,
-      toolSlug,
-      amountParam,
-      stateParam,
-      email,
-      inputsJsonParam,
-      outputsJsonParam
-    );
+    const { record, toolSlug, offer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
     const bundle = buildLienBondWorkpaperBundle(record, offer, "paid_toolkit");
-    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email || (record && record.email) || "", toolSlug, offer, isSynth, bundle);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -6127,7 +6243,8 @@ export async function onRequestPost(context) {
     );
     const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 125000;
     const thresholdUsd = 25000;
-    const offer = selectOfferForSlug(toolSlug, body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "");
+    const reqPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const offer = selectOfferForSlug(toolSlug, reqPostSku);
     const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_lienbond_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
     if (isFulfillMode) {
@@ -6144,8 +6261,10 @@ export async function onRequestPost(context) {
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
+      const effFulfillSku = reqPostSku || String((storedRecord && storedRecord.offer_sku) || "").trim().toLowerCase();
+      const effFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, effFulfillSku);
       const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
-      const ffBundle = buildLienBondWorkpaperBundle(settledRecord, offer, "paid_toolkit");
+      const ffBundle = buildLienBondWorkpaperBundle(settledRecord, effFulfillOffer, "paid_toolkit");
       return new Response(
         JSON.stringify({
           ok: true,
@@ -6385,32 +6504,32 @@ const PARTNER_ROUTES = {
 const GAINHELM_TOOLKIT_OFFERS = {
   gh_soc2_cmmc_audit_workpapers: {
     sku: "gh_soc2_cmmc_audit_workpapers",
-    title: "GainHelm SOC 2 & DoD CMMC 2.0 Audit Readiness Workpaper & SPRS Control Kit",
+    title: "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite",
     price_usd: 79,
     price_cents: 7900,
     currency: "usd",
     billing_mode: "payment",
-    statutory_authority: "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, and NIST SP 800-171 Rev 2",
+    statutory_authority: "AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) & 32 CFR Part 170",
     deliverables: [
-      "Personalized SOC 2 Trust Services Criteria & DoD CMMC 2.0 Level 2 Audit Budget Workpaper (HTML/PDF)",
-      "110-Control NIST SP 800-171 Rev 2 SPRS Scoring & 180-Day POA&M Remediation Schedule (CSV)",
-      "Multi-Framework Control Reuse & Continuous Surveillance Cost Reconciliation Schedule (CSV/HTML)",
-      "Signed CISO/CFO Audit Scope Manifest & C3PAO / CPA RFP Checklist (JSON)",
+      "JSON + CSV Control Scoping Matrix (AICPA Trust Services Criteria, NIST 800-171 & ISO 27001 Annex A)",
+      "Auditor-Day Rate & Readiness Gap Worksheet (Type I vs Type II observation window sensitivity)",
+      "CISO & CFO Board Budget Approval Template with GRC automation ROI comparison",
+      "3-Year Audit, Penetration Testing & Compliance Staffing Total Cost of Ownership (TCO) Schedule",
     ],
   },
   gh_hipaa_iso27001_governance_kit: {
     sku: "gh_hipaa_iso27001_governance_kit",
-    title: "GainHelm ISO 27001:2022 & HHS OCR HIPAA Civil Penalty Governance Workpaper Suite",
+    title: "GainHelm HIPAA Penalty, ISO 27001 & Cyber Breach Audit Workpaper Kit",
     price_usd: 49,
     price_cents: 4900,
     currency: "usd",
     billing_mode: "payment",
-    statutory_authority: "ISO/IEC 27006-1:2024, 45 CFR 160.404 (HITECH Act), and PCI DSS v4.0.1",
+    statutory_authority: "45 CFR 160.404, ISO/IEC 27006-1:2024 & SEC Item 1.05 Form 8-K",
     deliverables: [
-      "Personalized ISO/IEC 27006-1:2024 Auditor-Day & 45 CFR 160.404 Penalty Exposure Workpaper (HTML/PDF)",
-      "5-Point Breach Notification, Forensics & Multi-Framework Control Overlap Schedule (CSV)",
-      "Annex A:2022 (93 Controls) to SOC 2 & HIPAA Security Rule Crosswalk Ledger (CSV/HTML)",
-      "Signed Enterprise Security Governance Audit Manifest (JSON)",
+      "ISO/IEC 27006-1 Stage 1 & Stage 2 Auditor-Day Calculation & Annex A Control Matrix",
+      "45 CFR 160.404 Tier 1-4 Civil Monetary Penalty Cap & Breach Notification Schedule",
+      "SEC Item 1.05 Materiality & Cyber Liability Retention Stress-Test Workpaper",
+      "Accredited Certification Body & QSA Scoping Checklist (CSV & Print-Ready Audit HTML)",
     ],
   },
   gh_instant_compliance_worksheet_19: {
@@ -6435,10 +6554,12 @@ const GAINHELM_TOOLKIT_OFFERS = {
     price_cents: 29900,
     currency: "usd",
     billing_mode: "payment",
-    statutory_authority: "GainHelm B2B Security & Compliance Advisory Partner Standard",
+    statutory_authority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
     deliverables: [
-      "Verified vCISO, SOC 2 CPA, or Cyber Broker Calculator Partner Slot Placement",
-      "Real-Time Qualified Enterprise Compliance Lead Routing & Attribution Feed",
+      "Verified Commercial Partner Desk Placement on Target Calculator Route",
+      "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+      "Direct Calculator CTA & Partner Matrix Priority Slot",
+      "Monthly Partner Attribution & Conversion Reconciliation Digest",
     ],
   },
 };
@@ -6463,15 +6584,492 @@ function deriveCapitalBand(amount) {
   return "under_25k";
 }
 
-function selectOfferForSlug(toolSlug, reqSku) {
+__GAINHELM_FRAMEWORK_ROUTING_JS__
+
+const PARTNER_ALIASES = GAINHELM_PARTNER_ALIASES;
+const PARTNER_REP_DESK_BY_KEY = GAINHELM_PARTNER_REP_DESK_BY_KEY;
+
+const GAINHELM_FRAMEWORK_BUNDLE_SPECS = {
+  dora: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm DORA ICT Third-Party Risk & TLPT Compliance Workpaper Suite",
+    statutoryAuthority: "Regulation (EU) 2022/2554 (DORA Articles 5-30), Commission Delegated Regulation (EU) 2024/1772 & EBA/ESMA/EIOPA RTS",
+    regulatorName: "European Supervisory Authorities (EBA, ESMA, EIOPA)",
+    vertical: "dora_eu_ict_resilience",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta EU DORA & Enterprise GRC Automation Desk",
+    footerComplianceDoc: "Retain this workpaper alongside Regulation (EU) 2022/2554 (DORA) ICT risk governance, TLPT scoping, and Article 28 Register of Information documentation.",
+    l100Title: "Baseline DORA ICT Risk Governance, TLPT & Register of Information Cost",
+    l200Title: "Internal ICT Risk, Register of Information & Article 28 Vendor Mapping Hours (At $145/hr)",
+    l200Auth: "Regulation (EU) 2022/2554 Articles 5-16 & Article 28 Third-Party RTS",
+    l300Title: "Statutory Penalty Exposure (Article 50/51 Daily Periodic Fines)",
+    l300Auth: "Regulation (EU) 2022/2554 Articles 50-51 Administrative Enforcement",
+    l400Title: "Multi-Entity DORA Resilience & ISO/IEC 27001 Control Reuse Credit",
+    l400Auth: "Regulation (EU) 2022/2554 Article 25 Digital Operational Resilience Testing",
+    s3Title: "Multi-Entity Cross-Walk + TLPT Red-Team Scope (250+ Staff / Critical ICT)",
+    trends: [
+      { metric_name: "EU DORA Article 26 Threat-Led Penetration Testing (TLPT) Benchmark", authority_source: "Regulation (EU) 2022/2554 Art. 26 & TIBER-EU" },
+      { metric_name: "EU DORA Article 28 Critical ICT Third-Party Oversight Unit Cost", authority_source: "ESA Joint RTS on Subcontracting & Register of Information" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212 & ENISA Resilience Survey" },
+    ],
+    exec101Title: "DORA ICT Governance Boundary & Article 28 Register Attestation",
+    exec101Scope: "Regulation (EU) 2022/2554 Articles 5-30",
+    exec102Title: "180-Day DORA TLPT Scoping & Register of Information Readiness Calendar",
+    exec102Auth: "Regulation (EU) 2022/2554 Article 26 & Commission Delegated Regulation (EU) 2024/1772",
+    exec102Body: "Day 1-30: Lock Register of Information & ICT critical function dependencies; Day 31-90: Validate Article 28 contractual clauses & incident triage SLA; Day 91-180: Execute TLPT scoping and Competent Authority readiness review",
+    exec103Title: "DORA ICT Third-Party Concentration & Operational Resilience Safe-Harbor Memo",
+    exec103Auth: "Regulation (EU) 2022/2554 Articles 17-23 & Articles 28-30",
+  },
+  eu_ai_act: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm EU AI Act High-Risk Conformity & Article 99 Exposure Workpaper Suite",
+    statutoryAuthority: "Regulation (EU) 2024/1689 (EU AI Act Annex III, Articles 9-17, 43 & 99) & ISO/IEC 42001:2023",
+    regulatorName: "European AI Office and National Market Surveillance Authorities",
+    vertical: "eu_ai_act_conformity",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta AI Governance & EU AI Act Readiness Desk",
+    footerComplianceDoc: "Retain this workpaper alongside Regulation (EU) 2024/1689 (EU AI Act) Annex IV technical documentation, FRIA records, and ISO/IEC 42001:2023 QMS files.",
+    l100Title: "Baseline EU AI Act Article 43 Conformity, QMS & Annex IV Readiness Cost",
+    l200Title: "Internal Annex IV Technical Documentation, FRIA & Data Governance Engineering Hours (At $145/hr)",
+    l200Auth: "Regulation (EU) 2024/1689 Articles 9-17 & Article 27 FRIA",
+    l300Title: "Statutory Penalty Ceiling Exposure (Article 99 High-Risk Non-Compliance)",
+    l300Auth: "Regulation (EU) 2024/1689 Article 99(3)-(4) Administrative Fines",
+    l400Title: "Multi-System Conformity & ISO/IEC 42001 Control Reuse Credit",
+    l400Auth: "Regulation (EU) 2024/1689 Article 17 Quality Management System & ISO/IEC 42001",
+    s3Title: "Multi-System Annex III High-Risk Portfolio + Notified Body Scope (250+ Staff)",
+    trends: [
+      { metric_name: "EU AI Act Article 43 Notified Body Conformity & Annex IV Dossier Benchmark", authority_source: "Regulation (EU) 2024/1689 Art. 43 & Annex VII" },
+      { metric_name: "EU AI Act Article 17 AI Quality Management System Implementation Cost", authority_source: "European AI Office & ISO/IEC 42001:2023 Benchmarks" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "EU AI Act High-Risk System Inventory & Conformity Boundary Declaration",
+    exec101Scope: "Regulation (EU) 2024/1689 Annex III & Articles 9-17",
+    exec102Title: "180-Day Annex IV Technical Dossier & Article 43 Conformity Defense Calendar",
+    exec102Auth: "Regulation (EU) 2024/1689 Articles 11, 17, 27 & 43",
+    exec102Body: "Day 1-30: Classify Annex III systems & lock Article 9 risk management log; Day 31-90: Assemble Annex IV dossier & Article 15 adversarial robustness evidence; Day 91-180: Complete Article 27 FRIA, EU Database registration, and CE Declaration of Conformity",
+    exec103Title: "EU AI Act Governance, Post-Market Monitoring & Article 99 Mitigation Memo",
+    exec103Auth: "Regulation (EU) 2024/1689 Articles 72 & 99",
+  },
+  sec_8k: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm SEC Form 8-K Item 1.05 & Reg S-K Item 106 Materiality Workpaper Suite",
+    statutoryAuthority: "17 CFR 229.106 (Reg S-K Item 106), 17 CFR 249.308 (Form 8-K Item 1.05) & SEC Release 33-11216",
+    regulatorName: "U.S. Securities and Exchange Commission (SEC)",
+    vertical: "sec_cyber_disclosure",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta SEC Reg S-K Item 106 & Cyber Governance Desk",
+    footerComplianceDoc: "Retain this workpaper alongside 17 CFR 229.106 (Reg S-K Item 106), Form 8-K Item 1.05 disclosure committee minutes, and SEC Release 33-11216 documentation.",
+    l100Title: "Baseline SEC Form 8-K Item 1.05 Triage, Legal Counsel & DFIR Readiness Cost",
+    l200Title: "Disclosure Committee, Materiality Rubric & Item 106 Board Oversight Hours (At $145/hr)",
+    l200Auth: "17 CFR 229.106 (Reg S-K Item 106(b)-(c))",
+    l300Title: "4-Business-Day Late Filing, Incident Legal Surge & Enforcement Exposure",
+    l300Auth: "17 CFR 249.308 Form 8-K Item 1.05 & SEC Release 33-11216",
+    l400Title: "Continuous Telemetry & Reg S-K Item 106 Control Reuse Credit",
+    l400Auth: "17 CFR 229.106(b)(1) Risk Management & Governance Processes",
+    s3Title: "Multi-Subsidiary Global Registrant Disclosure & Retained DFIR Panel (250+ Staff)",
+    trends: [
+      { metric_name: "SEC Form 8-K Item 1.05 External Securities Counsel & DFIR Retainer Index", authority_source: "SEC Release 33-11216 & EDGAR Item 1.05 Benchmarks" },
+      { metric_name: "SEC Reg S-K Item 106 Annual Form 10-K Governance Readiness Cost", authority_source: "17 CFR 229.106 Annual Compliance Surveys" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "SEC Form 8-K Item 1.05 Materiality & Reg S-K Item 106 Scope Declaration",
+    exec101Scope: "17 CFR 229.106 & 17 CFR 249.308 Form 8-K Item 1.05",
+    exec102Title: "4-Business-Day Materiality Triage & Annual Form 10-K Governance Calendar",
+    exec102Auth: "SEC Release 33-11216 (4-Business-Day Materiality Clock)",
+    exec102Body: "Day 1-30: Ratify Disclosure Committee charter & materiality escalation rubric; Day 31-90: Bind retained DFIR SLA & Attorney General national security delay protocol; Day 91-180: Finalize Form 10-K Reg S-K Item 106 board oversight workpapers",
+    exec103Title: "SEC Materiality Substantiation & Incident Disclosure Defense Memo",
+    exec103Auth: "17 CFR 249.308 Form 8-K Item 1.05 & Reg S-K Item 106",
+  },
+  gdpr: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm GDPR Article 83 Privacy Governance & DPIA Workpaper Suite",
+    statutoryAuthority: "Regulation (EU) 2016/679 (GDPR Articles 30, 32, 35 & 83) & EDPB Fining Guidelines 04/2022",
+    regulatorName: "European Data Protection Board (EDPB) & National DPAs",
+    vertical: "eu_gdpr_privacy",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta GDPR & EU Privacy Automation Desk",
+    footerComplianceDoc: "Retain this workpaper alongside Regulation (EU) 2016/679 Article 30 ROPA, Article 35 DPIA, and Data Protection Officer governance records.",
+    l100Title: "Baseline GDPR DPIA, ROPA & Supervisory Readiness Cost",
+    l200Title: "Internal ROPA, DPIA & Cross-Border Transfer Engineering Hours (At $145/hr)",
+    l200Auth: "Regulation (EU) 2016/679 Articles 30, 32 & 35",
+    l300Title: "Article 83 Tier 1 / Tier 2 Supervisory Penalty Exposure",
+    l300Auth: "Regulation (EU) 2016/679 Article 83 & EDPB 04/2022",
+    l400Title: "Continuous Privacy Governance & ISO/IEC 27701 Control Reuse Credit",
+    l400Auth: "Regulation (EU) 2016/679 Article 32 & ISO/IEC 27006-1:2024",
+    s3Title: "Multi-Member-State Processing Scope + Cross-Border SCCs (250+ Staff)",
+    trends: [
+      { metric_name: "EU GDPR Article 35 DPIA & Cross-Border Transfer Program Cost Index", authority_source: "EDPB & National DPA Privacy Program Benchmarks" },
+      { metric_name: "ISO/IEC 27006-1 Stage 1 + Stage 2 ISMS Surveillance Audit Index", authority_source: "IAF MD 5 & ISO/IEC 27006-1:2024" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "GDPR Processing Scope, ROPA & Cross-Border Boundary Declaration",
+    exec101Scope: "Regulation (EU) 2016/679 Articles 30, 32 & 35",
+    exec102Title: "72-Hour Breach Notification & Article 35 DPIA Readiness Calendar",
+    exec102Auth: "Regulation (EU) 2016/679 Articles 33 & 35",
+    exec102Body: "Day 1-30: Freeze Article 30 ROPA & subprocessor map; Day 31-90: Complete Article 35 DPIAs & SCC transfer risk assessments; Day 91-180: Test 72-hour Article 33 DPA reporting runbook",
+    exec103Title: "GDPR Article 83 Mitigating Factors & Security Posture Memo",
+    exec103Auth: "Regulation (EU) 2016/679 Articles 32 & 83",
+  },
+  ccpa: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm CCPA/CPRA Privacy Compliance & Breach Liability Workpaper Suite",
+    statutoryAuthority: "Cal. Civ. Code 1798.100 et seq. (CCPA/CPRA) & 11 CCR 7000 et seq.",
+    regulatorName: "California Privacy Protection Agency (CPPA) & CA Attorney General",
+    vertical: "ccpa_cpra_privacy",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta CCPA/CPRA & Consumer Privacy Automation Desk",
+    footerComplianceDoc: "Retain this workpaper alongside Cal. Civ. Code 1798.100 (CCPA/CPRA) cybersecurity audit, DSAR log, and 11 CCR 7000 risk assessment documentation.",
+    l100Title: "Baseline CCPA/CPRA Cybersecurity Audit & DSAR Automation Cost",
+    l200Title: "Internal DSAR Workflow, Opt-Out Signal & Vendor DPA Hours (At $145/hr)",
+    l200Auth: "Cal. Civ. Code 1798.100 & 11 CCR 7000",
+    l300Title: "Administrative Fine & Statutory Breach Damages Exposure",
+    l300Auth: "Cal. Civ. Code 1798.150 & 1798.155",
+    l400Title: "Unified Privacy Controls & Annual CPPA Audit Reuse Credit",
+    l400Auth: "11 CCR Cybersecurity Audit & Risk Assessment Rules",
+    s3Title: "High-Volume Consumer Personal Information & ADMT Scope (250+ Staff)",
+    trends: [
+      { metric_name: "CPPA Annual Cybersecurity Audit & Risk Assessment Cost Index", authority_source: "CPPA Regulations & 11 CCR 7000 Benchmarks" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+      { metric_name: "ISO/IEC 27006-1 Security Governance Control Baseline Index", authority_source: "ISO/IEC 27006-1:2024" },
+    ],
+    exec101Title: "CCPA/CPRA Consumer Privacy Scope & Service-Provider Declaration",
+    exec101Scope: "Cal. Civ. Code 1798.100 et seq. & 11 CCR 7000",
+    exec102Title: "45-Day DSAR SLA & Annual Cybersecurity Audit Defense Calendar",
+    exec102Auth: "Cal. Civ. Code 1798.130 & CPPA Audit Rules",
+    exec102Body: "Day 1-30: Inventory personal & sensitive information categories; Day 31-90: Verify GPC opt-out & vendor contracts; Day 91-180: Complete CPPA cybersecurity audit readiness",
+    exec103Title: "Cal. Civ. Code 1798.150 Reasonable Security Substantiation Memo",
+    exec103Auth: "Cal. Civ. Code 1798.150 Private Right of Action Safeguards",
+  },
+  nis2: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm EU NIS2 Directive Article 21 Compliance Workpaper Suite",
+    statutoryAuthority: "Directive (EU) 2022/2555 (NIS2 Articles 20, 21, 23 & 34) & National Member State Transpositions",
+    regulatorName: "ENISA & EU Member State Competent Authorities",
+    vertical: "eu_nis2_resilience",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta EU NIS2 & Critical Infrastructure GRC Desk",
+    footerComplianceDoc: "Retain this workpaper alongside Directive (EU) 2022/2555 (NIS2) Article 21 risk-management records and Article 23 CSIRT notification procedures.",
+    l100Title: "Baseline NIS2 Article 21 Ten-Measure Security & Audit Cost",
+    l200Title: "Internal Supply-Chain Risk, Incident Handling & Governance Hours (At $145/hr)",
+    l200Auth: "Directive (EU) 2022/2555 Articles 20-21",
+    l300Title: "Essential / Important Entity Article 34 Administrative Fine Exposure",
+    l300Auth: "Directive (EU) 2022/2555 Article 34",
+    l400Title: "Cross-Entity NIS2 & ISO/IEC 27001 Control Reuse Credit",
+    l400Auth: "ENISA Implementing Regulation (EU) 2024/2690 & ISO 27001",
+    s3Title: "Essential Entity Multi-Member-State Supply-Chain Scope (250+ Staff)",
+    trends: [
+      { metric_name: "EU NIS2 Article 21 Technical & Supply-Chain Governance Benchmark", authority_source: "Directive (EU) 2022/2555 & ENISA Surveys" },
+      { metric_name: "ISO/IEC 27006-1 Stage 1 + Stage 2 Audit Index", authority_source: "ISO/IEC 27006-1:2024" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "EU NIS2 Entity Classification & Article 21 Boundary Declaration",
+    exec101Scope: "Directive (EU) 2022/2555 Articles 3, 20 & 21",
+    exec102Title: "24h/72h CSIRT Incident Reporting & Article 21 Readiness Calendar",
+    exec102Auth: "Directive (EU) 2022/2555 Articles 21 & 23",
+    exec102Body: "Day 1-30: Confirm Essential vs Important entity registration & management sign-off; Day 31-90: Remediate Article 21 supply-chain & MFA controls; Day 91-180: Test 24-hour CSIRT early warning workflow",
+    exec103Title: "EU NIS2 Article 20 Management Accountability & Control Memo",
+    exec103Auth: "Directive (EU) 2022/2555 Articles 20 & 34",
+  },
+  iso_27001: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm ISO/IEC 27001:2022 Certification & Stage 1/2 Audit Workpaper Kit",
+    statutoryAuthority: "ISO/IEC 27001:2022, ISO/IEC 27006-1:2024 & IAF MD 5 Auditor-Day Rules",
+    regulatorName: "ANAB / UKAS Accredited ISO/IEC 27001 Certification Bodies",
+    vertical: "iso27001_isms",
+    primaryPartnerKey: "thoropass_audit",
+    partnerRepDesk: "Thoropass & Vanta ISO/IEC 27001:2022 ISMS Desk",
+    footerComplianceDoc: "Retain this workpaper alongside ISO/IEC 27001:2022 Statement of Applicability (SoA), Risk Treatment Plan, and ISO/IEC 27006-1:2024 Certification Body records.",
+    l100Title: "Baseline Accredited Certification Body Stage 1 & Stage 2 Audit Fee",
+    l200Title: "Internal ISMS Engineering, Annex A 93-Control & SoA Hours (At $145/hr)",
+    l200Auth: "ISO/IEC 27001:2022 Clauses 4-10 & Annex A",
+    l300Title: "Non-Conformity Audit Rework & Certification Delay Exposure",
+    l300Auth: "ISO/IEC 27006-1:2024 Annex B & IAF MD 5",
+    l400Title: "Year 1/Year 2 Surveillance & Continuous ISMS Reuse Credit",
+    l400Auth: "ISO/IEC 27006-1:2024 Clause 9.1.3 Surveillance Formula",
+    s3Title: "Multi-Site Global ISMS Certification Scope (250+ FTE)",
+    trends: [
+      { metric_name: "ISO/IEC 27006-1:2024 Accredited Certification Body Auditor-Day Rate", authority_source: "IAF MD 5 & ANAB Accredited Registrar Surveys" },
+      { metric_name: "ISO/IEC 27001:2022 Annex A Control Automation Platform Benchmark", authority_source: "Enterprise ISMS Benchmarks" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "ISO/IEC 27001:2022 ISMS Scope & Statement of Applicability Declaration",
+    exec101Scope: "ISO/IEC 27001:2022 Clauses 4.3, 6.1.3 & Annex A",
+    exec102Title: "Stage 1, Stage 2 & Surveillance Audit Readiness Calendar",
+    exec102Auth: "ISO/IEC 27006-1:2024 Annex B Auditor-Day Schedule",
+    exec102Body: "Day 1-30: Freeze ISMS scope & Statement of Applicability; Day 31-90: Complete internal audit & management review; Day 91-180: Execute accredited Stage 1 & Stage 2 certification audits",
+    exec103Title: "ISO/IEC 27001 Surveillance Continuity & Non-Conformity Closure Memo",
+    exec103Auth: "ISO/IEC 27006-1:2024 Clause 9.1.3",
+  },
+  pci_dss: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm PCI DSS 4.0.1 ROC / SAQ & QSA Audit Workpaper Kit",
+    statutoryAuthority: "PCI Security Standards Council PCI DSS v4.0.1 (Requirements 1-12, Req 11.4 & 12.10)",
+    regulatorName: "PCI Security Standards Council (PCI SSC) & Qualified Security Assessors (QSA)",
+    vertical: "pci_dss_payments",
+    primaryPartnerKey: "cobalt_pentest",
+    partnerRepDesk: "Cobalt & Vanta PCI DSS v4.0.1 Readiness Desk",
+    footerComplianceDoc: "Retain this workpaper alongside PCI DSS v4.0.1 Report on Compliance (ROC) or SAQ Attestation of Compliance (AOC) and quarterly ASV scan logs.",
+    l100Title: "Baseline QSA Report on Compliance (ROC) / SAQ Validation Cost",
+    l200Title: "Internal Cardholder Data Environment (CDE) Segmentation & Evidence Hours (At $145/hr)",
+    l200Auth: "PCI DSS v4.0.1 Requirements 1-12",
+    l300Title: "Acquirer Non-Compliance Monthly Penalty & Breach Fine Exposure",
+    l300Auth: "Card Brand Acquirer Rules & PCI DSS v4.0.1",
+    l400Title: "Req 11.4 Segmentation Penetration Test & ASV Quarterly Scan Credit",
+    l400Auth: "PCI DSS v4.0.1 Requirements 11.3 & 11.4",
+    s3Title: "Level 1 Merchant / Service Provider Segmented CDE Scope (>6M Tx/Yr)",
+    trends: [
+      { metric_name: "PCI DSS v4.0.1 Level 1 QSA Report on Compliance Fee Index", authority_source: "PCI SSC QSA Assessment Benchmarks" },
+      { metric_name: "PCI Req 11.4 CDE Segmentation & Penetration Testing Index", authority_source: "CREST / PTES Offensive Security Benchmarks" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "PCI DSS v4.0.1 Cardholder Data Environment (CDE) Boundary Declaration",
+    exec101Scope: "PCI DSS v4.0.1 Scoping & Segmentation Guidance",
+    exec102Title: "Quarterly ASV Scan & Annual QSA ROC / SAQ Defense Calendar",
+    exec102Auth: "PCI DSS v4.0.1 Requirements 11.3, 11.4 & 12.10",
+    exec102Body: "Day 1-30: Isolate CDE & verify tokenization scope; Day 31-90: Complete Req 11.4 segmentation penetration test & ASV scans; Day 91-180: Finalize QSA ROC / AOC attestation",
+    exec103Title: "PCI DSS v4.0.1 Compensating Control & Targeted Risk Analysis Memo",
+    exec103Auth: "PCI DSS v4.0.1 Customized Approach & Appendix B/C",
+  },
+  hitrust: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm HITRUST CSF e1 / i1 / r2 Authorized Assessor Workpaper Kit",
+    statutoryAuthority: "HITRUST CSF v11 (e1, i1, and r2 Validated Assessment & MyCSF Licensing Framework)",
+    regulatorName: "HITRUST Alliance & Authorized External Assessors",
+    vertical: "hitrust_csf_assurance",
+    primaryPartnerKey: "thoropass_audit",
+    partnerRepDesk: "Thoropass & Vanta HITRUST CSF e1/i1/r2 Assessment Desk",
+    footerComplianceDoc: "Retain this workpaper alongside HITRUST MyCSF inheritance records, CSF v11 validated assessment scoping, and Authorized External Assessor workpapers.",
+    l100Title: "Baseline HITRUST Authorized External Assessor & MyCSF Licensing Cost",
+    l200Title: "Internal CSF v11 Control Maturity & Inheritance Mapping Hours (At $145/hr)",
+    l200Auth: "HITRUST CSF v11 e1 / i1 / r2 Scoping Rules",
+    l300Title: "QA Review Rejection & Re-Fieldwork Delay Exposure",
+    l300Auth: "HITRUST Quality Assurance & CAP Threshold Rules",
+    l400Title: "Year-2 Interim Surveillance & Inheritance Control Reuse Credit",
+    l400Auth: "HITRUST MyCSF Inheritance & Control Maturity Program",
+    s3Title: "HITRUST r2 Validated Multi-System Enterprise Scope (250+ Staff)",
+    trends: [
+      { metric_name: "HITRUST CSF v11 r2 Validated Assessor & MyCSF Fee Benchmark", authority_source: "HITRUST Alliance & External Assessor Surveys" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+      { metric_name: "ISO/IEC 27006-1 Security Control Assurance Day-Rate Index", authority_source: "ISO/IEC 27006-1:2024" },
+    ],
+    exec101Title: "HITRUST CSF v11 Assessment Tier (e1 / i1 / r2) & Boundary Declaration",
+    exec101Scope: "HITRUST CSF v11 Scoping & MyCSF Registration",
+    exec102Title: "180-Day Readiness, Fieldwork & QA Sign-Off Calendar",
+    exec102Auth: "HITRUST Assessment Submission & Interim Review Rules",
+    exec102Body: "Day 1-30: Lock MyCSF scoping & inheritance; Day 31-90: Close maturity gaps across policy/process/implemented PRISMA scores; Day 91-180: Complete External Assessor validation & HITRUST QA",
+    exec103Title: "HITRUST Inheritance & Continuous Assurance Maintenance Memo",
+    exec103Auth: "HITRUST Shared Responsibility & Inheritance Program",
+  },
+  cyber_insurance: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm Cyber Liability Premium, SIR & Breach Exposure Workpaper Kit",
+    statutoryAuthority: "NAIC Cyber Insurance Market Data, State Breach Notification Statutes & IBM/Ponemon Cost Factors",
+    regulatorName: "Cyber Underwriting Carriers & State Insurance Departments",
+    vertical: "cyber_liability_underwriting",
+    primaryPartnerKey: "coalition_cyber_insurance",
+    partnerRepDesk: "Coalition Active Cyber Insurance & GRC Underwriting Desk",
+    footerComplianceDoc: "Retain this workpaper alongside cyber insurance underwriting security questionnaires, MFA/EDR attestation logs, and incident response retainer documentation.",
+    l100Title: "Baseline Cyber Liability Policy Premium & Retention (SIR) Allocation",
+    l200Title: "Underwriting Security Control Attestation & Hardening Hours (At $145/hr)",
+    l200Auth: "NAIC Cyber Underwriting Standards & Carrier Minimum Controls",
+    l300Title: "Uninsured Breach Response, Ransomware & Business Interruption Exposure",
+    l300Auth: "State Breach Notification Statutes & DFIR Severity Benchmarks",
+    l400Title: "Active Monitoring, MFA / Immutable Backup & EDR Credit Savings",
+    l400Auth: "Carrier Underwriting Security Control Credits",
+    s3Title: "High-Limit Aggregate Tower + Incident Forensics Panel (250+ Staff)",
+    trends: [
+      { metric_name: "U.S. Commercial Cyber Liability Rate-per-Million Benchmark Index", authority_source: "NAIC Cyber Market & Broker Underwriting Surveys" },
+      { metric_name: "Enterprise DFIR & Breach Legal Response Severity Benchmark", authority_source: "Ponemon / Breach Cost Surveys" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "Cyber Insurance Limit, Retention (SIR) & Control Underwriting Declaration",
+    exec101Scope: "Carrier Minimum Security Controls & Active Risk Underwriting",
+    exec102Title: "90-Day Underwriting Hardening & Policy Renewal Calendar",
+    exec102Auth: "MFA, EDR, PAM & Immutable Backup Renewal Requirements",
+    exec102Body: "Day 1-30: Verify phishing-resistant MFA & immutable offline backups; Day 31-90: Bind active attack-surface monitoring & pre-approved DFIR panel; Day 91-180: Benchmark SIR vs tower limit",
+    exec103Title: "Active Security Posture & Breach Mitigation Underwriting Memo",
+    exec103Auth: "NAIC Cyber Risk Transfer & Control Attestation Standards",
+  },
+  hipaa: {
+    offerSku: "gh_hipaa_iso27001_governance_kit",
+    title: "GainHelm HIPAA Penalty Tier, Security Rule & Breach Cost Workpaper Kit",
+    statutoryAuthority: "45 CFR 160.404 (HIPAA CMP Tiers 1-4), 45 CFR Part 164 & 45 CFR 102.3 Inflation Index",
+    regulatorName: "HHS Office for Civil Rights (OCR)",
+    vertical: "hipaa_healthcare_security",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta HIPAA & Healthcare Security Compliance Desk",
+    footerComplianceDoc: "Retain this workpaper alongside 45 CFR 164.308 Security Risk Analysis (SRA), Business Associate Agreements (BAAs), and 45 CFR 160.404 governance documentation.",
+    l100Title: "Baseline HIPAA Security Risk Analysis (SRA) & Safeguard Cost",
+    l200Title: "Internal ePHI Administrative, Physical & Technical Safeguard Hours (At $145/hr)",
+    l200Auth: "45 CFR 164.308 - 164.316 HIPAA Security Rule",
+    l300Title: "HHS OCR Tier 1-4 Statutory CMP & 60-Day Breach Notice Exposure",
+    l300Auth: "45 CFR 160.404 & 45 CFR Part 102.3 Inflation Adjustment",
+    l400Title: "HITECH Recognized Security Practices (42 U.S.C. 17941) Mitigation Credit",
+    l400Auth: "42 U.S.C. 17941 Recognized Security Practices Lookback",
+    s3Title: "Multi-Facility Healthcare Covered Entity / Business Associate ePHI Enclave",
+    trends: [
+      { metric_name: "HHS OCR Tier 4 Willful Neglect Annual Statutory Penalty Cap", authority_source: "45 CFR 160.404 / 45 CFR Part 102.3" },
+      { metric_name: "Healthcare ePHI Breach Forensics & 60-Day Notification Unit Cost", authority_source: "HHS OCR Breach Portal & Healthcare Benchmarks" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+    ],
+    exec101Title: "HIPAA Security Rule ePHI Enclave & Risk Analysis Boundary Declaration",
+    exec101Scope: "45 CFR Part 164 Subpart C",
+    exec102Title: "HIPAA SRA Remediation & 60-Day Breach Readiness Calendar",
+    exec102Auth: "45 CFR 164.308 & 45 CFR 164.404-408",
+    exec102Body: "Day 1-30: Inventory ePHI repositories & BAA contracts; Day 31-90: Complete enterprise Security Risk Analysis & encryption validation; Day 91-180: Document 12-month Recognized Security Practices",
+    exec103Title: "HITECH Act 42 U.S.C. 17941 Recognized Security Practices Memo",
+    exec103Auth: "42 U.S.C. 17941 & 45 CFR 160.404",
+  },
+  fedramp: {
+    offerSku: "gh_soc2_cmmc_audit_workpapers",
+    title: "GainHelm FedRAMP Moderate / High & 3PAO Authorization Workpaper Suite",
+    statutoryAuthority: "NIST SP 800-53 Rev 5, FedRAMP Rev 5 Baselines & OMB M-24-15 Authorization Policy",
+    regulatorName: "FedRAMP PMO & Accredited 3PAO Assessors",
+    vertical: "fedramp_3pao_ato",
+    primaryPartnerKey: "drata_compliance",
+    partnerRepDesk: "Drata FedRAMP & 3PAO ATO Readiness Desk",
+    footerComplianceDoc: "Retain this workpaper alongside NIST SP 800-53 Rev 5 SSP, SAR, POA&M, and accredited 3PAO ConMon continuous monitoring documentation.",
+    l100Title: "Baseline Accredited 3PAO RAR & Full Security Assessment Fee",
+    l200Title: "Internal FedRAMP Boundary Isolation, FIPS 140-3 & SSP Hours (At $145/hr)",
+    l200Auth: "NIST SP 800-53 Rev 5 & FedRAMP Authorization Act",
+    l300Title: "Agency Sponsorship Delay & Unremediated POA&M Escalation Risk",
+    l300Auth: "OMB M-24-15 & FedRAMP ConMon Policy",
+    l400Title: "Continuous ConMon Automation & Monthly POA&M Reuse Credit",
+    l400Auth: "FedRAMP Continuous Monitoring Performance Management Guide",
+    s3Title: "FedRAMP High / Impact Level Authorization Boundary (250+ Staff)",
+    trends: [
+      { metric_name: "FedRAMP Moderate Accredited 3PAO Security Assessment Benchmark", authority_source: "FedRAMP PMO & 3PAO Assessment Benchmarks" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+      { metric_name: "Federal Boundary Continuous Monitoring Automation Index", authority_source: "NIST SP 800-53 Rev 5 ConMon Benchmarks" },
+    ],
+    exec101Title: "FedRAMP Authorization Boundary, FIPS 140-3 & SSP Declaration",
+    exec101Scope: "NIST SP 800-53 Rev 5 & OMB M-24-15",
+    exec102Title: "180-Day 3PAO Readiness Assessment & ATO Defense Calendar",
+    exec102Auth: "FedRAMP Rev 5 Authorization & ConMon Requirements",
+    exec102Body: "Day 1-30: Isolate federal boundary & validate FIPS 140-3 crypto modules; Day 31-90: Freeze SSP & complete 3PAO RAR; Day 91-180: Execute 3PAO SAR & Agency ATO ConMon cadence",
+    exec103Title: "FedRAMP ConMon Continuous Vulnerability & Deviation Memo",
+    exec103Auth: "FedRAMP Continuous Monitoring Guide",
+  },
+  pentest: {
+    offerSku: "gh_soc2_cmmc_audit_workpapers",
+    title: "GainHelm CREST/OSCP Penetration Testing Scoping & RoE Workpaper Suite",
+    statutoryAuthority: "NIST SP 800-115, PTES Execution Standard, OWASP ASVS v4 & PCI Req 11.4",
+    regulatorName: "CREST / OSCP Accredited Penetration Testing Providers",
+    vertical: "offensive_security_pentest",
+    primaryPartnerKey: "cobalt_pentest",
+    partnerRepDesk: "Cobalt CREST & OSCP PtaaS Scoping Desk",
+    footerComplianceDoc: "Retain this workpaper alongside signed Rules of Engagement (RoE), CREST/OSCP tester findings, and retest attestation letters.",
+    l100Title: "Baseline CREST / OSCP Gray-Box Penetration Testing Fee",
+    l200Title: "Internal Remediation, Credentialed Staging & Retest Hours (At $145/hr)",
+    l200Auth: "NIST SP 800-115 & OWASP ASVS v4",
+    l300Title: "Critical CVSS Remediation Delay & Failed Retest Window Exposure",
+    l300Auth: "PTES & Enterprise Security Assurance Standards",
+    l400Title: "Continuous PtaaS & Free Retesting Workflow Savings",
+    l400Auth: "Continuous Offensive Security Validation",
+    s3Title: "Multi-App + API + Cloud Infrastructure Gray-Box Scope",
+    trends: [
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+      { metric_name: "CREST / OSCP Penetration Testing Engagement Day-Rate Index", authority_source: "CREST / PtaaS Market Benchmarks" },
+      { metric_name: "ISO/IEC 27006-1 Security Verification Baseline Index", authority_source: "ISO/IEC 27006-1:2024" },
+    ],
+    exec101Title: "Penetration Testing Rules of Engagement (RoE) & Target Asset Declaration",
+    exec101Scope: "NIST SP 800-115 & OWASP ASVS v4",
+    exec102Title: "30-Day Fieldwork, Critical Finding Triage & Retest Calendar",
+    exec102Auth: "PTES Execution & Remediation SLA Protocol",
+    exec102Body: "Day 1-30: Sign RoE & stage test credentials; Day 31-90: Execute manual offensive testing & Jira triage; Day 91-180: Verify patched findings via certified free retest",
+    exec103Title: "Offensive Security Letter of Attestation Substantiation Memo",
+    exec103Auth: "NIST SP 800-115 & CREST Retesting Standards",
+  },
+  cmmc: {
+    offerSku: "gh_soc2_cmmc_audit_workpapers",
+    title: "GainHelm CMMC 2.0 Level 2 & NIST SP 800-171 SPRS Audit Workpaper Suite",
+    statutoryAuthority: "32 CFR Part 170 (CMMC 2.0), DFARS 252.204-7012/7021 & NIST SP 800-171 Rev 2",
+    regulatorName: "DoD CIO, Cyber-AB & Authorized C3PAO Assessors",
+    vertical: "cmmc_dod_defense",
+    primaryPartnerKey: "drata_compliance",
+    partnerRepDesk: "Drata CMMC 2.0 & C3PAO Readiness Desk",
+    footerComplianceDoc: "Retain this workpaper alongside your DoD SPRS score attestation, NIST SP 800-171 System Security Plan (SSP), 180-day POA&M schedule, and C3PAO assessment scope record.",
+    l100Title: "Baseline Accredited C3PAO Assessment & Certification Fee",
+    l200Title: "Internal NIST SP 800-171 Gap Remediation & Enclave Hours (At $145/hr)",
+    l200Auth: "DFARS 252.204-7012 & NIST SP 800-171 Rev 2",
+    l300Title: "Sub-Threshold SPRS Score Contract Exclusion & POA&M Escalation Exposure",
+    l300Auth: "32 CFR Part 170.21 & DFARS 252.204-7021",
+    l400Title: "Automated CUI Enclave Boundary & Continuous Evidence Reuse Credit",
+    l400Auth: "32 CFR Part 170 Level 2 Enclave Efficiency Benchmarks",
+    s3Title: "Enterprise CMMC 2.0 Level 2 CUI Enclave & 25+ Open Controls Scope",
+    trends: [
+      { metric_name: "DoD CMMC 2.0 Level 2 C3PAO Assessment & SPRS 110-Control Readiness", authority_source: "32 CFR Part 170.17 & DoD CIO Cost Estimate" },
+      { metric_name: "Information Security Analyst Loaded Engineering Wage (BLS SOC 15-1212)", authority_source: "BLS OEWS 15-1212" },
+      { metric_name: "CUI Enclave Boundary & FIPS 140-3 Engineering Labor Index", authority_source: "NIST SP 800-171 Rev 2 / C3PAO Practice Benchmarks" },
+    ],
+    exec101Title: "CMMC 2.0 Level 2 CUI Enclave Boundary & SPRS Self-Assessment Declaration",
+    exec101Scope: "32 CFR Part 170 & NIST SP 800-171 Rev 2 (110 Controls)",
+    exec102Title: "180-Day C3PAO Readiness & Conditional POA&M Closeout Calendar",
+    exec102Auth: "32 CFR Part 170.21 Conditional Certification Window",
+    exec102Body: "Day 1-30: Isolate CUI boundary & publish PIEE SPRS score; Day 31-90: Remediate >1-point NIST SP 800-171 controls; Day 91-180: Close conditional POA&M items and complete C3PAO assessment",
+    exec103Title: "DFARS 252.204-7012 / 7021 Contract Flowdown & SPRS Substantiation Memo",
+    exec103Auth: "DoD CIO 32 CFR Part 170 Rulemaking",
+  },
+};
+
+for (const [fwKey, fwSpec] of Object.entries(GAINHELM_FRAMEWORK_BUNDLE_SPECS)) {
+  const canonDeliverables = GAINHELM_DELIVERABLES_BY_FRAMEWORK[fwKey];
+  if (fwSpec && Array.isArray(canonDeliverables) && canonDeliverables.length) {
+    fwSpec.deliverables = canonDeliverables;
+  }
+}
+
+function selectOfferForSlug(toolSlug, reqSku, vertical = "") {
+  const fw = classifyGainHelmFramework(toolSlug, vertical);
+  const spec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fw];
+  let baseOffer = null;
   if (reqSku && GAINHELM_TOOLKIT_OFFERS[reqSku]) {
-    return GAINHELM_TOOLKIT_OFFERS[reqSku];
+    baseOffer = GAINHELM_TOOLKIT_OFFERS[reqSku];
+  } else if (spec) {
+    baseOffer = GAINHELM_TOOLKIT_OFFERS[spec.offerSku] || GAINHELM_TOOLKIT_OFFERS.gh_hipaa_iso27001_governance_kit;
+  } else {
+    baseOffer = GAINHELM_TOOLKIT_OFFERS.gh_soc2_cmmc_audit_workpapers;
   }
-  const s = String(toolSlug || "").toLowerCase();
-  if (s.includes("hipaa") || s.includes("iso-27001") || s.includes("pci-dss") || s.includes("cyber-liability")) {
-    return GAINHELM_TOOLKIT_OFFERS.gh_hipaa_iso27001_governance_kit;
+  if (reqSku === "gh_instant_compliance_worksheet_19") {
+    if (fw !== "soc2" && spec) {
+      return {
+        ...baseOffer,
+        statutory_authority: spec.statutoryAuthority,
+        regulator_name: spec.regulatorName,
+        deliverables: [
+          "Personalized Compliance Readiness & Scoping Worksheet (Print-Ready HTML/PDF)",
+          "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
+          `${spec.regulatorName} Evidence & Checklist Summary (HTML/PDF)`,
+          "Machine-Readable Security Governance Scenario Pack (JSON)",
+        ],
+      };
+    }
+    const hasFrameworkContext = !isGenericGainHelmToolSlug(toolSlug) || isExplicitGainHelmVertical(vertical);
+    if (hasFrameworkContext) {
+      return {
+        ...baseOffer,
+        statutory_authority: GAINHELM_TOOLKIT_OFFERS.gh_soc2_cmmc_audit_workpapers.statutory_authority,
+      };
+    }
+    return baseOffer;
   }
-  return GAINHELM_TOOLKIT_OFFERS.gh_soc2_cmmc_audit_workpapers;
+  const hasExplicitMismatch =
+    Boolean(reqSku) &&
+    spec &&
+    reqSku !== spec.offerSku;
+  if (!spec || hasExplicitMismatch) {
+    return baseOffer;
+  }
+  return {
+    ...baseOffer,
+    title: spec.title,
+    statutory_authority: spec.statutoryAuthority,
+    regulator_name: spec.regulatorName,
+    deliverables:
+      Array.isArray(spec.deliverables) && spec.deliverables.length
+        ? spec.deliverables
+        : baseOffer.deliverables,
+  };
 }
 
 function parseEdgeJsonParam(rawVal) {
@@ -6485,19 +7083,26 @@ function parseEdgeJsonParam(rawVal) {
   }
 }
 
-async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {
+async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam, verticalParam = "") {
   const mem = getMemoryBuffer();
   const isDirectLead = String(leadId || "").endsWith("_direct");
+  const rawSlugNorm = String(toolSlug === undefined || toolSlug === null ? "" : toolSlug)
+    .trim()
+    .toLowerCase()
+    .replace(/^\\/+|\\/+$/g, "")
+    .replace(/^tools(?:\\/|$)/, "");
+  const cleanVert = String(verticalParam || "").trim().toLowerCase();
+  const hasExplicitVert = isExplicitGainHelmVertical(cleanVert);
   let baseRecord = null;
   if (leadId) {
-    const foundMem = mem.find((r) => r && r.lead_id === leadId && (!isDirectLead || !toolSlug || !r.tool_slug || r.tool_slug === toolSlug));
+    const foundMem = mem.find((r) => r && r.lead_id === leadId && (!isDirectLead || !rawSlugNorm || !r.tool_slug || r.tool_slug === rawSlugNorm));
     if (foundMem) baseRecord = { ...foundMem };
     if (!baseRecord) {
       const kv = getLeadsKv(env);
       if (kv && typeof kv.get === "function") {
         try {
           const kvRec = await kv.get(leadId, { type: "json" });
-          if (kvRec && typeof kvRec === "object" && (!isDirectLead || !toolSlug || !kvRec.tool_slug || kvRec.tool_slug === toolSlug)) {
+          if (kvRec && typeof kvRec === "object" && (!isDirectLead || !rawSlugNorm || !kvRec.tool_slug || kvRec.tool_slug === rawSlugNorm)) {
             baseRecord = { ...kvRec };
           }
         } catch (_) {}
@@ -6508,26 +7113,118 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
   const safeAmount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? Math.round(parsedAmount * 100) / 100 : 48500;
   if (baseRecord) {
     if (Number.isFinite(parsedAmount) && parsedAmount > 0) baseRecord.calculated_amount = safeAmount;
-    if (toolSlug && toolSlug !== "general") baseRecord.tool_slug = toolSlug;
+    if (rawSlugNorm && !isGenericGainHelmToolSlug(rawSlugNorm)) baseRecord.tool_slug = rawSlugNorm;
+    if (hasExplicitVert) {
+      baseRecord.vertical = cleanVert;
+      baseRecord.has_explicit_vertical = true;
+    }
     if (stateParam) baseRecord.state = String(stateParam).toUpperCase().slice(0, 2) || baseRecord.state;
+    Object.defineProperty(baseRecord, "_ghFoundInStore", { value: true, enumerable: false, configurable: true });
     return baseRecord;
   }
-  return {
+  const effSlug = rawSlugNorm || "";
+  const fwKey = classifyGainHelmFramework(effSlug, cleanVert);
+  const effVertical = GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || (hasExplicitVert ? cleanVert : "soc2_grc_automation");
+  const fallbackRec = {
     lead_id: leadId || "lead_gainhelm_direct",
     property_id: "gainhelm",
     email: emailParam || "",
     state: String(stateParam || "DE").toUpperCase().slice(0, 2) || "DE",
-    tool_slug: toolSlug || "soc-2-audit-cost-calculator",
+    tool_slug: effSlug,
+    vertical: effVertical,
+    has_explicit_vertical: hasExplicitVert,
+    has_explicit_sku: false,
+    is_bare_root: Boolean(isGenericGainHelmToolSlug(effSlug) && !hasExplicitVert),
     calculated_amount: safeAmount,
     calculator_inputs: parseEdgeJsonParam(inputsJsonParam),
     calculator_outputs: parseEdgeJsonParam(outputsJsonParam),
     created_at: new Date().toISOString(),
   };
+  Object.defineProperty(fallbackRec, "_ghFoundInStore", { value: false, enumerable: false, configurable: true });
+  return fallbackRec;
+}
+
+function resolveGainHelmRecordScopeFlags(record, toolSlugOverride = "") {
+  const slugVal = String(
+    toolSlugOverride !== "" ? toolSlugOverride : ((record && record.tool_slug) || "")
+  ).trim().toLowerCase();
+  const isGenericSlug = isGenericGainHelmToolSlug(slugVal);
+  const isHubSlug = slugVal.endsWith("-hub");
+  const hasExplicitVert = Boolean(
+    record && (record.has_explicit_vertical || (!isGenericSlug && !isHubSlug))
+  );
+  const hasExplicitSku = Boolean(record && record.has_explicit_sku);
+  const isBareRoot = Boolean(
+    record && Object.prototype.hasOwnProperty.call(record, "is_bare_root")
+      ? record.is_bare_root
+      : (isGenericSlug && !hasExplicitVert && !hasExplicitSku)
+  );
+  return { slugVal, isGenericSlug, isHubSlug, hasExplicitVert, hasExplicitSku, isBareRoot };
+}
+
+function buildGainHelmActionUrl(modeName, record, offer, extras = {}) {
+  const flags = resolveGainHelmRecordScopeFlags(record, extras.tool_slug || "");
+  const leadId = String((record && record.lead_id) || "lead_gainhelm_direct");
+  const offerSku = String((offer && offer.sku) || (record && record.offer_sku) || "").trim().toLowerCase();
+  const vertVal = String(extras.vertical !== undefined ? extras.vertical : ((record && record.vertical) || "")).trim().toLowerCase();
+  const qs = new URLSearchParams();
+  qs.set(modeName, "1");
+  qs.set("lead_id", leadId);
+  if (offerSku && (!flags.isBareRoot || flags.hasExplicitSku || offerSku !== "gh_soc2_cmmc_audit_workpapers")) {
+    qs.set("sku", offerSku);
+  }
+  qs.set("tool_slug", flags.slugVal);
+  if (vertVal && (flags.hasExplicitVert || (!flags.isBareRoot && !flags.isHubSlug))) {
+    qs.set("vertical", vertVal);
+  }
+  if (extras.amount !== undefined && extras.amount !== null && extras.amount !== "") {
+    qs.set("amount", String(extras.amount));
+  }
+  if (extras.state) {
+    qs.set("state", String(extras.state));
+  }
+  if (extras.redirect) {
+    qs.set("redirect", "1");
+  }
+  return `/api/lead-capture?${qs.toString()}`;
+}
+
+function resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku) {
+  const recSlugRaw = String((record && record.tool_slug) || "").trim().toLowerCase();
+  const recHasExplicitSlug = Boolean(
+    recSlugRaw && !isGenericGainHelmToolSlug(recSlugRaw) && !recSlugRaw.endsWith("-hub")
+  );
+  const effSlug = (toolSlug && !isGenericGainHelmToolSlug(toolSlug)) ? toolSlug : (recSlugRaw || toolSlug || "");
+  const reqHasExplicitVert = isExplicitGainHelmVertical(verticalParam);
+  const recHasExplicitVert = Boolean(record && (record.has_explicit_vertical || recHasExplicitSlug));
+  const effVert = reqHasExplicitVert
+    ? String(verticalParam || "").trim().toLowerCase()
+    : (recHasExplicitVert ? String((record && record.vertical) || "").trim().toLowerCase() : "");
+  const cleanReqSku = String(reqSku || "").trim().toLowerCase();
+  const recOfferSku = String((record && record.offer_sku) || "").trim().toLowerCase();
+  const recordFromStore = Boolean(record && (record._ghFoundInStore || record.captured_at));
+  const effSku = cleanReqSku || (recordFromStore && recOfferSku ? recOfferSku : "");
+  const offer = selectOfferForSlug(effSlug, effSku, effVert);
+  const explicitVert = reqHasExplicitVert
+    ? String(verticalParam || "").trim().toLowerCase()
+    : (record && record.has_explicit_vertical ? String(record.vertical || "").trim().toLowerCase() : "");
+  const explicitSku = cleanReqSku || (recordFromStore && record && record.has_explicit_sku ? recOfferSku : "");
+  const flags = resolveGainHelmRecordScopeFlags(record, effSlug);
+  const paymentRequiredCtx = {
+    sku: (offer && offer.sku && (!flags.isBareRoot || flags.hasExplicitSku || offer.sku !== "gh_soc2_cmmc_audit_workpapers")) ? offer.sku : "",
+    tool_slug: effSlug,
+    vertical: explicitVert || (recHasExplicitVert ? effVert : ""),
+  };
+  return { effSlug, effVert, effSku, offer, explicitVert, explicitSku, paymentRequiredCtx };
 }
 
 function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const leadId = String((record && record.lead_id) || "lead_gainhelm_direct");
-  const toolSlug = String((record && record.tool_slug) || "soc-2-audit-cost-calculator");
+  const recVert = String((record && record.vertical) || "").trim().toLowerCase();
+  const hasExplicitSlugProp = Boolean(record && Object.prototype.hasOwnProperty.call(record, "tool_slug"));
+  const toolSlug = hasExplicitSlugProp
+    ? String(record.tool_slug === undefined || record.tool_slug === null ? "" : record.tool_slug)
+    : "";
   const stateCode = String((record && record.state) || "DE").toUpperCase();
   const baseAmount = Math.max(25000, Number((record && record.calculated_amount) || 48500));
   const autoSavings = Math.round(baseAmount * 0.34 * 100) / 100;
@@ -6537,7 +7234,43 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const customInputs = (record && record.calculator_inputs && typeof record.calculator_inputs === "object") ? record.calculator_inputs : {};
   const customOutputs = (record && record.calculator_outputs && typeof record.calculator_outputs === "object") ? record.calculator_outputs : {};
 
-  const reconciliationSchedule = [
+  const fwKey = classifyGainHelmFramework(toolSlug, recVert);
+  const fwSpec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fwKey] || null;
+  const fwVertical = (fwSpec && fwSpec.vertical) || GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || "soc2_grc_automation";
+  const reconciliationSchedule = fwSpec ? [
+    {
+      line_code: "GH-100",
+      line_item: fwSpec.l100Title,
+      authority: offer.statutory_authority,
+      baseline_value: fmtUsd(baseAmount),
+      optimized_value: fmtUsd(netOptimized),
+      delta_impact: `-${fmtUsd(autoSavings)} GRC Automation Savings`,
+    },
+    {
+      line_code: "GH-200",
+      line_item: fwSpec.l200Title,
+      authority: fwSpec.l200Auth,
+      baseline_value: "320 hrs ($46,400.00)",
+      optimized_value: "75 hrs ($10,875.00)",
+      delta_impact: "-245 Engineering Hours Saved",
+    },
+    {
+      line_code: "GH-300",
+      line_item: fwSpec.l300Title,
+      authority: fwSpec.l300Auth,
+      baseline_value: fmtUsd(baseAmount * 4.5),
+      optimized_value: fmtUsd(baseAmount * 0.5),
+      delta_impact: "Continuous Control Monitoring Active",
+    },
+    {
+      line_code: "GH-400",
+      line_item: fwSpec.l400Title,
+      authority: fwSpec.l400Auth,
+      baseline_value: fmtUsd(baseAmount * 0.78),
+      optimized_value: fmtUsd(Math.max(9500, baseAmount * 0.78 - crossFrameworkReuse)),
+      delta_impact: `-${fmtUsd(crossFrameworkReuse)} Cross-Framework Control Overlap Credit`,
+    },
+  ] : [
     {
       line_code: "GH-100",
       line_item: "Baseline Unautomated CPA / C3PAO / QSA Audit & Readiness Cost",
@@ -6585,13 +7318,41 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
       estimated_net_benefit: fmtUsd(autoSavings),
     },
     {
-      scenario_label: "High-Complexity Multi-Cloud + CUI / ePHI Enclave (250+ Staff)",
+      scenario_label: fwSpec ? fwSpec.s3Title : "High-Complexity Multi-Cloud + CUI / ePHI Enclave (250+ Staff)",
       modeled_principal: fmtUsd(baseAmount * 1.65),
       effective_rate: "68.0% Automated Evidence Coverage",
       estimated_net_benefit: fmtUsd(autoSavings * 1.55),
     },
   ];
-  const statutoryTrendTimeseries = [
+  const statutoryTrendTimeseries = fwSpec ? [
+    {
+      metric_name: fwSpec.trends[0].metric_name,
+      authority_source: fwSpec.trends[0].authority_source,
+      y2024: fmtUsd(Math.round(baseAmount * 0.84)),
+      y2025: fmtUsd(Math.round(baseAmount * 0.92)),
+      y2026: fmtUsd(baseAmount),
+      y2028_proj: fmtUsd(Math.round(baseAmount * 1.09)),
+      y2030_proj: fmtUsd(Math.round(baseAmount * 1.18)),
+    },
+    {
+      metric_name: fwSpec.trends[1].metric_name,
+      authority_source: fwSpec.trends[1].authority_source,
+      y2024: fmtUsd(Math.round(baseAmount * 0.42)),
+      y2025: fmtUsd(Math.round(baseAmount * 0.46)),
+      y2026: fmtUsd(Math.round(baseAmount * 0.50)),
+      y2028_proj: fmtUsd(Math.round(baseAmount * 0.55)),
+      y2030_proj: fmtUsd(Math.round(baseAmount * 0.61)),
+    },
+    {
+      metric_name: fwSpec.trends[2].metric_name,
+      authority_source: fwSpec.trends[2].authority_source,
+      y2024: "$112.40/hr",
+      y2025: "$117.10/hr",
+      y2026: "$121.67/hr",
+      y2028_proj: "$131.10/hr",
+      y2030_proj: "$141.50/hr",
+    },
+  ] : [
     {
       metric_name: "AICPA SOC 2 Type II & ISO 27001:2022 Combined CPA/CB Fee Index",
       authority_source: "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Tables",
@@ -6620,31 +7381,30 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
       y2030_proj: "$2,327,341",
     },
   ];
-  const fulfillQs = new URLSearchParams({
-    fulfill: "1",
-    lead_id: leadId,
-    sku: offer.sku,
+  const fulfillmentUrl = buildGainHelmActionUrl("fulfill", record, offer, {
     tool_slug: toolSlug,
-    amount: String(baseAmount),
+    vertical: fwVertical,
+    amount: baseAmount,
     state: stateCode,
   });
-  const playQs = new URLSearchParams({
-    playbook: "1",
-    lead_id: leadId,
-    sku: offer.sku,
+  const playbookUrl = buildGainHelmActionUrl("playbook", record, offer, {
     tool_slug: toolSlug,
-    amount: String(baseAmount),
+    vertical: fwVertical,
+    amount: baseAmount,
     state: stateCode,
   });
-  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
-  const playbookUrl = `/api/lead-capture?${playQs.toString()}`;
   const playbookCsvUrl = `${playbookUrl}&format=csv`;
   const playbookDatapackUrl = `${playbookUrl}&format=datapack`;
   const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
   const datapackUrl = `${fulfillmentUrl}&format=datapack`;
   const activeCsvUrl = mode === "paid_toolkit" ? csvFulfillmentUrl : playbookCsvUrl;
   const activeDatapackUrl = mode === "paid_toolkit" ? datapackUrl : playbookDatapackUrl;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}&state=${encodeURIComponent(stateCode)}`;
+  const checkoutUrl = buildGainHelmActionUrl("checkout", record, offer, {
+    tool_slug: toolSlug,
+    vertical: fwVertical,
+    amount: baseAmount,
+    state: stateCode,
+  });
   const grossPriceUsd = Number(offer.price_usd || 79);
   const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
@@ -6672,7 +7432,38 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     settled_at: (record && record.settled_at) || new Date().toISOString(),
   };
   const isUnredactedPaid = mode === "paid_toolkit";
-  const statutoryExecutionArtifacts = [
+  const statutoryExecutionArtifacts = fwSpec ? [
+    {
+      instrument_id: "GH-EXEC-101",
+      instrument_title: fwSpec.exec101Title,
+      controlling_statute: offer.statutory_authority,
+      filing_deadline_rule: "90-Day Readiness Control Freeze & Continuous Evidence Collection",
+      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
+      statutory_clause_body: isUnredactedPaid
+        ? `ATTESTATION OF REGULATORY BOUNDARY (${stateCode}): Pursuant to ${fwSpec.exec101Scope}, the undersigned entity certifies that the scope for ${toolSlug} encompasses a modeled baseline budget of ${fmtUsd(baseAmount)} and an optimized automated control budget of ${fmtUsd(netOptimized)} (${fmtUsd(autoSavings)} GRC automation variance).`
+        : `ATTESTATION PREVIEW (${stateCode}): Modeled readiness scope ${fmtUsd(baseAmount)} -> ${fmtUsd(netOptimized)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
+    },
+    {
+      instrument_id: "GH-EXEC-102",
+      instrument_title: fwSpec.exec102Title,
+      controlling_statute: fwSpec.exec102Auth,
+      filing_deadline_rule: "Day 30 Scope Lock / Day 90 Evidence Review / Day 180 Final Sign-Off",
+      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
+      statutory_clause_body: isUnredactedPaid
+        ? `STATUTORY REMEDIATION SCHEDULE: ${fwSpec.exec102Body}, substantiating ${fmtUsd(crossFrameworkReuse)} in shared control overlap.`
+        : `REMEDIATION CALENDAR PREVIEW: Day 30 Scope Freeze / Day 90 Evidence Lock / Day 180 Closeout. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
+    },
+    {
+      instrument_id: "GH-EXEC-103",
+      instrument_title: fwSpec.exec103Title,
+      controlling_statute: fwSpec.exec103Auth,
+      filing_deadline_rule: "12-Month Continuous Control Monitoring Lookback Window",
+      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
+      statutory_clause_body: isUnredactedPaid
+        ? `REGULATORY SUBSTANTIATION (${stateCode}): Entity maintains continuous control monitoring under ${fwSpec.exec103Auth}, mitigating statutory enforcement exposure from ${fmtUsd(baseAmount * 4.5)} to ${fmtUsd(baseAmount * 0.5)} and capturing ${fmtUsd(crossFrameworkReuse)} in control reuse.`
+        : `SUBSTANTIATION MEMO PREVIEW: Mitigates regulatory penalty exposure from ${fmtUsd(baseAmount * 4.5)} to ${fmtUsd(baseAmount * 0.5)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
+    },
+  ] : [
     {
       instrument_id: "GH-EXEC-101",
       instrument_title: "CISO / CPA Audit Scope Attestation & Enclave Boundary Declaration",
@@ -6709,10 +7500,12 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     schema_version: "pseo-datapack-v1",
     property_id: "gainhelm",
     tool_slug: toolSlug,
+    vertical: fwVertical,
+    framework_key: fwKey,
     offer_sku: offer.sku,
     offer_title: offer.title,
     statutory_authority: offer.statutory_authority,
-    regulator_name: "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
+    regulator_name: (fwSpec && fwSpec.regulatorName) || offer.regulator_name || "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
     effective_tax_year: "2026",
     modeled_scenario_summary: {
       calculated_amount: baseAmount,
@@ -6830,7 +7623,7 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     <thead><tr><th>Instrument ID</th><th>Statutory Instrument & Deadline Rule</th><th>Execution Clause / Filing Text</th></tr></thead>
     <tbody>${execArtifactsHtml}</tbody>
   </table>
-  <p class="meta" style="margin-top:24px;">Generated deterministically by GainHelm Enterprise Compliance Engine (${new Date().toISOString()}). Retain this workpaper alongside AICPA SSAE 18, NIST SP 800-171A, ISO/IEC 27006-1:2024, and 45 CFR 160.404 governance documentation.</p>
+  <p class="meta" style="margin-top:24px;">Generated deterministically by GainHelm Enterprise Compliance Engine (${new Date().toISOString()}). ${(fwSpec && fwSpec.footerComplianceDoc) || "Retain this workpaper alongside AICPA SSAE 18, NIST SP 800-171A, ISO/IEC 27006-1:2024, and 45 CFR 160.404 governance documentation."}</p>
 </div>
 </body>
 </html>`;
@@ -6840,6 +7633,8 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     lead_id: leadId,
     property_id: "gainhelm",
     tool_slug: toolSlug,
+    vertical: fwVertical,
+    framework_key: fwKey,
     state: stateCode,
     offer_sku: offer.sku,
     offer_title: offer.title,
@@ -6958,8 +7753,11 @@ function buildEdgeLeadKvMetadata(rec) {
     property_id: rec.property_id || EDGE_PROPERTY_ID,
     lead_type: rec.lead_type || "qualified_quote",
     lifecycle_stage: rec.lifecycle_stage || "captured",
-    tool_slug: String(rec.tool_slug || "general").slice(0, 80),
+    tool_slug: String(rec.tool_slug || "").slice(0, 80),
     vertical: String(rec.vertical || "").slice(0, 48),
+    has_explicit_vertical: Boolean(rec.has_explicit_vertical),
+    has_explicit_sku: Boolean(rec.has_explicit_sku),
+    is_bare_root: Boolean(rec.is_bare_root),
     email: String(rec.email || "").slice(0, 80),
     state: String(rec.state || "US").slice(0, 4),
     capital_band: String(rec.capital_band || "standard").slice(0, 24),
@@ -7087,8 +7885,14 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
   return out;
 }
 
-function buildEdgePaymentRequiredResponse(payment, leadId) {
+function buildEdgePaymentRequiredResponse(payment, leadId, checkoutContext = null) {
   const lid = String(leadId || "");
+  const ctx = checkoutContext && typeof checkoutContext === "object" ? checkoutContext : {};
+  const qs = new URLSearchParams({ checkout: "1", lead_id: lid });
+  if (ctx.sku) qs.set("sku", String(ctx.sku));
+  if (ctx.tool_slug) qs.set("tool_slug", String(ctx.tool_slug));
+  if (ctx.vertical) qs.set("vertical", String(ctx.vertical));
+  qs.set("redirect", "1");
   return new Response(
     JSON.stringify({
       ok: false,
@@ -7100,7 +7904,7 @@ function buildEdgePaymentRequiredResponse(payment, leadId) {
       net_settled_revenue_usd: 0,
       reason: (payment && payment.reason) || "payment_not_verified",
       lead_id: lid,
-      checkout_url: "/api/lead-capture?checkout=1&lead_id=" + encodeURIComponent(lid) + "&redirect=1",
+      checkout_url: `/api/lead-capture?${qs.toString()}`,
       message: "Paid workpapers unlock only after a live Stripe Checkout session_id is verified as paid.",
     }),
     { status: 402, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS } }
@@ -7248,12 +8052,25 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
   return Object.values(byCalc).sort((a, b) => b.deliverable_requests_count - a.deliverable_requests_count);
 }
 
-async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSyntheticProbe = false, bundle = null) {
-  const fallbackUrl = bundle ? bundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookUrl = bundle ? bundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSyntheticProbe = false, bundle = null, vertical = "", explicitSku = "") {
+  const callerVert = String(vertical || "").trim().toLowerCase();
+  const hasExplicitVertical = isExplicitGainHelmVertical(callerVert);
+  const callerSku = String(explicitSku || "").trim().toLowerCase();
+  const hasExplicitSku = Boolean(callerSku && Object.prototype.hasOwnProperty.call(GAINHELM_TOOLKIT_OFFERS, callerSku));
+  const effVert = hasExplicitVertical ? callerVert : String((bundle && bundle.vertical) || "").trim();
+  const fallbackRec = {
+    lead_id: leadId,
+    tool_slug: toolSlug,
+    vertical: effVert,
+    has_explicit_vertical: hasExplicitVertical,
+    has_explicit_sku: hasExplicitSku,
+    offer_sku: (offer && offer.sku) || callerSku || "",
+  };
+  const fallbackUrl = bundle ? bundle.checkout_url : buildGainHelmActionUrl("checkout", fallbackRec, offer, { tool_slug: toolSlug, vertical: effVert });
+  const playbookUrl = bundle ? bundle.playbook_url : buildGainHelmActionUrl("playbook", fallbackRec, offer, { tool_slug: toolSlug, vertical: effVert });
   const playbookCsvUrl = bundle && bundle.playbook_csv_url ? bundle.playbook_csv_url : `${playbookUrl}&format=csv`;
   const playbookDatapackUrl = bundle && bundle.playbook_datapack_url ? bundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
-  const fulfillmentUrl = bundle ? bundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const fulfillmentUrl = bundle ? bundle.fulfillment_url : buildGainHelmActionUrl("fulfill", fallbackRec, offer, { tool_slug: toolSlug, vertical: effVert });
   const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
   const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
@@ -7261,14 +8078,24 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const stripeDisplayName = "GainHelm";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
-  const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+  const fwKey = classifyGainHelmFramework(toolSlug, hasExplicitVertical ? callerVert : effVert);
+  const fwDefaultSlug = GAINHELM_DEFAULT_SLUG_BY_FRAMEWORK[fwKey] || "soc-2-audit-cost-calculator";
+  const fwSpecForSku = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fwKey];
+  const skuMatchesFw = Boolean(fwSpecForSku && fwSpecForSku.offerSku === callerSku);
+  const skuDefaultSlug =
+    hasExplicitSku && !skuMatchesFw && callerSku !== "gh_instant_compliance_worksheet_19"
+      ? (callerSku === "gh_hipaa_iso27001_governance_kit" ? "iso-27001-certification-cost-calculator" : "soc-2-audit-cost-calculator")
+      : fwDefaultSlug;
+  const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools(?:\\/|$)/, "");
+  const isGenericSlug = !slugNorm || slugNorm === "general" || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage";
+  const toolPath = slugNorm.endsWith("-hub") || (isGenericSlug && !hasExplicitVertical && !hasExplicitSku)
     ? "/"
-    : slugNorm === "general"
-    ? "/tools/soc-2-audit-cost-calculator/"
+    : isGenericSlug
+    ? `/tools/${skuDefaultSlug}/`
     : `/tools/${slugNorm}/`;
   const successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `https://gainhelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
+  const fwVertical = GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || "soc2_grc_automation";
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
     calculated_amount: bundle.calculated_amount,
@@ -7300,6 +8127,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[workpaper_id]": `wp_${leadId}`,
         "metadata[property_id]": "gainhelm",
         "metadata[tool_slug]": toolSlug,
+        "metadata[vertical]": fwVertical,
         "metadata[sku]": offer.sku,
         "metadata[offer_sku]": offer.sku,
         "metadata[merchant_email]": stripeMerchantEmail,
@@ -7325,6 +8153,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
           offer_sku: offer.sku,
           offer_title: offer.title,
           offer_price_usd: offer.price_usd,
+          vertical: fwVertical,
           statutory_authority: offer.statutory_authority,
           deliverables: offer.deliverables,
           billing_mode: "payment",
@@ -7359,6 +8188,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
     offer_sku: offer.sku,
     offer_title: offer.title,
     offer_price_usd: offer.price_usd,
+    vertical: fwVertical,
     statutory_authority: offer.statutory_authority,
     deliverables: offer.deliverables,
     billing_mode: "payment",
@@ -7424,13 +8254,17 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "GainHelm Research Desk";
-  const emailSubject = `[GainHelm Playbook] Your Enterprise GRC & Audit Readiness Worksheet (${record.tool_slug})`;
-  const fallbackGhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_gainhelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "soc-2-audit-cost-calculator")}&redirect=1`;
+  const labelSlug = record.tool_slug || record.vertical || "soc-2-audit-cost-calculator";
+  const recFwKey = classifyGainHelmFramework(record.tool_slug, record.vertical);
+  const recOfferObj = record.offer_sku ? { sku: record.offer_sku } : null;
+  const resolvedDeskLabel = record.partner_rep_desk || resolveGainHelmPartnerRepDesk(record.partner_key, recFwKey);
+  const emailSubject = `[GainHelm Playbook] Your Compliance Scoping & Cost Worksheet (${labelSlug})`;
+  const fallbackGhCheckoutPath = buildGainHelmActionUrl("checkout", record, recOfferObj, { redirect: true });
   const rawGhCheckout = String(record.checkout_url || fallbackGhCheckoutPath);
   const fullGhCheckoutUrl = rawGhCheckout.startsWith("http")
     ? rawGhCheckout
     : `https://gainhelm.com${rawGhCheckout}${rawGhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const ghPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_gainhelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "soc-2-audit-cost-calculator")}`);
+  const ghPlaybookPath = String(record.playbook_url || buildGainHelmActionUrl("playbook", record, recOfferObj));
   const ghPlaybookHtmlUrl = `https://gainhelm.com${ghPlaybookPath}${ghPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const ghPlaybookCsvUrl = `https://gainhelm.com${record.playbook_csv_url || (ghPlaybookPath + "&format=csv")}`;
   const ghSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -7442,12 +8276,12 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       `</tbody></table>`
     : "";
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
-    `<h2>Your GainHelm Enterprise GRC &amp; Security Audit Worksheet</h2>` +
-    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
+    `<h2>Your Calculation Worksheet &amp; Action Plan</h2>` +
+    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${labelSlug}</strong></p>` +
     `<p>Modeled Scope: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "mid_market"}</strong></p>` +
     ghTableHtml +
     `<p><a href="${ghPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${ghPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
-    `<p><a href="https://gainhelm.com${record.redirect_url}">Review Matched GRC &amp; Audit Platform (${record.partner_rep_desk || "Enterprise GRC & C3PAO / CPA Audit Desk"})</a></p>` +
+    `<p><a href="https://gainhelm.com${record.redirect_url}">Review Matched GRC &amp; Compliance Platform (${resolvedDeskLabel})</a></p>` +
     `<p><a href="${fullGhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
@@ -7612,15 +8446,18 @@ export async function onRequestGet(context) {
   const isSynth =
     (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
     reqUrl.searchParams.get("synthetic_test") === "1";
-  const toolSlug = (
-    reqUrl.searchParams.get("tool_slug") ||
-    reqUrl.searchParams.get("slug") ||
-    reqUrl.searchParams.get("source_tool") ||
-    reqUrl.searchParams.get("source") ||
-    "soc-2-audit-cost-calculator"
-  ).toLowerCase();
-  const reqSku = reqUrl.searchParams.get("sku") || "";
-  const offer = selectOfferForSlug(toolSlug, reqSku);
+  const verticalParam = String(reqUrl.searchParams.get("vertical") || "").trim().toLowerCase();
+  const rawGetToolSlug =
+    reqUrl.searchParams.get("tool_slug") ??
+    reqUrl.searchParams.get("slug") ??
+    reqUrl.searchParams.get("source_tool") ??
+    reqUrl.searchParams.get("source");
+  const toolSlug = String(rawGetToolSlug === null ? "" : rawGetToolSlug)
+    .trim()
+    .toLowerCase()
+    .replace(/^\\/+|\\/+$/g, "")
+    .replace(/^tools(?:\\/|$)/, "");
+  const reqSku = String(reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_gainhelm_direct";
   const email = reqUrl.searchParams.get("email") || "";
   const amountParam = reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "";
@@ -7651,12 +8488,15 @@ export async function onRequestGet(context) {
       stateParam,
       email,
       inputsJsonParam,
-      outputsJsonParam
+      outputsJsonParam,
+      verticalParam
     );
+    const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
+    const offer = effState.offer;
     let gatedRecord = record;
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
-      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId, effState.paymentRequiredCtx);
       gatedRecord = await persistSettledEdgeLeadRecord(env, record, payment, isSynth);
     }
     const bundle = buildGainHelmWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "playbook");
@@ -7721,10 +8561,23 @@ export async function onRequestGet(context) {
       stateParam,
       email,
       inputsJsonParam,
-      outputsJsonParam
+      outputsJsonParam,
+      verticalParam
     );
+    const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
+    const offer = effState.offer;
     const bundle = buildGainHelmWorkpaperBundle(record, offer, "paid_toolkit");
-    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(
+      env,
+      leadId,
+      email || record.email || "",
+      effState.effSlug,
+      offer,
+      isSynth,
+      bundle,
+      effState.explicitVert,
+      effState.explicitSku
+    );
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -7752,7 +8605,7 @@ export async function onRequestGet(context) {
         status: stripeOffer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "gainhelm",
         lead_id: leadId,
-        tool_slug: toolSlug,
+        tool_slug: effState.effSlug,
         ...stripeOffer,
       }),
       {
@@ -7897,24 +8750,45 @@ export async function onRequestPost(context) {
     const body = await request.json().catch(() => ({}));
     const rawEmail = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
     const state = String(body.state || reqUrl.searchParams.get("state") || "DE").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "DE";
-    const toolSlug = String(
-      body.tool_slug ||
-      body.slug ||
-      body.source_tool ||
-      body.source ||
-      reqUrl.searchParams.get("tool_slug") ||
-      reqUrl.searchParams.get("tool") ||
-      reqUrl.searchParams.get("slug") ||
-      "soc-2-audit-cost-calculator"
-    )
+    const reqVertical = String(
+      body.vertical || reqUrl.searchParams.get("vertical") || ""
+    ).trim().toLowerCase();
+    const rawToolSlugCandidate =
+      body.tool_slug !== undefined ? body.tool_slug
+      : body.slug !== undefined ? body.slug
+      : body.source_tool !== undefined ? body.source_tool
+      : body.source !== undefined ? body.source
+      : reqUrl.searchParams.get("tool_slug") ??
+        reqUrl.searchParams.get("tool") ??
+        reqUrl.searchParams.get("slug");
+    const fallbackSlugVal = rawToolSlugCandidate === undefined || rawToolSlugCandidate === null
+      ? ""
+      : String(rawToolSlugCandidate);
+    const toolSlug = fallbackSlugVal
       .trim()
       .toLowerCase()
       .replace(/^\\/+|\\/+$/g, "")
-      .replace(/^tools\\//, "");
-    const reqPartner = String(body.partner_key || "vanta_security").trim().toLowerCase();
-    const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, reqPartner)
-      ? reqPartner
-      : "vanta_security";
+      .replace(/^tools(?:\\/|$)/, "");
+    const reqPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const hasExplicitVertical = isExplicitGainHelmVertical(reqVertical);
+    const hasExplicitSku = Boolean(reqPostSku && Object.prototype.hasOwnProperty.call(GAINHELM_TOOLKIT_OFFERS, reqPostSku));
+    const isBareRoot = Boolean(isGenericGainHelmToolSlug(toolSlug) && !hasExplicitVertical && !hasExplicitSku);
+    const fwKey = classifyGainHelmFramework(toolSlug, reqVertical);
+    const fwSpec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fwKey] || null;
+    const fwPrimaryPartner =
+      (fwSpec && fwSpec.primaryPartnerKey) ||
+      GAINHELM_PRIMARY_PARTNER_BY_FRAMEWORK[fwKey] ||
+      "vanta_security";
+    const rawReqPartner = String(body.partner_key || "").trim().toLowerCase();
+    const canonReqPartner = PARTNER_ALIASES[rawReqPartner] || rawReqPartner;
+    const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, canonReqPartner)
+      ? canonReqPartner
+      : fwPrimaryPartner;
+    const fwVertical =
+      (fwSpec && fwSpec.vertical) ||
+      GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] ||
+      "soc2_grc_automation";
+    const fwRepDesk = resolveGainHelmPartnerRepDesk(partnerKey, fwKey);
     const isSynth = isSyntheticProbeRequest(request, body, rawEmail);
     const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
     const isCheckoutMode = reqUrl.searchParams.get("checkout") === "1" || body.checkout === true || modeParam === "checkout";
@@ -7927,13 +8801,11 @@ export async function onRequestPost(context) {
     );
     const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 48500;
     const thresholdUsd = 25000;
-    const offer = selectOfferForSlug(toolSlug, body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "");
+    const offer = selectOfferForSlug(toolSlug, reqPostSku, reqVertical);
     const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_gainhelm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
     if (isFulfillMode) {
       const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
-      const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
-      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
       const storedRecord = await lookupEdgeLeadRecord(
         env,
         leadId,
@@ -7942,10 +8814,14 @@ export async function onRequestPost(context) {
         state,
         rawEmail || "",
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
-        body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
+        body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json"),
+        reqVertical
       );
+      const effFulfillState = resolveGainHelmEffectiveRequestState(storedRecord, toolSlug, reqVertical, reqPostSku);
+      const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId, effFulfillState.paymentRequiredCtx);
       const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
-      const ffBundle = buildGainHelmWorkpaperBundle(settledRecord, offer, "paid_toolkit");
+      const ffBundle = buildGainHelmWorkpaperBundle(settledRecord, effFulfillState.offer, "paid_toolkit");
       return new Response(
         JSON.stringify({
           ok: true,
@@ -7966,6 +8842,7 @@ export async function onRequestPost(context) {
     }
 
     if (!isCheckoutMode && body.calculated_amount !== undefined && calculatedAmount < thresholdUsd) {
+      const subVertQs = fwVertical ? `&vertical=${encodeURIComponent(fwVertical)}` : "";
       return new Response(
         JSON.stringify({
           ok: true,
@@ -7975,11 +8852,12 @@ export async function onRequestPost(context) {
           frictionless_mode: true,
           property_id: "gainhelm",
           tool_slug: toolSlug,
-          vertical: "b2b_cyber_compliance",
+          vertical: fwVertical,
           calculated_amount: calculatedAmount,
           threshold_usd: thresholdUsd,
           partner_key: partnerKey,
-          redirect_url: `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=frictionless_direct`,
+          partner_rep_desk: fwRepDesk,
+          redirect_url: `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=frictionless_direct${subVertQs}`,
           action_bus_dispatched: false,
         }),
         { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
@@ -8011,11 +8889,12 @@ export async function onRequestPost(context) {
         intent: "partner_registration",
         lifecycle_stage: "partner_registered",
         tool_slug: toolSlug,
-        vertical: "b2b_cyber_compliance",
+        vertical: fwVertical,
         email,
         firm_name: firmName,
         state,
         offer_sku: partnerSku,
+        has_explicit_sku: true,
         offer_title: "Verified Calculator Partner Slot",
         offer_price_usd: 299,
         checkout_url: partnerCheckoutUrl,
@@ -8061,15 +8940,16 @@ export async function onRequestPost(context) {
         JSON.stringify({
           ok: false,
           success: false,
-          error: "Explicit TCPA partner_sharing_consent is required to dispatch your GRC / CPA audit quote.",
+          error: "Explicit TCPA partner_sharing_consent is required to dispatch your compliance readiness quote.",
         }),
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
 
     const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount));
-    const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
-    const qs = new URLSearchParams({
+    const subidSlug = (toolSlug || fwKey || "gainhelm").slice(0, 24);
+    const subid = `cpl_${subidSlug}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
+    const qsParams = {
       source_tool: toolSlug,
       cta_slot: "partner_quote_intake",
       subid,
@@ -8077,9 +8957,11 @@ export async function onRequestPost(context) {
       capital_band: capitalBand,
       amount: String(Math.round(calculatedAmount)),
       lead_id: leadId,
-    }).toString();
+    };
+    if (fwVertical) qsParams.vertical = fwVertical;
+    const qs = new URLSearchParams(qsParams).toString();
     const redirectUrl = `/r/${partnerKey}?${qs}`;
-    const liveBase = PARTNER_ROUTES[partnerKey];
+    const liveBase = partnerKey === "vanta_security" ? resolveVantaDestinationUrl(fwKey) : PARTNER_ROUTES[partnerKey];
     const liveDestinationUrl = `${liveBase}${liveBase.includes("?") ? "&" : "?"}${qs}`;
     const record = {
       lead_id: leadId,
@@ -8087,7 +8969,10 @@ export async function onRequestPost(context) {
       lead_type: hasQuoteFields ? "qualified_quote" : "playbook_subscription",
       lifecycle_stage: hasQuoteFields ? "captured" : "playbook_subscribed",
       tool_slug: toolSlug,
-      vertical: "b2b_cyber_compliance",
+      vertical: fwVertical,
+      has_explicit_vertical: hasExplicitVertical,
+      has_explicit_sku: hasExplicitSku,
+      is_bare_root: isBareRoot,
       email,
       state,
       capital_band: capitalBand,
@@ -8095,7 +8980,7 @@ export async function onRequestPost(context) {
       threshold_usd: thresholdUsd,
       partner_sharing_consent: Boolean(body.partner_sharing_consent),
       partner_key: partnerKey,
-      partner_rep_desk: "Enterprise GRC & C3PAO / CPA Audit Desk",
+      partner_rep_desk: fwRepDesk,
       redirect_url: redirectUrl,
       live_destination_url: liveDestinationUrl,
       action_bus_dispatched: calculatedAmount >= 50000,
@@ -8106,7 +8991,7 @@ export async function onRequestPost(context) {
       captured_at: new Date().toISOString(),
     };
     const bundle = buildGainHelmWorkpaperBundle(record, offer);
-    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle, reqVertical, reqPostSku);
     record.reconciliation_schedule = bundle.reconciliation_schedule;
     record.sensitivity_matrix = bundle.sensitivity_matrix;
     record.fulfillment_url = bundle.fulfillment_url;
@@ -8156,6 +9041,10 @@ export async function onRequestPost(context) {
 }
 """
         lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json("gainhelm"))
+        lead_js = lead_js.replace(
+            "__GAINHELM_FRAMEWORK_ROUTING_JS__",
+            _render_gainhelm_framework_routing_js(include_deliverables=True),
+        )
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(gainhelm)")
         return lead_js
 
@@ -8210,6 +9099,51 @@ const PREXVO_TOOLKIT_OFFER = {
     "Lender Rate-Match Underwriting Intake Sheet (CSV & Print-Ready Audit HTML)",
   ],
 };
+
+function resolvePrexvoOfferSpec(rawSku) {
+  const cleanSku = String(rawSku || "").trim().toLowerCase();
+  if (cleanSku === "px_verified_partner_slot") {
+    return {
+      sku: "px_verified_partner_slot",
+      title: "Verified Calculator Partner Slot",
+      price_usd: 299,
+      price_cents: 29900,
+      currency: "usd",
+      statutory_authority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
+      deliverables: [
+        "Verified Commercial Partner Desk Placement on Target Calculator Route",
+        "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+        "Direct Calculator CTA & Partner Matrix Priority Slot",
+        "Monthly Partner Attribution & Conversion Reconciliation Digest",
+      ],
+    };
+  }
+  if (cleanSku === "px_instant_repayment_worksheet_19") {
+    return {
+      sku: "px_instant_repayment_worksheet_19",
+      title: "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
+      price_usd: 19,
+      price_cents: 1900,
+      currency: "usd",
+      statutory_authority: "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026) & 34 CFR 685.209",
+      deliverables: [
+        "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
+        "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
+        "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
+        "Machine-Readable Borrower Refinance Scenario Pack (JSON)",
+      ],
+    };
+  }
+  return {
+    sku: PREXVO_TOOLKIT_OFFER.sku,
+    title: PREXVO_TOOLKIT_OFFER.title,
+    price_usd: Number(PREXVO_TOOLKIT_OFFER.price_usd || 39),
+    price_cents: Number(PREXVO_TOOLKIT_OFFER.price_cents || 3900),
+    currency: PREXVO_TOOLKIT_OFFER.currency || "usd",
+    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+    deliverables: Array.isArray(PREXVO_TOOLKIT_OFFER.deliverables) ? [...PREXVO_TOOLKIT_OFFER.deliverables] : [],
+  };
+}
 
 function getLeadsKv(env) {
   if (!env) return null;
@@ -8348,23 +9282,15 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   ];
 
   const rawPxSku = String((record && record.offer_sku) || "").trim().toLowerCase();
-  const isPartnerSlotPx = rawPxSku === "px_verified_partner_slot";
-  const isQuickPx = rawPxSku === "px_instant_repayment_worksheet_19";
-  const activePxSku = isPartnerSlotPx
-    ? "px_verified_partner_slot"
-    : isQuickPx
-    ? "px_instant_repayment_worksheet_19"
-    : PREXVO_TOOLKIT_OFFER.sku;
-  const activePxTitle = isPartnerSlotPx
-    ? "Verified Calculator Partner Slot"
-    : isQuickPx
-    ? "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)"
-    : PREXVO_TOOLKIT_OFFER.title;
-  const grossPriceUsd = isPartnerSlotPx ? 299 : isQuickPx ? 19 : Number(PREXVO_TOOLKIT_OFFER.price_usd || 39);
+  const activePxOffer = resolvePrexvoOfferSpec(rawPxSku);
+  const activePxSku = activePxOffer.sku;
+  const activePxTitle = activePxOffer.title;
+  const grossPriceUsd = Number(activePxOffer.price_usd || 39);
 
   const playbookQs = new URLSearchParams({
     playbook: "1",
     lead_id: leadId,
+    sku: activePxSku,
     tool_slug: toolSlug,
     amount: String(baseAmount),
     state: stateCode,
@@ -8459,7 +9385,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2028"]} ${ts.unit}</td>` +
     `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2030"]} ${ts.unit}</td></tr>`
   ).join("");
-  const delivHtml = PREXVO_TOOLKIT_OFFER.deliverables.map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
+  const delivHtml = (activePxOffer.deliverables || []).map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
   const isUnredactedPaid = mode === "paid_toolkit";
   const statutoryExecutionArtifacts = [
     {
@@ -8501,14 +9427,14 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
   const upgradeBannerHtml = isUnredactedPaid
     ? ""
     : `<div class="no-print" style="background:#fffbeb;border:1px solid #f59e0b;padding:12px 16px;border-radius:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">` +
-      `<div style="font-size:12.5px;color:#92400e;"><strong>Preview Mode:</strong> Statutory execution clauses are redacted in the free playbook. Unlock the full unredacted statutory filing packet ($${PREXVO_TOOLKIT_OFFER.price_usd}).</div>` +
-      `<a href="${checkoutUrl}&redirect=1" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Unlock Unredacted Filing Packet ($${PREXVO_TOOLKIT_OFFER.price_usd})</a></div>`;
+      `<div style="font-size:12.5px;color:#92400e;"><strong>Preview Mode:</strong> Statutory execution clauses are redacted in the free playbook. Unlock the full unredacted statutory filing packet ($${activePxOffer.price_usd}).</div>` +
+      `<a href="${checkoutUrl}&redirect=1" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Unlock Unredacted Filing Packet ($${activePxOffer.price_usd})</a></div>`;
   const badgeLabel = mode === "paid_toolkit" ? "PAID DECISION AUDIT WORKPAPER PACKAGE" : "PERSONALIZED REFINANCE PLAYBOOK & WORKSHEET";
-  const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${PREXVO_TOOLKIT_OFFER.title} (${leadId})</title>` +
+  const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${activePxOffer.title} (${leadId})</title>` +
     `<style>body{font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px;}.sheet{max-width:920px;margin:0 auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:28px;}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;}th{text-align:left;padding:10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:11px;text-transform:uppercase;color:#334155;}@media print{body{background:#fff;padding:0;}.sheet{border:none;}.no-print{display:none!important;}}</style></head>` +
     `<body><div class="sheet"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:18px;">` +
-    `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${PREXVO_TOOLKIT_OFFER.title}</h1>` +
-    `<div style="font-size:12px;color:#475569;">Authority: ${PREXVO_TOOLKIT_OFFER.statutory_authority} | Tool: ${toolSlug} | State: ${stateCode}</div></div>` +
+    `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${activePxOffer.title}</h1>` +
+    `<div style="font-size:12px;color:#475569;">Authority: ${activePxOffer.statutory_authority} | Tool: ${toolSlug} | State: ${stateCode}</div></div>` +
     `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
     `<a href="${activeCsvUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a>` +
     `<a href="${activeDatapackUrl}" style="background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download Statutory Data Pack (JSON)</a></div></div>` +
@@ -8558,7 +9484,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     property_id: "prexvo",
     tool_slug: toolSlug,
     offer_sku: activePxSku,
-    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+    statutory_authority: activePxOffer.statutory_authority,
     effective_tax_year: "2026",
     modeled_scenario_summary: customParameterLedger,
     reconciliation_schedule: reconciliationSchedule,
@@ -8577,7 +9503,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     offer_sku: activePxSku,
     offer_title: activePxTitle,
     offer_price_usd: grossPriceUsd,
-    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
+    statutory_authority: activePxOffer.statutory_authority,
     calculated_amount: baseAmount,
     capital_band: capitalBand,
     state: stateCode,
@@ -8590,7 +9516,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     statutory_execution_artifacts: statutoryExecutionArtifacts,
     statutory_data_pack: statutoryDataPack,
     settlement_attribution: settlementAttribution,
-    deliverables: PREXVO_TOOLKIT_OFFER.deliverables,
+    deliverables: activePxOffer.deliverables,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
     playbook_datapack_url: playbookDatapackUrl,
@@ -9062,37 +9988,8 @@ function isSyntheticProbeRequest(request, body, email) {
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false, customRecord = null, reqSku = "") {
   const cleanSku = String(reqSku || (customRecord && customRecord.offer_sku) || "").trim().toLowerCase();
-  const isPartnerSlotSku = cleanSku === "px_verified_partner_slot";
-  const isQuickUnlockSku = cleanSku === "px_instant_repayment_worksheet_19";
-  const activeOffer = isPartnerSlotSku
-    ? {
-        sku: "px_verified_partner_slot",
-        title: "Verified Calculator Partner Slot",
-        price_usd: 299,
-        price_cents: 29900,
-        currency: "usd",
-        statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
-        deliverables: [
-          "Verified Student Loan Tax CPA or Fiduciary Refinance Advisor Partner Slot Placement",
-          "Qualified Borrower & Repayment Simulation Attribution Routing",
-        ],
-      }
-    : isQuickUnlockSku
-    ? {
-        sku: "px_instant_repayment_worksheet_19",
-        title: "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
-        price_usd: 19,
-        price_cents: 1900,
-        currency: "usd",
-        statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
-        deliverables: [
-          "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
-          "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
-          "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
-          "Machine-Readable Borrower Refinance Scenario Pack (JSON)",
-        ],
-      }
-    : PREXVO_TOOLKIT_OFFER;
+  const activeOffer = resolvePrexvoOfferSpec(cleanSku);
+  const isPartnerSlotSku = activeOffer.sku === "px_verified_partner_slot";
   const customBundle = customRecord
     ? buildEdgePersonalizedWorkpaperBundle(
         {
@@ -9105,7 +10002,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       )
     : null;
   const fallbackUrl = customBundle && !isPartnerSlotSku ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
   const playbookDatapackUrl = customBundle && customBundle.playbook_datapack_url ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
   const fulfillmentUrl = customBundle && !isPartnerSlotSku ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
@@ -9336,12 +10233,13 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
   const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`;
-  const fallbackPxCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}&redirect=1`;
+  const pxSkuQs = record && record.offer_sku ? `&sku=${encodeURIComponent(record.offer_sku)}` : "";
+  const fallbackPxCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}&redirect=1`;
   const rawPxCheckout = String(record.checkout_url || fallbackPxCheckoutPath);
   const fullPxCheckoutUrl = rawPxCheckout.startsWith("http")
     ? rawPxCheckout
     : `https://prexvo.com${rawPxCheckout}${rawPxCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const pxPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}`);
+  const pxPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}`);
   const pxPlaybookHtmlUrl = `https://prexvo.com${pxPlaybookPath}${pxPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const pxPlaybookCsvUrl = `https://prexvo.com${record.playbook_csv_url || (pxPlaybookPath + "&format=csv")}`;
   const pxSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -9520,6 +10418,44 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
+async function resolvePrexvoGetContext(env, reqUrl, request) {
+  const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
+  const email = reqUrl.searchParams.get("email") || "";
+  const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+  const rawToolParam = (
+    reqUrl.searchParams.get("tool_slug") ||
+    reqUrl.searchParams.get("tool") ||
+    reqUrl.searchParams.get("slug") ||
+    reqUrl.searchParams.get("source_tool") ||
+    reqUrl.searchParams.get("source") ||
+    ""
+  ).trim().toLowerCase();
+  if (rawToolParam && RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => rawToolParam.includes(s))) {
+    return { restricted: true, leadId, email, reqSku, toolSlug: rawToolParam, storedRecord: null, isSynth: false };
+  }
+  const isSynth = isSyntheticProbeRequest(request, null, email);
+  const storedRecord = await lookupEdgeLeadRecord(
+    env,
+    leadId,
+    rawToolParam,
+    reqUrl.searchParams.get("amount"),
+    reqUrl.searchParams.get("state"),
+    email,
+    reqUrl.searchParams.get("inputs_json"),
+    reqUrl.searchParams.get("outputs_json")
+  );
+  const storedSlug = String((storedRecord && storedRecord.tool_slug) || "").trim().toLowerCase();
+  const toolSlug =
+    rawToolParam && rawToolParam !== "general"
+      ? rawToolParam
+      : (storedSlug && storedSlug !== "general" ? storedSlug : "student-loan-refinance-break-even-calculator");
+  if (storedRecord && (!storedSlug || storedSlug === "general")) {
+    storedRecord.tool_slug = toolSlug;
+  }
+  const restricted = RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s));
+  return { restricted, leadId, email, reqSku, toolSlug, storedRecord, isSynth };
+}
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
@@ -9532,42 +10468,22 @@ export async function onRequestGet(context) {
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
     if (reqUrl.searchParams.get("playbook") === "1" || reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill" || modeParam === "playbook") {
       const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
-      const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
-      const email = reqUrl.searchParams.get("email") || "";
-      const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
-    const toolSlug = (
-      reqUrl.searchParams.get("tool_slug") ||
-      reqUrl.searchParams.get("tool") ||
-      reqUrl.searchParams.get("slug") ||
-      reqUrl.searchParams.get("source_tool") ||
-      reqUrl.searchParams.get("source") ||
-      "student-loan-refinance-break-even-calculator"
-    ).toLowerCase();
-    if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          success: false,
-          error: "Restricted public-service asset cannot attach commercial refinance toolkits.",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-      );
-    }
-    const isSynth = isSyntheticProbeRequest(request, null, email);
-    const storedRecord = await lookupEdgeLeadRecord(
-      env,
-      leadId,
-      toolSlug,
-      reqUrl.searchParams.get("amount"),
-      reqUrl.searchParams.get("state"),
-      email,
-      reqUrl.searchParams.get("inputs_json"),
-      reqUrl.searchParams.get("outputs_json")
-    );
-    let gatedRecord = storedRecord;
-    if (reqSku && gatedRecord) {
-      gatedRecord = { ...gatedRecord, offer_sku: reqSku };
-    }
+      const ctx = await resolvePrexvoGetContext(env, reqUrl, request);
+      if (ctx.restricted) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            success: false,
+            error: "Restricted public-service asset cannot attach commercial refinance toolkits.",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+      const { leadId, reqSku, storedRecord, isSynth } = ctx;
+      let gatedRecord = storedRecord;
+      if (reqSku && gatedRecord) {
+        gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+      }
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
@@ -9626,16 +10542,8 @@ export async function onRequestGet(context) {
     );
   }
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
-    const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
-    const email = reqUrl.searchParams.get("email") || "";
-    const toolSlug =
-      reqUrl.searchParams.get("tool_slug") ||
-      reqUrl.searchParams.get("tool") ||
-      reqUrl.searchParams.get("slug") ||
-      reqUrl.searchParams.get("source_tool") ||
-      reqUrl.searchParams.get("source") ||
-      "student-loan-refinance-break-even-calculator";
-    if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.toLowerCase().includes(s))) {
+    const ctx = await resolvePrexvoGetContext(env, reqUrl, request);
+    if (ctx.restricted) {
       return new Response(
         JSON.stringify({
           ok: false,
@@ -9645,18 +10553,8 @@ export async function onRequestGet(context) {
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
-    const isSynth = isSyntheticProbeRequest(request, null, email);
-    const customRecord = await lookupEdgeLeadRecord(
-      env,
-      leadId,
-      toolSlug,
-      reqUrl.searchParams.get("amount"),
-      reqUrl.searchParams.get("state"),
-      email,
-      reqUrl.searchParams.get("inputs_json"),
-      reqUrl.searchParams.get("outputs_json")
-    );
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord, reqUrl.searchParams.get("sku") || "");
+    const { leadId, email, reqSku, toolSlug, storedRecord: customRecord, isSynth } = ctx;
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord, reqSku);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -10326,10 +11224,12 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
       offerTitle: "Verified Calculator Partner Slot",
       offerPriceUsd: 299,
       offerPriceCents: 29900,
-      statutoryAuthority: "ProfitHelm B2B CPA & Tax Advisory Partner Placement Standard",
+      statutoryAuthority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
       deliverables: [
-        "Verified CPA, Tax Attorney, or Commercial Broker Partner Slot Placement",
-        "High-Intent Calculator Lead Routing & Statutory Attribution Feed",
+        "Verified Commercial Partner Desk Placement on Target Calculator Route",
+        "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+        "Direct Calculator CTA & Partner Matrix Priority Slot",
+        "Monthly Partner Attribution & Conversion Reconciliation Digest",
       ],
     };
   }
@@ -10499,7 +11399,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
   const inputs = (record && record.scenario_inputs && typeof record.scenario_inputs === "object") ? record.scenario_inputs : {};
   const outputs = (record && record.scenario_outputs && typeof record.scenario_outputs === "object") ? record.scenario_outputs : {};
-  const effSpec = spec || resolveVerticalAndThreshold(toolSlug, "");
+  const effSpec = spec || resolveVerticalAndThreshold(toolSlug, "", (record && record.offer_sku) || "");
   const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   let reconciliationSchedule = [];
@@ -10714,6 +11614,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
   const playbookQs = new URLSearchParams({
     playbook: "1",
     lead_id: leadId,
+    sku: effSpec.offerSku,
     tool_slug: toolSlug,
     amount: String(baseAmount),
     state: stateCode,
@@ -11495,7 +12396,7 @@ function isSyntheticProbeRequest(request, body, email) {
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false, customRecord = null) {
   const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, spec, "paid_toolkit") : null;
   const fallbackUrl = customBundle ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+  const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
   const playbookDatapackUrl = customBundle && customBundle.playbook_datapack_url ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
   const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
@@ -11721,12 +12622,13 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
   const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`;
-  const fallbackPhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}&redirect=1`;
+  const phSkuQs = record && record.offer_sku ? `&sku=${encodeURIComponent(record.offer_sku)}` : "";
+  const fallbackPhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}&redirect=1`;
   const rawPhCheckout = String(record.checkout_url || fallbackPhCheckoutPath);
   const fullPhCheckoutUrl = rawPhCheckout.startsWith("http")
     ? rawPhCheckout
     : `https://profithelm.com${rawPhCheckout}${rawPhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const phPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}`);
+  const phPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}`);
   const phPlaybookHtmlUrl = `https://profithelm.com${phPlaybookPath}${phPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const phPlaybookCsvUrl = `https://profithelm.com${record.playbook_csv_url || (phPlaybookPath + "&format=csv")}`;
   const phSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -11905,6 +12807,44 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
+async function resolveProfitHelmGetContext(env, reqUrl) {
+  const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
+  const email = reqUrl.searchParams.get("email") || "";
+  const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+  const rawToolParam = (
+    reqUrl.searchParams.get("tool_slug") ||
+    reqUrl.searchParams.get("tool") ||
+    reqUrl.searchParams.get("slug") ||
+    reqUrl.searchParams.get("source_tool") ||
+    reqUrl.searchParams.get("source") ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  const storedRecord = await lookupEdgeLeadRecord(
+    env,
+    leadId,
+    rawToolParam,
+    reqUrl.searchParams.get("amount"),
+    reqUrl.searchParams.get("state"),
+    email,
+    reqUrl.searchParams.get("inputs_json"),
+    reqUrl.searchParams.get("outputs_json")
+  );
+  const effSku = reqSku || String((storedRecord && storedRecord.offer_sku) || "").trim().toLowerCase();
+  const defaultSlugForSku = defaultSlugForProfitHelmSku(effSku);
+  const storedSlug = String((storedRecord && storedRecord.tool_slug) || "").trim().toLowerCase();
+  const toolSlug =
+    rawToolParam && rawToolParam !== "general"
+      ? rawToolParam
+      : (storedSlug && storedSlug !== "general" ? storedSlug : defaultSlugForSku);
+  if (storedRecord && (!storedSlug || storedSlug === "general")) {
+    storedRecord.tool_slug = toolSlug;
+  }
+  const spec = resolveVerticalAndThreshold(toolSlug, "", effSku);
+  return { leadId, email, reqSku, effSku, toolSlug, spec, storedRecord };
+}
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://profithelm.com/api/lead-capture");
@@ -11922,33 +12862,9 @@ export async function onRequestGet(context) {
     modeParam === "playbook"
   ) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
-    const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
-    const email = reqUrl.searchParams.get("email") || "";
-    const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
-    const defaultSlugForSku = defaultSlugForProfitHelmSku(reqSku);
-    const rawToolParam = (
-      reqUrl.searchParams.get("tool_slug") ||
-      reqUrl.searchParams.get("tool") ||
-      reqUrl.searchParams.get("slug") ||
-      reqUrl.searchParams.get("source_tool") ||
-      reqUrl.searchParams.get("source") ||
-      ""
-    )
-      .trim()
-      .toLowerCase();
-    const toolSlug = !rawToolParam || rawToolParam === "general" ? defaultSlugForSku : rawToolParam;
-    const spec = resolveVerticalAndThreshold(toolSlug, "", reqSku);
+    const ctx = await resolveProfitHelmGetContext(env, reqUrl);
+    const { leadId, email, reqSku, spec, storedRecord } = ctx;
     const isSynth = isSyntheticProbeRequest(request, null, email);
-    const storedRecord = await lookupEdgeLeadRecord(
-      env,
-      leadId,
-      toolSlug,
-      reqUrl.searchParams.get("amount"),
-      reqUrl.searchParams.get("state"),
-      email,
-      reqUrl.searchParams.get("inputs_json"),
-      reqUrl.searchParams.get("outputs_json")
-    );
     let gatedRecord = storedRecord;
     if (reqSku && gatedRecord) {
       gatedRecord = { ...gatedRecord, offer_sku: reqSku };
@@ -12011,33 +12927,9 @@ export async function onRequestGet(context) {
     );
   }
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
-    const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
-    const email = reqUrl.searchParams.get("email") || "";
-    const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
-    const defaultSlugForSku = defaultSlugForProfitHelmSku(reqSku);
-    const rawToolParam = (
-      reqUrl.searchParams.get("tool_slug") ||
-      reqUrl.searchParams.get("tool") ||
-      reqUrl.searchParams.get("slug") ||
-      reqUrl.searchParams.get("source_tool") ||
-      reqUrl.searchParams.get("source") ||
-      ""
-    ).trim();
-    const toolSlug =
-      !rawToolParam || rawToolParam.toLowerCase() === "general" ? defaultSlugForSku : rawToolParam;
-    const spec = resolveVerticalAndThreshold(toolSlug, "", reqSku);
+    const { leadId, email, toolSlug, spec, storedRecord: customRecord } = await resolveProfitHelmGetContext(env, reqUrl);
     const isSynth = isSyntheticProbeRequest(request, null, email);
-    const customRecord = await lookupEdgeLeadRecord(
-      env,
-      leadId,
-      toolSlug,
-      reqUrl.searchParams.get("amount"),
-      reqUrl.searchParams.get("state"),
-      email,
-      reqUrl.searchParams.get("inputs_json"),
-      reqUrl.searchParams.get("outputs_json")
-    );
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSynth, customRecord);
+    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email || (customRecord && customRecord.email) || "", toolSlug, spec, isSynth, customRecord);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -12214,8 +13106,10 @@ export async function onRequestPost(context) {
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
+      const effPostSku = reqSku || String((storedRecord && storedRecord.offer_sku) || "").trim().toLowerCase();
+      const effFulfillSpec = effPostSku ? resolveVerticalAndThreshold((storedRecord && storedRecord.tool_slug) || toolSlug, reqPartner, effPostSku) : spec;
       const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
-      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, spec, "paid_toolkit");
+      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, effFulfillSpec, "paid_toolkit");
       return new Response(
         JSON.stringify({
           ok: true,

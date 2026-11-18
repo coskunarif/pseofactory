@@ -5426,16 +5426,172 @@ def _repair_html_tags_pass(updated: str) -> Tuple[str, set[str]]:
     return re.sub(r"<([a-zA-Z0-9]+)\b[^>]*>", _repair_html_tag, updated), tag_repairs
 
 
+def _find_balanced_tag_span(
+    html_text: str,
+    attr_val: str,
+    *,
+    tag_name: str = "div",
+    attr_name: str = "id",
+    start_pos: int = 0,
+) -> Optional[Tuple[int, int]]:
+    """Returns `(start, end)` character span of the balanced `<tag id|class="...">...</tag>` block."""
+    tag_re_esc = re.escape(tag_name)
+    attr_pat = (
+        rf'\b{re.escape(attr_name)}=["\']{re.escape(attr_val)}["\']'
+        if attr_name != "class"
+        else rf'\bclass=["\'][^"\']*\b{re.escape(attr_val)}\b[^"\']*["\']'
+    )
+    open_m = re.search(rf"<{tag_re_esc}\b[^>]*{attr_pat}[^>]*>", html_text[start_pos:], flags=re.IGNORECASE)
+    if not open_m:
+        return None
+    start = start_pos + open_m.start()
+    if open_m.group(0).rstrip().endswith("/>"):
+        return (start, start_pos + open_m.end())
+    depth = 0
+    for tok_m in re.finditer(rf"</?{tag_re_esc}\b[^>]*>", html_text[start:], flags=re.IGNORECASE):
+        tok_str = tok_m.group(0).lower()
+        if tok_str.startswith(f"</{tag_name.lower()}"):
+            depth -= 1
+            if depth == 0:
+                return (start, start + tok_m.end())
+        elif not tok_str.endswith("/>"):
+            depth += 1
+    return None
+
+
+def _iter_balanced_tag_spans(
+    html_text: str,
+    attr_val: str,
+    *,
+    tag_name: str = "div",
+    attr_name: str = "id",
+) -> List[Tuple[int, int]]:
+    """Iterates non-overlapping `(start, end)` spans of all matching balanced HTML blocks."""
+    spans: List[Tuple[int, int]] = []
+    pos = 0
+    while pos < len(html_text):
+        sp = _find_balanced_tag_span(
+            html_text,
+            attr_val,
+            tag_name=tag_name,
+            attr_name=attr_name,
+            start_pos=pos,
+        )
+        if not sp:
+            break
+        spans.append(sp)
+        pos = max(sp[1], pos + 1)
+    return spans
+
+
+def _find_balanced_div_span(
+    html_text: str,
+    attr_val: str,
+    attr_name: str = "id",
+) -> Optional[Tuple[int, int]]:
+    """Returns `(start, end)` character span of the `<div id|class="...">...</div>` block if balanced."""
+    return _find_balanced_tag_span(html_text, attr_val, tag_name="div", attr_name=attr_name)
+
+
+def _gainhelm_drawer_has_mismatch(drawer_html: str, tool_slug: str) -> bool:
+    """Detects cross-framework copy leaks or stale SKU/price attributes on #post-calculation-upgrade-drawer."""
+    from pseofactory.affiliates import get_gainhelm_framework_profile, has_gainhelm_cross_framework_leak
+
+    if has_gainhelm_cross_framework_leak(drawer_html, tool_slug):
+        return True
+    fw_prof = get_gainhelm_framework_profile(slug=tool_slug)
+    exp_sku = str(fw_prof["offer_sku"]).strip().lower()
+    exp_price = str(int(round(float(fw_prof["offer_price_usd"]))))
+    open_m = re.match(r"<div\b[^>]*>", drawer_html, flags=re.IGNORECASE)
+    open_tag = open_m.group(0) if open_m else ""
+    u_sku = (_extract_attr(open_tag, "data-offer-sku") or "").strip().lower()
+    u_price = (_extract_attr(open_tag, "data-offer-price") or "").strip()
+    if (u_sku and u_sku != exp_sku) or (u_price and u_price != exp_price):
+        return True
+    if not u_sku or not u_price:
+        return True
+    for sku_found in re.findall(
+        r"sku=(gh_(?:soc2_cmmc_audit_workpapers|hipaa_iso27001_governance_kit))",
+        drawer_html,
+        flags=re.IGNORECASE,
+    ):
+        if sku_found.lower() != exp_sku:
+            return True
+    up_btn_m = re.search(
+        r'<a\b[^>]*\bid=["\']btn-post-calc-upgrade-checkout["\'][^>]*>([\s\S]*?)</a>',
+        drawer_html,
+        flags=re.IGNORECASE,
+    )
+    if up_btn_m:
+        btn_tag = re.match(r"<a\b[^>]*>", up_btn_m.group(0), flags=re.IGNORECASE)
+        if btn_tag:
+            b_sku = (_extract_attr(btn_tag.group(0), "data-offer-sku") or "").strip().lower()
+            b_price = (_extract_attr(btn_tag.group(0), "data-offer-price") or "").strip()
+            if (b_sku and b_sku != exp_sku) or (b_price and b_price != exp_price):
+                return True
+        for pm in re.findall(r"\(\$(\d+)\b", up_btn_m.group(1)):
+            if pm != exp_price:
+                return True
+    title_m = re.search(
+        r'<h[1-6]\b[^>]*class=["\'][^"\']*post-calc-upgrade-title[^"\']*["\'][^>]*>([\s\S]*?)</h[1-6]>',
+        drawer_html,
+        flags=re.IGNORECASE,
+    )
+    if title_m:
+        for pm in re.findall(r"\(\$(\d+)\b", title_m.group(1)):
+            if pm != exp_price:
+                return True
+    for locked_p in re.findall(r"LOCKED:\s*\$(\d+)", drawer_html, flags=re.IGNORECASE):
+        if locked_p != exp_price:
+            return True
+    return False
+
+
+def _rewrite_anchor_attrs_by_class(
+    html_fragment: str,
+    class_tok: str,
+    *,
+    new_href: Optional[str] = None,
+    sku_replace: Optional[str] = None,
+    attr_updates: Optional[Dict[str, str]] = None,
+    inner_html: Optional[str] = None,
+) -> str:
+    """Rewrites `<a ...>` tags matching `class_tok` independently of attribute order."""
+    pat = rf'<a\b([^>]*\bclass=["\'][^"\']*\b{re.escape(class_tok)}\b[^"\']*["\'][^>]*)>([\s\S]*?)</a>'
+
+    def _sub_anchor(m: re.Match) -> str:
+        tag = f"<a{m.group(1)}>"
+        body = m.group(2)
+        if new_href is not None:
+            tag = _set_or_replace_attr(tag, "href", new_href)
+        if sku_replace:
+            cur_href = _extract_attr(tag, "href")
+            if cur_href and "sku=" in cur_href.lower():
+                upd_href = re.sub(
+                    r'(\b[?&;]?sku=)[^&"\']+',
+                    rf"\g<1>{sku_replace}",
+                    cur_href,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                tag = _set_or_replace_attr(tag, "href", upd_href)
+        for k, v in (attr_updates or {}).items():
+            tag = _set_or_replace_attr(tag, k, v)
+        return f"{tag}{inner_html if inner_html is not None else body}</a>"
+
+    return re.sub(pat, _sub_anchor, html_fragment, flags=re.IGNORECASE)
+
+
 def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]:
     """
     Injects #post-calculation-upgrade-drawer inside #saveable-decision-blueprint
     on eligible commercial calculator pages that have #partner-quote-intake-step.
+    Also refreshes any GainHelm drawer containing cross-framework leaks or stale SKU/price attrs.
     Strictly preserves YMYL public-service pages free of commercial offers.
     """
     if (
         'id="partner-quote-intake-step"' not in updated
         or 'id="saveable-decision-blueprint"' not in updated
-        or 'id="post-calculation-upgrade-drawer"' in updated
     ):
         return updated, False
 
@@ -5473,6 +5629,27 @@ def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]
     except ValueError:
         calc_amt = None
 
+    if re.search(r'\bid=["\']post-calculation-upgrade-drawer["\']', updated, flags=re.IGNORECASE):
+        if prop_id != "gainhelm":
+            return updated, False
+        spans = _iter_balanced_tag_spans(updated, "post-calculation-upgrade-drawer")
+        if not spans:
+            return updated, False
+        fresh_drawer = render_post_calculation_upgrade_drawer_html(
+            slug=tool_slug,
+            property_id=prop_id,
+            baseline_amount=calc_amt,
+        )
+        if not fresh_drawer:
+            return updated, False
+        fresh_stripped = fresh_drawer.strip()
+        replaced = updated
+        for sp_start, sp_end in reversed(spans):
+            existing_drawer = replaced[sp_start:sp_end]
+            if _gainhelm_drawer_has_mismatch(existing_drawer, tool_slug):
+                replaced = replaced[:sp_start] + fresh_stripped + replaced[sp_end:]
+        return replaced, replaced != updated
+
     drawer_html = render_post_calculation_upgrade_drawer_html(
         slug=tool_slug,
         property_id=prop_id,
@@ -5493,6 +5670,192 @@ def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]
     return updated, False
 
 
+def _pro_hook_has_mismatched_price(html_fragment: str, exp_price: str) -> bool:
+    """Checks whether an HTML fragment cites a package or Locked price differing from exp_price."""
+    target = str(exp_price)
+    for pm in re.findall(r"\(\$(\d+)\)", html_fragment):
+        if pm not in ("0", target):
+            return True
+    for lm in re.findall(r"Locked:\s*\$(\d+)(?![,\d])", html_fragment, flags=re.IGNORECASE):
+        if lm != target:
+            return True
+    return False
+
+
+def _gainhelm_pro_card_has_mismatch(
+    pro_html: str,
+    tool_slug: str,
+    exp_sku: str,
+    exp_price: str,
+) -> bool:
+    """Detects cross-framework leaks or stale SKU/price attributes inside a single .pro-hook-card block."""
+    from pseofactory.affiliates import has_gainhelm_cross_framework_leak
+
+    if has_gainhelm_cross_framework_leak(pro_html, tool_slug):
+        return True
+    for dc_m in re.finditer(
+        r'<a\b[^>]*\bclass=["\'][^"\']*\bpro-hook-direct-checkout\b[^"\']*["\'][^>]*>',
+        pro_html,
+        flags=re.IGNORECASE,
+    ):
+        dc_tag = dc_m.group(0)
+        dc_sku = (_extract_attr(dc_tag, "data-offer-sku") or "").strip().lower()
+        dc_price = (_extract_attr(dc_tag, "data-offer-price") or "").strip()
+        dc_href = _extract_attr(dc_tag, "href") or ""
+        if (
+            (dc_sku and dc_sku != exp_sku)
+            or (dc_price and dc_price != exp_price)
+            or (f"sku={exp_sku}" not in dc_href.lower() and "sku=" in dc_href.lower())
+        ):
+            return True
+    return _pro_hook_has_mismatched_price(pro_html, exp_price)
+
+
+def _clean_pro_hook_outer_spans(
+    pro_card_html: str,
+    *,
+    tool_slug: str,
+    default_state: str,
+    offer_price: str,
+    is_gainhelm: bool,
+) -> str:
+    """Rewrites leaky or mismatched outer <span> labels inside .pro-hook-card to clean statutory copy."""
+    if not is_gainhelm:
+        return pro_card_html
+    from pseofactory.affiliates import has_gainhelm_cross_framework_leak
+
+    sample_span = _find_balanced_div_span(pro_card_html, "pro-hook-sample-unlock", attr_name="class")
+    canonical_span = (
+        f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> '
+        f"Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>"
+    )
+
+    def _sub_span(m: re.Match) -> str:
+        if sample_span and m.start() >= sample_span[0] and m.end() <= sample_span[1]:
+            return m.group(0)
+        span_full = m.group(0)
+        has_leak = has_gainhelm_cross_framework_leak(span_full, tool_slug)
+        wrong_price = _pro_hook_has_mismatched_price(span_full, str(offer_price))
+        if has_leak or wrong_price:
+            return canonical_span
+        return span_full
+
+    return re.sub(r"<span\b[^>]*>[\s\S]*?</span>", _sub_span, pro_card_html, flags=re.IGNORECASE)
+
+
+def _split_top_level_html_nodes(inner_html: str) -> List[str]:
+    """Splits direct HTML element blocks and text runs inside a container using balanced tag depth."""
+    nodes: List[str] = []
+    pos = 0
+    n = len(inner_html)
+    void_tags = {"br", "hr", "img", "input", "meta", "link"}
+    while pos < n:
+        if inner_html[pos] != "<":
+            nxt = inner_html.find("<", pos)
+            end = n if nxt < 0 else nxt
+            chunk = inner_html[pos:end]
+            if chunk.strip():
+                nodes.append(chunk)
+            pos = end
+            continue
+        open_m = re.match(r"<([a-zA-Z0-9]+)\b[^>]*>", inner_html[pos:])
+        if not open_m:
+            end_gt = inner_html.find(">", pos)
+            pos = (end_gt + 1) if end_gt >= 0 else n
+            continue
+        tag = open_m.group(1).lower()
+        if open_m.group(0).rstrip().endswith("/>") or tag in void_tags:
+            nodes.append(open_m.group(0))
+            pos += open_m.end()
+            continue
+        depth = 0
+        matched_end = n
+        for tok_m in re.finditer(rf"</?{re.escape(tag)}\b[^>]*>", inner_html[pos:], flags=re.IGNORECASE):
+            tok_s = tok_m.group(0).lower()
+            if tok_s.startswith(f"</{tag}"):
+                depth -= 1
+                if depth == 0:
+                    matched_end = pos + tok_m.end()
+                    break
+            elif not tok_s.endswith("/>"):
+                depth += 1
+        nodes.append(inner_html[pos:matched_end])
+        pos = matched_end
+    return nodes
+
+
+def _heal_pro_hook_sample_unlock(
+    pro_card_html: str,
+    *,
+    tool_slug: str,
+    default_state: str,
+    calc_amt_fmt: str,
+    offer_price: str,
+    offer_sku: str,
+    is_gainhelm: bool,
+) -> str:
+    """Repairs .pro-hook-sample-unlock preview, pricing, and checkout attrs using balanced tag spans."""
+    sample_span = _find_balanced_div_span(pro_card_html, "pro-hook-sample-unlock", attr_name="class")
+    if sample_span:
+        block = pro_card_html[sample_span[0]:sample_span[1]]
+        block = block.replace("(Locked - $", "(Locked: $")
+        open_m = re.match(r"<div\b[^>]*>", block, flags=re.IGNORECASE)
+        close_idx = block.rfind("</div>")
+        if open_m and close_idx > open_m.end():
+            open_tag = open_m.group(0)
+            inner = block[open_m.end():close_idx]
+            if is_gainhelm:
+                from pseofactory.affiliates import has_gainhelm_cross_framework_leak
+
+                if has_gainhelm_cross_framework_leak(block, tool_slug):
+                    clean_preview_div = (
+                        f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> '
+                        f'Line 1 Statutory Control &amp; Scope Schedule (Unlocked) | '
+                        f'Line 2 Remediation Sensitivity Matrix (Unlocked) | '
+                        f'Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
+                    )
+                    top_nodes = _split_top_level_html_nodes(inner)
+                    action_nodes = [
+                        nd for nd in top_nodes
+                        if "pro-hook-direct-checkout" in nd or "pro-hook-quote-jump" in nd
+                    ]
+                    cleaned_actions: List[str] = []
+                    for act in action_nodes:
+                        if has_gainhelm_cross_framework_leak(act, tool_slug):
+                            anchors = re.findall(
+                                r'<a\b[^>]*class=["\'][^"\']*(?:pro-hook-direct-checkout|pro-hook-quote-jump)[^"\']*["\'][^>]*>[\s\S]*?</a>',
+                                act,
+                                flags=re.IGNORECASE,
+                            )
+                            if anchors:
+                                cleaned_actions.append(
+                                    '<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
+                                    + " ".join(anchors)
+                                    + "</div>"
+                                )
+                                continue
+                        cleaned_actions.append(act)
+                    inner = clean_preview_div + "".join(cleaned_actions)
+            inner = re.sub(
+                r"(Locked:\s*\$)\d+",
+                rf"\g<1>{offer_price}",
+                inner,
+                flags=re.IGNORECASE,
+            )
+            block = f"{open_tag}{inner}</div>"
+        pro_card_html = pro_card_html[:sample_span[0]] + block + pro_card_html[sample_span[1]:]
+    return _rewrite_anchor_attrs_by_class(
+        pro_card_html,
+        "pro-hook-direct-checkout",
+        sku_replace=offer_sku,
+        attr_updates={
+            "data-offer-sku": str(offer_sku),
+            "data-offer-price": str(offer_price),
+        },
+        inner_html=f"Instant Checkout &amp; Download (${offer_price}) &rarr;",
+    )
+
+
 def _retrofit_pro_hook_and_lead_capture_cards(
     updated: str,
     *,
@@ -5501,76 +5864,109 @@ def _retrofit_pro_hook_and_lead_capture_cards(
     has_quote_intake: bool,
     is_restricted_ps: bool,
     actions: List[str],
+    property_id: str = "",
 ) -> str:
     """Retrofits .pro-hook-card, sample schedule preview, and lead capture email placeholders."""
-    if 'class="pro-hook-card"' in updated and 'id="post-calculation-upgrade-drawer"' in updated:
+    prop_eff = (property_id or "").strip().lower()
+    if not prop_eff:
+        if "gainhelm.com" in updated:
+            prop_eff = "gainhelm"
+        elif "prexvo.com" in updated:
+            prop_eff = "prexvo"
+        elif "lienbond.com" in updated:
+            prop_eff = "lienbond"
+        else:
+            prop_eff = "profithelm"
+    is_gainhelm = prop_eff == "gainhelm"
+    pro_spans = _iter_balanced_tag_spans(updated, "pro-hook-card", attr_name="class")
+    has_drawer = bool(re.search(r'\bid=["\']post-calculation-upgrade-drawer["\']', updated, flags=re.IGNORECASE))
+    if pro_spans and (has_drawer or is_gainhelm):
         upg_m = re.search(
             r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
             updated,
             re.IGNORECASE,
         )
         upg_tag = upg_m.group(0) if upg_m else ""
-        offer_price = (_extract_attr(upg_tag, "data-offer-price") if upg_tag else "") or "49"
-        offer_sku = (_extract_attr(upg_tag, "data-offer-sku") if upg_tag else "") or "ph_statutory_tax_audit_workpapers"
+        if is_gainhelm:
+            from pseofactory.affiliates import get_gainhelm_framework_profile
+
+            fw_prof = get_gainhelm_framework_profile(slug=tool_slug)
+            offer_price = str(int(round(float(fw_prof["offer_price_usd"]))))
+            offer_sku = str(fw_prof["offer_sku"])
+        else:
+            offer_price = (_extract_attr(upg_tag, "data-offer-price") if upg_tag else "") or "49"
+            offer_sku = (_extract_attr(upg_tag, "data-offer-sku") if upg_tag else "") or "ph_statutory_tax_audit_workpapers"
         calc_amt = (_extract_attr(upg_tag, "data-calculated-amount") if upg_tag else "") or "125000"
         try:
             calc_amt_fmt = f"${int(float(calc_amt)):,}"
         except ValueError:
             calc_amt_fmt = "$125,000"
-        new_pro_doc = re.sub(
-            r'(<div\b[^>]*class=["\'][^"\']*\bpro-hook-card\b[^"\']*["\'][^>]*>[\s\S]*?)ProfitHelm Pro:(</strong>)',
-            r"\1Statutory Audit Workpaper:\2",
-            updated,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        new_pro_doc = re.sub(
-            r'<a\b[^>]*href=["\']#lead-capture-form["\'][^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>',
-            (
-                f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" '
-                f'data-checkout-nav="1" style="background-color: var(--bg-surface); color: var(--brand-primary); '
-                f'border: 1px solid var(--brand-border); border-radius: 6px; font-weight: 700; '
-                f'text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; '
-                f'min-height: 44px; min-width: 44px; padding: 6px 12px;">'
-                f'Export Audit Workpaper (${offer_price}) &rarr;</a>'
-            ),
-            new_pro_doc,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        if 'data-mechanic="above_fold_packet_sample_unlock"' not in new_pro_doc:
-            checkout_href = (
-                f"/api/lead-capture?checkout=1&amp;sku={offer_sku}"
-                f"&amp;tool_slug={tool_slug}&amp;amount={calc_amt}&amp;redirect=1"
-            )
-            quote_jump_html = (
-                f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
-                f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
-                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border); background: var(--bg-surface); color: var(--brand-primary); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
-                f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
-                if has_quote_intake
-                else ""
-            )
-            sample_unlock_html = (
-                f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
-                f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
-                f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Bracket &amp; Deduction Schedule (Unlocked) | Line 2 Effective vs. Marginal Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
-                f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
-                f'<a href="{checkout_href}" rel="nofollow" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
-                f'{quote_jump_html}'
-                f'</div></div>'
-            )
-            new_pro_doc = re.sub(
-                r'(<div\b[^>]*class=["\'][^"\']*\bpro-hook-card\b[^"\']*["\'][^>]*>[\s\S]*?<a\b[^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>)(\s*</div>)',
-                lambda m: m.group(1) + sample_unlock_html + m.group(2),
-                new_pro_doc,
+        new_doc = updated
+        for sp_start, sp_end in reversed(pro_spans):
+            pro_card_html = new_doc[sp_start:sp_end]
+            pro_card_html = re.sub(
+                r'ProfitHelm Pro:(</strong>)',
+                r"Statutory Audit Workpaper:\1",
+                pro_card_html,
                 count=1,
                 flags=re.IGNORECASE,
             )
-        else:
-            new_pro_doc = new_pro_doc.replace("(Locked - $", "(Locked: $")
-        if new_pro_doc != updated:
-            updated = new_pro_doc
+            pro_card_html = _clean_pro_hook_outer_spans(
+                pro_card_html,
+                tool_slug=tool_slug,
+                default_state=default_state,
+                offer_price=offer_price,
+                is_gainhelm=is_gainhelm,
+            )
+            pro_card_html = _rewrite_anchor_attrs_by_class(
+                pro_card_html,
+                "pro-hook-link",
+                new_href="#post-calculation-upgrade-drawer",
+                attr_updates={"data-checkout-nav": "1"},
+                inner_html=f"Export Audit Workpaper (${offer_price}) &rarr;",
+            )
+            if 'data-mechanic="above_fold_packet_sample_unlock"' not in pro_card_html:
+                checkout_href = (
+                    f"/api/lead-capture?checkout=1&amp;sku={offer_sku}"
+                    f"&amp;tool_slug={tool_slug}&amp;amount={calc_amt}&amp;redirect=1"
+                )
+                quote_jump_html = (
+                    f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
+                    f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
+                    f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border); background: var(--bg-surface); color: var(--brand-primary); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
+                    f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
+                    if has_quote_intake
+                    else ""
+                )
+                sample_unlock_html = (
+                    f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
+                    f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
+                    f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Bracket &amp; Deduction Schedule (Unlocked) | Line 2 Effective vs. Marginal Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
+                    f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
+                    f'<a href="{checkout_href}" rel="nofollow" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
+                    f'{quote_jump_html}'
+                    f'</div></div>'
+                )
+                pro_card_html = re.sub(
+                    r'(<a\b[^>]*class=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>)(\s*</div>)$',
+                    lambda m: m.group(1) + sample_unlock_html + m.group(2),
+                    pro_card_html,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                pro_card_html = _heal_pro_hook_sample_unlock(
+                    pro_card_html,
+                    tool_slug=tool_slug,
+                    default_state=default_state,
+                    calc_amt_fmt=calc_amt_fmt,
+                    offer_price=offer_price,
+                    offer_sku=offer_sku,
+                    is_gainhelm=is_gainhelm,
+                )
+            new_doc = new_doc[:sp_start] + pro_card_html + new_doc[sp_end:]
+        if new_doc != updated:
+            updated = new_doc
             actions.append("pro_hook_checkout_anchor")
     elif (
         'id="post-calculation-upgrade-drawer"' in updated
@@ -5856,29 +6252,12 @@ def _retrofit_partner_reg_and_quick_unlock(
         )
         if quick_bar_html:
             quick_bar_html, _ = _normalize_pro_hook_link_contrast(quick_bar_html)
-            qb_open_m = re.search(
-                r'<div\b[^>]*\bid=["\']calc-result-quick-unlock-bar["\'][^>]*>',
-                updated,
-                flags=re.IGNORECASE,
-            )
-            if qb_open_m:
-                qb_start = qb_open_m.start()
-                qb_depth = 0
-                qb_end = -1
-                for div_tok in re.finditer(r"</?div\b[^>]*>", updated[qb_start:], flags=re.IGNORECASE):
-                    tok_str = div_tok.group(0).lower()
-                    if tok_str.startswith("</div"):
-                        qb_depth -= 1
-                        if qb_depth == 0:
-                            qb_end = qb_start + div_tok.end()
-                            break
-                    elif not tok_str.endswith("/>"):
-                        qb_depth += 1
-                if qb_end > qb_start:
-                    updated_qb = updated[:qb_start] + quick_bar_html.strip() + updated[qb_end:]
-                    if updated_qb != updated:
-                        updated = updated_qb
-                        actions.append("calc_result_quick_unlock_bar_contextual_v2")
+            span_qb = _find_balanced_div_span(updated, "calc-result-quick-unlock-bar")
+            if span_qb:
+                updated_qb = updated[: span_qb[0]] + quick_bar_html.strip() + updated[span_qb[1] :]
+                if updated_qb != updated:
+                    updated = updated_qb
+                    actions.append("calc_result_quick_unlock_bar_contextual_v2")
 
     if 'id="variant-baseline"' in updated and 'id="variant-accelerated"' in updated:
         healed_variants = re.sub(
@@ -5965,11 +6344,23 @@ def _retrofit_partner_reg_and_quick_unlock(
             )
             actions.append("gainhelm_metrics_grid_first_order")
 
+    upg_drawer_m = re.search(
+        r'<div\b[^>]*id=["\']post-calculation-upgrade-drawer["\'][^>]*>',
+        updated,
+        re.IGNORECASE,
+    )
+    upg_drawer_price_str = _extract_attr(upg_drawer_m.group(0), "data-offer-price") if upg_drawer_m else ""
+    try:
+        full_price_drawer_int = int(round(float(upg_drawer_price_str))) if upg_drawer_price_str else (
+            39 if prop_id == "prexvo" else (69 if prop_id == "lienbond" else (79 if prop_id == "gainhelm" else 49))
+        )
+    except ValueError:
+        full_price_drawer_int = 39 if prop_id == "prexvo" else (69 if prop_id == "lienbond" else (79 if prop_id == "gainhelm" else 49))
     ctx_q_drawer = resolve_quick_unlock_contextual_copy(
         slug=tool_slug,
         property_id=prop_id,
         quick_price_int=19,
-        full_price_int=39 if prop_id == "prexvo" else (69 if prop_id == "lienbond" else (79 if prop_id == "gainhelm" else 49)),
+        full_price_int=full_price_drawer_int,
     )
     if 'id="btn-post-calc-quick-unlock-checkout"' in updated and "Instant PDF/CSV Statutory Worksheet ($19)" in updated:
         updated = re.sub(
@@ -6355,6 +6746,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
         has_quote_intake=has_quote_intake,
         is_restricted_ps=is_restricted_ps,
         actions=actions,
+        property_id=prop_id,
     )
     updated = _retrofit_partner_reg_and_quick_unlock(
         updated,

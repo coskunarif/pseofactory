@@ -4254,6 +4254,146 @@ def _build_b2b_depth_spec(
     }
 
 
+_GAINHELM_SPECIAL_DEPTH_SPECS: Dict[str, Dict[str, Any]] = {
+    "fedramp": {
+        "intro_assessor": "accredited 3PAO assessment fees and FIPS 140-3 enclave engineering hours",
+        "presets": [
+            ("FedRAMP Li-SaaS / Low Baseline (Inherited PaaS)", '{"serp-b2b-gross":295000,"serp-b2b-deduction":75000,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("FedRAMP Moderate Rev 5 (325 Controls / Inherited PaaS)", '{"serp-b2b-gross":500000,"serp-b2b-deduction":145000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Custom IaaS FedRAMP Moderate Boundary (Unsegmented)", '{"serp-b2b-gross":845000,"serp-b2b-deduction":0,"serp-b2b-rate":30.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("FedRAMP High Impact Level (421 Controls / Full ConMon)", '{"serp-b2b-gross":1120000,"serp-b2b-deduction":260000,"serp-b2b-rate":26.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("Accredited 3PAO RAR &amp; SAR Assessment", "44 U.S.C. 3607 &amp; OMB M-24-15", "$165,000 to $265,000 3PAO fee", "Independent Readiness Assessment &amp; Full Security Assessment"),
+            ("NIST SP 800-53 Rev 5 Control Implementation", "FedRAMP Rev 5 Moderate (325 Controls)", "$185,000 enclave &amp; SSP engineering", "Automated inheritance across GovCloud / Federal PaaS"),
+            ("FIPS 140-3 Cryptographic &amp; Boundary Isolation", "NIST FIPS 140-3 / Boundary Rules", "$85,000 validated crypto &amp; segmentation", "Strict separation of commercial vs federal metadata"),
+            ("FedRAMP ConMon Continuous Monitoring", "OMB M-24-15 ConMon Monthly POA&amp;M", "$65,000 annualized ConMon operations", "Monthly vulnerability scans, deviations &amp; annual 3PAO audit"),
+        ],
+        "banner_cta": "Review Vetted FedRAMP &amp; 3PAO Automation Partners",
+        "wb": {
+            "gross": 845000, "ded": 345000, "rate": 22.0,
+            "gross_label": "Unsegmented Custom IaaS FedRAMP ATO Cost ($)",
+            "ded_label": "Inherited PaaS &amp; Continuous GRC Savings ($)",
+            "rate_label": "3PAO Remediation &amp; ConMon Overhead (%)",
+            "regime_label": "Authorization Boundary &amp; ConMon Posture",
+            "opt1": "Inherited GovCloud PaaS + Automated ConMon",
+            "opt2": "Custom IaaS Full Boundary + Manual SSP",
+            "opt3": "FedRAMP High Impact Expansion (+20% Scope)",
+            "m1_lbl": "Net Automated FedRAMP ATO TCO",
+            "m2_lbl": "Unsegmented Custom IaaS TCO",
+            "m3_lbl": "Control Inheritance Savings",
+            "m4_lbl": "Protected Federal Contract ACV Value",
+            "svg_l_pfx": "Automated FedRAMP ATO TCO",
+            "svg_r_pfx": "Inherited Boundary Savings",
+            "banner_lead": "Leveraging inherited federal PaaS control baselines and automated NIST 800-53 ConMon telemetry compresses Year-1 FedRAMP ATO cost to",
+            "banner_mid": "in manual SSP and boundary remediation effort.",
+        },
+    },
+    "ccpa": {
+        "intro_assessor": "external privacy counsel, DSAR workflow engineering, and CPPA audit hours",
+        "presets": [
+            ("Mid-Market SaaS (50k Consumer Records / Automated DSAR)", '{"serp-b2b-gross":68000,"serp-b2b-deduction":21000,"serp-b2b-rate":18.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Consumer Platform (250k Records + Global Privacy Control)", '{"serp-b2b-gross":124000,"serp-b2b-deduction":38000,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual DSAR Spreadsheets &amp; Unmapped Ad-Tech Tags", '{"serp-b2b-gross":158000,"serp-b2b-deduction":0,"serp-b2b-rate":28.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("High-Volume Data Broker (1M+ Records / CPPA Cybersecurity Audit)", '{"serp-b2b-gross":260000,"serp-b2b-deduction":64000,"serp-b2b-rate":24.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("45-Day DSAR Discovery &amp; Deletion Pipeline", "Cal. Civ. Code 1798.105 / 1798.130", "$24,000 automated identity &amp; deletion workflows", "45-day statutory SLA (+45-day extension documentation)"),
+            ("Global Privacy Control (GPC) &amp; Do-Not-Sell Signals", "11 CCR Section 7025 / CPRA Opt-Out", "$16,500 consent orchestration + tag governance", "Honor browser GPC opt-out preference signals automatically"),
+            ("CPPA Risk Assessment &amp; Cybersecurity Audit", "Cal. Civ. Code 1798.185(a)(15)", "$28,000 annual risk &amp; sensitive PI review", "Annual CPPA regulatory attestation for high-risk processing"),
+            ("Private Right of Action Breach Exposure Model", "Cal. Civ. Code 1798.150(a)(1)", "$100 to $750 statutory damages per consumer", "Unencrypted consumer PI exfiltration litigation reserve"),
+        ],
+        "banner_cta": "Review Vetted CCPA/CPRA &amp; Privacy Automation Partners",
+        "wb": {
+            "gross": 68000, "ded": 21000, "rate": 18.0,
+            "gross_label": "Manual DSAR &amp; Unmapped Ad-Tech Compliance Cost ($)",
+            "ded_label": "Automated GPC &amp; Consumer Request Workflow Savings ($)",
+            "rate_label": "Privacy Legal &amp; Data Mapping Overhead (%)",
+            "regime_label": "CPRA Consumer Rights &amp; Consent Architecture",
+            "opt1": "Automated DSAR Orchestration + GPC Signal Enforcement",
+            "opt2": "Manual Inbox DSAR Triage + Unaudited Third-Party Pixels",
+            "opt3": "Multi-State US Privacy Law Expansion (+20% Scope)",
+            "m1_lbl": "Net Automated CCPA/CPRA TCO",
+            "m2_lbl": "Manual Privacy Compliance TCO",
+            "m3_lbl": "Annual DSAR Engineering Savings",
+            "m4_lbl": "Mitigated CPPA &amp; Class Statutory Risk",
+            "svg_l_pfx": "Automated CPRA TCO",
+            "svg_r_pfx": "DSAR &amp; Consent Savings",
+            "banner_lead": "Automating 45-day consumer DSAR fulfillment and Global Privacy Control enforcement reduces annual CCPA/CPRA compliance TCO to",
+            "banner_mid": "in manual legal and engineering data-discovery overhead.",
+        },
+    },
+    "gdpr": {
+        "intro_assessor": "DPO advisory, Article 30 RoPA mapping, and supervisory readiness engineering hours",
+        "presets": [
+            ("EU Growth SaaS (Article 30 RoPA + SCC Safeguards)", '{"serp-b2b-gross":74000,"serp-b2b-deduction":22000,"serp-b2b-rate":19.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Cross-Border Enterprise (DPIA + 30-Day DSAR Automation)", '{"serp-b2b-gross":136000,"serp-b2b-deduction":41000,"serp-b2b-rate":21.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual Article 30 Spreadsheets &amp; Unverified Transfers", '{"serp-b2b-gross":172000,"serp-b2b-deduction":0,"serp-b2b-rate":29.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("High-Risk Processing Scale (Art. 35 DPIA + Multi-DPA)", '{"serp-b2b-gross":285000,"serp-b2b-deduction":70000,"serp-b2b-rate":25.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("Article 30 Records of Processing Activities (RoPA)", "Regulation (EU) 2016/679 Art. 30", "$22,000 continuous data inventory &amp; lineage", "Live controller/processor sub-processor register"),
+            ("Article 35 Data Protection Impact Assessments (DPIA)", "Regulation (EU) 2016/679 Art. 35", "$19,500 high-risk processing impact reviews", "Mandatory DPO consultation for systematic profiling"),
+            ("Chapter V Transfer Impact &amp; EU-US DPF / SCCs", "Regulation (EU) 2016/679 Art. 44-49", "$18,000 TIA documentation &amp; SCC module stack", "Standard Contractual Clauses &amp; supplementary encryption"),
+            ("72-Hour Supervisory Authority Breach Readiness", "Regulation (EU) 2016/679 Art. 33-34", "$14,500 incident runbooks + Art. 83 mitigation", "Documented containment within statutory 72-hour clock"),
+        ],
+        "banner_cta": "Review Vetted EU GDPR &amp; Privacy Governance Partners",
+        "wb": {
+            "gross": 74000, "ded": 22000, "rate": 19.0,
+            "gross_label": "Manual GDPR RoPA &amp; Transfer Assessment Cost ($)",
+            "ded_label": "Automated DPIA &amp; 30-Day DSAR Workflow Savings ($)",
+            "rate_label": "DPO Advisory &amp; Cross-Border Legal Factor (%)",
+            "regime_label": "GDPR Governance &amp; International Transfer Posture",
+            "opt1": "Automated Art. 30 RoPA + SCC / DPF Continuous Evidence",
+            "opt2": "Manual Privacy Questionnaires + Static Transfer Spreadsheets",
+            "opt3": "Multi-DPA Lead Supervisory Authority Scope (+20%)",
+            "m1_lbl": "Net Automated EU GDPR TCO",
+            "m2_lbl": "Manual GDPR Compliance TCO",
+            "m3_lbl": "Annual RoPA &amp; DPIA Automation Savings",
+            "m4_lbl": "Mitigated Article 83 Tier Exposure",
+            "svg_l_pfx": "Automated GDPR Readiness TCO",
+            "svg_r_pfx": "RoPA &amp; DSAR Automation Savings",
+            "banner_lead": "Continuous Article 30 data inventory discovery and automated 30-day DSAR orchestration compresses annual GDPR readiness cost to",
+            "banner_mid": "in manual privacy engineering and DPO review effort.",
+        },
+    },
+    "nis2": {
+        "intro_assessor": "EU cybersecurity governance engineering, supply-chain security audits, and CSIRT readiness hours",
+        "presets": [
+            ("Important Entity Baseline (Article 21 10-Measure Hygiene)", '{"serp-b2b-gross":96000,"serp-b2b-deduction":27000,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Essential Entity Multi-Member-State Operations", '{"serp-b2b-gross":164000,"serp-b2b-deduction":46000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual Supply-Chain Audits &amp; Ad-Hoc CSIRT Triage", '{"serp-b2b-gross":205000,"serp-b2b-deduction":0,"serp-b2b-rate":30.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Critical Infrastructure Operator (Art. 32 Supervisory Scope)", '{"serp-b2b-gross":320000,"serp-b2b-deduction":78000,"serp-b2b-rate":26.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("Article 21 10-Measure Cybersecurity Risk Stack", "Directive (EU) 2022/2555 Art. 21(2)", "$44,000 IAM, crypto &amp; vulnerability hygiene", "Continuous MFA, patching &amp; multi-factor asset inventory"),
+            ("Article 23 CSIRT 24-Hr Early Warning Pipeline", "Directive (EU) 2022/2555 Art. 23", "$19,000 telemetry + 72-hr notification runbooks", "Statutory 24h warning, 72h assessment, 30-day final report"),
+            ("Article 21(2)(d) Supply-Chain Supplier Assurance", "Directive (EU) 2022/2555 Art. 21", "$21,000 vendor posture &amp; SLA verification", "Direct supplier vulnerability &amp; incident clauses"),
+            ("Article 20 Management Body Training &amp; Sign-Off", "Directive (EU) 2022/2555 Art. 20", "$12,000 executive governance &amp; audit trace", "Documented board oversight mitigating personal liability"),
+        ],
+        "banner_cta": "Review Vetted EU NIS2 &amp; Resilience Governance Partners",
+        "wb": {
+            "gross": 96000, "ded": 27000, "rate": 20.0,
+            "gross_label": "Manual Article 21 &amp; Supplier Security Oversight Cost ($)",
+            "ded_label": "Automated Posture Telemetry &amp; CSIRT SLA Savings ($)",
+            "rate_label": "Member-State Supervisory &amp; Governance Overhead (%)",
+            "regime_label": "NIS2 Essential / Important Entity Compliance Posture",
+            "opt1": "Automated Article 21 Telemetry + CSIRT 24h Runbook",
+            "opt2": "Manual Supplier Questionnaires + Ad-Hoc Incident Logging",
+            "opt3": "Cross-Border Essential Entity Supervisory Scope (+20%)",
+            "m1_lbl": "Net Automated EU NIS2 TCO",
+            "m2_lbl": "Manual NIS2 Compliance TCO",
+            "m3_lbl": "Annual Risk &amp; Supplier Audit Savings",
+            "m4_lbl": "Mitigated Article 34 Fine Exposure",
+            "svg_l_pfx": "Automated NIS2 Readiness TCO",
+            "svg_r_pfx": "Supplier &amp; CSIRT Savings",
+            "banner_lead": "Continuous Article 21 risk telemetry and pre-staged 24-hour CSIRT reporting workflows compress annual NIS2 readiness cost to",
+            "banner_mid": "in manual supply-chain and compliance documentation labor.",
+        },
+    },
+}
+
+
 def _build_gainhelm_depth_spec(
     topic_label: str, statutory_authority: str, economic_dataset: str, slug: str = ""
 ) -> Dict[str, Any]:
@@ -4261,6 +4401,19 @@ def _build_gainhelm_depth_spec(
     is_dora = any(k in s_low for k in ("dora", "ict-third-party", "2022/2554"))
     is_eu_ai = any(k in s_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity"))
     is_sec = any(k in s_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality"))
+    special_key = (
+        "fedramp"
+        if "fedramp" in s_low
+        else (
+            "ccpa"
+            if any(k in s_low for k in ("ccpa", "cpra", "cppa"))
+            else (
+                "gdpr"
+                if any(k in s_low for k in ("gdpr", "dsar", "2016/679"))
+                else ("nis2" if any(k in s_low for k in ("nis2", "2022/2555")) else "")
+            )
+        )
+    )
 
     if is_dora:
         intro_assessor = "third-party risk oversight fees and internal engineering hours"
@@ -4361,6 +4514,13 @@ def _build_gainhelm_depth_spec(
             "banner_lead": "Operationalizing pre-staged Form 8-K Item 1.05 materiality rubrics and retained DFIR workflows compresses annual readiness cost to",
             "banner_mid": "in emergency incident counsel surge.",
         }
+    elif special_key:
+        sp = _GAINHELM_SPECIAL_DEPTH_SPECS[special_key]
+        intro_assessor = sp["intro_assessor"]
+        presets = list(sp["presets"])
+        table_rows = list(sp["table_rows"])
+        banner_cta = sp["banner_cta"]
+        wb = dict(sp["wb"])
     else:
         intro_assessor = "external CPA/C3PAO assessment fees and internal engineering hours"
         presets = [
@@ -5129,24 +5289,22 @@ def render_partner_quote_intake_html(
             )
             btn_text = "Unlock Matched Rate-Table Quote & Continue"
     elif prop_clean == "gainhelm":
-        heading_text = f"Enterprise GRC Automation & Audit Readiness Quote Intake ({threshold_fmt}+ TCO Threshold)"
-        sub_text = (
-            f"Compliance and audit readiness budgets at or above {threshold_fmt} qualify for direct GRC automation "
-            f"platform fee quotes, AICPA CPA / C3PAO assessor matching, and multi-framework control scoping. "
-            f"Sub-threshold calculations stay 100% frictionless."
-        )
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
+        heading_text = f"{fw_prof['quote_heading_prefix']} ({threshold_fmt}+ TCO Threshold)"
+        sub_text = fw_prof["quote_sub_template"].format(threshold_fmt=threshold_fmt)
         email_label = "Work or Security Operations Email Address"
         state_label = "Organization Operating State (US)" if is_intl_tool else (
             "Corporate Headquarters State" if is_state_tool else "Organization Billing / HQ State"
         )
         band_label = "Annual Compliance & Audit Budget Band"
         consent_copy = (
-            "I provide explicit TCPA partner_sharing_consent authorizing GainHelm to share my work email, "
-            "headquarters state, and compliance budget band with matched GRC automation, CPA audit, penetration testing, "
-            "or cyber insurance partners (including Vanta, Drata, Sprinto, Thoropass, Coalition, and Cobalt) to prepare "
-            "a customized readiness quote."
+            f"I provide explicit TCPA partner_sharing_consent authorizing GainHelm to share my work email, "
+            f"headquarters state, and compliance budget band with {fw_prof['quote_consent_scope']} to prepare "
+            f"a customized readiness quote."
         )
-        btn_text = "Request Matched GRC & Audit Quote"
+        btn_text = fw_prof["quote_btn_text"]
     elif prop_clean == "lienbond":
         if is_intl_tool:
             heading_text = f"Commercial Surety Bond Underwriting Quote Intake ({threshold_fmt}+ Project Threshold)"
@@ -5315,13 +5473,6 @@ def render_post_calculation_upgrade_drawer_html(
     quick_price_int = int(round(float(spec.get("quick_unlock_price_usd") or 19)))
     eff_stat = str(spec["statutory_authority"])
     regulator_name = str(spec["regulator_name"])
-    if prop_clean == "gainhelm":
-        if any(k in slug_clean for k in ("dora", "ict-third-party", "2022/2554")):
-            regulator_name = "European Supervisory Authorities (EBA, ESMA, EIOPA)"
-        elif any(k in slug_clean for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
-            regulator_name = "European AI Office and NIST AI RMF"
-        elif any(k in slug_clean for k in ("sec-cybersecurity", "8k-item-105", "item-105", "229.106", "materiality")):
-            regulator_name = "U.S. Securities and Exchange Commission (SEC)"
     trend_count = int(spec["trend_series_count"])
     trend_labels = [lbl for lbl in spec.get("trend_series_labels", []) if lbl]
     trend_preview = ", ".join(trend_labels[:2]) if trend_labels else "2024 to 2030 Statutory Benchmark Series"
@@ -5349,9 +5500,25 @@ def render_post_calculation_upgrade_drawer_html(
         pillar_1_title = "1. Personalized Loan Audit Workpaper (HTML/PDF + CSV)"
         pillar_2_title = f"2. Tailored Title IV & Rate Data Pack ({trend_count} Series, 2024 to 2030)"
     elif prop_clean == "gainhelm":
-        badge_text = "Post-Calculation Board, CISO & Assessor Deliverable"
-        pillar_1_title = "1. Personalized Audit Readiness Workpaper (HTML/PDF + CSV)"
-        pillar_2_title = f"2. Tailored Multi-Framework Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
+        fw_key = fw_prof["framework_key"]
+        badge_text = (
+            "Post-Calculation Board, CISO & Assessor Deliverable"
+            if fw_key in ("soc2", "cmmc")
+            else "Post-Calculation Board, CISO & Regulatory Deliverable"
+        )
+        pillar_1_title = (
+            "1. Personalized Audit Readiness Workpaper (HTML/PDF + CSV)"
+            if fw_key in ("soc2", "cmmc")
+            else "1. Personalized Regulatory Readiness Workpaper (HTML/PDF + CSV)"
+        )
+        pillar_2_title = (
+            f"2. Tailored Multi-Framework Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
+            if fw_key in ("soc2", "cmmc")
+            else f"2. Tailored Statutory Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
+        )
     elif prop_clean == "lienbond":
         badge_text = "Post-Calculation Contractor, CFO & Surety Underwriter Deliverable"
         pillar_1_title = "1. 50-State Statutory Lien Waiver, AIA A312 & WH-347 Packet (HTML/PDF + CSV)"
@@ -5487,17 +5654,24 @@ def resolve_quick_unlock_contextual_copy(
         }
 
     if prop == "gainhelm":
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        fw_prof = get_gainhelm_framework_profile(slug=s_low)
+        fw_key = fw_prof["framework_key"]
+        badge_copy = (
+            "Auditor PDF/CSV + Free Email Summary"
+            if fw_key in ("soc2", "cmmc")
+            else "Regulatory PDF/CSV + Free Email Summary"
+        )
+        quick_lbl = fw_prof["quick_btn_text"]
         return {
-            "heading": "Get Your Auditor-Ready Control Scope, POA&amp;M &amp; Budget Worksheet",
-            "badge": "Auditor PDF/CSV + Free Email Summary",
-            "summary": (
-                "Unlocks control-by-control evidence collection checklist, engineering remediation "
-                "hour estimator, and board budget approval schedule."
-            ),
-            "email_label": "Email Address for Free Audit Cost Summary",
+            "heading": fw_prof["quick_unlock_heading"],
+            "badge": badge_copy,
+            "summary": fw_prof["quick_unlock_summary"],
+            "email_label": "Email Address for Free Compliance Cost Summary",
             "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download Audit Scope &amp; Budget Worksheet (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download Audit Scope &amp; Budget Worksheet (${quick_price_int})",
+            "quick_btn_label": f"{quick_lbl} (${quick_price_int}) &rarr;",
+            "drawer_quick_btn_label": f"{quick_lbl} (${quick_price_int})",
             "full_link_label": f"Or Full GRC Evidence Package (${full_price_int})",
         }
 
@@ -5703,12 +5877,14 @@ def _render_saveable_decision_blueprint_html(
         eff_stat = statutory_authority or "34 CFR Part 685 and Higher Education Act Title IV"
         eff_prop = property_id or "prexvo"
     elif is_gainhelm:
-        if any(k in str(slug or "").lower() for k in ("dora", "eu-ai-act", "sec-cybersecurity", "8k-item-105")):
-            reviewer_label = "CISO, risk committee, or regulatory compliance review"
-            eff_stat = statutory_authority or "governing European or SEC cybersecurity regulations"
-        else:
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        fw_prof = get_gainhelm_framework_profile(slug=slug)
+        if fw_prof["framework_key"] in ("soc2", "cmmc"):
             reviewer_label = "CISO, CPA auditor, or C3PAO assessor review"
-            eff_stat = statutory_authority or "AICPA SSAE 18, NIST SP 800-171, and ISO/IEC 27001:2022"
+        else:
+            reviewer_label = "CISO, risk committee, or regulatory compliance review"
+        eff_stat = statutory_authority or fw_prof["statutory_authority"]
         eff_prop = property_id or "gainhelm"
     elif str(property_id).strip().lower() == "lienbond":
         reviewer_label = "surety underwriter, project CFO, or construction counsel review"

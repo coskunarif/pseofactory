@@ -285,6 +285,133 @@ def test_no_copy_oscillation_between_reposition_and_normalize_and_no_inline_lock
         assert norm_html == rep_html, f"Copy oscillation detected between reposition and normalize for {slug}"
 
 
+def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path: Path):
+    """
+    Verifies GainHelm query-intent swaps, empirical-yield swaps (real dist + outbound_partner_engagement.json),
+    and unhealed non-Vanta upgrades keep Card 1, <section data-primary-partner>, .calc-inline-cta,
+    .comparison-table-cta-bar, and .overlay-partner-offer 100% aligned, preserve <h2>, and survive
+    subsequent normalize_html_callout_message_match calls without split-brain reversion.
+    """
+    import json
+    import shutil
+    from bs4 import BeautifulSoup
+    import pseofactory.affiliates as _aff
+    from pseofactory.affiliates import (
+        normalize_html_callout_message_match,
+        reposition_affiliate_placements_from_gsc_signals,
+        run_gsc_affiliate_placement_feedback_pass,
+    )
+
+    live_gh_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
+    live_gh_eng = Path("/home/ubuntuadmin/projects/gainhelm/.agy/outbound_partner_engagement.json")
+    assert live_gh_dist.is_dir() and live_gh_eng.is_file()
+
+    def _extract_slot_partners(html_doc: str):
+        soup = BeautifulSoup(html_doc, "html.parser")
+        sec = soup.select_one("section.affiliates-section, section.partners-section, section.refinance-partner-section")
+        card1 = sec.select_one(".partner-card") if sec else None
+        inline = soup.select_one(".calc-inline-cta")
+        tbl = soup.select_one(".comparison-table-cta-bar")
+        ov = soup.select_one(".overlay-partner-offer")
+        h2 = sec.select_one("h2") if sec else None
+        return {
+            "sec": sec,
+            "sec_pk": sec.get("data-primary-partner") if sec else None,
+            "sec_rep": sec.get("data-gsc-repositioned") if sec else None,
+            "card1_pk": card1.get("data-partner") if card1 else None,
+            "inline_pk": inline.get("data-partner") if inline else None,
+            "tbl_pk": tbl.get("data-partner") if tbl else None,
+            "ov_pk": ov.get("data-partner") if ov else None,
+            "h2_text": h2.get_text(" ", strip=True) if h2 else "",
+        }
+
+    # 1. Unhealed static non-Vanta page (iso-27001 with stale vanta_security) heals to thoropass_audit & keeps <h2>
+    iso_raw = (live_gh_dist / "tools" / "iso-27001-certification-cost-calculator" / "index.html").read_text(encoding="utf-8")
+    iso_healed = normalize_html_callout_message_match(iso_raw, property_id="gainhelm")
+    iso_slots = _extract_slot_partners(iso_healed)
+    assert iso_slots["sec_pk"] == "thoropass_audit"
+    assert iso_slots["card1_pk"] == "thoropass_audit"
+    assert iso_slots["inline_pk"] == "thoropass_audit"
+    assert iso_slots["h2_text"] == "Recommended Partner Solutions"
+
+    # 2. Query-intent swap on SOC 2 (promoting thoropass_audit) with id= before class= on <section>
+    soc2_raw = (live_gh_dist / "tools" / "soc-2-audit-cost-calculator" / "index.html").read_text(encoding="utf-8")
+    soc2_with_id = soc2_raw.replace(
+        '<section class="affiliate-section affiliates-section"',
+        '<section id="gainhelm-partners" class="affiliate-section affiliates-section"',
+        1,
+    )
+    q_rep, q_meta = reposition_affiliate_placements_from_gsc_signals(
+        soc2_with_id,
+        property_id="gainhelm",
+        slug="soc-2-audit-cost-calculator",
+        query="thoropass soc 2 bundled audit cost",
+        gsc_metrics={
+            "query": "thoropass soc 2 bundled audit cost",
+            "impressions": 450,
+            "clicks": 4,
+            "ctr": 0.0089,
+            "position": 7.5,
+        },
+    )
+    assert q_meta["gsc_repositioned"] is True
+    assert q_meta["after_primary_partner"] == "thoropass_audit"
+    q_slots = _extract_slot_partners(q_rep)
+    assert q_slots["sec_rep"] == "true"
+    assert q_slots["h2_text"] == "Recommended Partner Solutions"
+    assert {
+        q_slots["sec_pk"],
+        q_slots["card1_pk"],
+        q_slots["inline_pk"],
+        q_slots["tbl_pk"],
+        q_slots["ov_pk"],
+    } == {"thoropass_audit"}
+    q_after_norm = normalize_html_callout_message_match(q_rep, property_id="gainhelm")
+    assert q_after_norm == q_rep
+
+    # 3. Empirical-yield swap via run_gsc_affiliate_placement_feedback_pass on /tmp/ copy of real gainhelm/dist + engagement JSON
+    gh_repo = tmp_path / "gainhelm"
+    gh_dist = gh_repo / "dist"
+    (gh_repo / ".agy").mkdir(parents=True, exist_ok=True)
+    shutil.copytree(live_gh_dist, gh_dist)
+    shutil.copy2(live_gh_eng, gh_repo / ".agy" / "outbound_partner_engagement.json")
+
+    fb_pass1 = run_gsc_affiliate_placement_feedback_pass(
+        property_id="gainhelm",
+        dist_dir=gh_dist,
+        repo_root=gh_repo,
+        gsc_rows=[],
+        dry_run=False,
+    )
+    assert fb_pass1["pages_scanned"] == 13
+    assert fb_pass1["pages_updated"] == 13
+
+    repositioned_slugs = 0
+    for html_file in sorted((gh_dist / "tools").glob("*/index.html")):
+        t_slug = html_file.parent.name
+        page_html = html_file.read_text(encoding="utf-8")
+        slots = _extract_slot_partners(page_html)
+        assert slots["h2_text"] == "Recommended Partner Solutions", f"Missing <h2> on {t_slug}"
+        assert slots["sec_pk"] == slots["card1_pk"] == slots["inline_pk"] == slots["ov_pk"], (t_slug, slots)
+        if slots["sec_rep"] == "true":
+            repositioned_slugs += 1
+            assert slots["tbl_pk"] == slots["sec_pk"], f"Table bar split-brain on {t_slug}: {slots}"
+        has_leak_fn = getattr(_aff, "has_gainhelm_cross_framework_leak", None)
+        assert has_leak_fn is not None and not has_leak_fn(str(slots["sec"]), t_slug), t_slug
+        norm_after = normalize_html_callout_message_match(page_html, property_id="gainhelm")
+        assert norm_after == page_html, f"normalize_html_callout_message_match reverted/mutated {t_slug}"
+
+    assert repositioned_slugs >= 12
+    fb_pass2 = run_gsc_affiliate_placement_feedback_pass(
+        property_id="gainhelm",
+        dist_dir=gh_dist,
+        repo_root=gh_repo,
+        gsc_rows=[],
+        dry_run=False,
+    )
+    assert fb_pass2["pages_updated"] == 0
+
+
 def test_idempotency_of_write_substrate_lock_on_lienbond_result_box_and_prexvo_rap_meter():
     from pseofactory.affiliates import normalize_html_callout_message_match
     from pseofactory.visual_primitives import normalize_html_visual_primitives
@@ -758,8 +885,399 @@ console.log(JSON.stringify(out));
     assert corrupt_ledger.read_text(encoding="utf-8") == corrupt_payload
 
 
+def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity(tmp_path: Path) -> None:
+    """
+    Verifies on isolated copies of all 4 real tenant estates (dist + .agy):
+    - load_property_partner_engagement_metrics prefers outbound_partner_engagement.json over stale partner_engagement_metrics.json
+    - GSC/empirical partner swaps from run_gsc_affiliate_placement_feedback_pass survive retrofit_estate
+    - Prexvo Card 1 (calculator_primary_cta) matches <section data-primary-partner>, .calc-inline-cta, .comparison-table-cta-bar, and .overlay-partner-offer on all 23 Prexvo pages (0 slot_mismatches) after feedback_pass and P1->P2->P3
+    - ProfitHelm gsc_affiliate_placement_ledger.json preserves all 156 page_reports (including section-179-calculator & tcja-sunset-capital-gains)
+    - LienBond multi-class .comparison-table-cta-bar card pseo-card matches promoted partner and h2
+    - GainHelm DORA/EU AI Act overlays converge with zero 'Dora Ict'/'Eu Ai Act' leaks
+    - Pass 1 -> Pass 2 -> Pass 3 produces 0 HTML byte diffs and 0 callout destination mismatches across all 4 tenants.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    import re
+    import shutil
+    from bs4 import BeautifulSoup
+    import pseofactory.affiliates as _aff
+    from pseofactory.affiliates import (
+        audit_callout_destination_message_match,
+        run_gsc_affiliate_placement_feedback_pass,
+    )
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    load_property_partner_engagement_metrics = getattr(_aff, "load_property_partner_engagement_metrics", None)
+    load_persisted_gsc_placement_metrics_by_slug = getattr(_aff, "load_persisted_gsc_placement_metrics_by_slug", None)
+    assert callable(load_property_partner_engagement_metrics)
+    assert callable(load_persisted_gsc_placement_metrics_by_slug)
+
+    def _collect_prexvo_slot_mismatches(dist_dir_px: Path) -> list:
+        mismatches = []
+        for lp in sorted((dist_dir_px / "tools").rglob("index.html")):
+            if lp.parent == dist_dir_px / "tools":
+                continue
+            soup = BeautifulSoup(lp.read_text(encoding="utf-8"), "html.parser")
+            if soup.select_one('[data-restricted-public-service="true"], .ymyl-public-service-guardrail'):
+                continue
+            sec = soup.select_one("section.refinance-partner-section, section.partners-section")
+            if sec is None:
+                mismatches.append((lp.relative_to(dist_dir_px).as_posix(), "missing_section"))
+                continue
+            sec_pk = sec.get("data-primary-partner") or sec.get("data-partner")
+            card1 = sec.select_one(".partner-card")
+            card1_pk = card1.get("data-partner") if card1 else None
+            card1_a = card1.select_one("a[data-cta-slot]") if card1 else None
+            card1_slot = card1_a.get("data-cta-slot") if card1_a else None
+            inline = soup.select_one(".calc-inline-cta")
+            inline_pk = inline.get("data-partner") if inline else None
+            tbl = soup.select_one(".comparison-table-cta-bar")
+            tbl_pk = tbl.get("data-partner") if tbl else None
+            ov = soup.select_one(".overlay-partner-offer")
+            ov_pk = ov.get("data-partner") if ov else None
+            if (
+                not sec_pk
+                or card1_pk != sec_pk
+                or card1_slot != "calculator_primary_cta"
+                or (inline_pk and inline_pk != sec_pk)
+                or (ov_pk and ov_pk != sec_pk)
+                or (sec.get("data-gsc-repositioned") == "true" and tbl_pk and tbl_pk != sec_pk)
+            ):
+                mismatches.append(
+                    (
+                        lp.relative_to(dist_dir_px).as_posix(),
+                        {
+                            "sec_pk": sec_pk,
+                            "card1_pk": card1_pk,
+                            "card1_slot": card1_slot,
+                            "inline_pk": inline_pk,
+                            "tbl_pk": tbl_pk,
+                            "ov_pk": ov_pk,
+                            "repositioned": sec.get("data-gsc-repositioned"),
+                        },
+                    )
+                )
+        return mismatches
+
+    tenants = [
+        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
+        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
+        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond")),
+    ]
+    for prop, src_root in tenants:
+        repo_copy = tmp_path / prop
+        dist_copy = repo_copy / "dist"
+        shutil.copytree(src_root / "dist", dist_copy)
+        if (src_root / ".agy").is_dir():
+            shutil.copytree(src_root / ".agy", repo_copy / ".agy")
+
+        out_eng_file = repo_copy / ".agy" / "outbound_partner_engagement.json"
+        if out_eng_file.is_file():
+            loaded_eng = load_property_partner_engagement_metrics(repo_copy / ".agy", prop)
+            assert loaded_eng == json.loads(out_eng_file.read_text(encoding="utf-8")), (
+                f"{prop}: load_property_partner_engagement_metrics shadowed outbound_partner_engagement.json"
+            )
+
+        fb_report = run_gsc_affiliate_placement_feedback_pass(
+            property_id=prop,
+            repo_root=repo_copy,
+            dist_dir=dist_copy,
+            dry_run=False,
+        )
+        if prop == "prexvo":
+            px_pages = [
+                p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
+            ]
+            assert len(px_pages) == 23
+            px_fb_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
+            assert px_fb_mismatches == [], f"Prexvo slot mismatches right after feedback_pass: {px_fb_mismatches}"
+
+        promoted_before = {}
+        for html_p in sorted((dist_copy / "tools").rglob("index.html")):
+            rel = html_p.relative_to(dist_copy).as_posix()
+            raw_t = html_p.read_text(encoding="utf-8")
+            m_in = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', raw_t)
+            if m_in:
+                promoted_before[rel] = m_in.group(1)
+
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
+        snap_p1 = {
+            p.relative_to(dist_copy).as_posix(): p.read_text(encoding="utf-8")
+            for p in sorted(dist_copy.rglob("*.html"))
+        }
+        wiped = []
+        for rel, pk0 in promoted_before.items():
+            m_after = re.search(
+                r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
+                snap_p1[rel],
+            )
+            if not m_after or m_after.group(1) != pk0:
+                wiped.append((rel, pk0, m_after.group(1) if m_after else None))
+        assert not wiped, f"{prop} wiped GSC/empirical swaps during retrofit_estate Pass 1: {wiped}"
+
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
+        snap_p2 = {
+            p.relative_to(dist_copy).as_posix(): p.read_text(encoding="utf-8")
+            for p in sorted(dist_copy.rglob("*.html"))
+        }
+        p1_p2_diffs = [rel for rel, b1 in snap_p1.items() if snap_p2[rel] != b1]
+        assert not p1_p2_diffs, f"{prop} Pass 1 -> Pass 2 HTML diffs did not converge: {p1_p2_diffs}"
+
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
+        p2_p3_diffs = [
+            rel for rel, b2 in snap_p2.items() if (dist_copy / rel).read_text(encoding="utf-8") != b2
+        ]
+        assert not p2_p3_diffs, f"{prop} Pass 2 -> Pass 3 HTML diffs did not converge: {p2_p3_diffs}"
+
+        wiped_p3 = []
+        for rel, pk0 in promoted_before.items():
+            txt_p3 = (dist_copy / rel).read_text(encoding="utf-8")
+            m_after3 = re.search(
+                r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
+                txt_p3,
+            )
+            if not m_after3 or m_after3.group(1) != pk0:
+                wiped_p3.append((rel, pk0, m_after3.group(1) if m_after3 else None))
+        assert not wiped_p3, f"{prop} downgraded swaps by Pass 3: {wiped_p3}"
+
+        callout_audit = audit_callout_destination_message_match(dist_copy, property_id=prop)
+        assert callout_audit["status"] == "PASS" and callout_audit["mismatch_count"] == 0, callout_audit
+
+        if prop == "gainhelm":
+            dora_html = (dist_copy / "tools/dora-ict-third-party-risk-compliance-cost-calculator/index.html").read_text(encoding="utf-8")
+            euai_html = (dist_copy / "tools/eu-ai-act-high-risk-conformity-assessment-cost-calculator/index.html").read_text(encoding="utf-8")
+            assert "Dora Ict" not in dora_html and "DORA ICT" in dora_html
+            assert "Eu Ai Act" not in euai_html and "EU AI Act" in euai_html
+        elif prop == "prexvo":
+            px_retro_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
+            assert px_retro_mismatches == [], (
+                f"Prexvo slot mismatches after retrofit_estate P1->P2->P3: {px_retro_mismatches}"
+            )
+        elif prop == "profithelm":
+            ledger_data = json.loads((repo_copy / ".agy" / "gsc_affiliate_placement_ledger.json").read_text(encoding="utf-8"))
+            assert fb_report["pages_scanned"] == 156
+            assert len(ledger_data["page_reports"]) == 156, len(ledger_data["page_reports"])
+            assert len(ledger_data["repositioned_pages"]) == fb_report["repositioned_pages_count"]
+            persisted_ph = load_persisted_gsc_placement_metrics_by_slug(repo_copy / ".agy", "profithelm")
+            assert "section-179-calculator" in persisted_ph and persisted_ph["section-179-calculator"]["impressions"] >= 70
+            assert "tcja-sunset-capital-gains" in persisted_ph and persisted_ph["tcja-sunset-capital-gains"]["impressions"] >= 25
+            ca_html = (dist_copy / "tools/irs-2027-tax-brackets/california/index.html").read_text(encoding="utf-8")
+            m_ca = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', ca_html)
+            assert m_ca and m_ca.group(1) == promoted_before["tools/irs-2027-tax-brackets/california/index.html"]
+        elif prop == "lienbond":
+            for lp in sorted((dist_copy / "tools").rglob("index.html")):
+                if lp.parent == dist_copy / "tools":
+                    continue
+                txt = lp.read_text(encoding="utf-8")
+                m_sec = re.search(r'<section[^>]*affiliates-section[^>]*>(.*?)</section>', txt, re.S)
+                assert m_sec is not None, lp
+                sec_pk_m = re.search(r'data-primary-partner=["\']([^"\']+)["\']', m_sec.group(0))
+                assert sec_pk_m is not None, lp
+                if sec_pk_m.group(1) == "levelset_lien_filing":
+                    h2_m = re.search(r"<h2[^>]*>(.*?)</h2>", m_sec.group(1), re.S)
+                    assert h2_m and "SuretyBondsDirect" not in h2_m.group(1)
+                m_bar = re.search(r'<div[^>]*comparison-table-cta-bar[^>]*>', txt)
+                if m_bar and 'data-gsc-repositioned="true"' in m_sec.group(0):
+                    p_bar = re.search(r'data-partner=["\']([^"\']+)["\']', m_bar.group(0))
+                    assert p_bar and p_bar.group(1) == sec_pk_m.group(1)
+                    assert "card pseo-card" in m_bar.group(0)
 
 
+def test_engagement_precedence_prexvo_card1_and_non_empirical_gsc_preservation(tmp_path: Path) -> None:
+    """
+    Verifies:
+    1. load_property_partner_engagement_metrics prefers outbound_partner_engagement.json over partner_engagement_metrics.json.
+    2. Prexvo promoted swaps reorder .partner-card children in .partner-matrix-grid so Card 1
+       (data-cta-slot="calculator_primary_cta") matches the promoted partner, preserve partners-section,
+       id=, and #partner-registration-drawer, and survive normalize_html_callout_message_match.
+    3. Non-empirical GSC tiers survive gsc_metrics=None even when global engagement_metrics triggers EMPIRICAL_YIELD_SWAP.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    from bs4 import BeautifulSoup
+    import pseofactory.affiliates as _aff
+    from pseofactory.affiliates import (
+        normalize_html_callout_message_match,
+        reposition_affiliate_placements_from_gsc_signals,
+        run_gsc_affiliate_placement_feedback_pass,
+    )
 
+    load_property_partner_engagement_metrics = getattr(_aff, "load_property_partner_engagement_metrics", None)
+    load_persisted_gsc_placement_metrics_by_slug = getattr(_aff, "load_persisted_gsc_placement_metrics_by_slug", None)
+    assert callable(load_property_partner_engagement_metrics), "Missing load_property_partner_engagement_metrics"
+    assert callable(load_persisted_gsc_placement_metrics_by_slug), "Missing load_persisted_gsc_placement_metrics_by_slug"
+
+    agy_dir = tmp_path / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    (agy_dir / "partner_engagement_metrics.json").write_text(
+        json.dumps({"property_id": "prexvo", "source": "stale_oct", "by_slug": {}}),
+        encoding="utf-8",
+    )
+    (agy_dir / "outbound_partner_engagement.json").write_text(
+        json.dumps({"property_id": "prexvo", "source": "live_nov", "by_slug": {"rap-payment-calculator": {"top_converting_partner": "lendkey"}}}),
+        encoding="utf-8",
+    )
+    loaded = load_property_partner_engagement_metrics(agy_dir, "prexvo")
+    assert loaded.get("source") == "live_nov"
+
+    px_html = (
+        '<!DOCTYPE html><html><head><title>Student Loan Refinance Calculator</title>'
+        '<link rel="canonical" href="https://prexvo.com/tools/student-loan-refinance-break-even-calculator/"></head><body>'
+        '<div class="result-box"><p><strong class="output-value">$4,200</strong></p>'
+        '<div id="calc-result-quick-unlock-bar">Unlock</div></div>'
+        '<section class="scenario-comparison"><table></table></div></section>'
+        '<section id="px-partners" class="partners-section refinance-partner-section" data-mechanic="compliant_intent_monetization">'
+        '<div class="partner-matrix-grid">'
+        '<div class="partner-card" data-partner="splash_financial"><a href="/r/splash_financial" data-cta-slot="calculator_primary_cta">Splash</a></div>'
+        '<div class="partner-card" data-partner="credible"><a href="/r/credible" data-cta-slot="partner_matrix_card">Credible</a></div>'
+        '<div class="partner-card" data-partner="lendkey"><a href="/r/lendkey" data-cta-slot="partner_matrix_card">LendKey</a></div>'
+        '</div>'
+        '<div id="partner-registration-drawer"><form><input type="email" name="email"></form></div>'
+        '</section>'
+        '<section class="overlay-section overlay-partner-offer affiliate-cta-section card" data-property="prexvo" data-partner="splash_financial">'
+        '<h3 class="section-subtitle">Recommended</h3><a href="/r/splash_financial">Go</a></section>'
+        '</body></html>'
+    )
+    rep_px, rep_meta = reposition_affiliate_placements_from_gsc_signals(
+        px_html,
+        property_id="prexvo",
+        slug="student-loan-refinance-break-even-calculator",
+        gsc_metrics={"query": "student loan refinance break even calculator", "impressions": 300, "clicks": 3, "ctr": 0.01, "position": 6.5},
+        engagement_metrics={
+            "by_partner": {
+                "lendkey": {"outbound_clicks": 20, "estimated_revenue_yield_usd": 2000.0, "empirical_erpm_usd": 900.0},
+            },
+            "by_slug": {
+                "student-loan-refinance-break-even-calculator": {
+                    "top_converting_partner": "lendkey",
+                    "partners": {"lendkey": {"outbound_clicks": 20, "estimated_revenue_yield_usd": 2000.0, "empirical_erpm_usd": 900.0}},
+                }
+            },
+        },
+    )
+    assert rep_meta["after_primary_partner"] == "lendkey"
+    soup = BeautifulSoup(rep_px, "html.parser")
+    sec = soup.select_one("section#px-partners.partners-section.refinance-partner-section")
+    assert sec is not None
+    assert sec.get("data-primary-partner") == "lendkey"
+    assert sec.get("data-gsc-repositioned") == "true"
+    assert sec.select_one("#partner-registration-drawer") is not None
+    cards = sec.select(".partner-matrix-grid .partner-card")
+    assert [c.get("data-partner") for c in cards] == ["lendkey", "splash_financial", "credible"]
+    assert cards[0].select_one("a")["data-cta-slot"] == "calculator_primary_cta"
+    assert soup.select_one(".calc-inline-cta").get("data-partner") == "lendkey"
+    assert soup.select_one(".comparison-table-cta-bar").get("data-partner") == "lendkey"
+    assert soup.select_one(".overlay-partner-offer").get("data-partner") == "lendkey"
+
+    norm_px = normalize_html_callout_message_match(rep_px, property_id="prexvo", preserve_promoted_primary=False)
+    assert norm_px == rep_px
+
+    # Non-empirical GSC tier survives gsc_metrics=None when global EMPIRICAL_YIELD_SWAP fires
+    ph_base = (
+        '<html><head><title>Section 179 Calculator</title>'
+        '<link rel="canonical" href="https://profithelm.com/tools/section-179-calculator/"></head><body>'
+        '<div class="result-card"><div class="card-header"><h2>Results</h2></div></div>'
+        '<section class="affiliate-section affiliates-section"><a href="/r/xendoo">Xendoo</a></section>'
+        '</body></html>'
+    )
+    ph_gsc, _ = reposition_affiliate_placements_from_gsc_signals(
+        ph_base,
+        property_id="profithelm",
+        slug="section-179-calculator",
+        query="rippling payroll calculator",
+        gsc_metrics={"query": "rippling payroll calculator", "impressions": 220, "clicks": 2, "ctr": 0.009, "position": 6.0},
+    )
+    global_eng = {
+        "by_partner": {
+            "xendoo": {"outbound_clicks": 50, "estimated_revenue_yield_usd": 4500.0, "empirical_erpm_usd": 850.0}
+        },
+        "by_slug": {},
+    }
+    ph_preserved, ph_pres_meta = reposition_affiliate_placements_from_gsc_signals(
+        ph_gsc,
+        property_id="profithelm",
+        slug="section-179-calculator",
+        gsc_metrics=None,
+        engagement_metrics=global_eng,
+    )
+    assert ph_pres_meta["after_primary_partner"] == "rippling"
+    assert 'data-partner="rippling"' in ph_preserved
+
+    # Verify gsc_affiliate_placement_ledger.json never truncates >50 repositioned_pages or >100 page_reports
+    bulk_repo = tmp_path / "bulk_ph"
+    bulk_dist = bulk_repo / "dist"
+    gsc_rows_bulk = []
+    for i in range(110):
+        b_slug = f"tool-bulk-{i:03d}"
+        t_dir = bulk_dist / "tools" / b_slug
+        t_dir.mkdir(parents=True, exist_ok=True)
+        (t_dir / "index.html").write_text(
+            f'<html><head><title>Tool {i}</title>'
+            f'<link rel="canonical" href="https://profithelm.com/tools/{b_slug}/"></head><body>'
+            '<div class="result-card"><div class="card-header"><h2>Results</h2></div></div>'
+            '<section class="affiliate-section affiliates-section"><a href="/r/xendoo">Xendoo</a></section>'
+            '</body></html>',
+            encoding="utf-8",
+        )
+        gsc_rows_bulk.append(
+            {"slug": b_slug, "query": f"section 179 calculator {i}", "impressions": 60 + i, "clicks": 1, "position": 8.0}
+        )
+    bulk_fb = run_gsc_affiliate_placement_feedback_pass(
+        property_id="profithelm",
+        dist_dir=bulk_dist,
+        repo_root=bulk_repo,
+        gsc_rows=gsc_rows_bulk,
+        engagement_metrics={},
+        dry_run=False,
+    )
+    assert bulk_fb["pages_scanned"] == 110
+    assert len(bulk_fb["page_reports"]) == 110
+    assert len(bulk_fb["repositioned_pages"]) == 110
+    bulk_ledger = json.loads((bulk_repo / ".agy" / "gsc_affiliate_placement_ledger.json").read_text(encoding="utf-8"))
+    assert len(bulk_ledger["page_reports"]) == 110
+    assert len(bulk_ledger["repositioned_pages"]) == 110
+    bulk_persisted = load_persisted_gsc_placement_metrics_by_slug(bulk_repo / ".agy", "profithelm")
+    assert "tool-bulk-109" in bulk_persisted and bulk_persisted["tool-bulk-109"]["impressions"] == 169
+
+
+def test_reposition_preserves_gsc_placed_partner_and_multiclass_table_bar() -> None:
+    """
+    Verifies reposition_affiliate_placements_from_gsc_signals preserves promoted partners
+    when gsc_metrics=None, preserves multi-class .comparison-table-cta-bar card pseo-card,
+    normalizes split-brain LienBond h2 headings, and preserves #partner-registration-drawer
+    and section id attributes. Zero em-dashes. Zero en-dashes.
+    """
+    import re
+    from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
+
+    sample_lb = (
+        '<html><body>'
+        '<div class="interactive-calculator-container"><div class="kpi-block"><div>$12,000</div></div>'
+        '<div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" data-partner="levelset_lien_filing" data-gsc-tier="EMPIRICAL_YIELD_SWAP" data-gsc-repositioned="true"><a href="/r/levelset_lien_filing">File Notice</a></div>'
+        '<div class="lead-capture-card"></div></div>'
+        '<div class="comparison-table-cta-bar card pseo-card" data-partner="suretybonds_direct" data-cta-slot="comparison_table_cta">'
+        '<span>SuretyBondsDirect</span><a href="/r/suretybonds_direct">Compare</a></div>'
+        '<section id="partner-solutions" class="affiliate-section affiliates-section" data-partner="levelset_lien_filing" data-primary-partner="levelset_lien_filing" data-gsc-tier="EMPIRICAL_YIELD_SWAP" data-gsc-repositioned="true">'
+        '<h2>Verified Commercial Execution Partner: SuretyBondsDirect.com Nationwide Surety &amp; License Bonding</h2>'
+        '<div id="partner-registration-drawer"><form><input type="email" name="email"></form></div>'
+        '</section></body></html>'
+    )
+    out_html, report = reposition_affiliate_placements_from_gsc_signals(
+        sample_lb,
+        property_id="lienbond",
+        slug="california-texas-florida-preliminary-notice-deadline-calculator",
+        gsc_metrics=None,
+    )
+    assert report["after_primary_partner"] == "levelset_lien_filing"
+    assert report["gsc_repositioned"] is True
+    m_bar = re.search(r'<div\b[^>]*comparison-table-cta-bar[^>]*>', out_html)
+    assert m_bar and "card pseo-card" in m_bar.group(0)
+    assert 'data-partner="levelset_lien_filing"' in m_bar.group(0)
+    assert '<section id="partner-solutions"' in out_html
+    assert 'id="partner-registration-drawer"' in out_html
+    sec_m = re.search(r'<section[^>]*affiliates-section[^>]*>(.*?)</section>', out_html, re.S)
+    assert sec_m and "SuretyBondsDirect" not in re.search(r"<h2[^>]*>(.*?)</h2>", sec_m.group(1), re.S).group(1)
 
 

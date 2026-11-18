@@ -20,7 +20,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.contracts import assert_no_forbidden_dashes, normalize_statutory_acronym_casing
+
+
+def _normalize_overlay_statutory_casing(val: Any) -> Any:
+    """Normalizes statutory acronym casing across overlay string, list, and dict values."""
+    if isinstance(val, str):
+        return normalize_statutory_acronym_casing(val)
+    if isinstance(val, list):
+        return [_normalize_overlay_statutory_casing(item) for item in val]
+    if isinstance(val, dict):
+        return {k: _normalize_overlay_statutory_casing(v) for k, v in val.items()}
+    return val
 
 
 def prepare_estate_dirs(output_dir: Any, property_id: str) -> Tuple[Path, Path, Path]:
@@ -440,17 +451,43 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
             cleaned.pop("faq_schema", None)
 
     partner_offer = cleaned.get("partner_offer")
-    if isinstance(partner_offer, dict) and not any(k in slug_low for k in ("soc-2", "soc2")):
+    if isinstance(partner_offer, dict):
         cleaned_offer = dict(partner_offer)
-        if "/products/soc-2" in str(cleaned_offer.get("url") or "").lower():
-            cleaned_offer["url"] = "https://www.vanta.com/"
-        if _has_leak(cleaned_offer.get("description") or ""):
-            cleaned_offer["description"] = (
-                "Automate continuous control evidence collection, vendor risk tracking, and audit readiness workflows."
-            )
-        if _has_leak(cleaned_offer.get("cta_text") or ""):
-            cleaned_offer["cta_text"] = "Explore Automated GRC Platforms"
+        if not any(k in slug_low for k in ("soc-2", "soc2")):
+            if "/products/soc-2" in str(cleaned_offer.get("url") or "").lower():
+                cleaned_offer["url"] = "https://www.vanta.com/"
+            if _has_leak(cleaned_offer.get("description") or ""):
+                cleaned_offer["description"] = (
+                    "Automate continuous control evidence collection, vendor risk tracking, and audit readiness workflows."
+                )
+            if _has_leak(cleaned_offer.get("cta_text") or ""):
+                cleaned_offer["cta_text"] = "Explore Automated GRC Platforms"
+        for offer_txt_key in ("name", "badge", "description", "cta_text", "disclosure"):
+            if isinstance(cleaned_offer.get(offer_txt_key), str):
+                cleaned_offer[offer_txt_key] = normalize_statutory_acronym_casing(cleaned_offer[offer_txt_key])
         cleaned["partner_offer"] = cleaned_offer
+
+    for norm_key in (
+        "meta_description",
+        "description",
+        "title_rewrite",
+        "title",
+        "h1",
+        "quick_answer",
+        "methodology_notes",
+        "summary",
+        "h2_headings",
+        "h2_blocks",
+        "autonomous_citation_assertions",
+        "ai_mode_decision_matrix",
+        "comparison_rows",
+        "preset_scenarios",
+        "faq_entries",
+        "faq_additions",
+        "faq_schema",
+    ):
+        if norm_key in cleaned:
+            cleaned[norm_key] = _normalize_overlay_statutory_casing(cleaned[norm_key])
 
     return cleaned
 
@@ -874,7 +911,7 @@ def build_partners_matrix_section(
     engagement_metrics: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Renders the vetted partner matrix cards sorted by estimated partner yield."""
-    from pseofactory.affiliates import score_partner_yield
+    from pseofactory.affiliates import resolve_contextual_partner_offer_copy, score_partner_yield
 
     live_items = [
         (p_id, p_info)
@@ -892,17 +929,24 @@ def build_partners_matrix_section(
             pass
     cards = []
     for p_id, p_info in live_items:
+        ctx_copy = resolve_contextual_partner_offer_copy(
+            partner_key=p_id,
+            p_obj=p_info,
+            slug=slug,
+            property_id=getattr(p_info, "property_id", "profithelm"),
+        )
+        badge_val = ctx_copy.get("badge") or getattr(p_info, "badge", "")
         badge_html = (
-            f'  <span class="partner-badge">{html.escape(p_info.badge)}</span>\n'
-            if getattr(p_info, "badge", "")
+            f'  <span class="partner-badge">{html.escape(badge_val)}</span>\n'
+            if badge_val
             else ""
         )
-        cta_text = getattr(p_info, "cta_text", "") or default_cta_text
+        cta_text = ctx_copy.get("cta_text") or getattr(p_info, "cta_text", "") or default_cta_text
         cards.append(
             f'<div class="partner-card" data-partner="{html.escape(p_id)}">\n'
             f"{badge_html}"
-            f'  <h3 class="partner-title">{html.escape(p_info.name)}</h3>\n'
-            f'  <p>{html.escape(p_info.description)}</p>\n'
+            f'  <h3 class="partner-title">{html.escape(ctx_copy.get("name") or p_info.name)}</h3>\n'
+            f'  <p>{html.escape(ctx_copy.get("description") or p_info.description)}</p>\n'
             f'  <a href="/r/{html.escape(p_id)}" target="_blank" rel="noopener sponsored nofollow" '
             f'class="partner-btn touch-target" data-partner="{html.escape(p_id)}" '
             f'data-cta-slot="partner_matrix_card">{html.escape(cta_text)}</a>\n'
@@ -938,7 +982,7 @@ def build_partner_cta(
     slug: str = "",
 ) -> str:
     """Renders the primary partner callout card or public-service statutory guardrail."""
-    from pseofactory.affiliates import is_restricted_public_service_slug
+    from pseofactory.affiliates import is_restricted_public_service_slug, resolve_contextual_partner_offer_copy
 
     if slug and is_restricted_public_service_slug(slug):
         return (
@@ -962,14 +1006,20 @@ def build_partner_cta(
             "      </div>\n    </section>"
         )
     p_key = ref_partner.key
+    ctx_copy = resolve_contextual_partner_offer_copy(
+        partner_key=p_key,
+        p_obj=ref_partner,
+        slug=slug,
+        property_id=getattr(ref_partner, "property_id", "profithelm"),
+    )
     return (
         '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
         '      <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
-        f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html.escape(ref_partner.badge or default_featured_badge)}</span>\n'
-        f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html.escape(ref_partner.name)}</h3>\n'
-        f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html.escape(ref_partner.description)}</p>\n'
+        f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html.escape(ctx_copy.get("badge") or ref_partner.badge or default_featured_badge)}</span>\n'
+        f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html.escape(ctx_copy.get("name") or ref_partner.name)}</h3>\n'
+        f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html.escape(ctx_copy.get("description") or ref_partner.description)}</p>\n'
         f'        <a href="/r/{html.escape(p_key)}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{html.escape(p_key)}" data-cta-slot="calculator_primary_cta" style="display: inline-block; padding: 0.625rem 1.25rem; background: var(--brand-primary); color: #fff; border-radius: 6px; text-decoration: none; font-weight: 600;">\n'
-        f'          {html.escape(ref_partner.cta_text or default_cta_text)} &rarr;\n'
+        f'          {html.escape(ctx_copy.get("cta_text") or ref_partner.cta_text or default_cta_text)} &rarr;\n'
         "        </a>\n      </div>\n    </section>"
     )
 

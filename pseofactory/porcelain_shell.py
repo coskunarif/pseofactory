@@ -3169,6 +3169,7 @@ def render_porcelain_header(profile: Dict[str, Any]) -> str:
 def render_porcelain_compliance_strip(
     profile: Dict[str, Any],
     is_restricted_public_service: bool = False,
+    rel_path: str = "",
 ) -> str:
     """Renders the single canonical above-the-fold YMYL + FTC 16 CFR Part 255 disclosure strip."""
     raw_text = (
@@ -3176,6 +3177,16 @@ def render_porcelain_compliance_strip(
         if is_restricted_public_service
         else profile["compliance_text"]
     )
+    if profile.get("property_id") == "gainhelm" and rel_path and not is_restricted_public_service:
+        rel_clean = str(rel_path).strip().lstrip("/").lower()
+        if rel_clean.startswith(("tools/", "vs/", "guides/")) and rel_clean not in (
+            "tools/index.html",
+            "vs/index.html",
+            "guides/index.html",
+        ):
+            from pseofactory.affiliates import get_gainhelm_compliance_strip_text
+
+            raw_text = get_gainhelm_compliance_strip_text(rel_clean)
     return (
         '      <div class="compliance-strip ftc-disclosure-banner" role="note" '
         'aria-label="Statutory and FTC Disclosure">\n'
@@ -4353,7 +4364,11 @@ def _enforce_calculator_leaf_slot_order(
         )
 
     hero_section_html = f'      <section class="hero-section tool-hero card">\n        {hero_inner}\n      </section>'
-    compliance_html = render_porcelain_compliance_strip(profile, is_restricted_public_service=is_restricted)
+    compliance_html = render_porcelain_compliance_strip(
+        profile,
+        is_restricted_public_service=is_restricted,
+        rel_path=rel_path,
+    )
 
     return "\n".join(
         [
@@ -4482,7 +4497,11 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
         )
 
     hero_section_html = f'      <section class="hero-section card">\n        {hero_inner}\n      </section>'
-    compliance_html = render_porcelain_compliance_strip(profile, is_restricted_public_service=is_restricted)
+    compliance_html = render_porcelain_compliance_strip(
+        profile,
+        is_restricted_public_service=is_restricted,
+        rel_path=rel_path,
+    )
 
     return "\n".join(
         [
