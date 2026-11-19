@@ -20,7 +20,7 @@ import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import is_non_tool_or_governance_route
 from pseofactory.supervisor import AtomicStateLedger
@@ -9389,6 +9389,130 @@ def _build_overlay_heading_guidance_html(
     )
 
 
+def _resolve_non_colliding_baseline_title(
+    raw_h1: str,
+    rolled_title: str,
+    brand: str,
+    tenant_norm: str,
+    existing_titles: Optional[Collection[str]] = None,
+) -> str:
+    """
+    Resolves a clean [50, 60] char baseline title guaranteed distinct from rolled_title
+    and existing_titles, handling long H1s, parentheticals like '(0% State Tax)', and
+    H1s lacking 'Calculator' without forbidden dashes or duplicate 'Calculator'.
+    """
+    from pseofactory.contracts import (
+        ORGANIC_SEARCH_TITLE_MAX_CHARS,
+        ORGANIC_SEARCH_TITLE_MIN_CHARS,
+        detect_title_year_conflict_issues,
+        normalize_statutory_acronym_casing,
+    )
+
+    rolled_clean = _strip_forbidden_dashes(html_lib.unescape(str(rolled_title or ""))).strip()
+    forbidden_lower: Set[str] = {
+        _strip_forbidden_dashes(html_lib.unescape(str(t))).strip().lower()
+        for t in ([rolled_clean] + list(existing_titles or ()))
+        if t and str(t).strip()
+    }
+
+    h1_clean = re.sub(r"\s+", " ", _strip_forbidden_dashes(html_lib.unescape(str(raw_h1 or "")))).strip()
+    h1_noparen = re.sub(r"\s+", " ", re.sub(r"\s*\([^)]*\)\s*", " ", h1_clean)).strip()
+    suffix = f" | {brand}"
+    fallback_in_range: Optional[str] = None
+
+    def _validate_candidate(cand: str, min_l: int = 50, max_l: int = 60) -> Optional[str]:
+        nonlocal fallback_in_range
+        c_norm = _strip_forbidden_dashes(normalize_statutory_acronym_casing(re.sub(r"\s+", " ", cand).strip()))
+        c_norm = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", c_norm, flags=re.IGNORECASE)
+        if not c_norm or c_norm.lower() in forbidden_lower:
+            return None
+        if "| |" in c_norm or "\u2013" in c_norm or "\u2014" in c_norm:
+            return None
+        if re.search(r"\s&\s+[A-Za-z](?:\s*\||$)", c_norm):
+            return None
+        if re.search(r"\b(Reference|Schedule|Guide|Model|Estimator)\s+\1\b", c_norm, re.IGNORECASE):
+            return None
+        if detect_title_year_conflict_issues(c_norm):
+            return None
+        c_len = len(c_norm)
+        if min_l <= c_len <= max_l:
+            return c_norm
+        if fallback_in_range is None and ORGANIC_SEARCH_TITLE_MIN_CHARS <= c_len <= ORGANIC_SEARCH_TITLE_MAX_CHARS:
+            fallback_in_range = c_norm
+        return None
+
+    has_zero_state_paren = bool(re.search(r"\(0%\s+State\s+Tax\)", h1_clean, re.IGNORECASE))
+    seed_for_norm = h1_clean if has_zero_state_paren else (h1_noparen or h1_clean or "Statutory Calculator")
+    primary = _normalize_title_50_60(
+        seed_for_norm,
+        brand=brand,
+        tenant_id=tenant_norm,
+        secondary_modifier=None,
+    )
+    ok_primary = _validate_candidate(primary)
+    if ok_primary:
+        return ok_primary
+
+    # Tier 1: Swap 'Calculator' in the colliding/rolled core before ' | {brand}' with non-colliding role nouns.
+    alt_nouns = ("Reference", "Schedule", "Guide", "Model", "Estimator")
+    for src_title in (primary, rolled_clean):
+        if not src_title:
+            continue
+        core = src_title[: -len(suffix)].strip(" |-:") if src_title.lower().endswith(suffix.lower()) else src_title.split("|")[0].strip(" |-:")
+        if core and re.search(r"\bCalculator\b", core, re.IGNORECASE):
+            for alt_word in alt_nouns:
+                if alt_word.lower() in core.lower():
+                    continue
+                swapped = re.sub(r"\bCalculator\b", alt_word, core, count=1, flags=re.IGNORECASE)
+                ok_swap = _validate_candidate(f"{swapped}{suffix}")
+                if ok_swap:
+                    return ok_swap
+
+    # Tier 2: Pass shortened core variants with distinguishing tokens/modifiers BEFORE truncation cutoff.
+    core_tokens = [
+        tok for tok in re.sub(r"[&/,]+", " ", (h1_noparen or h1_clean or "Statutory")).split()
+        if tok.strip(" |-:")
+    ]
+    core_tokens_no_calc = [t for t in core_tokens if t.lower() != "calculator"] or ["Statutory", "Tax"]
+    trailing_stops = {"and", "or", "for", "of", "the", "in", "by", "to", "with", "statutory", "&"}
+    for end_idx in range(min(len(core_tokens_no_calc), 8), 1, -1):
+        prefix_words = list(core_tokens_no_calc[:end_idx])
+        while len(prefix_words) > 1 and prefix_words[-1].lower() in trailing_stops:
+            prefix_words.pop()
+        short_core = " ".join(prefix_words).strip()
+        if not short_core:
+            continue
+        for dist_word in ("Statutory Guide", "Reference", "Rate Schedule", "Schedule", "Reference Guide", "Guide", "Model", "Estimator"):
+            if dist_word.lower() in short_core.lower():
+                continue
+            ok_direct = _validate_candidate(f"{short_core} {dist_word}{suffix}")
+            if ok_direct:
+                return ok_direct
+            norm_mod = _normalize_title_50_60(
+                short_core,
+                brand=brand,
+                tenant_id=tenant_norm,
+                secondary_modifier=dist_word,
+            )
+            ok_mod = _validate_candidate(norm_mod)
+            if ok_mod:
+                return ok_mod
+
+    if fallback_in_range:
+        return fallback_in_range
+
+    base_fallback = " ".join(core_tokens_no_calc[:4]) or "Statutory Tax"
+    for tag in ("Reference", "Statutory Guide", "Rate Schedule", "Schedule", "Guide"):
+        cand_fb = _validate_candidate(
+            f"{base_fallback} {tag}{suffix}",
+            min_l=ORGANIC_SEARCH_TITLE_MIN_CHARS,
+            max_l=ORGANIC_SEARCH_TITLE_MAX_CHARS,
+        )
+        if cand_fb:
+            return cand_fb
+    return _normalize_title_50_60(f"{base_fallback} Reference", brand=brand, tenant_id=tenant_norm)
+
+
 def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any]) -> str:
     """
     Rolls back a degraded overlay's title rewrite and heading overrides from HTML,
@@ -9401,8 +9525,8 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
     if is_non_tool_overlay_target(html=html, overlay_data=overlay_data):
         return _strip_forbidden_dashes(_strip_overlay_dom_sections(html))
 
-    rolled_title = _strip_forbidden_dashes(str(overlay_data.get("rolled_back_title_rewrite") or "")).strip()
-    baseline_title = _strip_forbidden_dashes(str(overlay_data.get("baseline_title") or "")).strip()
+    rolled_title = _strip_forbidden_dashes(html_lib.unescape(str(overlay_data.get("rolled_back_title_rewrite") or ""))).strip()
+    baseline_title = _strip_forbidden_dashes(html_lib.unescape(str(overlay_data.get("baseline_title") or ""))).strip()
     raw_ov_t = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").lower()
     brand = (
         "Prexvo"
@@ -9415,23 +9539,19 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
         else ("gainhelm" if brand == "GainHelm" else ("lienbond" if brand == "LienBond" else "profithelm"))
     )
 
-    if not baseline_title:
+    if not baseline_title or (rolled_title and baseline_title.lower() == rolled_title.lower()):
         h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
-        raw_h1 = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else str(overlay_data.get("slug") or "Statutory Calculator").replace("-", " ").title()
-        raw_h1 = re.sub(r"\s*\([^)]*\)\s*", " ", raw_h1).strip()
-        baseline_title = _normalize_title_50_60(
-            raw_h1,
-            brand=brand,
-            tenant_id=tenant_norm,
-            secondary_modifier=None,
+        raw_h1 = (
+            html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip()
+            if h1_m
+            else str(overlay_data.get("slug") or "Statutory Calculator").replace("-", " ").title()
         )
-        if rolled_title and baseline_title == rolled_title:
-            baseline_title = _normalize_title_50_60(
-                f"{raw_h1} Reference",
-                brand=brand,
-                tenant_id=tenant_norm,
-                secondary_modifier=None,
-            )
+        baseline_title = _resolve_non_colliding_baseline_title(
+            raw_h1=raw_h1,
+            rolled_title=rolled_title,
+            brand=brand,
+            tenant_norm=tenant_norm,
+        )
 
     title_m = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
     cur_title = html_lib.unescape(title_m.group(1).strip()) if title_m else ""
@@ -9443,20 +9563,20 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
         escaped_base = html_lib.escape(baseline_title)
         html = re.sub(
             r"<title>.*?</title>",
-            f"<title>{escaped_base}</title>",
+            lambda _m: f"<title>{escaped_base}</title>",
             html,
             count=1,
             flags=re.DOTALL | re.IGNORECASE,
         )
         html = re.sub(
             r'(<meta\s+property=["\']og:title["\']\s+content=["\'])([^"\']*)(["\'])',
-            rf"\g<1>{escaped_base}\g<3>",
+            lambda m: f"{m.group(1)}{escaped_base}{m.group(3)}",
             html,
             flags=re.IGNORECASE,
         )
         html = re.sub(
             r'(<meta\s+name=["\']twitter:title["\']\s+content=["\'])([^"\']*)(["\'])',
-            rf"\g<1>{escaped_base}\g<3>",
+            lambda m: f"{m.group(1)}{escaped_base}{m.group(3)}",
             html,
             flags=re.IGNORECASE,
         )
@@ -9488,6 +9608,8 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
                 canonical_url=canon_url,
                 stat_auth="IRC Section 1(j); IRC Section 179; IRC Section 1031",
                 econ_ds="IRS SOI Tax Statistics",
+                preserve_title=True,
+                forbidden_titles=([rolled_title] if rolled_title else None),
             )
     except Exception:
         pass
@@ -10227,7 +10349,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 if q_norm:
                     existing_q_norms.add(q_norm)
                 new_faq_cards.append(
-                    '    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">\n'
+                    '    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; border: 1px solid var(--border);">\n'
                     f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(f["question"])}</summary>\n'
                     f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(f["answer"])}</p>\n'
                     "    </details>"
@@ -10279,7 +10401,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             for f in faq_items:
                 q = f["question"]
                 a = f["answer"]
-                faq_parts.append('    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">')
+                faq_parts.append('    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; border: 1px solid var(--border);">')
                 faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
                 faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
                 faq_parts.append("    </details>")

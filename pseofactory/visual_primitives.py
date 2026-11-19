@@ -7595,8 +7595,9 @@ def normalize_html_visual_primitives(
             repaired.append("h2_card_title_to_section_title")
 
     # 6. Inject or repair <script id="pseo-runtime-sync">
+    updated_no_footer = re.sub(r"<footer\b[\s\S]*?</footer>", "", updated, flags=re.IGNORECASE)
     has_interactive_controls = any(
-        tok in updated
+        tok in updated_no_footer
         for tok in (
             "<form",
             'type="range"',

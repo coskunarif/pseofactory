@@ -2728,3 +2728,260 @@ def test_serp_svg_breakdown_labels_stacked_without_overlap() -> None:
         assert 'x="8"' in m_tax.group(0)
         assert 'text-anchor="start"' in m_tax.group(0)
         assert_no_forbidden_dashes(html, context=f"serp svg {slug}")
+
+
+def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_titles(
+    tmp_path: Path,
+) -> None:
+    """
+    Ensures rollback_degraded_overlay_from_html and _resolve_non_colliding_baseline_title never
+    no-op when baseline_title is None and raw_h1 normalizes equal to rolled_back_title_rewrite
+    (long statutory H1s, HTML entities like &amp;, and (0% State Tax) H1s), and guarantees
+    verify_cohort_reflection_contract passes with [50, 60] char non-colliding titles.
+    """
+    import html as html_lib
+    import re
+    import pseofactory.gsc_remediation as gsc_mod
+    from pseofactory.audit import _titles_match
+    from pseofactory.verifier import verify_cohort_reflection_contract
+
+    # 1. End-to-end HTML rollback + verify_cohort_reflection_contract on multi-state cohort
+    cases = [
+        (
+            "north-carolina",
+            "North Carolina 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "North Carolina 2027 Tax Brackets Calculator | ProfitHelm",
+        ),
+        (
+            "south-carolina",
+            "South Carolina 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "South Carolina 2027 Tax Brackets Calculator | ProfitHelm",
+        ),
+        (
+            "montana",
+            "Montana 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Montana 2027 Tax Brackets Calculator | ProfitHelm",
+        ),
+        (
+            "texas",
+            "Texas 2027 Tax Calculator (0% State Tax)",
+            "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm",
+        ),
+    ]
+    dist_dir = tmp_path / "dist"
+    ov_dir = tmp_path / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    for slug, raw_h1, rolled_title in cases:
+        page_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / slug
+        page_dir.mkdir(parents=True, exist_ok=True)
+        canon = f"https://profithelm.com/tools/irs-2027-tax-brackets/{slug}/"
+        state_name = html_lib.unescape(raw_h1).split(" 2027 ")[0]
+        tax_note = "0% state individual income tax" if slug == "texas" else "state income tax brackets"
+        raw_html = (
+            "<!DOCTYPE html><html lang=\"en\"><head>"
+            f"<title>{html_lib.escape(rolled_title)}</title>"
+            f"<meta name=\"description\" content=\"Calculate 2027 {state_name} federal and {tax_note} scenarios for single filers under IRC Section 1(j).\">"
+            f"<meta property=\"og:title\" content=\"{html_lib.escape(rolled_title)}\">"
+            f"<link rel=\"canonical\" href=\"{canon}\">"
+            "</head><body><main>"
+            f"<h1>{raw_h1}</h1>"
+            f"<aside class=\"quick-answer\"><p>{state_name} benchmark analysis covers {tax_note} on a $73,035 single-filer wage with $7,637 federal tax, 10.5% effective rate, and $65,398 take-home pay under IRC Section 1(j) permanent 2027 brackets from 10% to 37% and standard deduction rules for compliant household modeling.</p></aside>"
+            "</main></body></html>"
+        )
+        overlay = {
+            "property_id": "profithelm",
+            "slug": f"irs-2027-tax-brackets/{slug}",
+            "target_url": f"/tools/irs-2027-tax-brackets/{slug}/",
+            "status": "DEGRADED_ROLLED_BACK",
+            "baseline_title": None,
+            "rolled_back_title_rewrite": rolled_title,
+        }
+        (ov_dir / f"irs-2027-tax-brackets-{slug}.json").write_text(json.dumps(overlay), encoding="utf-8")
+        fixed_html = rollback_degraded_overlay_from_html(raw_html, overlay)
+        (page_dir / "index.html").write_text(fixed_html, encoding="utf-8")
+
+        m_t = re.search(r"<title>(.*?)</title>", fixed_html, re.S)
+        assert m_t is not None
+        new_title = html_lib.unescape(m_t.group(1)).strip()
+        assert new_title != rolled_title, f"{slug} stayed rolled back: {new_title!r}"
+        assert 50 <= len(new_title) <= 60, f"{slug} title length out of [50, 60]: {len(new_title)} ({new_title!r})"
+        assert "&amp;amp;" not in fixed_html
+        assert_no_forbidden_dashes(fixed_html, context=f"rolled back html {slug}")
+
+    cohort_report = verify_cohort_reflection_contract(tmp_path, dist_dir=dist_dir)
+    assert cohort_report["passed"] is True, f"Cohort reflection failed: {cohort_report}"
+    assert cohort_report["violations_count"] == 0, f"Unexpected cohort issues: {cohort_report['issues']}"
+
+    # 2. Direct helper checks across long H1, (0% State Tax), missing 'Calculator', and collisions
+    resolve_fn = getattr(gsc_mod, "_resolve_non_colliding_baseline_title", None)
+    assert callable(resolve_fn), "_resolve_non_colliding_baseline_title helper missing"
+
+    nc_h1 = "North Carolina 2027 Tax Brackets & Statutory Rate Schedules"
+    nc_rolled = "North Carolina 2027 Tax Brackets Calculator | ProfitHelm"
+    nc_resolved = resolve_fn(nc_h1, nc_rolled, "ProfitHelm", "profithelm")
+    assert nc_resolved != nc_rolled
+    assert 50 <= len(nc_resolved) <= 60
+    assert _titles_match(nc_resolved, nc_h1)
+    assert_no_forbidden_dashes(nc_resolved, context="nc rollback helper")
+
+    nc_colliding = resolve_fn(
+        nc_h1,
+        nc_rolled,
+        "ProfitHelm",
+        "profithelm",
+        existing_titles={nc_resolved},
+    )
+    assert nc_colliding not in {nc_rolled, nc_resolved}
+    assert 50 <= len(nc_colliding) <= 60
+
+    tx_short_h1 = "Texas 2027 Tax Calculator (0% State Tax)"
+    tx_rolled = "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm"
+    tx_short_resolved = resolve_fn(tx_short_h1, tx_rolled, "ProfitHelm", "profithelm")
+    assert tx_short_resolved != tx_rolled
+    assert 50 <= len(tx_short_resolved) <= 60
+    assert "(0% State Tax)" in tx_short_resolved
+    assert _titles_match(tx_short_resolved, tx_short_h1)
+
+    no_calc_h1 = "State Corporate Franchise Schedule & Filing Guidance"
+    no_calc_rolled = "State Corporate Franchise Schedule Guidance | ProfitHelm"
+    no_calc_resolved = resolve_fn(no_calc_h1, no_calc_rolled, "ProfitHelm", "profithelm")
+    assert no_calc_resolved != no_calc_rolled
+    assert 30 <= len(no_calc_resolved) <= 70
+    assert_no_forbidden_dashes(no_calc_resolved, context="no_calc rollback helper")
+
+
+def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies RetroReflectionEngine.retrofit_estate enforces degraded rollback on long-H1 and
+    0% State Tax pages in one idempotent pass (Pass 2 pages_retrofitted == 0), preserves
+    Allow-Rolled-Back parity in _needs_page_structure_geo_normalization, does not inject FTC
+    banners on governance pages merely containing <code>/r/</code> prose, and accepts Section 179
+    vehicle overlay titles vs trim H1s in _titles_match.
+    """
+    import html as html_lib
+    import re
+    from pseofactory.audit import _titles_match
+    from pseofactory.maintenance import RetroReflectionEngine, _needs_page_structure_geo_normalization
+    from pseofactory.verifier import verify_cohort_reflection_contract
+
+    dist_dir = tmp_path / "dist"
+    ov_dir = tmp_path / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create Texas & North Carolina spoke pages with pre-fix rolled-back <title>
+    for slug, h1_text, rolled in [
+        (
+            "north-carolina",
+            "North Carolina 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "North Carolina 2027 Tax Brackets Calculator | ProfitHelm",
+        ),
+        (
+            "texas",
+            "Texas 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm",
+        ),
+    ]:
+        state_name = html_lib.unescape(h1_text).split(" 2027 ")[0]
+        tax_clause = (
+            "levies a 0% state individual income tax ($0 state tax)"
+            if slug == "texas"
+            else "applies statutory state income tax brackets"
+        )
+        canon = f"https://profithelm.com/tools/irs-2027-tax-brackets/{slug}/"
+        raw_html = (
+            "<!DOCTYPE html><html lang=\"en\"><head>"
+            f"<title>{html_lib.escape(rolled)}</title>"
+            f"<meta name=\"description\" content=\"Calculate 2027 {state_name} federal and state income tax liability under IRC Section 1(j) permanent brackets and standard deductions for single and joint filers.\">"
+            f"<meta property=\"og:title\" content=\"{html_lib.escape(rolled)}\">"
+            f"<link rel=\"canonical\" href=\"{canon}\">"
+            "<script type=\"application/ld+json\">"
+            + json.dumps(
+                {
+                    "@context": "https://schema.org",
+                    "@type": "SoftwareApplication",
+                    "name": html_lib.unescape(h1_text),
+                    "applicationCategory": "FinanceApplication",
+                    "operatingSystem": "Any",
+                    "inLanguage": "en-US",
+                    "datePublished": "2026-01-15",
+                    "dateModified": "2026-10-31",
+                }
+            )
+            + "</script>"
+            "</head><body><main>"
+            f"<section class=\"hero-section\"><h1>{h1_text}</h1></section>"
+            f"<aside class=\"quick-answer\"><p>{state_name} {tax_clause}, so a single filer on the $73,035 median wage benchmark owes $7,637 in federal tax (10.5% effective rate) and keeps $65,398 take-home pay. Under OBBBA IRC Section 1(j), permanent federal brackets (10% to 37%) and standard deductions apply.</p></aside>"
+            "<div class=\"calculator-card\"><form><label for=\"wage\">Wage</label><input id=\"wage\" type=\"number\" value=\"73035\"></form></div>"
+            "</main></body></html>"
+        )
+        p_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / slug
+        p_dir.mkdir(parents=True, exist_ok=True)
+        (p_dir / "index.html").write_text(raw_html, encoding="utf-8")
+        (ov_dir / f"irs-2027-tax-brackets-{slug}.json").write_text(
+            json.dumps(
+                {
+                    "property_id": "profithelm",
+                    "slug": f"irs-2027-tax-brackets/{slug}",
+                    "target_url": f"/tools/irs-2027-tax-brackets/{slug}/",
+                    "status": "DEGRADED_ROLLED_BACK",
+                    "baseline_title": None,
+                    "rolled_back_title_rewrite": rolled,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    # Governance page mentioning <code>/r/</code> prose only (no outbound href="/r/") + AboutPage JSON-LD
+    disc_dir = dist_dir / "disclaimers"
+    disc_dir.mkdir(parents=True, exist_ok=True)
+    (disc_dir / "index.html").write_text(
+        "<!DOCTYPE html><html lang=\"en\"><head>"
+        "<title>Financial Disclaimers &amp; Disclosures | ProfitHelm</title>"
+        "<meta name=\"description\" content=\"Official ProfitHelm editorial methodology and affiliate routing disclosure standards.\">"
+        "<link rel=\"canonical\" href=\"https://profithelm.com/disclaimers/\">"
+        "<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"AboutPage\",\"name\":\"Disclaimers\",\"inLanguage\":\"en-US\",\"datePublished\":\"2026-01-15\",\"dateModified\":\"2026-11-12\"}</script>"
+        "</head><body><main><section class=\"hero-section\"><h1>Financial Disclaimers</h1></section>"
+        "<p>Affiliate tracking links routed via <code>/r/</code> include standard disclosures.</p>"
+        "</main></body></html>",
+        encoding="utf-8",
+    )
+
+    r1 = RetroReflectionEngine.retrofit_estate(dist_dir, "profithelm", canonical_base="https://profithelm.com")
+    assert r1["status"] == "PASS"
+
+    tx_html = (dist_dir / "tools" / "irs-2027-tax-brackets" / "texas" / "index.html").read_text(encoding="utf-8")
+    tx_title = html_lib.unescape(re.search(r"<title>(.*?)</title>", tx_html, re.S).group(1)).strip()
+    assert tx_title != "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm"
+    assert 50 <= len(tx_title) <= 60
+    assert (
+        _needs_page_structure_geo_normalization(
+            tx_html,
+            check_aeo_geo_graph=False,
+            allow_rolled_back_zero_tax_title=True,
+        )
+        is False
+    )
+
+    disc_html = (disc_dir / "index.html").read_text(encoding="utf-8")
+    assert "ftc-disclosure-banner" not in disc_html
+
+    coh = verify_cohort_reflection_contract(tmp_path, dist_dir=dist_dir)
+    assert coh["passed"] is True
+    assert coh["violations_count"] == 0
+
+    r2 = RetroReflectionEngine.retrofit_estate(dist_dir, "profithelm", canonical_base="https://profithelm.com")
+    assert r2["status"] == "PASS"
+    assert r2["pages_retrofitted"] == 0, f"Pass 2 was not idempotent: {r2.get('retrofitted_paths')}"
+
+    # Section 179 vehicle active overlay vs trim H1 must reconcile without title ping-pong
+    assert _titles_match(
+        "Ford F-150 Lightning EV Truck Calculator (2026) | ProfitHelm",
+        "Ford F-150 Lightning Pro / XLT Section 179 Tax Calculator",
+    )
+    assert _titles_match(
+        "Lincoln Navigator L-Heavy SUV Calculator (2026) | ProfitHelm",
+        "Lincoln Navigator L-Series 4x4 Section 179 Tax Calculator",
+    )

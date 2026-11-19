@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable, Tuple
+from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable, Tuple, Collection
 
 from pseofactory.contracts import is_non_tool_or_governance_route, normalize_statutory_acronym_casing
 
@@ -3240,6 +3240,19 @@ class AssetIntegrityEvaluator:
                 and _needs_page_structure_geo_normalization(
                     content,
                     check_aeo_geo_graph=(adapter.dist_dir / "catalog.json").is_file(),
+                    allow_rolled_back_zero_tax_title=(
+                        "tools/irs-2027-tax-brackets/" in rel_key
+                        and any(
+                            k
+                            in _collect_degraded_rolled_back_overlays(
+                                getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
+                            )
+                            for k in (
+                                rel_key.strip("/").removeprefix("tools/").removesuffix("/index.html").strip("/"),
+                                self.extract_slug(p, adapter.dist_dir),
+                            )
+                        )
+                    ),
                 )
             ):
                 if DriftReason.STRUCTURAL_CONTRACT_VIOLATION not in reasons:
@@ -5884,9 +5897,46 @@ def _effective_non_tool_qa_plain_and_word_count(
     return qa_plain, qa_total_words
 
 
+def _collect_degraded_rolled_back_overlays(repo_root: Optional[Path]) -> Dict[str, Dict[str, Any]]:
+    """
+    Collects DEGRADED_ROLLED_BACK overlay specs indexed by slug and nested hub/leaf alias.
+    Skips non-rolled-back files without JSON parsing for O(ms) estate checks.
+    """
+    rolled: Dict[str, Dict[str, Any]] = {}
+    if repo_root is None:
+        return rolled
+    r_path = Path(repo_root)
+    for ov_dir in (r_path / "content" / "overlays", r_path / ".agy" / "overlays"):
+        if not ov_dir.is_dir():
+            continue
+        for ov_file in sorted(ov_dir.rglob("*.json")):
+            try:
+                raw_txt = ov_file.read_text(encoding="utf-8", errors="ignore")
+                if "DEGRADED_ROLLED_BACK" not in raw_txt:
+                    continue
+                ov_spec = json.loads(raw_txt)
+            except Exception:
+                continue
+            if not isinstance(ov_spec, dict) or str(ov_spec.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
+                continue
+            rel_s = ov_file.relative_to(ov_dir).with_suffix("").as_posix().strip("/")
+            spec_s = str(ov_spec.get("slug") or "").strip("/")
+            target_u = str(ov_spec.get("target_url") or "")
+            url_s = target_u.split("/tools/", 1)[1].split("?")[0].strip("/") if "/tools/" in target_u else ""
+            for s in (rel_s, spec_s, url_s):
+                if not s:
+                    continue
+                rolled[s] = ov_spec
+                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if s.startswith(f"{hub_pfx}-"):
+                        rolled[f"{hub_pfx}/{s[len(hub_pfx) + 1:]}"] = ov_spec
+    return rolled
+
+
 def _needs_page_structure_geo_normalization(
     html_content: str,
     check_aeo_geo_graph: bool = True,
+    allow_rolled_back_zero_tax_title: bool = False,
 ) -> bool:
     """Checks whether an HTML document has structural or GEO answer-delivery gaps requiring normalization."""
     if any(
@@ -6051,8 +6101,16 @@ def _needs_page_structure_geo_normalization(
                             st_slug in ZERO_INCOME_TAX_STATES
                             and (
                                 "0% state individual income tax" not in qa_inner
-                                or "0% State" not in html_content
-                                or "Tax Calculator (0% State Tax)" not in html_content
+                                or (
+                                    not allow_rolled_back_zero_tax_title
+                                    and (
+                                        "0% State" not in html_content
+                                        or not re.search(
+                                            r"\bTax\s+(?:Calculator|Reference|Schedule|Guide|Model|Estimator)\s+\(0%\s+State\s+Tax\)",
+                                            html_content,
+                                        )
+                                    )
+                                )
                             )
                         )
                         or qa_words > 60
@@ -6434,6 +6492,8 @@ def _normalize_spoke_and_synthesized_body_bloat(
     topic_label: str,
     stat_auth: str,
     econ_ds: str,
+    preserve_title: bool = False,
+    forbidden_titles: Optional[Collection[str]] = None,
 ) -> Tuple[str, bool]:
     """Repairs body-level heading/prose bloat, duplicate blocks, 480.00% yield formatting, and spoke meta/answer parity."""
     updated = html_content
@@ -6715,8 +6775,17 @@ def _normalize_spoke_and_synthesized_body_bloat(
                     qa_title_str = zt_copy["quick_answer_title"].replace("&", "&amp;")
                     spoke_qa = zt_copy["quick_answer"]
 
+                    forbidden_set = {
+                        str(t).strip().lower()
+                        for t in (forbidden_titles or ())
+                        if t and str(t).strip()
+                    }
                     cur_t_m = re.search(r"<title>([\s\S]*?)</title>", updated, re.IGNORECASE)
-                    if not cur_t_m or cur_t_m.group(1).strip() != zt_title_esc:
+                    if (
+                        not preserve_title
+                        and zt_title.strip().lower() not in forbidden_set
+                        and (not cur_t_m or cur_t_m.group(1).strip() != zt_title_esc)
+                    ):
                         updated = re.sub(
                             r"<title>[\s\S]*?</title>",
                             f"<title>{zt_title_esc}</title>",
@@ -7021,6 +7090,8 @@ def _normalize_page_structure_and_geo_parity(
     canonical_url: str,
     stat_auth: str,
     econ_ds: str,
+    preserve_title: bool = False,
+    forbidden_titles: Optional[Collection[str]] = None,
 ) -> Tuple[str, bool]:
     """
     Normalizes page structure and GEO extractability across compiled HTML pages:
@@ -7037,6 +7108,8 @@ def _normalize_page_structure_and_geo_parity(
         topic_label=topic_label,
         stat_auth=stat_auth,
         econ_ds=econ_ds,
+        preserve_title=preserve_title,
+        forbidden_titles=forbidden_titles,
     )
 
     # 1. Contextualize generic <h2> headings
@@ -7519,8 +7592,13 @@ def _normalize_page_structure_and_geo_parity(
             changed = True
 
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
-    if t_m:
+    if t_m and not preserve_title:
         old_t_raw = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
+        forbidden_title_set = {
+            str(t).strip().lower()
+            for t in (forbidden_titles or ())
+            if t and str(t).strip()
+        }
         misplaced_pslf = "(pslf)" in old_t_raw.lower() and not any(k in slug.lower() for k in ("pslf", "public-service"))
         non_tool_calc_title = (
             (is_non_tool_slug and slug.lower() not in ("tools-directory", "tools") and "calculator" in old_t_raw.lower())
@@ -7544,7 +7622,7 @@ def _normalize_page_structure_and_geo_parity(
                 clean_t_seed = re.sub(r"\s*\(PSLF\)", "", old_t_raw, flags=re.IGNORECASE) if misplaced_pslf else old_t_raw
             sec_mod = "non_tool" if is_non_tool_slug else None
             healed_t = _normalize_title_50_60(clean_t_seed, brand_label, property_id, secondary_modifier=sec_mod)
-            if healed_t and healed_t != old_t_raw:
+            if healed_t and healed_t != old_t_raw and healed_t.strip().lower() not in forbidden_title_set:
                 updated = updated.replace(f"<title>{t_m.group(1)}</title>", f"<title>{healed_t}</title>", 1)
                 updated = updated.replace(f'content="{old_t_raw}"', f'content="{healed_t}"')
                 updated = updated.replace(f'"{old_t_raw}"', f'"{healed_t}"')
@@ -8110,6 +8188,8 @@ def _normalize_page_structure_and_geo_parity(
                         for t in (
                             "WebSite",
                             "WebPage",
+                            "AboutPage",
+                            "ContactPage",
                             "CollectionPage",
                             "SoftwareApplication",
                             "WebApplication",
@@ -8126,6 +8206,8 @@ def _normalize_page_structure_and_geo_parity(
                         t in nt_list
                         for t in (
                             "WebPage",
+                            "AboutPage",
+                            "ContactPage",
                             "CollectionPage",
                             "SoftwareApplication",
                             "WebApplication",
@@ -8220,7 +8302,8 @@ def _normalize_page_structure_and_geo_parity(
                             n
                             for n in g_nodes
                             if isinstance(n, dict)
-                            and n.get("@type") in ("WebPage", "SoftwareApplication", "WebApplication")
+                            and n.get("@type")
+                            in ("WebPage", "AboutPage", "ContactPage", "SoftwareApplication", "WebApplication")
                         ),
                         g_nodes[0] if isinstance(g_nodes[0], dict) else None,
                     )
@@ -9711,7 +9794,11 @@ class RetroReflectionEngine:
         return False
 
     @classmethod
-    def audit_html_mechanics(cls, html_content: str) -> List[str]:
+    def audit_html_mechanics(
+        cls,
+        html_content: str,
+        allow_rolled_back_zero_tax_title: bool = False,
+    ) -> List[str]:
         """Returns list of missing upgraded engine mechanics for a tool/calculator HTML document."""
         missing: List[str] = []
         has_manifest = (
@@ -10228,7 +10315,10 @@ class RetroReflectionEngine:
                 and (html_content.find("data-calc-preset") - max(0, html_content.find("<main"))) > 2500
             )
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
-            or _needs_page_structure_geo_normalization(html_content)
+            or _needs_page_structure_geo_normalization(
+                html_content,
+                allow_rolled_back_zero_tax_title=allow_rolled_back_zero_tax_title,
+            )
             or (
                 "PYTEST_CURRENT_TEST" not in os.environ
                 and (
@@ -10917,6 +11007,8 @@ class RetroReflectionEngine:
         dist_dir: Optional[Path] = None,
         manifest_override: Optional[Dict[str, Any]] = None,
         write_sidecar: bool = True,
+        preserve_title: Optional[bool] = None,
+        forbidden_titles: Optional[Collection[str]] = None,
     ) -> Tuple[str, List[str]]:
         """
         Deterministically retro-reflects missing or stale pseofactory engine mechanics into an HTML document.
@@ -10975,18 +11067,38 @@ class RetroReflectionEngine:
             slug_clean = slug_clean[:-len("/index.html")]
         slug = slug_clean.strip("/") or "tool"
 
-        cache_key: Optional[Tuple[str, str, str, str]] = None
+        eff_preserve_title = bool(preserve_title)
+        eff_forbidden_titles: List[str] = [str(t) for t in (forbidden_titles or ()) if t]
+        if preserve_title is None and dist_dir is not None:
+            rb_ov_match = _collect_degraded_rolled_back_overlays(Path(dist_dir).parent).get(slug)
+            if rb_ov_match is not None:
+                eff_preserve_title = True
+                rb_t_val = str(rb_ov_match.get("rolled_back_title_rewrite") or "").strip()
+                if rb_t_val and rb_t_val not in eff_forbidden_titles:
+                    eff_forbidden_titles.append(rb_t_val)
+
+        cache_key: Optional[Tuple[str, str, str, str, bool, Tuple[str, ...]]] = None
         if manifest_override is None and html_content:
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
             dist_key = str(Path(dist_dir).resolve()) if dist_dir is not None else ""
-            cache_key = (h_digest, str(property_id).lower(), str(slug), dist_key)
+            cache_key = (
+                h_digest,
+                str(property_id).lower(),
+                str(slug),
+                dist_key,
+                eff_preserve_title,
+                tuple(sorted(eff_forbidden_titles)),
+            )
             cached_res = cls._RETROFIT_HTML_CACHE.get(cache_key)
             if cached_res is not None:
                 out_html, out_rep = cached_res
                 if dist_dir is None or not cls._sidecar_needs_sync(Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json", out_html):
                     return out_html, list(out_rep)
 
-        missing = cls.audit_html_mechanics(html_content)
+        missing = cls.audit_html_mechanics(
+            html_content,
+            allow_rolled_back_zero_tax_title=eff_preserve_title,
+        )
         if not missing and isinstance(manifest_override, dict):
             try:
                 emb_m = re.search(
@@ -11695,6 +11807,8 @@ class RetroReflectionEngine:
             canonical_url=canonical_url,
             stat_auth=stat_auth,
             econ_ds=econ_ds,
+            preserve_title=eff_preserve_title,
+            forbidden_titles=eff_forbidden_titles or None,
         )
 
         from pseofactory.visual_primitives import normalize_html_visual_primitives
@@ -12097,6 +12211,8 @@ class RetroReflectionEngine:
                                 continue
                             ov_s = str(raw_ov.get("slug") or ov_path.stem)
                             if cls._is_non_tool_overlay_spec(ov_path.relative_to(ov_dir).with_suffix("").as_posix(), raw_ov):
+                                continue
+                            if str(raw_ov.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
                                 continue
                             raw_ov, ov_reconciled = TruthReconciliationEngine.reconcile_overlay_spec_truth(
                                 raw_ov,
@@ -13782,6 +13898,7 @@ class RetroReflectionEngine:
         from pseofactory.tenant_facts import TruthReconciliationEngine
 
         active_overlays = cls._resolve_active_estate_overlays(d, property_id, heal_legacy=False)
+        degraded_overlays = _collect_degraded_rolled_back_overlays(d.parent)
         stale_pages: Dict[str, List[str]] = {}
         scanned = 0
         for html_file in sorted(d.rglob("*.html")):
@@ -13828,7 +13945,11 @@ class RetroReflectionEngine:
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
             scanned += 1
-            missing = cls.audit_html_mechanics(content)
+            tool_slug_key = rel[len("tools/") : -len("/index.html")] if (rel.startswith("tools/") and rel.endswith("/index.html")) else ""
+            missing = cls.audit_html_mechanics(
+                content,
+                allow_rolled_back_zero_tax_title=bool(tool_slug_key and tool_slug_key in degraded_overlays),
+            )
             if rel.startswith("tools/") and rel.endswith("/index.html"):
                 tool_slug_rel = rel[len("tools/") : -len("/index.html")]
                 sidecar_cand = d / "manifests" / f"{tool_slug_rel.replace('/', '-')}.json"
@@ -14278,9 +14399,11 @@ class RetroReflectionEngine:
                     continue
                 rel_s = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
                 spec_s = str(ov_spec.get("slug") or "").strip("/")
+                target_u = str(ov_spec.get("target_url") or "")
+                url_s = target_u.split("/tools/", 1)[1].split("?")[0].strip("/") if "/tools/" in target_u else ""
                 if cls._is_non_tool_overlay_spec(rel_s, ov_spec):
                     continue
-                rb_cands = [s for s in (rel_s, spec_s) if s and not is_non_tool_or_governance_route(s)]
+                rb_cands = [s for s in (rel_s, spec_s, url_s) if s and not is_non_tool_or_governance_route(s)]
                 for s in list(rb_cands):
                     for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
                         if s.startswith(f"{hub_pfx}-"):
@@ -14310,6 +14433,7 @@ class RetroReflectionEngine:
             heal_legacy=True,
             canonical_base=canonical_base,
         )
+        degraded_overlays = _collect_degraded_rolled_back_overlays(d.parent)
         from pseofactory.affiliates import (
             load_persisted_gsc_placement_metrics_by_slug,
             load_property_partner_engagement_metrics,
@@ -14486,7 +14610,7 @@ class RetroReflectionEngine:
                     if rel not in retrofitted_paths:
                         retrofitted_paths.append(rel)
                 if (
-                    "/r/" in content
+                    re.search(r'href\s*=\s*["\']/r/', content, flags=re.I)
                     or "overlay-partner-offer" in content
                     or (
                         property_id.lower() == "lienbond"
@@ -14732,11 +14856,19 @@ class RetroReflectionEngine:
                     working_content = cleaned_ov
                     overlay_injected = True
 
+            rb_ov_for_slug = degraded_overlays.get(slug)
+            rb_forbidden = (
+                [str(rb_ov_for_slug.get("rolled_back_title_rewrite") or "").strip()]
+                if (isinstance(rb_ov_for_slug, dict) and rb_ov_for_slug.get("rolled_back_title_rewrite"))
+                else None
+            )
             updated_html, repaired = cls.retrofit_html(
                 working_content,
                 property_id=property_id,
                 slug=slug,
                 dist_dir=d,
+                preserve_title=(rb_ov_for_slug is not None),
+                forbidden_titles=rb_forbidden,
             )
             if overlay_injected and "gsc_striking_overlay" not in repaired:
                 repaired.append("gsc_striking_overlay")

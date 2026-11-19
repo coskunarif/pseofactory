@@ -2152,7 +2152,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
         url = f"{POST_URL_BASE}/tools/workers-comp-and-payroll-burden-calculator/?annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45&utm_source=linkedin&utm_medium=social&utm_campaign=workers-comp-and-payroll-burden-calculator&utm_content=company_post"
         text = (
             f"On $500,000 in annual payroll, an 8.65% statutory tax rate plus $3.45/$100 workers comp rate adds $60,500 (+12.1%) in employer burden.\n\n"
-            f"Under IRC Sections 3111 and 3301 alongside state NCCI workers compensation manuals, true employee cost extends well beyond base W-2 wages.\n\n"
+            f"Under IRC Section 3111 and Section 3301 alongside state NCCI workers compensation manuals, true employee cost extends well beyond base W-2 wages.\n\n"
             f"Key findings from our labor burden modeling engine:\n"
             f"• $500,000 covered payroll incurs $43,250 in statutory FICA/FUTA/SUTA taxes and $17,250 in workers comp premium ($60,500 total burden).\n"
             f"• Lowering your Experience Modification Rate (EMR) from 1.20 to 0.85 cuts annual workers comp premiums by nearly 30%.\n"
@@ -5326,7 +5326,7 @@ TOOL_YOUTUBE_METADATA = {
         "title": "Workers Comp & Employer Payroll Tax Burden Calculator",
         "preset_query": "annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45",
         "chapters": [
-            "IRC Sections 3111 & 3301 Employer FICA & FUTA Rules",
+            "IRC Section 3111 and Section 3301 Employer FICA & FUTA Rules",
             "NCCI Class-Code Workers Comp Rates per $100 Payroll",
             "Experience Modification Rate (EMR) & True Labor Burden",
             "Interactive Payroll & Workers Comp Walkthrough",
@@ -5336,7 +5336,7 @@ TOOL_YOUTUBE_METADATA = {
             "On $500,000 in annual payroll with an 8.65% statutory payroll tax rate and $3.45/$100 workers comp class rate, employer burden adds $60,500 (+12.1%) above base wages.\n\n"
             "Run your payroll and NCCI class rates live on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/workers-comp-and-payroll-burden-calculator/?annual_payroll=500000&statutory_tax_rate=0.0865&workers_comp_rate_per_100=3.45&utm_source=youtube&utm_medium=video&utm_campaign=workers-comp-and-payroll-burden-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under IRC Sections 3111 and 3301, BLS ECEC benchmarks, and NCCI rating manuals."
+            "Statutory Basis: Computed under IRC Section 3111 and Section 3301, BLS ECEC benchmarks, and NCCI rating manuals."
         ),
         "tags": [
             "workers comp calculator",
@@ -7645,7 +7645,7 @@ This directory contains deterministic benchmark matrices and statutory reference
 - **Section 1202 QSBS Gain Exclusion**: [section_1202_benchmarks.md](./section_1202_benchmarks.md) (IRC Section 1202)
 - **IRS 2026/2027 Marginal Tax Brackets**: [tax_brackets_benchmarks.md](./tax_brackets_benchmarks.md) (IRC Section 1, TCJA Sunset)
 - **SaaS Startup Runway and Net Burn**: [saas_runway_benchmarks.md](./saas_runway_benchmarks.md) (FASB ASC 205-40)
-- **2026 Corporate Tax, Section 179 & SaaS Runway Statistics Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) (IRC Sections 179, 1031, 1401, FASB ASC 205-40)
+- **2026 Corporate Tax, Section 179 & SaaS Runway Statistics Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) (IRC Section 179, 1031, 1401, FASB ASC 205-40)
 
 All calculations are 100% deterministic, grounded in federal statutes, and updated for the 2026/2027 tax horizon.
 """

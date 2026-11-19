@@ -4170,7 +4170,7 @@ class TruthReconciliationEngine:
                     uses_details = ('<details' in f_inner.lower()) or ('class="faq-list"' in f_inner.lower()) or ("class='faq-list'" in f_inner.lower())
                     if uses_details:
                         add_faq_html = "\n".join(
-                            f'    <details class="faq-item faq-card" style="margin-bottom: 1rem; padding: 0.25rem 1rem 0.75rem 1rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px;">\n'
+                            f'    <details class="faq-item faq-card" style="margin-bottom: 1rem; border: 1px solid var(--border);">\n'
                             f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{_html_lib.escape(q, quote=False)}</summary>\n'
                             f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{_html_lib.escape(a, quote=False)}</p>\n'
                             f'    </details>'

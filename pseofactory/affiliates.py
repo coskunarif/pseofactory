@@ -7906,7 +7906,7 @@ def normalize_html_callout_message_match(
                 f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{html_lib.escape(ctx_card["badge"])}</span>\n'
-                f'        <span class="affiliate-disclosure-badge" style="font-size:0.75rem;color:var(--text-secondary);margin-left:0.5rem;font-weight:500;">Sponsored / Partner</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem; font-weight: 500;">Sponsored / Partner</span>\n'
                 f'        <h3 class="affiliate-title">{html_lib.escape(ctx_card["name"])}</h3>\n'
                 f'        <p class="affiliate-desc">{html_lib.escape(ctx_card["description"])}</p>\n'
                 f'      </div>\n'
@@ -8405,7 +8405,7 @@ def normalize_html_callout_message_match(
     )
 
     # Ensure every ProfitHelm page with outbound /r/ links has an above-the-fold .ftc-disclosure-banner with vertical-matched partner disclosure
-    if prop in ("profithelm", "exchange1031") and "/r/" in updated:
+    if prop in ("profithelm", "exchange1031") and re.search(r'href\s*=\s*["\']/r/', updated, flags=re.I):
         ctx_ftc_text = get_contextual_ftc_disclosure(prop, slug=page_slug)
         banner_inner = f"<strong>FTC Disclosure:</strong> {html_lib.escape(ctx_ftc_text)}"
         if 'class="ftc-disclosure-banner"' in updated:
