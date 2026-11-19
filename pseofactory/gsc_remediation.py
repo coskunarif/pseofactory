@@ -2126,14 +2126,17 @@ def _normalize_title_50_60(
         "tools",
     }
     _base_no_yr = re.sub(r"\b(202[4-9]|203\d)\b", "", base.lower()).strip(" |-:")
-    is_non_calc_title = (
-        secondary_modifier == "non_tool"
-        or _base_no_yr in _non_calc_exact
-        or any(k in _base_no_yr for k in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "directory", "audit cost"))
-        or any(_base_no_yr.startswith(x) for x in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "tools"))
-    ) and "calculator" not in raw_title.lower()
-    needs_calc = (not is_non_calc_title) and (secondary_modifier != "non_tool")
+    is_non_calc_title = (secondary_modifier == "non_tool") or (
+        (
+            _base_no_yr in _non_calc_exact
+            or any(k in _base_no_yr for k in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "directory", "audit cost"))
+            or any(_base_no_yr.startswith(x) for x in ("about", "privacy", "disclaimer", "methodology", "terms", "contact", "tools"))
+        )
+        and "calculator" not in raw_title.lower()
+    )
+    needs_calc = not is_non_calc_title
     if not needs_calc:
+        base = re.sub(r"\bCalculators\b", "Tools", base, flags=re.IGNORECASE).strip()
         base = re.sub(r"\s+Calculator\b", "", base, flags=re.IGNORECASE).strip()
         base = re.sub(r"\bCalculator\b", "", base, flags=re.IGNORECASE).strip()
 
@@ -2247,18 +2250,22 @@ def _normalize_title_50_60(
 
     # Pad with parenthetical modifier or whole domain words if shorter than 50 chars
     pad_tokens = (
-        [f"({vertical_paren_mod})", "(Title IV)", "(2026 Rules)", "2026", "Payment", "Federal", "Schedule", "Plan", "Estimator", "Rules"]
-        if tenant_id == "prexvo"
+        ["(2026 Standards)", "2026", "Standards", "Governance", "Overview", "Reference", "Guide", "Rules"]
+        if is_non_calc_title
         else (
-            [f"({vertical_paren_mod})", "(2026 Audit)", "2026", "Audit", "Cost", "Schedule", "Estimator", "Rules"]
-            if tenant_id == "gainhelm"
+            [f"({vertical_paren_mod})", "(Title IV)", "(2026 Rules)", "2026", "Payment", "Federal", "Schedule", "Plan", "Estimator", "Rules"]
+            if tenant_id == "prexvo"
             else (
-                [f"({vertical_paren_mod})", "(2026 Rates)", "2026", "Bond", "Rate", "Schedule", "Estimator", "Rules"]
-                if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")))
+                [f"({vertical_paren_mod})", "(2026 Audit)", "2026", "Audit", "Cost", "Schedule", "Estimator", "Rules"]
+                if tenant_id == "gainhelm"
                 else (
-                    [f"({vertical_paren_mod})", "(2026 Model)", "2026", "Cost", "Schedule", "Estimator", "Model"]
-                    if is_non_tax_commercial
-                    else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+                    [f"({vertical_paren_mod})", "(2026 Rates)", "2026", "Bond", "Rate", "Schedule", "Estimator", "Rules"]
+                    if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")))
+                    else (
+                        [f"({vertical_paren_mod})", "(2026 Model)", "2026", "Cost", "Schedule", "Estimator", "Model"]
+                        if is_non_tax_commercial
+                        else [f"({vertical_paren_mod})", "(2026 Rules)", "(IRC Guide)", "2026", "Tax", "Schedule", "Estimator", "Deduction", "Savings", "Rules"]
+                    )
                 )
             )
         )
@@ -2279,18 +2286,22 @@ def _normalize_title_50_60(
 
     if len(cand) < 50:
         extra_pads = (
-            ["& Title IV Simulator", "& Payment Schedule", "Simulator", "Schedule", "Estimator"]
-            if tenant_id == "prexvo"
+            ["& Governance Standards", "& Statutory Reference", "Standards", "Overview", "Reference", "Guide"]
+            if is_non_calc_title
             else (
-                ["& GRC Cost Estimator", "& Audit Schedule", "Simulator", "Schedule", "Estimator"]
-                if tenant_id == "gainhelm"
+                ["& Title IV Simulator", "& Payment Schedule", "Simulator", "Schedule", "Estimator"]
+                if tenant_id == "prexvo"
                 else (
-                    ["& Surety Rate Schedule", "& Bond Cost Estimator", "Simulator", "Schedule", "Estimator"]
-                    if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")))
+                    ["& GRC Cost Estimator", "& Audit Schedule", "Simulator", "Schedule", "Estimator"]
+                    if tenant_id == "gainhelm"
                     else (
-                        ["& Cost Schedule", "& Scenario Estimator", "Simulator", "Schedule", "Estimator"]
-                        if is_non_tax_commercial
-                        else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+                        ["& Surety Rate Schedule", "& Bond Cost Estimator", "Simulator", "Schedule", "Estimator"]
+                        if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")))
+                        else (
+                            ["& Cost Schedule", "& Scenario Estimator", "Simulator", "Schedule", "Estimator"]
+                            if is_non_tax_commercial
+                            else ["& Statutory Schedule", "& Planning Estimator", "Simulator", "Schedule", "Estimator"]
+                        )
                     )
                 )
             )
@@ -2305,6 +2316,13 @@ def _normalize_title_50_60(
     while len(cand) < 50:
         if not _has_year(base):
             add_tok = "2026"
+        elif is_non_calc_title:
+            add_tok = next(
+                (t for t in ("Standards", "Overview", "Reference", "Guide", "Rules") if t.lower() not in base.lower()),
+                "",
+            )
+            if not add_tok:
+                break
         elif "schedule" not in base.lower():
             add_tok = "Schedule"
         elif "estimator" not in base.lower():
@@ -9389,18 +9407,764 @@ def _build_overlay_heading_guidance_html(
     )
 
 
+_INDIVISIBLE_TITLE_BIGRAMS = frozenset({
+    ("golden", "parachute"),
+    ("workers", "comp"),
+    ("workers", "compensation"),
+    ("prevailing", "wage"),
+    ("fringe", "benefit"),
+    ("tax", "bomb"),
+    ("miller", "act"),
+    ("performance", "and"),
+    ("and", "payment"),
+    ("performance", "&"),
+    ("&", "payment"),
+    ("payment", "bond"),
+    ("preliminary", "notice"),
+    ("notice", "deadline"),
+    ("tax-equivalent", "yield"),
+    ("treasury", "bill"),
+    ("bill", "yield"),
+    ("6,000+", "lb"),
+    ("6,000+", "lbs"),
+    ("6,000", "lb"),
+    ("6,000", "lbs"),
+    ("lb", "gvwr"),
+    ("lbs", "gvwr"),
+    ("line", "of"),
+    ("of", "credit"),
+    ("new", "york"),
+    ("new", "jersey"),
+    ("new", "mexico"),
+    ("new", "hampshire"),
+    ("north", "carolina"),
+    ("north", "dakota"),
+    ("south", "carolina"),
+    ("south", "dakota"),
+    ("west", "virginia"),
+    ("rhode", "island"),
+    ("district", "of"),
+    ("of", "columbia"),
+    ("land", "rover"),
+})
+
+_GRAMMATICAL_CONNECTOR_WORDS = frozenset({
+    "of", "vs", "versus", "and", "or", "for", "to", "by", "with", "in", "&",
+})
+
+_US_STATE_TO_ABBR: Dict[str, str] = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
+    "kansas": "KS", "kentucky": "KY", "louisiana": "LA", "maine": "ME",
+    "maryland": "MD", "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
+    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
+    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH",
+    "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
+
+_US_STATE_NAME_WORDS = frozenset({
+    w for name in _US_STATE_TO_ABBR for w in name.split() if w != "of"
+})
+_US_STATE_ABBRS_LOWER = frozenset(abbr.lower() for abbr in _US_STATE_TO_ABBR.values())
+
+
+def _is_state_abbr_tok(tok: str) -> bool:
+    """Returns True for uppercase two-letter US jurisdiction abbreviations like 'CA,' or 'FL'."""
+    bare = tok.strip(".,;:-()")
+    return len(bare) == 2 and bare.isupper() and bare.lower() in _US_STATE_ABBRS_LOWER
+
+_DANGLING_TITLE_STOPS = frozenset({
+    "and", "or", "for", "with", "in", "to", "of", "by", "from", "at", "on", "as",
+    "per", "vs", "versus", "the", "a", "an", "&", "section", "sec", "form", "part",
+    "title", "irc", "capital", "new", "south", "north", "west", "rhode", "preliminary",
+})
+
+_AUDIT_TITLE_STOP_WORDS = frozenset({
+    "and", "or", "for", "with", "the", "a", "an", "of", "to", "in", "model", "guide",
+    "tool", "rules", "irc", "v11", "2024", "2025", "2026", "2027", "base", "dual",
+    "motor", "awd", "title", "iv", "form",
+})
+
+
+def _tokenize_title_core(text: str) -> List[str]:
+    """Splits a title core into words while preserving numeric thousands commas like '6,000+'."""
+    cleaned = re.sub(r"[&/]+|(?<!\d),(?!\d)", " ", text or "")
+    return [tok for tok in cleaned.split() if tok.strip(" |-:")]
+
+
+def _splits_title_pair(left_tok: str, right_tok: str) -> bool:
+    """Returns True if slicing between left_tok and right_tok breaks an indivisible bigram or statutory code."""
+    l_low = left_tok.lower().strip(".,;:-()")
+    r_low = right_tok.lower().strip(".,;:-()")
+    if (l_low, r_low) in _INDIVISIBLE_TITLE_BIGRAMS:
+        return True
+    if l_low in ("section", "form", "irc", "item") and any(ch.isdigit() for ch in r_low):
+        return True
+    return False
+
+
+def _compact_multi_state_tokens(tokens: List[str]) -> List[List[str]]:
+    """
+    When >= 2 US states appear as a contiguous jurisdiction list (e.g. 'California, Texas and Florida'),
+    produces compacted two-letter abbreviation sequences preserving all states and remaining topic words.
+    """
+    norm_toks = [t.lower().strip(".,;:-()") for t in tokens]
+    spans: List[Tuple[int, int, str]] = []
+    idx = 0
+    while idx < len(norm_toks):
+        matched = False
+        for width in (3, 2, 1):
+            if idx + width <= len(norm_toks):
+                phrase = " ".join(norm_toks[idx : idx + width])
+                abbr = _US_STATE_TO_ABBR.get(phrase)
+                if abbr:
+                    spans.append((idx, idx + width, abbr))
+                    idx += width
+                    matched = True
+                    break
+        if not matched:
+            idx += 1
+    if len(spans) < 2:
+        return []
+
+    first_start = spans[0][0]
+    last_end = spans[-1][1]
+    span_indices = {pos for s, e, _ in spans for pos in range(s, e)}
+    for mid in range(first_start, last_end):
+        if mid not in span_indices and norm_toks[mid] not in (",", "and", "&"):
+            return []
+
+    abbrs = [abbr for _, _, abbr in spans]
+    prefix = [t.rstrip(",") for t in tokens[:first_start]]
+    rest = [t.rstrip(",") if (i == 0 and t.endswith(",")) else t for i, t in enumerate(tokens[last_end:])]
+    variants: List[List[str]] = []
+    comma_mid = [f"{ab}," if i < len(abbrs) - 1 else ab for i, ab in enumerate(abbrs)]
+    variants.append(prefix + comma_mid + rest)
+    if len(abbrs) >= 2:
+        amp_mid = [f"{ab}," if i < len(abbrs) - 2 else ab for i, ab in enumerate(abbrs[:-1])] + ["&", abbrs[-1]]
+        and_mid = [f"{ab}," if i < len(abbrs) - 2 else ab for i, ab in enumerate(abbrs[:-1])] + ["and", abbrs[-1]]
+        variants.append(prefix + amp_mid + rest)
+        variants.append(prefix + and_mid + rest)
+    return variants
+
+
+def _clean_title_token_seq(tokens: List[str]) -> List[str]:
+    """Removes dangling edge stopwords, orphaned Section/Form anchors, and duplicate conjunctions."""
+    raw = list(tokens)
+    filtered: List[str] = []
+    for idx, tok in enumerate(raw):
+        low = tok.lower().strip(".,;:-()")
+        if low in ("section", "form", "item") and (idx + 1 >= len(raw) or not any(ch.isdigit() for ch in raw[idx + 1])):
+            continue
+        filtered.append(tok)
+    out: List[str] = []
+    for tok in filtered:
+        low = tok.lower().strip(".,;:-()")
+        if low in ("&", "and", "or", "vs", "versus") and out and out[-1].lower().strip(".,;:-()") in ("&", "and", "or", "vs", "versus", "of", "for", "by", "in"):
+            continue
+        out.append(tok)
+    while len(out) > 1 and out[0].lower().strip(".,;:-()") in ("&", "and", "or", "vs", "versus", "of", "for", "by", "in", "to", "with"):
+        out.pop(0)
+    while len(out) > 1 and out[-1].lower().strip(".,;:-()") in _DANGLING_TITLE_STOPS:
+        out.pop()
+    if out:
+        out[-1] = out[-1].rstrip(",")
+    return out
+
+
+def _generate_contracted_calculator_candidates(
+    h1_noparen: str,
+    h1_clean: str,
+    suffix: str,
+) -> List[str]:
+    """
+    Contracts long H1s while preserving _titles_match parity, indivisible phrases,
+    statutory Section/Form anchors, numeric weight ratings, and multi-state jurisdictions.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from itertools import combinations
+    from pseofactory.audit import ALLOWED_TITLE_EXPANSIONS
+
+    def _to_tokens(src: str) -> List[str]:
+        s = re.sub(r"\s*/\s*", " ", src).strip()
+        return [t for t in s.split() if t.strip(" |-:")]
+
+    primary_src = h1_noparen or h1_clean or "Statutory"
+    raw_tokens_with_commas = [t for t in _to_tokens(primary_src) if t.lower() != "calculator"]
+    if not raw_tokens_with_commas:
+        return []
+
+    state_compacts = _compact_multi_state_tokens(raw_tokens_with_commas)
+    clean_primary = [
+        t for t in _to_tokens(re.sub(r"(?<!\d),(?!\d)", " ", primary_src)) if t.lower() != "calculator"
+    ]
+
+    tier_a_set = _AUDIT_TITLE_STOP_WORDS | ALLOWED_TITLE_EXPANSIONS
+
+    def _is_tier_a(seq: List[str], idx: int) -> bool:
+        low_t = seq[idx].lower().strip(".,;:-()")
+        if not low_t or low_t in _GRAMMATICAL_CONNECTOR_WORDS or low_t in _US_STATE_NAME_WORDS or _is_state_abbr_tok(seq[idx]):
+            return False
+        if idx > 0 and seq[idx - 1].lower().strip(".,;:-()") in ("section", "form", "irc", "item") and any(ch.isdigit() for ch in low_t):
+            return False
+        if low_t == "credit" and idx >= 2 and seq[idx - 1].lower() == "of" and seq[idx - 2].lower() == "line":
+            return False
+        parts = re.findall(r"[a-z0-9]+", low_t)
+        return bool(parts) and all(p in tier_a_set for p in parts)
+
+    def _is_paired_idx(seq: List[str], idx: int) -> bool:
+        low_i = seq[idx].lower().strip(".,;:-()")
+        prev_l = seq[idx - 1].lower().strip(".,;:-()") if idx > 0 else ""
+        next_l = seq[idx + 1].lower().strip(".,;:-()") if idx + 1 < len(seq) else ""
+        if prev_l:
+            if (prev_l, low_i) in _INDIVISIBLE_TITLE_BIGRAMS:
+                return True
+            if prev_l in ("section", "form", "irc", "item") and any(ch.isdigit() for ch in low_i):
+                return True
+        if next_l:
+            if (low_i, next_l) in _INDIVISIBLE_TITLE_BIGRAMS:
+                return True
+            if low_i == "section" and any(ch.isdigit() for ch in next_l):
+                return prev_l != "irc"
+            if low_i in ("form", "irc", "item") and any(ch.isdigit() for ch in next_l):
+                return True
+        if re.fullmatch(r"\d[\d,]*\+", low_i):
+            return True
+        return False
+
+    results: List[str] = []
+    seen_res: Set[str] = set()
+    bare_code_pat = re.compile(r"^(?:199A|280G|8-K|179|1031|174|1256)\b", re.IGNORECASE)
+    h1_starts_bare = bool(bare_code_pat.match(h1_clean.strip()))
+    has_form_8k_h1 = bool(re.search(r"\bform\s+8-k\b", h1_clean, re.IGNORECASE))
+
+    def _emit(seq: List[str]) -> None:
+        cleaned = _clean_title_token_seq(seq)
+        if not cleaned:
+            return
+        core_str = " ".join(cleaned)
+        if not h1_starts_bare and bare_code_pat.match(core_str):
+            return
+        if has_form_8k_h1 and re.search(r"\b8-k\b", core_str, re.IGNORECASE) and not re.search(r"\bform\s+8-k\b", core_str, re.IGNORECASE):
+            return
+        if re.search(r"\b([a-z]{3,})\s+(?:vs|versus|and|&|or)\s+\1\b", core_str, re.IGNORECASE):
+            return
+        cand = f"{core_str} Calculator{suffix}"
+        k = cand.lower()
+        if k not in seen_res:
+            seen_res.add(k)
+            results.append(cand)
+
+    def _emit_with_conjunctions(seq: List[str]) -> None:
+        _emit(seq)
+        if any(t.lower() == "and" for t in seq):
+            _emit(["&" if t.lower() == "and" else t for t in seq])
+        if any(t.lower() == "versus" for t in seq):
+            _emit(["vs" if t.lower() == "versus" else t for t in seq])
+
+    def _valid_drop_combo(seq: List[str], drop_combo: Tuple[int, ...]) -> bool:
+        drop_set = set(drop_combo)
+        for d in drop_combo:
+            if seq[d].lower().strip(".,;:-()") == "section" and (d == 0 or (d - 1) in drop_set or seq[d - 1].lower() != "irc"):
+                return False
+        return True
+
+    def _contract_sequence(seq: List[str]) -> None:
+        _emit_with_conjunctions(seq)
+        tier_a_idxs = [
+            i for i in range(len(seq))
+            if _is_tier_a(seq, i) and not _is_paired_idx(seq, i)
+        ]
+        tier_a_idxs.sort(key=lambda i: (1 if seq[i].lower() == "section" else 0, -i))
+        tier_a_pool = tier_a_idxs[:10]
+
+        for r in range(1, min(len(tier_a_pool), 5) + 1):
+            emitted_r = 0
+            for drop_combo in combinations(tier_a_pool, r):
+                if not _valid_drop_combo(seq, drop_combo):
+                    continue
+                drop_set = set(drop_combo)
+                _emit_with_conjunctions([t for idx, t in enumerate(seq) if idx not in drop_set])
+                emitted_r += 1
+                if emitted_r >= 40:
+                    break
+
+        tier_b_idxs = [
+            i for i in range(len(seq) - 1, -1, -1)
+            if not _is_tier_a(seq, i)
+            and not _is_paired_idx(seq, i)
+            and seq[i].lower().strip(".,;:-()") not in _GRAMMATICAL_CONNECTOR_WORDS
+            and not _is_state_abbr_tok(seq[i])
+        ]
+        for b_idx in tier_b_idxs[:8]:
+            base_b = [t for idx, t in enumerate(seq) if idx != b_idx]
+            _emit_with_conjunctions(base_b)
+            b_tier_a = [
+                i for i in range(len(base_b))
+                if _is_tier_a(base_b, i) and not _is_paired_idx(base_b, i)
+            ]
+            b_tier_a.sort(key=lambda i: (1 if base_b[i].lower() == "section" else 0, -i))
+            for r in range(1, min(len(b_tier_a), 4) + 1):
+                emitted_br = 0
+                for drop_combo in combinations(b_tier_a[:8], r):
+                    if not _valid_drop_combo(base_b, drop_combo):
+                        continue
+                    drop_set = set(drop_combo)
+                    _emit_with_conjunctions([t for idx, t in enumerate(base_b) if idx not in drop_set])
+                    emitted_br += 1
+                    if emitted_br >= 24:
+                        break
+
+    if state_compacts:
+        _emit_with_conjunctions(clean_primary)
+        for sc_seq in state_compacts:
+            _contract_sequence(sc_seq)
+    _contract_sequence(clean_primary)
+
+    # Secondary sequence variants: short acronym parens (e.g. EMR) and clean whole-phrase drops
+    secondary_seqs: List[List[str]] = []
+    if "(" in h1_clean and ")" in h1_clean and not re.search(r"0%\s+State\s+Tax", h1_clean, re.IGNORECASE):
+        def _keep_short_acronym(m: re.Match[str]) -> str:
+            inner = m.group(1).strip()
+            return f" {inner} " if re.fullmatch(r"[A-Za-z0-9\-]{2,8}", inner) else " "
+
+        exp_str = re.sub(r"\(([^)]*)\)", _keep_short_acronym, h1_clean)
+        exp_str = re.sub(r"(?<!\d),(?!\d)", " ", exp_str)
+        exp_toks = [t for t in _to_tokens(exp_str) if t.lower() != "calculator"]
+        if exp_toks and exp_toks != clean_primary:
+            secondary_seqs.append(exp_toks)
+
+    no_gvwr_str = re.sub(r"\b\d[\d,]*\+\s+lbs?\s+gvwr\b", " ", re.sub(r"(?<!\d),(?!\d)", " ", primary_src), flags=re.IGNORECASE)
+    no_gvwr_toks = [t for t in _to_tokens(no_gvwr_str) if t.lower() != "calculator"]
+    if no_gvwr_toks and no_gvwr_toks != clean_primary:
+        secondary_seqs.append(no_gvwr_toks)
+
+    if no_gvwr_toks != clean_primary and any(t.lower() == "section" for t in no_gvwr_toks[1:]):
+        no_gvwr_sec_str = re.sub(r"(?<!^)\b(?:IRC\s+)?Section\s+\d+[A-Za-z0-9\-]*\b", " ", " ".join(no_gvwr_toks), flags=re.IGNORECASE)
+        no_gvwr_sec_toks = [t for t in _to_tokens(no_gvwr_sec_str) if t.lower() != "calculator"]
+        if no_gvwr_sec_toks and no_gvwr_sec_toks != no_gvwr_toks:
+            secondary_seqs.append(no_gvwr_sec_toks)
+
+    if len(clean_primary) >= 3 and any(t.lower() == "section" for t in clean_primary[1:]):
+        no_sec_str = re.sub(r"(?<!^)\b(?:IRC\s+)?Section\s+\d+[A-Za-z0-9\-]*\b", " ", re.sub(r"(?<!\d),(?!\d)", " ", primary_src), flags=re.IGNORECASE)
+        no_sec_toks = [t for t in _to_tokens(no_sec_str) if t.lower() != "calculator"]
+        if no_sec_toks and no_sec_toks != clean_primary:
+            secondary_seqs.append(no_sec_toks)
+
+    if re.search(r"\bPerformance\s+(?:and|&)\s+Payment\b", primary_src, re.IGNORECASE):
+        pay_str = re.sub(r"\bPerformance\s+(?:and|&)\s+(Payment)\b", r"\1", primary_src, flags=re.IGNORECASE)
+        pay_toks = [t for t in _to_tokens(pay_str) if t.lower() != "calculator"]
+        if pay_toks and pay_toks != clean_primary:
+            secondary_seqs.append(pay_toks)
+
+    for sec_seq in secondary_seqs:
+        _contract_sequence(sec_seq)
+
+    return results
+
+
+def _topic_gated_calculator_modifiers(
+    h1_low: str,
+    tenant_norm: str,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+    """
+    Returns (inline_mod_words, calc_suffixes, paren_mods) strictly gated by H1 topic
+    so cross-vertical filler words never leak onto unrelated calculators.
+    """
+    has_bracket = "bracket" in h1_low
+    has_179 = "179" in h1_low
+    has_1031 = "1031" in h1_low
+    has_tax = any(k in h1_low for k in ("tax", "bracket", "irs", "179", "1031", "tcja", "qsbs", "280g", "199a", "1256", "s-corp", "camt", "amt", "r&d", "r & d"))
+    has_bond = any(k in h1_low for k in ("bond", "surety", "miller"))
+    has_lien = any(k in h1_low for k in ("lien", "notice", "deadline", "retainage"))
+    has_audit = any(k in h1_low for k in ("audit", "compliance", "soc ", "soc2", "cmmc", "hipaa", "fedramp", "hitrust", "dora", "eu ai", "nist", "iso"))
+    has_loan = any(k in h1_low for k in ("loan", "repayment", "rap", "ibr", "pslf", "student"))
+    has_2027_plus = bool(re.search(r"\b202[7-9]\b", h1_low))
+
+    if has_bracket:
+        mods: List[str] = ["State", "Income", "Tax", "Rate", "Statutory", "Schedule"]
+        suffixes: List[str] = [
+            "State Tax Brackets Calculator",
+            "Income Tax Brackets Calculator",
+            "Tax Brackets & Rate Calculator",
+            "Tax Brackets Rate Calculator",
+            "Statutory Tax Brackets Calculator",
+            "State Tax Calculator",
+            "Income Tax Calculator",
+            "Tax Rate Calculator",
+            "Statutory Tax Calculator",
+            "Brackets & Rate Calculator",
+            "Brackets & Tax Calculator",
+            "Tax & Rate Calculator",
+            "Tax Brackets Calculator",
+            "Tax Calculator",
+            "Calculator",
+        ]
+        parens: List[str] = ["IRS Table", "IRC Rules"]
+    elif has_179:
+        mods = ["Tax", "Deduction", "Fleet", "2026"]
+        suffixes = [
+            "Section 179 Tax Calculator",
+            "Section 179 Deduction Calculator",
+            "Section 179 Calculator",
+            "Tax Deduction Calculator",
+            "Fleet Tax Calculator",
+            "Tax Calculator",
+            "Calculator",
+        ]
+        parens = ["Form 4562", "IRC Rules"]
+    elif has_1031:
+        mods = ["Tax", "Deduction", "Deferral"]
+        suffixes = [
+            "Section 1031 Tax Deferral Calculator",
+            "Section 1031 Tax Calculator",
+            "Section 1031 Deduction Calculator",
+            "Section 1031 Calculator",
+            "Tax Deferral Calculator",
+            "Deferral Calculator",
+            "Calculator",
+        ]
+        parens = ["Form 8824", "IRC Rules"]
+    elif has_bond:
+        mods = ["Bond Cost", "Surety", "Rate", "Schedule"]
+        suffixes = ["Surety Bond Calculator", "Bond Cost Calculator", "Rate Calculator", "Calculator"]
+        parens = ["Surety Rules", "2026"]
+    elif has_lien:
+        mods = ["Notice", "Deadline", "Matrix", "Schedule"]
+        suffixes = ["Deadline Calculator", "Notice Calculator", "Statutory Calculator", "Calculator"]
+        parens = ["50-State", "2026"]
+    elif has_audit:
+        mods = ["Audit Cost", "Cost", "Compliance", "Audit", "Schedule"]
+        suffixes = ["Audit Cost Calculator", "Compliance Cost Calculator", "Compliance Calculator", "Cost Calculator", "Calculator"]
+        parens = ["GRC Audit", "2026 Audit"]
+    elif has_loan:
+        mods = ["Student Loan", "Repayment", "Payment", "Schedule", "Plan"]
+        suffixes = ["Student Loan Calculator", "Repayment Calculator", "Payment Calculator", "Schedule Calculator", "Calculator"]
+        parens = ["Title IV", "IDR Plan"]
+    elif has_tax:
+        mods = ["Tax", "Rate", "Statutory", "Schedule", "Analysis", "Model"]
+        suffixes = ["Tax Calculator", "Rate Calculator", "Statutory Calculator", "Analysis Calculator", "Schedule Calculator", "Calculator"]
+        parens = ["IRC Rules", "2026"]
+    else:
+        mods = ["Cost", "Rate", "Analysis", "Model", "Comparison"]
+        suffixes = ["Analysis Calculator", "Model Calculator", "Cost Calculator", "Rate Calculator", "Calculator"]
+        parens = ["2026 Model", "2026"]
+
+    if has_2027_plus:
+        mods = [m for m in mods if "2026" not in m]
+        parens = [p for p in parens if "2026" not in p]
+    if tenant_norm == "prexvo" and not has_loan:
+        parens = [p for p in parens if p not in ("Title IV", "IDR Plan")] or ["2026"]
+    return tuple(mods), tuple(suffixes), tuple(parens)
+
+
+def _build_prefix_seeds_from_tokens(tokens: List[str]) -> List[str]:
+    """
+    Slices leading token prefixes descending from min(len, 8) down to 2 without
+    cutting across indivisible bigrams or statutory Section/Form/Item code pairs.
+    """
+    seeds: List[str] = []
+    seen: Set[str] = set()
+
+    def _push(seq_words: List[str]) -> None:
+        cleaned = list(seq_words)
+        while len(cleaned) > 1 and cleaned[-1].lower().strip(".,;:-()") in _DANGLING_TITLE_STOPS:
+            cleaned.pop()
+        if not cleaned or (len(cleaned) == 1 and cleaned[0].lower().strip(".,;:-()") in _DANGLING_TITLE_STOPS):
+            return
+        text = " ".join(cleaned).strip().rstrip(",")
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            seeds.append(text)
+        if any(w.lower() == "and" for w in cleaned):
+            amp = " ".join("&" if w.lower() == "and" else w for w in cleaned).strip().rstrip(",")
+            if amp and amp.lower() not in seen:
+                seen.add(amp.lower())
+                seeds.append(amp)
+        m_form_tail = re.match(r"^(.*?)\s+(?:and|&)\s+([A-Z]{1,4}-\d+[A-Z0-9]*)$", text)
+        if m_form_tail:
+            for alt_tail in (f"{m_form_tail.group(1)} ({m_form_tail.group(2)})", f"{m_form_tail.group(1)} {m_form_tail.group(2)}"):
+                if alt_tail.lower() not in seen:
+                    seen.add(alt_tail.lower())
+                    seeds.append(alt_tail)
+
+    for end_idx in range(min(len(tokens), 8), 1, -1):
+        prefix_words = list(tokens[:end_idx])
+        if end_idx < len(tokens):
+            while len(prefix_words) > 1 and _splits_title_pair(prefix_words[-1], tokens[len(prefix_words)]):
+                if (
+                    prefix_words[-1].lower().strip(".,;:-()") == "notice"
+                    and tokens[len(prefix_words)].lower().strip(".,;:-()") == "deadline"
+                    and len(prefix_words) >= 2
+                    and prefix_words[-2].lower().strip(".,;:-()") == "preliminary"
+                ):
+                    break
+                prefix_words.pop()
+        _push(prefix_words)
+        no_yr_words = [w for w in prefix_words if not re.fullmatch(r"202[4-9]|203\d", w)]
+        if len(no_yr_words) >= 2 and no_yr_words != prefix_words:
+            _push(no_yr_words)
+    return seeds
+
+
+def _iter_calculator_preserving_title_candidates(
+    h1_clean: str,
+    h1_noparen: str,
+    primary: str,
+    rolled_clean: str,
+    brand: str,
+    tenant_norm: str,
+) -> List[str]:
+    """
+    Generates ordered Calculator-preserving title candidates before any alt-noun fallback drops
+    'Calculator': (1) (0% State Tax) swaps, (2) topic-gated descriptor swaps on primary/rolled cores,
+    (3) _titles_match-safe H1 contractions, and (4) topic-gated short-prefix + Calculator builds.
+    Zero em-dashes. Zero en-dashes.
+    """
+    suffix = f" | {brand}"
+    candidates: List[str] = []
+    seen_lower: Set[str] = set()
+
+    def _add(cand: str) -> None:
+        c = re.sub(r"\s+", " ", cand).strip()
+        if c and c.lower() not in seen_lower:
+            seen_lower.add(c.lower())
+            candidates.append(c)
+
+    h1_low = h1_clean.lower()
+    has_zero_state_paren = bool(re.search(r"\(0%\s+State\s+Tax\)", h1_clean, re.IGNORECASE))
+
+    # 1. Preserve '(0% State Tax)' alongside 'Calculator' when present in H1
+    if has_zero_state_paren:
+        zt_base = h1_noparen or re.sub(r"\s*\(0%\s+State\s+Tax\)\s*", " ", h1_clean, flags=re.IGNORECASE).strip()
+        zt_noyr = re.sub(r"\s+\b202[4-9]\b", "", zt_base).strip()
+        for base_seed in (zt_base, zt_noyr):
+            if not base_seed:
+                continue
+            if re.search(r"\bTax\s+Calculator\b", base_seed, re.IGNORECASE):
+                for zt_swap in (
+                    "State Tax Calculator",
+                    "Income Tax Calculator",
+                    "Tax Rate Calculator",
+                    "Federal Tax Calculator",
+                    "Statutory Tax Calculator",
+                    "Brackets Calculator",
+                    "Tax Calculator",
+                ):
+                    sw = re.sub(r"\bTax\s+Calculator\b", zt_swap, base_seed, count=1, flags=re.IGNORECASE)
+                    _add(f"{sw} (0% State Tax){suffix}")
+            elif "calculator" in base_seed.lower():
+                _add(f"{base_seed} (0% State Tax){suffix}")
+            else:
+                _add(f"{base_seed} Calculator (0% State Tax){suffix}")
+
+    # 2. Topic-gated descriptor swaps across primary and rolled cores
+    swap_rules: List[Tuple[str, Tuple[str, ...]]] = [
+        (
+            r"\bTax Brackets Calculator Schedule\b",
+            (
+                "State Tax Brackets Calculator",
+                "Income Tax Brackets Calculator",
+                "Tax Brackets & Rate Calculator",
+                "Tax Brackets Rate Calculator",
+                "Statutory Tax Brackets Calculator",
+                "Tax Brackets & Statutory Calculator",
+                "Tax Brackets Calculator",
+                "State Tax Calculator",
+                "Income Tax Calculator",
+                "Tax Rate Calculator",
+                "Statutory Tax Calculator",
+                "Brackets & Rate Calculator",
+                "Brackets & Tax Calculator",
+            ),
+        ),
+        (
+            r"\bTax Brackets & Statutory Calculator\b",
+            (
+                "State Tax Brackets Calculator",
+                "Income Tax Brackets Calculator",
+                "Tax Brackets & Rate Calculator",
+                "Tax Brackets Calculator Schedule",
+                "Tax Brackets Rate Calculator",
+                "Statutory Tax Brackets Calculator",
+                "Tax Brackets Calculator",
+                "State Tax Calculator",
+                "Income Tax Calculator",
+                "Tax Rate Calculator",
+                "Statutory Tax Calculator",
+                "Brackets & Rate Calculator",
+                "Brackets & Tax Calculator",
+            ),
+        ),
+        (
+            r"\bTax Brackets Calculator\b",
+            (
+                "State Tax Brackets Calculator",
+                "Income Tax Brackets Calculator",
+                "Tax Brackets & Rate Calculator",
+                "Tax Brackets Rate Calculator",
+                "Tax Brackets Calculator Schedule",
+                "Tax Brackets & Statutory Calculator",
+                "State Tax Calculator",
+                "Income Tax Calculator",
+                "Tax Rate Calculator",
+                "Statutory Tax Calculator",
+                "Brackets & Rate Calculator",
+                "Brackets & Tax Calculator",
+                "Tax & Rate Calculator",
+                "Brackets Calculator",
+            ),
+        ),
+    ]
+    if "179" in h1_low:
+        swap_rules.append((
+            r"\bSection 179(?: Tax)? Calculator\b",
+            (
+                "Section 179 Tax Calculator",
+                "Section 179 Deduction Calculator",
+                "Section 179 Calculator",
+                "Tax Deduction Calculator",
+                "Fleet Tax Calculator",
+                "Tax Calculator",
+            ),
+        ))
+    if "1031" in h1_low:
+        swap_rules.append((
+            r"\bSection 1031(?: Exchange| Tax Deferral| Tax)? Calculator\b",
+            (
+                "Section 1031 Tax Deferral Calculator",
+                "Section 1031 Tax Calculator",
+                "Section 1031 Deduction Calculator",
+                "Section 1031 Calculator",
+                "Tax Deferral Calculator",
+            ),
+        ))
+    if "tax" in h1_low or "bracket" in h1_low:
+        swap_rules.append((
+            r"\bTax Calculator\b",
+            (
+                "State Tax Calculator",
+                "Income Tax Calculator",
+                "Tax Rate Calculator",
+                "Statutory Tax Calculator",
+                "Federal Tax Calculator",
+                "Tax & Rate Calculator",
+            ) if ("bracket" in h1_low or "state" in h1_low) else (
+                "Tax Rate Calculator",
+                "Statutory Tax Calculator",
+                "Tax & Rate Calculator",
+            ),
+        ))
+
+    mod_words, calc_suffixes, paren_mods = _topic_gated_calculator_modifiers(h1_low, tenant_norm)
+    deferred_inline_mods: List[str] = []
+    deferred_paren_candidates: List[str] = []
+
+    for src_title in (primary, rolled_clean):
+        if not src_title:
+            continue
+        core = (
+            src_title[: -len(suffix)].strip(" |-:")
+            if src_title.lower().endswith(suffix.lower())
+            else src_title.split("|")[0].strip(" |-:")
+        )
+        if not core:
+            continue
+        for pat, replacements in swap_rules:
+            if re.search(pat, core, re.IGNORECASE):
+                for repl in replacements:
+                    _add(f"{re.sub(pat, repl, core, count=1, flags=re.IGNORECASE)}{suffix}")
+        if re.search(r"\bCalculator\b", core, re.IGNORECASE):
+            for mod_w in mod_words:
+                if mod_w.lower() not in core.lower():
+                    ins = re.sub(r"\bCalculator\b", f"{mod_w} Calculator", core, count=1, flags=re.IGNORECASE)
+                    deferred_inline_mods.append(f"{ins}{suffix}")
+        core_noparen = re.sub(r"\s+", " ", re.sub(r"\s*\([^)]*\)\s*", " ", core)).strip()
+        if core_noparen:
+            for p_mod in paren_mods:
+                deferred_paren_candidates.append(
+                    _normalize_title_50_60(
+                        core_noparen,
+                        brand=brand,
+                        tenant_id=tenant_norm,
+                        secondary_modifier=p_mod,
+                    )
+                )
+
+    # 3. Token-preserving H1 contractions (prioritizing conjunction compression & Tier-A elision before dropping nouns)
+    for contracted in _generate_contracted_calculator_candidates(h1_noparen=h1_noparen, h1_clean=h1_clean, suffix=suffix):
+        _add(contracted)
+
+    # 3b. Priority state-compacted prefix builds before modifier insertions on uncompacted cores
+    prefix_src = re.sub(r"\s*/\s*", " ", h1_noparen or h1_clean or "Statutory").strip()
+    raw_words_no_calc = [t for t in prefix_src.split() if t.strip(" |-:") and t.lower() != "calculator"] or ["Statutory", "Tax"]
+    state_compact_seqs = _compact_multi_state_tokens(raw_words_no_calc)
+    for sc_seq in state_compact_seqs:
+        for sc_seed in _build_prefix_seeds_from_tokens(sc_seq):
+            _add(f"{sc_seed} Calculator{suffix}")
+
+    # 4. Topic-gated inline modifier inserts & shortened prefix builds
+    for mod_cand in deferred_inline_mods:
+        _add(mod_cand)
+
+    core_tokens_no_calc = [t for t in _tokenize_title_core(h1_noparen or h1_clean or "Statutory") if t.lower() != "calculator"] or ["Statutory", "Tax"]
+    seq_inputs_for_prefix = list(state_compact_seqs) + [raw_words_no_calc, core_tokens_no_calc]
+    if re.search(r"\b\d[\d,]*\+\s+lbs?\s+gvwr\b", prefix_src, re.IGNORECASE):
+        no_gvwr_sec = re.sub(r"\b\d[\d,]*\+\s+lbs?\s+gvwr\b", " ", prefix_src, flags=re.IGNORECASE)
+        no_gvwr_sec = re.sub(r"(?<!^)\b(?:IRC\s+)?Section\s+\d+[A-Za-z0-9\-]*\b", " ", no_gvwr_sec, flags=re.IGNORECASE)
+        sec_words = [t for t in no_gvwr_sec.split() if t.strip(" |-:") and t.lower() != "calculator"]
+        if sec_words:
+            seq_inputs_for_prefix.append(sec_words)
+
+    prefix_seeds: List[str] = []
+    seen_prefixes: Set[str] = set()
+    for token_seq in seq_inputs_for_prefix:
+        for seed in _build_prefix_seeds_from_tokens(token_seq):
+            if seed.lower() not in seen_prefixes:
+                seen_prefixes.add(seed.lower())
+                prefix_seeds.append(seed)
+
+    for short_core in prefix_seeds:
+        _add(f"{short_core} Calculator{suffix}")
+        short_words_low = {w.lower() for w in short_core.split()}
+        for calc_sfx in calc_suffixes:
+            sfx_non_calc = [w.lower() for w in calc_sfx.split() if w.lower() not in ("calculator", "&")]
+            if sfx_non_calc and any(w in short_words_low for w in sfx_non_calc):
+                continue
+            _add(f"{short_core} {calc_sfx}{suffix}")
+        _add(_normalize_title_50_60(short_core, brand=brand, tenant_id=tenant_norm, secondary_modifier=None))
+
+    for p_cand in deferred_paren_candidates:
+        _add(p_cand)
+    for short_core in prefix_seeds:
+        for p_mod in paren_mods:
+            _add(_normalize_title_50_60(short_core, brand=brand, tenant_id=tenant_norm, secondary_modifier=p_mod))
+
+    return candidates
+
+
 def _resolve_non_colliding_baseline_title(
     raw_h1: str,
     rolled_title: str,
     brand: str,
     tenant_norm: str,
     existing_titles: Optional[Collection[str]] = None,
+    *,
+    is_non_tool: bool = False,
 ) -> str:
     """
     Resolves a clean [50, 60] char baseline title guaranteed distinct from rolled_title
-    and existing_titles, handling long H1s, parentheticals like '(0% State Tax)', and
-    H1s lacking 'Calculator' without forbidden dashes or duplicate 'Calculator'.
+    and existing_titles, preserving 'Calculator' and _titles_match parity on tool routes
+    and strictly excluding 'Calculator' when is_non_tool=True.
+    Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.audit import _titles_match
     from pseofactory.contracts import (
         ORGANIC_SEARCH_TITLE_MAX_CHARS,
         ORGANIC_SEARCH_TITLE_MIN_CHARS,
@@ -9418,99 +10182,263 @@ def _resolve_non_colliding_baseline_title(
     h1_clean = re.sub(r"\s+", " ", _strip_forbidden_dashes(html_lib.unescape(str(raw_h1 or "")))).strip()
     h1_noparen = re.sub(r"\s+", " ", re.sub(r"\s*\([^)]*\)\s*", " ", h1_clean)).strip()
     suffix = f" | {brand}"
-    fallback_in_range: Optional[str] = None
+    preserve_calculator = bool(not is_non_tool)
+    dangling_stops = _DANGLING_TITLE_STOPS
+    bare_code_pat = re.compile(r"^(?:199A|280G|8-K|179|1031|174|1256)\b", re.IGNORECASE)
+    h1_starts_bare = bool(bare_code_pat.match(h1_clean.strip()))
+    has_form_8k_h1 = bool(re.search(r"\bform\s+8-k\b", h1_clean, re.IGNORECASE))
+    has_weight_rating_h1 = bool(re.search(r"\b\d[\d,]*\+", h1_clean))
 
-    def _validate_candidate(cand: str, min_l: int = 50, max_l: int = 60) -> Optional[str]:
-        nonlocal fallback_in_range
+    fallback_matched_calc: Optional[str] = None
+    fallback_matched: Optional[str] = None
+    fallback_any: Optional[str] = None
+
+    def _strip_non_tool_calc_words(text: str) -> str:
+        t = re.sub(r"\bCalculators\b", "Tools", text, flags=re.IGNORECASE)
+        t = re.sub(r"\s+\bCalculator\b", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bCalculator\b", "", t, flags=re.IGNORECASE)
+        return re.sub(r"\s+", " ", t).strip(" |-:")
+
+    def _validate_candidate(
+        cand: str,
+        min_l: int = 50,
+        max_l: int = 60,
+        require_calc: bool = False,
+        require_h1_match: bool = True,
+    ) -> Optional[str]:
+        nonlocal fallback_matched_calc, fallback_matched, fallback_any
         c_norm = _strip_forbidden_dashes(normalize_statutory_acronym_casing(re.sub(r"\s+", " ", cand).strip()))
-        c_norm = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", c_norm, flags=re.IGNORECASE)
+        c_norm = re.sub(
+            r"\b(Calculator|Tax|Rate|State|Income|Brackets|Schedule|Section|Statutory|Guide|Reference|Model|Estimator|Audit|Cost|Bond|Tools|Directory|Standards|Overview)\s+\1\b",
+            r"\1",
+            c_norm,
+            flags=re.IGNORECASE,
+        )
+        c_norm = re.sub(r"\s+", " ", c_norm).strip()
         if not c_norm or c_norm.lower() in forbidden_lower:
             return None
         if "| |" in c_norm or "\u2013" in c_norm or "\u2014" in c_norm:
             return None
         if re.search(r"\s&\s+[A-Za-z](?:\s*\||$)", c_norm):
             return None
-        if re.search(r"\b(Reference|Schedule|Guide|Model|Estimator)\s+\1\b", c_norm, re.IGNORECASE):
+        if re.search(r"\b(Reference|Schedule|Guide|Model|Estimator|Standards|Overview|Directory)\s+\1\b", c_norm, re.IGNORECASE):
+            return None
+        if re.search(
+            r"\b(?:and|or|for|with|in|to|of|by|the|a|an|from|at|on|as|per|vs|versus|section|sec|form|part|title|irc|new|south|north|west|rhode|preliminary)\s+Calculator\b",
+            c_norm,
+            re.IGNORECASE,
+        ):
+            return None
+        core_only = (
+            c_norm[: -len(suffix)].strip(" |-:")
+            if c_norm.lower().endswith(suffix.lower())
+            else c_norm.split("|")[0].strip(" |-:")
+        )
+        if re.search(r"\b([a-z]{3,})\s+(?:vs|versus|and|&|or)\s+\1\b", core_only, re.IGNORECASE):
+            return None
+        if not h1_starts_bare and bare_code_pat.match(core_only):
+            return None
+        if has_form_8k_h1 and re.search(r"\b8-k\b", core_only, re.IGNORECASE) and not re.search(r"\bform\s+8-k\b", core_only, re.IGNORECASE):
+            return None
+        if has_weight_rating_h1:
+            has_unit = bool(re.search(r"\blbs?\b|\bgvwr\b", core_only, re.IGNORECASE))
+            has_num = bool(re.search(r"\b\d[\d,]*\+", core_only))
+            if has_unit and not has_num:
+                return None
+            if has_num and not (re.search(r"\blbs?\b", core_only, re.IGNORECASE) and re.search(r"\bgvwr\b", core_only, re.IGNORECASE)):
+                return None
+        core_words = core_only.split()
+        if core_words and core_words[-1].lower().strip(".,;:-()") in dangling_stops:
             return None
         if detect_title_year_conflict_issues(c_norm):
+            return None
+        has_calc = "calculator" in c_norm.lower()
+        if is_non_tool and has_calc:
+            return None
+        if require_calc and not has_calc:
+            return None
+        matches_h1 = (not h1_clean) or _titles_match(c_norm, h1_clean)
+        if require_h1_match and not matches_h1:
             return None
         c_len = len(c_norm)
         if min_l <= c_len <= max_l:
             return c_norm
-        if fallback_in_range is None and ORGANIC_SEARCH_TITLE_MIN_CHARS <= c_len <= ORGANIC_SEARCH_TITLE_MAX_CHARS:
-            fallback_in_range = c_norm
+        if ORGANIC_SEARCH_TITLE_MIN_CHARS <= c_len <= ORGANIC_SEARCH_TITLE_MAX_CHARS:
+            if matches_h1:
+                if has_calc and fallback_matched_calc is None:
+                    fallback_matched_calc = c_norm
+                if fallback_matched is None:
+                    fallback_matched = c_norm
+            if fallback_any is None:
+                fallback_any = c_norm
         return None
 
     has_zero_state_paren = bool(re.search(r"\(0%\s+State\s+Tax\)", h1_clean, re.IGNORECASE))
-    seed_for_norm = h1_clean if has_zero_state_paren else (h1_noparen or h1_clean or "Statutory Calculator")
+    seed_for_norm = h1_clean if has_zero_state_paren else (h1_noparen or h1_clean or ("Statutory Standards" if is_non_tool else "Statutory Calculator"))
+    if is_non_tool:
+        seed_for_norm = _strip_non_tool_calc_words(seed_for_norm) or "Statutory Governance Standards"
+
     primary = _normalize_title_50_60(
         seed_for_norm,
         brand=brand,
         tenant_id=tenant_norm,
-        secondary_modifier=None,
+        secondary_modifier="non_tool" if is_non_tool else None,
     )
-    ok_primary = _validate_candidate(primary)
+    est_seed_len = len(seed_for_norm) + len(suffix) + (0 if is_non_tool or "calculator" in seed_for_norm.lower() else 11)
+    ok_primary = _validate_candidate(primary, require_calc=preserve_calculator, require_h1_match=not is_non_tool)
+    if ok_primary and (is_non_tool or est_seed_len <= 60):
+        return ok_primary
+
+    # Tier 1 (Priority on tool routes): Calculator-preserving [50, 60] variations strictly matching H1.
+    calc_candidates: List[str] = []
+    if preserve_calculator:
+        calc_candidates = _iter_calculator_preserving_title_candidates(
+            h1_clean=h1_clean,
+            h1_noparen=h1_noparen,
+            primary=primary,
+            rolled_clean=rolled_clean,
+            brand=brand,
+            tenant_norm=tenant_norm,
+        )
+        for cand in calc_candidates:
+            ok_c = _validate_candidate(cand, min_l=50, max_l=60, require_calc=True, require_h1_match=True)
+            if ok_c:
+                return ok_c
     if ok_primary:
         return ok_primary
 
-    # Tier 1: Swap 'Calculator' in the colliding/rolled core before ' | {brand}' with non-colliding role nouns.
-    alt_nouns = ("Reference", "Schedule", "Guide", "Model", "Estimator")
-    for src_title in (primary, rolled_clean):
-        if not src_title:
-            continue
-        core = src_title[: -len(suffix)].strip(" |-:") if src_title.lower().endswith(suffix.lower()) else src_title.split("|")[0].strip(" |-:")
-        if core and re.search(r"\bCalculator\b", core, re.IGNORECASE):
-            for alt_word in alt_nouns:
-                if alt_word.lower() in core.lower():
-                    continue
-                swapped = re.sub(r"\bCalculator\b", alt_word, core, count=1, flags=re.IGNORECASE)
-                ok_swap = _validate_candidate(f"{swapped}{suffix}")
-                if ok_swap:
-                    return ok_swap
+    # Tier 2: Alt-noun swaps (or non-tool swaps) requiring _titles_match parity first.
+    alt_nouns = (
+        ("Overview", "Standards", "Guide", "Reference", "Notice", "Directory", "Rules")
+        if is_non_tool
+        else ("Reference", "Schedule", "Guide", "Model", "Estimator")
+    )
+    short_mod_words = (
+        ("Statutory Standards", "Overview", "Reference", "Guide", "Compliance Guide", "Schedule", "Rules")
+        if is_non_tool
+        else ("Statutory Guide", "Reference", "Rate Schedule", "Schedule", "Reference Guide", "Guide", "Model", "Estimator")
+    )
+    core_tokens = _tokenize_title_core(h1_noparen or h1_clean or ("Statutory Standards" if is_non_tool else "Statutory"))
+    core_tokens_no_calc = [
+        ("Tools" if is_non_tool and t.lower() == "calculators" else t)
+        for t in core_tokens
+        if t.lower() != "calculator"
+    ] or (["Statutory", "Standards"] if is_non_tool else ["Statutory", "Tax"])
 
-    # Tier 2: Pass shortened core variants with distinguishing tokens/modifiers BEFORE truncation cutoff.
-    core_tokens = [
-        tok for tok in re.sub(r"[&/,]+", " ", (h1_noparen or h1_clean or "Statutory")).split()
-        if tok.strip(" |-:")
-    ]
-    core_tokens_no_calc = [t for t in core_tokens if t.lower() != "calculator"] or ["Statutory", "Tax"]
-    trailing_stops = {"and", "or", "for", "of", "the", "in", "by", "to", "with", "statutory", "&"}
-    for end_idx in range(min(len(core_tokens_no_calc), 8), 1, -1):
-        prefix_words = list(core_tokens_no_calc[:end_idx])
-        while len(prefix_words) > 1 and prefix_words[-1].lower() in trailing_stops:
-            prefix_words.pop()
-        short_core = " ".join(prefix_words).strip()
-        if not short_core:
-            continue
-        for dist_word in ("Statutory Guide", "Reference", "Rate Schedule", "Schedule", "Reference Guide", "Guide", "Model", "Estimator"):
-            if dist_word.lower() in short_core.lower():
+    def _run_alt_noun_and_short_core(require_h1: bool) -> Optional[str]:
+        for src_title in (primary, rolled_clean):
+            if not src_title:
                 continue
-            ok_direct = _validate_candidate(f"{short_core} {dist_word}{suffix}")
-            if ok_direct:
-                return ok_direct
-            norm_mod = _normalize_title_50_60(
-                short_core,
-                brand=brand,
-                tenant_id=tenant_norm,
-                secondary_modifier=dist_word,
+            core = (
+                src_title[: -len(suffix)].strip(" |-:")
+                if src_title.lower().endswith(suffix.lower())
+                else src_title.split("|")[0].strip(" |-:")
             )
-            ok_mod = _validate_candidate(norm_mod)
-            if ok_mod:
-                return ok_mod
+            if is_non_tool:
+                core_clean = _strip_non_tool_calc_words(core)
+                if core_clean:
+                    ok_stripped = _validate_candidate(f"{core_clean}{suffix}", require_h1_match=require_h1)
+                    if ok_stripped:
+                        return ok_stripped
+                    for dist_word in short_mod_words:
+                        if dist_word.lower() not in core_clean.lower():
+                            ok_nt_mod = _validate_candidate(f"{core_clean} {dist_word}{suffix}", require_h1_match=require_h1)
+                            if ok_nt_mod:
+                                return ok_nt_mod
+                    ok_norm_nt = _validate_candidate(
+                        _normalize_title_50_60(core_clean, brand=brand, tenant_id=tenant_norm, secondary_modifier="non_tool"),
+                        require_h1_match=require_h1,
+                    )
+                    if ok_norm_nt:
+                        return ok_norm_nt
+            if core and re.search(r"\bCalculator\b", core, re.IGNORECASE):
+                for alt_word in alt_nouns:
+                    if alt_word.lower() in core.lower():
+                        continue
+                    swapped = re.sub(r"\bCalculators?\b", alt_word, core, count=1, flags=re.IGNORECASE)
+                    if is_non_tool:
+                        swapped = _strip_non_tool_calc_words(swapped)
+                    ok_swap = _validate_candidate(f"{swapped}{suffix}", require_h1_match=require_h1)
+                    if ok_swap:
+                        return ok_swap
 
-    if fallback_in_range:
-        return fallback_in_range
+        for short_core in _build_prefix_seeds_from_tokens(core_tokens_no_calc):
+            if not short_core:
+                continue
+            if is_non_tool:
+                ok_nt_direct = _validate_candidate(f"{short_core}{suffix}", require_h1_match=require_h1)
+                if ok_nt_direct:
+                    return ok_nt_direct
+                ok_nt_norm = _validate_candidate(
+                    _normalize_title_50_60(short_core, brand=brand, tenant_id=tenant_norm, secondary_modifier="non_tool"),
+                    require_h1_match=require_h1,
+                )
+                if ok_nt_norm:
+                    return ok_nt_norm
+            for dist_word in short_mod_words:
+                if dist_word.lower() in short_core.lower():
+                    continue
+                ok_direct = _validate_candidate(f"{short_core} {dist_word}{suffix}", require_h1_match=require_h1)
+                if ok_direct:
+                    return ok_direct
+                if not is_non_tool:
+                    norm_mod = _normalize_title_50_60(
+                        short_core,
+                        brand=brand,
+                        tenant_id=tenant_norm,
+                        secondary_modifier=dist_word,
+                    )
+                    ok_mod = _validate_candidate(norm_mod, require_h1_match=require_h1)
+                    if ok_mod:
+                        return ok_mod
+        return None
 
-    base_fallback = " ".join(core_tokens_no_calc[:4]) or "Statutory Tax"
-    for tag in ("Reference", "Statutory Guide", "Rate Schedule", "Schedule", "Guide"):
+    if not is_non_tool:
+        ok_matched_alt = _run_alt_noun_and_short_core(require_h1=True)
+        if ok_matched_alt:
+            return ok_matched_alt
+        if preserve_calculator and fallback_matched_calc:
+            return fallback_matched_calc
+        if fallback_matched:
+            return fallback_matched
+
+    # Last-resort relaxed pass (non-tool pages or pathological H1s where no _titles_match candidate existed)
+    if preserve_calculator:
+        for cand in calc_candidates:
+            ok_c = _validate_candidate(cand, min_l=50, max_l=60, require_calc=True, require_h1_match=False)
+            if ok_c:
+                return ok_c
+    ok_relaxed_alt = _run_alt_noun_and_short_core(require_h1=False)
+    if ok_relaxed_alt:
+        return ok_relaxed_alt
+
+    if fallback_any:
+        return fallback_any
+
+    base_fallback = " ".join(core_tokens_no_calc[:4]) or ("Statutory Standards" if is_non_tool else "Statutory Tax")
+    if is_non_tool:
+        base_fallback = _strip_non_tool_calc_words(base_fallback) or "Statutory Standards"
+    fallback_tags = (
+        ("Overview", "Standards", "Reference", "Guide", "Schedule")
+        if is_non_tool
+        else ("Calculator", "Reference", "Statutory Guide", "Rate Schedule", "Schedule", "Guide")
+    )
+    for tag in fallback_tags:
         cand_fb = _validate_candidate(
             f"{base_fallback} {tag}{suffix}",
             min_l=ORGANIC_SEARCH_TITLE_MIN_CHARS,
             max_l=ORGANIC_SEARCH_TITLE_MAX_CHARS,
+            require_h1_match=False,
         )
         if cand_fb:
             return cand_fb
-    return _normalize_title_50_60(f"{base_fallback} Reference", brand=brand, tenant_id=tenant_norm)
+    last_tag = "Standards" if is_non_tool else ("Calculator" if preserve_calculator else "Reference")
+    return _normalize_title_50_60(
+        f"{base_fallback} {last_tag}",
+        brand=brand,
+        tenant_id=tenant_norm,
+        secondary_modifier="non_tool" if is_non_tool else None,
+    )
 
 
 def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any]) -> str:

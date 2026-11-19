@@ -2730,22 +2730,81 @@ def test_serp_svg_breakdown_labels_stacked_without_overlap() -> None:
         assert_no_forbidden_dashes(html, context=f"serp svg {slug}")
 
 
+def _seed_verifier_endpoints_for_relevance_gate(
+    dist_dir: Path,
+    canonical_urls: List[str],
+) -> None:
+    """Seeds minimal machine endpoints and manifests so MasterSEOVerifier relevance checks are non-vacuous."""
+    manifests_dir = dist_dir / "manifests"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    (manifests_dir / "irs-2027-tax-brackets.json").write_text(
+        json.dumps(
+            {
+                "slug": "irs-2027-tax-brackets",
+                "formula": "federal_tax + state_tax",
+                "inputs": ["income", "filing_status", "state"],
+                "sample_calculation": {"income": 73035, "total_tax": 7637},
+            }
+        ),
+        encoding="utf-8",
+    )
+    url_tags = "\n".join(f"  <url><loc>{u}</loc></url>" for u in canonical_urls)
+    sitemap_xml = f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{url_tags}\n</urlset>\n'
+    for sm_name in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml"):
+        (dist_dir / sm_name).write_text(sitemap_xml, encoding="utf-8")
+    (dist_dir / "feed.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0"><channel><title>ProfitHelm</title>'
+        '<link>https://profithelm.com/</link><description>Tax tools</description>'
+        '<language>en-US</language></channel></rss>\n',
+        encoding="utf-8",
+    )
+    (dist_dir / "llms.txt").write_text("# ProfitHelm\n- https://profithelm.com/tools/\n", encoding="utf-8")
+    (dist_dir / "llms-full.txt").write_text("# ProfitHelm Full\n- https://profithelm.com/tools/\n", encoding="utf-8")
+    (dist_dir / "robots.txt").write_text("User-agent: *\nAllow: /\nSitemap: https://profithelm.com/sitemap.xml\n", encoding="utf-8")
+
+
+def _profithelm_calc_leaf_head_term_guard(rel: str, p: Path, parser: Any) -> str | None:
+    """Mirrors profithelm.seo_verifier._profithelm_calculation_leaf Search Intent Match rule."""
+    is_state_tax_leaf = "/irs-2027-tax-brackets/" in rel and p.parent.name != "irs-2027-tax-brackets"
+    is_vehicle_leaf = "/section-179-calculator/" in rel and p.parent.name != "section-179-calculator"
+    if is_state_tax_leaf or is_vehicle_leaf:
+        if "calculator" not in parser.title.lower():
+            return f"{rel}: Title missing 'Calculator' head term ('{parser.title}')"
+    elif rel.startswith("tools/") and rel != "tools/index.html":
+        if not parser.has_calculator:
+            return f"{rel}: Missing interactive calculator controls or calculation container"
+    return None
+
+
 def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_titles(
     tmp_path: Path,
 ) -> None:
     """
     Ensures rollback_degraded_overlay_from_html and _resolve_non_colliding_baseline_title never
     no-op when baseline_title is None and raw_h1 normalizes equal to rolled_back_title_rewrite
-    (long statutory H1s, HTML entities like &amp;, and (0% State Tax) H1s), and guarantees
-    verify_cohort_reflection_contract passes with [50, 60] char non-colliding titles.
+    (long statutory H1s, HTML entities like &amp;, and (0% State Tax) H1s), preserve 'Calculator'
+    in rolled-back baseline titles across NC/SC/MT/VT/HI/TX so MasterSEOVerifier Search Intent
+    Match passes with 0 gaps, and guarantee verify_cohort_reflection_contract passes.
     """
     import html as html_lib
     import re
     import pseofactory.gsc_remediation as gsc_mod
     from pseofactory.audit import _titles_match
-    from pseofactory.verifier import verify_cohort_reflection_contract
+    from pseofactory.verifier import MasterSEOVerifier, verify_cohort_reflection_contract
 
-    # 1. End-to-end HTML rollback + verify_cohort_reflection_contract on multi-state cohort
+    state_codes = {
+        "north-carolina": "US-NC",
+        "south-carolina": "US-SC",
+        "montana": "US-MT",
+        "vermont": "US-VT",
+        "hawaii": "US-HI",
+        "texas": "US-TX",
+        "california": "US-CA",
+        "alaska": "US-AK",
+    }
+
+    # 1. End-to-end HTML rollback + MasterSEOVerifier + verify_cohort_reflection_contract on multi-state cohort
     cases = [
         (
             "north-carolina",
@@ -2760,7 +2819,17 @@ def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_t
         (
             "montana",
             "Montana 2027 Tax Brackets &amp; Statutory Rate Schedules",
-            "Montana 2027 Tax Brackets Calculator | ProfitHelm",
+            "Montana 2027 Tax Brackets Calculator Schedule | ProfitHelm",
+        ),
+        (
+            "vermont",
+            "Vermont 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Vermont 2027 Tax Brackets Calculator Schedule | ProfitHelm",
+        ),
+        (
+            "hawaii",
+            "Hawaii 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Hawaii 2027 Tax Brackets Calculator (IRC Rules) | ProfitHelm",
         ),
         (
             "texas",
@@ -2771,21 +2840,54 @@ def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_t
     dist_dir = tmp_path / "dist"
     ov_dir = tmp_path / ".agy" / "overlays"
     ov_dir.mkdir(parents=True, exist_ok=True)
+    seeded_urls: List[str] = []
     for slug, raw_h1, rolled_title in cases:
         page_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / slug
         page_dir.mkdir(parents=True, exist_ok=True)
         canon = f"https://profithelm.com/tools/irs-2027-tax-brackets/{slug}/"
+        seeded_urls.append(canon)
         state_name = html_lib.unescape(raw_h1).split(" 2027 ")[0]
         tax_note = "0% state individual income tax" if slug == "texas" else "state income tax brackets"
+        ld_graph = json.dumps(
+            {
+                "@context": "https://schema.org",
+                "@graph": [
+                    {
+                        "@type": "SoftwareApplication",
+                        "name": html_lib.unescape(raw_h1),
+                        "applicationCategory": "FinanceApplication",
+                        "operatingSystem": "Any",
+                        "spatialCoverage": {"@type": "State", "name": state_name},
+                    },
+                    {
+                        "@type": "BreadcrumbList",
+                        "itemListElement": [
+                            {"@type": "ListItem", "position": 1, "name": "Tools", "item": "https://profithelm.com/tools/"},
+                            {"@type": "ListItem", "position": 2, "name": state_name, "item": canon},
+                        ],
+                    },
+                ],
+            }
+        )
         raw_html = (
             "<!DOCTYPE html><html lang=\"en\"><head>"
+            "<meta http-equiv=\"content-language\" content=\"en-US\">"
+            f"<meta name=\"geo.region\" content=\"{state_codes[slug]}\">"
             f"<title>{html_lib.escape(rolled_title)}</title>"
             f"<meta name=\"description\" content=\"Calculate 2027 {state_name} federal and {tax_note} scenarios for single filers under IRC Section 1(j).\">"
             f"<meta property=\"og:title\" content=\"{html_lib.escape(rolled_title)}\">"
+            f"<meta property=\"og:url\" content=\"{canon}\">"
             f"<link rel=\"canonical\" href=\"{canon}\">"
+            f"<link rel=\"alternate\" hreflang=\"en-US\" href=\"{canon}\">"
+            f"<link rel=\"alternate\" hreflang=\"x-default\" href=\"{canon}\">"
+            f"<script type=\"application/ld+json\">{ld_graph}</script>"
             "</head><body><main>"
             f"<h1>{raw_h1}</h1>"
             f"<aside class=\"quick-answer\"><p>{state_name} benchmark analysis covers {tax_note} on a $73,035 single-filer wage with $7,637 federal tax, 10.5% effective rate, and $65,398 take-home pay under IRC Section 1(j) permanent 2027 brackets from 10% to 37% and standard deduction rules for compliant household modeling.</p></aside>"
+            "<h2>2027 Federal and State Tax Bracket Schedule</h2>"
+            "<h2>Statutory Filing Assumptions and Standard Deduction</h2>"
+            "<div class=\"calculator-card\"><form><label for=\"wage\">Wage</label><input id=\"wage\" type=\"number\" value=\"73035\"></form></div>"
+            "<nav><a href=\"/tools/\">Tools</a><a href=\"/tools/irs-2027-tax-brackets/\">Brackets</a><a href=\"/methodology/\">Methodology</a></nav>"
             "</main></body></html>"
         )
         overlay = {
@@ -2804,9 +2906,81 @@ def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_t
         assert m_t is not None
         new_title = html_lib.unescape(m_t.group(1)).strip()
         assert new_title != rolled_title, f"{slug} stayed rolled back: {new_title!r}"
+        assert "calculator" in new_title.lower(), f"{slug} baseline title missing 'Calculator': {new_title!r}"
         assert 50 <= len(new_title) <= 60, f"{slug} title length out of [50, 60]: {len(new_title)} ({new_title!r})"
         assert "&amp;amp;" not in fixed_html
         assert_no_forbidden_dashes(fixed_html, context=f"rolled back html {slug}")
+
+    # Seed non-colliding sibling pages + endpoints so check_content_relevance_gate is non-vacuous (>=10 pages, >=5 endpoints)
+    for rel_extra, title_extra, h1_extra, code_extra in (
+        ("index.html", "Statutory Tax & Treasury Calculator Hub | ProfitHelm", "Statutory Tax and Treasury Calculators", None),
+        ("tools/index.html", "Financial & Statutory Tools Directory | ProfitHelm", "Financial and Statutory Tools Directory", None),
+        ("tools/irs-2027-tax-brackets/index.html", "IRS 2027 Tax Brackets & Sunset Calculator | ProfitHelm", "IRS 2027 Tax Brackets & Sunset Calculator", None),
+        ("tools/irs-2027-tax-brackets/california/index.html", "California 2027 Tax Brackets Calculator | ProfitHelm", "California 2027 Tax Brackets & Statutory Rate Schedules", "US-CA"),
+        ("tools/irs-2027-tax-brackets/alaska/index.html", "Alaska 2027 Tax Calculator (0% State Tax) | ProfitHelm", "Alaska 2027 Tax Brackets & Statutory Rate Schedules", "US-AK"),
+    ):
+        ep = dist_dir / rel_extra
+        ep.parent.mkdir(parents=True, exist_ok=True)
+        e_slug = rel_extra.replace("/index.html", "").replace("index.html", "").strip("/")
+        e_canon = f"https://profithelm.com/{e_slug}/" if e_slug else "https://profithelm.com/"
+        seeded_urls.append(e_canon)
+        geo_meta = f"<meta name=\"geo.region\" content=\"{code_extra}\">" if code_extra else ""
+        st_name = h1_extra.split(" 2027 ")[0] if " 2027 " in h1_extra else "United States"
+        ld_extra = json.dumps(
+            {
+                "@context": "https://schema.org",
+                "@graph": [
+                    {
+                        "@type": "SoftwareApplication",
+                        "name": h1_extra,
+                        "applicationCategory": "FinanceApplication",
+                        "operatingSystem": "Any",
+                        "spatialCoverage": {"@type": "Place", "name": st_name},
+                    },
+                    {
+                        "@type": "BreadcrumbList",
+                        "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": e_canon}],
+                    },
+                ],
+            }
+        )
+        ep.write_text(
+            "<!DOCTYPE html><html lang=\"en\"><head>"
+            "<meta http-equiv=\"content-language\" content=\"en-US\">"
+            f"{geo_meta}<title>{html_lib.escape(title_extra)}</title>"
+            "<meta name=\"description\" content=\"Deterministic federal and state 2027 income tax modeling under IRC Section 1(j) statutory schedules.\">"
+            f"<meta property=\"og:url\" content=\"{e_canon}\">"
+            f"<link rel=\"canonical\" href=\"{e_canon}\">"
+            f"<link rel=\"alternate\" hreflang=\"en-US\" href=\"{e_canon}\">"
+            f"<link rel=\"alternate\" hreflang=\"x-default\" href=\"{e_canon}\">"
+            f"<script type=\"application/ld+json\">{ld_extra}</script>"
+            "</head><body><main>"
+            f"<h1>{html_lib.escape(h1_extra)}</h1>"
+            "<aside class=\"quick-answer\"><p>Statutory benchmark modeling evaluates 2027 federal income tax brackets from 10% to 37%, state individual tax liabilities, and net take-home pay on a $73,035 median wage benchmark under IRC Section 1(j) permanent standard deduction and marginal rate thresholds for households.</p></aside>"
+            "<h2>2027 Federal and State Tax Bracket Schedule</h2>"
+            "<h2>Statutory Filing Assumptions and Standard Deduction</h2>"
+            "<div class=\"calculator-card\"><form><label for=\"wage\">Wage</label><input id=\"wage\" type=\"number\" value=\"73035\"></form></div>"
+            "<nav><a href=\"/tools/\">Tools</a><a href=\"/tools/irs-2027-tax-brackets/\">Brackets</a><a href=\"/methodology/\">Methodology</a></nav>"
+            "</main></body></html>",
+            encoding="utf-8",
+        )
+    _seed_verifier_endpoints_for_relevance_gate(dist_dir, seeded_urls)
+
+    verifier = MasterSEOVerifier(
+        dist_dir=dist_dir,
+        domain="profithelm.com",
+        brand_name="ProfitHelm",
+        min_manifests=1,
+        is_calculation_leaf=_profithelm_calc_leaf_head_term_guard,
+        allow_mutations=False,
+    )
+    rel_gate = verifier.check_content_relevance_gate(dist_dir)
+    assert rel_gate["status"] == "PASS", f"Content relevance gate failed: {rel_gate}"
+    search_intent_finding = next(f for f in rel_gate["findings"] if f["factor"] == "Search Intent Match")
+    assert search_intent_finding["gap_count"] == 0, f"Search Intent Match gaps: {search_intent_finding}"
+    audit_res = verifier.audit_seo_checklist(dist_dir=dist_dir, enforce_relevance=True)
+    assert audit_res["content_relevance"]["status"] == "PASS"
+    assert not any("Search Intent Match" in iss for iss in audit_res["issues"]), audit_res["issues"]
 
     cohort_report = verify_cohort_reflection_contract(tmp_path, dist_dir=dist_dir)
     assert cohort_report["passed"] is True, f"Cohort reflection failed: {cohort_report}"
@@ -2816,14 +2990,27 @@ def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_t
     resolve_fn = getattr(gsc_mod, "_resolve_non_colliding_baseline_title", None)
     assert callable(resolve_fn), "_resolve_non_colliding_baseline_title helper missing"
 
+    for st_h1, st_rolled in (
+        ("North Carolina 2027 Tax Brackets & Statutory Rate Schedules", "North Carolina 2027 Tax Brackets Calculator | ProfitHelm"),
+        ("South Carolina 2027 Tax Brackets & Statutory Rate Schedules", "South Carolina 2027 Tax Brackets Calculator | ProfitHelm"),
+        ("Montana 2027 Tax Brackets & Statutory Rate Schedules", "Montana 2027 Tax Brackets Calculator Schedule | ProfitHelm"),
+        ("Vermont 2027 Tax Brackets & Statutory Rate Schedules", "Vermont 2027 Tax Brackets Calculator Schedule | ProfitHelm"),
+        ("Hawaii 2027 Tax Brackets & Statutory Rate Schedules", "Hawaii 2027 Tax Brackets & Statutory Calculator | ProfitHelm"),
+        ("Hawaii 2027 Tax Brackets & Statutory Rate Schedules", "Hawaii 2027 Tax Brackets Calculator (IRC Rules) | ProfitHelm"),
+        ("Texas 2027 Tax Brackets & Statutory Rate Schedules", "Texas 2027 Tax Brackets & Statutory Calculator | ProfitHelm"),
+        ("Ford F-150 Lightning Pro / XLT Section 179 Tax Calculator", "Ford F-150 Lightning Pro / XLT Calculator | ProfitHelm"),
+        ("Porsche Cayenne Base / E-Hybrid Section 179 Tax Calculator", "Porsche Cayenne Base / E-Hybrid Calculator | ProfitHelm"),
+    ):
+        resolved_title = resolve_fn(st_h1, st_rolled, "ProfitHelm", "profithelm")
+        assert resolved_title != st_rolled
+        assert "calculator" in resolved_title.lower(), f"Missing 'Calculator': {resolved_title!r}"
+        assert 50 <= len(resolved_title) <= 60, f"Length out of [50, 60]: {resolved_title!r}"
+        assert _titles_match(resolved_title, st_h1), f"_titles_match failed: {resolved_title!r} vs {st_h1!r}"
+        assert_no_forbidden_dashes(resolved_title, context=f"rollback helper {st_h1}")
+
     nc_h1 = "North Carolina 2027 Tax Brackets & Statutory Rate Schedules"
     nc_rolled = "North Carolina 2027 Tax Brackets Calculator | ProfitHelm"
     nc_resolved = resolve_fn(nc_h1, nc_rolled, "ProfitHelm", "profithelm")
-    assert nc_resolved != nc_rolled
-    assert 50 <= len(nc_resolved) <= 60
-    assert _titles_match(nc_resolved, nc_h1)
-    assert_no_forbidden_dashes(nc_resolved, context="nc rollback helper")
-
     nc_colliding = resolve_fn(
         nc_h1,
         nc_rolled,
@@ -2832,22 +3019,270 @@ def test_rollback_degraded_overlay_resolves_non_colliding_long_h1_and_zero_tax_t
         existing_titles={nc_resolved},
     )
     assert nc_colliding not in {nc_rolled, nc_resolved}
+    assert "calculator" in nc_colliding.lower()
     assert 50 <= len(nc_colliding) <= 60
+    assert _titles_match(nc_colliding, nc_h1)
 
     tx_short_h1 = "Texas 2027 Tax Calculator (0% State Tax)"
     tx_rolled = "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm"
     tx_short_resolved = resolve_fn(tx_short_h1, tx_rolled, "ProfitHelm", "profithelm")
     assert tx_short_resolved != tx_rolled
+    assert "calculator" in tx_short_resolved.lower()
     assert 50 <= len(tx_short_resolved) <= 60
     assert "(0% State Tax)" in tx_short_resolved
     assert _titles_match(tx_short_resolved, tx_short_h1)
 
     no_calc_h1 = "State Corporate Franchise Schedule & Filing Guidance"
     no_calc_rolled = "State Corporate Franchise Schedule Guidance | ProfitHelm"
-    no_calc_resolved = resolve_fn(no_calc_h1, no_calc_rolled, "ProfitHelm", "profithelm")
+    no_calc_resolved = resolve_fn(no_calc_h1, no_calc_rolled, "ProfitHelm", "profithelm", is_non_tool=True)
     assert no_calc_resolved != no_calc_rolled
+    assert "calculator" not in no_calc_resolved.lower(), f"is_non_tool leaked Calculator: {no_calc_resolved!r}"
     assert 30 <= len(no_calc_resolved) <= 70
     assert_no_forbidden_dashes(no_calc_resolved, context="no_calc rollback helper")
+
+    # 3. Strict is_non_tool=True governance protection (even when rolled_title or H1 contains 'Calculator')
+    for nt_brand, nt_tid, nt_h1, nt_rolled in (
+        ("ProfitHelm", "profithelm", "Corporate Background and Statutory Governance Standards", "About ProfitHelm | ProfitHelm"),
+        ("ProfitHelm", "profithelm", "Privacy Policy & Zero-Telemetry Data Governance", "Privacy Policy Zero-Telemetry Calculator | ProfitHelm"),
+        ("GainHelm", "gainhelm", "Quantitative Research Methodology & Verification Standards Calculator", "Quantitative Research Methodology Calculator | GainHelm"),
+        ("ProfitHelm", "profithelm", "Legal Disclaimers & Statutory Compliance Notice", "Legal Disclaimers Calculator | ProfitHelm"),
+    ):
+        nt_out = resolve_fn(nt_h1, nt_rolled, nt_brand, nt_tid, is_non_tool=True)
+        assert nt_out != nt_rolled
+        assert "calculator" not in nt_out.lower(), f"Non-tool leaked 'Calculator': {nt_out!r}"
+        assert 50 <= len(nt_out) <= 60, f"Non-tool title out of [50, 60]: {nt_out!r}"
+        assert_no_forbidden_dashes(nt_out, context=f"non_tool {nt_tid}")
+        # Verify _normalize_title_50_60(..., secondary_modifier="non_tool") also never injects 'Calculator'
+        norm_nt = gsc_mod._normalize_title_50_60(nt_h1, nt_brand, nt_tid, secondary_modifier="non_tool")
+        assert "calculator" not in norm_nt.lower(), f"_normalize_title_50_60 non_tool leaked 'Calculator': {norm_nt!r}"
+
+    norm_nt_plural = gsc_mod._normalize_title_50_60(
+        "Methodology for Quantitative Calculators",
+        "ProfitHelm",
+        "profithelm",
+        secondary_modifier="non_tool",
+    )
+    assert "calculator" not in norm_nt_plural.lower(), f"non_tool plural 'Calculators' leaked: {norm_nt_plural!r}"
+    assert 50 <= len(norm_nt_plural) <= 60
+
+    # 4. Multi-tenant complex tool rollback slugs (11 Round-2 phrase/anchor regressions + TruthReconciliationEngine)
+    from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+    from pseofactory.tenant_facts import TruthReconciliationEngine
+
+    complex_cases = (
+        (
+            "lienbond",
+            "LienBond",
+            "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+            "Davis-Bacon Prevailing Wage and WH-347 Fringe Benefit Rate Calculator",
+            "Davis-Bacon Prevailing Wage and WH-347 Calculator | LienBond",
+            ("bond cost", "surety"),
+            ("prevailing wage",),
+            (),
+        ),
+        (
+            "lienbond",
+            "LienBond",
+            "experience-modification-rate-emr-workers-comp-penalty-calculator",
+            "Experience Modification Rate (EMR) Workers Comp Penalty Calculator",
+            "Experience Modification Rate EMR Calculator | LienBond",
+            ("bond cost", "surety"),
+            ("workers comp",),
+            (),
+        ),
+        (
+            "profithelm",
+            "ProfitHelm",
+            "section-199a-qbi-phaseout-wage-limit-calculator",
+            "Section 199A QBI Phaseout Wage Limit Calculator Engine",
+            "Section 199A QBI Phaseout Wage Limit Calculator | ProfitHelm",
+            ("bond cost", "audit cost"),
+            ("section 199a",),
+            (),
+        ),
+        (
+            "gainhelm",
+            "GainHelm",
+            "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",
+            "SEC Form 8-K Item 1.05 Cyber Materiality Cost",
+            "SEC Form 8-K Item 1.05 Cyber Calculator | GainHelm",
+            ("bond cost", "surety"),
+            ("form 8-k",),
+            (),
+        ),
+        (
+            "lienbond",
+            "LienBond",
+            "miller-act-performance-and-payment-bond-premium-calculator",
+            "Miller Act Performance and Payment Bond Premium Calculator",
+            "Miller Act Performance And Payment Calculator | LienBond",
+            ("bond cost", "surety"),
+            ("payment",),
+            (),
+        ),
+        (
+            "lienbond",
+            "LienBond",
+            "california-texas-florida-preliminary-notice-deadline-calculator",
+            "California, Texas and Florida Preliminary Notice Deadline Calculator",
+            "California Texas Florida Calculator (Surety Rate) | LienBond",
+            ("bond cost", "surety", "california, texas and florida calculator"),
+            ("preliminary",),
+            ("notice", "deadline"),
+        ),
+        (
+            "profithelm",
+            "ProfitHelm",
+            "invoice-factoring-vs-business-line-of-credit-calculator",
+            "Invoice Factoring vs Line of Credit Calculator Engine",
+            "Invoice Factoring vs Business Line Calculator | ProfitHelm",
+            ("bond cost", "audit cost"),
+            ("line of credit",),
+            (),
+        ),
+        (
+            "profithelm",
+            "ProfitHelm",
+            "section-1031-calculator/district-of-columbia",
+            "District of Columbia Section 1031 Tax Deferral Calculator",
+            "District of Columbia Section 1031 Calculator | ProfitHelm",
+            ("bond cost", "audit cost", "district columbia"),
+            (),
+            ("district of columbia", "dc"),
+        ),
+        (
+            "profithelm",
+            "ProfitHelm",
+            "workers-comp-and-payroll-burden-calculator",
+            "Workers Comp & Employer Payroll Tax Calculator Engine",
+            "Workers Comp And Payroll Burden Calculator 2026 | ProfitHelm",
+            ("bond cost", "audit cost"),
+            ("workers comp",),
+            (),
+        ),
+        (
+            "profithelm",
+            "ProfitHelm",
+            "treasury-yield-calculator",
+            "Treasury Bill Yield vs HYSA Tax-Equivalent Yield Calculator",
+            "Treasury Bill Yield vs HYSA Calculator | ProfitHelm",
+            ("bond cost", "audit cost", "yield vs yield"),
+            ("treasury bill yield vs hysa",),
+            (),
+        ),
+        (
+            "lienbond",
+            "LienBond",
+            "contractor-lien-release-statutory-matrix-by-state",
+            "50-State Contractor Mechanics Lien Release Statutory Matrix",
+            "50-State Contractor Mechanics Lien Calculator | LienBond",
+            ("bond cost", "surety"),
+            (),
+            (),
+        ),
+        (
+            "lienbond",
+            "LienBond",
+            "contractor-overhead-and-profit-markup-vs-margin-calculator",
+            "Contractor Overhead and Profit Markup vs Margin Calculator",
+            "Contractor Overhead And Profit Markup Calculator | LienBond",
+            ("bond cost", "surety"),
+            (),
+            (),
+        ),
+        (
+            "profithelm",
+            "ProfitHelm",
+            "section-280g-golden-parachute-excise-tax-safe-harbor-calculator",
+            "IRC Section 280G Golden Parachute Excise Tax Calculator",
+            "Section 280G Golden Parachute Excise Calculator | ProfitHelm",
+            ("bond cost", "audit cost"),
+            ("golden parachute",),
+            (),
+        ),
+    )
+    for mt_tid, mt_brand, mt_slug, mt_h1, mt_rolled, forbidden_words, req_all, req_any in complex_cases:
+        k0 = resolve_fn(mt_h1, mt_rolled, mt_brand, mt_tid)
+        k1 = resolve_fn(mt_h1, mt_rolled, mt_brand, mt_tid, existing_titles={k0})
+        k2 = resolve_fn(mt_h1, mt_rolled, mt_brand, mt_tid, existing_titles={k0, k1})
+        assert k1 != k0 and k2 not in {k0, k1}
+        for tag, cand_t in (("k=0", k0), ("k=1", k1), ("k=2", k2)):
+            low_t = cand_t.lower()
+            assert cand_t != mt_rolled, f"{mt_slug} ({tag}) collided with rolled: {cand_t!r}"
+            assert 50 <= len(cand_t) <= 60, f"{mt_slug} ({tag}) length out of [50, 60]: {cand_t!r}"
+            if tag in ("k=0", "k=1"):
+                assert "calculator" in low_t, f"{mt_slug} ({tag}) missing 'Calculator': {cand_t!r}"
+            assert _titles_match(cand_t, mt_h1), f"{mt_slug} ({tag}) failed _titles_match: {cand_t!r} vs {mt_h1!r}"
+            for fw in forbidden_words:
+                assert fw not in low_t, f"{mt_slug} ({tag}) leaked/split term {fw!r}: {cand_t!r}"
+            if tag in ("k=0", "k=1") or mt_slug in (
+                "section-1031-calculator/district-of-columbia",
+                "workers-comp-and-payroll-burden-calculator",
+                "treasury-yield-calculator",
+            ):
+                for rp in req_all:
+                    assert rp in low_t, f"{mt_slug} ({tag}) missing required phrase {rp!r}: {cand_t!r}"
+                if req_any:
+                    assert any(opt in low_t for opt in req_any), f"{mt_slug} ({tag}) missing one of {req_any!r}: {cand_t!r}"
+        assert not k0.lower().startswith("199a"), f"199A missing Section prefix: {k0!r}"
+
+        dom = f"{mt_tid}.com"
+        raw_mt_html = (
+            f"<!DOCTYPE html><html lang='en'><head><title>{html_lib.escape(mt_rolled)}</title>"
+            f"<link rel='canonical' href='https://{dom}/tools/{mt_slug}/'></head>"
+            f"<body><main><h1>{html_lib.escape(mt_h1)}</h1></main></body></html>"
+        )
+        rb_mt_html = rollback_degraded_overlay_from_html(
+            raw_mt_html,
+            {
+                "tenant_id": mt_tid,
+                "slug": mt_slug,
+                "status": "DEGRADED_ROLLED_BACK",
+                "baseline_title": None,
+                "rolled_back_title_rewrite": mt_rolled,
+            },
+        )
+        rec_mt_html, rec_repairs = TruthReconciliationEngine.reconcile_html_truth(
+            rb_mt_html,
+            tenant=mt_tid,
+            rel_path=f"tools/{mt_slug}/index.html",
+            slug=mt_slug,
+        )
+        t_after_rb = html_lib.unescape(re.search(r"<title>(.*?)</title>", rb_mt_html, re.S).group(1)).strip()
+        t_after_rec = html_lib.unescape(re.search(r"<title>(.*?)</title>", rec_mt_html, re.S).group(1)).strip()
+        assert t_after_rb != mt_rolled
+        assert t_after_rec == t_after_rb, f"{mt_slug} TruthReconciliationEngine ping-ponged title: {t_after_rb!r} -> {t_after_rec!r}"
+        assert "title_aligned_with_h1" not in rec_repairs
+
+    # 5. Numeric thousands comma & '6,000+ lb GVWR' phrase preservation across PROFITHELM_SECTION_179_VEHICLES
+    for v_h1, v_rolled in (
+        ("Land Rover Defender 110 6,000+ Lb GVWR Section 179 Tax Calculator", "Land Rover Defender 110 Section 179 Calculator | ProfitHelm"),
+        ("Tesla Cybertruck 6,000+ Lb GVWR Section 179 Tax Calculator", "Tesla Cybertruck Dual Motor AWD Calculator | ProfitHelm"),
+    ):
+        v_k0 = resolve_fn(v_h1, v_rolled, "ProfitHelm", "profithelm")
+        v_k1 = resolve_fn(v_h1, v_rolled, "ProfitHelm", "profithelm", existing_titles={v_k0})
+        if v_h1.startswith("Tesla Cybertruck"):
+            assert "6,000+" in v_k0, f"Expected '6,000+' preserved in {v_k0!r}"
+        for v_cand in (v_k0, v_k1):
+            low_vc = v_cand.lower()
+            assert "6 000+" not in v_cand and "6 000" not in v_cand, f"Split thousands comma in {v_cand!r}"
+            if "lb" in low_vc or "gvwr" in low_vc:
+                assert "6,000+" in v_cand, f"Orphaned 'lb/gvwr' without '6,000+' in {v_cand!r}"
+            assert "calculator" in low_vc
+            assert 50 <= len(v_cand) <= 60
+            assert _titles_match(v_cand, v_h1)
+
+    for v_slug, v_h1 in PROFITHELM_SECTION_179_VEHICLES:
+        v_used: Set[str] = set()
+        for k_idx in range(4):
+            v_res = resolve_fn(v_h1, "", "ProfitHelm", "profithelm", existing_titles=v_used)
+            v_low = v_res.lower()
+            assert 50 <= len(v_res) <= 60, f"{v_slug} k={k_idx} len out of [50,60]: {v_res!r}"
+            assert "calculator" in v_low and _titles_match(v_res, v_h1)
+            assert "6 000" not in v_res
+            if re.search(r"\b\d[\d,]*\+", v_h1) and ("lb" in v_low or "gvwr" in v_low):
+                assert "6,000+" in v_res, f"{v_slug} k={k_idx} orphaned 'lb/gvwr' without '6,000+': {v_res!r}"
+            v_used.add(v_res.lower())
 
 
 def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
@@ -2855,35 +3290,58 @@ def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
 ) -> None:
     """
     Verifies RetroReflectionEngine.retrofit_estate enforces degraded rollback on long-H1 and
-    0% State Tax pages in one idempotent pass (Pass 2 pages_retrofitted == 0), preserves
-    Allow-Rolled-Back parity in _needs_page_structure_geo_normalization, does not inject FTC
-    banners on governance pages merely containing <code>/r/</code> prose, and accepts Section 179
-    vehicle overlay titles vs trim H1s in _titles_match.
+    0% State Tax pages (NC, SC, MT, VT, HI, TX) preserving 'Calculator' in one idempotent pass
+    (Pass 2 pages_retrofitted == 0), passes MasterSEOVerifier Search Intent Match with 0 gaps,
+    preserves Allow-Rolled-Back parity in _needs_page_structure_geo_normalization, does not
+    inject FTC banners on governance pages merely containing <code>/r/</code> prose, and
+    accepts Section 179 vehicle overlay titles vs trim H1s in _titles_match.
     """
     import html as html_lib
     import re
     from pseofactory.audit import _titles_match
     from pseofactory.maintenance import RetroReflectionEngine, _needs_page_structure_geo_normalization
-    from pseofactory.verifier import verify_cohort_reflection_contract
+    from pseofactory.verifier import MasterSEOVerifier, verify_cohort_reflection_contract
 
     dist_dir = tmp_path / "dist"
     ov_dir = tmp_path / ".agy" / "overlays"
     ov_dir.mkdir(parents=True, exist_ok=True)
     dist_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create Texas & North Carolina spoke pages with pre-fix rolled-back <title>
-    for slug, h1_text, rolled in [
+    # Create 6 DEGRADED_ROLLED_BACK state spoke pages (NC, SC, MT, VT, HI, TX) with pre-fix rolled-back <title>
+    rolled_cases = [
         (
             "north-carolina",
             "North Carolina 2027 Tax Brackets &amp; Statutory Rate Schedules",
             "North Carolina 2027 Tax Brackets Calculator | ProfitHelm",
         ),
         (
+            "south-carolina",
+            "South Carolina 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "South Carolina 2027 Tax Brackets Calculator | ProfitHelm",
+        ),
+        (
+            "montana",
+            "Montana 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Montana 2027 Tax Brackets Calculator Schedule | ProfitHelm",
+        ),
+        (
+            "vermont",
+            "Vermont 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Vermont 2027 Tax Brackets Calculator Schedule | ProfitHelm",
+        ),
+        (
+            "hawaii",
+            "Hawaii 2027 Tax Brackets &amp; Statutory Rate Schedules",
+            "Hawaii 2027 Tax Brackets &amp; Statutory Calculator | ProfitHelm",
+        ),
+        (
             "texas",
             "Texas 2027 Tax Brackets &amp; Statutory Rate Schedules",
             "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm",
         ),
-    ]:
+    ]
+    seeded_urls: List[str] = []
+    for slug, h1_text, rolled in rolled_cases:
         state_name = html_lib.unescape(h1_text).split(" 2027 ")[0]
         tax_clause = (
             "levies a 0% state individual income tax ($0 state tax)"
@@ -2891,12 +3349,17 @@ def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
             else "applies statutory state income tax brackets"
         )
         canon = f"https://profithelm.com/tools/irs-2027-tax-brackets/{slug}/"
+        seeded_urls.append(canon)
         raw_html = (
             "<!DOCTYPE html><html lang=\"en\"><head>"
+            "<meta http-equiv=\"content-language\" content=\"en-US\">"
             f"<title>{html_lib.escape(rolled)}</title>"
             f"<meta name=\"description\" content=\"Calculate 2027 {state_name} federal and state income tax liability under IRC Section 1(j) permanent brackets and standard deductions for single and joint filers.\">"
             f"<meta property=\"og:title\" content=\"{html_lib.escape(rolled)}\">"
+            f"<meta property=\"og:url\" content=\"{canon}\">"
             f"<link rel=\"canonical\" href=\"{canon}\">"
+            f"<link rel=\"alternate\" hreflang=\"en-US\" href=\"{canon}\">"
+            f"<link rel=\"alternate\" hreflang=\"x-default\" href=\"{canon}\">"
             "<script type=\"application/ld+json\">"
             + json.dumps(
                 {
@@ -2937,6 +3400,7 @@ def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
     # Governance page mentioning <code>/r/</code> prose only (no outbound href="/r/") + AboutPage JSON-LD
     disc_dir = dist_dir / "disclaimers"
     disc_dir.mkdir(parents=True, exist_ok=True)
+    seeded_urls.append("https://profithelm.com/disclaimers/")
     (disc_dir / "index.html").write_text(
         "<!DOCTYPE html><html lang=\"en\"><head>"
         "<title>Financial Disclaimers &amp; Disclosures | ProfitHelm</title>"
@@ -2952,10 +3416,14 @@ def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
     r1 = RetroReflectionEngine.retrofit_estate(dist_dir, "profithelm", canonical_base="https://profithelm.com")
     assert r1["status"] == "PASS"
 
+    for slug, _h1_text, rolled in rolled_cases:
+        st_html = (dist_dir / "tools" / "irs-2027-tax-brackets" / slug / "index.html").read_text(encoding="utf-8")
+        rolled_title_out = html_lib.unescape(re.search(r"<title>(.*?)</title>", st_html, re.S).group(1)).strip()
+        assert rolled_title_out != html_lib.unescape(rolled), f"{slug} stayed rolled back: {rolled_title_out!r}"
+        assert "calculator" in rolled_title_out.lower(), f"{slug} missing 'Calculator' head term: {rolled_title_out!r}"
+        assert 50 <= len(rolled_title_out) <= 60, f"{slug} out of [50, 60]: {rolled_title_out!r}"
+
     tx_html = (dist_dir / "tools" / "irs-2027-tax-brackets" / "texas" / "index.html").read_text(encoding="utf-8")
-    tx_title = html_lib.unescape(re.search(r"<title>(.*?)</title>", tx_html, re.S).group(1)).strip()
-    assert tx_title != "Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm"
-    assert 50 <= len(tx_title) <= 60
     assert (
         _needs_page_structure_geo_normalization(
             tx_html,
@@ -2975,6 +3443,62 @@ def test_retrofit_estate_degraded_rollback_zero_tax_and_prose_r_link_idempotent(
     r2 = RetroReflectionEngine.retrofit_estate(dist_dir, "profithelm", canonical_base="https://profithelm.com")
     assert r2["status"] == "PASS"
     assert r2["pages_retrofitted"] == 0, f"Pass 2 was not idempotent: {r2.get('retrofitted_paths')}"
+
+    # Seed supporting tool/hub/root pages + endpoints so MasterSEOVerifier runs non-vacuously (>=10 pages, >=5 endpoints)
+    for rel_extra, title_extra, h1_extra in (
+        ("index.html", "Statutory Tax and Treasury Calculator Hub | ProfitHelm", "Statutory Tax and Treasury Calculators"),
+        ("tools/index.html", "Financial and Statutory Tools Directory | ProfitHelm", "Financial and Statutory Tools Directory"),
+        ("tools/irs-2027-tax-brackets/index.html", "IRS 2027 Tax Brackets and Sunset Calculator | ProfitHelm", "IRS 2027 Tax Brackets and Sunset Calculator"),
+        ("tools/irs-2027-tax-brackets/california/index.html", "California 2027 Tax Brackets Calculator | ProfitHelm", "California 2027 Tax Brackets and Statutory Rate Schedules"),
+    ):
+        ep = dist_dir / rel_extra
+        ep.parent.mkdir(parents=True, exist_ok=True)
+        e_slug = rel_extra.replace("/index.html", "").replace("index.html", "").strip("/")
+        e_canon = f"https://profithelm.com/{e_slug}/" if e_slug else "https://profithelm.com/"
+        seeded_urls.append(e_canon)
+        ep.write_text(
+            "<!DOCTYPE html><html lang=\"en\"><head>"
+            "<meta http-equiv=\"content-language\" content=\"en-US\">"
+            f"<title>{html_lib.escape(title_extra)}</title>"
+            "<meta name=\"description\" content=\"Deterministic federal and state 2027 income tax modeling under IRC Section 1(j) statutory schedules.\">"
+            f"<meta property=\"og:url\" content=\"{e_canon}\">"
+            f"<link rel=\"canonical\" href=\"{e_canon}\">"
+            "<script type=\"application/ld+json\">"
+            + json.dumps(
+                {
+                    "@context": "https://schema.org",
+                    "@type": "SoftwareApplication",
+                    "name": h1_extra,
+                    "applicationCategory": "FinanceApplication",
+                    "operatingSystem": "Any",
+                    "inLanguage": "en-US",
+                    "datePublished": "2026-01-15",
+                    "dateModified": "2026-10-31",
+                }
+            )
+            + "</script>"
+            "</head><body><main>"
+            f"<section class=\"hero-section\"><h1>{html_lib.escape(h1_extra)}</h1></section>"
+            "<aside class=\"quick-answer\"><p>Statutory benchmark modeling evaluates 2027 federal income tax brackets from 10% to 37%, state individual tax liabilities, and net take-home pay on a $73,035 median wage benchmark under IRC Section 1(j) permanent standard deduction and marginal rate thresholds for households.</p></aside>"
+            "<div class=\"calculator-card\"><form><label for=\"wage\">Wage</label><input id=\"wage\" type=\"number\" value=\"73035\"></form></div>"
+            "</main></body></html>",
+            encoding="utf-8",
+        )
+    _seed_verifier_endpoints_for_relevance_gate(dist_dir, seeded_urls)
+
+    verifier = MasterSEOVerifier(
+        dist_dir=dist_dir,
+        domain="profithelm.com",
+        brand_name="ProfitHelm",
+        min_manifests=1,
+        is_calculation_leaf=_profithelm_calc_leaf_head_term_guard,
+        allow_mutations=False,
+    )
+    rel_gate = verifier.check_content_relevance_gate(dist_dir)
+    search_intent_finding = next(f for f in rel_gate["findings"] if f["factor"] == "Search Intent Match")
+    assert search_intent_finding["passed"] is True and search_intent_finding["gap_count"] == 0, search_intent_finding
+    audit_res = verifier.audit_seo_checklist(dist_dir=dist_dir, enforce_relevance=True)
+    assert not any("Search Intent Match" in iss for iss in audit_res["issues"]), audit_res["issues"]
 
     # Section 179 vehicle active overlay vs trim H1 must reconcile without title ping-pong
     assert _titles_match(
