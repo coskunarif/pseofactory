@@ -5986,6 +5986,102 @@ def verify_html_unique_first_party_information(
     }
 
 
+_TENANT_DOMAIN_MARKERS: Tuple[Tuple[str, str], ...] = (
+    ("lienbond", "lienbond.com"),
+    ("gainhelm", "gainhelm.com"),
+    ("prexvo", "prexvo.com"),
+    ("profithelm", "profithelm.com"),
+)
+
+
+def _extract_html_tag_attr(tag: str, attr: str) -> str:
+    """Extracts an attribute value from an HTML tag snippet (case-insensitive)."""
+    m = re.search(rf"""\b{attr}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>]+))""", tag)
+    if not m:
+        return ""
+    return next((g for g in m.groups() if g is not None), "")
+
+
+def _match_tenant_marker(segment: str, *, domain_only: bool = False) -> Optional[str]:
+    """Matches canonical tenant domain markers first, then optional tenant tokens."""
+    if not segment:
+        return None
+    for tenant, domain in _TENANT_DOMAIN_MARKERS:
+        if domain in segment:
+            return tenant
+    if not domain_only:
+        for tenant, _ in _TENANT_DOMAIN_MARKERS:
+            if tenant in segment:
+                return tenant
+    return None
+
+
+def _infer_tenant_from_html_head(
+    html_content: str,
+    lower_doc: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Infers tenant identity from authoritative head and structured-data signals
+    (canonical URL, og:url, title, JSON-LD @id/url) before body fallback.
+    """
+    doc_lower = lower_doc if lower_doc is not None else (html_content or "").lower()
+    if not doc_lower:
+        return None
+
+    head_m = re.search(r"<head\b[^>]*>([\s\S]*?)</head>", doc_lower)
+    head_scope = head_m.group(1) if head_m else doc_lower
+    head_no_script = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", " ", head_scope)
+
+    for tag_m in re.finditer(r"<link\b[^>]*>", head_no_script):
+        tag = tag_m.group(0)
+        if _extract_html_tag_attr(tag, "rel").strip() == "canonical":
+            matched = _match_tenant_marker(_extract_html_tag_attr(tag, "href"))
+            if matched:
+                return matched
+
+    for tag_m in re.finditer(r"<meta\b[^>]*>", head_no_script):
+        tag = tag_m.group(0)
+        prop_val = (
+            _extract_html_tag_attr(tag, "property")
+            or _extract_html_tag_attr(tag, "name")
+        ).strip()
+        if prop_val == "og:url":
+            matched = _match_tenant_marker(_extract_html_tag_attr(tag, "content"))
+            if matched:
+                return matched
+
+    title_m = re.search(r"<title\b[^>]*>([\s\S]*?)</title>", head_no_script)
+    if title_m:
+        matched = _match_tenant_marker(title_m.group(1))
+        if matched:
+            return matched
+
+    ld_pattern = r"""<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>"""
+    id_url_pattern = r"""["'](?:@id|url)["']\s*:\s*["']([^"']+)["']"""
+    for ld_m in re.finditer(ld_pattern, doc_lower):
+        for field_m in re.finditer(id_url_pattern, ld_m.group(1)):
+            matched = _match_tenant_marker(field_m.group(1).replace("\\/", "/"), domain_only=True)
+            if matched:
+                return matched
+
+    for field_m in re.finditer(id_url_pattern, doc_lower):
+        matched = _match_tenant_marker(field_m.group(1).replace("\\/", "/"), domain_only=True)
+        if matched:
+            return matched
+
+    if head_m:
+        matched = _match_tenant_marker(head_no_script, domain_only=True) or _match_tenant_marker(head_no_script)
+        if matched:
+            return matched
+
+    visible_lower = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", " ", doc_lower)
+    matched = _match_tenant_marker(visible_lower, domain_only=True) or _match_tenant_marker(visible_lower)
+    if matched:
+        return matched
+
+    return _match_tenant_marker(doc_lower, domain_only=True) or _match_tenant_marker(doc_lower)
+
+
 def verify_html_cross_web_consensus_and_corroboration(
     html_content: str,
     rel_path: str = "index.html",
@@ -6028,16 +6124,13 @@ def verify_html_cross_web_consensus_and_corroboration(
     issues.extend(detected)
 
     lower_doc = html_content.lower()
-    if "<html" in lower_doc and ("profithelm" in lower_doc or "prexvo" in lower_doc or "gainhelm" in lower_doc or "lienbond" in lower_doc):
+    inferred_tenant = (
+        _infer_tenant_from_html_head(html_content, lower_doc)
+        if "<html" in lower_doc
+        else None
+    )
+    if inferred_tenant:
         from pseofactory.tenant_facts import TruthReconciliationEngine
-        if "lienbond" in lower_doc:
-            inferred_tenant = "lienbond"
-        elif "gainhelm" in lower_doc:
-            inferred_tenant = "gainhelm"
-        elif "prexvo" in lower_doc:
-            inferred_tenant = "prexvo"
-        else:
-            inferred_tenant = "profithelm"
         for recon_issue in TruthReconciliationEngine.audit_html_truth_reconciliation(
             html_content,
             tenant=inferred_tenant,

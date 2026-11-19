@@ -1953,8 +1953,8 @@ def _render_runtime_sync_workbench_js() -> str:
     function syncComplianceAuditFormOutputs(outNodes) {
       var auditForm = document.querySelector("form[id$='-compliance-form']");
       if (!auditForm) return false;
-      if (typeof window.__gainhelmSyncWorkspaceOutputs === "function") {
-        window.__gainhelmSyncWorkspaceOutputs();
+      if (typeof window.__complianceSyncWorkspaceOutputs === "function") {
+        window.__complianceSyncWorkspaceOutputs();
         return true;
       }
       var hcEl = document.getElementById("calc-input-headcount");

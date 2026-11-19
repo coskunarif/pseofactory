@@ -2878,13 +2878,20 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in IRS reasonable compensation audit benchmarks.",
             )
         if "179" in q_low or "gvwr" in q_low or "heavy vehicle" in q_low or "equipment" in q_low:
-            if "heavy" in q_low or "gvwr" in q_low or "weight" in q_low or "heavy-vehicle" in (slug or "").lower():
+            is_vehicle_spoke = slug_low.startswith("section-179-calculator/") or slug_low.startswith(
+                "section-179-calculator-"
+            )
+            if not is_vehicle_spoke and (
+                "heavy" in q_low or "gvwr" in q_low or "weight" in q_low or "heavy-vehicle" in slug_low
+            ):
                 return (
                     "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions "
                     "($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
                     " Grounded in IRC Section 179(b)(5) and Section 280F limits.",
                 )
-            if "vehicle" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low:
+            if not is_vehicle_spoke and (
+                "vehicle" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low
+            ):
                 return (
                     "Model combined IRC Section 179 expensing, 20% bonus depreciation, "
                     "and business-use recapture thresholds for commercial vehicles and equipment.",

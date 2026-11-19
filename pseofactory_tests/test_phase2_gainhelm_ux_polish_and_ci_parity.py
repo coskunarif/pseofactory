@@ -665,3 +665,229 @@ def test_gainhelm_full_page_chromium_script1_and_script2_parity(tmp_path: Path) 
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_runtime_sync_tenant_neutral_and_head_tenant_inference() -> None:
+    from pseofactory import verifier as verifier_mod
+    from pseofactory.gsc_remediation import _normalize_meta_120_155
+    from pseofactory.porcelain_shell import _ensure_prexvo_ymyl_forfeiture_notice
+    from pseofactory.verifier import verify_html_cross_web_consensus_and_corroboration
+    from pseofactory.visual_primitives import render_runtime_synchronizer_script
+
+    legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
+    runtime_js = render_runtime_synchronizer_script()
+    runtime_low = runtime_js.lower()
+    assert "__complianceSyncWorkspaceOutputs" in runtime_js
+    assert legacy_sync_hook not in runtime_js
+    for tenant_tok in ("gainhelm", "prexvo", "profithelm", "lienbond"):
+        assert tenant_tok not in runtime_low, f"Shared runtime script leaked tenant token {tenant_tok!r}"
+
+    # Canonical URL, og:url, title, JSON-LD @id/url, and script-stripped body fallback must beat embedded <script> tokens
+    prexvo_script_page = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<title>RAP vs IBR Repayment Calculator 2026 | Prexvo</title>'
+        '<link rel="canonical" href="https://prexvo.com/tools/rap-vs-ibr-calculator/">'
+        '</head><body><main>'
+        '<h1>RAP vs IBR Repayment Calculator</h1>'
+        '<p>Compare federal Title IV repayment plans alongside private refinance lenders such as SoFi, Credible, and Earnest. '
+        'Refinancing federal student loans permanently waives federal protections, including IDR and PSLF.</p>'
+        f'<script>if (typeof window.{legacy_sync_hook} === "function") {{ window.{legacy_sync_hook}(); }}</script>'
+        '</main></body></html>'
+    )
+    px_res = verify_html_cross_web_consensus_and_corroboration(
+        prexvo_script_page,
+        rel_path="tools/rap-vs-ibr-calculator/index.html",
+    )
+    assert px_res["status"] == "PASS", px_res
+
+    prexvo_body_xref = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<meta property="og:url" content="https://prexvo.com/tools/student-loan-repayment-calculator/">'
+        '<title>Student Loan Repayment Calculator</title>'
+        '</head><body><main>'
+        '<p>Borrowers reviewing private rates from SoFi, Credible, or Earnest should note refinancing federal student loans '
+        'permanently waives federal protections, including IDR and PSLF. Compare enterprise compliance tools on GainHelm.</p>'
+        '</main></body></html>'
+    )
+    px_xref_res = verify_html_cross_web_consensus_and_corroboration(
+        prexvo_body_xref,
+        rel_path="tools/student-loan-repayment-calculator/index.html",
+    )
+    assert not any("GainHelm" in iss for iss in px_xref_res["issues"]), px_xref_res
+    assert any("Cross-tenant contamination on Prexvo" in iss for iss in px_xref_res["issues"])
+
+    profithelm_jsonld_page = (
+        '<!DOCTYPE html><html lang="en"><head><title>Tax Deferral Tool</title></head><body><main>'
+        '<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage",'
+        '"@id":"https://profithelm.com/tools/section-1031-calculator/#webpage",'
+        '"url":"https://profithelm.com/tools/section-1031-calculator/"}</script>'
+        '<p>Coordinate IRC Section 179 and Section 1031 like-kind exchange schedules with Mercury treasury accounts.</p>'
+        f'<script>var legacyHook = window.{legacy_sync_hook};</script>'
+        '</main></body></html>'
+    )
+    ph_res = verify_html_cross_web_consensus_and_corroboration(
+        profithelm_jsonld_page,
+        rel_path="tools/section-1031-calculator/index.html",
+    )
+    assert ph_res["status"] == "PASS", ph_res
+
+    profithelm_body_xref = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<title>Section 179 Equipment Calculator | ProfitHelm</title>'
+        '</head><body><main>'
+        '<p>Model IRC Section 179 and Section 1031 depreciation alongside Mercury accounts; see gainhelm.com for SOC 2.</p>'
+        '</main></body></html>'
+    )
+    ph_xref_res = verify_html_cross_web_consensus_and_corroboration(
+        profithelm_body_xref,
+        rel_path="tools/section-179-calculator/index.html",
+    )
+    assert not any("GainHelm" in iss for iss in ph_xref_res["issues"]), ph_xref_res
+    assert any("Cross-tenant contamination on ProfitHelm" in iss for iss in ph_xref_res["issues"])
+
+    no_head_prexvo_page = (
+        '<!DOCTYPE html><html><head><title>Repayment Estimator</title></head><body>'
+        '<p>Prexvo federal student loan repayment summary.</p>'
+        f'<script>window.{legacy_sync_hook} = function() {{}};</script>'
+        '</body></html>'
+    )
+    no_head_res = verify_html_cross_web_consensus_and_corroboration(
+        no_head_prexvo_page,
+        rel_path="tools/repayment-estimator/index.html",
+    )
+    assert no_head_res["status"] == "PASS", no_head_res
+
+    lienbond_page = (
+        '<!DOCTYPE html><html><head>'
+        '<link rel="canonical" href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/">'
+        '</head><body><p>LienBond surety estimator.</p></body></html>'
+    )
+    gainhelm_banned_page = (
+        '<!DOCTYPE html><html><head>'
+        '<link rel="canonical" href="https://gainhelm.com/tools/soc-2-audit-cost-calculator/">'
+        '</head><body><p>Compare SoFi rates for SOC 2 compliance.</p></body></html>'
+    )
+    infer_fn = getattr(verifier_mod, "_infer_tenant_from_html_head", None)
+    assert callable(infer_fn), "Missing _infer_tenant_from_html_head helper"
+    assert infer_fn(prexvo_script_page) == "prexvo"
+    assert infer_fn(prexvo_body_xref) == "prexvo"
+    assert infer_fn(profithelm_jsonld_page) == "profithelm"
+    assert infer_fn(profithelm_body_xref) == "profithelm"
+    assert infer_fn(no_head_prexvo_page) == "prexvo"
+    assert infer_fn(lienbond_page) == "lienbond"
+    assert infer_fn(gainhelm_banned_page) == "gainhelm"
+
+    gh_res = verify_html_cross_web_consensus_and_corroboration(
+        gainhelm_banned_page,
+        rel_path="tools/soc-2-audit-cost-calculator/index.html",
+    )
+    assert gh_res["status"] == "FAIL"
+    assert any("Banned claim detected for GainHelm: 'sofi'" in i for i in gh_res["issues"])
+
+    heavy_meta = _normalize_meta_120_155(
+        "",
+        "profithelm",
+        "commercial heavy vehicle section 179 weight calculator",
+        slug="commercial-heavy-vehicle-section-179-weight-calculator",
+    )
+    chev_meta = _normalize_meta_120_155(
+        "",
+        "profithelm",
+        "Chevrolet Silverado 2500HD Heavy Truck Section 179",
+        slug="section-179-calculator/chevrolet-silverado-2500hd",
+    )
+    assert chev_meta != heavy_meta
+
+    long_qa_words = " ".join(["word"] * 53)
+    px_disc_html = (
+        f'<html><body><aside class="quick-answer"><p>{long_qa_words} refinancing note.</p></aside>'
+        '<div class="footer-bottom"><span>Prexvo LLC</span></div></body></html>'
+    )
+    guarded_html = _ensure_prexvo_ymyl_forfeiture_notice(
+        px_disc_html,
+        {"property_id": "prexvo"},
+        "governance",
+    )
+    qa_inner = re.search(r'<aside class="quick-answer">([\s\S]*?)</aside>', guarded_html)
+    assert qa_inner is not None
+    assert len(re.sub(r"<[^>]+>", " ", qa_inner.group(1)).split()) <= 60
+    assert "waives federal protections" in guarded_html.lower()
+
+
+def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path: Path) -> None:
+    from pseofactory.verifier import MasterSEOVerifier
+
+    engine_root = Path(__file__).resolve().parents[1]
+    base_env = {"PATH": os.environ.get("PATH", "")}
+
+    live_px = Path("/home/ubuntuadmin/projects/prexvo")
+    if (live_px / ".git").is_dir():
+        px_repo = tmp_path / "px_cli_repo"
+        px_repo.mkdir(parents=True)
+        arch_px = subprocess.run(
+            f"git -C {str(live_px)!r} archive HEAD | tar -x -C {str(px_repo)!r}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert arch_px.returncode == 0, arch_px.stderr
+        px_dist = tmp_path / "px_cli_dist"
+        px_env = {**base_env, "PYTHONPATH": f"{engine_root}:{px_repo}"}
+        px_build = subprocess.run(
+            [sys.executable, "-m", "prexvo.cli", "build", "--dist", str(px_dist)],
+            cwd=str(px_repo),
+            env=px_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert px_build.returncode == 0, f"prexvo build failed:\n{px_build.stdout}\n{px_build.stderr}"
+        px_verifier = MasterSEOVerifier(
+            dist_dir=px_dist,
+            domain="prexvo.com",
+            brand_name="Prexvo",
+            allow_mutations=False,
+        )
+        px_audit = px_verifier.audit_seo_checklist(dist_dir=px_dist, raise_on_error=True)
+        assert px_audit["status"] == "PASS" and px_audit["total_issues_count"] == 0
+        legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
+        px_sample = (px_dist / "tools" / "student-loan-repayment-calculator" / "index.html").read_text(encoding="utf-8")
+        assert legacy_sync_hook not in px_sample
+        assert "__complianceSyncWorkspaceOutputs" in px_sample
+
+    live_ph = Path("/home/ubuntuadmin/projects/profithelm-platform")
+    if (live_ph / ".git").is_dir():
+        ph_repo = tmp_path / "ph_cli_repo"
+        ph_repo.mkdir(parents=True)
+        arch_ph = subprocess.run(
+            f"git -C {str(live_ph)!r} archive HEAD | tar -x -C {str(ph_repo)!r}",
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert arch_ph.returncode == 0, arch_ph.stderr
+        ph_env = {**base_env, "PYTHONPATH": f"{engine_root}:{ph_repo}"}
+        ph_build = subprocess.run(
+            [sys.executable, "-m", "profithelm.cli", "build"],
+            cwd=str(ph_repo),
+            env=ph_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert ph_build.returncode == 0, f"profithelm build failed:\n{ph_build.stdout}\n{ph_build.stderr}"
+        ph_dist = ph_repo / "dist"
+        ph_verifier = MasterSEOVerifier(
+            dist_dir=ph_dist,
+            domain="profithelm.com",
+            brand_name="ProfitHelm",
+            allow_mutations=False,
+        )
+        ph_audit = ph_verifier.audit_seo_checklist(dist_dir=ph_dist, raise_on_error=True)
+        assert ph_audit["status"] == "PASS" and ph_audit["total_issues_count"] == 0
+        legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
+        ph_sample = (ph_dist / "tools" / "section-179-calculator" / "index.html").read_text(encoding="utf-8")
+        assert legacy_sync_hook not in ph_sample
+        assert "__complianceSyncWorkspaceOutputs" in ph_sample

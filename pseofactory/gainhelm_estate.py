@@ -1353,7 +1353,7 @@ def _render_calculator_widget(
         }}
 
         if (typeof window !== "undefined") {{
-          window.__gainhelmSyncWorkspaceOutputs = recompute;
+          window.__complianceSyncWorkspaceOutputs = recompute;
         }}
         function setCalcInputVal(fid, rawV) {{
           var el = document.getElementById(fid);

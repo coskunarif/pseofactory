@@ -4167,18 +4167,20 @@ def _ensure_prexvo_ymyl_forfeiture_notice(
     )
     if qa_match:
         qa_inner = qa_match.group(2)
-        last_p_close = qa_inner.lower().rfind("</p>")
-        if last_p_close != -1:
-            new_inner = qa_inner[:last_p_close] + f" {sentence}" + qa_inner[last_p_close:]
-        else:
-            new_inner = qa_inner.rstrip() + f"\n      <p>{sentence}</p>\n    "
-        return (
-            html_text[: qa_match.start()]
-            + qa_match.group(1)
-            + new_inner
-            + qa_match.group(3)
-            + html_text[qa_match.end() :]
-        )
+        qa_plain_words = re.sub(r"<[^>]+>", " ", qa_inner).split()
+        if len(qa_plain_words) + len(sentence.split()) <= 60:
+            last_p_close = qa_inner.lower().rfind("</p>")
+            if last_p_close != -1:
+                new_inner = qa_inner[:last_p_close] + f" {sentence}" + qa_inner[last_p_close:]
+            else:
+                new_inner = qa_inner.rstrip() + f"\n      <p>{sentence}</p>\n    "
+            return (
+                html_text[: qa_match.start()]
+                + qa_match.group(1)
+                + new_inner
+                + qa_match.group(3)
+                + html_text[qa_match.end() :]
+            )
 
     hero_p_match = re.search(
         r'(<p\b[^>]*class=["\'][^"\']*\bhero-desc\b[^"\']*["\'][^>]*>)([\s\S]*?)(</p>)',
