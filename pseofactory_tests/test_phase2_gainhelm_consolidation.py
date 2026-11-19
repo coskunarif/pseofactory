@@ -113,7 +113,9 @@ def test_slice0_css_commentary_title_and_compiler_select_and_gitops_slug(tmp_pat
     (gh_mock / "pyproject.toml").write_text('[project]\nname = "gainhelm"\n', encoding="utf-8")
     sync_tenant_test_isolation_guards(gh_mock, "gainhelm")
     gh_ci = (gh_mock / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "python3 -m gainhelm.cli build" in gh_ci
+    assert "python3 -m gainhelm.cli build --dist /tmp/gh_ci_dist" in gh_ci
+    assert "python3 -m gainhelm.cli audit --dist /tmp/gh_ci_dist" in gh_ci
+    assert "python3 -m gainhelm.cli audit" in gh_ci
     assert "$GITHUB_WORKSPACE/gainhelm/_pseo_substrate" in gh_ci
     assert "/home/ubuntuadmin/projects/gainhelm/dist" not in gh_ci
     assert "/home/ubuntuadmin/projects/pseofactory" not in gh_ci

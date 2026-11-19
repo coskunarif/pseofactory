@@ -2320,6 +2320,19 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             sibling_links = resolved_siblings
     if not sibling_links:
         sibling_links = cluster
+    if is_gainhelm and slug not in ("", "index", "soc-2-audit-cost-calculator"):
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        gh_prof = get_gainhelm_framework_profile(slug=slug)
+        gh_forb = tuple(str(t).lower() for t in (gh_prof.get("forbidden_leak_tokens") or ()))
+        if gh_forb:
+            clean_gh_siblings = [
+                (s_slug, s_title)
+                for s_slug, s_title in sibling_links
+                if not any(tok in f"{s_slug} {s_title}".lower() for tok in gh_forb)
+            ]
+            if clean_gh_siblings:
+                sibling_links = clean_gh_siblings
 
     from pseofactory.competitor import _format_safe_heading_topic
     primary_sibling_slug, primary_sibling_title = sibling_links[0]

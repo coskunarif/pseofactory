@@ -385,6 +385,121 @@ _GAINHELM_FRAMEWORK_LEAK_GROUPS: Tuple[Tuple[Tuple[str, ...], Tuple[str, ...]], 
 )
 
 
+_OVERLAY_CONTENT_KEYS: Tuple[str, ...] = (
+    "meta_description",
+    "description",
+    "title_rewrite",
+    "title",
+    "h1",
+    "quick_answer",
+    "methodology_notes",
+    "summary",
+    "h2_headings",
+    "h2_blocks",
+    "autonomous_citation_assertions",
+    "ai_mode_decision_matrix",
+    "comparison_rows",
+    "preset_scenarios",
+    "faq_entries",
+    "faq_additions",
+    "faq_schema",
+    "partner_offer",
+)
+
+
+def _clean_gainhelm_offer_entry(
+    entry: Dict[str, Any],
+    slug_low: str,
+    has_leak_fn: Any,
+    fw_prof: Dict[str, Any],
+    affiliates_mod: Any,
+) -> Dict[str, Any]:
+    """Rewrites cross-framework leaked copy inside a GainHelm partner offer or slot binding dict."""
+    cleaned_entry = dict(entry)
+    pk = str(cleaned_entry.get("partner_key") or "").strip().lower()
+    is_soc2 = any(k in slug_low for k in ("soc-2", "soc2"))
+    ctx_copy: Dict[str, Any] = {}
+    if pk and affiliates_mod is not None:
+        p_obj = affiliates_mod.GAINHELM_AFFILIATES.get(pk)
+        if p_obj is not None:
+            ctx_copy = affiliates_mod.resolve_contextual_partner_offer_copy(
+                partner_key=pk,
+                p_obj=p_obj,
+                slug=slug_low,
+                property_id="gainhelm",
+            )
+    if not is_soc2:
+        for url_key in ("url", "default_url"):
+            if "/products/soc-2" in str(cleaned_entry.get(url_key) or "").lower():
+                cleaned_entry[url_key] = str(fw_prof.get("vanta_url") or "https://www.vanta.com/")
+        fallback_map = {
+            "name": str(ctx_copy.get("name") or "Automated GRC & Compliance Platform"),
+            "partner_name": str(ctx_copy.get("name") or "Automated GRC & Compliance Platform"),
+            "title": str(ctx_copy.get("badge") or ctx_copy.get("name") or "Automated GRC & Compliance Readiness"),
+            "badge": str(ctx_copy.get("badge") or "Automated Compliance Readiness"),
+            "description": str(
+                ctx_copy.get("description")
+                or "Automate continuous control evidence collection, vendor risk tracking, and audit readiness workflows."
+            ),
+            "cta_text": str(ctx_copy.get("cta_text") or "Explore Automated GRC Platforms"),
+        }
+        for txt_key, rep_val in fallback_map.items():
+            cur_val = cleaned_entry.get(txt_key)
+            if isinstance(cur_val, str) and cur_val and has_leak_fn(cur_val):
+                cleaned_entry[txt_key] = rep_val
+        disc_val = cleaned_entry.get("disclosure")
+        if isinstance(disc_val, str) and disc_val and (has_leak_fn(disc_val) or "cpa/c3pao" in disc_val.lower()):
+            cleaned_entry["disclosure"] = (
+                "FTC Partner Compensation Disclosure: GainHelm is an independent security compliance "
+                "research publisher and may receive referral compensation from vetted commercial partners "
+                "at no additional cost to you."
+            )
+    for norm_txt_key in ("name", "partner_name", "title", "badge", "description", "cta_text", "disclosure"):
+        if isinstance(cleaned_entry.get(norm_txt_key), str):
+            cleaned_entry[norm_txt_key] = normalize_statutory_acronym_casing(cleaned_entry[norm_txt_key])
+    for nested_list_key in ("secondary_offers", "ranked_partner_candidates", "roster_offers", "ordered_offers"):
+        nested_list = cleaned_entry.get(nested_list_key)
+        if isinstance(nested_list, list):
+            cleaned_list: List[Any] = []
+            for item in nested_list:
+                if isinstance(item, dict):
+                    cleaned_list.append(_clean_gainhelm_offer_entry(item, slug_low, has_leak_fn, fw_prof, affiliates_mod))
+                elif isinstance(item, str) and not is_soc2 and (has_leak_fn(item) or "cpa/c3pao" in item.lower()):
+                    continue
+                else:
+                    cleaned_list.append(item)
+            cleaned_entry[nested_list_key] = cleaned_list
+    return cleaned_entry
+
+
+def _clean_gainhelm_partner_roster(
+    roster: Any,
+    slug_low: str,
+    has_leak_fn: Any,
+    fw_prof: Dict[str, Any],
+    affiliates_mod: Any,
+) -> Any:
+    is_soc2 = any(k in slug_low for k in ("soc-2", "soc2"))
+    if isinstance(roster, dict):
+        cleaned_roster = _clean_gainhelm_offer_entry(roster, slug_low, has_leak_fn, fw_prof, affiliates_mod)
+        if isinstance(cleaned_roster.get("primary_offer"), dict):
+            cleaned_roster["primary_offer"] = _clean_gainhelm_offer_entry(
+                cleaned_roster["primary_offer"], slug_low, has_leak_fn, fw_prof, affiliates_mod
+            )
+        return cleaned_roster
+    if isinstance(roster, list):
+        cleaned_items: List[Any] = []
+        for item in roster:
+            if isinstance(item, dict):
+                cleaned_items.append(_clean_gainhelm_offer_entry(item, slug_low, has_leak_fn, fw_prof, affiliates_mod))
+            elif isinstance(item, str) and not is_soc2 and (has_leak_fn(item) or "cpa/c3pao" in item.lower()):
+                continue
+            else:
+                cleaned_items.append(item)
+        return cleaned_items
+    return roster
+
+
 def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug: str) -> Dict[str, Any]:
     """
     Removes cross-framework SOC 2, CMMC, and HIPAA copy from GainHelm GSC overlays
@@ -398,6 +513,19 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
     for owner_tokens, markers in _GAINHELM_FRAMEWORK_LEAK_GROUPS:
         if not any(tok in slug_low for tok in owner_tokens):
             active_markers.extend(markers)
+    fw_prof: Dict[str, Any] = {}
+    affiliates_mod: Any = None
+    try:
+        from pseofactory import affiliates as _aff_mod
+
+        affiliates_mod = _aff_mod
+        fw_prof = _aff_mod.get_gainhelm_framework_profile(slug=slug_low)
+        for tok in fw_prof.get("forbidden_leak_tokens") or ():
+            tok_l = str(tok).strip().lower()
+            if tok_l and tok_l not in active_markers:
+                active_markers.append(tok_l)
+    except Exception:
+        pass
     if not active_markers:
         return overlay_data
     leak_markers = tuple(active_markers)
@@ -417,6 +545,7 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
         "quick_answer",
         "methodology_notes",
         "summary",
+        "ai_repair_prompt",
     ):
         val = cleaned.get(scalar_key)
         if isinstance(val, str) and _has_leak(val):
@@ -428,9 +557,13 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
         "autonomous_citation_assertions",
         "ai_mode_decision_matrix",
         "comparison_rows",
+        "comparison_matrix",
         "preset_scenarios",
+        "scenario_presets",
         "faq_entries",
         "faq_additions",
+        "faq",
+        "hub_links",
     ):
         raw_list = cleaned.get(list_key)
         if isinstance(raw_list, list):
@@ -452,20 +585,34 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
 
     partner_offer = cleaned.get("partner_offer")
     if isinstance(partner_offer, dict):
-        cleaned_offer = dict(partner_offer)
-        if not any(k in slug_low for k in ("soc-2", "soc2")):
-            if "/products/soc-2" in str(cleaned_offer.get("url") or "").lower():
-                cleaned_offer["url"] = "https://www.vanta.com/"
-            if _has_leak(cleaned_offer.get("description") or ""):
-                cleaned_offer["description"] = (
-                    "Automate continuous control evidence collection, vendor risk tracking, and audit readiness workflows."
-                )
-            if _has_leak(cleaned_offer.get("cta_text") or ""):
-                cleaned_offer["cta_text"] = "Explore Automated GRC Platforms"
-        for offer_txt_key in ("name", "badge", "description", "cta_text", "disclosure"):
-            if isinstance(cleaned_offer.get(offer_txt_key), str):
-                cleaned_offer[offer_txt_key] = normalize_statutory_acronym_casing(cleaned_offer[offer_txt_key])
+        cleaned_offer = _clean_gainhelm_offer_entry(partner_offer, slug_low, _has_leak, fw_prof, affiliates_mod)
+        if "partner_roster" in cleaned_offer:
+            cleaned_offer["partner_roster"] = _clean_gainhelm_partner_roster(
+                cleaned_offer["partner_roster"], slug_low, _has_leak, fw_prof, affiliates_mod
+            )
         cleaned["partner_offer"] = cleaned_offer
+
+    if "partner_roster" in cleaned:
+        cleaned["partner_roster"] = _clean_gainhelm_partner_roster(
+            cleaned["partner_roster"], slug_low, _has_leak, fw_prof, affiliates_mod
+        )
+
+    slot_plan = cleaned.get("slot_plan")
+    if isinstance(slot_plan, dict):
+        cleaned_slot_plan = _clean_gainhelm_offer_entry(slot_plan, slug_low, _has_leak, fw_prof, affiliates_mod)
+        if isinstance(cleaned_slot_plan.get("slot_bindings"), dict):
+            cleaned_slot_plan["slot_bindings"] = {
+                sk: (
+                    _clean_gainhelm_offer_entry(sv, slug_low, _has_leak, fw_prof, affiliates_mod)
+                    if isinstance(sv, dict)
+                    else sv
+                )
+                for sk, sv in cleaned_slot_plan["slot_bindings"].items()
+            }
+        rep_reason = cleaned_slot_plan.get("reposition_reason")
+        if isinstance(rep_reason, str) and _has_leak(rep_reason):
+            cleaned_slot_plan["reposition_reason"] = "Framework-matched partner placement preserved."
+        cleaned["slot_plan"] = cleaned_slot_plan
 
     for norm_key in (
         "meta_description",
@@ -481,9 +628,12 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
         "autonomous_citation_assertions",
         "ai_mode_decision_matrix",
         "comparison_rows",
+        "comparison_matrix",
         "preset_scenarios",
+        "scenario_presets",
         "faq_entries",
         "faq_additions",
+        "faq",
         "faq_schema",
     ):
         if norm_key in cleaned:
@@ -496,8 +646,10 @@ def sanitize_tenant_overlays(
     repo_root: Path,
     tools_dir: Path,
     extra_bad_tokens: Sequence[str] = (),
+    property_id: str = "",
 ) -> None:
-    """Removes orphaned or cross-tenant contaminated overlay JSON files."""
+    """Removes orphaned, cross-tenant contaminated, or cross-framework leaked overlay JSON files."""
+    is_gainhelm = str(property_id or "").strip().lower() == "gainhelm"
     for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
         if not ov_dir.is_dir():
             continue
@@ -505,13 +657,31 @@ def sanitize_tenant_overlays(
             if not (tools_dir / ov_file.stem / "index.html").is_file():
                 ov_file.unlink(missing_ok=True)
                 continue
-            if extra_bad_tokens:
+            try:
+                raw_text = ov_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if extra_bad_tokens and any(bad_tok in raw_text.lower() for bad_tok in extra_bad_tokens):
+                ov_file.unlink(missing_ok=True)
+                continue
+            if is_gainhelm:
                 try:
-                    raw_ov = ov_file.read_text(encoding="utf-8").lower()
-                    if any(bad_tok in raw_ov for bad_tok in extra_bad_tokens):
-                        ov_file.unlink(missing_ok=True)
+                    ov_data = json.loads(raw_text)
                 except Exception:
-                    pass
+                    ov_file.unlink(missing_ok=True)
+                    continue
+                if not isinstance(ov_data, dict):
+                    ov_file.unlink(missing_ok=True)
+                    continue
+                cleaned = strip_cross_framework_leaks_from_overlay(ov_data, ov_file.stem)
+                has_content = any(bool(cleaned.get(k)) for k in _OVERLAY_CONTENT_KEYS)
+                if not has_content:
+                    ov_file.unlink(missing_ok=True)
+                elif cleaned != ov_data:
+                    ov_file.write_text(
+                        json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
 
 
 def finalize_estate_build(
@@ -537,7 +707,12 @@ def finalize_estate_build(
     tools_dir = dist / "tools"
     manifests_dir = dist / "manifests"
 
-    sanitize_tenant_overlays(root, tools_dir, extra_bad_tokens=bad_overlay_tokens)
+    sanitize_tenant_overlays(
+        root,
+        tools_dir,
+        extra_bad_tokens=bad_overlay_tokens,
+        property_id=property_id,
+    )
 
     retrofit_report: Dict[str, Any] = {}
     if run_retrofit:

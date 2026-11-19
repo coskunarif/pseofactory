@@ -7083,6 +7083,12 @@ function parseEdgeJsonParam(rawVal) {
   }
 }
 
+function resolveGainHelmDefaultJurisdiction(fwKey, toolSlug = "") {
+  const k = String(fwKey || classifyGainHelmFramework(toolSlug, "") || "").trim().toLowerCase();
+  if (k === "dora" || k === "eu_ai_act" || k === "nis2" || k === "gdpr") return "EU";
+  return "US";
+}
+
 async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam, verticalParam = "") {
   const mem = getMemoryBuffer();
   const isDirectLead = String(leadId || "").endsWith("_direct");
@@ -7124,12 +7130,13 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
   }
   const effSlug = rawSlugNorm || "";
   const fwKey = classifyGainHelmFramework(effSlug, cleanVert);
+  const defaultJurisdiction = resolveGainHelmDefaultJurisdiction(fwKey, effSlug);
   const effVertical = GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || (hasExplicitVert ? cleanVert : "soc2_grc_automation");
   const fallbackRec = {
     lead_id: leadId || "lead_gainhelm_direct",
     property_id: "gainhelm",
     email: emailParam || "",
-    state: String(stateParam || "DE").toUpperCase().slice(0, 2) || "DE",
+    state: String(stateParam || defaultJurisdiction).toUpperCase().slice(0, 2) || defaultJurisdiction,
     tool_slug: effSlug,
     vertical: effVertical,
     has_explicit_vertical: hasExplicitVert,
@@ -7225,7 +7232,9 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const toolSlug = hasExplicitSlugProp
     ? String(record.tool_slug === undefined || record.tool_slug === null ? "" : record.tool_slug)
     : "";
-  const stateCode = String((record && record.state) || "DE").toUpperCase();
+  const fwKey = classifyGainHelmFramework(toolSlug, recVert);
+  const fwJurisdiction = resolveGainHelmDefaultJurisdiction(fwKey, toolSlug);
+  const stateCode = String((record && record.state) || fwJurisdiction).toUpperCase();
   const baseAmount = Math.max(25000, Number((record && record.calculated_amount) || 48500));
   const autoSavings = Math.round(baseAmount * 0.34 * 100) / 100;
   const netOptimized = Math.max(12000, Math.round((baseAmount - autoSavings) * 100) / 100);
@@ -7234,7 +7243,6 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const customInputs = (record && record.calculator_inputs && typeof record.calculator_inputs === "object") ? record.calculator_inputs : {};
   const customOutputs = (record && record.calculator_outputs && typeof record.calculator_outputs === "object") ? record.calculator_outputs : {};
 
-  const fwKey = classifyGainHelmFramework(toolSlug, recVert);
   const fwSpec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fwKey] || null;
   const fwVertical = (fwSpec && fwSpec.vertical) || GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || "soc2_grc_automation";
   const reconciliationSchedule = fwSpec ? [
@@ -7506,7 +7514,8 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     offer_title: offer.title,
     statutory_authority: offer.statutory_authority,
     regulator_name: (fwSpec && fwSpec.regulatorName) || offer.regulator_name || "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
-    effective_tax_year: "2026",
+    compliance_cycle_year: "2026",
+    framework_jurisdiction: fwJurisdiction,
     modeled_scenario_summary: {
       calculated_amount: baseAmount,
       state: stateCode,
@@ -8132,7 +8141,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[offer_sku]": offer.sku,
         "metadata[merchant_email]": stripeMerchantEmail,
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 48500),
-        "metadata[state]": String((bundle && bundle.state) || "DE"),
+        "metadata[state]": String((bundle && bundle.state) || resolveGainHelmDefaultJurisdiction(classifyGainHelmFramework(toolSlug, fwVertical), toolSlug)),
         "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
       };
       if (!isPlaceholderCheckoutEmail(candidateEmail)) {
@@ -8461,7 +8470,7 @@ export async function onRequestGet(context) {
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_gainhelm_direct";
   const email = reqUrl.searchParams.get("email") || "";
   const amountParam = reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "";
-  const stateParam = reqUrl.searchParams.get("state") || "DE";
+  const stateParam = reqUrl.searchParams.get("state") || "";
   const inputsJsonParam = reqUrl.searchParams.get("inputs_json") || "";
   const outputsJsonParam = reqUrl.searchParams.get("outputs_json") || "";
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
@@ -8749,7 +8758,7 @@ export async function onRequestPost(context) {
     const reqUrl = new URL((request && request.url) || "https://gainhelm.com/api/lead-capture");
     const body = await request.json().catch(() => ({}));
     const rawEmail = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
-    const state = String(body.state || reqUrl.searchParams.get("state") || "DE").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "DE";
+    const rawStateInput = String(body.state || reqUrl.searchParams.get("state") || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
     const reqVertical = String(
       body.vertical || reqUrl.searchParams.get("vertical") || ""
     ).trim().toLowerCase();
@@ -8774,6 +8783,7 @@ export async function onRequestPost(context) {
     const hasExplicitSku = Boolean(reqPostSku && Object.prototype.hasOwnProperty.call(GAINHELM_TOOLKIT_OFFERS, reqPostSku));
     const isBareRoot = Boolean(isGenericGainHelmToolSlug(toolSlug) && !hasExplicitVertical && !hasExplicitSku);
     const fwKey = classifyGainHelmFramework(toolSlug, reqVertical);
+    const state = rawStateInput || resolveGainHelmDefaultJurisdiction(fwKey, toolSlug);
     const fwSpec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fwKey] || null;
     const fwPrimaryPartner =
       (fwSpec && fwSpec.primaryPartnerKey) ||

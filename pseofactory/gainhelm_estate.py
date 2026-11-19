@@ -586,21 +586,456 @@ _COMPLIANCE_FAQS: List[Dict[str, str]] = [
 ]
 
 
+_CORE_TOOL_WIDGET_BASE: Dict[str, Dict[str, Any]] = {
+    "cmmc-2-0-compliance-cost-calculator": {
+        "title": "DoD CMMC 2.0 Level 2 &amp; CUI Enclave Audit Cost Calculator",
+        "desc": "Deterministic 32 CFR Part 170 C3PAO assessment fee, enclave licensing, and CUI remediation cost calculator.",
+        "switcher_title": "CMMC 2.0 Level 2 Audit Presets",
+        "submit_label": "Recalculate CMMC 2.0 Level 2 Budget",
+        "visible_fields": ("headcount", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt"),
+        "field_overrides": {
+            "headcount": {"tooltip": "Personnel inside the DoD Controlled Unclassified Information (CUI) enclave boundary."},
+        },
+        "presets": (
+            "Mid-Tier Defense Supplier (75 HC, 7 Open Controls)",
+            "Small CUI Enclave Subcontractor (25 HC, 6 Open Controls)",
+            "Enterprise Prime Contractor (250 HC, 21 Open Controls)",
+        ),
+        "primary_keys": ("cmmc", "sprs", "savings"),
+        "primary_labels": {
+            "cmmc": "DoD CMMC 2.0 Level 2 C3PAO Total Cost (32 CFR 170)",
+            "sprs": "NIST SP 800-171 DoD SPRS Score ([-203, +110])",
+            "savings": "Continuous CUI Enclave Evidence Savings",
+        },
+        "meter_header": "CMMC 2.0 Cost Allocation: C3PAO Fee vs CUI Enclave &amp; Automation",
+        "meter_left_lbl": "C3PAO",
+        "meter_right_lbl": "Enclave",
+        "legend_1": "C3PAO Assessment Fee",
+        "legend_2": "Automated Evidence Savings",
+        "legend_3": "CUI Remediation Engineering",
+    },
+    "nist-800-171-sprs-score-calculator": {
+        "title": "NIST SP 800-171 Rev 2 &amp; DoD SPRS Score Calculator",
+        "desc": "Deterministic DoD Assessment Methodology weighted SPRS scoring [-203, +110] and POA&amp;M eligibility calculator.",
+        "switcher_title": "NIST SP 800-171 SPRS Scoring Presets",
+        "submit_label": "Recalculate NIST SP 800-171 SPRS Score",
+        "visible_fields": ("headcount", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt"),
+        "field_overrides": {
+            "headcount": {"tooltip": "Defense engineering and operations personnel inside the NIST SP 800-171 CUI boundary."},
+        },
+        "presets": (
+            "DoD Contractor Baseline (SPRS 87, 7 Open Controls)",
+            "POA&amp;M Eligible Enclave (SPRS 100, 6 Open Controls)",
+            "Enterprise Flat Network (SPRS 55, 21 Open Controls)",
+        ),
+        "primary_keys": ("sprs", "cmmc", "savings"),
+        "primary_labels": {
+            "sprs": "NIST SP 800-171 DoD SPRS Score ([-203, +110])",
+            "cmmc": "DFARS 7012/7020 Remediation &amp; Assessment Budget",
+            "savings": "Automated SSP &amp; POA&amp;M Evidence Savings",
+        },
+        "meter_header": "SPRS Readiness Allocation: Assessment vs Automated SSP Evidence",
+        "meter_left_lbl": "Assessment",
+        "meter_right_lbl": "SSP Auto",
+        "legend_1": "External Assessment Fee",
+        "legend_2": "Automated SSP &amp; Evidence Savings",
+        "legend_3": "110-Control Remediation Labor",
+    },
+    "iso-27001-certification-cost-calculator": {
+        "title": "ISO/IEC 27001:2022 Certification &amp; Auditor-Day Calculator",
+        "desc": "Deterministic ISO/IEC 27006-1:2024 Stage 1 &amp; Stage 2 auditor-day allocation and Annex A ISMS budgeting model.",
+        "switcher_title": "ISO/IEC 27001:2022 ISMS Scope Presets",
+        "submit_label": "Recalculate ISO 27001 Certification Cost",
+        "visible_fields": ("headcount",),
+        "field_overrides": {
+            "headcount": {"tooltip": "Total personnel inside the certified ISO/IEC 27001:2022 ISMS boundary."},
+        },
+        "presets": (
+            "Series B SaaS ISMS (75 HC, 11 Auditor Days)",
+            "Seed Startup ISMS Scope (25 HC, 7 Auditor Days)",
+            "Multi-Site Global ISMS (250 HC, 17 Auditor Days)",
+        ),
+        "primary_keys": ("iso27001", "savings"),
+        "primary_labels": {
+            "iso27001": "ISO/IEC 27001:2022 Stage 1 &amp; 2 Total Cost",
+            "savings": "Automated Annex A Evidence Labor Savings",
+        },
+        "meter_header": "ISMS Budget Allocation: Certification Body Days vs Automation",
+        "meter_left_lbl": "Registrar",
+        "meter_right_lbl": "ISMS Auto",
+        "legend_1": "Accredited Registrar Fee",
+        "legend_2": "Annex A Evidence Savings",
+        "legend_3": "Internal ISMS Readiness Prep",
+    },
+    "hipaa-violation-penalty-breach-cost-calculator": {
+        "title": "HIPAA 45 CFR 160.404 Violation Penalty &amp; HITECH Breach Cost Calculator",
+        "desc": "Deterministic HHS OCR four-tier civil monetary penalty, 60-day breach notice, and forensic exposure simulator.",
+        "switcher_title": "HIPAA Breach &amp; ePHI Exposure Scenarios",
+        "submit_label": "Recalculate HIPAA Penalty &amp; Breach Exposure",
+        "visible_fields": ("headcount", "compromised_records"),
+        "field_overrides": {
+            "headcount": {"tooltip": "Covered entity or business associate workforce handling ePHI repositories."},
+            "compromised_records": {"label": "Compromised Patient ePHI Records", "tooltip": "Unencrypted ePHI patient records exposed under 45 CFR 160.404 and 45 CFR 164.406."},
+        },
+        "presets": (
+            "Covered Clinic / HealthTech (75 HC, 1,500 ePHI Records)",
+            "Seed Digital Health (25 HC, 500 ePHI Records)",
+            "Enterprise Health System (250 HC, 15,000 ePHI Records)",
+        ),
+        "primary_keys": ("hipaa", "savings"),
+        "primary_labels": {
+            "hipaa": "HIPAA 45 CFR 160.404 Tier 3 Breach Exposure",
+            "savings": "Recognized Security Practices Safeguard Savings",
+        },
+        "meter_header": "Breach Exposure Mix: Statutory OCR Penalty vs Forensic Response",
+        "meter_left_lbl": "OCR Cap",
+        "meter_right_lbl": "Response",
+        "legend_1": "HHS OCR Statutory Penalty Reserve",
+        "legend_2": "Safeguard Automation Savings",
+        "legend_3": "Breach Notification &amp; Forensics",
+    },
+    "pci-dss-4-0-compliance-cost-calculator": {
+        "title": "PCI DSS v4.0.1 Compliance &amp; QSA ROC Cost Calculator",
+        "desc": "Deterministic PCI SSC v4.0.1 QSA Report on Compliance, ASV scanning, and Cardholder Data Environment budgeting engine.",
+        "switcher_title": "PCI DSS v4.0.1 Cardholder Scope Presets",
+        "submit_label": "Recalculate PCI DSS v4.0.1 Budget",
+        "visible_fields": ("headcount", "compromised_records"),
+        "field_overrides": {
+            "headcount": {"tooltip": "Workforce operating inside the segmented Cardholder Data Environment (CDE)."},
+            "compromised_records": {"label": "In-Scope Payment / PAN Records", "tooltip": "Primary account number (PAN) records processed within the audited CDE boundary."},
+        },
+        "presets": (
+            "Level 2 Service Provider (75 HC, Segmented CDE)",
+            "Merchant SAQ A / Tokenized (25 HC, Low Scope)",
+            "Level 1 Processor Scope (250 HC, Unsegmented CDE)",
+        ),
+        "primary_keys": ("pci_dss", "savings"),
+        "primary_labels": {
+            "pci_dss": "PCI DSS v4.0.1 Level 1 QSA ROC Total Cost",
+            "savings": "Continuous ASV &amp; CDE Evidence Savings",
+        },
+        "meter_header": "PCI DSS Allocation: QSA ROC Fieldwork vs ASV &amp; Tokenization",
+        "meter_left_lbl": "QSA ROC",
+        "meter_right_lbl": "CDE Auto",
+        "legend_1": "QSA Validation Engagement",
+        "legend_2": "Tokenization &amp; ASV Savings",
+        "legend_3": "CDE Segmentation Engineering",
+    },
+    "fedramp-authorization-3pao-cost-calculator": {
+        "title": "FedRAMP Moderate Authorization &amp; 3PAO Audit Cost Calculator",
+        "desc": "Deterministic 44 U.S.C. 3607 FedRAMP Rev 5 3PAO SAR assessment, GovCloud boundary, and ConMon cost model.",
+        "switcher_title": "FedRAMP Authorization Boundary Presets",
+        "submit_label": "Recalculate FedRAMP 3PAO Authorization Budget",
+        "visible_fields": ("headcount",),
+        "field_overrides": {
+            "headcount": {"tooltip": "Engineering and operations personnel supporting the FedRAMP authorization boundary."},
+        },
+        "presets": (
+            "FedRAMP Moderate Rev 5 (75 HC, Inherited PaaS)",
+            "FedRAMP Li-SaaS Baseline (25 HC, Low Impact)",
+            "Custom IaaS FedRAMP Boundary (250 HC, Full ConMon)",
+        ),
+        "primary_keys": ("fedramp", "savings"),
+        "primary_labels": {
+            "fedramp": "FedRAMP Moderate 3PAO Year-1 Budget",
+            "savings": "Inherited PaaS &amp; Automated ConMon Savings",
+        },
+        "meter_header": "FedRAMP ATO Allocation: 3PAO SAR Fieldwork vs Enclave &amp; ConMon",
+        "meter_left_lbl": "3PAO SAR",
+        "meter_right_lbl": "ConMon",
+        "legend_1": "Accredited 3PAO Assessment Fee",
+        "legend_2": "PaaS Inheritance &amp; ConMon Savings",
+        "legend_3": "FIPS 140-3 &amp; SSP Engineering",
+    },
+    "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+        "title": "HITRUST CSF v11 (e1 / i1 / r2) Certification Cost Calculator",
+        "desc": "Deterministic HITRUST Authorized External Assessor validation, MyCSF portal licensing, and CSP inheritance budgeting engine.",
+        "switcher_title": "HITRUST CSF v11 Validation Presets",
+        "submit_label": "Recalculate HITRUST CSF Certification Cost",
+        "visible_fields": ("headcount", "compromised_records"),
+        "field_overrides": {
+            "headcount": {"tooltip": "Engineering and compliance staff supporting systems inside the HITRUST MyCSF scope."},
+            "compromised_records": {"label": "Sensitive Records in Assessment Scope", "tooltip": "Regulated record volume driving HITRUST CSF v11 assurance depth factors."},
+        },
+        "presets": (
+            "HITRUST i1 Validated Scope (75 HC, Inherited CSP)",
+            "HITRUST e1 Essentials Scope (25 HC, 44 Controls)",
+            "HITRUST r2 Risk-Based Scope (250 HC, Full Factors)",
+        ),
+        "primary_keys": ("hitrust", "savings"),
+        "primary_labels": {
+            "hitrust": "HITRUST CSF v11 Validated Assessment Cost",
+            "savings": "MyCSF CSP Control Inheritance Savings",
+        },
+        "meter_header": "HITRUST CSF Allocation: External Assessor vs MyCSF Inheritance",
+        "meter_left_lbl": "Assessor",
+        "meter_right_lbl": "MyCSF",
+        "legend_1": "Authorized External Assessor Fee",
+        "legend_2": "CSP Control Inheritance Savings",
+        "legend_3": "PRISMA Scoring &amp; Remediation",
+    },
+    "penetration-testing-scoping-cost-calculator": {
+        "title": "Enterprise Penetration Testing &amp; PTaaS Scoping Cost Calculator",
+        "desc": "Deterministic NIST SP 800-115 and CREST/OSCP penetration test day-rate, API scope, and retest cost model.",
+        "switcher_title": "Penetration Testing Perimeter Presets",
+        "submit_label": "Recalculate Penetration Testing Budget",
+        "visible_fields": ("headcount",),
+        "field_overrides": {
+            "headcount": {"tooltip": "Engineering organization size scaling target web applications, APIs, and cloud VPC endpoints."},
+        },
+        "presets": (
+            "Cloud SaaS + API Suite (75 HC, Segmented Scope)",
+            "Single Web App PTaaS (25 HC, External Perimeter)",
+            "Enterprise Multi-Cluster Red Team (250 HC Scope)",
+        ),
+        "primary_keys": ("pentest", "savings"),
+        "primary_labels": {
+            "pentest": "CREST / OSCP Penetration Test Year-1 Cost",
+            "savings": "PTaaS Jira Sync &amp; Free Retest Savings",
+        },
+        "meter_header": "Pentest Budget Allocation: Assessor Fieldwork vs Retest Efficiency",
+        "meter_left_lbl": "Assessor",
+        "meter_right_lbl": "PTaaS",
+        "legend_1": "CREST / OSCP Testing Fee",
+        "legend_2": "PTaaS Triage &amp; Retest Savings",
+        "legend_3": "Internal Vulnerability Remediation",
+    },
+    "cyber-liability-insurance-breach-exposure-calculator": {
+        "title": "Cyber Liability Insurance Premium &amp; Retention Exposure Calculator",
+        "desc": "Deterministic NAIC cyber underwriting rate-on-line, self-insured retention (SIR), and breach balance-sheet model.",
+        "switcher_title": "Cyber Underwriting &amp; Retention Presets",
+        "submit_label": "Recalculate Cyber Insurance &amp; Exposure",
+        "visible_fields": ("headcount", "compromised_records"),
+        "field_overrides": {
+            "headcount": {"tooltip": "Insured workforce endpoints covered under MFA and EDR underwriting controls."},
+            "compromised_records": {"label": "Sensitive Records Held in Production", "tooltip": "Customer PII record volume sizing first-party forensics and carrier rate tiers."},
+        },
+        "presets": (
+            "$2M-$5M SaaS Policy (75 HC, 1,500 Sensitive Records)",
+            "$1M-$2M Startup Coverage (25 HC, 500 Records)",
+            "$10M+ Enterprise Excess Tower (250 HC, 15,000 Records)",
+        ),
+        "primary_keys": ("cyber_insurance", "savings"),
+        "primary_labels": {
+            "cyber_insurance": "Annual Premium + SIR Retention Exposure",
+            "savings": "MFA / EDR Underwriting Premium Credit",
+        },
+        "meter_header": "Cyber Coverage Split: Annual Policy Premium vs SIR Retention Reserve",
+        "meter_left_lbl": "Premium",
+        "meter_right_lbl": "SIR Reserve",
+        "legend_1": "Annual Cyber Policy Premium",
+        "legend_2": "MFA / EDR Control Savings Credit",
+        "legend_3": "Self-Insured Retention (SIR) Reserve",
+    },
+}
+
+
+def _build_core_widget_quick_answer(slug_low: str, benchmarks: Dict[str, Dict[str, Any]]) -> str:
+    b_soc2 = benchmarks["soc2"]
+    b_cmmc = benchmarks["cmmc"]
+    b_sprs = benchmarks["sprs"]
+    b_iso = benchmarks["iso27001"]
+    b_hipaa = benchmarks["hipaa"]
+    b_pci = benchmarks["pci_dss"]
+    b_fed = benchmarks["fedramp"]
+    b_hit = benchmarks["hitrust"]
+    b_pen = benchmarks["pentest"]
+    b_cyb = benchmarks["cyber_insurance"]
+    answers = {
+        "cmmc-2-0-compliance-cost-calculator": (
+            f"Under DoD 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense contractor models "
+            f"${b_cmmc['total_cost']:,.2f} in CMMC 2.0 Level 2 readiness (${b_cmmc['c3pao_assessment_fee']:,.2f} "
+            f"C3PAO assessment fee, ${b_cmmc['enclave_licensing_annual']:,.2f} CUI enclave licensing, "
+            f"${b_cmmc['remediation_labor_cost']:,.2f} engineering remediation, and ${b_cmmc['rpo_advisory_fee']:,.2f} "
+            f"RPO advisory) alongside a {int(b_sprs['sprs_score'])} SPRS score."
+        ),
+        "nist-800-171-sprs-score-calculator": (
+            f"Under DFARS 252.204-7019 and DoD Assessment Methodology rules, 3 unimplemented 5-point, "
+            f"2 unimplemented 3-point, and 2 unimplemented 1-point NIST SP 800-171 Rev 2 controls deduct "
+            f"{int(b_sprs['deduction_points'])} points from +110 for a DoD SPRS score of {int(b_sprs['sprs_score'])} "
+            f"(1 point short of the 88-point conditional POA&M threshold)."
+        ),
+        "iso-27001-certification-cost-calculator": (
+            f"Under ISO/IEC 27006-1:2024 Annex B headcount tables, a 75-employee ISMS requires {b_iso['auditor_days']:.1f} "
+            f"Stage 1 and Stage 2 auditor days (${b_iso['registrar_fee']:,.2f} registrar fee), ${b_iso['isms_platform_cost']:,.2f} "
+            f"ISMS tooling, ${b_iso['internal_audit_fee']:,.2f} internal audit, and ${b_iso['remediation_cost']:,.2f} "
+            f"engineering remediation (${b_iso['total_cost']:,.2f} Year-1 budget)."
+        ),
+        "hipaa-violation-penalty-breach-cost-calculator": (
+            f"Under 45 CFR 160.404 and HITECH 42 U.S.C. 1320d-5, an unencrypted breach of {b_hipaa['compromised_records']:,} "
+            f"ePHI records reaches the ${b_hipaa['ocr_civil_penalty']:,.2f} Tier 3 OCR civil penalty cap plus "
+            f"${b_hipaa['forensic_legal_retainer']:,.2f} in forensic legal retainers and "
+            f"${b_hipaa['breach_notification_cost']:,.2f} in notification costs (${b_hipaa['total_exposure']:,.2f} modeled exposure)."
+        ),
+        "pci-dss-4-0-compliance-cost-calculator": (
+            f"Under PCI DSS v4.0.1 and PCI SSC Merchant Level 1 rules, a 75-employee payment architecture models "
+            f"${b_pci['total_cost']:,.2f} in annual readiness covering QSA Report on Compliance fieldwork ($42,000.00), "
+            f"quarterly ASV vulnerability scanning, segmented CDE penetration testing, and payment page script integrity."
+        ),
+        "fedramp-authorization-3pao-cost-calculator": (
+            f"Under 44 U.S.C. 3607 and OMB M-24-15, a FedRAMP Rev 5 Moderate authorization across 325 NIST SP 800-53 "
+            f"controls models a Year-1 baseline budget of ${b_fed['total_cost']:,.2f} covering accredited 3PAO RAR/SAR "
+            f"testing, FIPS 140-3 boundary isolation, and automated monthly ConMon operations."
+        ),
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": (
+            f"Under HITRUST CSF v11 assurance standards, a validated external assessor engagement paired with MyCSF "
+            f"licensing and cloud CSP control inheritance models a Year-1 baseline cost of ${b_hit['total_cost']:,.2f} "
+            f"over a {b_hit['timeline_months']}-month validation and PRISMA scoring cycle."
+        ),
+        "penetration-testing-scoping-cost-calculator": (
+            f"Under NIST SP 800-115 and OWASP ASVS scoping methodology, a combined web application, OWASP API Top 10, "
+            f"and segmented cloud penetration test models a Year-1 budget of ${b_pen['total_cost']:,.2f} including "
+            f"remediation triage and verification retesting."
+        ),
+        "cyber-liability-insurance-breach-exposure-calculator": (
+            f"Under NAIC cyber liability underwriting benchmarks, a 75-employee organization holding 1,500 sensitive "
+            f"records models ${b_cyb['annual_premium']:,.2f} in annual cyber premium alongside a "
+            f"${b_cyb['self_insured_retention']:,.2f} self-insured retention (${b_cyb['total_cost']:,.2f} combined baseline exposure)."
+        ),
+    }
+    return answers.get(
+        slug_low,
+        f"Under AICPA SSAE 18 (AT-C Section 205) and DoD 32 CFR Part 170, a 75-employee enterprise "
+        f"incurs a baseline SOC 2 Type II total outlay of ${b_soc2['total_cost']:,.2f} (comprising ${b_soc2['cpa_audit_fee']:,.2f} CPA fees, "
+        f"$11,500.00 penetration testing, $15,000.00 GRC platform licensing, and ${b_soc2['internal_labor_cost']:,.2f} engineering labor), "
+        f"while 3 unimplemented 5-point, 2 unimplemented 3-point, and 2 unimplemented 1-point NIST SP 800-171 "
+        f"controls yield a DoD SPRS score of {int(b_sprs['sprs_score'])} out of 110 (1 point shy of the 88-point conditional POA&M floor).",
+    )
+
+
+def _compute_meter_breakdown(slug_low: str, benchmarks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Computes framework-accurate SSR meter dollar splits and percentage widths."""
+    b_soc2 = benchmarks["soc2"]
+    b_cmmc = benchmarks["cmmc"]
+    b_sprs = benchmarks["sprs"]
+    b_iso = benchmarks["iso27001"]
+    b_hipaa = benchmarks["hipaa"]
+    b_pci = benchmarks["pci_dss"]
+    b_fed = benchmarks["fedramp"]
+    b_hit = benchmarks["hitrust"]
+    b_pen = benchmarks["pentest"]
+    b_cyb = benchmarks["cyber_insurance"]
+
+    cmmc_rem = float(b_cmmc["remediation_labor_cost"])
+    iso_rem = float(b_iso["remediation_cost"])
+    hipaa_resp = round(float(b_hipaa["forensic_legal_retainer"]) + float(b_hipaa["breach_notification_cost"]), 2)
+    fed_tot = float(b_fed["total_cost"])
+    hit_tot = float(b_hit["total_cost"])
+    pen_tot = float(b_pen["total_cost"])
+
+    table: Dict[str, Dict[str, Any]] = {
+        "cmmc-2-0-compliance-cost-calculator": {
+            "mode": "cmmc",
+            "pay": float(b_cmmc["c3pao_assessment_fee"]),
+            "right": float(b_cmmc["enclave_licensing_annual"]),
+            "int": cmmc_rem,
+            "sub": round(cmmc_rem * 0.35, 2),
+            "pct": max(5, min(95, round((float(b_cmmc["c3pao_assessment_fee"]) / max(1.0, float(b_cmmc["total_cost"]))) * 100))),
+        },
+        "nist-800-171-sprs-score-calculator": {
+            "mode": "sprs",
+            "pay": float(b_cmmc["c3pao_assessment_fee"]),
+            "right": float(b_cmmc["enclave_licensing_annual"]),
+            "int": cmmc_rem,
+            "sub": round(cmmc_rem * 0.35, 2),
+            "pct": max(5, min(95, round(((110.0 - max(0.0, float(b_sprs["deduction_points"]))) / 110.0) * 100))),
+        },
+        "iso-27001-certification-cost-calculator": {
+            "mode": "iso27001",
+            "pay": float(b_iso["registrar_fee"]),
+            "right": float(b_iso["isms_platform_cost"]),
+            "int": iso_rem,
+            "sub": round(iso_rem * 0.50, 2),
+            "pct": max(5, min(95, round((float(b_iso["registrar_fee"]) / max(1.0, float(b_iso["total_cost"]))) * 100))),
+        },
+        "hipaa-violation-penalty-breach-cost-calculator": {
+            "mode": "hipaa",
+            "pay": float(b_hipaa["ocr_civil_penalty"]),
+            "right": hipaa_resp,
+            "int": hipaa_resp,
+            "sub": round(float(b_hipaa["ocr_civil_penalty"]) * 0.30, 2),
+            "pct": max(5, min(95, round((float(b_hipaa["ocr_civil_penalty"]) / max(1.0, float(b_hipaa["total_exposure"]))) * 100))),
+        },
+        "pci-dss-4-0-compliance-cost-calculator": {
+            "mode": "pci_dss",
+            "pay": 42000.0,
+            "right": 14000.0,
+            "int": 38800.0,
+            "sub": round(38800.0 * 0.45, 2),
+            "pct": max(5, min(95, round((42000.0 / max(1.0, float(b_pci["total_cost"]))) * 100))),
+        },
+        "fedramp-authorization-3pao-cost-calculator": {
+            "mode": "fedramp",
+            "pay": round(fed_tot * 0.42, 2),
+            "right": round(fed_tot * 0.16, 2),
+            "int": round(fed_tot * 0.42, 2),
+            "sub": round(fed_tot * 0.25, 2),
+            "pct": 42,
+        },
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+            "mode": "hitrust",
+            "pay": round(hit_tot * 0.50, 2),
+            "right": round(hit_tot * 0.18, 2),
+            "int": round(hit_tot * 0.32, 2),
+            "sub": round(hit_tot * 0.30, 2),
+            "pct": 50,
+        },
+        "penetration-testing-scoping-cost-calculator": {
+            "mode": "pentest",
+            "pay": round(pen_tot * 0.62, 2),
+            "right": round(pen_tot * 0.18, 2),
+            "int": round(pen_tot * 0.20, 2),
+            "sub": round(pen_tot * 0.30, 2),
+            "pct": 62,
+        },
+        "cyber-liability-insurance-breach-exposure-calculator": {
+            "mode": "cyber_insurance",
+            "pay": float(b_cyb["annual_premium"]),
+            "right": float(b_cyb["self_insured_retention"]),
+            "int": float(b_cyb["self_insured_retention"]),
+            "sub": round(float(b_cyb["annual_premium"]) * 0.22, 2),
+            "pct": max(5, min(95, round((float(b_cyb["annual_premium"]) / max(1.0, float(b_cyb["total_cost"]))) * 100))),
+        },
+    }
+    return table.get(
+        slug_low,
+        {
+            "mode": "soc2",
+            "pay": float(b_soc2["cpa_audit_fee"]),
+            "right": float(b_soc2["grc_platform_cost"]),
+            "int": float(b_soc2["internal_labor_cost"]),
+            "sub": float(b_soc2["automation_savings"]),
+            "pct": max(5, min(95, round((float(b_soc2["cpa_audit_fee"]) / max(1.0, float(b_soc2["total_cost"]))) * 100))),
+        },
+    )
+
+
 def _render_calculator_widget(
     benchmarks: Dict[str, Dict[str, Any]],
     tool_slug: str = "soc-2-audit-cost-calculator",
 ) -> str:
     slug_low = str(tool_slug or "").strip().lower()
-    show_extra_criteria = ("soc-2" in slug_low or "soc2" in slug_low or not slug_low)
+    is_soc2_hub = slug_low in ("", "index", "soc-2-audit-cost-calculator") or "soc-2" in slug_low or "soc2" in slug_low
+    spec = None if is_soc2_hub else _CORE_TOOL_WIDGET_BASE.get(slug_low)
+    show_extra_criteria = is_soc2_hub
+    visible_fields = set(spec["visible_fields"]) if spec else {f["id"] for f in _COMPLIANCE_FIELDS}
+    field_overrides = (spec or {}).get("field_overrides", {})
+
     fields_html = []
     for f in _COMPLIANCE_FIELDS:
-        if f["id"] == "extra_criteria" and not show_extra_criteria:
+        fid_raw = f["id"]
+        if fid_raw == "extra_criteria" and not show_extra_criteria:
             continue
-        fid = html.escape(f["id"])
+        if spec is not None and fid_raw not in visible_fields:
+            continue
+        ov = field_overrides.get(fid_raw, {})
+        flabel = ov.get("label", f["label"])
+        ftip = ov.get("tooltip", f["tooltip"])
+        fid = html.escape(fid_raw)
         fields_html.append(f"""
           <div class="calc-field-group">
             <div class="calc-label-row">
-              <label for="calc-input-{fid}" class="calc-label">{html.escape(f['label'])}</label>
+              <label for="calc-input-{fid}" class="calc-label">{html.escape(flabel)}</label>
               <span class="calc-unit">{html.escape(f['unit'])}</span>
             </div>
             <input
@@ -614,48 +1049,108 @@ def _render_calculator_widget(
               step="{f['step']}"
               data-field-id="{fid}"
             />
-            <p class="calc-tooltip">{html.escape(f['tooltip'])}</p>
+            <p class="calc-tooltip">{html.escape(ftip)}</p>
           </div>""")
 
-    soc2_val = f"${benchmarks['soc2']['total_cost']:,.2f}"
-    cmmc_val = f"${benchmarks['cmmc']['total_cost']:,.2f}"
-    sprs_val = f"{int(benchmarks['sprs']['sprs_score'])} pts"
-    iso_val = f"${benchmarks['iso27001']['total_cost']:,.2f}"
-    hipaa_val = f"${benchmarks['hipaa']['total_exposure']:,.2f}"
-    pci_val = f"${benchmarks['pci_dss']['total_cost']:,.2f}"
-    sav_val = f"${benchmarks['soc2']['automation_savings']:,.2f}/yr"
-    cpa_fee_val = f"${benchmarks['soc2']['cpa_audit_fee']:,.2f}"
-    grc_fee_val = f"${benchmarks['soc2']['grc_platform_cost']:,.2f}"
-    int_labor_val = f"${benchmarks['soc2']['internal_labor_cost']:,.2f}"
-    quick_ans = (
-        "Under AICPA SSAE 18 (AT-C Section 205) and DoD 32 CFR Part 170, a 75-employee enterprise "
-        "incurs a baseline SOC 2 Type II total outlay of $78,100.40 (comprising $37,000.00 CPA fees, "
-        "$11,500.00 penetration testing, $15,000.00 GRC platform licensing, and $14,600.40 engineering labor), "
-        "while 3 unimplemented 5-point, 2 unimplemented 3-point, and 2 unimplemented 1-point NIST SP 800-171 "
-        "controls yield a DoD SPRS score of 87 out of 110 (1 point shy of the 88-point conditional POA&M floor)."
+    meter_bd = _compute_meter_breakdown(slug_low, benchmarks)
+    metric_vals = {
+        "soc2": ("metric-soc2_total_cost", f"${benchmarks['soc2']['total_cost']:,.2f}"),
+        "sprs": ("metric-nist_sprs_score", f"{int(benchmarks['sprs']['sprs_score'])} pts"),
+        "cmmc": ("metric-cmmc_total_cost", f"${benchmarks['cmmc']['total_cost']:,.2f}"),
+        "iso27001": ("metric-iso27001_total_cost", f"${benchmarks['iso27001']['total_cost']:,.2f}"),
+        "hipaa": ("metric-hipaa_exposure", f"${benchmarks['hipaa']['total_exposure']:,.2f}"),
+        "pci_dss": ("metric-pci_dss_cost", f"${benchmarks['pci_dss']['total_cost']:,.2f}"),
+        "fedramp": ("metric-fedramp_total_cost", f"${benchmarks['fedramp']['total_cost']:,.2f}"),
+        "hitrust": ("metric-hitrust_total_cost", f"${benchmarks['hitrust']['total_cost']:,.2f}"),
+        "pentest": ("metric-pentest_total_cost", f"${benchmarks['pentest']['total_cost']:,.2f}"),
+        "cyber_insurance": ("metric-cyber_insurance_total_cost", f"${benchmarks['cyber_insurance']['total_cost']:,.2f}"),
+        "savings": ("metric-soc2_automation_savings", f"${meter_bd['sub']:,.2f}/yr"),
+    }
+    hub_cards = (
+        ("soc2", "SOC 2 Type II Total Year-1 Cost (AICPA SSAE 18)", True),
+        ("sprs", "NIST SP 800-171 DoD SPRS Score ([-203, +110])", True),
+        ("cmmc", "DoD CMMC 2.0 Level 2 C3PAO Total Cost (32 CFR 170)", False),
+        ("iso27001", "ISO/IEC 27001:2022 Stage 1 &amp; 2 Total Cost", False),
+        ("hipaa", "HIPAA 45 CFR 160.404 Tier 3 Breach Exposure", False),
+        ("pci_dss", "PCI DSS v4.0.1 Level 1 QSA ROC Total Cost", False),
+        ("savings", "Continuous GRC Automation Labor Savings", True),
     )
+    if spec is None:
+        cards_html = "\n".join(
+            f'            <div class="calc-metric-card{" calc-metric-highlight" if hl else ""}">\n'
+            f'              <div class="calc-metric-label">{lbl}</div>\n'
+            f'              <div class="calc-metric-value" id="{metric_vals[key][0]}">{metric_vals[key][1]}</div>\n'
+            f"            </div>"
+            for key, lbl, hl in hub_cards
+        )
+    else:
+        primary_keys = spec["primary_keys"]
+        primary_labels = spec["primary_labels"]
+        visible_cards = [
+            f'            <div class="calc-metric-card calc-metric-highlight">\n'
+            f'              <div class="calc-metric-label">{primary_labels[key]}</div>\n'
+            f'              <div class="calc-metric-value" id="{metric_vals[key][0]}">{metric_vals[key][1]}</div>\n'
+            f"            </div>"
+            for key in primary_keys
+        ]
+        parity_keys = ("soc2", "sprs", "cmmc", "iso27001", "hipaa", "pci_dss", "savings")
+        hidden_cards = [
+            f'            <div class="calc-metric-card" hidden aria-hidden="true">\n'
+            f'              <div class="calc-metric-label">Secondary Benchmark</div>\n'
+            f'              <div class="calc-metric-value" id="{metric_vals[key][0]}">{metric_vals[key][1]}</div>\n'
+            f"            </div>"
+            for key in parity_keys
+            if key not in primary_keys
+        ]
+        cards_html = "\n".join(visible_cards + hidden_cards)
+
+    meter_pay_val = f"${meter_bd['pay']:,.2f}"
+    meter_right_val = f"${meter_bd['right']:,.2f}"
+    meter_sub_val = f"${meter_bd['sub']:,.2f}"
+    meter_int_val = f"${meter_bd['int']:,.2f}"
+    meter_left_pct = int(meter_bd["pct"])
+    meter_right_pct = 100 - meter_left_pct
+    meter_mode = html.escape(str(meter_bd["mode"]))
+    quick_ans = _build_core_widget_quick_answer(slug_low, benchmarks)
+
+    calc_title = spec["title"] if spec else "Enterprise SOC 2 Type II, DoD CMMC 2.0 &amp; NIST 800-171 SPRS Audit Calculator"
+    calc_desc = spec["desc"] if spec else "Deterministic enterprise GRC audit budgeting and NIST SP 800-171 SPRS scoring engine."
+    switcher_title = spec["switcher_title"] if spec else "Enterprise Audit Scenario Presets"
+    submit_label = spec["submit_label"] if spec else "Recalculate Compliance Budget &amp; SPRS Score"
+    preset_labels = spec["presets"] if spec else (
+        "Series B SaaS (75 HC, 3 TSC, SPRS 87)",
+        "Seed / Series A (25 HC, 2 TSC, SPRS 100)",
+        "Enterprise Defense &amp; Health (250 HC, 5 TSC, SPRS 55)",
+    )
+    meter_header = spec["meter_header"] if spec else "SOC 2 Cost Allocation: CPA Attestation vs Pentest &amp; GRC Automation"
+    meter_left_lbl = spec["meter_left_lbl"] if spec else "CPA"
+    meter_right_lbl = spec["meter_right_lbl"] if spec else "GRC"
+    legend_1 = spec["legend_1"] if spec else "CPA Firm Attestation Fee"
+    legend_2 = spec["legend_2"] if spec else "GRC Automation Savings"
+    legend_3 = spec["legend_3"] if spec else "Internal Engineering Prep"
+    aria_title = html.escape(html.unescape(calc_title), quote=True)
 
     return f"""
-    <section class="interactive-calculator-container" id="calculator-workspace-anchor" aria-label="Enterprise SOC 2 Type II, DoD CMMC 2.0 &amp; NIST 800-171 SPRS Audit Calculator">
+    <section class="interactive-calculator-container" id="calculator-workspace-anchor" aria-label="{aria_title}">
       <div class="calc-header">
-        <h2 class="calc-title">Enterprise SOC 2 Type II, DoD CMMC 2.0 &amp; NIST 800-171 SPRS Audit Calculator</h2>
-        <p class="calc-desc">Deterministic enterprise GRC audit budgeting and NIST SP 800-171 SPRS scoring engine.</p>
+        <h2 class="calc-title">{calc_title}</h2>
+        <p class="calc-desc">{calc_desc}</p>
       </div>
 
       <div class="calc-switcher-panel">
         <div class="calc-switcher-header">
-          <span class="calc-switcher-title">Enterprise Audit Scenario Presets</span>
+          <span class="calc-switcher-title">{switcher_title}</span>
           <span class="calc-switcher-hint">Instant Statutory Recalculation</span>
         </div>
         <div class="calc-switcher-pills">
           <button type="button" class="calc-switcher-btn touch-target active" data-preset-hc="75" data-preset-crit="2" data-preset-u5="3" data-preset-u3="2" data-preset-u1="2" data-preset-rec="1500">
-            Series B SaaS (75 HC, 3 TSC, SPRS 87)
+            {preset_labels[0]}
           </button>
           <button type="button" class="calc-switcher-btn touch-target" data-preset-hc="25" data-preset-crit="1" data-preset-u5="0" data-preset-u3="2" data-preset-u1="4" data-preset-rec="500">
-            Seed / Series A (25 HC, 2 TSC, SPRS 100)
+            {preset_labels[1]}
           </button>
           <button type="button" class="calc-switcher-btn touch-target" data-preset-hc="250" data-preset-crit="4" data-preset-u5="6" data-preset-u3="5" data-preset-u1="10" data-preset-rec="15000">
-            Enterprise Defense &amp; Health (250 HC, 5 TSC, SPRS 55)
+            {preset_labels[2]}
           </button>
         </div>
       </div>
@@ -666,7 +1161,7 @@ def _render_calculator_widget(
           <form id="gainhelm-compliance-form" class="calculator-form" onsubmit="return false;">
             {''.join(fields_html)}
             <button type="submit" id="calc-submit-btn" class="btn-cta touch-target" style="width: 100%; margin-top: 0.5rem;">
-              Recalculate Compliance Budget &amp; SPRS Score
+              {submit_label}
             </button>
           </form>
         </div>
@@ -674,49 +1169,22 @@ def _render_calculator_widget(
         <div class="calc-results-column" aria-live="polite">
           <h3 class="calc-column-title">Deterministic Statutory &amp; Audit Outputs</h3>
           <div class="calc-metrics-grid">
-            <div class="calc-metric-card calc-metric-highlight">
-              <div class="calc-metric-label">SOC 2 Type II Total Year-1 Cost (AICPA SSAE 18)</div>
-              <div class="calc-metric-value" id="metric-soc2_total_cost">{soc2_val}</div>
-            </div>
-            <div class="calc-metric-card calc-metric-highlight">
-              <div class="calc-metric-label">NIST SP 800-171 DoD SPRS Score ([-203, +110])</div>
-              <div class="calc-metric-value" id="metric-nist_sprs_score">{sprs_val}</div>
-            </div>
-            <div class="calc-metric-card">
-              <div class="calc-metric-label">DoD CMMC 2.0 Level 2 C3PAO Total Cost (32 CFR 170)</div>
-              <div class="calc-metric-value" id="metric-cmmc_total_cost">{cmmc_val}</div>
-            </div>
-            <div class="calc-metric-card">
-              <div class="calc-metric-label">ISO/IEC 27001:2022 Stage 1 &amp; 2 Total Cost</div>
-              <div class="calc-metric-value" id="metric-iso27001_total_cost">{iso_val}</div>
-            </div>
-            <div class="calc-metric-card">
-              <div class="calc-metric-label">HIPAA 45 CFR 160.404 Tier 3 Breach Exposure</div>
-              <div class="calc-metric-value" id="metric-hipaa_exposure">{hipaa_val}</div>
-            </div>
-            <div class="calc-metric-card">
-              <div class="calc-metric-label">PCI DSS v4.0.1 Level 1 QSA ROC Total Cost</div>
-              <div class="calc-metric-value" id="metric-pci_dss_cost">{pci_val}</div>
-            </div>
-            <div class="calc-metric-card calc-metric-highlight">
-              <div class="calc-metric-label">Continuous GRC Automation Labor Savings</div>
-              <div class="calc-metric-value" id="metric-soc2_automation_savings">{sav_val}</div>
-            </div>
+{cards_html}
           </div>
 
           <div class="subsidy-meter-wrap">
             <div class="subsidy-meter-header">
-              <span>SOC 2 Cost Allocation: CPA Attestation vs Pentest &amp; GRC Automation</span>
-              <span id="meter-cpa-val">{cpa_fee_val} CPA | {grc_fee_val} GRC</span>
+              <span>{meter_header}</span>
+              <span id="meter-cpa-val" data-meter-mode="{meter_mode}" data-left-label="{html.escape(meter_left_lbl)}" data-right-label="{html.escape(meter_right_lbl)}">{meter_pay_val} {html.escape(meter_left_lbl)} | {meter_right_val} {html.escape(meter_right_lbl)}</span>
             </div>
             <div class="subsidy-meter-bar">
-              <div class="subsidy-meter-seg subsidy-meter-seg-pay" id="meter-seg-cpa" style="width: 47%;"></div>
-              <div class="subsidy-meter-seg subsidy-meter-seg-sub" id="meter-seg-grc" style="width: 53%;"></div>
+              <div class="subsidy-meter-seg subsidy-meter-seg-pay" id="meter-seg-cpa" style="width: {meter_left_pct}%;"></div>
+              <div class="subsidy-meter-seg subsidy-meter-seg-sub" id="meter-seg-grc" style="width: {meter_right_pct}%;"></div>
             </div>
             <div class="subsidy-meter-legend">
-              <span class="legend-item"><span class="legend-dot dot-pay"></span>CPA Firm Attestation Fee (<span id="meter-pay-val">{cpa_fee_val}</span>)</span>
-              <span class="legend-item"><span class="legend-dot dot-sub"></span>GRC Automation Savings (<span id="meter-sub-val">${benchmarks['soc2']['automation_savings']:,.2f}</span>)</span>
-              <span class="legend-item"><span class="legend-dot dot-int"></span>Internal Engineering Prep (<span id="meter-int-val">{int_labor_val}</span>)</span>
+              <span class="legend-item"><span class="legend-dot dot-pay"></span>{legend_1} (<span id="meter-pay-val">{meter_pay_val}</span>)</span>
+              <span class="legend-item"><span class="legend-dot dot-sub"></span>{legend_2} (<span id="meter-sub-val">{meter_sub_val}</span>)</span>
+              <span class="legend-item"><span class="legend-dot dot-int"></span>{legend_3} (<span id="meter-int-val">{meter_int_val}</span>)</span>
             </div>
           </div>
         </div>
@@ -738,6 +1206,16 @@ def _render_calculator_widget(
         }}
         function fmtUSD(v) {{
           return "$" + v.toLocaleString("en-US", {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+        }}
+        function isIntNum(v) {{
+          return Math.abs(v - Math.round(v)) < 1e-6;
+        }}
+        function fmtCompactNum(v) {{
+          if (isIntNum(v)) return Math.round(v).toLocaleString("en-US");
+          return v.toLocaleString("en-US", {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+        }}
+        function fmtCompactUSD(v) {{
+          return "$" + fmtCompactNum(v);
         }}
         function recompute() {{
           var hcEl = document.getElementById("calc-input-headcount");
@@ -764,12 +1242,45 @@ def _render_calculator_widget(
           var sprsDeduction = (u5 * 5) + (u3 * 3) + (u1 * 1);
           var sprsScore = Math.max(-203, 110 - sprsDeduction);
 
-          var cmmcTotal = Math.round((48500.0 + 26400.0 + (380.0 * 115.0 * Math.max(0.5, scaleFactor)) + 13400.0) * 100) / 100;
+          var cmmcRem = Math.round((380.0 * 115.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+          var cmmcTotal = Math.round((48500.0 + 26400.0 + cmmcRem + 13400.0) * 100) / 100;
           var isoDays = Math.max(5.0, Math.round(11.0 * Math.pow(scaleFactor, 0.35)));
-          var isoTotal = Math.round(((isoDays * 1950.0) + 14500.0 + 8500.0 + (180.0 * 125.28)) * 100) / 100;
+          var isoReg = Math.round((isoDays * 1950.0) * 100) / 100;
+          var isoRem = Math.round((180.0 * 125.28 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
+          var isoTotal = Math.round((isoReg + 14500.0 + 8500.0 + isoRem) * 100) / 100;
           var ocrFine = Math.min(rec * 13795.0, 2067813.0);
-          var hipaaTotal = Math.round((ocrFine + 95000.0 + (rec * 195.0)) * 100) / 100;
-          var pciTotal = 94800.00;
+          var hipaaResp = Math.round((95000.0 + (rec * 195.0)) * 100) / 100;
+          var hipaaTotal = Math.round((ocrFine + hipaaResp) * 100) / 100;
+          var pciCde = Math.round((38800.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+          var pciTotal = Math.round((42000.0 + 14000.0 + pciCde) * 100) / 100;
+          var fedTotal = Math.round((500000.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
+          var hitTotal = Math.round((115000.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
+          var penTotal = Math.round((23300.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
+          var cybPrem = Math.round((20415.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+          var cybSir = 20485.0;
+          var cybTotal = Math.round((cybPrem + cybSir) * 100) / 100;
+          var extraMetrics = [
+            ["metric-fedramp_total_cost", fedTotal],
+            ["metric-hitrust_total_cost", hitTotal],
+            ["metric-pentest_total_cost", penTotal],
+            ["metric-cyber_insurance_total_cost", cybTotal]
+          ];
+
+          var elMeterCpa = document.getElementById("meter-cpa-val");
+          var meterMode = (elMeterCpa && elMeterCpa.getAttribute("data-meter-mode")) || "soc2";
+          var meterMap = {{
+            soc2: {{pay: cpaFee, right: grcFee, sub: autoSavings, intl: internalLabor, pct: Math.round((cpaFee / Math.max(1, soc2Total)) * 100)}},
+            cmmc: {{pay: 48500.0, right: 26400.0, sub: Math.round(cmmcRem * 0.35 * 100) / 100, intl: cmmcRem, pct: Math.round((48500.0 / Math.max(1, cmmcTotal)) * 100)}},
+            sprs: {{pay: 48500.0, right: 26400.0, sub: Math.round(cmmcRem * 0.35 * 100) / 100, intl: cmmcRem, pct: Math.round(((110.0 - Math.max(0, sprsDeduction)) / 110.0) * 100)}},
+            iso27001: {{pay: isoReg, right: 14500.0, sub: Math.round(isoRem * 0.50 * 100) / 100, intl: isoRem, pct: Math.round((isoReg / Math.max(1, isoTotal)) * 100)}},
+            hipaa: {{pay: ocrFine, right: hipaaResp, sub: Math.round(ocrFine * 0.30 * 100) / 100, intl: hipaaResp, pct: Math.round((ocrFine / Math.max(1, hipaaTotal)) * 100)}},
+            pci_dss: {{pay: 42000.0, right: 14000.0, sub: Math.round(pciCde * 0.45 * 100) / 100, intl: pciCde, pct: Math.round((42000.0 / Math.max(1, pciTotal)) * 100)}},
+            fedramp: {{pay: Math.round(fedTotal * 0.42 * 100) / 100, right: Math.round(fedTotal * 0.16 * 100) / 100, sub: Math.round(fedTotal * 0.25 * 100) / 100, intl: Math.round(fedTotal * 0.42 * 100) / 100, pct: 42}},
+            hitrust: {{pay: Math.round(hitTotal * 0.50 * 100) / 100, right: Math.round(hitTotal * 0.18 * 100) / 100, sub: Math.round(hitTotal * 0.30 * 100) / 100, intl: Math.round(hitTotal * 0.32 * 100) / 100, pct: 50}},
+            pentest: {{pay: Math.round(penTotal * 0.62 * 100) / 100, right: Math.round(penTotal * 0.18 * 100) / 100, sub: Math.round(penTotal * 0.30 * 100) / 100, intl: Math.round(penTotal * 0.20 * 100) / 100, pct: 62}},
+            cyber_insurance: {{pay: cybPrem, right: cybSir, sub: Math.round(cybPrem * 0.22 * 100) / 100, intl: cybSir, pct: Math.round((cybPrem / Math.max(1, cybTotal)) * 100)}}
+          }};
+          var activeMeter = meterMap[meterMode] || meterMap.soc2;
 
           var elSoc2 = document.getElementById("metric-soc2_total_cost");
           var elSprs = document.getElementById("metric-nist_sprs_score");
@@ -785,28 +1296,77 @@ def _render_calculator_widget(
           if (elIso) elIso.textContent = fmtUSD(isoTotal);
           if (elHipaa) elHipaa.textContent = fmtUSD(hipaaTotal);
           if (elPci) elPci.textContent = fmtUSD(pciTotal);
-          if (elSav) elSav.textContent = fmtUSD(autoSavings) + "/yr";
+          if (elSav) elSav.textContent = fmtUSD(activeMeter.sub) + "/yr";
+          for (var emIdx = 0; emIdx < extraMetrics.length; emIdx++) {{
+            var emEl = document.getElementById(extraMetrics[emIdx][0]);
+            if (emEl) emEl.textContent = fmtUSD(extraMetrics[emIdx][1]);
+          }}
 
-          var elMeterCpa = document.getElementById("meter-cpa-val");
           var elMeterPay = document.getElementById("meter-pay-val");
           var elMeterSub = document.getElementById("meter-sub-val");
           var elMeterInt = document.getElementById("meter-int-val");
           var elSegCpa = document.getElementById("meter-seg-cpa");
           var elSegGrc = document.getElementById("meter-seg-grc");
-          var cpaPct = Math.max(5, Math.min(95, Math.round((cpaFee / Math.max(1, soc2Total)) * 100)));
-          if (elMeterCpa) elMeterCpa.textContent = fmtUSD(cpaFee) + " CPA | " + fmtUSD(grcFee) + " GRC";
-          if (elMeterPay) elMeterPay.textContent = fmtUSD(cpaFee);
-          if (elMeterSub) elMeterSub.textContent = fmtUSD(autoSavings);
-          if (elMeterInt) elMeterInt.textContent = fmtUSD(internalLabor);
+          var leftLbl = (elMeterCpa && elMeterCpa.getAttribute("data-left-label")) || "CPA";
+          var rightLbl = (elMeterCpa && elMeterCpa.getAttribute("data-right-label")) || "GRC";
+          var cpaPct = Math.max(5, Math.min(95, activeMeter.pct));
+          if (elMeterCpa) elMeterCpa.textContent = fmtUSD(activeMeter.pay) + " " + leftLbl + " | " + fmtUSD(activeMeter.right) + " " + rightLbl;
+          if (elMeterPay) elMeterPay.textContent = fmtUSD(activeMeter.pay);
+          if (elMeterSub) elMeterSub.textContent = fmtUSD(activeMeter.sub);
+          if (elMeterInt) elMeterInt.textContent = fmtUSD(activeMeter.intl);
           if (elSegCpa) elSegCpa.style.width = cpaPct + "%";
           if (elSegGrc) elSegGrc.style.width = (100 - cpaPct) + "%";
+
+          var primaryOutMap = {{
+            soc2: soc2Total,
+            cmmc: cmmcTotal,
+            sprs: sprsScore,
+            iso27001: isoTotal,
+            hipaa: hipaaTotal,
+            pci_dss: pciTotal,
+            fedramp: fedTotal,
+            hitrust: hitTotal,
+            pentest: penTotal,
+            cyber_insurance: cybTotal
+          }};
+          var primaryVal = Object.prototype.hasOwnProperty.call(primaryOutMap, meterMode) ? primaryOutMap[meterMode] : soc2Total;
+          var isSprsMode = meterMode === "sprs";
+          if (typeof document.querySelectorAll === "function") {{
+            var allOutNodes = document.querySelectorAll(".output-value");
+            for (var oi = 0; oi < allOutNodes.length; oi++) {{
+              var outCandidate = allOutNodes[oi];
+              if (!outCandidate.classList || !outCandidate.classList.contains("overlay-preset-readout")) {{
+                outCandidate.textContent = isSprsMode ? String(Math.round(primaryVal)) : fmtCompactNum(primaryVal);
+                break;
+              }}
+            }}
+          }}
+          var hrBase = document.getElementById("hero-range-baseline");
+          var hrLow = document.getElementById("hero-range-low");
+          var hrHigh = document.getElementById("hero-range-high");
+          var fmtHeroVal = function(v) {{
+            return isSprsMode ? fmtCompactNum(v) : fmtCompactUSD(v);
+          }};
+          if (hrBase) hrBase.textContent = isSprsMode ? String(Math.round(primaryVal)) : fmtCompactUSD(primaryVal);
+          if (hrLow) hrLow.textContent = fmtHeroVal(primaryVal * 0.8);
+          if (hrHigh) hrHigh.textContent = fmtHeroVal(primaryVal * 1.2);
         }}
 
-        var params = new URLSearchParams(window.location.search);
+        if (typeof window !== "undefined") {{
+          window.__gainhelmSyncWorkspaceOutputs = recompute;
+        }}
+        function setCalcInputVal(fid, rawV) {{
+          var el = document.getElementById(fid);
+          if (!el) return;
+          el.value = String(rawV);
+          var rEl = document.getElementById("retro-range-" + fid);
+          if (rEl) rEl.value = String(rawV);
+        }}
+
+        var params = new URLSearchParams((typeof window !== "undefined" && window.location && window.location.search) || "");
         ["headcount", "extra_criteria", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt", "compromised_records"].forEach(function(k) {{
           if (params.has(k)) {{
-            var inp = document.getElementById("calc-input-" + k);
-            if (inp) inp.value = Math.max(0, parseFloat(params.get(k)) || 0);
+            setCalcInputVal("calc-input-" + k, Math.max(0, parseFloat(params.get(k)) || 0));
           }}
         }});
 
@@ -817,18 +1377,12 @@ def _render_calculator_widget(
           btns[i].addEventListener("click", function() {{
             for (var j = 0; j < btns.length; j++) btns[j].classList.remove("active");
             this.classList.add("active");
-            var hcTarget = document.getElementById("calc-input-headcount");
-            if (hcTarget) hcTarget.value = this.getAttribute("data-preset-hc") || "75";
-            var critBtnTarget = document.getElementById("calc-input-extra_criteria");
-            if (critBtnTarget) critBtnTarget.value = this.getAttribute("data-preset-crit") || "2";
-            var u5Target = document.getElementById("calc-input-unimplemented_5pt");
-            if (u5Target) u5Target.value = this.getAttribute("data-preset-u5") || "3";
-            var u3Target = document.getElementById("calc-input-unimplemented_3pt");
-            if (u3Target) u3Target.value = this.getAttribute("data-preset-u3") || "2";
-            var u1Target = document.getElementById("calc-input-unimplemented_1pt");
-            if (u1Target) u1Target.value = this.getAttribute("data-preset-u1") || "2";
-            var recTarget = document.getElementById("calc-input-compromised_records");
-            if (recTarget) recTarget.value = this.getAttribute("data-preset-rec") || "1500";
+            setCalcInputVal("calc-input-headcount", this.getAttribute("data-preset-hc") || "75");
+            setCalcInputVal("calc-input-extra_criteria", this.getAttribute("data-preset-crit") || this.getAttribute("data-preset-extra") || "2");
+            setCalcInputVal("calc-input-unimplemented_5pt", this.getAttribute("data-preset-u5") || "3");
+            setCalcInputVal("calc-input-unimplemented_3pt", this.getAttribute("data-preset-u3") || "2");
+            setCalcInputVal("calc-input-unimplemented_1pt", this.getAttribute("data-preset-u1") || "2");
+            setCalcInputVal("calc-input-compromised_records", this.getAttribute("data-preset-rec") || "1500");
             recompute();
           }});
         }}
@@ -1023,8 +1577,17 @@ def _render_base_html(
     body_content: str,
     jsonld_schemas: Optional[List[Dict[str, Any]]] = None,
     css_text: str = "",
+    disclaimers_override: Optional[Dict[str, str]] = None,
+    editorial_policy_override: str = "",
 ) -> str:
     gsc_meta_val, _ = _resolve_gainhelm_public_meta()
+    active_disclaimers = dict(GAINHELM_DISCLOSURES)
+    if disclaimers_override:
+        active_disclaimers.update({k: v for k, v in disclaimers_override.items() if v})
+    policy_txt = editorial_policy_override or (
+        "GainHelm Editorial Policy: All calculations are deterministic and verified by statutory models pursuant to "
+        "AICPA SSAE 18, 32 CFR Part 170, NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024, 45 CFR 160.404, and BLS OEWS SOC 15-1212 wage benchmarks."
+    )
     return render_base_html(
         title=title,
         meta_description=meta_description,
@@ -1036,12 +1599,9 @@ def _render_base_html(
         author=GAINHELM_AUTHOR,
         og_image_url=f"{GAINHELM_CANONICAL_BASE}/static/img/gainhelm-og.png",
         gsc_meta_val=gsc_meta_val,
-        disclaimers=GAINHELM_DISCLOSURES,
+        disclaimers=active_disclaimers,
         linkedin_url=GAINHELM_LINKEDIN_URL,
-        editorial_policy_text=(
-            "GainHelm Editorial Policy: All calculations are deterministic and verified by statutory models pursuant to "
-            "AICPA SSAE 18, 32 CFR Part 170, NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024, 45 CFR 160.404, and BLS OEWS SOC 15-1212 wage benchmarks."
-        ),
+        editorial_policy_text=policy_txt,
         org_schema=_get_gainhelm_organization_schema(),
         localbiz_schema=_get_gainhelm_local_business_schema(),
         footer_tagline="Independent Enterprise Security & Statutory Compliance Modeling.",
@@ -1051,9 +1611,288 @@ def _render_base_html(
     )
 
 
-def _calculator_schemas(route_path: str, title: str, description: str) -> List[Dict[str, Any]]:
+_CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
+    "cmmc-2-0-compliance-cost-calculator": {
+        "faqs": (
+            {"question": "How is a CMMC 2.0 Level 2 C3PAO total budget calculated under 32 CFR Part 170?", "answer": "Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense supplier models a $48,500.00 Cyber-AB C3PAO assessment fee, $26,400.00 CUI enclave licensing, $43,700.00 remediation labor, and $13,400.00 RPO advisory ($132,000.00 total program cost)."},
+            {"question": "When are conditional CMMC Level 2 POA&M items allowed?", "answer": "Under 32 CFR 170.21, contractors achieving at least 88 of 110 controls (80% minimum) may place eligible 1-point controls on a 180-day POA&M closeout plan prior to final certification."},
+        ),
+        "howto": (
+            ("Define CUI Enclave Boundary & Headcount", "Specify personnel and cloud endpoints processing Controlled Unclassified Information inside the CMMC Level 2 scope."),
+            ("Model Cyber-AB C3PAO Assessment Fees", "Calculate triennial external C3PAO validation fees under 32 CFR Part 170 and DFARS 252.204-7021."),
+            ("Estimate Engineering & Enclave Remediation", "Apply loaded BLS SOC 15-1212 engineering hours and FIPS 140-3 CUI enclave tooling costs."),
+            ("Verify 180-Day POA&M Conditional Eligibility", "Confirm open controls meet the 80% (88/110) minimum conditional score threshold before award."),
+        ),
+        "scenarios_lead": "GainHelm evaluates CMMC 2.0 Level 2 costs across isolated CUI enclave boundaries and unsegmented corporate networks under 32 CFR Part 170.",
+        "steps": (
+            "Establish the Controlled Unclassified Information (CUI) boundary and in-scope DoD contractor headcount.",
+            "Apply Cyber-AB authorized C3PAO triennial assessment fee schedules under 32 CFR Part 170.",
+            "Compute engineering remediation hours across NIST SP 800-171A 320 assessment objectives.",
+            "Validate conditional certification eligibility and 180-day POA&M closeout windows under 32 CFR 170.21.",
+        ),
+        "table_rows": (
+            ("CMMC 2.0 Level 2 (C3PAO)", "32 CFR Part 170 &amp; DFARS 7021", "110 NIST SP 800-171 Controls", "Cyber-AB Authorized C3PAO", "Triennial + Annual Affirmation"),
+            ("180-Day Conditional POA&amp;M", "32 CFR 170.21", "1-Point Controls (&gt;=88/110 Score)", "C3PAO Closeout Verification", "180 Calendar Days"),
+            ("GovCloud CUI Enclave", "DFARS 252.204-7012 &amp; FIPS 140-3", "Isolated CUI Workload Boundary", "FedRAMP Moderate Cloud Inheritance", "Continuous Enclave ConMon"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170", "DoD CMMC 2.0 Final Program Rule (32 CFR Part 170)"),
+            ("Dataset 2:", "https://www.acq.osd.mil/dpap/dars/dfars/html/current/252204.htm#7021", "DFARS 252.204-7012 &amp; 252.204-7021 CMMC Clauses"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "nist-800-171-sprs-score-calculator": {
+        "faqs": (
+            {"question": "How is the DoD NIST SP 800-171 SPRS score calculated under DFARS 252.204-7019?", "answer": "Contractors begin at +110 across 110 NIST SP 800-171 Rev 2 requirements and subtract 5 points, 3 points, or 1 point per unimplemented control, bounded strictly between -203 and +110."},
+            {"question": "What minimum SPRS score qualifies for DoD POA&M readiness?", "answer": "Reaching at least 88 points out of 110 with zero open critical 5-point CUI safeguards establishes conditional POA&M eligibility under federal assessment rules."},
+        ),
+        "howto": (
+            ("Inventory 110 NIST SP 800-171 Controls", "Audit all 14 control families across your System Security Plan (SSP) and CUI boundary."),
+            ("Weight Unimplemented 5, 3, and 1-Point Gaps", "Count open 5-point, 3-point, and 1-point security requirements per the DoD Assessment Methodology."),
+            ("Compute SPRS Score Across [-203, +110]", "Subtract weighted control deductions from +110 and verify conditional 88-point eligibility."),
+            ("Prioritize 5-Point Remediation Sequence", "Close high-weight MFA, FIPS 140-3 cryptography, and CUI boundary gaps first in your POA&M."),
+        ),
+        "scenarios_lead": "GainHelm models DoD Supplier Performance Risk System (SPRS) score trajectories across weighted 5-point, 3-point, and 1-point control gaps.",
+        "steps": (
+            "Map all 110 NIST SP 800-171 Rev 2 security requirements and 320 assessment objectives.",
+            "Apply DoD Assessment Methodology deductions (-5, -3, or -1 point) to every open gap.",
+            "Clamp final SPRS self-assessment scores cleanly within [-203, +110] statutory bounds.",
+            "Prioritize 5-point controls in the System Security Plan (SSP) and POA&M prior to SPRS upload.",
+        ),
+        "table_rows": (
+            ("5-Point Foundational Controls", "NIST SP 800-171 Rev 2 (42 Controls)", "MFA, FIPS Crypto &amp; CUI Isolation", "DoD Assessment Methodology", "Immediate 5-Pt Deduction Each"),
+            ("3-Point Medium Controls", "NIST SP 800-171 Rev 2 (14 Controls)", "Audit Logging &amp; Least Privilege", "DFARS 252.204-7019 / 7020", "3-Pt Deduction Until Closed"),
+            ("1-Point Procedural Controls", "NIST SP 800-171 Rev 2 (54 Controls)", "Training, Media &amp; Policy Hygiene", "SPRS Self-Assessment Filing", "1-Pt Deduction Each"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://csrc.nist.gov/pubs/sp/800/171/r2/upd1/final", "NIST SP 800-171 Rev 2 Security Requirements"),
+            ("Dataset 2:", "https://www.acq.osd.mil/dpap/dars/dfars/html/current/252204.htm#7019", "DFARS 252.204-7019 &amp; 7020 DoD Assessment Rules"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "iso-27001-certification-cost-calculator": {
+        "faqs": (
+            {"question": "How are ISO/IEC 27001:2022 Stage 1 and Stage 2 auditor days calculated?", "answer": "Accredited certification bodies derive mandatory audit duration from ISO/IEC 27006-1:2024 Annex B headcount brackets (11 auditor days at $1,950/day = $21,450 for a 75-employee ISMS scope)."},
+            {"question": "What ongoing surveillance costs follow ISO 27001 certification?", "answer": "IAF MD 5 requires annual surveillance audits in Years 2 and 3 equal to roughly 33% to 45% of Stage 2 auditor days before Year 3 recertification."},
+        ),
+        "howto": (
+            ("Define ISMS Scope &amp; Effective Headcount", "Specify personnel and business units governed by your ISO/IEC 27001:2022 Statement of Applicability."),
+            ("Compute ISO/IEC 27006-1 Auditor Days", "Allocate Stage 1 and Stage 2 certification body auditor days by effective ISMS headcount."),
+            ("Budget ISMS Platform &amp; Internal Audit Fees", "Include Annex A 93-control evidence automation and mandatory Clause 9.2 internal audit review."),
+            ("Plan Years 2-3 Surveillance Audits", "Project annual surveillance auditor days under IAF MD 5 across the 3-year certificate cycle."),
+        ),
+        "scenarios_lead": "GainHelm calculates ISO/IEC 27001:2022 certification fees from ISO/IEC 27006-1:2024 auditor-day tables and Annex A control complexity.",
+        "steps": (
+            "Establish effective ISMS headcount and scope boundaries across Clauses 4-10 and Annex A (93 controls).",
+            "Compute Stage 1 documentation review and Stage 2 sampling auditor days per ISO/IEC 27006-1:2024.",
+            "Factor accredited ANAB/UKAS registrar day rates, internal audit, and ISMS readiness engineering.",
+            "Verify surveillance audit commitments for Years 2 and 3 under IAF MD 5.",
+        ),
+        "table_rows": (
+            ("Stage 1 &amp; Stage 2 Certification Audit", "ISO/IEC 27006-1:2024 Annex B", "Clauses 4-10 + 93 Annex A Controls", "ANAB / UKAS Registrar", "Year 1 Initial Certification"),
+            ("Years 2-3 Surveillance Cycle", "IAF MD 5 Mandatory Rules", "Core ISMS &amp; Sampled Annex A Controls", "Accredited Certification Body", "Annual Surveillance (33% Days)"),
+            ("Clause 9.2 Internal ISMS Audit", "ISO/IEC 27001:2022 Clause 9.2", "Pre-Stage 2 Conformance Testing", "Independent Internal Auditor", "Annual Management Review"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://www.iso.org/standard/27001", "ISO/IEC 27001:2022 Information Security Management Systems"),
+            ("Dataset 2:", "https://www.iso.org/standard/83440.html", "ISO/IEC 27006-1:2024 Accreditation Body Audit-Day Standard"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "hipaa-violation-penalty-breach-cost-calculator": {
+        "faqs": (
+            {"question": "What are the HIPAA civil monetary penalty tiers under 45 CFR 160.404?", "answer": "HHS OCR assesses inflation-adjusted Tier 1 ($141-$71,162), Tier 2 ($1,424-$71,162), Tier 3 Willful Neglect Corrected ($13,795-$71,162), and Tier 4 Uncorrected ($71,162-$2,067,813 annual cap per identical provision)."},
+            {"question": "When is media notice required after an ePHI data breach?", "answer": "Under 45 CFR 164.406, breaches involving 500 or more unencrypted ePHI records trigger prominent media notice alongside 60-day HHS OCR and individual notifications."},
+        ),
+        "howto": (
+            ("Specify Workforce &amp; Exposed ePHI Records", "Enter workforce size and compromised unencrypted patient ePHI records under 45 CFR Part 164."),
+            ("Evaluate 45 CFR 160.404 Penalty Tiers", "Model inflation-adjusted per-violation OCR civil penalty caps across Tiers 1 through 4."),
+            ("Add Forensic Legal &amp; Notification Costs", "Include $95,000 forensic legal retainers and per-record breach notification/credit monitoring outlays."),
+            ("Assess Recognized Security Practices Credit", "Evaluate 42 U.S.C. 17941 12-month HITECH safe-harbor mitigation impact."),
+        ),
+        "scenarios_lead": "GainHelm simulates HHS OCR 45 CFR 160.404 penalty caps, 45 CFR 164.406 media notification thresholds, and HITECH breach remediation.",
+        "steps": (
+            "Quantify compromised unencrypted ePHI records and covered-entity or business associate exposure.",
+            "Apply 45 CFR 160.404 / 45 CFR 102.3 annual inflation-adjusted civil monetary penalty caps.",
+            "Compute forensic legal retainers, 60-day individual notice, and >500-record media notice expenses.",
+            "Evaluate ePHI encryption safe harbor and HITECH Recognized Security Practices (42 U.S.C. 17941).",
+        ),
+        "table_rows": (
+            ("Tier 3 Willful Neglect (Corrected)", "45 CFR 160.404 &amp; 45 CFR 102.3", "$13,795+ / violation ($2,067,813 Cap)", "HHS Office for Civil Rights", "Per Identical Provision / Yr"),
+            ("HITECH Breach Notification", "45 CFR 164.404-408", "Individual, OCR &amp; Media (&gt;=500 Rec)", "HHS OCR Breach Portal", "60-Day Statutory Window"),
+            ("Recognized Security Practices", "42 U.S.C. 17941 (HITECH Amendment)", "12-Month Continuous Safeguards", "HHS OCR Enforcement Factor", "Audit &amp; Fine Reduction Factor"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-160", "HHS HIPAA Administrative Simplification Penalties (45 CFR Part 160)"),
+            ("Dataset 2:", "https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-164", "HIPAA Security &amp; Breach Notification Rule (45 CFR Part 164)"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "pci-dss-4-0-compliance-cost-calculator": {
+        "faqs": (
+            {"question": "What drives PCI DSS v4.0.1 Report on Compliance (ROC) costs?", "answer": "PCI DSS v4.0.1 Level 1 validation combines QSA ROC fieldwork ($42,000 baseline), CDE network segmentation engineering, quarterly Approved Scanning Vendor (ASV) external scans, and segmented CDE penetration testing."},
+            {"question": "How does payment tokenization reduce PCI DSS scope?", "answer": "Offloading raw PAN entry via hosted fields or tokenization qualifies merchants for streamlined SAQ A / segmented CDE scopes, cutting QSA sampling hours substantially."},
+        ),
+        "howto": (
+            ("Define Cardholder Data Environment (CDE)", "Specify workforce and payment systems storing, processing, or transmitting PAN data."),
+            ("Size QSA ROC &amp; ASV Scanning Fees", "Include annual Qualified Security Assessor validation and mandatory quarterly ASV scans."),
+            ("Budget v4.0.1 Req. 6.4.3 &amp; 11.6.1 Controls", "Account for payment page client-side script monitoring and HSM cryptographic key rotation."),
+            ("Model CDE Tokenization Scope Savings", "Compare unsegmented flat-LAN costs against tokenized CDE boundary isolation."),
+        ),
+        "scenarios_lead": "GainHelm compares PCI DSS v4.0.1 QSA Report on Compliance budgets across unsegmented CDEs and tokenized payment architectures.",
+        "steps": (
+            "Map all cardholder data flows, payment processors, and Cardholder Data Environment (CDE) boundaries.",
+            "Apply PCI SSC merchant/service provider tier validation rules (ROC vs SAQ A / SAQ D).",
+            "Budget quarterly ASV external scans, CDE penetration testing, and Req. 6.4.3 / 11.6.1 script alerts.",
+            "Verify scope reduction from hosted payment tokenization and network segmentation testing.",
+        ),
+        "table_rows": (
+            ("Level 1 QSA Report on Compliance", "PCI DSS v4.0.1 Req. 1-12", "Full CDE On-Site / Remote Sampling", "Qualified Security Assessor (QSA)", "Annual ROC + AOC Filing"),
+            ("Quarterly ASV &amp; CDE Pentest", "PCI DSS v4.0.1 Req. 11.3 &amp; 11.4", "External IP Scans &amp; Segmentation Test", "PCI SSC Approved ASV", "Quarterly Scan / Annual Test"),
+            ("Client-Side Payment Script Integrity", "PCI DSS v4.0.1 Req. 6.4.3 &amp; 11.6.1", "E-Commerce Checkout Script Tamper Checks", "QSA / Payment Compliance Review", "Mandatory Effective Cadence"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://www.pcisecuritystandards.org/standards/pci-dss/", "PCI Security Standards Council PCI DSS v4.0.1 Standard"),
+            ("Dataset 2:", "https://www.pcisecuritystandards.org/assessors_and_solutions/qualified_security_assessors/", "PCI SSC Qualified Security Assessor (QSA) &amp; ASV Requirements"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "fedramp-authorization-3pao-cost-calculator": {
+        "faqs": (
+            {"question": "How much does a FedRAMP Moderate 3PAO assessment and authorization cost?", "answer": "Under 44 U.S.C. 3607 and OMB M-24-15, FedRAMP Rev 5 Moderate authorizations across 325 NIST SP 800-53 controls average $500,000.00 in Year-1 outlay across 3PAO RAR/SAR testing, GovCloud FIPS 140-3 isolation, and ConMon operations."},
+            {"question": "How does cloud PaaS inheritance reduce FedRAMP authorization cost?", "answer": "Building atop a FedRAMP Authorized GovCloud PaaS inherits physical, hypervisor, and baseline control families, compressing SSP authoring and 3PAO SAR test hours."},
+        ),
+        "howto": (
+            ("Select FedRAMP Impact Level &amp; Boundary", "Define personnel and cloud services inside the Low, Moderate (325 controls), or High authorization boundary."),
+            ("Budget Accredited 3PAO RAR &amp; SAR Testing", "Estimate independent Readiness Assessment Report (RAR) and full Security Assessment Report fees."),
+            ("Size FIPS 140-3 &amp; GovCloud Enclave Build", "Include validated cryptographic modules, boundary diagrams, and SSP engineering."),
+            ("Plan Ongoing Monthly FedRAMP ConMon", "Allocate annual 3PAO penetration tests, monthly POA&amp;M updates, and vulnerability scanning."),
+        ),
+        "scenarios_lead": "GainHelm models FedRAMP Rev 5 Moderate Year-1 authorization costs across inherited federal PaaS deployments and custom IaaS boundaries.",
+        "steps": (
+            "Establish the FedRAMP authorization boundary, customer data classification, and impact baseline.",
+            "Map all 325 NIST SP 800-53 Rev 5 Moderate controls including inherited federal IaaS/PaaS layers.",
+            "Budget independent 3PAO Readiness Assessment Report (RAR) and Security Assessment Report (SAR) testing.",
+            "Fund FIPS 140-3 encryption, POA&amp;M remediation, and ongoing OMB M-24-15 ConMon operations.",
+        ),
+        "table_rows": (
+            ("Accredited 3PAO RAR &amp; SAR", "44 U.S.C. 3607 &amp; FedRAMP Rev 5", "Readiness &amp; Full 325-Control Testing", "A2LA-Accredited 3PAO", "Authorization + Annual Audit"),
+            ("NIST SP 800-53 Rev 5 Moderate", "OMB M-24-15 FedRAMP Policy", "325 Security &amp; Privacy Controls", "FedRAMP PMO / Agency Sponsor", "Continuous ConMon Monthly"),
+            ("FIPS 140-3 Boundary &amp; ConMon", "NIST FIPS 140-3 &amp; ConMon Guide", "Validated Crypto + Vulnerability Scans", "ISSO &amp; 3PAO Annual Assessment", "Monthly POA&amp;M &amp; Scan Pack"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://www.fedramp.gov/documents-templates/", "FedRAMP Program Rev 5 Baselines, RAR &amp; ConMon Rules"),
+            ("Dataset 2:", "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final", "NIST SP 800-53 Rev 5 Security &amp; Privacy Controls"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+        "faqs": (
+            {"question": "What separates HITRUST e1, i1, and r2 certification costs?", "answer": "HITRUST CSF v11 scales from e1 (44 essentials controls) and i1 (182 implemented controls, 1-year) to r2 (200 to 600+ risk-based controls, 2-year certification), with baseline validated programs modeling $115,000.00 in Year-1 outlay."},
+            {"question": "How does HITRUST MyCSF CSP inheritance cut assessment effort?", "answer": "Inheriting validated controls from AWS, Azure, or GCP inside MyCSF directly satisfies infrastructure control maturity without redundant evidence collection."},
+        ),
+        "howto": (
+            ("Select HITRUST CSF e1, i1, or r2 Tier", "Match buyer assurance expectations across 1-year e1/i1 or 2-year risk-based r2 validation."),
+            ("Size MyCSF Subscription &amp; Scoping Factors", "Account for MyCSF licensing and system/regulatory scoping factors inside HITRUST CSF v11."),
+            ("Apply Authorized External Assessor Fees", "Model independent assessor fieldwork, PRISMA scoring verification, and HITRUST QA review."),
+            ("Leverage Cloud CSP Control Inheritance", "Import pre-validated cloud provider controls in MyCSF to lower engineering remediation labor."),
+        ),
+        "scenarios_lead": "GainHelm models HITRUST CSF v11 e1, i1, and r2 certification investments with MyCSF licensing and CSP control inheritance credits.",
+        "steps": (
+            "Determine target HITRUST CSF v11 certification level (e1, i1, or r2) and MyCSF organizational scope.",
+            "Map AWS, Azure, or GCP cloud inheritance inside the MyCSF portal to eliminate duplicate controls.",
+            "Budget HITRUST Authorized External Assessor validation fieldwork and HITRUST QA submission.",
+            "Maintain Year-1 interim assessment readiness (for r2) and continuous PRISMA control evidence.",
+        ),
+        "table_rows": (
+            ("HITRUST e1 Essentials", "HITRUST CSF v11 Assurance", "44 Foundational Cyber Controls", "Authorized External Assessor", "1-Year Validated Certificate"),
+            ("HITRUST i1 Implemented", "HITRUST CSF v11 Assurance", "182 Threat-Adaptive Controls", "Authorized External Assessor", "1-Year Validated Certificate"),
+            ("HITRUST r2 Risk-Based", "HITRUST CSF v11 PRISMA", "200 to 600+ Risk-Tailored Controls", "External Assessor + HITRUST QA", "2-Year Cycle + Interim Review"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://hitrustalliance.net/product-tool/hitrust-csf/", "HITRUST CSF v11 Framework &amp; e1/i1/r2 Assurance Specifications"),
+            ("Dataset 2:", "https://hitrustalliance.net/mycsf/", "HITRUST MyCSF Inheritance &amp; PRISMA Scoring Architecture"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "penetration-testing-scoping-cost-calculator": {
+        "faqs": (
+            {"question": "How are enterprise penetration testing engagement budgets priced?", "answer": "Under NIST SP 800-115 and CREST/OSCP scoping norms, testing costs scale by target application/API endpoints and assessor days ($1,450 to $2,400/day), modeling $23,300.00 baseline including remediation verification retesting."},
+            {"question": "Why choose continuous PTaaS over static boutique PDF pentests?", "answer": "PTaaS platforms stream verified exploit proof directly into Jira or GitHub with complimentary 30-to-90-day retesting, eliminating costly re-engagement change orders."},
+        ),
+        "howto": (
+            ("Inventory Web Apps, APIs &amp; Cloud Perimeter", "Count authenticated web applications, REST/GraphQL API endpoints, and internal VPC segments."),
+            ("Select Grey-Box PTaaS vs Black-Box Scope", "Provide test credentials and OpenAPI specs to maximize business-logic vulnerability coverage per assessor day."),
+            ("Estimate CREST/OSCP Assessor-Day Rates", "Calculate testing days across external network, OWASP API Top 10, and cloud IAM lateral paths."),
+            ("Verify Included Retest SLA Windows", "Confirm complimentary remediation verification and clean executive attestation letter turnaround."),
+        ),
+        "scenarios_lead": "GainHelm benchmarks CREST/OSCP penetration testing budgets across single web applications, API suites, and full red-team engagements.",
+        "steps": (
+            "Enumerate all external IPs, authenticated web apps, API endpoints, and cloud IAM environments.",
+            "Apply CREST/OSCP assessor day-rate benchmarks under NIST SP 800-115 and OWASP ASVS.",
+            "Include engineering triage and patch deployment hours for verified critical and high findings.",
+            "Execute verification retesting to obtain a clean customer-shareable attestation letter.",
+        ),
+        "table_rows": (
+            ("Web App &amp; OWASP API Top 10", "NIST SP 800-115 &amp; OWASP ASVS", "Authenticated Business Logic &amp; IDOR", "CREST / OSCP Assessors", "Annual + Major Release Cadence"),
+            ("Cloud VPC &amp; Internal Network", "PTES &amp; Cloud Architecture Rules", "IAM Privilege Escalation &amp; Segmentation", "Certified Ethical Testers", "Annual Segmentation Validation"),
+            ("PTaaS Jira Sync &amp; Free Retest", "Continuous PTaaS Workflow", "30-to-90-Day Included Patch Retests", "PTaaS Engineering Platform", "1-2 Day Retest Turnaround"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://csrc.nist.gov/pubs/sp/800/115/final", "NIST SP 800-115 Technical Guide to Information Security Testing"),
+            ("Dataset 2:", "https://owasp.org/www-project-application-security-verification-standard/", "OWASP Application Security Verification Standard (ASVS)"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+    "cyber-liability-insurance-breach-exposure-calculator": {
+        "faqs": (
+            {"question": "What determines cyber liability insurance premiums and retentions?", "answer": "NAIC cyber underwriting benchmarks price policy rate-on-line ($20,415.00 baseline premium) and Self-Insured Retention ($20,485.00 SIR, totaling $40,900.00 balance-sheet commitment) from annual revenue, sensitive record count, and verified MFA/EDR hygiene."},
+            {"question": "Which security controls qualify for carrier premium credits?", "answer": "Phishing-resistant FIDO2 MFA, managed Endpoint Detection and Response (EDR), Privileged Access Management (PAM), and immutable offline backups consistently remove ransomware co-insurance penalties."},
+        ),
+        "howto": (
+            ("Specify Headcount &amp; Sensitive Record Volume", "Enter workforce size and production PII/customer records shaping underwriting exposure tiers."),
+            ("Model Annual Policy Premium Rate-on-Line", "Estimate carrier rate-on-line per $1M policy limit alongside Self-Insured Retention (SIR)."),
+            ("Verify MFA, EDR &amp; Immutable Backups", "Apply 15% to 35% carrier underwriting premium credits for verified security controls."),
+            ("Evaluate First-Party Forensics &amp; BI Sublimits", "Confirm breach counsel, ransom negotiation, and business interruption coverage limits."),
+        ),
+        "scenarios_lead": "GainHelm quantifies cyber liability insurance rate-on-line premiums, Self-Insured Retention (SIR) exposure, and underwriting security credits.",
+        "steps": (
+            "Quantify insured workforce endpoints, sensitive customer record count, and target policy limits.",
+            "Compute annual cyber insurance rate-on-line premium and first-dollar Self-Insured Retention (SIR).",
+            "Validate FIDO2 MFA, managed EDR, PAM, and immutable backups to unlock carrier underwriting discounts.",
+            "Align incident forensics, breach counsel panels, and business interruption sublimits with policy terms.",
+        ),
+        "table_rows": (
+            ("Primary Cyber Limit ($2M-$5M)", "NAIC Cyber Rate-on-Line Rules", "First &amp; Third-Party Breach Coverage", "Licensed Cyber Carrier Underwriter", "Annual Policy Renewal"),
+            ("Self-Insured Retention (SIR)", "Policy Retention &amp; Co-Insurance", "$25k-$250k First-Dollar Deductible", "Insured Balance-Sheet Reserve", "Per Claim / Incident Retention"),
+            ("MFA, EDR &amp; Backup Credits", "Underwriting Security Questionnaire", "FIDO2 MFA + EDR + Immutable Backups", "Carrier Risk Engineering Desk", "15%-35% Premium Credit"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://content.naic.org/cipr-topics/cyber-risk", "NAIC Cyber Risk Insurance Market &amp; Underwriting Benchmarks"),
+            ("Dataset 2:", "https://www.sec.gov/rules-regulations/2023/07/cybersecurity-risk-management-strategy-governance-incident-disclosure", "SEC Cybersecurity Risk Management &amp; Material Exposure Rules"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
+}
+
+
+def _resolve_tool_faqs(tool_slug: Optional[str]) -> List[Dict[str, str]]:
+    slug_low = str(tool_slug or "").strip().lower()
+    spec = _CORE_TOOL_CONTENT_SPECS.get(slug_low)
+    if spec and spec.get("faqs"):
+        return list(spec["faqs"])
+    return list(_COMPLIANCE_FAQS)
+
+
+def _calculator_schemas(
+    route_path: str,
+    title: str,
+    description: str,
+    tool_slug: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     clean_route = route_path if route_path.startswith("/") else f"/{route_path}"
     full_url = f"{GAINHELM_CANONICAL_BASE}{clean_route}"
+    faqs = _resolve_tool_faqs(tool_slug)
     return [
         {
             "@type": "SoftwareApplication",
@@ -1063,6 +1902,8 @@ def _calculator_schemas(route_path: str, title: str, description: str) -> List[D
             "operatingSystem": "Web",
             "url": full_url,
             "description": description,
+            "datePublished": "2026-01-15",
+            "dateModified": "2026-10-31",
             "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
         },
         {
@@ -1070,7 +1911,7 @@ def _calculator_schemas(route_path: str, title: str, description: str) -> List[D
             "@id": f"{full_url}#faq",
             "mainEntity": [
                 {"@type": "Question", "name": item["question"], "acceptedAnswer": {"@type": "Answer", "text": item["answer"]}}
-                for item in _COMPLIANCE_FAQS
+                for item in faqs
             ],
         },
     ]
@@ -1187,6 +2028,109 @@ def _build_home_html(benchmarks: Dict[str, Dict[str, Any]], all_tools: Sequence[
     return _render_base_html(GAINHELM_SITE_TITLE, GAINHELM_SITE_DESCRIPTION, f"{GAINHELM_CANONICAL_BASE}/", body, jsonld_schemas=schemas, css_text=css_text)
 
 
+def _build_core_tool_scenarios_html(slug: str, benchmarks: Dict[str, Dict[str, Any]]) -> str:
+    b_soc2 = benchmarks["soc2"]
+    b_cmmc = benchmarks["cmmc"]
+    b_sprs = benchmarks["sprs"]
+    b_iso = benchmarks["iso27001"]
+    b_hipaa = benchmarks["hipaa"]
+    b_pci = benchmarks["pci_dss"]
+    b_fed = benchmarks["fedramp"]
+    b_hit = benchmarks["hitrust"]
+    b_pen = benchmarks["pentest"]
+    b_cyb = benchmarks["cyber_insurance"]
+
+    scenario_map: Dict[str, Tuple[str, str, str, str]] = {
+        "cmmc-2-0-compliance-cost-calculator": (
+            "Scenario A: Segmented GovCloud CUI Enclave (75 Employees, 15 Open Controls)",
+            f"Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense contractor isolating CUI into a managed enclave incurs ${b_cmmc['c3pao_assessment_fee']:,.2f} in accredited C3PAO fees, ${b_cmmc['enclave_licensing_annual']:,.2f} in enclave tooling, ${b_cmmc['remediation_labor_cost']:,.2f} in engineering labor, and ${b_cmmc['rpo_advisory_fee']:,.2f} in RPO advisory (${b_cmmc['total_cost']:,.2f} total program cost).",
+            "Scenario B: Unsegmented Corporate-Wide CMMC Scope (250 Employees)",
+            f"Expanding CMMC 2.0 Level 2 boundary controls across an unsegmented 250-employee corporate network escalates engineering remediation and C3PAO sampling costs above ${b_cmmc['total_cost'] * 2.15:,.2f} without GovCloud CUI workstation isolation.",
+        ),
+        "nist-800-171-sprs-score-calculator": (
+            "Scenario A: Baseline Mid-Market DoD Supplier (7 Open Controls -> SPRS 87)",
+            f"Under DFARS 252.204-7019, 3 open 5-point, 2 open 3-point, and 2 open 1-point NIST SP 800-171 controls deduct {int(b_sprs['deduction_points'])} points from +110 for an SPRS score of {int(b_sprs['sprs_score'])} (just 1 point shy of conditional POA&M readiness).",
+            "Scenario B: Closed 5-Point Architecture Gaps (SPRS 100+)",
+            "Closing the 3 unimplemented 5-point MFA and FIPS 140-3 encryption requirements adds +15 SPRS points to reach 102, qualifying remaining 1-point gaps for a 180-day conditional POA&M.",
+        ),
+        "iso-27001-certification-cost-calculator": (
+            "Scenario A: Segmented 75-Employee SaaS ISMS (11.0 Auditor Days)",
+            f"Under ISO/IEC 27006-1:2024 Annex B, a 75-employee ISMS models ${b_iso['registrar_fee']:,.2f} in ANAB/UKAS Stage 1 and Stage 2 registrar fees, ${b_iso['isms_platform_cost']:,.2f} in Annex A tooling, ${b_iso['internal_audit_fee']:,.2f} in internal audit, and ${b_iso['remediation_cost']:,.2f} in remediation (${b_iso['total_cost']:,.2f} Year-1 total).",
+            "Scenario B: Multi-Site Global ISMS Expansion (250 Employees, 17 Auditor Days)",
+            f"Scaling ISMS scope to 250 multi-site employees adds Stage 2 sampling auditor days ($33,150+ registrar fees) plus expanded Clause 9.2 internal audit coverage totaling over ${b_iso['total_cost'] * 1.65:,.2f}.",
+        ),
+        "hipaa-violation-penalty-breach-cost-calculator": (
+            "Scenario A: Unencrypted ePHI Incident (1,500 Records, Tier 3 Cap)",
+            f"Under 45 CFR 160.404 and HITECH, 1,500 compromised ePHI records trigger the ${b_hipaa['ocr_civil_penalty']:,.2f} Tier 3 OCR civil penalty ceiling alongside ${b_hipaa['forensic_legal_retainer']:,.2f} in forensic counsel and ${b_hipaa['breach_notification_cost']:,.2f} in breach notification (${b_hipaa['total_exposure']:,.2f} modeled exposure).",
+            "Scenario B: Sub-500 Record Encrypted Incident Safe Harbor",
+            "Keeping production ePHI databases AES-256 encrypted with split KMS keys qualifies for the 45 CFR 164.402 encryption safe harbor, eliminating mandatory 60-day OCR and media breach notices.",
+        ),
+        "pci-dss-4-0-compliance-cost-calculator": (
+            "Scenario A: Segmented Level 1 / Service Provider CDE (75 Employees)",
+            f"Under PCI DSS v4.0.1, a segmented Cardholder Data Environment models ${b_pci['total_cost']:,.2f} in annual readiness including $42,000.00 QSA Report on Compliance fieldwork, quarterly ASV scans, and annual CDE penetration testing.",
+            "Scenario B: Tokenized Checkout Scope Reduction (SAQ A)",
+            "Eliminating raw PAN touchpoints via hosted payment tokenization reduces annual PCI DSS v4.0.1 QSA and CDE segmentation scope by 45% to 65%.",
+        ),
+        "fedramp-authorization-3pao-cost-calculator": (
+            "Scenario A: FedRAMP Moderate Rev 5 via Inherited GovCloud PaaS (325 Controls)",
+            f"Under 44 U.S.C. 3607 and OMB M-24-15, deploying on an authorized federal PaaS compresses Year-1 3PAO SAR assessment, boundary isolation, and ConMon readiness to ${b_fed['total_cost']:,.2f} across a {b_fed['timeline_months']}-month ATO runway.",
+            "Scenario B: Custom Unsegmented IaaS FedRAMP Boundary",
+            f"Building all 325 NIST SP 800-53 Moderate controls from scratch on raw IaaS expands SSP authoring and 3PAO SAR test duration above ${b_fed['total_cost'] * 1.69:,.2f}.",
+        ),
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": (
+            "Scenario A: HITRUST CSF v11 Validated Assessment with CSP Inheritance",
+            f"Pairing MyCSF cloud control inheritance with external assessor fieldwork models ${b_hit['total_cost']:,.2f} over a {b_hit['timeline_months']}-month validation and QA window.",
+            "Scenario B: Uninherited Multi-Entity HITRUST r2 Validation",
+            f"Scoring 400+ custom HITRUST r2 control requirements manually without cloud CSP inheritance pushes Year-1 external assessor and remediation budgets above ${b_hit['total_cost'] * 2.05:,.2f}.",
+        ),
+        "penetration-testing-scoping-cost-calculator": (
+            "Scenario A: Web App, OWASP API Top 10 &amp; Segmented Cloud PTaaS (75 Employees)",
+            f"Under NIST SP 800-115 scoping standards, a multi-surface CREST/OSCP test with Jira remediation triage and complimentary retesting models ${b_pen['total_cost']:,.2f} Year-1 cost.",
+            "Scenario B: Enterprise Red Team &amp; Multi-VPC Lateral Assessment (250 Employees)",
+            f"Adding multi-region Active Directory lateral testing and red-team adversary emulation increases assessor day allocation above ${b_pen['total_cost'] * 2.4:,.2f}.",
+        ),
+        "cyber-liability-insurance-breach-exposure-calculator": (
+            "Scenario A: Verified MFA / EDR / Immutable Backup Underwriting (75 Employees)",
+            f"Under NAIC underwriting tiers, verified FIDO2 MFA and managed EDR qualify for a ${b_cyb['annual_premium']:,.2f} annual cyber premium alongside a ${b_cyb['self_insured_retention']:,.2f} SIR reserve (${b_cyb['total_cost']:,.2f} total exposure).",
+            "Scenario B: Missing MFA / Unverified Backup Surcharge Posture",
+            f"Unverified backup immutability and legacy password access trigger carrier ransomware co-insurance sublimits and raise combined premium + SIR exposure above ${b_cyb['total_cost'] * 1.85:,.2f}.",
+        ),
+    }
+
+    if slug in scenario_map:
+        a_title, a_body, b_title, b_body = scenario_map[slug]
+        cmp_b = f"Compare with {b_title} &rarr;"
+        ret_a = f"&larr; Return to {a_title}"
+    else:
+        a_title = "Scenario A: Mid-Market SaaS SOC 2 Type II Baseline (75 Employees, 3 TSC)"
+        a_body = (
+            f"Under AICPA SSAE 18 (AT-C Section 205), a 75-employee SaaS company completing a SOC 2 Type II attestation "
+            f"across Security, Availability, and Confidentiality incurs ${b_soc2['cpa_audit_fee']:,.2f} in CPA audit fees, "
+            f"${b_soc2['grc_platform_cost']:,.2f} in GRC automation, ${b_soc2['pentest_fee']:,.2f} in penetration testing, "
+            f"and ${b_soc2['internal_labor_cost']:,.2f} in engineering labor (${b_soc2['total_cost']:,.2f} total first-year cost)."
+        )
+        b_title = "Scenario B: Defense Contractor CMMC 2.0 Level 2 C3PAO Certification (75 Employees, 15 Open Controls)"
+        b_body = (
+            f"Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense contractor remediating 15 unimplemented "
+            f"NIST SP 800-171 controls incurs ${b_cmmc['c3pao_assessment_fee']:,.2f} in accredited C3PAO fees, "
+            f"${b_cmmc['enclave_licensing_annual']:,.2f} in enclave tooling, ${b_cmmc['remediation_labor_cost']:,.2f} in engineering labor, "
+            f"and ${b_cmmc['rpo_advisory_fee']:,.2f} in RPO advisory (${b_cmmc['total_cost']:,.2f} total program cost)."
+        )
+        cmp_b = "Compare with CMMC 2.0 Level 2 Defense Contractor Scenario B &rarr;"
+        ret_a = "&larr; Return to SOC 2 Type II Baseline Scenario A"
+
+    return f"""      <div class="calculation-variant" data-variant-id="variant-baseline" id="variant-baseline" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
+        <h3 class="variant-title">{a_title}</h3>
+        <p>{a_body}</p>
+        <p><a href="#variant-accelerated" class="touch-target">{cmp_b}</a></p>
+      </div>
+      <div class="calculation-variant" data-variant-id="variant-accelerated" id="variant-accelerated" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
+        <h3 class="variant-title">{b_title}</h3>
+        <p>{b_body}</p>
+        <p><a href="#variant-baseline" class="touch-target">{ret_a}</a></p>
+      </div>"""
+
+
 def _build_core_tool_html(
     tool: Dict[str, Any],
     all_tools: Sequence[Dict[str, Any]],
@@ -1195,15 +2139,27 @@ def _build_core_tool_html(
     repo_root: Optional[Path],
     css_text: str,
 ) -> str:
+    from pseofactory.affiliates import get_gainhelm_framework_profile
+
     slug = tool["slug"]
     title = f"{tool['title']} | GainHelm"
     meta_desc = tool["description"]
     canonical_url = f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/"
     manifest_spec = GAINHELM_FALLBACK_MANIFESTS_MAP.get(slug) or GAINHELM_FALLBACK_MANIFESTS_MAP["soc-2-audit-cost-calculator"]
+    fw_prof = get_gainhelm_framework_profile(slug=slug)
+    content_spec = _CORE_TOOL_CONTENT_SPECS.get(slug)
 
-    schemas = _calculator_schemas(f"/tools/{slug}/", tool["title"], meta_desc)
+    default_howto_steps = (
+        ("Define Organizational Headcount & System Scope", "Specify employee headcount, cloud boundaries, and active Trust Services Criteria or NIST SP 800-171 domains."),
+        ("Compute Accredited External Audit & Assessor Fees", "Calculate CPA firm SSAE 18 fees, C3PAO assessments under 32 CFR Part 170, or ISO/IEC 27006-1 auditor days."),
+        ("Model Internal Engineering Remediation & GRC Costs", "Apply BLS OEWS SOC 15-1212 ($121.67/hr) loaded wages to remediation hours and GRC platform licensing."),
+        ("Evaluate Statutory Penalty Exposure & SPRS Risk", "Compare investment against DoD SPRS [-203, +110] bounds and HHS OCR 45 CFR 160.404 caps."),
+    )
+    howto_steps = (content_spec or {}).get("howto", default_howto_steps)
+
+    schemas = _calculator_schemas(f"/tools/{slug}/", tool["title"], meta_desc, tool_slug=slug)
     schemas.append(_get_gainhelm_organization_schema())
-    schemas.append({"@type": "WebPage", "@id": f"{canonical_url}#webpage", "name": title, "description": meta_desc, "url": canonical_url})
+    schemas.append({"@type": "WebPage", "@id": f"{canonical_url}#webpage", "name": title, "description": meta_desc, "url": canonical_url, "datePublished": "2026-01-15", "dateModified": "2026-10-31"})
     schemas.append(
         {
             "@type": "HowTo",
@@ -1212,10 +2168,8 @@ def _build_core_tool_html(
             "description": f"Step-by-step statutory procedure for computing {tool['title']}.",
             "url": canonical_url,
             "step": [
-                {"@type": "HowToStep", "position": 1, "name": "Define Organizational Headcount & System Scope", "text": "Specify employee headcount, cloud boundaries, and active Trust Services Criteria or NIST SP 800-171 domains.", "url": f"{canonical_url}#step-1"},
-                {"@type": "HowToStep", "position": 2, "name": "Compute Accredited External Audit & Assessor Fees", "text": "Calculate CPA firm SSAE 18 fees, C3PAO assessments under 32 CFR Part 170, or ISO/IEC 27006-1 auditor days.", "url": f"{canonical_url}#step-2"},
-                {"@type": "HowToStep", "position": 3, "name": "Model Internal Engineering Remediation & GRC Costs", "text": "Apply BLS OEWS SOC 15-1212 ($121.67/hr) loaded wages to remediation hours and GRC platform licensing.", "url": f"{canonical_url}#step-3"},
-                {"@type": "HowToStep", "position": 4, "name": "Evaluate Statutory Penalty Exposure & SPRS Risk", "text": "Compare investment against DoD SPRS [-203, +110] bounds and HHS OCR 45 CFR 160.404 caps.", "url": f"{canonical_url}#step-4"},
+                {"@type": "HowToStep", "position": idx, "name": step_name, "text": step_txt, "url": f"{canonical_url}#step-{idx}"}
+                for idx, (step_name, step_txt) in enumerate(howto_steps, start=1)
             ],
         }
     )
@@ -1242,16 +2196,71 @@ def _build_core_tool_html(
     )
 
     quick_answer = quick_answers.get(slug) or tool.get("quick_answer") or GAINHELM_SITE_DESCRIPTION
+    forbidden_toks = tuple(str(t).lower() for t in (fw_prof.get("forbidden_leak_tokens") or ()))
+    clean_siblings = [
+        other
+        for other in all_tools
+        if other.get("slug")
+        and other["slug"] != slug
+        and not any(
+            tok in f"{other.get('slug', '')} {other.get('title', '')}".lower()
+            for tok in forbidden_toks
+        )
+    ]
     related_links = [
         f'<li class="tool-link-item"><a href="/tools/{other["slug"]}/" class="tool-link touch-target">{html.escape(other["title"])}</a></li>'
-        for other in all_tools
-        if other.get("slug") and other["slug"] != slug
-    ][:6]
+        for other in clean_siblings[:6]
+    ]
 
-    scen_a = benchmarks["soc2"]
-    scen_b = benchmarks["cmmc"]
-    stat_disc = html.escape(GAINHELM_DISCLOSURES["statutory_compliance_disclaimer"])
+    stat_disc_raw = str(fw_prof.get("statutory_disclaimer") or GAINHELM_DISCLOSURES["statutory_compliance_disclaimer"])
+    stat_disc = html.escape(stat_disc_raw)
     aff_disc = html.escape(GAINHELM_DISCLOSURES["ftc_disclosure"])
+
+    scenarios_lead = (content_spec or {}).get(
+        "scenarios_lead",
+        "GainHelm evaluates multi-scenario compliance projections across organizational headcount tiers, Trust Services Criteria selections, and unimplemented NIST SP 800-171 control counts to model auditor fees and engineering remediation labor.",
+    )
+    scenarios_html = _build_core_tool_scenarios_html(slug, benchmarks)
+
+    steps_list = (content_spec or {}).get(
+        "steps",
+        (
+            "Establish organizational headcount, cloud enclave boundaries, and in-scope compliance frameworks.",
+            "Apply statutory and accreditation auditor-day schedules (AICPA SSAE 18, 32 CFR Part 170, or ISO/IEC 27006-1:2024).",
+            "Calculate internal engineering remediation hours multiplied by loaded BLS SOC 15-1212 hourly rates.",
+            "Evaluate DoD SPRS score thresholds [-203, +110] and HHS OCR 45 CFR 160.404 civil penalty caps.",
+        ),
+    )
+    steps_html = "\n        ".join(f"<li>{s}</li>" for s in steps_list)
+
+    default_rows = (
+        ("SOC 2 Type II", "AICPA SSAE 18 (AT-C 205)", "5 Trust Services Criteria", "Licensed CPA Firm", "Annual (3-12 Mo Window)"),
+        ("CMMC 2.0 Level 2", "32 CFR Part 170 / DFARS 7021", "110 NIST 800-171 Controls", "Cyber-AB Accredited C3PAO", "Triennial + Annual Affirmation"),
+        ("ISO/IEC 27001:2022", "ISO/IEC 27006-1:2024", "Clauses 4-10 + 93 Annex A", "ANAB / UKAS Registrar", "3-Year Cycle + Annual Surveillance"),
+        ("HIPAA Security &amp; Breach", "45 CFR Part 160 / 164", "Administrative, Physical, Technical", "HHS OCR Enforcement", "Continuous Statutory Duty"),
+        ("PCI DSS v4.0.1", "PCI Security Standards Council", "12 Principal Requirements", "Qualified Security Assessor (QSA)", "Annual ROC + Quarterly ASV"),
+    )
+    table_rows_html = "\n            ".join(
+        f'<tr><td class="td-plan-name">{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td><td>{r[4]}</td></tr>'
+        for r in (content_spec or {}).get("table_rows", default_rows)
+    )
+
+    default_prov = (
+        ("Dataset 1:", "https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170", "DoD CMMC 2.0 Program Rule (32 CFR Part 170) &amp; NIST SP 800-171 Rev 2"),
+        ("Dataset 2:", "https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-160", "HHS HIPAA Administrative Simplification &amp; Civil Penalties (45 CFR Part 160)"),
+        ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+    )
+    prov_html = "\n        ".join(
+        f'<li><strong>{p[0]}</strong> <a href="{p[1]}" target="_blank" rel="noopener noreferrer">{p[2]}</a></li>'
+        for p in (content_spec or {}).get("provenance", default_prov)
+    )
+
+    editorial_override = (
+        f"GainHelm Editorial Policy: All calculations are deterministic and verified pursuant to "
+        f"{manifest_spec['statutory_authority']} and BLS OEWS SOC 15-1212 wage benchmarks."
+        if content_spec is not None
+        else ""
+    )
 
     body = f"""
     <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -1282,26 +2291,14 @@ def _build_core_tool_html(
 
     <section class="calculation-scenarios-section" style="margin: 2rem 0;">
       <h2 class="section-title">Statutory Calculation Scenarios &amp; Scope Variants</h2>
-      <p class="section-lead">GainHelm evaluates multi-scenario compliance projections across organizational headcount tiers, Trust Services Criteria selections, and unimplemented NIST SP 800-171 control counts to model auditor fees and engineering remediation labor.</p>
-      <div class="calculation-variant" data-variant-id="variant-baseline" id="variant-baseline" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
-        <h3 class="variant-title">Scenario A: Mid-Market SaaS SOC 2 Type II Baseline (75 Employees, 3 TSC)</h3>
-        <p>Under AICPA SSAE 18 (AT-C Section 205), a 75-employee SaaS company completing a SOC 2 Type II attestation across Security, Availability, and Confidentiality incurs ${scen_a["cpa_audit_fee"]:,.2f} in CPA audit fees, ${scen_a["grc_platform_cost"]:,.2f} in GRC automation, ${scen_a["pentest_fee"]:,.2f} in penetration testing, and ${scen_a["internal_labor_cost"]:,.2f} in engineering labor (${scen_a["total_cost"]:,.2f} total first-year cost).</p>
-        <p><a href="#variant-accelerated" class="touch-target">Compare with CMMC 2.0 Level 2 Defense Contractor Scenario B &rarr;</a></p>
-      </div>
-      <div class="calculation-variant" data-variant-id="variant-accelerated" id="variant-accelerated" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
-        <h3 class="variant-title">Scenario B: Defense Contractor CMMC 2.0 Level 2 C3PAO Certification (75 Employees, 15 Open Controls)</h3>
-        <p>Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense contractor remediating 15 unimplemented NIST SP 800-171 controls incurs ${scen_b["c3pao_assessment_fee"]:,.2f} in accredited C3PAO fees, ${scen_b["enclave_licensing_annual"]:,.2f} in enclave tooling, ${scen_b["remediation_labor_cost"]:,.2f} in engineering labor, and ${scen_b["rpo_advisory_fee"]:,.2f} in RPO advisory (${scen_b["total_cost"]:,.2f} total program cost).</p>
-        <p><a href="#variant-baseline" class="touch-target">&larr; Return to SOC 2 Type II Baseline Scenario A</a></p>
-      </div>
+      <p class="section-lead">{scenarios_lead}</p>
+{scenarios_html}
     </section>
 
     <section class="calculation-methodology-section">
       <h2 class="section-title">Statutory Compliance &amp; Audit Cost Assessment Procedure</h2>
       <ol class="calculation-steps">
-        <li>Establish organizational headcount, cloud enclave boundaries, and in-scope compliance frameworks.</li>
-        <li>Apply statutory and accreditation auditor-day schedules (AICPA SSAE 18, 32 CFR Part 170, or ISO/IEC 27006-1:2024).</li>
-        <li>Calculate internal engineering remediation hours multiplied by loaded BLS SOC 15-1212 hourly rates.</li>
-        <li>Evaluate DoD SPRS score thresholds [-203, +110] and HHS OCR 45 CFR 160.404 civil penalty caps.</li>
+        {steps_html}
       </ol>
     </section>
 
@@ -1319,11 +2316,7 @@ def _build_core_tool_html(
             </tr>
           </thead>
           <tbody>
-            <tr><td class="td-plan-name">SOC 2 Type II</td><td>AICPA SSAE 18 (AT-C 205)</td><td>5 Trust Services Criteria</td><td>Licensed CPA Firm</td><td>Annual (3-12 Mo Window)</td></tr>
-            <tr><td class="td-plan-name">CMMC 2.0 Level 2</td><td>32 CFR Part 170 / DFARS 7021</td><td>110 NIST 800-171 Controls</td><td>Cyber-AB Accredited C3PAO</td><td>Triennial + Annual Affirmation</td></tr>
-            <tr><td class="td-plan-name">ISO/IEC 27001:2022</td><td>ISO/IEC 27006-1:2024</td><td>Clauses 4-10 + 93 Annex A</td><td>ANAB / UKAS Registrar</td><td>3-Year Cycle + Annual Surveillance</td></tr>
-            <tr><td class="td-plan-name">HIPAA Security &amp; Breach</td><td>45 CFR Part 160 / 164</td><td>Administrative, Physical, Technical</td><td>HHS OCR Enforcement</td><td>Continuous Statutory Duty</td></tr>
-            <tr><td class="td-plan-name">PCI DSS v4.0.1</td><td>PCI Security Standards Council</td><td>12 Principal Requirements</td><td>Qualified Security Assessor (QSA)</td><td>Annual ROC + Quarterly ASV</td></tr>
+            {table_rows_html}
           </tbody>
         </table>
       </div>
@@ -1332,9 +2325,7 @@ def _build_core_tool_html(
     <section class="statutory-provenance-box">
       <h2 class="section-title">Statutory Authority &amp; Provenance Citations</h2>
       <ul>
-        <li><strong>Dataset 1:</strong> <a href="https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170" target="_blank" rel="noopener noreferrer">DoD CMMC 2.0 Program Rule (32 CFR Part 170) &amp; NIST SP 800-171 Rev 2</a></li>
-        <li><strong>Dataset 2:</strong> <a href="https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-160" target="_blank" rel="noopener noreferrer">HHS HIPAA Administrative Simplification &amp; Civil Penalties (45 CFR Part 160)</a></li>
-        <li><strong>Dataset 3:</strong> <a href="https://www.bls.gov/oes/current/oes151212.htm" target="_blank" rel="noopener noreferrer">BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series</a></li>
+        {prov_html}
       </ul>
       <p class="statutory-provenance-note">Cryptographic SHA-256 provenance hashes verify mathematical fidelity across all compliance cost and penalty calculations.</p>
     </section>
@@ -1348,7 +2339,16 @@ def _build_core_tool_html(
 
     {_build_retro_reflection_block(slug, canonical_url)}
     """
-    rendered = _render_base_html(title, meta_desc, canonical_url, body, jsonld_schemas=schemas, css_text=css_text)
+    rendered = _render_base_html(
+        title,
+        meta_desc,
+        canonical_url,
+        body,
+        jsonld_schemas=schemas,
+        css_text=css_text,
+        disclaimers_override={"statutory_compliance_disclaimer": stat_disc_raw} if content_spec is not None else None,
+        editorial_policy_override=editorial_override,
+    )
     return _apply_overlay_if_present(rendered, slug, repo_root)
 
 
@@ -1396,6 +2396,7 @@ def _build_methodology_html(css_text: str) -> str:
       <section class="hero-section">
         <h1 class="hero-title">Enterprise Cyber Compliance &amp; Audit Cost Calculation Methodology</h1>
         <p class="hero-desc">GainHelm compiles deterministic financial and regulatory models based directly on federal regulations, accreditation body standards, and Bureau of Labor Statistics wage series.</p>
+        <p class="verified-date-meta">Last verified against primary statutes and accreditation tables: 2026-10-31</p>
       </section>
       <aside class="quick-answer">
         <p>GainHelm models enterprise cybersecurity compliance costs, third-party audit fees, and federal statutory penalty exposure using deterministic formulas anchored to AICPA SSAE 18 (AT-C Section 205), 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024 mandatory auditor-day tables, 45 CFR 160.404 HIPAA civil penalty schedules, and BLS OEWS SOC 15-1212 wage benchmarks.</p>
@@ -1428,7 +2429,19 @@ def _build_methodology_html(css_text: str) -> str:
         </div>
       </section>
     </article>"""
-    return _render_base_html(title, meta_desc, canonical_url, body, css_text=css_text)
+    schemas = [
+        _get_gainhelm_organization_schema(),
+        {
+            "@type": "WebPage",
+            "@id": f"{canonical_url}#webpage",
+            "url": canonical_url,
+            "name": title,
+            "description": meta_desc,
+            "datePublished": "2026-01-15",
+            "dateModified": "2026-10-31",
+        },
+    ]
+    return _render_base_html(title, meta_desc, canonical_url, body, jsonld_schemas=schemas, css_text=css_text)
 
 
 def _build_disclaimers_html(css_text: str) -> str:
@@ -1443,6 +2456,7 @@ def _build_disclaimers_html(css_text: str) -> str:
       <section class="hero-section">
         <h1 class="hero-title">Cyber Compliance Regulatory Notices &amp; Disclaimers</h1>
         <p class="hero-desc">Statutory notices, independent attestation boundaries, and FTC 16 CFR Part 255 commercial disclosures governing GainHelm calculators.</p>
+        <p class="verified-date-meta">Last verified against primary statutes and accreditation tables: 2026-10-31</p>
       </section>
       <aside class="quick-answer">
         <p>GainHelm is an independent enterprise cybersecurity compliance and financial research publisher providing deterministic audit cost and statutory penalty modeling. All calculations are for informational and budgeting purposes only and do not constitute formal legal counsel, licensed CPA attestation, or accredited C3PAO certification.</p>
@@ -1476,7 +2490,19 @@ def _build_disclaimers_html(css_text: str) -> str:
         </div>
       </section>
     </article>"""
-    return _render_base_html(title, meta_desc, canonical_url, body, css_text=css_text)
+    schemas = [
+        _get_gainhelm_organization_schema(),
+        {
+            "@type": "WebPage",
+            "@id": f"{canonical_url}#webpage",
+            "url": canonical_url,
+            "name": title,
+            "description": meta_desc,
+            "datePublished": "2026-01-15",
+            "dateModified": "2026-10-31",
+        },
+    ]
+    return _render_base_html(title, meta_desc, canonical_url, body, jsonld_schemas=schemas, css_text=css_text)
 
 
 def _write_llms_files(dist: Path, all_tools: Sequence[Dict[str, Any]], quick_answers: Dict[str, str]) -> None:

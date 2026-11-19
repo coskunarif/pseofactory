@@ -2708,16 +2708,16 @@ _GAINHELM_PARTNER_CONTEXTUAL_COPY: Dict[str, Dict[str, Tuple[str, str, str, str]
             "Launch DORA Readiness with Drata",
         ),
         "sprinto_compliance": (
-            "Automated DORA & ISO 27001 Readiness",
-            "Sprinto Multi-Framework GRC & DORA Automation",
+            "Automated DORA Readiness",
+            "Sprinto DORA Compliance & ICT Risk Automation",
             "Rapid compliance automation for European financial entities and ICT service providers managing DORA controls and Register of Information workflows.",
             "Compare DORA Pricing with Sprinto",
         ),
         "thoropass_audit": (
             "Integrated GRC & Independent Assurance",
             "Thoropass Enterprise Compliance & ICT Audit Readiness",
-            "Unified compliance automation and accredited technical review workflows for EU DORA ICT risk and ISO 27001 controls.",
-            "Scope DORA & ISO Controls with Thoropass",
+            "Unified compliance automation and accredited technical review workflows for EU DORA ICT risk and TLPT resilience controls.",
+            "Scope DORA Controls with Thoropass",
         ),
         "coalition_cyber_insurance": (
             "Active Cyber Insurance & ICT Risk Protection",
@@ -2748,7 +2748,7 @@ _GAINHELM_PARTNER_CONTEXTUAL_COPY: Dict[str, Dict[str, Tuple[str, str, str, str]
         "sprinto_compliance": (
             "Fast-Track AI Governance & ISO 42001",
             "Sprinto Automated AI Risk & Conformity Readiness",
-            "Structured compliance automation for AI providers preparing Annex IV technical documentation, ISO 27001, and ISO 42001 governance evidence.",
+            "Structured compliance automation for AI providers preparing Annex IV technical documentation and ISO 42001 governance evidence.",
             "Compare AI Governance Pricing with Sprinto",
         ),
         "thoropass_audit": (
@@ -8416,7 +8416,12 @@ def normalize_html_callout_message_match(
                 count=1,
                 flags=re.S | re.I,
             )
-        elif 'class="ftc-disclosure-card"' not in updated and "</section>" in updated and "<main" in updated:
+        elif (
+            "ftc-disclosure-banner" not in updated
+            and 'class="ftc-disclosure-card"' not in updated
+            and "</section>" in updated
+            and "<main" in updated
+        ):
             banner_div = (
                 f'\n      <div class="ftc-disclosure-banner" data-mechanic="compliant_intent_monetization" '
                 f'style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem; padding: 0.625rem 0.875rem; '

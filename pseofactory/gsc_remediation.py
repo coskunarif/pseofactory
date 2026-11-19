@@ -10060,14 +10060,25 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         p_opt_status = html_lib.escape(
             _strip_forbidden_dashes(str(p_offer.get("optimization_status") or "INITIAL_PLACEMENT"))
         )
-        p_disc = html_lib.escape(
-            _strip_forbidden_dashes(
-                str(
-                    p_offer.get("disclosure")
-                    or "FTC Disclosure: We may earn an affiliate commission when you register through approved partner links at no additional cost to you."
-                )
+        raw_disc = _strip_forbidden_dashes(
+            str(
+                p_offer.get("disclosure")
+                or "FTC Disclosure: We may earn an affiliate commission when you register through approved partner links at no additional cost to you."
             )
         )
+        if raw_prop_id.lower() == "gainhelm":
+            try:
+                from pseofactory.affiliates import has_gainhelm_cross_framework_leak
+
+                if has_gainhelm_cross_framework_leak(raw_disc, ov_slug_norm) or "cpa/c3pao" in raw_disc.lower():
+                    raw_disc = (
+                        "FTC Partner Compensation Disclosure: GainHelm is an independent security compliance "
+                        "research publisher and may receive referral compensation from vetted commercial partners "
+                        "at no additional cost to you."
+                    )
+            except Exception:
+                pass
+        p_disc = html_lib.escape(raw_disc)
         partner_section_markup = (
             f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
             f'data-property="{prop_id}" data-partner="{p_key}" data-partner-url="{html_lib.escape(raw_p_url)}" data-cta-slot="{p_slot}" '

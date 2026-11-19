@@ -1953,6 +1953,10 @@ def _render_runtime_sync_workbench_js() -> str:
     function syncComplianceAuditFormOutputs(outNodes) {
       var auditForm = document.querySelector("form[id$='-compliance-form']");
       if (!auditForm) return false;
+      if (typeof window.__gainhelmSyncWorkspaceOutputs === "function") {
+        window.__gainhelmSyncWorkspaceOutputs();
+        return true;
+      }
       var hcEl = document.getElementById("calc-input-headcount");
       var critEl = document.getElementById("calc-input-extra_criteria");
       var u5El = document.getElementById("calc-input-unimplemented_5pt");
@@ -1969,58 +1973,122 @@ def _render_runtime_sync_workbench_js() -> str:
 
       var scaleFactor = hc / 75.0;
       var cpaFee = 28000.0 + (crit * 4500.0);
+      var grcFee = 15000.0;
       var internalLabor = Math.round((120.0 * scaleFactor * 121.67) * 100) / 100;
-      var soc2Total = Math.round((cpaFee + 11500.0 + 15000.0 + internalLabor) * 100) / 100;
+      var soc2Total = Math.round((cpaFee + 11500.0 + grcFee + internalLabor) * 100) / 100;
       var autoSavings = Math.round((internalLabor * 0.55) * 100) / 100;
-      var sprsScore = Math.max(-203, 110 - ((u5 * 5) + (u3 * 3) + (u1 * 1)));
-      var cmmcTotal = Math.round((48500.0 + 26400.0 + (380.0 * 115.0 * Math.max(0.5, scaleFactor)) + 13400.0) * 100) / 100;
+      var sprsDeduction = (u5 * 5) + (u3 * 3) + (u1 * 1);
+      var sprsScore = Math.max(-203, 110 - sprsDeduction);
+      var cmmcRem = Math.round((380.0 * 115.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+      var cmmcTotal = Math.round((48500.0 + 26400.0 + cmmcRem + 13400.0) * 100) / 100;
       var isoDays = Math.max(5.0, Math.round(11.0 * Math.pow(scaleFactor, 0.35)));
-      var isoTotal = Math.round(((isoDays * 1950.0) + 14500.0 + 8500.0 + (180.0 * 125.28)) * 100) / 100;
+      var isoReg = Math.round((isoDays * 1950.0) * 100) / 100;
+      var isoRem = Math.round((180.0 * 125.28 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
+      var isoTotal = Math.round((isoReg + 14500.0 + 8500.0 + isoRem) * 100) / 100;
       var ocrFine = Math.min(rec * 13795.0, 2067813.0);
-      var hipaaTotal = Math.round((ocrFine + 95000.0 + (rec * 195.0)) * 100) / 100;
+      var hipaaResp = Math.round((95000.0 + (rec * 195.0)) * 100) / 100;
+      var hipaaTotal = Math.round((ocrFine + hipaaResp) * 100) / 100;
+      var pciCde = Math.round((38800.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+      var pciTotal = Math.round((42000.0 + 14000.0 + pciCde) * 100) / 100;
+      var fedTotal = Math.round((500000.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
+      var hitTotal = Math.round((115000.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
+      var penTotal = Math.round((23300.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
+      var cybPrem = Math.round((20415.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+      var cybSir = 20485.0;
+      var cybTotal = Math.round((cybPrem + cybSir) * 100) / 100;
 
-      var elSoc2 = document.getElementById("metric-soc2_total_cost");
-      var elSprs = document.getElementById("metric-nist_sprs_score");
-      var elCmmc = document.getElementById("metric-cmmc_total_cost");
-      var elIso = document.getElementById("metric-iso27001_total_cost");
-      var elHipaa = document.getElementById("metric-hipaa_exposure");
-      var elSav = document.getElementById("metric-soc2_automation_savings");
-      if (elSoc2) elSoc2.textContent = fmtUsd2(soc2Total);
-      if (elSprs) elSprs.textContent = sprsScore + " pts";
-      if (elCmmc) elCmmc.textContent = fmtUsd2(cmmcTotal);
-      if (elIso) elIso.textContent = fmtUsd2(isoTotal);
-      if (elHipaa) elHipaa.textContent = fmtUsd2(hipaaTotal);
-      if (elSav) elSav.textContent = fmtUsd2(autoSavings) + "/yr";
+      var elMeterCpa = document.getElementById("meter-cpa-val");
+      var meterMode = elMeterCpa ? elMeterCpa.getAttribute("data-meter-mode") : "";
+      if (!meterMode) {
+        var slugLow = resolveCurrentToolSlug().toLowerCase();
+        if (slugLow.indexOf("sprs") !== -1 || slugLow.indexOf("nist-800-171") !== -1) meterMode = "sprs";
+        else if (slugLow.indexOf("cmmc") !== -1) meterMode = "cmmc";
+        else if (slugLow.indexOf("iso-27001") !== -1 || slugLow.indexOf("iso27001") !== -1) meterMode = "iso27001";
+        else if (slugLow.indexOf("hipaa") !== -1) meterMode = "hipaa";
+        else if (slugLow.indexOf("pci-dss") !== -1 || slugLow.indexOf("pci") !== -1) meterMode = "pci_dss";
+        else if (slugLow.indexOf("fedramp") !== -1) meterMode = "fedramp";
+        else if (slugLow.indexOf("hitrust") !== -1) meterMode = "hitrust";
+        else if (slugLow.indexOf("penetration") !== -1 || slugLow.indexOf("pentest") !== -1) meterMode = "pentest";
+        else if (slugLow.indexOf("cyber-liability") !== -1 || slugLow.indexOf("cyber-insurance") !== -1) meterMode = "cyber_insurance";
+        else meterMode = "soc2";
+      }
 
+      var meterMap = {
+        soc2: { pay: cpaFee, right: grcFee, sub: autoSavings, intl: internalLabor, pct: Math.round((cpaFee / Math.max(1, soc2Total)) * 100) },
+        cmmc: { pay: 48500.0, right: 26400.0, sub: Math.round(cmmcRem * 0.35 * 100) / 100, intl: cmmcRem, pct: Math.round((48500.0 / Math.max(1, cmmcTotal)) * 100) },
+        sprs: { pay: 48500.0, right: 26400.0, sub: Math.round(cmmcRem * 0.35 * 100) / 100, intl: cmmcRem, pct: Math.round(((110.0 - Math.max(0, sprsDeduction)) / 110.0) * 100) },
+        iso27001: { pay: isoReg, right: 14500.0, sub: Math.round(isoRem * 0.50 * 100) / 100, intl: isoRem, pct: Math.round((isoReg / Math.max(1, isoTotal)) * 100) },
+        hipaa: { pay: ocrFine, right: hipaaResp, sub: Math.round(ocrFine * 0.30 * 100) / 100, intl: hipaaResp, pct: Math.round((ocrFine / Math.max(1, hipaaTotal)) * 100) },
+        pci_dss: { pay: 42000.0, right: 14000.0, sub: Math.round(pciCde * 0.45 * 100) / 100, intl: pciCde, pct: Math.round((42000.0 / Math.max(1, pciTotal)) * 100) },
+        fedramp: { pay: Math.round(fedTotal * 0.42 * 100) / 100, right: Math.round(fedTotal * 0.16 * 100) / 100, sub: Math.round(fedTotal * 0.25 * 100) / 100, intl: Math.round(fedTotal * 0.42 * 100) / 100, pct: 42 },
+        hitrust: { pay: Math.round(hitTotal * 0.50 * 100) / 100, right: Math.round(hitTotal * 0.18 * 100) / 100, sub: Math.round(hitTotal * 0.30 * 100) / 100, intl: Math.round(hitTotal * 0.32 * 100) / 100, pct: 50 },
+        pentest: { pay: Math.round(penTotal * 0.62 * 100) / 100, right: Math.round(penTotal * 0.18 * 100) / 100, sub: Math.round(penTotal * 0.30 * 100) / 100, intl: Math.round(penTotal * 0.20 * 100) / 100, pct: 62 },
+        cyber_insurance: { pay: cybPrem, right: cybSir, sub: Math.round(cybPrem * 0.22 * 100) / 100, intl: cybSir, pct: Math.round((cybPrem / Math.max(1, cybTotal)) * 100) }
+      };
+      var activeMeter = meterMap[meterMode] || meterMap.soc2;
+
+      var metricPairs = [
+        ["metric-soc2_total_cost", fmtUsd2(soc2Total)],
+        ["metric-nist_sprs_score", sprsScore + " pts"],
+        ["metric-cmmc_total_cost", fmtUsd2(cmmcTotal)],
+        ["metric-iso27001_total_cost", fmtUsd2(isoTotal)],
+        ["metric-hipaa_exposure", fmtUsd2(hipaaTotal)],
+        ["metric-pci_dss_cost", fmtUsd2(pciTotal)],
+        ["metric-fedramp_total_cost", fmtUsd2(fedTotal)],
+        ["metric-hitrust_total_cost", fmtUsd2(hitTotal)],
+        ["metric-pentest_total_cost", fmtUsd2(penTotal)],
+        ["metric-cyber_insurance_total_cost", fmtUsd2(cybTotal)],
+        ["metric-soc2_automation_savings", fmtUsd2(activeMeter.sub) + "/yr"]
+      ];
+      for (var mpIdx = 0; mpIdx < metricPairs.length; mpIdx++) {
+        var mpEl = document.getElementById(metricPairs[mpIdx][0]);
+        if (mpEl) mpEl.textContent = metricPairs[mpIdx][1];
+      }
+
+      var elMeterPay = document.getElementById("meter-pay-val");
+      var elMeterSub = document.getElementById("meter-sub-val");
+      var elMeterInt = document.getElementById("meter-int-val");
+      var elSegCpa = document.getElementById("meter-seg-cpa");
+      var elSegGrc = document.getElementById("meter-seg-grc");
+      if (elMeterCpa) {
+        var lLbl = elMeterCpa.getAttribute("data-left-label") || "CPA";
+        var rLbl = elMeterCpa.getAttribute("data-right-label") || "GRC";
+        elMeterCpa.textContent = fmtUsd2(activeMeter.pay) + " " + lLbl + " | " + fmtUsd2(activeMeter.right) + " " + rLbl;
+      }
+      if (elMeterPay) elMeterPay.textContent = fmtUsd2(activeMeter.pay);
+      if (elMeterSub) elMeterSub.textContent = fmtUsd2(activeMeter.sub);
+      if (elMeterInt) elMeterInt.textContent = fmtUsd2(activeMeter.intl);
+      var cpaPct = Math.max(5, Math.min(95, activeMeter.pct));
+      if (elSegCpa) elSegCpa.style.width = cpaPct + "%";
+      if (elSegGrc) elSegGrc.style.width = (100 - cpaPct) + "%";
+
+      var primaryOutMap = {
+        soc2: soc2Total,
+        cmmc: cmmcTotal,
+        sprs: sprsScore,
+        iso27001: isoTotal,
+        hipaa: hipaaTotal,
+        pci_dss: pciTotal,
+        fedramp: fedTotal,
+        hitrust: hitTotal,
+        pentest: penTotal,
+        cyber_insurance: cybTotal
+      };
+      var primaryVal = Object.prototype.hasOwnProperty.call(primaryOutMap, meterMode) ? primaryOutMap[meterMode] : soc2Total;
+      var isSprsMode = meterMode === "sprs";
       var primaryOutEl = outNodes && outNodes.length ? outNodes[0] : null;
-      if (!primaryOutEl || (primaryOutEl.classList && primaryOutEl.classList.contains("overlay-preset-readout"))) {
-        return true;
+      if (primaryOutEl && !(primaryOutEl.classList && primaryOutEl.classList.contains("overlay-preset-readout"))) {
+        primaryOutEl.textContent = isSprsMode ? String(Math.round(primaryVal)) : formatOutNum(primaryVal);
       }
-      var slugLow = resolveCurrentToolSlug().toLowerCase();
-      if (slugLow.indexOf("soc-2") !== -1 || slugLow.indexOf("soc2") !== -1) {
-        primaryOutEl.textContent = fmtNum2(soc2Total);
-      } else if (slugLow.indexOf("sprs") !== -1 || slugLow.indexOf("nist-800-171") !== -1) {
-        primaryOutEl.textContent = String(sprsScore);
-      } else if (slugLow.indexOf("cmmc") !== -1) {
-        primaryOutEl.textContent = fmtNum2(cmmcTotal);
-      } else if (slugLow.indexOf("iso-27001") !== -1 || slugLow.indexOf("iso27001") !== -1) {
-        primaryOutEl.textContent = fmtNum2(isoTotal);
-      } else if (slugLow.indexOf("hipaa") !== -1) {
-        primaryOutEl.textContent = fmtNum2(hipaaTotal);
-      } else {
-        var baseOut = parseFloat(primaryOutEl.getAttribute("data-baseline-output") || "");
-        if (!isNaN(baseOut) && baseOut > 0 && _userInteracted) {
-          var combinedScale = scaleFactor;
-          if (slugLow.indexOf("cyber-liability") !== -1 || slugLow.indexOf("sec-cyber") !== -1) {
-            combinedScale = (0.4 * scaleFactor) + (0.6 * Math.max(0.1, rec / 1500.0));
-          } else {
-            var baseGaps = 17.0;
-            var curGaps = (u5 * 5) + (u3 * 3) + u1 + 1e-6;
-            combinedScale = (0.7 * scaleFactor) + (0.3 * (curGaps / baseGaps));
-          }
-          primaryOutEl.textContent = formatOutNum(Math.round(baseOut * Math.max(0.05, combinedScale) * 100) / 100);
-        }
-      }
+      var hrBase = document.getElementById("hero-range-baseline");
+      var hrLow = document.getElementById("hero-range-low");
+      var hrHigh = document.getElementById("hero-range-high");
+      var fmtHeroVal = function(v) {
+        return isSprsMode ? formatOutNum(v) : ("$" + formatOutNum(v));
+      };
+      if (hrBase) hrBase.textContent = isSprsMode ? String(Math.round(primaryVal)) : ("$" + formatOutNum(primaryVal));
+      if (hrLow) hrLow.textContent = fmtHeroVal(primaryVal * 0.8);
+      if (hrHigh) hrHigh.textContent = fmtHeroVal(primaryVal * 1.2);
       return true;
     }
 
@@ -2073,7 +2141,10 @@ def _render_runtime_sync_workbench_js() -> str:
       updateSerpWorkbenchSynchronously();
 
       var outNodes = document.querySelectorAll(".output-value");
-      syncComplianceAuditFormOutputs(outNodes);
+      if (syncComplianceAuditFormOutputs(outNodes)) {
+        syncOutboundAffiliateLinks();
+        return;
+      }
       if (!outNodes.length) {
         syncOutboundAffiliateLinks();
         return;
@@ -2831,7 +2902,7 @@ def _render_runtime_sync_events_js() -> str:
           var matchedThisKey = false;
           for (var cIdx = 0; cIdx < candidates.length; cIdx++) {
             var cKey = candidates[cIdx];
-            var el = document.getElementById("field-" + cKey) || document.getElementById("input-" + cKey) || document.getElementById(cKey) || document.querySelector('[name="' + cKey + '"]');
+            var el = document.getElementById("field-" + cKey) || document.getElementById("input-" + cKey) || document.getElementById("calc-input-" + cKey) || document.getElementById(cKey) || document.querySelector('[name="' + cKey + '"]');
             if (el && (el.tagName === "INPUT" || el.tagName === "SELECT")) {
               var valStr = String(rawVal).trim();
               if (el.type === "checkbox") {
@@ -5682,6 +5753,29 @@ def _pro_hook_has_mismatched_price(html_fragment: str, exp_price: str) -> bool:
     return False
 
 
+def _gainhelm_pro_card_has_stale_tax_copy(frag: str) -> bool:
+    """Detects legacy DE/tax-worded .pro-hook-card copy while preserving synthetic clean DORA baselines."""
+    if not frag:
+        return False
+    if any(
+        tok in frag
+        for tok in (
+            "Statutory Bracket",
+            "Effective vs. Marginal",
+            "Statutory Reconciliation Schedule",
+            "Statutory Control & Scope Schedule",
+            "Statutory Control &amp; Scope Schedule",
+            "Instant DE Partner Quote",
+            "Export Personalized DE Schedule",
+            "ProfitHelm Pro",
+        )
+    ):
+        return True
+    if "DE Baseline" in frag and "DORA ICT Control Matrix" not in frag and "DORA Zero-Baseline" not in frag:
+        return True
+    return False
+
+
 def _gainhelm_pro_card_has_mismatch(
     pro_html: str,
     tool_slug: str,
@@ -5691,7 +5785,7 @@ def _gainhelm_pro_card_has_mismatch(
     """Detects cross-framework leaks or stale SKU/price attributes inside a single .pro-hook-card block."""
     from pseofactory.affiliates import has_gainhelm_cross_framework_leak
 
-    if has_gainhelm_cross_framework_leak(pro_html, tool_slug):
+    if has_gainhelm_cross_framework_leak(pro_html, tool_slug) or _gainhelm_pro_card_has_stale_tax_copy(pro_html):
         return True
     for dc_m in re.finditer(
         r'<a\b[^>]*\bclass=["\'][^"\']*\bpro-hook-direct-checkout\b[^"\']*["\'][^>]*>',
@@ -5711,6 +5805,86 @@ def _gainhelm_pro_card_has_mismatch(
     return _pro_hook_has_mismatched_price(pro_html, exp_price)
 
 
+_GAINHELM_PRO_SHORT_LABELS: Dict[str, str] = {
+    "soc2": "SOC 2",
+    "cmmc": "CMMC 2.0",
+    "iso_27001": "ISO 27001",
+    "hipaa": "HIPAA",
+    "pci_dss": "PCI DSS 4.0",
+    "fedramp": "FedRAMP",
+    "hitrust": "HITRUST CSF",
+    "pentest": "Pentest",
+    "cyber_insurance": "Cyber Insurance",
+    "dora": "DORA ICT",
+    "eu_ai_act": "EU AI Act",
+    "nis2": "NIS2",
+    "gdpr": "GDPR",
+    "ccpa": "CCPA/CPRA",
+    "sec_8k": "SEC 8-K",
+}
+
+
+def _resolve_gainhelm_pro_short_label(tool_slug: str) -> str:
+    """Returns a framework-pure short label for GainHelm .pro-hook-card copy."""
+    s_low = str(tool_slug or "").strip().lower()
+    if s_low in ("", "index"):
+        return "Compliance"
+    if "800-171" in s_low or "sprs" in s_low:
+        return "NIST 800-171"
+    from pseofactory.affiliates import classify_gainhelm_framework
+
+    fw_key = classify_gainhelm_framework(slug=s_low)
+    return _GAINHELM_PRO_SHORT_LABELS.get(fw_key, "Compliance")
+
+
+def _build_pro_hook_card_copy(
+    *,
+    tool_slug: str,
+    default_state: str,
+    calc_amt_fmt: str,
+    offer_price: str,
+    is_gainhelm: bool,
+    is_injected: bool = False,
+) -> Dict[str, str]:
+    """Builds tenant-appropriate .pro-hook-card labels and sample-preview lines."""
+    if is_gainhelm:
+        fw_short = _resolve_gainhelm_pro_short_label(tool_slug)
+        return {
+            "prefix": f"{fw_short} Audit Workpaper:",
+            "outer_span": (
+                f'<span><strong style="color: var(--brand-primary);">{fw_short} Audit Workpaper:</strong> '
+                f"Export Personalized Compliance Schedule &amp; Data Pack (PDF/CSV)</span>"
+            ),
+            "quote_jump_label": "Instant Partner Readiness Quote ($0) &rarr;",
+            "sample_preview": (
+                f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {fw_short} Baseline):</strong> '
+                f"Line 1 Control &amp; Assessor Cost Schedule (Unlocked) | "
+                f"Line 2 Maturity &amp; Penalty Sensitivity Matrix (Unlocked) | "
+                f"Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>"
+            ),
+        }
+    line1_label = (
+        "Statutory Reconciliation Schedule"
+        if is_injected
+        else "Statutory Bracket &amp; Deduction Schedule"
+    )
+    line2_label = "Sensitivity Matrix" if is_injected else "Effective vs. Marginal Sensitivity Matrix"
+    return {
+        "prefix": "Statutory Audit Workpaper:",
+        "outer_span": (
+            f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> '
+            f"Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>"
+        ),
+        "quote_jump_label": f"Instant {default_state} Partner Quote ($0) &rarr;",
+        "sample_preview": (
+            f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> '
+            f"Line 1 {line1_label} (Unlocked) | "
+            f"Line 2 {line2_label} (Unlocked) | "
+            f"Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>"
+        ),
+    }
+
+
 def _clean_pro_hook_outer_spans(
     pro_card_html: str,
     *,
@@ -5725,10 +5899,13 @@ def _clean_pro_hook_outer_spans(
     from pseofactory.affiliates import has_gainhelm_cross_framework_leak
 
     sample_span = _find_balanced_div_span(pro_card_html, "pro-hook-sample-unlock", attr_name="class")
-    canonical_span = (
-        f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> '
-        f"Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>"
-    )
+    canonical_span = _build_pro_hook_card_copy(
+        tool_slug=tool_slug,
+        default_state=default_state,
+        calc_amt_fmt="$0",
+        offer_price=str(offer_price),
+        is_gainhelm=True,
+    )["outer_span"]
 
     def _sub_span(m: re.Match) -> str:
         if sample_span and m.start() >= sample_span[0] and m.end() <= sample_span[1]:
@@ -5736,7 +5913,8 @@ def _clean_pro_hook_outer_spans(
         span_full = m.group(0)
         has_leak = has_gainhelm_cross_framework_leak(span_full, tool_slug)
         wrong_price = _pro_hook_has_mismatched_price(span_full, str(offer_price))
-        if has_leak or wrong_price:
+        has_tax_leak = _gainhelm_pro_card_has_stale_tax_copy(span_full)
+        if has_leak or wrong_price or has_tax_leak:
             return canonical_span
         return span_full
 
@@ -5807,13 +5985,15 @@ def _heal_pro_hook_sample_unlock(
             if is_gainhelm:
                 from pseofactory.affiliates import has_gainhelm_cross_framework_leak
 
-                if has_gainhelm_cross_framework_leak(block, tool_slug):
-                    clean_preview_div = (
-                        f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> '
-                        f'Line 1 Statutory Control &amp; Scope Schedule (Unlocked) | '
-                        f'Line 2 Remediation Sensitivity Matrix (Unlocked) | '
-                        f'Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
-                    )
+                has_stale_tax = _gainhelm_pro_card_has_stale_tax_copy(block)
+                if has_gainhelm_cross_framework_leak(block, tool_slug) or has_stale_tax:
+                    clean_preview_div = _build_pro_hook_card_copy(
+                        tool_slug=tool_slug,
+                        default_state=default_state,
+                        calc_amt_fmt=calc_amt_fmt,
+                        offer_price=offer_price,
+                        is_gainhelm=True,
+                    )["sample_preview"]
                     top_nodes = _split_top_level_html_nodes(inner)
                     action_nodes = [
                         nd for nd in top_nodes
@@ -5836,6 +6016,12 @@ def _heal_pro_hook_sample_unlock(
                                 continue
                         cleaned_actions.append(act)
                     inner = clean_preview_div + "".join(cleaned_actions)
+                inner = re.sub(
+                    r"Instant\s+(?:DE|US)\s+Partner Quote\s*\(\$0\)",
+                    "Instant Partner Readiness Quote ($0)",
+                    inner,
+                    flags=re.IGNORECASE,
+                )
             inner = re.sub(
                 r"(Locked:\s*\$)\d+",
                 rf"\g<1>{offer_price}",
@@ -5844,6 +6030,13 @@ def _heal_pro_hook_sample_unlock(
             )
             block = f"{open_tag}{inner}</div>"
         pro_card_html = pro_card_html[:sample_span[0]] + block + pro_card_html[sample_span[1]:]
+    if is_gainhelm:
+        pro_card_html = re.sub(
+            r"Instant\s+(?:DE|US)\s+Partner Quote\s*\(\$0\)",
+            "Instant Partner Readiness Quote ($0)",
+            pro_card_html,
+            flags=re.IGNORECASE,
+        )
     return _rewrite_anchor_attrs_by_class(
         pro_card_html,
         "pro-hook-direct-checkout",
@@ -5902,11 +6095,18 @@ def _retrofit_pro_hook_and_lead_capture_cards(
         except ValueError:
             calc_amt_fmt = "$125,000"
         new_doc = updated
+        hook_copy = _build_pro_hook_card_copy(
+            tool_slug=tool_slug,
+            default_state=default_state,
+            calc_amt_fmt=calc_amt_fmt,
+            offer_price=offer_price,
+            is_gainhelm=is_gainhelm,
+        )
         for sp_start, sp_end in reversed(pro_spans):
             pro_card_html = new_doc[sp_start:sp_end]
             pro_card_html = re.sub(
                 r'ProfitHelm Pro:(</strong>)',
-                r"Statutory Audit Workpaper:\1",
+                f"{hook_copy['prefix']}\\1",
                 pro_card_html,
                 count=1,
                 flags=re.IGNORECASE,
@@ -5925,7 +6125,10 @@ def _retrofit_pro_hook_and_lead_capture_cards(
                 attr_updates={"data-checkout-nav": "1"},
                 inner_html=f"Export Audit Workpaper (${offer_price}) &rarr;",
             )
-            if 'data-mechanic="above_fold_packet_sample_unlock"' not in pro_card_html:
+            if (
+                'data-mechanic="above_fold_packet_sample_unlock"' not in pro_card_html
+                and "pro-hook-sample-unlock" not in pro_card_html
+            ):
                 checkout_href = (
                     f"/api/lead-capture?checkout=1&amp;sku={offer_sku}"
                     f"&amp;tool_slug={tool_slug}&amp;amount={calc_amt}&amp;redirect=1"
@@ -5934,14 +6137,14 @@ def _retrofit_pro_hook_and_lead_capture_cards(
                     f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
                     f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
                     f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border); background: var(--bg-surface); color: var(--brand-primary); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
-                    f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
+                    f"{hook_copy['quote_jump_label']}</a>"
                     if has_quote_intake
                     else ""
                 )
                 sample_unlock_html = (
                     f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
                     f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
-                    f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Bracket &amp; Deduction Schedule (Unlocked) | Line 2 Effective vs. Marginal Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
+                    f"{hook_copy['sample_preview']}"
                     f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
                     f'<a href="{checkout_href}" rel="nofollow" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
                     f'{quote_jump_html}'
@@ -5987,6 +6190,14 @@ def _retrofit_pro_hook_and_lead_capture_cards(
             calc_amt_fmt = f"${int(float(calc_amt)):,}"
         except ValueError:
             calc_amt_fmt = "$125,000"
+        inj_copy = _build_pro_hook_card_copy(
+            tool_slug=tool_slug,
+            default_state=default_state,
+            calc_amt_fmt=calc_amt_fmt,
+            offer_price=offer_price,
+            is_gainhelm=is_gainhelm,
+            is_injected=True,
+        )
         checkout_href = (
             f"/api/lead-capture?checkout=1&amp;sku={offer_sku}"
             f"&amp;tool_slug={tool_slug}&amp;amount={calc_amt}&amp;redirect=1"
@@ -5995,17 +6206,17 @@ def _retrofit_pro_hook_and_lead_capture_cards(
             f' <a href="#partner-quote-intake-step" class="pro-hook-quote-jump touch-target" '
             f'data-quote-jump="1" data-cta-slot="above_fold_partner_quote_jump" '
             f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--brand-border); background: var(--bg-surface); color: var(--brand-primary); font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">'
-            f'Instant {default_state} Partner Quote ($0) &rarr;</a>'
+            f"{inj_copy['quote_jump_label']}</a>"
             if has_quote_intake
             else ""
         )
         injected_pro_card = (
             f'\n          <div class="pro-hook-card" style="background: var(--brand-soft); border: 1px dashed var(--brand-border); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.8125rem; color: var(--text-secondary); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem;">'
-            f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>'
+            f"{inj_copy['outer_span']}"
             f'<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="background-color: var(--bg-surface); color: var(--brand-primary); border: 1px solid var(--brand-border); border-radius: 6px; font-weight: 700; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 12px;">Export Audit Workpaper (${offer_price}) &rarr;</a>'
             f'\n              <div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock" '
             f'style="width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--brand-border); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-secondary);">'
-            f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> Line 1 Statutory Reconciliation Schedule (Unlocked) | Line 2 Sensitivity Matrix (Unlocked) | Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>'
+            f"{inj_copy['sample_preview']}"
             f'<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
             f'<a href="{checkout_href}" rel="nofollow" class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{offer_price}" data-cta-slot="above_fold_workpaper_checkout_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap;">Instant Checkout &amp; Download (${offer_price}) &rarr;</a>'
             f'{quote_jump_html}'
@@ -6612,9 +6823,25 @@ def _retrofit_hero_range_and_jurisdiction_bars(
             actions.append("state_first_hero_bar")
 
     if has_quote_intake and tool_slug != "index":
+        slug_low = str(tool_slug or "").strip().lower()
+        is_intl_gh = property_id == "gainhelm" and (
+            any(tok in slug_low for tok in ("philippines", "eu-ai-act", "dora-ict", "eu-dora", "nis2", "iso-27001", "iso27001", "gdpr"))
+            or "dora" in slug_low.split("-")
+        )
+        is_eu_gh = is_intl_gh and (
+            any(tok in slug_low for tok in ("eu-ai-act", "dora-ict", "eu-dora", "nis2", "gdpr"))
+            or "dora" in slug_low.split("-")
+        )
+        eff_state = ("EU" if is_eu_gh else "US") if is_intl_gh else default_state
+        eff_jurisdictions = (
+            (("EU", "European Union / EEA (EU)"), ("UK", "United Kingdom (UK)"), ("US", "United States (US)"))
+            + tuple(us_jurisdictions)
+            if is_intl_gh
+            else us_jurisdictions
+        )
         full_opts_14 = "\n".join(
-            f'              <option value="{sc}"{" selected" if sc == default_state else ""}>{sl}</option>'
-            for sc, sl in us_jurisdictions
+            f'              <option value="{sc}"{" selected" if sc == eff_state else ""}>{sl}</option>'
+            for sc, sl in eff_jurisdictions
         )
         for sel_id in ("quote-intake-hero-state", "quote-intake-state", "quote-intake-partner-reg-state"):
             sel_pat = re.compile(
@@ -6624,7 +6851,7 @@ def _retrofit_hero_range_and_jurisdiction_bars(
             sel_m = sel_pat.search(updated)
             if sel_m:
                 cur_inner = sel_m.group(2)
-                if f'value="{default_state}" selected' not in cur_inner or 'value="ME"' not in cur_inner:
+                if f'value="{eff_state}" selected' not in cur_inner or 'value="ME"' not in cur_inner:
                     new_sel = sel_m.group(1) + "\n" + full_opts_14 + "\n            " + sel_m.group(3)
                     if new_sel != sel_m.group(0):
                         updated = updated[: sel_m.start()] + new_sel + updated[sel_m.end() :]

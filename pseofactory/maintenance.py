@@ -10061,6 +10061,9 @@ class RetroReflectionEngine:
                 and "Income-Based" not in cluster_body
                 and "/tools/soc-2-audit-cost-calculator/" not in cluster_body
                 and "/tools/cmmc-2-0-compliance-cost-calculator/" not in cluster_body
+                and "/tools/iso-27001-certification-cost-calculator/" not in cluster_body
+                and "/tools/pci-dss-4-0-compliance-cost-calculator/" not in cluster_body
+                and "/tools/nist-800-171-sprs-score-calculator/" not in cluster_body
                 and "/tools/contractor-license-bond-cost-calculator-by-credit-score/" not in cluster_body
                 and "/tools/workers-compensation-class-code-rate-calculator-by-state/" not in cluster_body
             )

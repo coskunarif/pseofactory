@@ -2806,6 +2806,314 @@ def _resolve_b2b_commercial_competitor_content(s_low: str) -> Optional[Dict[str,
     return None
 
 
+_GAINHELM_TRAP_SPECS: Dict[str, Tuple[str, str, List[str], List[Tuple[str, str, str]], str, List[str]]] = {
+    "iso_27001": (
+        "Immediate ISO/IEC 27001:2022 Statement of Applicability &amp; Stage 1/2 Audit-Day Trap Alert",
+        "Under ISO/IEC 27001:2022 and ISO/IEC 27006-1:2024 mandatory auditor-day tables, scoping unnecessary corporate subsidiaries into the ISMS boundary or submitting an incomplete Annex A 93-control Statement of Applicability (SoA) triggers non-conformities and costly Stage 2 extension days.",
+        [
+            "Lock an explicit ISMS Scope Statement and Clause 4-10 risk ledger isolating production engineering assets prior to Stage 1.",
+            "Map all 93 ISO/IEC 27001:2022 Annex A controls with documented Statement of Applicability (SoA) justifications.",
+            "Execute an independent Clause 9.2 internal audit and Clause 9.3 management review before engaging your certification body.",
+            "Confirm ANAB/UKAS registrar auditor-day scheduling and Years 2-3 surveillance audit pricing upfront.",
+        ],
+        [
+            ("Scoping every non-production office and corporate endpoint into the ISMS boundary", "Inflates ISO/IEC 27006-1 effective headcount brackets and Stage 1/2 auditor days by 50% to 150%", "Constrain the ISMS Statement of Applicability strictly to production SaaS delivery teams"),
+            ("Entering Stage 1 with an incomplete Clause 9.2 internal audit or management review record", "Causes mandatory Stage 1 deferral and registrar rescheduling fees prior to Stage 2", "Complete internal audit remediation and leadership review sign-off 30 days pre-Stage 1"),
+            ("Maintaining Annex A evidence manually in static spreadsheets across surveillance years", "Creates major non-conformities during annual IAF MD 5 surveillance sampling", "Automate continuous access, vulnerability, and change evidence collection into your ISMS"),
+        ],
+        "ISO/IEC 27001:2022 Registrar &amp; ISMS Vetting Checklist",
+        [
+            "Verify ANAB or UKAS accreditation status under ISO/IEC 17021-1 and ISO/IEC 27006-1:2024.",
+            "Confirm automated Annex A 93-control evidence coverage across your cloud provider, IdP, and source control.",
+            "Lock Stage 1, Stage 2, and Years 2-3 surveillance day rates before signing the registrar master agreement.",
+        ],
+    ),
+    "hipaa": (
+        "Immediate 45 CFR 160.404 OCR Penalty &amp; 60-Day HITECH Breach Notice Trap Alert",
+        "Under 45 CFR 160.404, 45 CFR Part 164, and HITECH 42 U.S.C. 1320d-5, operating without a documented Security Risk Analysis, unexecuted Business Associate Agreements (BAAs), or unencrypted ePHI stores exposes covered entities to Tier 3-4 OCR caps ($2,067,813/yr) and 60-day media breach notices.",
+        [
+            "Maintain a current 45 CFR 164.308(a)(1) Security Risk Analysis documenting all ePHI repositories and transmission paths.",
+            "Enforce AES-256 encryption at rest and TLS 1.2+ in transit with split KMS keys to preserve the 45 CFR 164.402 breach safe harbor.",
+            "Execute compliant Business Associate Agreements (BAAs) with every cloud, logging, and health-tech vendor touching ePHI.",
+            "Document 12 consecutive months of Recognized Security Practices under 42 U.S.C. 17941 to qualify for OCR enforcement leniency.",
+        ],
+        [
+            ("Storing production patient exports or backup snapshots without AES-256 encryption", "Eliminates the HIPAA breach notification safe harbor and triggers 60-day OCR + media notice above 500 records", "Enforce KMS encryption across all databases, object stores, and backup replicas containing ePHI"),
+            ("Onboarding analytics or cloud sub-vendors before signing an executed BAA", "Creates direct 45 CFR 164.504(e) Business Associate violations during HHS OCR audits", "Enforce procurement gating blocking PHI-adjacent vendor provisioning without a countersigned BAA"),
+            ("Failing to update the annual Security Risk Analysis after EHR or cloud topology changes", "Routinely accounts for HHS OCR settlement corrective action plans exceeding $500,000", "Run continuous ePHI asset discovery and annual documented SRA updates"),
+        ],
+        "HIPAA Security Safeguard &amp; BAA Governance Checklist",
+        [
+            "Verify vendor BAA execution readiness across infrastructure, observability, and support platforms.",
+            "Confirm automated ePHI encryption, RBAC access logging, and audit-trail immutability under 45 CFR 164.312.",
+            "Validate 12-month Recognized Security Practices evidence binders aligned with 42 U.S.C. 17941.",
+        ],
+    ),
+    "pci_dss": (
+        "Immediate PCI DSS v4.0.1 QSA ROC &amp; CDE Segmentation Trap Alert",
+        "Under PCI DSS v4.0.1, placing raw Primary Account Numbers (PAN) on flat corporate networks or neglecting Requirements 6.4.3 and 11.6.1 client-side payment script integrity expands QSA Report on Compliance (ROC) scope and exposes merchants to monthly card-brand non-compliance assessments.",
+        [
+            "Isolate the Cardholder Data Environment (CDE) via firewall segmentation and Req. 11.4 annual segmentation testing.",
+            "Use hosted payment fields or vault tokenization to remove raw PAN exposure and compress QSA / SAQ scope.",
+            "Schedule mandatory quarterly Approved Scanning Vendor (ASV) external vulnerability scans under Req. 11.3.2.",
+            "Implement payment-page script authorization and HTTP header tamper monitoring under PCI DSS v4.0.1 Req. 6.4.3 &amp; 11.6.1.",
+        ],
+        [
+            ("Allowing unsegmented corporate workstations to reach payment processing subnets", "Pulls the entire employee laptop fleet and IT directory into QSA ROC sampling", "Isolate CDE jump hosts behind MFA-gated bastions and verify segmentation every 6-12 months"),
+            ("Missing a quarterly passing ASV scan deadline prior to AOC submission", "Halts Attestation of Compliance sign-off until clean ASV remediation re-scans complete", "Automate continuous vulnerability patching ahead of quarterly ASV scan windows"),
+            ("Treating e-commerce checkout third-party JavaScript tags without Req. 6.4.3 inventory", "Causes immediate PCI DSS v4.0.1 ROC findings on payment page integrity", "Deploy automated SRI / CSP script integrity alerting across all checkout templates"),
+        ],
+        "PCI DSS v4.0.1 QSA &amp; CDE Readiness Checklist",
+        [
+            "Verify Qualified Security Assessor (QSA) and Approved Scanning Vendor (ASV) PCI SSC listing status.",
+            "Confirm tokenized checkout boundaries minimize raw PAN persistence across storage and logs.",
+            "Audit Req. 6.4.3 and Req. 11.6.1 client-side script monitoring before annual ROC review.",
+        ],
+    ),
+    "fedramp": (
+        "Immediate FedRAMP Rev 5 Authorization Boundary &amp; 3PAO SAR Trap Alert (44 U.S.C. 3607)",
+        "Under 44 U.S.C. 3607 and OMB M-24-15, deploying FedRAMP workloads on non-authorized commercial regions or underestimating FIPS 140-3 validated cryptography causes 3PAO Security Assessment Report (SAR) failures and multi-quarter PMO delays.",
+        [
+            "Build inside a FedRAMP Authorized GovCloud IaaS/PaaS layer to maximize NIST SP 800-53 Rev 5 control inheritance.",
+            "Enforce FIPS 140-3 validated cryptographic modules across every internal and external authorization boundary interface.",
+            "Engage an A2LA-accredited 3PAO early for Readiness Assessment Report (RAR) validation prior to full SAR testing.",
+            "Establish automated monthly ConMon vulnerability scanning, deviation requests, and POA&amp;M closeout pipelines.",
+        ],
+        [
+            ("Routing commercial SaaS telemetry or support tools across the federal authorization boundary", "Triggers automatic boundary contamination findings during 3PAO SAR inspection", "Enforce strict GovCloud metadata isolation and separate federal support tenants"),
+            ("Using unvalidated open-source TLS/crypto libraries in federal containers", "Violates mandatory FIPS 140-3 boundary rules and stalls FedRAMP PMO approval", "Standardize on FIPS 140-3 validated OS kernels and cryptographic libraries early"),
+            ("Treating FedRAMP ConMon as an ad-hoc spreadsheet chore post-ATO", "Risks Authority to Operate suspension when monthly OS/container scan SLAs lapse", "Automate continuous OS, container, and dependency scanning into ConMon POA&amp;M workflows"),
+        ],
+        "FedRAMP 3PAO &amp; ConMon Readiness Checklist",
+        [
+            "Verify A2LA-accredited 3PAO independence before Readiness Assessment Report kickoff.",
+            "Confirm automated NIST SP 800-53 Rev 5 SSP generation and OSCAL artifact exports.",
+            "Validate FIPS 140-3 cryptographic inventory and monthly ConMon scan SLA automation.",
+        ],
+    ),
+    "hitrust": (
+        "Immediate HITRUST CSF v11 MyCSF Scoping &amp; PRISMA Inheritance Trap Alert",
+        "Under HITRUST CSF v11 assurance rules, launching an r2 validated assessment without enabling AWS/Azure/GCP control inheritance in MyCSF or scoping redundant legacy systems triples external assessor validation hours and delays QA certification.",
+        [
+            "Select the right-sized HITRUST CSF v11 tier (e1, i1, or r2) matching your enterprise buyer contract requirements.",
+            "Activate HITRUST MyCSF inheritance links with your cloud provider before evidence scoring begins.",
+            "Pre-validate all five PRISMA maturity dimensions (Policy, Process, Implemented, Measured, Managed) across sampled controls.",
+            "Synchronize MyCSF corrective action plans with automated engineering ticketing to avoid HITRUST QA rejections.",
+        ],
+        [
+            ("Skipping cloud CSP inheritance setup inside MyCSF prior to readiness scoring", "Forces internal teams to test and re-document dozens of physical and hypervisor controls manually", "Import certified cloud provider MyCSF inheritance templates at scoping kickoff"),
+            ("Submitting r2 policies and procedures that fail to match implemented control timestamps", "Creates PRISMA scoring gaps across maturity weights during External Assessor QA", "Maintain unified version-controlled policy governance linked to continuous telemetry"),
+            ("Underestimating HITRUST Quality Assurance (QA) review turnaround timelines", "Delays customer contract closure when r2 certification is required prior to go-live", "Buffer 8 to 12 weeks for External Assessor submission and HITRUST QA review"),
+        ],
+        "HITRUST CSF v11 External Assessor &amp; MyCSF Checklist",
+        [
+            "Verify HITRUST Authorized External Assessor credentials and MyCSF tooling integrations.",
+            "Confirm AWS, Azure, or GCP CSP inheritance mapping is active before validated fieldwork.",
+            "Audit PRISMA policy and implementation score thresholds across targeted r2/i1 domains.",
+        ],
+    ),
+    "pentest": (
+        "Immediate CREST/OSCP Penetration Testing &amp; Retest Trap Alert (NIST SP 800-115)",
+        "Under NIST SP 800-115 and OWASP ASVS guidelines, purchasing opaque black-box PDF scans without OpenAPI documentation or paying extra boutique fees per verification retest stretches remediation cycles and blocks enterprise customer security approvals.",
+        [
+            "Provide grey-box test credentials, OpenAPI/GraphQL schemas, and staging replicas to maximize business-logic coverage.",
+            "Verify CREST, OSCP, or GPEN assessor credentials and manual exploitation of IDOR, SSRF, and privilege escalation paths.",
+            "Use PTaaS platforms streaming verified exploit PoCs directly into Jira or GitHub with SLA tracking.",
+            "Confirm complimentary 30-to-90-day verification retesting and a customer-shareable clean attestation letter.",
+        ],
+        [
+            ("Running purely unauthenticated automated vulnerability scans instead of manual exploitation probes", "Misses multi-tenant authorization bypasses and fails enterprise vendor security reviews", "Require manual grey-box OWASP ASVS and API Top 10 testing by certified pentesters"),
+            ("Signing point-in-time boutique SOWs that charge $3,500+ change orders for every retest", "Punishes rapid remediation when critical fixes require repeat verification", "Lock unlimited or 30-to-90-day complimentary retesting into your PTaaS agreement"),
+            ("Sharing raw exploit output PDFs instead of an executive remediation attestation letter", "Slows enterprise buyer procurement review or leaks sensitive internal endpoints", "Request both an internal technical triage report and a clean executive attestation letter"),
+        ],
+        "CREST/OSCP Penetration Testing &amp; PTaaS Checklist",
+        [
+            "Confirm CREST, OSCP, or GPEN tester certification on the final engagement attestation letter.",
+            "Verify real-time Jira/GitHub finding sync and included post-fix verification retesting.",
+            "Audit coverage across web apps, REST/GraphQL APIs, cloud IAM boundaries, and internal networks.",
+        ],
+    ),
+    "cyber_insurance": (
+        "Immediate Cyber Insurance Underwriting Control &amp; SIR Sublimit Trap Alert (NAIC)",
+        "Under modern NAIC cyber underwriting questionnaires, misstating phishing-resistant MFA coverage, missing Endpoint Detection and Response (EDR) on servers, or lacking immutable offline backups triggers policy rescission risk, ransomware co-insurance sublimits, or 40%+ premium surcharges.",
+        [
+            "Enforce phishing-resistant FIDO2 MFA across every VPN, cloud console, identity admin, and remote desktop path.",
+            "Maintain managed EDR coverage across 100% of production servers, workstations, and cloud compute nodes.",
+            "Verify immutable, air-gapped offline backups with documented quarterly ransomware restoration drills.",
+            "Reconcile policy Self-Insured Retention (SIR), social engineering sublimits, and panel DFIR forensics hourly caps.",
+        ],
+        [
+            ("Checking 'MFA enabled' on renewal applications when legacy service accounts bypass MFA", "Creates material misrepresentation exposure carriers cite to contest ransomware claims", "Verify 100% IdP MFA enforcement and Privileged Access Management (PAM) audit logs prior to signing"),
+            ("Ignoring dependent business interruption and contingent cloud-outage waiting periods", "Leaves multi-hour SaaS downtime losses uncovered below strict 12-to-24-hour policy thresholds", "Negotiate reduced BI waiting periods and broad contingent systems coverage"),
+            ("Using non-panel incident counsel or forensics teams during an active breach", "Renders emergency DFIR invoices ineligible toward policy SIR or coverage reimbursement", "Pre-clear preferred DFIR retainers directly on carrier policy endorsements"),
+        ],
+        "Cyber Underwriting &amp; Breach Readiness Checklist",
+        [
+            "Audit FIDO2 MFA, EDR endpoint coverage, PAM, and immutable backup readiness quarterly.",
+            "Verify carrier-approved DFIR breach counsel and forensics panel endorsements ahead of renewal.",
+            "Compare aggregate policy limits and Self-Insured Retention (SIR) exposure against record-count breach costs.",
+        ],
+    ),
+    "cmmc": (
+        "Immediate DoD CMMC 2.0 Level 2 CUI Enclave &amp; C3PAO Assessment Trap Alert (32 CFR Part 170)",
+        "Under DoD 32 CFR Part 170 and DFARS 252.204-7021, scoping unsegmented corporate laptops into your CUI boundary or failing to verify all 320 NIST SP 800-171A assessment objectives triples C3PAO assessment fees and risks False Claims Act exposure on defense contracts.",
+        [
+            "Isolate Controlled Unclassified Information (CUI) inside a FedRAMP-moderate or GovCloud VDI enclave before C3PAO scoping.",
+            "Validate objective evidence across all 110 NIST SP 800-171 controls (320 NIST SP 800-171A assessment objectives).",
+            "Use FIPS 140-3 validated cryptography for all CUI in transit and at rest per DFARS 252.204-7012.",
+            "Maintain an accurate live System Security Plan (SSP) and ensure conditional 180-day POA&amp;M scores reach 88+ / 110.",
+        ],
+        [
+            ("Scoping the entire corporate flat network instead of a segmented CUI enclave", "Multiplies endpoint hardening labor and C3PAO assessment duration by 150% to 300%", "Contain CUI processing strictly inside an isolated zero-trust FedRAMP GovCloud enclave"),
+            ("Submitting an inflated SPRS score without an executed SSP and test artifacts", "Exposes defense contractors to DFARS 252.204-7020 audit rejections and False Claims Act liability", "Substantiate every NIST SP 800-171A objective in an auditable SSP before uploading to SPRS"),
+            ("Allowing critical 5-point CUI controls onto a 180-day POA&amp;M list", "Disqualifies contractors from conditional CMMC Level 2 status under 32 CFR 170.21", "Close every open 5-point control and reach >=88/110 prior to C3PAO assessment kickoff"),
+        ],
+        "CMMC 2.0 C3PAO &amp; NIST SP 800-171 Readiness Checklist",
+        [
+            "Verify Cyber-AB Marketplace authorization status for your selected C3PAO.",
+            "Confirm automated SSP, POA&amp;M, and 320-objective evidence mapping in FedRAMP-ready GRC tooling.",
+            "Audit FIPS 140-3 encryption modules and CUI enclave boundary separation diagrams.",
+        ],
+    ),
+    "nist_800_171": (
+        "Immediate NIST SP 800-171 Rev 2 &amp; DoD SPRS Self-Assessment Trap Alert (DFARS 252.204-7019)",
+        "Under DFARS 252.204-7019 and 252.204-7020, submitting an unsupported SPRS score without an active System Security Plan (SSP) or misunderstanding 5-point, 3-point, and 1-point deductions risks False Claims Act scrutiny and DoD contract award holds.",
+        [
+            "Score every one of the 110 NIST SP 800-171 Rev 2 controls using exact DoD Assessment Methodology -5/-3/-1 weights.",
+            "Maintain a living System Security Plan (SSP) documenting CUI boundary flows, enclave endpoints, and FIPS crypto modules.",
+            "Prioritize open 5-point safeguards first to cross the 88-point conditional readiness floor cleanly.",
+            "Track every open gap with milestone dates in a documented Plan of Action and Milestones (POA&amp;M).",
+        ],
+        [
+            ("Claiming 'Implemented' on controls partially satisfied in commercial cloud tenants", "Triggers sharp score drops during DIBCAC Medium or High assessments under DFARS 252.204-7020", "Verify all 320 NIST SP 800-171A objectives individually before recording SPRS credit"),
+            ("Omitting target completion dates on POA&amp;M entries uploaded to SPRS", "Blocks DoD contracting officer compliance clearance during source selection", "Maintain live remediation dates and assigned owners across all open POA&amp;M items"),
+            ("Leaving CUI unisolated across general corporate laptops and email", "Expands SSP scope to every corporate device and degrades SPRS audit defensibility", "Migrate CUI storage and engineering collaboration inside an isolated enclave boundary"),
+        ],
+        "NIST SP 800-171 &amp; SPRS Substantiation Checklist",
+        [
+            "Verify exact SPRS calculation (-203 to +110) matches your latest SSP and POA&amp;M status.",
+            "Confirm DFARS 252.204-7012 incident reporting and FIPS 140-3 crypto artifacts are filed.",
+            "Audit automated evidence linkage for all 14 NIST SP 800-171 control families.",
+        ],
+    ),
+    "nis2": (
+        "Immediate EU NIS2 Article 21 Supply-Chain &amp; 24-Hour CSIRT Notification Trap Alert (Directive (EU) 2022/2555)",
+        "Under Directive (EU) 2022/2555 Articles 20, 21, and 23, Essential and Important Entities failing to verify direct ICT supplier cyber clauses or missing the mandatory 24-hour CSIRT early-warning deadline expose management bodies to personal supervisory accountability and Article 34 fines.",
+        [
+            "Map critical ICT suppliers against Article 21(2)(d) supply-chain security risk-management clauses.",
+            "Pre-stage 24-hour early warning, 72-hour incident assessment, and 30-day final CSIRT notification playbooks under Article 23.",
+            "Document Article 20 management body cybersecurity training and risk-approval records cleanly.",
+            "Establish continuous multi-factor authentication, encryption, and vulnerability disclosure controls per Article 21.",
+        ],
+        [
+            ("Waiting for a major outage before documenting national CSIRT reporting workflows", "Blows through the strict Article 23 24-hour early warning SLA", "Maintain pre-populated CSIRT incident report templates linked to SIEM alerts"),
+            ("Ignoring fourth-party hosting and SaaS supplier clauses under Article 21(2)(d)", "Creates supervisory non-conformity exposure during national sector audits", "Enforce standardized NIS2 supply-chain security addenda during procurement"),
+            ("Omitting management body risk-signoff logs required under Article 20", "Increases personal governance liability for board executives", "Archive quarterly board cybersecurity oversight briefings and remediation sign-offs"),
+        ],
+        "EU NIS2 Article 21 &amp; CSIRT Governance Checklist",
+        [
+            "Verify national CSIRT portal registration and 24-hour early-warning escalation contacts.",
+            "Confirm Article 21 risk-management telemetry covers encryption, MFA, backup resilience, and suppliers.",
+            "Audit Article 20 executive training records and documented risk-acceptance sign-offs.",
+        ],
+    ),
+    "gdpr": (
+        "Immediate EU GDPR Article 30 RoPA &amp; 72-Hour Supervisory Notification Trap Alert (Regulation (EU) 2016/679)",
+        "Under Regulation (EU) 2016/679 Articles 30, 33, 35, and Chapter V, operating unmapped international personal data transfers without Transfer Impact Assessments (TIAs) or missing the 72-hour supervisory breach notice window exposes controllers to Article 83 administrative fines.",
+        [
+            "Maintain live Article 30 Records of Processing Activities (RoPA) across internal teams and sub-processors.",
+            "Execute Article 35 Data Protection Impact Assessments (DPIAs) prior to high-risk profiling or sensitive processing.",
+            "Substantiate Chapter V cross-border transfers via EU-US Data Privacy Framework certification or 2021 SCCs + TIAs.",
+            "Automate 30-day data subject access/deletion workflows and 72-hour supervisory authority incident runbooks.",
+        ],
+        [
+            ("Operating third-party analytics tags without verified Chapter V transfer mechanisms", "Triggers supervisory enforcement orders and Article 83(5) fine exposure", "Audit sub-processor transfer locations and maintain signed SCC modules with supplementary encryption"),
+            ("Handling DSAR identity verification and deletion manually via email spreadsheets", "Routs teams past the 1-month statutory Article 12 response deadline", "Deploy automated data discovery and DSAR erasure orchestration across production databases"),
+            ("Skipping Article 35 DPIA DPO consultation prior to automated scoring rollouts", "Forces retrospective product redesign after supervisory inquiry", "Gate high-risk product launches behind documented DPIA sign-off"),
+        ],
+        "EU GDPR Article 30, DPIA &amp; Transfer Checklist",
+        [
+            "Verify current Article 30 RoPA register, lawful basis mapping, and sub-processor list.",
+            "Confirm valid EU-US DPF or 2021 Standard Contractual Clauses with completed Transfer Impact Assessments.",
+            "Audit 72-hour Article 33 breach notification runbooks and DPO escalation paths.",
+        ],
+    ),
+    "ccpa": (
+        "Immediate California CCPA/CPRA 45-Day DSAR &amp; GPC Enforcement Trap Alert (Cal. Civ. Code 1798.100)",
+        "Under Cal. Civ. Code 1798.105, 1798.130, and 11 CCR Section 7025, failing to honor browser Global Privacy Control (GPC) opt-out signals automatically or missing the 45-day consumer request SLA exposes businesses to CPPA enforcement and Cal. Civ. Code 1798.150 statutory breach damages.",
+        [
+            "Configure edge and tag-manager listeners to honor Global Privacy Control (GPC) signals automatically without dark patterns.",
+            "Automate 45-day verifiable consumer access, deletion, and correction fulfillment workflows across production stores.",
+            "Execute CPRA-compliant Service Provider and Contractor contract addenda restricting secondary ad-tech cross-context sharing.",
+            "Prepare annual CPPA risk assessment and cybersecurity audit attestations for high-risk consumer data processing.",
+        ],
+        [
+            ("Treating opt-out cookie banners as optional while third-party ad pixels ignore GPC headers", "Directly triggers CPPA administrative enforcement investigations", "Test automatic GPC signal suppression across all marketing and analytics tags quarterly"),
+            ("Leaving unencrypted California consumer PII exports in developer buckets", "Exposes organizations to $100 to $750 per-consumer statutory damages under Cal. Civ. Code 1798.150", "Enforce mandatory encryption and tokenization across all consumer personal information stores"),
+            ("Missing the 45-day DSAR deletion SLA across backup and warehouse tables", "Causes verified consumer complaint escalations to the California Privacy Protection Agency", "Automate cascading deletion propagation to analytics warehouses and CRM systems"),
+        ],
+        "California CCPA/CPRA &amp; GPC Compliance Checklist",
+        [
+            "Confirm automated Global Privacy Control (GPC) browser signal enforcement across all domains.",
+            "Verify signed CPRA Service Provider / Contractor addenda with all ad-tech and analytics partners.",
+            "Audit 45-day verifiable consumer request SLAs and annual CPPA risk assessment artifacts.",
+        ],
+    ),
+}
+
+_GAINHELM_RAW_TIER_CLUSTERS: List[Tuple[str, List[Tuple[str, str]]]] = [
+    (
+        "Tier 1: Core Commercial GRC & Attestation Pillar Models",
+        [
+            ("soc-2-audit-cost-calculator", "SOC 2 Type I and Type II Audit Cost & Engineering TCO Calculator"),
+            ("iso-27001-certification-cost-calculator", "ISO/IEC 27001:2022 Certification & Auditor-Day Cost Calculator"),
+            ("pci-dss-4-0-compliance-cost-calculator", "PCI DSS v4.0.1 QSA ROC and SAQ Compliance Cost Calculator"),
+            ("penetration-testing-scoping-cost-calculator", "CREST & OSCP Penetration Testing Scoping Cost Calculator"),
+        ],
+    ),
+    (
+        "Tier 2: Federal Defense & Cloud Authorization Matrices",
+        [
+            ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 C3PAO Assessment & Enclave Cost Calculator"),
+            ("nist-800-171-sprs-score-calculator", "NIST SP 800-171 DoD SPRS Weighted Score & POA&M Calculator"),
+            ("fedramp-authorization-3pao-cost-calculator", "FedRAMP 20x & Rev 5 3PAO Authorization Cost Calculator"),
+        ],
+    ),
+    (
+        "Tier 3: Healthcare Statutory Penalty & Cyber Risk Spokes",
+        [
+            ("hipaa-violation-penalty-breach-cost-calculator", "HIPAA Civil Monetary Penalty & HITECH Breach Cost Calculator"),
+            ("hitrust-csf-e1-i1-r2-certification-cost-calculator", "HITRUST CSF e1, i1, and r2 Certification Cost Calculator"),
+            ("cyber-liability-insurance-breach-exposure-calculator", "Cyber Liability Insurance Premium & Breach Exposure Calculator"),
+        ],
+    ),
+]
+
+
+def _resolve_gainhelm_trap_and_clusters(
+    s_low: str,
+) -> Tuple[Optional[Tuple[str, str, List[str], List[Tuple[str, str, str]], str, List[str]]], List[Tuple[str, List[Tuple[str, str]]]]]:
+    """Resolves framework-isolated trap guidance and non-leaking cluster links for GainHelm pages."""
+    from pseofactory.affiliates import classify_gainhelm_framework, get_gainhelm_framework_profile
+
+    fw_trap_key = "nist_800_171" if ("800-171" in s_low or "sprs" in s_low) else classify_gainhelm_framework(slug=s_low)
+    trap_tuple = _GAINHELM_TRAP_SPECS.get(fw_trap_key)
+    gh_prof = get_gainhelm_framework_profile(slug=s_low)
+    gh_forbidden = tuple(str(t).lower() for t in (gh_prof.get("forbidden_leak_tokens") or ()))
+    if s_low in ("", "index", "soc-2-audit-cost-calculator") or not gh_forbidden:
+        return trap_tuple, list(_GAINHELM_RAW_TIER_CLUSTERS)
+    clusters: List[Tuple[str, List[Tuple[str, str]]]] = []
+    for t_hdr, t_items in _GAINHELM_RAW_TIER_CLUSTERS:
+        kept_items = [
+            (tslug, tlabel)
+            for tslug, tlabel in t_items
+            if not any(tok in f"{tslug} {tlabel}".lower() for tok in gh_forbidden)
+        ]
+        if kept_items:
+            clusters.append((t_hdr, kept_items))
+    return trap_tuple, clusters
+
+
 def _resolve_vertical_competitor_content(
     slug: str,
     property_id: str,
@@ -3047,69 +3355,47 @@ def _resolve_vertical_competitor_content(
                 "Audit DFIR retainer response SLAs and immutable forensic evidence preservation workflows.",
             ]
         else:
-            trap_title = "Immediate Audit Observation Window and Control Scoping Trap Alert (AICPA AT-C 205 & 32 CFR Part 170)"
-            trap_body = (
-                "Under AICPA AT-C Section 205 (SOC 2 Type II), ISO/IEC 27006-1:2024 auditor-day tables, and DoD 32 CFR "
-                "Part 170 (CMMC 2.0 Level 2), failing to isolate production in-scope boundaries or allowing continuous "
-                "control evidence gaps during a 3-to-12-month observation window triggers qualified audit opinions, "
-                "mandatory re-testing surcharges, or SPRS score deductions below the 110-point NIST SP 800-171 threshold."
-            )
-            checklist_items = [
-                "Define an explicit System Description and Network Boundary Diagram isolating in-scope production assets or CUI enclaves prior to auditor readiness kick-off.",
-                "Automate continuous control evidence collection across identity (SSO/MFA), cloud infrastructure (AWS/GCP/Azure), endpoint MDM, and SDLC pull-request approvals.",
-                "Conduct an internal readiness gap assessment and remediate high-severity findings before opening the Type II observation window or C3PAO Stage 2 assessment.",
-                "Execute an independent CREST or OSCP penetration test and track critical/high CVE remediation SLAs prior to final auditor sign-off.",
-            ]
-            pitfalls = [
-                (
-                    "Scoping the entire corporate IT network instead of a segmented production or CUI enclave boundary",
-                    "Inflates ISO 27006 auditor-days, endpoint licensing, and C3PAO assessment fees by 150% to 300%",
-                    "Deploy a zero-trust segmented enclave isolating regulated customer data or CUI before readiness scoping",
-                ),
-                (
-                    "Relying on manual screenshot spreadsheets during a 6-to-12-month SOC 2 Type II observation window",
-                    "Causes population sampling failures on access reviews, employee offboarding, and change management tickets",
-                    "Connect automated GRC API integrations (Vanta, Drata, Sprinto) to collect timestamped control evidence daily",
-                ),
-                (
-                    "Submitting an unverified DoD SPRS self-assessment score without a documented System Security Plan (SSP)",
-                    "Exposes defense primes and subcontractors to False Claims Act liability and DFARS 252.204-7020 contract withholding",
-                    "Substantiate all 110 NIST SP 800-171 Rev 2 controls in a live SSP and track open POA&M items with strict 180-day closeout rules",
-                ),
-            ]
-            handoff_title = "GRC Automation, CPA Audit & Assessor Vetting Checklist"
-            handoff_items = [
-                "Verify peer-reviewed AICPA CPA firm registration, ISO/IEC 17021 accreditation, or Cyber-AB C3PAO authorization status.",
-                "Confirm automated API evidence coverage across your cloud provider, identity provider, source control, and HRIS.",
-                "Audit multi-framework control cross-mapping (SOC 2 + ISO 27001 + HIPAA + NIST 800-171) to eliminate duplicate audit workpapers.",
-            ]
-        tier_clusters = [
-            (
-                "Tier 1: Core Commercial GRC & Attestation Pillar Models",
-                [
-                    ("soc-2-audit-cost-calculator", "SOC 2 Type I and Type II Audit Cost & Engineering TCO Calculator"),
-                    ("iso-27001-certification-cost-calculator", "ISO/IEC 27001:2022 Certification & Auditor-Day Cost Calculator"),
-                    ("pci-dss-4-0-compliance-cost-calculator", "PCI DSS v4.0.1 QSA ROC and SAQ Compliance Cost Calculator"),
-                    ("penetration-testing-scoping-cost-calculator", "CREST & OSCP Penetration Testing Scoping Cost Calculator"),
-                ],
-            ),
-            (
-                "Tier 2: Federal Defense & Cloud Authorization Matrices",
-                [
-                    ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 C3PAO Assessment & Enclave Cost Calculator"),
-                    ("nist-800-171-sprs-score-calculator", "NIST SP 800-171 DoD SPRS Weighted Score & POA&M Calculator"),
-                    ("fedramp-authorization-3pao-cost-calculator", "FedRAMP 20x & Rev 5 3PAO Authorization Cost Calculator"),
-                ],
-            ),
-            (
-                "Tier 3: Healthcare Statutory Penalty & Cyber Risk Spokes",
-                [
-                    ("hipaa-violation-penalty-breach-cost-calculator", "HIPAA Civil Monetary Penalty & HITECH Breach Cost Calculator"),
-                    ("hitrust-csf-e1-i1-r2-certification-cost-calculator", "HITRUST CSF e1, i1, and r2 Certification Cost Calculator"),
-                    ("cyber-liability-insurance-breach-exposure-calculator", "Cyber Liability Insurance Premium & Breach Exposure Calculator"),
-                ],
-            ),
-        ]
+            gh_trap, _ = _resolve_gainhelm_trap_and_clusters(s_low)
+            if gh_trap is not None:
+                trap_title, trap_body, checklist_items, pitfalls, handoff_title, handoff_items = gh_trap
+            else:
+                trap_title = "Immediate Audit Observation Window and Control Scoping Trap Alert (AICPA AT-C 205 & 32 CFR Part 170)"
+                trap_body = (
+                    "Under AICPA AT-C Section 205 (SOC 2 Type II), ISO/IEC 27006-1:2024 auditor-day tables, and DoD 32 CFR "
+                    "Part 170 (CMMC 2.0 Level 2), failing to isolate production in-scope boundaries or allowing continuous "
+                    "control evidence gaps during a 3-to-12-month observation window triggers qualified audit opinions, "
+                    "mandatory re-testing surcharges, or SPRS score deductions below the 110-point NIST SP 800-171 threshold."
+                )
+                checklist_items = [
+                    "Define an explicit System Description and Network Boundary Diagram isolating in-scope production assets or CUI enclaves prior to auditor readiness kick-off.",
+                    "Automate continuous control evidence collection across identity (SSO/MFA), cloud infrastructure (AWS/GCP/Azure), endpoint MDM, and SDLC pull-request approvals.",
+                    "Conduct an internal readiness gap assessment and remediate high-severity findings before opening the Type II observation window or C3PAO Stage 2 assessment.",
+                    "Execute an independent CREST or OSCP penetration test and track critical/high CVE remediation SLAs prior to final auditor sign-off.",
+                ]
+                pitfalls = [
+                    (
+                        "Scoping the entire corporate IT network instead of a segmented production or CUI enclave boundary",
+                        "Inflates ISO 27006 auditor-days, endpoint licensing, and C3PAO assessment fees by 150% to 300%",
+                        "Deploy a zero-trust segmented enclave isolating regulated customer data or CUI before readiness scoping",
+                    ),
+                    (
+                        "Relying on manual screenshot spreadsheets during a 6-to-12-month SOC 2 Type II observation window",
+                        "Causes population sampling failures on access reviews, employee offboarding, and change management tickets",
+                        "Connect automated GRC API integrations (Vanta, Drata, Sprinto) to collect timestamped control evidence daily",
+                    ),
+                    (
+                        "Submitting an unverified DoD SPRS self-assessment score without a documented System Security Plan (SSP)",
+                        "Exposes defense primes and subcontractors to False Claims Act liability and DFARS 252.204-7020 contract withholding",
+                        "Substantiate all 110 NIST SP 800-171 Rev 2 controls in a live SSP and track open POA&M items with strict 180-day closeout rules",
+                    ),
+                ]
+                handoff_title = "GRC Automation, CPA Audit & Assessor Vetting Checklist"
+                handoff_items = [
+                    "Verify peer-reviewed AICPA CPA firm registration, ISO/IEC 17021 accreditation, or Cyber-AB C3PAO authorization status.",
+                    "Confirm automated API evidence coverage across your cloud provider, identity provider, source control, and HRIS.",
+                    "Audit multi-framework control cross-mapping (SOC 2 + ISO 27001 + HIPAA + NIST 800-171) to eliminate duplicate audit workpapers.",
+                ]
+        _, tier_clusters = _resolve_gainhelm_trap_and_clusters(s_low)
     elif is_lienbond:
         trap_title = "Immediate Statutory Notice Deadline & Surety Underwriting Trap Alert (40 U.S.C. 3131 & State Lien Codes)"
         trap_body = (
@@ -4391,6 +4677,278 @@ _GAINHELM_SPECIAL_DEPTH_SPECS: Dict[str, Dict[str, Any]] = {
             "banner_mid": "in manual supply-chain and compliance documentation labor.",
         },
     },
+    "iso_27001": {
+        "intro_assessor": "ANAB/UKAS certification body Stage 1 &amp; Stage 2 auditor-day fees and internal ISMS engineering hours",
+        "presets": [
+            ("Seed / Series A SaaS (35 Headcount / Segmented ISMS)", '{"serp-b2b-gross":46000,"serp-b2b-deduction":14500,"serp-b2b-rate":18.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Growth Enterprise (150 Headcount / Annex A 93 Controls)", '{"serp-b2b-gross":92000,"serp-b2b-deduction":29000,"serp-b2b-rate":21.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual Unsegmented ISMS &amp; SoA Spreadsheets (150 Headcount)", '{"serp-b2b-gross":124000,"serp-b2b-deduction":0,"serp-b2b-rate":28.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Multi-Site Global Scope (400 Headcount / Full IAF MD 5 Days)", '{"serp-b2b-gross":195000,"serp-b2b-deduction":54000,"serp-b2b-rate":25.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("ISMS Clauses 4-10 &amp; Annex A (93 Controls) Scope", "ISO/IEC 27001:2022 Annex A", "$19,500 Statement of Applicability &amp; risk ledger", "Continuous Annex A control evidence &amp; ISMS governance"),
+            ("Stage 1 &amp; Stage 2 Certification Body Audit", "ISO/IEC 27006-1:2024 &amp; IAF MD 5", "9 to 28 auditor-days ($1,600 to $2,200/day)", "Accredited ANAB/UKAS registrar initial certification audit"),
+            ("Years 2-3 Surveillance &amp; Recertification Cycle", "IAF MD 5 Surveillance Rules", "35% to 45% of Stage 2 days annually", "Annual surveillance sampling before Year 3 recertification"),
+            ("Internal Audit &amp; Management Review Readiness", "ISO/IEC 27001:2022 Clauses 9.2-9.3", "80 to 160 engineering &amp; quality readiness hours", "Independent pre-Stage 1 internal ISMS conformance check"),
+        ],
+        "banner_cta": "Review Vetted ISO/IEC 27001:2022 &amp; ISMS Partners",
+        "wb": {
+            "gross": 62000, "ded": 19500, "rate": 20.0,
+            "gross_label": "Manual ISMS &amp; Stage 1/2 Audit Preparation Cost ($)",
+            "ded_label": "Automated Annex A SoA &amp; Control Evidence Savings ($)",
+            "rate_label": "Registrar Auditor-Day &amp; Remediation Overhead (%)",
+            "regime_label": "ISMS Scope &amp; Certification Posture",
+            "opt1": "Automated Annex A Telemetry + Segmented ISMS Enclave",
+            "opt2": "Manual SoA Spreadsheets + Unsegmented Corporate Scope",
+            "opt3": "Multi-Site Global Certification Expansion (+20% Scope)",
+            "m1_lbl": "Net Automated ISO 27001 TCO",
+            "m2_lbl": "Manual ISMS Readiness TCO",
+            "m3_lbl": "Annual ISMS Automation Savings",
+            "m4_lbl": "Enterprise Deal Pipeline Unlocked",
+            "svg_l_pfx": "Automated ISO 27001 TCO",
+            "svg_r_pfx": "ISMS Evidence Savings",
+            "banner_lead": "Automating Annex A 93-control evidence collection and enclave boundary scoping compresses ISO/IEC 27001:2022 TCO to",
+            "banner_mid": "in manual Statement of Applicability and pre-audit labor.",
+        },
+    },
+    "hipaa": {
+        "intro_assessor": "45 CFR Part 164 Security Risk Analysis fees, BAA legal counsel, and ePHI safeguard engineering hours",
+        "presets": [
+            ("Covered Clinic / Digital Health Seed (25k PHI Records)", '{"serp-b2b-gross":52000,"serp-b2b-deduction":16500,"serp-b2b-rate":19.0,"serp-b2b-regime":"optimal_election"}'),
+            ("HealthTech Platform (100k PHI Records / Segmented Enclave)", '{"serp-b2b-gross":98000,"serp-b2b-deduction":31000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Manual Security Risk Analysis &amp; Unencrypted ePHI Stores", '{"serp-b2b-gross":134000,"serp-b2b-deduction":0,"serp-b2b-rate":31.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Enterprise Health System (500k+ Records / Breach Reserve)", '{"serp-b2b-gross":235000,"serp-b2b-deduction":68000,"serp-b2b-rate":27.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("HIPAA Security Risk Analysis &amp; Risk Management", "45 CFR 164.308(a)(1)(ii)(A)-(B)", "$16,000 to $42,000 baseline SRA + remediation", "Annual documented ePHI threat &amp; vulnerability inventory"),
+            ("HHS OCR Four-Tier Civil Monetary Penalties", "45 CFR 160.404 &amp; 42 U.S.C. 1320d-5", "$141 to $2,067,813 annual cap per provision", "Tiered culpability structure escalated for willful neglect"),
+            ("Breach Notification &amp; Forensics Surge (>500 Records)", "45 CFR 164.404-408 (HITECH)", "60-day OCR, individual &amp; media notification clock", "Encryption safe harbor eliminates reportable breach notice"),
+            ("Business Associate Agreement (BAA) &amp; Technical Safeguards", "45 CFR 164.312 &amp; 164.504(e)", "$12,500 BAA inventory + KMS/audit-log automation", "Mandatory vendor BAAs, RBAC access &amp; immutable audit logs"),
+        ],
+        "banner_cta": "Review Vetted HIPAA &amp; Healthcare Compliance Partners",
+        "wb": {
+            "gross": 68000, "ded": 21500, "rate": 21.0,
+            "gross_label": "Manual HIPAA Risk Analysis &amp; BAA Governance Cost ($)",
+            "ded_label": "Automated ePHI Safeguard &amp; Safe-Harbor Savings ($)",
+            "rate_label": "OCR Audit &amp; Counsel Readiness Factor (%)",
+            "regime_label": "ePHI Enclave &amp; Breach Safe-Harbor Posture",
+            "opt1": "Automated ePHI Encryption Safe Harbor + Continuous BAA Monitoring",
+            "opt2": "Manual SRA Spreadsheets + Unsegmented ePHI Repositories",
+            "opt3": "Multi-Entity Health Network Scope (+20% Safeguards)",
+            "m1_lbl": "Net Automated HIPAA TCO",
+            "m2_lbl": "Manual Healthcare Compliance TCO",
+            "m3_lbl": "Annual ePHI Governance Savings",
+            "m4_lbl": "Mitigated OCR Tier &amp; Breach Exposure",
+            "svg_l_pfx": "Automated HIPAA TCO",
+            "svg_r_pfx": "ePHI Readiness Savings",
+            "banner_lead": "Enforcing automated ePHI encryption safe harbors and continuous 45 CFR Part 164 monitoring compresses annual HIPAA TCO to",
+            "banner_mid": "in manual risk analysis and BAA documentation effort.",
+        },
+    },
+    "pci_dss": {
+        "intro_assessor": "QSA Report on Compliance (ROC) fees, ASV quarterly scanning, and Cardholder Data Environment (CDE) engineering",
+        "presets": [
+            ("Merchant SAQ A / Hosted Payment Tokenization (Low Scope)", '{"serp-b2b-gross":38000,"serp-b2b-deduction":12500,"serp-b2b-rate":18.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Service Provider SAQ D (Segmented CDE + Quarterly ASV)", '{"serp-b2b-gross":88000,"serp-b2b-deduction":28000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Unsegmented Monolith Network (Full QSA ROC Scope)", '{"serp-b2b-gross":142000,"serp-b2b-deduction":0,"serp-b2b-rate":30.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Level 1 Processor (&gt;6M Visa Tx/Yr / On-Site QSA ROC)", '{"serp-b2b-gross":225000,"serp-b2b-deduction":62000,"serp-b2b-rate":26.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("QSA Report on Compliance (ROC) &amp; AOC Validation", "PCI DSS v4.0.1 Merchant Level 1-2", "$38,000 to $110,000 QSA validation engagement", "Annual on-site/remote sampling &amp; Attestation of Compliance"),
+            ("Cardholder Data Environment (CDE) Segmentation", "PCI DSS v4.0.1 Req. 1.2 &amp; 12.5.2", "40% to 65% scope reduction via tokenization", "Isolates PAN handling systems from general corporate LAN"),
+            ("Quarterly ASV Vulnerability Scans &amp; CDE Pentest", "PCI DSS v4.0.1 Req. 11.3 &amp; 11.4", "$14,000/yr ASV + segmented network pentest", "Mandatory quarterly passing ASV scans &amp; annual CDE pentest"),
+            ("Payment Page Script &amp; Cryptographic Key Controls", "PCI DSS v4.0.1 Req. 3.5, 6.4.3 &amp; 11.6.1", "$16,500 tamper-detection &amp; HSM key rotation", "Client-side payment script integrity &amp; PAN encryption"),
+        ],
+        "banner_cta": "Review Vetted PCI DSS v4.0.1 &amp; QSA Partners",
+        "wb": {
+            "gross": 76000, "ded": 24000, "rate": 21.0,
+            "gross_label": "Unsegmented CDE &amp; QSA Preparation Cost ($)",
+            "ded_label": "Tokenization &amp; Continuous ASV Evidence Savings ($)",
+            "rate_label": "QSA Validation &amp; Remediation Overhead (%)",
+            "regime_label": "Cardholder Data Environment (CDE) Architecture",
+            "opt1": "Tokenized Hosted Checkout + Segmented CDE + Auto ASV",
+            "opt2": "Raw PAN Storage + Flat Network + Manual QSA Sampling",
+            "opt3": "Level 1 Multi-Region Processor Scope (+20% ROC Days)",
+            "m1_lbl": "Net Automated PCI DSS v4.0.1 TCO",
+            "m2_lbl": "Unsegmented CDE Audit TCO",
+            "m3_lbl": "Annual Scope Reduction Savings",
+            "m4_lbl": "Avoided Card-Brand Assessment Fines",
+            "svg_l_pfx": "Automated PCI DSS TCO",
+            "svg_r_pfx": "CDE Segmentation Savings",
+            "banner_lead": "Isolating the Cardholder Data Environment with payment tokenization and automated ASV scanning compresses PCI DSS v4.0.1 TCO to",
+            "banner_mid": "in manual QSA sampling and remediation work.",
+        },
+    },
+    "hitrust": {
+        "intro_assessor": "HITRUST Authorized External Assessor validation fees, MyCSF licensing, and inherited control engineering hours",
+        "presets": [
+            ("HITRUST e1 Essentials Validated Assessment (44 Controls)", '{"serp-b2b-gross":64000,"serp-b2b-deduction":19000,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("HITRUST i1 Implemented 1-Year Assessment (182 Controls)", '{"serp-b2b-gross":128000,"serp-b2b-deduction":39000,"serp-b2b-rate":23.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Uninherited HITRUST r2 Scope (Manual MyCSF Mapping)", '{"serp-b2b-gross":240000,"serp-b2b-deduction":0,"serp-b2b-rate":31.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("HITRUST r2 Risk-Based 2-Year Certification (Full Factors)", '{"serp-b2b-gross":295000,"serp-b2b-deduction":82000,"serp-b2b-rate":26.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("HITRUST e1 Cybersecurity Essentials Validation", "HITRUST CSF v11 (44 Core Controls)", "$28,000 to $48,000 External Assessor fee", "1-year foundational cyber hygiene validation"),
+            ("HITRUST i1 Threat-Adaptive 1-Year Certification", "HITRUST CSF v11 (182 Controls)", "$52,000 to $85,000 External Assessor + MyCSF", "Focuses strictly on implemented operational practices"),
+            ("HITRUST r2 Risk-Based 2-Year Certification", "HITRUST CSF v11 (200 to 600+ Controls)", "$85,000 to $175,000 External Assessor + QA", "Full 5-level PRISMA policy, procedure, implemented &amp; measured scoring"),
+            ("MyCSF Inheritance &amp; QA Review Pipeline", "HITRUST Assurance Program Rules", "30% to 45% effort cut via CSP inheritance", "Direct AWS/Azure/GCP control inheritance lowers manual scoring"),
+        ],
+        "banner_cta": "Review Vetted HITRUST CSF &amp; External Assessor Partners",
+        "wb": {
+            "gross": 128000, "ded": 39000, "rate": 23.0,
+            "gross_label": "Manual MyCSF Evidence &amp; External Assessor Cost ($)",
+            "ded_label": "Cloud Control Inheritance &amp; GRC Automation Savings ($)",
+            "rate_label": "PRISMA Scoring &amp; QA Remediation Overhead (%)",
+            "regime_label": "HITRUST CSF v11 Tier &amp; Inheritance Model",
+            "opt1": "Automated MyCSF Sync + Cloud CSP Control Inheritance",
+            "opt2": "Manual Spreadsheet Scoring + Zero Control Inheritance",
+            "opt3": "HITRUST r2 High-Regulatory Factor Expansion (+20% Scope)",
+            "m1_lbl": "Net Automated HITRUST TCO",
+            "m2_lbl": "Manual MyCSF Validation TCO",
+            "m3_lbl": "Annual Inheritance &amp; Scoring Savings",
+            "m4_lbl": "Protected Payer &amp; Health System ACV",
+            "svg_l_pfx": "Automated HITRUST TCO",
+            "svg_r_pfx": "MyCSF Inheritance Savings",
+            "banner_lead": "Pairing CSP control inheritance with automated MyCSF evidence collection compresses annual HITRUST CSF validation TCO to",
+            "banner_mid": "in manual PRISMA scoring and assessor back-and-forth.",
+        },
+    },
+    "pentest": {
+        "intro_assessor": "CREST/OSCP-certified tester day rates, retesting cycles, and vulnerability remediation engineering hours",
+        "presets": [
+            ("Seed Web App &amp; OWASP API PTaaS Scope (8 Assessor Days)", '{"serp-b2b-gross":28000,"serp-b2b-deduction":8500,"serp-b2b-rate":16.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Growth Cloud + Internal Network &amp; API Suite (16 Days)", '{"serp-b2b-gross":54000,"serp-b2b-deduction":16500,"serp-b2b-rate":19.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Legacy Boutique Consulting Firm (Paid Retest Cycles)", '{"serp-b2b-gross":72000,"serp-b2b-deduction":0,"serp-b2b-rate":28.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Enterprise Multi-Cluster Red Team &amp; AD Scope (30 Days)", '{"serp-b2b-gross":118000,"serp-b2b-deduction":32000,"serp-b2b-rate":24.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("External Web Application &amp; OWASP API Top 10 Test", "OWASP ASVS &amp; PTES Execution Standard", "$12,000 to $26,000 per scoped app/API", "Authenticated business-logic, IDOR, SSRF &amp; injection probes"),
+            ("Cloud Infrastructure &amp; Internal Network Lateral Test", "CREST / OSCP Methodology", "$1,450 to $2,400 per assessor-day", "IAM privilege escalation, container escape &amp; VPC pivot audit"),
+            ("Real-Time Finding Triage &amp; Jira/GitHub Retesting", "Continuous PTaaS Workflow", "30% to 45% remediation drag reduction", "Direct ticket sync + complimentary retest verification letters"),
+            ("Executive Attestation Letter &amp; Clean Retest Report", "Vendor Security Questionnaire Standard", "1 to 2 business day turnaround post-fix", "Customer-shareable clean retest letter without raw exploit logs"),
+        ],
+        "banner_cta": "Review Vetted CREST &amp; OSCP Penetration Testing Partners",
+        "wb": {
+            "gross": 42000, "ded": 13500, "rate": 18.0,
+            "gross_label": "Manual Point-in-Time Pentest &amp; Retest Fee TCO ($)",
+            "ded_label": "Continuous PTaaS Sync &amp; Free Retest Savings ($)",
+            "rate_label": "Remediation Triage &amp; Environment Setup Drag (%)",
+            "regime_label": "Penetration Testing Execution &amp; Retest Cadence",
+            "opt1": "Continuous PTaaS + Real-Time Jira Sync + Free Retests",
+            "opt2": "Static PDF Report Delivery + Paid Re-Engagement Fees",
+            "opt3": "Full Red Team + Multi-Cloud Segmentation Scope (+20%)",
+            "m1_lbl": "Net PTaaS Engagement TCO",
+            "m2_lbl": "Legacy Boutique Pentest TCO",
+            "m3_lbl": "Annual Retest &amp; Triage Savings",
+            "m4_lbl": "Avoided Critical Exploit Exposure",
+            "svg_l_pfx": "PTaaS Engagement TCO",
+            "svg_r_pfx": "Retest &amp; Triage Savings",
+            "banner_lead": "Using continuous PTaaS with Jira finding sync and included verification retests compresses annual pentest TCO to",
+            "banner_mid": "in engineering triage and repeat engagement fees.",
+        },
+    },
+    "cyber_insurance": {
+        "intro_assessor": "annual policy premiums, self-insured retention (SIR) reserves, and underwriting control engineering hours",
+        "presets": [
+            ("$2M Primary Cyber Limit (Phishing-Resistant MFA + EDR)", '{"serp-b2b-gross":54000,"serp-b2b-deduction":17500,"serp-b2b-rate":18.0,"serp-b2b-regime":"optimal_election"}'),
+            ("$5M Tower Limit (Segmented Backups + PAM Verified)", '{"serp-b2b-gross":105000,"serp-b2b-deduction":34000,"serp-b2b-rate":21.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Unverified Control Posture (High SIR + Ransomware Co-Pay)", '{"serp-b2b-gross":146000,"serp-b2b-deduction":0,"serp-b2b-rate":32.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("$10M+ Excess Tower (Full Forensics &amp; BI Sublimits)", '{"serp-b2b-gross":245000,"serp-b2b-deduction":72000,"serp-b2b-rate":26.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("Annual Cyber Insurance Rate-on-Line &amp; Premium", "NAIC Cyber Underwriting Benchmarks", "$8,500 to $22,000 per $1M limit tier", "Priced on annual revenue, record count &amp; verified EDR/MFA"),
+            ("Self-Insured Retention (SIR) &amp; Co-Insurance Split", "Carrier Policy Retention Schedule", "$25,000 to $250,000 first-dollar SIR", "Stronger control hygiene lowers deductible &amp; sublimit drag"),
+            ("Underwriting Control Verification Discounts", "Carrier Security Questionnaire Rules", "15% to 35% premium credit for PAM + MFA + EDR", "Immutable offline backups remove ransomware co-insurance"),
+            ("Incident Forensics, Ransom Negotiation &amp; BI", "First-Party Breach Cost Sublimits", "$240+ / compromised record + downtime loss", "Pre-approved carrier panel cuts emergency forensics billing"),
+        ],
+        "banner_cta": "Review Vetted Cyber Underwriting &amp; Security Partners",
+        "wb": {
+            "gross": 78000, "ded": 24500, "rate": 20.0,
+            "gross_label": "Unoptimized Cyber Premium &amp; Retention Exposure ($)",
+            "ded_label": "Verified MFA/EDR/Backup Underwriting Credit ($)",
+            "rate_label": "Claims Co-Insurance &amp; SIR Reserve Factor (%)",
+            "regime_label": "Carrier Underwriting &amp; Security Control Posture",
+            "opt1": "FIDO2 MFA + Managed EDR + Immutable Backups Verified",
+            "opt2": "Missing PAM / Unverified Backups + Sublimit Penalties",
+            "opt3": "$10M+ Multi-Carrier Excess Tower Expansion (+20%)",
+            "m1_lbl": "Net Optimized Policy &amp; Readiness TCO",
+            "m2_lbl": "Unverified Underwriting TCO",
+            "m3_lbl": "Annual Carrier Premium Savings",
+            "m4_lbl": "Transferred Breach Balance-Sheet Limit",
+            "svg_l_pfx": "Optimized Cyber Coverage TCO",
+            "svg_r_pfx": "Underwriting Credit Savings",
+            "banner_lead": "Demonstrating FIDO2 MFA, managed EDR, and immutable backups during underwriting compresses annual coverage and readiness TCO to",
+            "banner_mid": "in excess carrier rate surcharges.",
+        },
+    },
+    "nist_800_171": {
+        "intro_assessor": "NIST SP 800-171 Rev 2 gap engineering, SSP/POA&amp;M remediation hours, and DoD SPRS scoring work",
+        "presets": [
+            ("Segmented CUI Enclave (35 HC / SPRS Score +92)", '{"serp-b2b-gross":68000,"serp-b2b-deduction":22000,"serp-b2b-rate":20.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Mid-Tier Defense Supplier (120 HC / 110 Controls Verified)", '{"serp-b2b-gross":125000,"serp-b2b-deduction":41000,"serp-b2b-rate":23.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Unsegmented Corporate Network (Manual SSP / SPRS -45)", '{"serp-b2b-gross":178000,"serp-b2b-deduction":0,"serp-b2b-rate":32.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Multi-Site DIB Contractor (250 HC / High-Confidence Prep)", '{"serp-b2b-gross":265000,"serp-b2b-deduction":74000,"serp-b2b-rate":27.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("110 NIST SP 800-171 Rev 2 Security Requirements", "NIST SP 800-171 Rev 2 (14 Families)", "Weighted 1, 3, or 5 points per control", "Baseline score starts at +110 down to minimum -203"),
+            ("DFARS 252.204-7012 &amp; 7019 SPRS Filing", "DFARS 252.204-7019 Basic Self-Score", "Mandatory before DoD contract award", "Accurate SSP + POA&amp;M completion dates uploaded to SPRS"),
+            ("DoD Assessment Methodology &amp; DIBCAC Review", "DFARS 252.204-7020 Medium / High", "320 assessment &amp; objective evidence artifacts", "Independent DoD verification across all 110 controls"),
+            ("CUI Enclave Segmentation &amp; FIPS 140-3 Crypto", "NIST SP 800-171 3.13.11 &amp; Enclave Rules", "50% to 65% scope reduction on endpoints", "Restricts Controlled Unclassified Information to isolated enclave"),
+        ],
+        "banner_cta": "Review Vetted NIST SP 800-171 &amp; SPRS Readiness Partners",
+        "wb": {
+            "gross": 96000, "ded": 31000, "rate": 22.0,
+            "gross_label": "Unsegmented NIST 800-171 &amp; SSP Engineering Cost ($)",
+            "ded_label": "CUI Enclave Isolation &amp; POA&amp;M Automation Savings ($)",
+            "rate_label": "SPRS Remediation &amp; Evidence Verification Drag (%)",
+            "regime_label": "CUI Boundary &amp; SPRS Documentation Architecture",
+            "opt1": "Isolated GovCloud CUI Enclave + Live SSP &amp; POA&amp;M Sync",
+            "opt2": "Corporate-Wide Flat LAN + Static Word SSP Templates",
+            "opt3": "DIBCAC High-Confidence Multi-Site Scope (+20% Controls)",
+            "m1_lbl": "Net Automated NIST 800-171 TCO",
+            "m2_lbl": "Unsegmented SPRS Readiness TCO",
+            "m3_lbl": "Annual Enclave Scoping Savings",
+            "m4_lbl": "Protected DoD Prime &amp; Sub Contract Value",
+            "svg_l_pfx": "Automated NIST 800-171 TCO",
+            "svg_r_pfx": "Enclave &amp; POA&amp;M Savings",
+            "banner_lead": "Scoping CUI into an isolated enclave with automated SSP and POA&amp;M tracking compresses NIST SP 800-171 readiness TCO to",
+            "banner_mid": "in manual SPRS gap remediation labor.",
+        },
+    },
+    "cmmc": {
+        "intro_assessor": "Cyber-AB authorized C3PAO assessment fees and CUI enclave engineering hours",
+        "presets": [
+            ("Small DIB Supplier CUI Enclave (35 HC / Level 2)", '{"serp-b2b-gross":95000,"serp-b2b-deduction":28000,"serp-b2b-rate":22.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Mid-Tier Defense Contractor (120 HC / Segmented Enclave)", '{"serp-b2b-gross":162000,"serp-b2b-deduction":48000,"serp-b2b-rate":24.0,"serp-b2b-regime":"optimal_election"}'),
+            ("Unsegmented Corporate-Wide CMMC Scope (Manual SSP)", '{"serp-b2b-gross":248000,"serp-b2b-deduction":0,"serp-b2b-rate":33.0,"serp-b2b-regime":"unoptimized_baseline"}'),
+            ("Enterprise Defense Prime (250 HC / Level 2 + Level 3 Prep)", '{"serp-b2b-gross":340000,"serp-b2b-deduction":92000,"serp-b2b-rate":28.0,"serp-b2b-regime":"stress_case"}'),
+        ],
+        "table_rows": [
+            ("32 CFR Part 170 CMMC Level 2 C3PAO Assessment", "32 CFR Part 170.17 / Cyber-AB Rules", "$35,000 to $85,000 C3PAO triennial fee", "110 controls verified via 320 assessment objectives every 3 years"),
+            ("DFARS 252.204-7021 Contractual CMMC Clause", "DFARS Case 2019-D041 Phase-In", "Mandatory award condition on covered CUI", "Flowdown enforcement to defense supply-chain subcontractors"),
+            ("180-Day Conditional Certification &amp; POA&amp;M Cap", "32 CFR Part 170.21 POA&amp;M Scoring", "88+ / 110 minimum score (80% threshold)", "Only 1-point non-critical controls allowed on 180-day POA&amp;M"),
+            ("FIPS 140-3 Cryptography &amp; CUI Enclave", "NIST SP 800-171 / DFARS 252.204-7012", "45% to 60% C3PAO fee cut via boundary isolation", "VDI/GovCloud CUI enclave removes out-of-scope corporate laptops"),
+        ],
+        "banner_cta": "Review Vetted CMMC 2.0 &amp; C3PAO Readiness Partners",
+        "wb": {
+            "gross": 132000, "ded": 42000, "rate": 24.0,
+            "gross_label": "Unsegmented CMMC Scope &amp; C3PAO Assessment Cost ($)",
+            "ded_label": "CUI Enclave &amp; Automated Evidence Matrix Savings ($)",
+            "rate_label": "C3PAO Readiness &amp; POA&amp;M Closeout Overhead (%)",
+            "regime_label": "CMMC 2.0 Level 2 CUI Boundary Posture",
+            "opt1": "Segmented GovCloud CUI Enclave + Automated 320-Objective Evidence",
+            "opt2": "Corporate-Wide Flat Boundary + Manual C3PAO Binder Prep",
+            "opt3": "Multi-Site Prime + DIBCAC Level 3 Readiness (+20% Scope)",
+            "m1_lbl": "Net Automated CMMC 2.0 TCO",
+            "m2_lbl": "Unsegmented C3PAO Assessment TCO",
+            "m3_lbl": "Annual CUI Boundary Savings",
+            "m4_lbl": "Protected DoD Contract Eligibility Value",
+            "svg_l_pfx": "Automated CMMC 2.0 TCO",
+            "svg_r_pfx": "CUI Enclave Savings",
+            "banner_lead": "Isolating CUI into a GovCloud enclave with automated 320-objective evidence mapping compresses triennial-amortized CMMC 2.0 TCO to",
+            "banner_mid": "in manual C3PAO readiness and remediation engineering.",
+        },
+    },
 }
 
 
@@ -4401,19 +4959,27 @@ def _build_gainhelm_depth_spec(
     is_dora = any(k in s_low for k in ("dora", "ict-third-party", "2022/2554"))
     is_eu_ai = any(k in s_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity"))
     is_sec = any(k in s_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality"))
-    special_key = (
-        "fedramp"
-        if "fedramp" in s_low
-        else (
-            "ccpa"
-            if any(k in s_low for k in ("ccpa", "cpra", "cppa"))
-            else (
-                "gdpr"
-                if any(k in s_low for k in ("gdpr", "dsar", "2016/679"))
-                else ("nis2" if any(k in s_low for k in ("nis2", "2022/2555")) else "")
-            )
+    is_soc2_hub = s_low in ("", "index") or any(k in s_low for k in ("soc-2", "soc2"))
+    special_key = ""
+    if not (is_dora or is_eu_ai or is_sec or is_soc2_hub):
+        special_key_rules = (
+            ("fedramp", ("fedramp",)),
+            ("ccpa", ("ccpa", "cpra", "cppa")),
+            ("gdpr", ("gdpr", "dsar", "2016/679")),
+            ("nis2", ("nis2", "2022/2555")),
+            ("iso_27001", ("iso-27001", "iso27001", "27001")),
+            ("hipaa", ("hipaa", "hitech")),
+            ("pci_dss", ("pci-dss", "pcidss", "pci_dss", "pci-")),
+            ("hitrust", ("hitrust",)),
+            ("pentest", ("penetration-testing", "pentest", "ptaas")),
+            ("cyber_insurance", ("cyber-liability", "cyber-insurance", "breach-exposure")),
+            ("nist_800_171", ("800-171", "sprs")),
+            ("cmmc", ("cmmc", "c3pao")),
         )
-    )
+        for cand_key, cand_toks in special_key_rules:
+            if any(k in s_low for k in cand_toks):
+                special_key = cand_key
+                break
 
     if is_dora:
         intro_assessor = "third-party risk oversight fees and internal engineering hours"
@@ -5238,10 +5804,26 @@ def render_partner_quote_intake_html(
     form_display = "block" if is_active else "none"
     note_display = "none" if is_active else "block"
 
+    is_intl_tool = any(
+        tok in slug_clean
+        for tok in ("philippines", "eu-ai-act", "dora-ict", "eu-dora", "nis2", "iso-27001", "iso27001", "gdpr")
+    ) or "dora" in slug_clean.split("-")
+    is_eu_intl = (
+        any(tok in slug_clean for tok in ("eu-ai-act", "dora-ict", "eu-dora", "nis2", "gdpr"))
+        or "dora" in slug_clean.split("-")
+    )
     selected_state_code = resolve_state_code_from_slug(slug_clean, prop_clean)
+    jurisdiction_options: Tuple[Tuple[str, str], ...] = tuple(US_51_JURISDICTIONS)
+    if prop_clean == "gainhelm" and is_intl_tool:
+        jurisdiction_options = (
+            ("EU", "European Union / EEA (EU)"),
+            ("UK", "United Kingdom (UK)"),
+            ("US", "United States (US)"),
+        ) + jurisdiction_options
+        selected_state_code = "EU" if is_eu_intl else "US"
     state_options_html = "\n".join(
         f'              <option value="{st_code}"{" selected" if st_code == selected_state_code else ""}>{st_label}</option>'
-        for st_code, st_label in US_51_JURISDICTIONS
+        for st_code, st_label in jurisdiction_options
     )
 
     bands = (
@@ -5258,10 +5840,6 @@ def render_partner_quote_intake_html(
     from pseofactory.contracts import is_state_jurisdiction_tool
 
     is_state_tool = is_state_jurisdiction_tool(slug_clean, prop_clean)
-    is_intl_tool = any(
-        tok in slug_clean
-        for tok in ("philippines", "eu-ai-act", "dora-ict", "iso-27001", "iso27001", "gdpr")
-    )
 
     if prop_clean == "prexvo":
         is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
@@ -5295,13 +5873,16 @@ def render_partner_quote_intake_html(
         heading_text = f"{fw_prof['quote_heading_prefix']} ({threshold_fmt}+ TCO Threshold)"
         sub_text = fw_prof["quote_sub_template"].format(threshold_fmt=threshold_fmt)
         email_label = "Work or Security Operations Email Address"
-        state_label = "Organization Operating State (US)" if is_intl_tool else (
-            "Corporate Headquarters State" if is_state_tool else "Organization Billing / HQ State"
+        state_label = (
+            "Primary Jurisdiction / Operating Region"
+            if is_intl_tool
+            else ("Corporate Headquarters State" if is_state_tool else "Organization Billing / HQ State")
         )
+        jurisdiction_noun = "primary jurisdiction" if is_intl_tool else "headquarters state"
         band_label = "Annual Compliance & Audit Budget Band"
         consent_copy = (
             f"I provide explicit TCPA partner_sharing_consent authorizing GainHelm to share my work email, "
-            f"headquarters state, and compliance budget band with {fw_prof['quote_consent_scope']} to prepare "
+            f"{jurisdiction_noun}, and compliance budget band with {fw_prof['quote_consent_scope']} to prepare "
             f"a customized readiness quote."
         )
         btn_text = fw_prof["quote_btn_text"]

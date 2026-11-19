@@ -6425,6 +6425,19 @@ def resolve_post_calculation_upgrade_spec(
     controlling_statute = offer["statutory_authority"]
     effective_tax_year = "2026"
     default_econ_ds = "FRED 10-Year Treasury (DGS10) and BLS CPI-U Series"
+    gh_jurisdiction = ""
+    if prop_clean == "gainhelm":
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        gh_fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
+        gh_jurisdiction = (
+            "EU"
+            if str(gh_fw_prof.get("framework_key") or "").lower() in ("dora", "eu_ai_act", "nis2", "gdpr")
+            else "US"
+        )
+    else:
+        gh_fw_prof = None
+
     try:
         from pseofactory.tenant_facts import TenantFactStore
 
@@ -6436,12 +6449,9 @@ def resolve_post_calculation_upgrade_spec(
         if prop_clean == "prexvo":
             regulator_name = "U.S. Department of Education (Federal Student Aid)"
             default_econ_ds = "Federal Reserve G.19 Consumer Credit and Title IV Rate Series"
-        elif prop_clean == "gainhelm":
-            from pseofactory.affiliates import get_gainhelm_framework_profile
-
-            fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
-            regulator_name = fw_prof["regulator_name"]
-            default_econ_ds = fw_prof["economic_dataset"]
+        elif prop_clean == "gainhelm" and gh_fw_prof is not None:
+            regulator_name = gh_fw_prof["regulator_name"]
+            default_econ_ds = gh_fw_prof["economic_dataset"]
         elif prop_clean == "lienbond":
             regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
             default_econ_ds = "SFAA Surety Loss Ratios, NCCI Class Rate Filings, and BLS Construction Wage Series"
@@ -6485,7 +6495,14 @@ def resolve_post_calculation_upgrade_spec(
         "economic_dataset": eff_econ,
         "regulator_name": regulator_name,
         "controlling_statute": controlling_statute,
-        "effective_tax_year": effective_tax_year,
+        **(
+            {
+                "compliance_cycle_year": effective_tax_year,
+                "framework_jurisdiction": gh_jurisdiction,
+            }
+            if prop_clean == "gainhelm"
+            else {"effective_tax_year": effective_tax_year}
+        ),
         "deliverables": list(offer["deliverables"]),
         "workpaper_formats": [
             "Print-Ready Board & Advisor Audit Workpaper (HTML/PDF)",
@@ -7020,22 +7037,34 @@ def _synthesize_statutory_execution_artifacts(
     is_paid = mode == "paid_toolkit"
     exec_status = "UNREDACTED_READY_FOR_FILING" if is_paid else "PREVIEW_REDACTED_PENDING_CHECKOUT"
     redact_state = "UNREDACTED_READY_FOR_FILING" if is_paid else "PREVIEW_REDACTED"
-    statute = str(offer.get("statutory_authority") or "IRC Section 199A / Section 179")
+    statute = str(
+        offer.get("statutory_authority")
+        or ("AICPA SSAE 18 & NIST SP 800-171" if prop_clean == "gainhelm" else "IRC Section 199A / Section 179")
+    )
     prefix = {"prexvo": "PX", "gainhelm": "GH", "lienbond": "LB"}.get(prop_clean, "PH")
+    is_gh = prop_clean == "gainhelm"
     return [
         {
             "instrument_id": f"{prefix}-EXEC-101",
-            "instrument_title": f"{state_code} Primary Statutory Election & Filing Instrument ({offer['offer_title']})",
+            "instrument_title": (
+                f"{state_code} Primary Audit & Control Attestation Schedule ({offer['offer_title']})"
+                if is_gh
+                else f"{state_code} Primary Statutory Election & Filing Instrument ({offer['offer_title']})"
+            ),
             "controlling_statute": statute,
-            "filing_deadline_rule": "Timely Statutory Filing With Applicable Return / Notice Window",
+            "filing_deadline_rule": (
+                "90-Day Pre-Assessment Readiness Window & Audit Evidence Lock"
+                if is_gh
+                else "Timely Statutory Filing With Applicable Return / Notice Window"
+            ),
             "execution_status": exec_status,
             "redaction_state": redact_state,
             "statutory_clause_body": (
-                f"BINDING STATUTORY EXECUTION INSTRUMENT ({state_code} - {statute}): Modeled principal "
-                f"${base_amount:,.2f} certified for filing attachment and audit reconciliation."
+                f"BINDING {'COMPLIANCE ATTESTATION' if is_gh else 'STATUTORY EXECUTION INSTRUMENT'} ({state_code} - {statute}): Modeled principal "
+                f"${base_amount:,.2f} certified for {'audit binder attachment' if is_gh else 'filing attachment'} and reconciliation."
                 if is_paid
-                else f"STATUTORY INSTRUMENT PREVIEW ({state_code} - {statute}): Modeled principal "
-                f"${base_amount:,.2f}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]"
+                else f"{'COMPLIANCE ATTESTATION' if is_gh else 'STATUTORY INSTRUMENT'} PREVIEW ({state_code} - {statute}): Modeled principal "
+                f"${base_amount:,.2f}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL {'WORKPAPER' if is_gh else 'FILING'} PACKET VIA STRIPE CHECKOUT]"
             ),
         },
         {
@@ -7047,9 +7076,9 @@ def _synthesize_statutory_execution_artifacts(
             "redaction_state": redact_state,
             "statutory_clause_body": (
                 f"SAFE-HARBOR SUBSTANTIATION WORKPAPER ({state_code}): Contemporaneous reconciliation of "
-                f"${base_amount:,.2f} under {statute} verified for examiner inspection."
+                f"${base_amount:,.2f} under {statute} verified for {'assessor' if is_gh else 'examiner'} inspection."
                 if is_paid
-                else f"SAFE-HARBOR SUBSTANTIATION PREVIEW ({state_code}): [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]"
+                else f"SAFE-HARBOR SUBSTANTIATION PREVIEW ({state_code}): [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL {'WORKPAPER' if is_gh else 'FILING'} PACKET VIA STRIPE CHECKOUT]"
             ),
         },
     ]
@@ -7074,7 +7103,19 @@ def synthesize_personalized_audit_workpaper(
     slug_clean = _normalize_offer_tool_slug(rec.get("tool_slug") or tool_slug)
     lead_id = str(rec.get("lead_id") or f"lead_{prop_clean}_preview").strip()
     vert_clean = str(rec.get("vertical") or "").strip().lower()
-    state_code = str(rec.get("state") or "US").strip().upper() or "US"
+    gh_jurisdiction = ""
+    gh_prof_wp = None
+    if prop_clean == "gainhelm":
+        from pseofactory.affiliates import get_gainhelm_framework_profile
+
+        gh_prof_wp = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)
+        gh_jurisdiction = (
+            "EU"
+            if str(gh_prof_wp.get("framework_key") or "").lower() in ("dora", "eu_ai_act", "nis2", "gdpr")
+            else "US"
+        )
+    default_state_fb = gh_jurisdiction or "US"
+    state_code = str(rec.get("state") or default_state_fb).strip().upper() or default_state_fb
     email = str(rec.get("email") or "Scenario Analyst").strip()
 
     raw_inputs = rec.get("scenario_inputs") if isinstance(rec.get("scenario_inputs"), dict) else {}
@@ -7738,9 +7779,11 @@ def synthesize_personalized_audit_workpaper(
         elif prop_clean == "lienbond":
             regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
     if prop_clean == "gainhelm":
-        from pseofactory.affiliates import get_gainhelm_framework_profile
+        if gh_prof_wp is None:
+            from pseofactory.affiliates import get_gainhelm_framework_profile
 
-        regulator_name = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)["regulator_name"]
+            gh_prof_wp = get_gainhelm_framework_profile(slug=slug_clean, vertical=vert_clean)
+        regulator_name = gh_prof_wp["regulator_name"]
 
     datapack_url = str(offer.get("datapack_url") or f"{offer['fulfillment_url']}&format=datapack")
     playbook_csv_url = f"{offer['playbook_url']}&format=csv"
@@ -7809,7 +7852,14 @@ def synthesize_personalized_audit_workpaper(
         "statutory_authority": offer["statutory_authority"],
         "regulator_name": regulator_name,
         "controlling_statute": controlling_statute,
-        "effective_tax_year": effective_tax_year,
+        **(
+            {
+                "compliance_cycle_year": effective_tax_year,
+                "framework_jurisdiction": gh_jurisdiction,
+            }
+            if prop_clean == "gainhelm"
+            else {"effective_tax_year": effective_tax_year}
+        ),
         "modeled_scenario_summary": custom_parameter_ledger,
         "reconciliation_schedule": reconciliation_schedule,
         "sensitivity_matrix": sensitivity_matrix,

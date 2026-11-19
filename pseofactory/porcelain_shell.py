@@ -1614,6 +1614,12 @@ details.faq-accordion > summary::-webkit-details-marker {{
   line-height: 1.6;
   margin: 0 0 0.75rem 0;
 }}
+.verified-date-meta {{
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0.5rem 0 0 0;
+}}
 
 .section-subtitle {{
   font-size: 1.125rem;
@@ -4861,6 +4867,18 @@ def _render_governance_document(
     if li_id:
         org_node["sameAs"] = [f"https://www.linkedin.com/company/{li_id}/"]
 
+    doc_date_modified = (
+        "2026-10-31"
+        if str(profile.get("property_id") or "").strip().lower() == "gainhelm"
+        and route_slug in ("methodology", "disclaimers")
+        else "2026-11-12"
+    )
+    verified_date_html = (
+        f'\n        <p class="verified-date-meta">Last verified against primary statutes and accreditation tables: {doc_date_modified}</p>'
+        if route_slug in ("methodology", "disclaimers")
+        else ""
+    )
+
     graph = {
         "@context": "https://schema.org",
         "@graph": [
@@ -4873,7 +4891,7 @@ def _render_governance_document(
                 "description": desc,
                 "inLanguage": "en-US",
                 "datePublished": "2026-01-15",
-                "dateModified": "2026-11-12",
+                "dateModified": doc_date_modified,
                 "speakable": {
                     "@type": "SpeakableSpecification",
                     "cssSelector": [".quick-answer", "h1"],
@@ -4935,7 +4953,7 @@ def _render_governance_document(
         <h1>{html_lib.escape(h1_text)}</h1>
         <aside class="quick-answer" role="region" aria-label="Quick Answer Summary">
           <p class="quick-answer-body">{html_lib.escape(quick_answer_text)}</p>
-        </aside>
+        </aside>{verified_date_html}
       </section>
 {sections_html}
 {related_card}
@@ -4967,6 +4985,26 @@ def build_governance_pages(
     ds = profile["economic_dataset_label"]
     email = profile["contact_email"]
     partners = profile["partner_list_summary"]
+    prop_id = str(profile.get("property_id") or "profithelm").strip().lower()
+    privacy_params_map = {
+        "gainhelm": "audit scopes, employee headcount, control counts, or compliance budgets",
+        "lienbond": "contract values, payroll exposures, bond penalties, or project schedules",
+        "prexvo": "income, loan balances, household size, or repayment parameters",
+    }
+    privacy_params = privacy_params_map.get(
+        prop_id,
+        "income, loan balances, contract amounts, or control counts",
+    )
+    raw_input_noun = "compliance" if prop_id == "gainhelm" else "financial"
+    revision_examples_map = {
+        "gainhelm": "primary regulatory rule, NIST publication, ISO/IEC annex, AICPA section, or statutory breach provision referenced",
+        "lienbond": "primary statute, Miller Act rule, Federal Register notice, NCCI class manual, or state lien code section referenced",
+        "prexvo": "Higher Education Act section, 34 CFR regulation, Federal Register notice, or IRS guidance referenced",
+    }
+    revision_examples = revision_examples_map.get(
+        prop_id,
+        "primary statute, Federal Register notice, IRS Revenue Procedure, or state code section referenced",
+    )
 
     pages: Dict[str, str] = {}
 
@@ -5065,7 +5103,7 @@ def build_governance_pages(
         ),
         sections_html=f"""      <section class="card">
         <h2>Local Browser Calculation &amp; URL State</h2>
-        <p>All interactive scenario inputs entered into {html_lib.escape(brand)} calculators run locally in your web browser. Quantitative parameters such as income, loan balances, contract amounts, or control counts are evaluated in client memory without transmitting raw financial inputs to third-party analytics trackers. When you share or bookmark a scenario link, numeric parameters are serialized into URL query parameters under your direct control.</p>
+        <p>All interactive scenario inputs entered into {html_lib.escape(brand)} calculators run locally in your web browser. Quantitative parameters such as {html_lib.escape(privacy_params)} are evaluated in client memory without transmitting raw {html_lib.escape(raw_input_noun)} inputs to third-party analytics trackers. When you share or bookmark a scenario link, numeric parameters are serialized into URL query parameters under your direct control.</p>
       </section>
       <section class="card">
         <h2>Voluntary Lead Capture, Edge Telemetry &amp; Statutory Rights</h2>
@@ -5165,7 +5203,7 @@ def build_governance_pages(
       </section>
       <section class="card">
         <h2>Statutory Revision &amp; Correction Protocol</h2>
-        <p>When submitting a formula verification inquiry or statutory threshold update concerning {html_lib.escape(auth)} or {html_lib.escape(ds)}, include the exact calculator URL, input parameters tested, and the primary statute, Federal Register notice, IRS Revenue Procedure, or state code section referenced. Verified statutory updates are propagated across both client-side calculators and machine-readable JSON manifests with full changelog timestamps.</p>
+        <p>When submitting a formula verification inquiry or statutory threshold update concerning {html_lib.escape(auth)} or {html_lib.escape(ds)}, include the exact calculator URL, input parameters tested, and the {html_lib.escape(revision_examples)}. Verified statutory updates are propagated across both client-side calculators and machine-readable JSON manifests with full changelog timestamps.</p>
       </section>""",
         active_tools=tools,
         gsc_token=token,
