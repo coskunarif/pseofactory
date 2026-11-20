@@ -8,11 +8,23 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from abc import ABC, abstractmethod
 import asyncio
-from dataclasses import dataclass, field
+import atexit
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
+import datetime
+import fcntl
+import hashlib
 import inspect
 import json
 import os
 from pathlib import Path
+import queue
+import re
+import shutil
+import signal
+import subprocess
+import tempfile
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import urllib.error
@@ -22,6 +34,636 @@ import uuid
 import xml.etree.ElementTree as ET
 
 from pseofactory.server import EphemeralDistServer
+
+
+_CHROME_VERSION_CACHE: Dict[str, str] = {}
+_CHROME_VERSION_LOCK = threading.Lock()
+_ACTIVE_CHROME_INSTANCES: Dict[int, Tuple[int, str]] = {}
+_ACTIVE_CHROME_LOCK = threading.Lock()
+_DEFAULT_RECEIPTS_DIR = Path("/home/ubuntuadmin/projects/.agy/browser_verify_receipts")
+_MAX_FULL_HASH_ASSET_BYTES = 5 * 1024 * 1024
+
+
+def _atexit_cleanup_chrome_instances() -> None:
+    """Safety net ensuring no orphaned headless Chromium processes or temp profiles survive exit."""
+    with _ACTIVE_CHROME_LOCK:
+        items = list(_ACTIVE_CHROME_INSTANCES.items())
+        _ACTIVE_CHROME_INSTANCES.clear()
+    if not items:
+        return
+    for pid, (pgid, _tmp_dir) in items:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except OSError:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        alive = False
+        for pid, _pair in items:
+            try:
+                os.kill(pid, 0)
+                alive = True
+                break
+            except OSError:
+                pass
+        if not alive:
+            break
+        time.sleep(0.05)
+    for pid, (pgid, tmp_dir) in items:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+atexit.register(_atexit_cleanup_chrome_instances)
+
+
+def _playwright_revision_key(path: Path) -> Tuple[int, str]:
+    """Sort key preferring highest numeric Playwright browser revision."""
+    m = re.search(r"-(\d+)(?:/|$)", path.as_posix())
+    return (int(m.group(1)) if m else -1, path.as_posix())
+
+
+def discover_headless_chrome_binary() -> Tuple[Optional[str], bool]:
+    """
+    Discovers the pinned local Chromium binary for isolated headless CDP workers.
+    Returns (binary_path, is_headless_shell).
+    Preference order:
+    1. PSEOFACTORY_CHROME_BIN override
+    2. Pinned Playwright chrome-headless-shell (fastest startup & runtime, verified 100% layout/CLS parity)
+    3. Pinned Playwright full chrome binary (launched with --headless=new)
+    4. System google-chrome / chromium binary (launched with --headless=new)
+    """
+    override = (os.environ.get("PSEOFACTORY_CHROME_BIN") or "").strip()
+    if override:
+        ov_path = Path(override)
+        if ov_path.is_file() and os.access(ov_path, os.X_OK):
+            name_low = ov_path.name.lower()
+            is_shell = "headless-shell" in name_low or "headless_shell" in name_low
+            return str(ov_path), is_shell
+
+    pw_root_env = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
+    pw_roots = [Path(pw_root_env)] if pw_root_env else [Path.home() / ".cache" / "ms-playwright"]
+    for pw_root in pw_roots:
+        if not pw_root.is_dir():
+            continue
+        shell_candidates: List[Path] = []
+        for pattern in (
+            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",
+            "chromium_headless_shell-*/chrome-linux/headless_shell",
+        ):
+            shell_candidates.extend(
+                p for p in pw_root.glob(pattern) if p.is_file() and os.access(p, os.X_OK)
+            )
+        if shell_candidates:
+            shell_candidates.sort(key=_playwright_revision_key, reverse=True)
+            return str(shell_candidates[0]), True
+
+        chrome_candidates: List[Path] = []
+        for pattern in (
+            "chromium-*/chrome-linux64/chrome",
+            "chromium-*/chrome-linux/chrome",
+        ):
+            chrome_candidates.extend(
+                p for p in pw_root.glob(pattern) if p.is_file() and os.access(p, os.X_OK)
+            )
+        if chrome_candidates:
+            chrome_candidates.sort(key=_playwright_revision_key, reverse=True)
+            return str(chrome_candidates[0]), False
+
+    for bin_name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        found = shutil.which(bin_name)
+        if found:
+            return found, False
+
+    return None, False
+
+
+def get_chrome_version_string(binary_path: str) -> str:
+    """Returns cached `<chrome_bin> --version` string once per process."""
+    with _CHROME_VERSION_LOCK:
+        cached = _CHROME_VERSION_CACHE.get(binary_path)
+    if cached is not None:
+        return cached
+    ver = "unknown"
+    try:
+        res = subprocess.run(
+            [binary_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        raw = (res.stdout or res.stderr or "").strip()
+        if raw:
+            ver = raw.splitlines()[0].strip()
+    except Exception:
+        pass
+    with _CHROME_VERSION_LOCK:
+        _CHROME_VERSION_CACHE[binary_path] = ver
+    return ver
+
+
+def _get_available_ram_gb() -> float:
+    """Reads MemAvailable in GiB from /proc/meminfo with safe fallback."""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as mf:
+            for line in mf:
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return int(parts[1]) / (1024.0 * 1024.0)
+    except Exception:
+        pass
+    return 4.0
+
+
+def compute_auto_worker_count(num_routes: int, requested_workers: Optional[int] = None) -> int:
+    """
+    Safely sizes the isolated headless Chromium worker pool based on route count, CPU cores,
+    and available host RAM (~0.6 GiB headroom per worker).
+    """
+    if num_routes <= 1:
+        return 1
+    cpu_count = max(1, os.cpu_count() or 2)
+    avail_ram_gb = _get_available_ram_gb()
+    ram_cap = max(1, int(avail_ram_gb // 0.6))
+
+    if requested_workers is None:
+        env_w = (os.environ.get("PSEOFACTORY_BROWSER_WORKERS") or "").strip()
+        if env_w.isdigit() and int(env_w) >= 1:
+            requested_workers = int(env_w)
+
+    if requested_workers is not None:
+        req = max(1, int(requested_workers))
+        return max(1, min(req, num_routes, cpu_count, ram_cap))
+
+    auto_cpu_cap = max(1, cpu_count // 2)
+    return max(1, min(num_routes, auto_cpu_cap, ram_cap))
+
+
+def parse_and_apply_shard(routes: List[str], shard: Optional[str]) -> List[str]:
+    """
+    Deterministically partitions `routes` for 1-indexed shard spec 'K/N' (e.g. '1/4').
+    Sorts routes lexicographically before round-robin slicing so shards 1/N..N/N
+    cover the exact route union with zero overlap and zero missed routes.
+    """
+    if not shard:
+        return list(routes)
+    m = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", str(shard))
+    if not m:
+        raise ValueError(f"Invalid shard spec {shard!r}: expected 'K/N' with 1 <= K <= N")
+    k = int(m.group(1))
+    n = int(m.group(2))
+    if n < 1 or k < 1 or k > n:
+        raise ValueError(f"Invalid shard spec {shard!r}: expected 1 <= K <= N (got K={k}, N={n})")
+    ordered = sorted(routes)
+    return [r for idx, r in enumerate(ordered) if (idx % n) == (k - 1)]
+
+
+class _HeadlessChromiumInstance:
+    """
+    Context manager spawning an isolated headless Chromium process on an ephemeral CDP port
+    with its own temporary user-data-dir and process group. Guarantees deterministic teardown
+    (SIGTERM -> SIGKILL fallback) and temp dir removal on exit or exception.
+    """
+
+    def __init__(
+        self,
+        binary_path: str,
+        is_headless_shell: bool = False,
+        startup_timeout: float = 15.0,
+    ):
+        self.binary_path = binary_path
+        self.is_headless_shell = is_headless_shell
+        self.startup_timeout = startup_timeout
+        self.tmp_dir: Optional[str] = None
+        self.proc: Optional[subprocess.Popen] = None
+        self.pgid: Optional[int] = None
+        self.port: int = 0
+        self._stderr_fp: Optional[Any] = None
+
+    def start(self) -> int:
+        self.tmp_dir = tempfile.mkdtemp(prefix="pseofactory_cdp_worker_")
+        stderr_path = Path(self.tmp_dir) / "chrome_stderr.log"
+        self._stderr_fp = open(stderr_path, "wb")
+
+        cmd = [self.binary_path]
+        if not self.is_headless_shell:
+            cmd.append("--headless=new")
+        cmd.extend([
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--font-render-hinting=none",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-default-apps",
+            "--disable-sync",
+            "--no-first-run",
+            "--mute-audio",
+            "--hide-scrollbars",
+            "--window-size=1440,900",
+            "--remote-debugging-port=0",
+            f"--user-data-dir={self.tmp_dir}",
+            "about:blank",
+        ])
+
+        try:
+            self.proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=self._stderr_fp,
+                start_new_session=True,
+            )
+            self.pgid = self.proc.pid
+            with _ACTIVE_CHROME_LOCK:
+                _ACTIVE_CHROME_INSTANCES[self.proc.pid] = (self.pgid, self.tmp_dir)
+
+            port_file = Path(self.tmp_dir) / "DevToolsActivePort"
+            deadline = time.monotonic() + self.startup_timeout
+            discovered_port = 0
+            while time.monotonic() < deadline:
+                if self.proc.poll() is not None:
+                    err_tail = ""
+                    try:
+                        err_tail = stderr_path.read_text(encoding="utf-8", errors="ignore")[-400:]
+                    except Exception:
+                        pass
+                    raise RuntimeError(
+                        f"Headless Chromium exited prematurely (rc={self.proc.returncode}): {err_tail}"
+                    )
+                if port_file.is_file():
+                    try:
+                        lines = port_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+                        if lines and lines[0].strip().isdigit():
+                            discovered_port = int(lines[0].strip())
+                            break
+                    except Exception:
+                        pass
+                if stderr_path.is_file():
+                    try:
+                        err_txt = stderr_path.read_text(encoding="utf-8", errors="ignore")
+                        m = re.search(r"DevTools listening on ws://(?:127\.0\.0\.1|localhost):(\d+)/", err_txt)
+                        if m:
+                            discovered_port = int(m.group(1))
+                            break
+                    except Exception:
+                        pass
+                time.sleep(0.02)
+
+            if discovered_port <= 0:
+                raise RuntimeError(
+                    f"Timed out waiting {self.startup_timeout:.1f}s for headless Chromium CDP port"
+                )
+
+            # Confirm CDP HTTP endpoint is responding before handing port to worker
+            http_deadline = min(deadline, time.monotonic() + 5.0)
+            ready = False
+            while time.monotonic() < http_deadline:
+                try:
+                    req = urllib.request.Request(f"http://127.0.0.1:{discovered_port}/json/version")
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        if resp.status == 200:
+                            ready = True
+                            break
+                except Exception:
+                    time.sleep(0.03)
+            if not ready:
+                raise RuntimeError(f"Headless Chromium CDP port {discovered_port} did not respond to /json/version")
+
+            self.port = discovered_port
+            return self.port
+        except Exception:
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        proc = self.proc
+        pgid = self.pgid
+        tmp_dir = self.tmp_dir
+        self.proc = None
+        self.pgid = None
+        self.tmp_dir = None
+        self.port = 0
+
+        if proc is not None:
+            with _ACTIVE_CHROME_LOCK:
+                _ACTIVE_CHROME_INSTANCES.pop(proc.pid, None)
+            try:
+                if pgid is not None:
+                    try:
+                        os.killpg(pgid, signal.SIGTERM)
+                    except OSError:
+                        pass
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    if pgid is not None:
+                        try:
+                            os.killpg(pgid, signal.SIGKILL)
+                        except OSError:
+                            pass
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                    try:
+                        proc.wait(timeout=2.0)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        if self._stderr_fp is not None:
+            try:
+                self._stderr_fp.close()
+            except Exception:
+                pass
+            self._stderr_fp = None
+
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def __enter__(self) -> "_HeadlessChromiumInstance":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.stop()
+
+
+class BrowserVerifyReceiptStore:
+    """
+    Closed content-addressed SHA-256 verification receipt store for UnifiedBrowserAuditor.
+    Stores pass-only route verification receipts outside tenant git repositories using
+    fcntl.flock + atomic .tmp + os.replace writes.
+    """
+
+    SCHEMA_VERSION: int = 1
+
+    @staticmethod
+    def compute_verifier_source_digest() -> str:
+        """Computes closed SHA-256 over all Python source files in the pseofactory package."""
+        pkg_dir = Path(__file__).resolve().parent
+        h = hashlib.sha256()
+        py_files: List[Tuple[str, Path]] = []
+        for fp in pkg_dir.rglob("*.py"):
+            if not fp.is_file():
+                continue
+            rel = fp.relative_to(pkg_dir)
+            if "__pycache__" in rel.parts or any(part.startswith(".") for part in rel.parts):
+                continue
+            py_files.append((rel.as_posix(), fp))
+        py_files.sort(key=lambda item: item[0])
+        for rel_posix, fp in py_files:
+            h.update(rel_posix.encode("utf-8"))
+            h.update(b"\0")
+            try:
+                h.update(fp.read_bytes())
+            except OSError:
+                h.update(b"<unreadable>")
+            h.update(b"\0")
+        return h.hexdigest()
+
+    @staticmethod
+    def compute_estate_shared_digest(
+        dist_dir: Path,
+        chrome_version: str,
+        audit_options: Dict[str, Any],
+        verifier_digest: Optional[str] = None,
+    ) -> str:
+        """
+        Computes a closed per-estate shared dependency SHA-256 once per run_audit():
+        - SHA-256 of actual file bytes for ALL non-HTML files in dist/ up to 5 MiB
+          (covers CSS, JS, JSON, XML, PNG, WEBP, JPG, GIF, SVG, ICO, WOFF2, TXT, MD,
+          VTT, _redirects, _headers, favicon.*, etc.)
+        - (rel_posix, st_size, st_mtime_ns) fingerprint for any large media file > 5 MiB
+        - Sorted inventory of all HTML relative paths (so adding/removing/renaming any
+          HTML target invalidates cross-page link checks, while editing 1 HTML file's
+          content only invalidates that single route)
+        - Closed SHA-256 of all pseofactory/*.py source files
+        - Exact Chromium binary version string
+        - Effective audit options
+        """
+        h = hashlib.sha256()
+        h.update(f"schema_v{BrowserVerifyReceiptStore.SCHEMA_VERSION}\0".encode("utf-8"))
+        h.update(f"chrome:{chrome_version}\0".encode("utf-8"))
+        v_dig = verifier_digest if verifier_digest is not None else BrowserVerifyReceiptStore.compute_verifier_source_digest()
+        h.update(f"verifier:{v_dig}\0".encode("utf-8"))
+        h.update(json.dumps(audit_options, sort_keys=True, default=str).encode("utf-8"))
+        h.update(b"\0")
+
+        if dist_dir.is_dir():
+            non_html_full: List[Tuple[str, Path]] = []
+            non_html_large: List[Tuple[str, int, int]] = []
+            html_paths: List[str] = []
+            for p in dist_dir.rglob("*"):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(dist_dir)
+                parts = rel.parts
+                if "syndication" in parts or any(part.startswith(".") for part in parts):
+                    continue
+                rel_posix = rel.as_posix()
+                suf_low = p.suffix.lower()
+                if suf_low == ".html":
+                    html_paths.append(rel_posix)
+                    continue
+                try:
+                    st = p.stat()
+                except OSError:
+                    non_html_large.append((rel_posix, -1, -1))
+                    continue
+                if st.st_size <= _MAX_FULL_HASH_ASSET_BYTES:
+                    non_html_full.append((rel_posix, p))
+                else:
+                    non_html_large.append((rel_posix, st.st_size, st.st_mtime_ns))
+
+            non_html_full.sort(key=lambda item: item[0])
+            for rel_posix, fp in non_html_full:
+                h.update(b"asset:")
+                h.update(rel_posix.encode("utf-8"))
+                h.update(b"\0")
+                try:
+                    h.update(fp.read_bytes())
+                except OSError:
+                    h.update(b"<unreadable>")
+                h.update(b"\0")
+
+            non_html_large.sort(key=lambda item: item[0])
+            h.update(b"large_assets:")
+            for rel_posix, sz, mtime_ns in non_html_large:
+                h.update(f"{rel_posix}:{sz}:{mtime_ns}\n".encode("utf-8"))
+            h.update(b"\0")
+
+            html_paths.sort()
+            h.update(b"html_paths:")
+            h.update("\n".join(html_paths).encode("utf-8"))
+            h.update(b"\0")
+
+        return h.hexdigest()
+
+    @staticmethod
+    def resolve_route_html_file(dist_dir: Path, route: str) -> Optional[Path]:
+        """Resolves a canonical route path to its exact HTML file on disk inside dist_dir."""
+        clean = (route or "/").strip()
+        if not clean.startswith("/"):
+            clean = "/" + clean
+        if clean == "/":
+            cand = dist_dir / "index.html"
+            return cand if cand.is_file() else None
+        rel = clean.lstrip("/")
+        direct = dist_dir / rel
+        if direct.is_file() and direct.suffix.lower() == ".html":
+            return direct
+        if direct.is_dir():
+            idx = direct / "index.html"
+            if idx.is_file():
+                return idx
+        as_idx = dist_dir / rel.rstrip("/") / "index.html"
+        if as_idx.is_file():
+            return as_idx
+        as_html = dist_dir / f"{rel.rstrip('/')}.html"
+        if as_html.is_file():
+            return as_html
+        return None
+
+    @staticmethod
+    def compute_route_verify_key(dist_dir: Path, estate_shared_digest: str, route: str) -> Optional[str]:
+        """
+        Computes route_verify_key(r) = sha256(estate_shared_digest || route_path || sha256(html_bytes_of_r)).
+        Returns None if the route has no backing HTML file on disk (forcing live verification).
+        """
+        html_file = BrowserVerifyReceiptStore.resolve_route_html_file(dist_dir, route)
+        if html_file is None:
+            return None
+        try:
+            html_sha = hashlib.sha256(html_file.read_bytes()).hexdigest()
+        except OSError:
+            return None
+        payload = f"{estate_shared_digest}|{route}|{html_sha}".encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def default_receipt_path(property_id: Optional[str]) -> Optional[Path]:
+        """
+        Returns default receipt path under /home/ubuntuadmin/projects/.agy/browser_verify_receipts/<property_id>.json.
+        Returns None during pytest unless explicitly overridden, or when property_id is absent.
+        """
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return None
+        if not property_id:
+            return None
+        base_override = (os.environ.get("PSEOFACTORY_RECEIPTS_DIR") or "").strip()
+        base_dir = Path(base_override) if base_override else _DEFAULT_RECEIPTS_DIR
+        safe_id = re.sub(r"[^a-zA-Z0-9._-]", "_", str(property_id).strip().lower())
+        return base_dir / f"{safe_id}.json"
+
+    def __init__(self, receipt_path: Path):
+        self.receipt_path = Path(receipt_path)
+        self.lock_path = Path(f"{self.receipt_path}.lock")
+
+    def load_routes(self) -> Dict[str, Dict[str, Any]]:
+        """Loads persisted pass-only route receipts under a shared flock."""
+        if not self.receipt_path.is_file():
+            return {}
+        try:
+            self.receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.lock_path, "a+", encoding="utf-8") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_SH)
+                try:
+                    raw = json.loads(self.receipt_path.read_text(encoding="utf-8"))
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+            if not isinstance(raw, dict) or raw.get("schema_version") != self.SCHEMA_VERSION:
+                return {}
+            routes_map = raw.get("routes")
+            return routes_map if isinstance(routes_map, dict) else {}
+        except Exception:
+            return {}
+
+    def update_routes(
+        self,
+        property_id: Optional[str],
+        chrome_version: str,
+        estate_shared_digest: str,
+        passed_entries: Dict[str, Dict[str, Any]],
+        evict_routes: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Atomically merges verified PASS route receipts and evicts any failed routes
+        under an exclusive flock using .tmp + fsync + os.replace.
+        """
+        if not passed_entries and not evict_routes:
+            return
+        self.receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(self.lock_path, "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                existing_routes: Dict[str, Dict[str, Any]] = {}
+                if self.receipt_path.is_file():
+                    try:
+                        cur = json.loads(self.receipt_path.read_text(encoding="utf-8"))
+                        if (
+                            isinstance(cur, dict)
+                            and cur.get("schema_version") == self.SCHEMA_VERSION
+                            and isinstance(cur.get("routes"), dict)
+                        ):
+                            existing_routes = dict(cur["routes"])
+                    except Exception:
+                        existing_routes = {}
+
+                for bad_route in (evict_routes or []):
+                    existing_routes.pop(bad_route, None)
+
+                for route, entry in passed_entries.items():
+                    if entry.get("status") == "PASS" and entry.get("verify_key"):
+                        existing_routes[route] = {
+                            "verify_key": entry["verify_key"],
+                            "status": "PASS",
+                            "verified_at": now_iso,
+                            "screen_archetype": entry.get("screen_archetype", "statutory_guide"),
+                        }
+
+                doc = {
+                    "schema_version": self.SCHEMA_VERSION,
+                    "property_id": property_id or "custom",
+                    "chrome_version": chrome_version,
+                    "estate_shared_digest": estate_shared_digest,
+                    "updated_at": now_iso,
+                    "routes": dict(sorted(existing_routes.items())),
+                }
+                tmp_file = self.receipt_path.with_name(
+                    f"{self.receipt_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+                )
+                payload = json.dumps(doc, indent=2, sort_keys=False) + "\n"
+                with open(tmp_file, "w", encoding="utf-8") as tf:
+                    tf.write(payload)
+                    tf.flush()
+                    os.fsync(tf.fileno())
+                os.replace(tmp_file, self.receipt_path)
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass
@@ -497,23 +1139,55 @@ class UnifiedBrowserAuditor:
     """
 
     JS_CHECK_CLS = """new Promise(resolve => {
+        const describeNode = (node) => {
+            if (!node || !node.tagName) return 'unknown';
+            let s = String(node.tagName).toLowerCase();
+            if (node.id) {
+                s += '#' + node.id;
+            } else if (node.className && typeof node.className === 'string') {
+                const cls = node.className.trim().split(/\\s+/).slice(0, 2).join('.');
+                if (cls) s += '.' + cls;
+            }
+            return s;
+        };
+        const toRect = (r) => r ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null;
         let cls = 0.0;
+        const sources = [];
         const observer = new PerformanceObserver(list => {
             for (const entry of list.getEntries()) {
-                if (!entry.hadRecentInput) cls += entry.value;
+                if (!entry.hadRecentInput) {
+                    cls += entry.value;
+                    if (entry.value > 0 && Array.isArray(entry.sources) && sources.length < 10) {
+                        for (const src of entry.sources) {
+                            if (sources.length >= 10) break;
+                            sources.push({
+                                node: describeNode(src.node),
+                                value: Math.round(entry.value * 10000) / 10000,
+                                prev: toRect(src.previousRect),
+                                curr: toRect(src.currentRect),
+                                phase: 'load_scroll'
+                            });
+                        }
+                    }
+                }
             }
         });
         try {
             observer.observe({ type: 'layout-shift', buffered: true });
         } catch(e) {}
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
-        setTimeout(() => {
-            window.scrollTo({ top: 0, behavior: 'instant' });
+        const fontsWait = (document.fonts && document.fonts.ready)
+            ? Promise.race([document.fonts.ready.catch(() => {}), new Promise(r => setTimeout(r, 150))])
+            : Promise.resolve();
+        fontsWait.then(() => {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
             setTimeout(() => {
-                try { observer.disconnect(); } catch(e) {}
-                resolve(Math.round(cls * 1000) / 1000);
+                window.scrollTo({ top: 0, behavior: 'instant' });
+                setTimeout(() => {
+                    try { observer.disconnect(); } catch(e) {}
+                    resolve({ value: Math.round(cls * 1000) / 1000, sources: sources });
+                }, 150);
             }, 150);
-        }, 150);
+        });
     })"""
 
     JS_CHECK_TARGETS = """(() => {
@@ -1143,7 +1817,40 @@ class UnifiedBrowserAuditor:
             });
         }
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
-        const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
+        const isVisibleOutput = (el) => {
+            if (!el || el.nodeType !== 1) return false;
+            const cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) return false;
+            if (el.getClientRects().length === 0) return false;
+            let cur = el.parentElement;
+            while (cur && cur !== document.documentElement) {
+                const pcs = window.getComputedStyle(cur);
+                if (pcs.display === 'none' || pcs.visibility === 'hidden') return false;
+                cur = cur.parentElement;
+            }
+            return true;
+        };
+        const visibleOutputText = (el) => {
+            if (el.children.length === 0) return (el.textContent || '').trim();
+            const parts = [];
+            const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+                acceptNode: n => {
+                    const p = n.parentElement;
+                    if (!p) return NodeFilter.FILTER_REJECT;
+                    const tag = p.tagName.toLowerCase();
+                    if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                    const pcs = window.getComputedStyle(p);
+                    if (pcs.display === 'none' || pcs.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            while (w.nextNode()) {
+                const t = (w.currentNode.nodeValue || '').trim();
+                if (t) parts.push(t);
+            }
+            return parts.join(' ');
+        };
+        const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).filter(isVisibleOutput).map(visibleOutputText).join('|');
         const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
         const hasOutputs = document.querySelectorAll(outSel).length > 0;
 
@@ -1325,19 +2032,63 @@ class UnifiedBrowserAuditor:
         };
 
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
-        const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).map(el => (el.innerText || el.textContent || '').trim()).join('|');
+        const isVisibleOutput = (el) => {
+            if (!el || el.nodeType !== 1) return false;
+            const cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) return false;
+            if (el.getClientRects().length === 0) return false;
+            let cur = el.parentElement;
+            while (cur && cur !== document.documentElement) {
+                const pcs = window.getComputedStyle(cur);
+                if (pcs.display === 'none' || pcs.visibility === 'hidden') return false;
+                cur = cur.parentElement;
+            }
+            return true;
+        };
+        const visibleOutputText = (el) => {
+            if (el.children.length === 0) return (el.textContent || '').trim();
+            const parts = [];
+            const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+                acceptNode: n => {
+                    const p = n.parentElement;
+                    if (!p) return NodeFilter.FILTER_REJECT;
+                    const tag = p.tagName.toLowerCase();
+                    if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                    const pcs = window.getComputedStyle(p);
+                    if (pcs.display === 'none' || pcs.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            while (w.nextNode()) {
+                const t = (w.currentNode.nodeValue || '').trim();
+                if (t) parts.push(t);
+            }
+            return parts.join(' ');
+        };
+        const snapshotOutputs = () => Array.from(document.querySelectorAll(outSel)).filter(isVisibleOutput).map(visibleOutputText).join('|');
         const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
 
+        // 0. Dead extra_criteria control guard on non-SOC-2 calculators
+        const extraCritEl = document.getElementById('calc-input-extra_criteria');
+        const curPath = String(window.location.pathname || '');
+        if (extraCritEl && curPath.indexOf('/tools/') === 0 && !/soc-?2/i.test(curPath)) {
+            report.calculator_and_presets.input_failures.push('calc-input-extra_criteria');
+        }
+
         // 1. Links audit (internal + affiliate/outbound)
-        const allAnchors = Array.from(document.querySelectorAll('a[href]'));
+        const allAnchors = Array.from(document.querySelectorAll('a[href], a[data-partner], a.affiliate-cta-link'));
         report.links_audit.total_links = allAnchors.length;
         for (const a of allAnchors) {
             const href = (a.getAttribute('href') || '').trim();
+            const isAff = a.hasAttribute('data-partner') || a.classList.contains('affiliate-cta-link') || Boolean(a.closest('.partner-card, .calc-inline-cta, .overlay-partner-offer, #vetted-commercial-handoff')) || href.startsWith('/r/');
             if (!href || href === '#' || href.startsWith('javascript:')) {
                 report.links_audit.invalid_links.push(href || '(empty)');
+                if (isAff) {
+                    report.links_audit.affiliate_links += 1;
+                    report.links_audit.unrouted_affiliate_links.push({ href: href, rel: (a.getAttribute('rel') || '').toLowerCase(), id: a.id || '' });
+                }
                 continue;
             }
-            const isAff = a.hasAttribute('data-partner') || a.classList.contains('affiliate-cta-link') || Boolean(a.closest('.partner-card, .calc-inline-cta, .overlay-partner-offer, #vetted-commercial-handoff')) || href.startsWith('/r/');
             if (isAff) {
                 report.links_audit.affiliate_links += 1;
                 report.links_audit.affiliate_hrefs.push(href);
@@ -1501,6 +2252,10 @@ class UnifiedBrowserAuditor:
                         el.value = String(pVal);
                         el.dispatchEvent(new Event('input', { bubbles: true }));
                         el.dispatchEvent(new Event('change', { bubbles: true }));
+                    } else if (el.tagName === 'SELECT' && el.options && el.options.length >= 2) {
+                        el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 }
                 btn.classList.remove('active');
@@ -1512,7 +2267,7 @@ class UnifiedBrowserAuditor:
                 const afterOut = snapshotOutputs();
                 const afterInps = snapshotInputs();
                 if (beforeOut === afterOut && beforeInps === afterInps) {
-                    report.calculator_and_presets.button_failures.push(btn.id || ('preset_' + bIdx + ':' + (btn.innerText || btn.textContent || '').trim().slice(0, 32)));
+                    report.calculator_and_presets.button_failures.push(btn.id || ('preset_' + bIdx + ':' + (btn.textContent || '').trim().slice(0, 32)));
                 }
             }
             for (const item of savedControls) {
@@ -1670,13 +2425,13 @@ class UnifiedBrowserAuditor:
             if (previewBtn) {
                 previewBtn.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 400; i++) {
+                for (let i = 0; i < 960; i++) {
                     if (
                         document.getElementById('playbook-download-link') &&
                         document.getElementById('playbook-csv-link') &&
                         document.getElementById('playbook-datapack-link')
                     ) break;
-                    await new Promise(r => setTimeout(r, 12));
+                    await new Promise(r => setTimeout(r, 5));
                 }
                 report.post_calc_upgrade_drawer.preview_rendered = Boolean(
                     document.getElementById('playbook-download-link') &&
@@ -1688,9 +2443,9 @@ class UnifiedBrowserAuditor:
             if (upgCheckoutBtn) {
                 upgCheckoutBtn.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 400; i++) {
+                for (let i = 0; i < 960; i++) {
                     if (upgCheckoutBtn.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
-                    await new Promise(r => setTimeout(r, 12));
+                    await new Promise(r => setTimeout(r, 5));
                 }
                 report.post_calc_upgrade_drawer.checkout_status = upgCheckoutBtn.getAttribute('data-checkout-status') || '';
                 report.post_calc_upgrade_drawer.settlement_id = upgCheckoutBtn.getAttribute('data-settlement-id') || '';
@@ -1832,11 +2587,11 @@ class UnifiedBrowserAuditor:
                 emailInp.value = 'playbook-probe@synthetic.pseofactory.test';
             }
             leadForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 400; i++) {
+            for (let i = 0; i < 960; i++) {
                 if (leadForm.getAttribute('data-submission-state') === 'success' || leadForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
-                await new Promise(r => setTimeout(r, 12));
+                await new Promise(r => setTimeout(r, 5));
             }
             report.playbook_lead_capture_and_checkout.submission_state = leadForm.getAttribute('data-submission-state') || '';
             const pbPartner = document.getElementById('playbook-partner-link');
@@ -1844,11 +2599,11 @@ class UnifiedBrowserAuditor:
             report.playbook_lead_capture_and_checkout.partner_href = pbPartner ? (pbPartner.getAttribute('href') || '') : '';
             if (pbCheckout) {
                 pbCheckout.click();
-                for (let i = 0; i < 400; i++) {
+                for (let i = 0; i < 960; i++) {
                     if (pbCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
-                    await new Promise(r => setTimeout(r, 12));
+                    await new Promise(r => setTimeout(r, 5));
                 }
                 report.playbook_lead_capture_and_checkout.checkout_status = pbCheckout.getAttribute('data-checkout-status') || '';
                 report.playbook_lead_capture_and_checkout.checkout_session_id = pbCheckout.getAttribute('data-checkout-session-id') || '';
@@ -1871,11 +2626,11 @@ class UnifiedBrowserAuditor:
             if (qEmail) qEmail.value = 'quote-probe@synthetic.pseofactory.test';
             if (qConsent) qConsent.checked = true;
             quoteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 400; i++) {
+            for (let i = 0; i < 960; i++) {
                 if (quoteForm.getAttribute('data-submission-state') === 'success' || quoteForm.getAttribute('data-submission-state') === 'fallback_saved') {
                     break;
                 }
-                await new Promise(r => setTimeout(r, 12));
+                await new Promise(r => setTimeout(r, 5));
             }
             report.partner_quote_intake_and_checkout.submission_state = quoteForm.getAttribute('data-submission-state') || '';
             const qPartner = document.getElementById('quote-matched-partner-link');
@@ -1883,11 +2638,11 @@ class UnifiedBrowserAuditor:
             report.partner_quote_intake_and_checkout.partner_href = qPartner ? (qPartner.getAttribute('href') || '') : '';
             if (qCheckout) {
                 qCheckout.click();
-                for (let i = 0; i < 400; i++) {
+                for (let i = 0; i < 960; i++) {
                     if (qCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
                         break;
                     }
-                    await new Promise(r => setTimeout(r, 12));
+                    await new Promise(r => setTimeout(r, 5));
                 }
                 report.partner_quote_intake_and_checkout.checkout_status = qCheckout.getAttribute('data-checkout-status') || '';
                 report.partner_quote_intake_and_checkout.checkout_session_id = qCheckout.getAttribute('data-checkout-session-id') || '';
@@ -1912,9 +2667,9 @@ class UnifiedBrowserAuditor:
             if (prEmail) prEmail.value = 'partner-desk@synthetic.pseofactory.test';
             if (prState && !prState.value) prState.value = 'CA';
             prForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 400; i++) {
+            for (let i = 0; i < 960; i++) {
                 if (prForm.getAttribute('data-submission-state') === 'success') break;
-                await new Promise(r => setTimeout(r, 12));
+                await new Promise(r => setTimeout(r, 5));
             }
             report.partner_registration_and_slot_checkout.submission_state = prForm.getAttribute('data-submission-state') || '';
             const prChkLink = document.getElementById('partner-slot-checkout-link');
@@ -1922,9 +2677,9 @@ class UnifiedBrowserAuditor:
                 report.partner_registration_and_slot_checkout.checkout_href = prChkLink.getAttribute('href') || '';
                 report.partner_registration_and_slot_checkout.focused_after_submit = (document.activeElement === prChkLink);
                 prChkLink.click();
-                for (let i = 0; i < 400; i++) {
+                for (let i = 0; i < 960; i++) {
                     if (prChkLink.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
-                    await new Promise(r => setTimeout(r, 12));
+                    await new Promise(r => setTimeout(r, 5));
                 }
                 report.partner_registration_and_slot_checkout.checkout_status = prChkLink.getAttribute('data-checkout-status') || '';
                 report.partner_registration_and_slot_checkout.checkout_session_id = prChkLink.getAttribute('data-checkout-session-id') || '';
@@ -1949,30 +2704,73 @@ class UnifiedBrowserAuditor:
         if (upgDrawer || leadForm) {
             report.sellable_assets_and_fulfillment_gate.present = true;
             try {
-                const unpaidResp = await fetch('/api/lead-fulfillment?lead_id=unpaid_probe_check', {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' }
-                });
-                const unpaidJson = await unpaidResp.json().catch(() => ({}));
-                report.sellable_assets_and_fulfillment_gate.unpaid_402_enforced = (
-                    unpaidResp.status === 402 &&
-                    unpaidJson.status === 'payment_required' &&
-                    unpaidJson.settled === false
-                );
-                if (!report.sellable_assets_and_fulfillment_gate.unpaid_402_enforced) {
-                    report.sellable_assets_and_fulfillment_gate.failures.push('unpaid_402_gate_not_enforced');
-                }
-            } catch (e) {
-                report.sellable_assets_and_fulfillment_gate.failures.push('unpaid_402_fetch_error');
-            }
-
-            try {
-                const pbDlEl = document.getElementById('playbook-download-link');
                 const pbCsvEl = document.getElementById('playbook-csv-link');
                 const pbDpEl = document.getElementById('playbook-datapack-link');
                 const pbJsonUrl = (leadForm && leadForm.getAttribute('data-playbook-url')) || '/api/lead-capture?playbook=1';
-                const pbJsonResp = await fetch(pbJsonUrl, { headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' } });
-                const pbJsonData = await pbJsonResp.json().catch(() => ({}));
+                const pbCsvHref = (pbCsvEl && pbCsvEl.getAttribute('href')) || (pbJsonUrl + '&format=csv');
+                const pbDpHref = (pbDpEl && pbDpEl.getAttribute('href')) || (pbJsonUrl + '&format=datapack');
+                const ffHtmlEl = document.getElementById('checkout-fulfillment-html-link');
+                const ffCsvEl = document.getElementById('checkout-fulfillment-csv-link');
+                const ffDpEl = document.getElementById('checkout-fulfillment-datapack-link');
+                const ffHtmlHref = (ffHtmlEl && ffHtmlEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=html';
+                const ffCsvHref = (ffCsvEl && ffCsvEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=csv';
+                const ffDpHref = (ffDpEl && ffDpEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=datapack';
+
+                const [
+                    unpaidRes,
+                    pbJsonResp,
+                    pbCsvResp,
+                    pbDpResp,
+                    ffHtmlResp,
+                    ffCsvResp,
+                    ffDpResp,
+                    emailCheckResp
+                ] = await Promise.all([
+                    fetch('/api/lead-fulfillment?lead_id=unpaid_probe_check', {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' }
+                    }).catch(() => null),
+                    fetch(pbJsonUrl, { headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' } }),
+                    fetch(pbCsvHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch(pbDpHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch(ffHtmlHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch(ffCsvHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch(ffDpHref, { headers: { 'X-Pseofactory-Test': '1' } }),
+                    fetch('/api/lead-capture', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
+                        body: JSON.stringify({
+                            email: 'email-telemetry-probe@synthetic.pseofactory.test',
+                            tool_slug: window.location.pathname,
+                            synthetic_test: true
+                        })
+                    })
+                ]);
+
+                if (!unpaidRes) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('unpaid_402_fetch_error');
+                } else {
+                    const unpaidJson = await unpaidRes.json().catch(() => ({}));
+                    report.sellable_assets_and_fulfillment_gate.unpaid_402_enforced = (
+                        unpaidRes.status === 402 &&
+                        unpaidJson.status === 'payment_required' &&
+                        unpaidJson.settled === false
+                    );
+                    if (!report.sellable_assets_and_fulfillment_gate.unpaid_402_enforced) {
+                        report.sellable_assets_and_fulfillment_gate.failures.push('unpaid_402_gate_not_enforced');
+                    }
+                }
+
+                const [pbJsonData, pbCsvTxt, pbDpJson, ffHtmlTxt, ffCsvTxt, ffDpJson, emailCheckJson] = await Promise.all([
+                    pbJsonResp.json().catch(() => ({})),
+                    pbCsvResp.text(),
+                    pbDpResp.json().catch(() => ({})),
+                    ffHtmlResp.text(),
+                    ffCsvResp.text(),
+                    ffDpResp.json().catch(() => ({})),
+                    emailCheckResp.json().catch(() => ({}))
+                ]);
+
                 const pbArts = Array.isArray(pbJsonData.statutory_execution_artifacts)
                     ? pbJsonData.statutory_execution_artifacts
                     : (pbJsonData.statutory_data_pack && Array.isArray(pbJsonData.statutory_data_pack.statutory_execution_artifacts)
@@ -1994,9 +2792,6 @@ class UnifiedBrowserAuditor:
                     report.sellable_assets_and_fulfillment_gate.failures.push('free_playbook_contract_failed');
                 }
 
-                const pbCsvHref = (pbCsvEl && pbCsvEl.getAttribute('href')) || (pbJsonUrl + '&format=csv');
-                const pbCsvResp = await fetch(pbCsvHref, { headers: { 'X-Pseofactory-Test': '1' } });
-                const pbCsvTxt = await pbCsvResp.text();
                 report.sellable_assets_and_fulfillment_gate.free_csv_verified = (
                     pbCsvResp.status === 200 && pbCsvTxt.trim().split(/\\r?\\n/).length >= 4
                 );
@@ -2004,9 +2799,6 @@ class UnifiedBrowserAuditor:
                     report.sellable_assets_and_fulfillment_gate.failures.push('free_csv_contract_failed');
                 }
 
-                const pbDpHref = (pbDpEl && pbDpEl.getAttribute('href')) || (pbJsonUrl + '&format=datapack');
-                const pbDpResp = await fetch(pbDpHref, { headers: { 'X-Pseofactory-Test': '1' } });
-                const pbDpJson = await pbDpResp.json().catch(() => ({}));
                 report.sellable_assets_and_fulfillment_gate.free_datapack_verified = (
                     pbDpResp.status === 200 && Boolean(pbDpJson && (pbDpJson.pack_id || pbDpJson.reconciliation_schedule))
                 );
@@ -2014,21 +2806,6 @@ class UnifiedBrowserAuditor:
                     report.sellable_assets_and_fulfillment_gate.failures.push('free_datapack_contract_failed');
                 }
 
-                const ffHtmlEl = document.getElementById('checkout-fulfillment-html-link');
-                const ffCsvEl = document.getElementById('checkout-fulfillment-csv-link');
-                const ffDpEl = document.getElementById('checkout-fulfillment-datapack-link');
-                const ffHtmlHref = (ffHtmlEl && ffHtmlEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=html';
-                const ffCsvHref = (ffCsvEl && ffCsvEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=csv';
-                const ffDpHref = (ffDpEl && ffDpEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=datapack';
-
-                const [ffHtmlResp, ffCsvResp, ffDpResp] = await Promise.all([
-                    fetch(ffHtmlHref, { headers: { 'X-Pseofactory-Test': '1' } }),
-                    fetch(ffCsvHref, { headers: { 'X-Pseofactory-Test': '1' } }),
-                    fetch(ffDpHref, { headers: { 'X-Pseofactory-Test': '1' } })
-                ]);
-                const ffHtmlTxt = await ffHtmlResp.text();
-                const ffCsvTxt = await ffCsvResp.text();
-                const ffDpJson = await ffDpResp.json().catch(() => ({}));
                 const ffExecInst = Array.isArray(ffDpJson.statutory_execution_artifacts)
                     ? ffDpJson.statutory_execution_artifacts
                     : (Array.isArray(ffDpJson.execution_instruments) ? ffDpJson.execution_instruments : []);
@@ -2057,16 +2834,6 @@ class UnifiedBrowserAuditor:
                     report.sellable_assets_and_fulfillment_gate.failures.push('paid_datapack_contract_failed');
                 }
 
-                const emailCheckResp = await fetch('/api/lead-capture', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
-                    body: JSON.stringify({
-                        email: 'email-telemetry-probe@synthetic.pseofactory.test',
-                        tool_slug: window.location.pathname,
-                        synthetic_test: true
-                    })
-                });
-                const emailCheckJson = await emailCheckResp.json().catch(() => ({}));
                 report.sellable_assets_and_fulfillment_gate.email_dispatch_verified = (
                     emailCheckResp.status === 200 &&
                     Boolean(emailCheckJson.zeptomail_status) &&
@@ -2112,23 +2879,18 @@ class UnifiedBrowserAuditor:
                 }
             }
             report.affiliate_redirect_and_telemetry.dom_click_handled = allClicksHandled;
-            try {
-                const telResp = await fetch('/api/telemetry?synthetic_test=1', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
-                    body: JSON.stringify({
-                        schema_version: '2.0',
-                        event_type: 'synthetic_e2e_probe',
-                        slug: window.location.pathname,
-                        synthetic_test: true
-                    })
-                });
-                const telData = await telResp.json();
-                report.affiliate_redirect_and_telemetry.telemetry_status = telData.status || '';
-            } catch (e) {
-                report.affiliate_redirect_and_telemetry.passed = false;
-            }
-            for (const rawHref of uniquePartnerHrefs) {
+            const telPromise = fetch('/api/telemetry?synthetic_test=1', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
+                body: JSON.stringify({
+                    schema_version: '2.0',
+                    event_type: 'synthetic_e2e_probe',
+                    slug: window.location.pathname,
+                    synthetic_test: true
+                })
+            }).then(r => r.json()).then(d => ({ ok: true, status: d.status || '' })).catch(() => ({ ok: false, status: '' }));
+
+            const redirPromises = uniquePartnerHrefs.map(async (rawHref) => {
                 try {
                     const sep = rawHref.includes('?') ? '&' : '?';
                     const redirResp = await fetch(rawHref + sep + 'synthetic_test=1', {
@@ -2136,33 +2898,51 @@ class UnifiedBrowserAuditor:
                         headers: { 'X-Pseofactory-Test': '1' },
                         redirect: 'manual'
                     });
-                    const st = redirResp.status;
-                    const loc = redirResp.headers.get('Location') || redirResp.url || '';
-                    report.affiliate_redirect_and_telemetry.all_partner_redirects.push({
+                    return {
+                        ok: true,
                         href: rawHref,
-                        status: st,
-                        location: loc
-                    });
-                    if (report.affiliate_redirect_and_telemetry.redirect_status === 0) {
-                        report.affiliate_redirect_and_telemetry.redirect_status = st;
-                        report.affiliate_redirect_and_telemetry.redirect_location = loc;
-                    }
-                    if (redirResp.type !== 'opaqueredirect' && st !== 302 && st !== 200) {
-                        report.affiliate_redirect_and_telemetry.passed = false;
-                        report.affiliate_redirect_and_telemetry.partner_failures.push({
-                            href: rawHref,
-                            status: st,
-                            reason: 'unexpected_redirect_status'
-                        });
-                    } else {
-                        report.affiliate_redirect_and_telemetry.partners_verified_count += 1;
-                    }
+                        status: redirResp.status,
+                        type: redirResp.type,
+                        location: redirResp.headers.get('Location') || redirResp.url || ''
+                    };
                 } catch (e) {
+                    return { ok: false, href: rawHref, error: String(e) };
+                }
+            });
+
+            const [telOutcome, redirOutcomes] = await Promise.all([telPromise, Promise.all(redirPromises)]);
+            if (telOutcome.ok) {
+                report.affiliate_redirect_and_telemetry.telemetry_status = telOutcome.status;
+            } else {
+                report.affiliate_redirect_and_telemetry.passed = false;
+            }
+            for (const item of redirOutcomes) {
+                if (!item.ok) {
                     report.affiliate_redirect_and_telemetry.passed = false;
                     report.affiliate_redirect_and_telemetry.partner_failures.push({
-                        href: rawHref,
-                        reason: String(e)
+                        href: item.href,
+                        reason: item.error
                     });
+                    continue;
+                }
+                report.affiliate_redirect_and_telemetry.all_partner_redirects.push({
+                    href: item.href,
+                    status: item.status,
+                    location: item.location
+                });
+                if (report.affiliate_redirect_and_telemetry.redirect_status === 0) {
+                    report.affiliate_redirect_and_telemetry.redirect_status = item.status;
+                    report.affiliate_redirect_and_telemetry.redirect_location = item.location;
+                }
+                if (item.type !== 'opaqueredirect' && item.status !== 302 && item.status !== 200) {
+                    report.affiliate_redirect_and_telemetry.passed = false;
+                    report.affiliate_redirect_and_telemetry.partner_failures.push({
+                        href: item.href,
+                        status: item.status,
+                        reason: 'unexpected_redirect_status'
+                    });
+                } else {
+                    report.affiliate_redirect_and_telemetry.partners_verified_count += 1;
                 }
             }
             if (
@@ -2196,12 +2976,52 @@ class UnifiedBrowserAuditor:
     })()"""
 
     JS_CHECK_RESIZE_AND_INTERACTION_CLS = """new Promise(resolve => {
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
+        const describeNode = (node) => {
+            if (!node || !node.tagName) return 'unknown';
+            let s = String(node.tagName).toLowerCase();
+            if (node.id) {
+                s += '#' + node.id;
+            } else if (node.className && typeof node.className === 'string') {
+                const cls = node.className.trim().split(/\\s+/).slice(0, 2).join('.');
+                if (cls) s += '.' + cls;
+            }
+            return s;
+        };
+        const toRect = (r) => r ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null;
+        const fontsWait = (document.fonts && document.fonts.ready)
+            ? Promise.race([document.fonts.ready.catch(() => {}), new Promise(r => setTimeout(r, 150))])
+            : Promise.resolve();
+        fontsWait.then(() => {
+            if (document.documentElement) {
+                void document.documentElement.offsetWidth;
+            }
+            const flushFrames = (cb) => {
+                if (typeof requestAnimationFrame === 'function') {
+                    requestAnimationFrame(() => requestAnimationFrame(cb));
+                } else {
+                    setTimeout(cb, 20);
+                }
+            };
+            flushFrames(() => {
                 let cls = 0.0;
+                const sources = [];
                 const observer = new PerformanceObserver(list => {
                     for (const entry of list.getEntries()) {
-                        if (!entry.hadRecentInput) cls += entry.value;
+                        if (!entry.hadRecentInput) {
+                            cls += entry.value;
+                            if (entry.value > 0 && Array.isArray(entry.sources) && sources.length < 10) {
+                                for (const src of entry.sources) {
+                                    if (sources.length >= 10) break;
+                                    sources.push({
+                                        node: describeNode(src.node),
+                                        value: Math.round(entry.value * 10000) / 10000,
+                                        prev: toRect(src.previousRect),
+                                        curr: toRect(src.currentRect),
+                                        phase: 'interaction'
+                                    });
+                                }
+                            }
+                        }
                     }
                 });
                 try {
@@ -2216,7 +3036,7 @@ class UnifiedBrowserAuditor:
                 });
                 setTimeout(() => {
                     try { observer.disconnect(); } catch(e) {}
-                    resolve(Math.round(cls * 1000) / 1000);
+                    resolve({ value: Math.round(cls * 1000) / 1000, sources: sources });
                 }, 120);
             });
         });
@@ -2226,9 +3046,14 @@ class UnifiedBrowserAuditor:
         self,
         adapter: Optional[TenantBrowserAdapter] = None,
         dist_dir: Optional[Union[str, Path]] = None,
-        cdp_port: int = 9222,
+        cdp_port: Optional[int] = None,
         fail_closed: Optional[bool] = None,
         property_id: Optional[str] = None,
+        workers: Optional[int] = None,
+        isolated_browser: Optional[bool] = None,
+        no_verify_cache: bool = False,
+        shard: Optional[str] = None,
+        receipt_path: Optional[Union[str, Path]] = None,
     ):
         self.adapter = adapter
         if adapter is not None:
@@ -2242,8 +3067,25 @@ class UnifiedBrowserAuditor:
             self.excluded_routes = set()
             self.property_id = property_id
 
-        self.cdp_port = cdp_port
-        self.cdp_base = f"http://127.0.0.1:{cdp_port}"
+        self._explicit_cdp_port = cdp_port is not None
+        self.cdp_port = int(cdp_port) if cdp_port is not None else 9222
+        self.cdp_base = f"http://127.0.0.1:{self.cdp_port}"
+        if isolated_browser is not None:
+            self.isolated_browser = bool(isolated_browser)
+        elif os.environ.get("PSEOFACTORY_USE_SHARED_CDP") == "1":
+            self.isolated_browser = False
+        elif self._explicit_cdp_port:
+            self.isolated_browser = False
+        else:
+            self.isolated_browser = True
+
+        self.workers = workers
+        self.no_verify_cache = bool(no_verify_cache) or (os.environ.get("PSEOFACTORY_NO_VERIFY_CACHE") == "1")
+        self.shard = shard
+        self.receipt_path = Path(receipt_path) if receipt_path is not None else None
+        self._chrome_version_override: Optional[str] = None
+        self._verifier_digest_override: Optional[str] = None
+
         if fail_closed is None:
             env_fc = os.environ.get("PSEOFACTORY_BROWSER_FAIL_CLOSED")
             self.fail_closed = (env_fc != "0") if env_fc is not None else True
@@ -2500,9 +3342,20 @@ class UnifiedBrowserAuditor:
         return report
 
     def check_cdp_reachability(self, retries: int = 4, timeout: float = 8.0) -> Tuple[bool, str]:
-        """Checks if host Chrome CDP endpoint is responding on configured port with transient timeout retries."""
+        """
+        Checks if browser verification backend is available:
+        - When isolated_browser is enabled and a pinned local headless Chromium binary exists,
+          returns immediately with the discovered Chromium version.
+        - Otherwise probes the configured shared Chrome CDP endpoint on self.cdp_port.
+        """
         import socket
         import time
+
+        if self.isolated_browser:
+            chrome_bin, _ = discover_headless_chrome_binary()
+            if chrome_bin:
+                ver = self._chrome_version_override or get_chrome_version_string(chrome_bin)
+                return True, f"isolated_headless_chrome:{ver} ({chrome_bin})"
 
         last_err = ""
         attempts = max(1, int(retries))
@@ -2683,8 +3536,13 @@ class UnifiedBrowserAuditor:
             raw_path = raw_path[:-5] or "/"
         return raw_path or "/"
 
-    async def _configure_cdp_session(self, ws: Any, msg_counter: List[int]) -> None:
-        """Enables CDP domains, injects synthetic error/test hook, disables cache, and blocks external URLs."""
+    async def _configure_cdp_session(
+        self,
+        ws: Any,
+        msg_counter: List[int],
+        disable_cache: bool = True,
+    ) -> None:
+        """Enables CDP domains, injects synthetic error/test hook, configures cache, and blocks external URLs."""
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.enable", msg_id=msg_counter[0])
         msg_counter[0] += 1
@@ -2699,7 +3557,12 @@ class UnifiedBrowserAuditor:
         msg_counter[0] += 1
         await self._send_cdp(ws, "Network.enable", msg_id=msg_counter[0])
         msg_counter[0] += 1
-        await self._send_cdp(ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
+        await self._send_cdp(
+            ws,
+            "Network.setCacheDisabled",
+            {"cacheDisabled": bool(disable_cache)},
+            msg_id=msg_counter[0],
+        )
         msg_counter[0] += 1
         await self._send_cdp(
             ws,
@@ -2769,13 +3632,11 @@ class UnifiedBrowserAuditor:
             await asyncio.sleep(0.02)
 
     async def _prepare_audit_viewport(self, ws: Any, msg_counter: List[int]) -> None:
-        """Brings the CDP tab forward, enables focus emulation, and resets initial 1440x900 viewport."""
+        """Brings the CDP tab forward, enables focus emulation, and locks initial 1440x900 viewport."""
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
         msg_counter[0] += 1
         await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-        msg_counter[0] += 1
-        await self._send_cdp(ws, "Emulation.clearDeviceMetricsOverride", {}, msg_id=msg_counter[0])
         await self._set_viewport_and_settle(
             ws,
             1440,
@@ -2987,9 +3848,12 @@ class UnifiedBrowserAuditor:
 
             # 4a. Initial load & scroll CLS check before Emulation.setDeviceMetricsOverride resizes viewport
             msg_counter[0] += 1
-            cls_val = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
-            if cls_val and cls_val > 0.0:
+            cls_raw = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
+            cls_val, cls_sources = self._parse_cls_result(cls_raw)
+            if cls_val > 0.0:
                 defects["cls_value"] = cls_val
+                if cls_sources:
+                    defects.setdefault("cls_sources", []).extend(cls_sources)
 
             # 1b. Standard Desktop Viewport (1280x800)
             await self._set_viewport_and_settle(ws, 1280, 800, 1, False, msg_counter)
@@ -3034,9 +3898,12 @@ class UnifiedBrowserAuditor:
 
             # 4b. Interactive CLS check (PerformanceObserver layout-shift must be 0.0)
             msg_counter[0] += 1
-            interaction_cls = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
-            if interaction_cls and interaction_cls > defects["cls_value"]:
+            interaction_cls_raw = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
+            interaction_cls, interaction_cls_sources = self._parse_cls_result(interaction_cls_raw)
+            if interaction_cls > defects["cls_value"]:
                 defects["cls_value"] = interaction_cls
+            if interaction_cls > 0.0 and interaction_cls_sources:
+                defects.setdefault("cls_sources", []).extend(interaction_cls_sources)
 
             # 5. Dashes check (zero forbidden em/en dashes and spaced hyphens)
             msg_counter[0] += 1
@@ -3126,16 +3993,14 @@ class UnifiedBrowserAuditor:
                             "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
                         })
 
-            # 8. Restore desktop viewport (1440x900) and run universal interactive state + E2E surface verification
+            # 8. Restore desktop viewport (1440x900) and run full E2E interactive surface verification
+            # (strict superset of JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC: inputs, presets, focus outlines,
+            # positive tabindex, affiliate CTAs, extra_criteria guard, console/page errors, forms, checkout, telemetry)
             msg_counter[0] += 1
             await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
             msg_counter[0] += 1
             await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
             await self._set_viewport_and_settle(ws, 1440, 900, 1, False, msg_counter)
-            msg_counter[0] += 1
-            univ_failures = await self._eval_js(ws, self.JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC, msg_id=msg_counter[0])
-            if isinstance(univ_failures, list) and univ_failures:
-                defects["widget_failures"].extend(univ_failures)
 
             msg_counter[0] += 1
             raw_e2e = await self._eval_js(ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
@@ -3209,8 +4074,96 @@ class UnifiedBrowserAuditor:
                         pass
         return _lock_ctx()
 
+    @staticmethod
+    def _parse_cls_result(raw_val: Any) -> Tuple[float, List[Dict[str, Any]]]:
+        """Normalizes CLS JS evaluation output (numeric float or {value, sources} dict)."""
+        if isinstance(raw_val, dict):
+            try:
+                val = float(raw_val.get("value") or 0.0)
+            except (TypeError, ValueError):
+                val = 0.0
+            srcs = raw_val.get("sources")
+            return val, list(srcs) if isinstance(srcs, list) else []
+        if isinstance(raw_val, (int, float)):
+            return float(raw_val), []
+        return 0.0, []
+
+    @staticmethod
+    def _is_finding_failed(f: Dict[str, Any]) -> bool:
+        """Canonical failure predicate for a single route finding."""
+        return bool(
+            f.get("overflow_375")
+            or f.get("overflow_1280")
+            or f.get("overflow_1440")
+            or f.get("targets_under_44")
+            or (float(f.get("cls_value") or 0.0) > 0.0)
+            or f.get("dashes")
+            or f.get("broken_assets")
+            or f.get("widget_failures")
+            or not (f.get("interactive_surface") or {}).get("passed", True)
+            or f.get("hierarchy_violations")
+            or f.get("unwrapped_tables")
+            or f.get("transparent_controls")
+            or f.get("clipped_elements")
+            or f.get("card_geometry_violations")
+            or f.get("whitespace_rhythm_violations")
+            or f.get("calculator_ergonomics_violations")
+            or f.get("cta_density_violations")
+        )
+
+    @staticmethod
+    def _make_cached_pass_finding(route: str, verify_key: str, cached_entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Builds a clean passing finding record for a route satisfied by a valid SHA-256 receipt."""
+        return {
+            "route": route,
+            "screen_archetype": str(cached_entry.get("screen_archetype") or "statutory_guide"),
+            "verified_by_receipt": True,
+            "verify_key": verify_key,
+            "broken_assets": [],
+            "targets_under_44": [],
+            "cls_value": 0.0,
+            "overflow_375": False,
+            "overflow_1280": False,
+            "overflow_1440": False,
+            "dashes": [],
+            "widget_failures": [],
+            "hierarchy_violations": [],
+            "unwrapped_tables": [],
+            "transparent_controls": [],
+            "clipped_elements": [],
+            "card_geometry_violations": [],
+            "whitespace_rhythm_violations": [],
+            "calculator_ergonomics_violations": [],
+            "cta_density_violations": [],
+            "interactive_surface": {
+                "passed": True,
+                "route": route,
+                "verified_by_receipt": True,
+            },
+        }
+
+    def _clone_for_worker(self, worker_cdp_port: int) -> "UnifiedBrowserAuditor":
+        """Creates a thread-isolated auditor bound to a dedicated worker Chromium CDP port."""
+        worker = UnifiedBrowserAuditor(
+            adapter=self.adapter,
+            dist_dir=self.dist_dir,
+            cdp_port=worker_cdp_port,
+            fail_closed=self.fail_closed,
+            property_id=self.property_id,
+            isolated_browser=False,
+        )
+        worker.widget_specs = list(self.widget_specs)
+        worker.excluded_routes = set(self.excluded_routes)
+        return worker
+
     def audit_route(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for verifying a single route."""
+        if self.isolated_browser:
+            chrome_bin, is_shell = discover_headless_chrome_binary()
+            if chrome_bin:
+                with _HeadlessChromiumInstance(chrome_bin, is_headless_shell=is_shell) as chrome:
+                    worker = self._clone_for_worker(chrome.port)
+                    return asyncio.run(worker.verify_route(base_url, route))
         with self._cdp_session_lock(self.cdp_port):
             try:
                 return asyncio.run(self.verify_route(base_url, route))
@@ -3274,21 +4227,134 @@ class UnifiedBrowserAuditor:
 
     def audit_interactive_surface(self, base_url: str, route: str) -> Dict[str, Any]:
         """Synchronous wrapper for full E2E interactive surface verification on a route."""
+        if self.isolated_browser:
+            chrome_bin, is_shell = discover_headless_chrome_binary()
+            if chrome_bin:
+                with _HeadlessChromiumInstance(chrome_bin, is_headless_shell=is_shell) as chrome:
+                    worker = self._clone_for_worker(chrome.port)
+                    return asyncio.run(worker.verify_interactive_surface(base_url, route))
         with self._cdp_session_lock(self.cdp_port):
             try:
                 return asyncio.run(self.verify_interactive_surface(base_url, route))
             finally:
                 self._cleanup_dead_loopback_tabs(active_origin=None)
 
-    def run_audit(self, sample_size: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Runs comprehensive or sampled browser verification across all tenant routes.
-        Serves the distribution locally on EphemeralDistServer (127.0.0.1:0) and reuses a CDP tab.
-        """
+    def _run_isolated_worker_queue(
+        self,
+        route_queue: "queue.Queue[str]",
+        chrome_bin: str,
+        is_headless_shell: bool,
+        prop_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Executes routes dynamically from a shared work queue inside its own EphemeralDistServer + isolated Chromium."""
         import websockets
 
+        worker_findings: List[Dict[str, Any]] = []
+        with _HeadlessChromiumInstance(chrome_bin, is_headless_shell=is_headless_shell) as chrome:
+            worker_auditor = self._clone_for_worker(chrome.port)
+            with EphemeralDistServer(self.dist_dir, property_id=prop_id) as server:
+                base_url = server.base_url
+                msg_counter = [1]
+
+                async def _audit_queue() -> None:
+                    info = worker_auditor._open_cdp_tab()
+                    tab_id = info["id"]
+                    ws_url = info["webSocketDebuggerUrl"]
+                    try:
+                        async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
+                            await worker_auditor._configure_cdp_session(ws, msg_counter, disable_cache=True)
+                            while True:
+                                try:
+                                    r = route_queue.get_nowait()
+                                except queue.Empty:
+                                    break
+                                res = await worker_auditor.verify_route(base_url, r, msg_counter, ws=ws)
+                                worker_findings.append(res)
+                    finally:
+                        worker_auditor._close_cdp_tab_and_leaked_loopback(
+                            tab_id,
+                            active_origin=base_url,
+                            cleanup_stale_loopback=False,
+                        )
+
+                asyncio.run(_audit_queue())
+        return worker_findings
+
+    def _run_shared_cdp_routes(
+        self,
+        live_routes: List[str],
+        prop_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Executes routes sequentially against an explicitly configured shared Chrome CDP port."""
+        import websockets
+
+        live_findings: List[Dict[str, Any]] = []
+        if not live_routes:
+            return live_findings
         with self._cdp_session_lock(self.cdp_port):
-            reachable, cdp_msg = self.check_cdp_reachability()
+            msg_counter = [1]
+            self._cleanup_dead_loopback_tabs(active_origin=None)
+            base_url = ""
+            with EphemeralDistServer(self.dist_dir, property_id=prop_id) as server:
+                base_url = server.base_url
+
+                async def _audit_all() -> None:
+                    info = self._open_cdp_tab()
+                    tab_id = info["id"]
+                    ws_url = info["webSocketDebuggerUrl"]
+                    try:
+                        async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
+                            await self._configure_cdp_session(ws, msg_counter)
+                            for r in live_routes:
+                                res = await self.verify_route(base_url, r, msg_counter, ws=ws)
+                                live_findings.append(res)
+                    finally:
+                        self._close_cdp_tab_and_leaked_loopback(
+                            tab_id,
+                            active_origin=base_url,
+                            cleanup_stale_loopback=False,
+                        )
+
+                asyncio.run(_audit_all())
+            self._cleanup_dead_loopback_tabs(active_origin=base_url)
+        return live_findings
+
+    def run_audit(
+        self,
+        sample_size: Optional[int] = None,
+        workers: Optional[int] = None,
+        no_verify_cache: Optional[bool] = None,
+        shard: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Runs comprehensive or sampled browser verification across tenant routes.
+        Uses isolated parallel headless Chromium workers + closed SHA-256 route verification
+        receipts by default, while preserving explicit shared-CDP compatibility when `cdp_port`
+        is explicitly specified or `PSEOFACTORY_USE_SHARED_CDP=1`.
+        """
+        eff_shard = shard if shard is not None else self.shard
+        eff_workers_req = workers if workers is not None else self.workers
+        eff_no_cache = self.no_verify_cache if no_verify_cache is None else bool(no_verify_cache)
+
+        # Validate shard syntax eagerly even if dist_dir is empty or offline
+        if eff_shard:
+            parse_and_apply_shard([], eff_shard)
+
+        use_isolated = self.isolated_browser
+        chrome_bin: Optional[str] = None
+        is_shell = False
+        chrome_version_str = ""
+
+        if use_isolated:
+            chrome_bin, is_shell = discover_headless_chrome_binary()
+            if chrome_bin:
+                chrome_version_str = self._chrome_version_override or get_chrome_version_string(chrome_bin)
+            else:
+                use_isolated = False
+
+        if not use_isolated:
+            with self._cdp_session_lock(self.cdp_port):
+                reachable, cdp_msg = self.check_cdp_reachability()
             if not reachable:
                 if self.fail_closed:
                     raise RuntimeError(f"Chrome CDP unreachable on port {self.cdp_port}: {cdp_msg}")
@@ -3297,88 +4363,186 @@ class UnifiedBrowserAuditor:
                     "message": f"Chrome CDP unreachable on port {self.cdp_port}: {cdp_msg}",
                     "passed": True,
                     "total_routes": 0,
+                    "routes_audited": 0,
+                    "live_audited_routes": 0,
+                    "cached_receipt_routes": 0,
+                    "failed_count": 0,
+                    "failed_routes": [],
                     "findings": [],
                 }
-
-            if not self.dist_dir.exists():
-                return {
-                    "status": "PASS",
-                    "message": f"Distribution directory does not exist: {self.dist_dir}",
-                    "passed": True,
-                    "total_routes": 0,
-                    "findings": [],
-                }
-
-            extractor = RouteManifestExtractor(self.dist_dir)
-            all_routes = [r for r in extractor.extract_routes() if r not in self.excluded_routes]
-
-            if sample_size is not None and sample_size > 0:
-                routes_to_audit = extractor.select_smart_routes(
-                    all_routes=all_routes,
-                    sample_size=sample_size,
-                    widget_specs=self.widget_specs,
-                )
+            if self._chrome_version_override:
+                chrome_version_str = self._chrome_version_override
             else:
-                routes_to_audit = all_routes
+                try:
+                    ver_obj = json.loads(cdp_msg)
+                    chrome_version_str = (
+                        f"{ver_obj.get('Browser', 'shared-cdp')}|"
+                        f"{ver_obj.get('WebKit-Version', '')}"
+                    )
+                except Exception:
+                    chrome_version_str = str(cdp_msg)[:120]
 
-            findings: List[Dict[str, Any]] = []
-            msg_counter = [1]
+        if not self.dist_dir.exists():
+            return {
+                "status": "PASS",
+                "message": f"Distribution directory does not exist: {self.dist_dir}",
+                "passed": True,
+                "total_routes": 0,
+                "routes_audited": 0,
+                "live_audited_routes": 0,
+                "cached_receipt_routes": 0,
+                "failed_count": 0,
+                "failed_routes": [],
+                "findings": [],
+            }
 
-            self._cleanup_dead_loopback_tabs(active_origin=None)
+        extractor = RouteManifestExtractor(self.dist_dir)
+        all_routes = [r for r in extractor.extract_routes() if r not in self.excluded_routes]
 
-            prop_id = self.property_id or (self.adapter.tenant_id if self.adapter is not None else None)
-            base_url = ""
-            with EphemeralDistServer(self.dist_dir, property_id=prop_id) as server:
-                base_url = server.base_url
+        if sample_size is not None and sample_size > 0:
+            routes_to_audit = extractor.select_smart_routes(
+                all_routes=all_routes,
+                sample_size=sample_size,
+                widget_specs=self.widget_specs,
+            )
+        else:
+            routes_to_audit = list(all_routes)
 
-                async def audit_all() -> None:
-                    info = self._open_cdp_tab()
-                    tab_id = info["id"]
-                    ws_url = info["webSocketDebuggerUrl"]
-                    try:
-                        async with websockets.connect(ws_url, max_size=20 * 1024 * 1024) as ws:
-                            await self._configure_cdp_session(ws, msg_counter)
-                            for r in routes_to_audit:
-                                res = await self.verify_route(base_url, r, msg_counter, ws=ws)
-                                findings.append(res)
-                    finally:
-                        self._close_cdp_tab_and_leaked_loopback(
-                            tab_id,
-                            active_origin=base_url,
-                            cleanup_stale_loopback=False,
-                        )
+        if eff_shard:
+            routes_to_audit = parse_and_apply_shard(routes_to_audit, eff_shard)
 
-                asyncio.run(audit_all())
-            self._cleanup_dead_loopback_tabs(active_origin=base_url)
-
-        failed_count = sum(
-            1
-            for f in findings
-            if f.get("overflow_375")
-            or f.get("overflow_1280")
-            or f.get("overflow_1440")
-            or f.get("targets_under_44")
-            or (f.get("cls_value", 0.0) > 0.0)
-            or f.get("dashes")
-            or f.get("broken_assets")
-            or f.get("widget_failures")
-            or not (f.get("interactive_surface") or {}).get("passed", True)
-            or f.get("hierarchy_violations")
-            or f.get("unwrapped_tables")
-            or f.get("transparent_controls")
-            or f.get("clipped_elements")
-            or f.get("card_geometry_violations")
-            or f.get("whitespace_rhythm_violations")
-            or f.get("calculator_ergonomics_violations")
-            or f.get("cta_density_violations")
+        prop_id = self.property_id or (self.adapter.tenant_id if self.adapter is not None else None)
+        eff_receipt_path = (
+            self.receipt_path
+            if self.receipt_path is not None
+            else BrowserVerifyReceiptStore.default_receipt_path(prop_id)
         )
+        receipt_store = BrowserVerifyReceiptStore(eff_receipt_path) if eff_receipt_path is not None else None
+
+        cached_findings: List[Dict[str, Any]] = []
+        live_routes: List[str] = []
+        route_verify_keys: Dict[str, Optional[str]] = {}
+        estate_shared_digest = ""
+
+        if receipt_store is not None:
+            has_full_sitemap = (self.dist_dir / "sitemap.xml").is_file()
+            has_local_scripts = (
+                has_full_sitemap
+                or (self.dist_dir / "static" / "js").is_dir()
+                or (self.dist_dir / "js").is_dir()
+            )
+            audit_options = {
+                "property_id": prop_id or "",
+                "expected_host": self.adapter.canonical_domain if self.adapter is not None else "",
+                "fail_closed": self.fail_closed,
+                "enforce_strict_cls": True,
+                "check_meta_assets": has_full_sitemap,
+                "check_script_assets": has_local_scripts,
+                "widget_specs": [asdict(s) for s in self.widget_specs],
+            }
+            estate_shared_digest = BrowserVerifyReceiptStore.compute_estate_shared_digest(
+                dist_dir=self.dist_dir,
+                chrome_version=chrome_version_str,
+                audit_options=audit_options,
+                verifier_digest=self._verifier_digest_override,
+            )
+            stored_routes = {} if eff_no_cache else receipt_store.load_routes()
+            for r in routes_to_audit:
+                vkey = BrowserVerifyReceiptStore.compute_route_verify_key(
+                    self.dist_dir,
+                    estate_shared_digest,
+                    r,
+                )
+                route_verify_keys[r] = vkey
+                rec = stored_routes.get(r) if not eff_no_cache else None
+                if (
+                    vkey
+                    and isinstance(rec, dict)
+                    and rec.get("status") == "PASS"
+                    and rec.get("verify_key") == vkey
+                ):
+                    cached_findings.append(self._make_cached_pass_finding(r, vkey, rec))
+                else:
+                    live_routes.append(r)
+        else:
+            live_routes = list(routes_to_audit)
+
+        live_findings: List[Dict[str, Any]] = []
+        effective_workers = 0
+
+        if live_routes:
+            if use_isolated and chrome_bin:
+                effective_workers = compute_auto_worker_count(
+                    len(live_routes),
+                    requested_workers=eff_workers_req,
+                )
+                ordered_live = sorted(live_routes)
+                route_queue: "queue.Queue[str]" = queue.Queue()
+                for r in ordered_live:
+                    route_queue.put_nowait(r)
+                if effective_workers <= 1:
+                    live_findings = self._run_isolated_worker_queue(
+                        route_queue,
+                        chrome_bin,
+                        is_shell,
+                        prop_id,
+                    )
+                else:
+                    with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                        futures = [
+                            pool.submit(
+                                self._run_isolated_worker_queue,
+                                route_queue,
+                                chrome_bin,
+                                is_shell,
+                                prop_id,
+                            )
+                            for _ in range(effective_workers)
+                        ]
+                        for fut in as_completed(futures):
+                            live_findings.extend(fut.result())
+            else:
+                effective_workers = 1
+                live_findings = self._run_shared_cdp_routes(live_routes, prop_id)
+
+        if receipt_store is not None and live_findings:
+            passed_entries: Dict[str, Dict[str, Any]] = {}
+            evict_routes: List[str] = []
+            for f in live_findings:
+                r = str(f.get("route") or "")
+                vkey = route_verify_keys.get(r)
+                if self._is_finding_failed(f):
+                    if r:
+                        evict_routes.append(r)
+                elif r and vkey:
+                    passed_entries[r] = {
+                        "verify_key": vkey,
+                        "status": "PASS",
+                        "screen_archetype": str(f.get("screen_archetype") or "statutory_guide"),
+                    }
+            receipt_store.update_routes(
+                property_id=prop_id,
+                chrome_version=chrome_version_str,
+                estate_shared_digest=estate_shared_digest,
+                passed_entries=passed_entries,
+                evict_routes=evict_routes,
+            )
+
+        findings = sorted(cached_findings + live_findings, key=lambda item: str(item.get("route") or ""))
+        failed_routes = [str(f.get("route") or "") for f in findings if self._is_finding_failed(f)]
+        failed_count = len(failed_routes)
 
         return {
             "status": "PASS" if failed_count == 0 else "FAIL",
             "passed": failed_count == 0,
             "total_routes": len(all_routes),
             "routes_audited": len(routes_to_audit),
-            "findings": findings,
+            "live_audited_routes": len(live_findings),
+            "cached_receipt_routes": len(cached_findings),
             "failed_count": failed_count,
+            "failed_routes": failed_routes,
+            "workers_used": effective_workers,
+            "shard": eff_shard,
+            "findings": findings,
         }
 

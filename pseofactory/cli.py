@@ -132,7 +132,17 @@ def _summarize_browser_finding_failures(finding: Dict[str, Any]) -> List[str]:
     if finding.get("targets_under_44"):
         reasons.append(f"{len(finding['targets_under_44'])} undersized touch targets")
     if float(finding.get("cls_value") or 0.0) > 0.0:
-        reasons.append(f"CLS {finding['cls_value']}")
+        cls_sources = finding.get("cls_sources") or []
+        if cls_sources:
+            src_bits = []
+            for src in cls_sources[:3]:
+                if isinstance(src, dict):
+                    src_bits.append(f"{src.get('node', 'unknown')}({src.get('prev')}->{src.get('curr')})")
+                else:
+                    src_bits.append(str(src))
+            reasons.append(f"CLS {finding['cls_value']} [sources: {', '.join(src_bits)}]")
+        else:
+            reasons.append(f"CLS {finding['cls_value']}")
     if finding.get("dashes"):
         reasons.append(f"{len(finding['dashes'])} forbidden dashes")
     if finding.get("broken_assets"):
@@ -170,9 +180,16 @@ def _summarize_browser_finding_failures(finding: Dict[str, Any]) -> List[str]:
 def _print_browser_audit_report(label: str, report: Dict[str, Any], max_routes: int = 10) -> None:
     """Prints Browser CDP Audit summary plus capped per-route failure details."""
     status = report.get("status", "UNKNOWN")
+    live_n = report.get("live_audited_routes")
+    cached_n = report.get("cached_receipt_routes")
+    cache_note = (
+        f" (live={live_n}, cached={cached_n})"
+        if live_n is not None and cached_n is not None
+        else ""
+    )
     print(
         f"[{status}] Browser CDP Audit for '{label}': "
-        f"Total: {report.get('total_routes', 0)} | Audited: {report.get('routes_audited', 0)} | Failed: {report.get('failed_count', 0)}"
+        f"Total: {report.get('total_routes', 0)} | Audited: {report.get('routes_audited', 0)}{cache_note} | Failed: {report.get('failed_count', 0)}"
     )
     failed_routes: List[Tuple[str, List[str]]] = []
     for finding in report.get("findings") or []:
@@ -242,8 +259,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
             for p_id, adp_cls in adapter_map.items():
                 auditor = UnifiedBrowserAuditor(
                     adapter=adp_cls(),
-                    cdp_port=getattr(args, "cdp_port", 9222),
+                    cdp_port=getattr(args, "cdp_port", None),
                     fail_closed=getattr(args, "fail_closed", None),
+                    workers=getattr(args, "workers", None),
+                    no_verify_cache=getattr(args, "no_verify_cache", False),
+                    shard=getattr(args, "shard", None),
                 )
                 rep = auditor.run_audit(sample_size=getattr(args, "sample", None))
                 browser_reports[p_id] = rep
@@ -259,8 +279,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
         auditor = UnifiedBrowserAuditor(
             adapter=browser_adapter,
             dist_dir=args.dist_dir,
-            cdp_port=getattr(args, "cdp_port", 9222),
+            cdp_port=getattr(args, "cdp_port", None),
             fail_closed=getattr(args, "fail_closed", None),
+            workers=getattr(args, "workers", None),
+            no_verify_cache=getattr(args, "no_verify_cache", False),
+            shard=getattr(args, "shard", None),
         )
         report = auditor.run_audit(sample_size=getattr(args, "sample", None))
         if args.json:
@@ -327,8 +350,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
             if run_default_browser and p_id in _default_adapter_map:
                 b_auditor = _DefaultBrowserAuditor(
                     adapter=_default_adapter_map[p_id](),
-                    cdp_port=getattr(args, "cdp_port", 9222),
+                    cdp_port=getattr(args, "cdp_port", None),
                     fail_closed=getattr(args, "fail_closed", None),
+                    workers=getattr(args, "workers", None),
+                    no_verify_cache=getattr(args, "no_verify_cache", False),
+                    shard=getattr(args, "shard", None),
                 )
                 b_rep = b_auditor.run_audit(sample_size=default_sample)
                 rep_dict["browser_audit"] = b_rep
@@ -370,8 +396,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
     if run_default_browser and property_id in _default_adapter_map:
         b_auditor = _DefaultBrowserAuditor(
             adapter=_default_adapter_map[property_id](),
-            cdp_port=getattr(args, "cdp_port", 9222),
+            cdp_port=getattr(args, "cdp_port", None),
             fail_closed=getattr(args, "fail_closed", None),
+            workers=getattr(args, "workers", None),
+            no_verify_cache=getattr(args, "no_verify_cache", False),
+            shard=getattr(args, "shard", None),
         )
         b_rep = b_auditor.run_audit(sample_size=default_sample)
         rep_dict["browser_audit"] = b_rep
@@ -2304,7 +2333,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument("--browser", action="store_true", help="Audit static distribution using live Chrome DevTools Protocol (CDP)")
     p_audit.add_argument("--no-browser", action="store_true", help="Skip live Chrome DevTools Protocol (CDP) interactive audit during default audit")
     p_audit.add_argument("--sample", type=int, default=None, help="Sample N routes for fast browser audit")
-    p_audit.add_argument("--cdp-port", type=int, default=9222, help="Chrome DevTools Protocol port (default: 9222)")
+    p_audit.add_argument("--cdp-port", type=int, default=None, help="Explicit shared Chrome DevTools Protocol port (e.g. 9222); omit for isolated parallel headless Chromium workers")
+    p_audit.add_argument("--workers", type=int, default=None, help="Number of parallel headless Chromium workers (default: auto sized by CPU and RAM)")
+    p_audit.add_argument("--no-verify-cache", action="store_true", help="Disable SHA-256 page verification receipt reads and force live Chrome on every route")
+    p_audit.add_argument("--shard", type=str, default=None, help="Deterministic 1-indexed route shard filter K/N (e.g. 1/4)")
     p_audit.add_argument("--fail-closed", action="store_true", help="Fail closed if Chrome CDP port is unreachable")
     p_audit.add_argument("--check-engine-drift", action="store_true", help="Audit engine hash drift against state file")
     p_audit.add_argument("--department-handoffs", action="store_true", help="Verify end-to-end 6-department handoff contracts across all 4 tenants")

@@ -74,6 +74,20 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """Suppress standard HTTP request logging."""
         pass
 
+    def copyfile(self, source, outputfile) -> None:
+        """Sends static files <= 4 MiB in a single write burst so Chromium never paints partial streaming HTML."""
+        try:
+            pos = source.tell()
+            source.seek(0, os.SEEK_END)
+            size = source.tell() - pos
+            source.seek(pos)
+            if 0 < size <= 4 * 1024 * 1024:
+                outputfile.write(source.read())
+                return
+        except Exception:
+            pass
+        super().copyfile(source, outputfile)
+
     def _send_json(self, status_code: int, payload: Dict[str, Any], extra_headers: Optional[Dict[str, str]] = None) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status_code)
@@ -125,18 +139,26 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return "lienbond"
         return "profithelm"
 
-    def _evaluate_redirects_file(self, clean_path: str, query_str: str = "") -> Optional[tuple]:
+    def _get_parsed_redirects(self) -> List[tuple]:
         redirects_file = Path(self.root_dir) / "_redirects"
-        if not redirects_file.is_file():
-            return None
+        try:
+            st = redirects_file.stat()
+            sig = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return []
+
+        dist_srv = getattr(self, "dist_server", None)
+        if dist_srv is not None:
+            cached = getattr(dist_srv, "_redirects_cache", None)
+            if cached is not None and cached[0] == sig:
+                return cached[1]
+
         try:
             raw_lines = redirects_file.read_text(encoding="utf-8", errors="ignore").splitlines()
         except Exception:
-            return None
+            return []
 
-        req_norm = clean_path if clean_path.startswith("/") else f"/{clean_path}"
-        req_stripped = req_norm.rstrip("/") if req_norm != "/" else "/"
-
+        parsed: List[tuple] = []
         for line in raw_lines:
             stripped = line.strip()
             if not stripped:
@@ -158,7 +180,21 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # Skip internal 200 SPA fallback rewrites for /r/* and /api/* handled natively
             if status_code == 200:
                 continue
+            parsed.append((src, dst, status_code))
 
+        if dist_srv is not None:
+            dist_srv._redirects_cache = (sig, parsed)
+        return parsed
+
+    def _evaluate_redirects_file(self, clean_path: str, query_str: str = "") -> Optional[tuple]:
+        rules = self._get_parsed_redirects()
+        if not rules:
+            return None
+
+        req_norm = clean_path if clean_path.startswith("/") else f"/{clean_path}"
+        req_stripped = req_norm.rstrip("/") if req_norm != "/" else "/"
+
+        for src, dst, status_code in rules:
             matched_target: Optional[str] = None
             if src.endswith("/*"):
                 prefix = src[:-1]  # e.g. "/vs/"
