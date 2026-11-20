@@ -9,6 +9,8 @@ Zero em-dashes. Zero en-dashes.
 import re
 from pathlib import Path
 
+import pytest
+
 from pseofactory.affiliates import (
     LIENBOND_AFFILIATES,
     LIENBOND_MONETIZED_CALCULATOR_SLUGS,
@@ -413,6 +415,7 @@ def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None
     assert "bond_amount=99000" in out["postSubmitCalls"][0]
 
 
+@pytest.mark.xdist_group("cdp_9222")
 def test_lienbond_readable_formulas_and_compiled_estate_zero_spaced_hyphens(tmp_path: Path) -> None:
     """
     Verifies _format_human_readable_formula emits zero spaced hyphens (\\s+-\\s+) across all

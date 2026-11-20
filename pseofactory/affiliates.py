@@ -10334,8 +10334,12 @@ def reposition_affiliate_placements_from_gsc_signals(
             flags=re.S | re.I,
         )
 
-    # 4. Update #gsc-striking-overlay .overlay-partner-offer if present
-    if inline_offer and 'class="overlay-section overlay-partner-offer' in updated:
+    # 4. Update #gsc-striking-overlay .overlay-partner-offer if present (any class ordering)
+    _ov_partner_sec_re = re.compile(
+        r'<section\b[^>]*\bclass=["\'][^"\']*\boverlay-partner-offer\b[^"\']*["\'][^>]*>.*?</section>',
+        flags=re.S | re.I,
+    )
+    if inline_offer and _ov_partner_sec_re.search(updated):
         pk_ov = str(inline_offer["partner_key"])
         safe_ov_name = html_lib.escape(str(inline_offer.get("name") or pk_ov))
         safe_ov_cta = html_lib.escape(str(inline_offer.get("cta_text") or "Explore Partner"))
@@ -10358,18 +10362,12 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{safe_ov_cta}</a>\n'
             f'</section>'
         )
-        updated = re.sub(
-            r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',
-            ov_markup,
-            updated,
-            count=1,
-            flags=re.S | re.I,
-        )
+        updated = _ov_partner_sec_re.sub(ov_markup, updated, count=1)
 
     updated = normalize_html_callout_message_match(
         updated,
         property_id=prop,
-        preserve_promoted_primary=True,
+        preserve_promoted_primary=bool(slot_plan.get("gsc_repositioned")),
     )
     after_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', updated, flags=re.I)))
     after_primary = str(slot_plan.get("promoted_partner_key") or "")
@@ -10568,14 +10566,6 @@ def run_gsc_affiliate_placement_feedback_pass(
                 engagement_metrics=engagement_metrics,
             )
             if updated_html != raw_html:
-                try:
-                    updated_html = normalize_html_callout_message_match(
-                        updated_html,
-                        property_id=prop,
-                        preserve_promoted_primary=True,
-                    )
-                except Exception:
-                    pass
                 try:
                     from pseofactory.maintenance import normalize_html_visual_primitives
                     norm_h, _ = normalize_html_visual_primitives(updated_html, is_tenant_porcelain=True)

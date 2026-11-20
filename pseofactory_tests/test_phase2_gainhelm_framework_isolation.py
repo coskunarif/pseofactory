@@ -9,6 +9,7 @@ CMMC checkout/fulfillment parity. Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1165,7 +1166,25 @@ def test_gainhelm_estate_convergence_strict_and_core_containers(tmp_path: Path) 
     )
 
     dist_copy = tmp_path / "dist"
-    shutil.copytree(Path("/home/ubuntuadmin/projects/gainhelm/dist"), dist_copy, dirs_exist_ok=True)
+    src_gh_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
+    shutil.copytree(src_gh_dist, dist_copy, dirs_exist_ok=True, ignore=shutil.ignore_patterns("videos"))
+    src_gh_videos = src_gh_dist / "videos"
+    if src_gh_videos.is_dir():
+        dst_gh_videos = dist_copy / "videos"
+        dst_gh_videos.mkdir(parents=True, exist_ok=True)
+        for root_dir, _dirs, files in os.walk(src_gh_videos):
+            rel_dir = Path(root_dir).relative_to(src_gh_videos)
+            target_dir = dst_gh_videos / rel_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for fname in files:
+                src_file = Path(root_dir) / fname
+                dst_file = target_dir / fname
+                if src_file.suffix.lower() in {".mp4", ".mov", ".webm"}:
+                    if dst_file.exists() or dst_file.is_symlink():
+                        dst_file.unlink()
+                    os.symlink(src_file, dst_file)
+                else:
+                    shutil.copy2(src_file, dst_file)
     RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id="gainhelm")
     r2 = RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id="gainhelm")
     r3 = RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id="gainhelm")

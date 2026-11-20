@@ -887,6 +887,7 @@ def test_edge_workers_synthetic_probe_isolation_zero_crm_billing_kv_spam(tmp_pat
         assert out["redirPartner"] == partner_key
 
 
+@pytest.mark.xdist_group("cdp_9222")
 def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_path):
     from pseofactory.browser_verifier import UnifiedBrowserAuditor
     from pseofactory.server import EphemeralDistServer
@@ -1555,6 +1556,7 @@ console.log(JSON.stringify({{ status: data.zeptomail_status, provider: data.emai
         assert out["zeptoCalls"] == 0
 
 
+@pytest.mark.xdist_group("cdp_9222")
 def test_ui_ux_e2e_repro_gate(tmp_path):
     """
     Deterministic reproduction gate for the 4 UI/UX verification and runtime defects:

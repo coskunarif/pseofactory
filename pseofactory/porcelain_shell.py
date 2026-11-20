@@ -366,15 +366,15 @@ def extract_defined_and_referenced_css_vars(css_text: str) -> Tuple[Set[str], Se
     return defined, referenced
 
 
-def generate_porcelain_stylesheet_from_profile(profile: Dict[str, Any]) -> str:
-    """Generates the single canonical Porcelain Light CSS stylesheet for a tenant profile."""
-    assert_porcelain_palette_wcag(profile)
-    brand = profile["brand_name"]
-    bp = profile["brand_primary"]
-    bh = profile["brand_hover"]
-    bs = profile["brand_soft"]
-    bb = profile["brand_border"]
-
+@functools.lru_cache(maxsize=32)
+def _generate_porcelain_stylesheet_cached(
+    brand: str,
+    bp: str,
+    bh: str,
+    bs: str,
+    bb: str,
+) -> Tuple[str, str, FrozenSet[str]]:
+    """Cached pure builder returning (css_text, sha256_10, defined_css_vars)."""
     css = f"""/**
  * {brand} Canonical Porcelain Light Design System ({PORCELAIN_SHELL_VERSION})
  * Single-source-of-truth Porcelain tokens, layout primitives, WCAG AA contrast,
@@ -3059,6 +3059,25 @@ details.faq-accordion > summary::-webkit-details-marker {{
     undefined = sorted(referenced - defined)
     if undefined:
         raise ValueError(f"Generated Porcelain CSS contains undefined custom properties: {undefined}")
+    css_hash = hashlib.sha256(css.encode("utf-8")).hexdigest()[:10]
+    return css, css_hash, frozenset(defined)
+
+
+def _get_porcelain_stylesheet_meta_from_profile(profile: Dict[str, Any]) -> Tuple[str, str, FrozenSet[str]]:
+    """Validates profile WCAG palette and returns cached (css_text, sha256_10, defined_css_vars)."""
+    assert_porcelain_palette_wcag(profile)
+    return _generate_porcelain_stylesheet_cached(
+        str(profile["brand_name"]),
+        str(profile["brand_primary"]),
+        str(profile["brand_hover"]),
+        str(profile["brand_soft"]),
+        str(profile["brand_border"]),
+    )
+
+
+def generate_porcelain_stylesheet_from_profile(profile: Dict[str, Any]) -> str:
+    """Generates the single canonical Porcelain Light CSS stylesheet for a tenant profile."""
+    css, _, _ = _get_porcelain_stylesheet_meta_from_profile(profile)
     return css
 
 
@@ -4561,10 +4580,9 @@ def normalize_html_to_porcelain_shell(
     if blueprint == "operator_pwa":
         return _scrub_operator_pwa_gsc_token(html_content, profile), blueprint
 
-    porcelain_css_for_hash = generate_porcelain_stylesheet_from_profile(profile)
+    _, css_hash, cached_defined_vars = _get_porcelain_stylesheet_meta_from_profile(profile)
     if known_css_vars is None:
-        known_css_vars, _ = extract_defined_and_referenced_css_vars(porcelain_css_for_hash)
-    css_hash = hashlib.sha256(porcelain_css_for_hash.encode("utf-8")).hexdigest()[:10]
+        known_css_vars = cached_defined_vars
     base_css_href = str(profile["css_href"]).split("?", 1)[0]
     versioned_css_href = f"{base_css_href}?v={css_hash}"
 

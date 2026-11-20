@@ -4314,6 +4314,29 @@ def compile_search_opportunity_briefs(
 # ==============================================================================
 # WORKFLOW 6: MAKE CONTENT PORTFOLIO DECISIONS (& TRUE ASSET AGE RESOLUTION)
 # ==============================================================================
+_AGE_LEDGER_JSON_CACHE: Dict[Tuple[str, int, int, int], Any] = {}
+_AGE_LEDGER_JSON_CACHE_MAX = 64
+
+
+def _load_cached_age_ledger_json(l_path: Path) -> Any:
+    """Loads and caches a parsed ledger JSON file keyed by (path, st_mtime_ns, st_size, st_ino)."""
+    try:
+        st = l_path.stat()
+    except OSError:
+        return None
+    cache_key = (str(l_path), int(st.st_mtime_ns), int(st.st_size), int(st.st_ino))
+    if cache_key in _AGE_LEDGER_JSON_CACHE:
+        return _AGE_LEDGER_JSON_CACHE[cache_key]
+    try:
+        data = json.loads(l_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if len(_AGE_LEDGER_JSON_CACHE) >= _AGE_LEDGER_JSON_CACHE_MAX:
+        _AGE_LEDGER_JSON_CACHE.clear()
+    _AGE_LEDGER_JSON_CACHE[cache_key] = data
+    return data
+
+
 def resolve_true_asset_age_days(
     first_arg: Union[str, Path],
     second_arg: Optional[Union[str, Path]] = None,
@@ -4378,12 +4401,10 @@ def resolve_true_asset_age_days(
 
     for ledger_name in ("index_push_ledger.json", "pushed_urls_ledger.json", "metric_recovery_ledger.json"):
         l_path = root / ".agy" / ledger_name
-        if not l_path.is_file():
+        data = _load_cached_age_ledger_json(l_path)
+        if not isinstance(data, dict):
             continue
         try:
-            data = json.loads(l_path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                continue
             if ledger_name == "metric_recovery_ledger.json":
                 snaps = data.get("snapshots", {})
                 if isinstance(snaps, dict):
@@ -8109,11 +8130,13 @@ def evaluate_closed_loop_cohort_reflection(
                 ov_data["title"] = ov_data["title_rewrite"]
                 ov_changed = True
             if not ov_data.get("autonomous_citation_assertions") or not ov_data.get("ai_mode_decision_matrix"):
+                from pseofactory.contracts import normalize_statutory_acronym_casing
+
                 cit_bundle = _build_autonomous_citation_assertions_and_matrix(
                     tenant_id=prop,
                     slug=canon_ov_slug,
                     query_clean=q_str,
-                    heading_label=canon_ov_slug.replace("-", " ").title(),
+                    heading_label=normalize_statutory_acronym_casing(canon_ov_slug.replace("-", " ").title()),
                 )
                 ov_data["autonomous_citation_assertions"] = cit_bundle["autonomous_citation_assertions"]
                 ov_data["ai_mode_decision_matrix"] = cit_bundle["ai_mode_decision_matrix"]

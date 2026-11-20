@@ -165,6 +165,7 @@ def test_operator_pwa_and_editorial_comparison_blueprint_classification():
     assert any("mislabeled" in i.lower() or "calculator" in i.lower() for i in tampered_issues)
 
 
+@pytest.mark.xdist_group("cdp_9222")
 def test_gate_10_physical_css_touch_target_and_loophole_closures(tmp_path: Path):
     # 1. Inline #hex and rgb() outside <svg> must fail audit_porcelain_shell_page
     bad_inline_html = (
@@ -535,6 +536,7 @@ def test_publisher_head_injects_og_image_idempotently_across_tenants_and_governa
         assert len(matches) == 1 and existing_tag in matches[0], matches
 
 
+@pytest.mark.xdist_group("cdp_9222")
 def test_calc_panel_title_desktop_h2_hierarchy_and_h3_ordering(tmp_path: Path) -> None:
     """
     Verify .calc-panel-title (used on <h2>) computes to >= 18px (1.125rem+) on desktop

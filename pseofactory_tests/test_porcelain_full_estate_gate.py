@@ -381,6 +381,7 @@ def test_mobile_375px_nav_cta_desktop_specificity_overrides_btn_cta() -> None:
     assert not failures, "; ".join(failures)
 
 
+@pytest.mark.xdist_group("lienbond_compiled")
 def test_compiled_lienbond_stylesheet_covers_all_rendered_ui_classes(compiled_lienbond_root: Path) -> None:
     """
     Freshly compiled compile_lienbond_estate dist/css/style.css must define selectors for every
@@ -507,6 +508,7 @@ def _audit_html_hygiene_issues(dist_dir: Path, css_text: str) -> List[str]:
     return issues
 
 
+@pytest.mark.xdist_group("lienbond_compiled")
 def test_compiled_lienbond_estate_zero_raw_python_dup_calcs_dup_faqs_or_legacy_clutter(
     compiled_lienbond_root: Path,
 ) -> None:
@@ -793,6 +795,7 @@ def _load_cli_module(cli_path: Path, mod_name: str):
     return mod
 
 
+@pytest.mark.xdist_group("lienbond_compiled")
 def test_lienbond_cli_inspects_drifted_assets_count_not_drifted(
     compiled_lienbond_root: Path,
     monkeypatch: pytest.MonkeyPatch,

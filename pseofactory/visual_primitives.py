@@ -297,6 +297,7 @@ def get_screen_archetype_contract(html_content: str = "", rel_path: str = "index
     return dict(SCREEN_ARCHETYPE_CONTRACTS[archetype])
 
 
+@_functools.lru_cache(maxsize=8)
 def render_visual_primitives_style(is_tenant_porcelain: bool = True) -> str:
     """
     Renders the deterministic visual primitive stylesheet (<style id="pseo-visual-primitives">).

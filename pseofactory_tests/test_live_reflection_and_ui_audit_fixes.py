@@ -893,3 +893,132 @@ def test_profithelm_app_js_crypto_state_audit_retrofit_and_live_guard(tmp_path: 
         assert blocked["status"] == "BLOCKED_LIVE_WORKTREE"
 
 
+def test_stage3b_overlay_mutation_triggers_post_workflow_retrofit_and_normalizes_acronyms(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Regression test for Stage 3b ProfitHelm overlay-mutation bug:
+    1. inject_overlay_into_html normalizes statutory acronyms (Amt/Camt, 199a/Qbi, 280g)
+       across meta_description, quick_answer, assertions, h2_headings, and FAQ entries so
+       visible HTML matches normalized FAQPage JSON-LD.
+    2. reflect_and_recompile_all_assets(..., force=True) snapshots dist/**/*.html before/after
+       run_all_seo_growth_workflows so overlay-only HTML mutations (with mutated_donor_pages=[])
+       trigger post-workflow RetroReflectionEngine.retrofit_estate.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.gsc_remediation import inject_overlay_into_html
+    import pseofactory.affiliates as aff_mod
+    import pseofactory.qualification as qual_mod
+    import pseofactory.seo_growth_loops as sgl_mod
+    from pseofactory.maintenance import (
+        AssetIntegrityEvaluator,
+        AssetIntegrityReport,
+        RetroReflectionEngine,
+        SubprocessPropertyAdapter,
+        TenantRegistry,
+        reflect_and_recompile_all_assets,
+    )
+
+    base_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        "<title>Corporate AMT CAMT Book Income Calculator | ProfitHelm</title>"
+        '<meta name="description" content="Calculate Corporate AMT CAMT Book Income.">'
+        '<link rel="canonical" href="https://profithelm.com/tools/corporate-amt-camt-book-income-minimum-tax-calculator/">'
+        '<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"FAQPage","mainEntity":[]}]}</script>'
+        "</head><body><main id=\"main-content\"><div class=\"container\">"
+        '<h1>Corporate AMT CAMT Book Income Calculator</h1>'
+        '<aside class="quick-answer"><div class="quick-answer-body"><p>Baseline.</p></div></aside>'
+        '<section class="faq-section"><div class="faq-list"></div></section>'
+        "</div></main></body></html>"
+    )
+    polluted_overlay = {
+        "slug": "corporate-amt-camt-book-income-minimum-tax-calculator",
+        "tenant_id": "profithelm",
+        "title_rewrite": "Corporate Amt Camt & Section 199a Qbi 280g Calculator | ProfitHelm",
+        "meta_description": "Calculate Corporate Amt Camt and Section 199a Qbi and Section 280g statutory liabilities accurately.",
+        "quick_answer": "Under IRC rules, Corporate Amt Camt and Section 199a Qbi and Section 280g compute deterministic federal liability.",
+        "autonomous_citation_assertions": [
+            "In 2026, Corporate Amt Camt and Section 280g models apply statutory thresholds."
+        ],
+        "h2_headings": ["Corporate Amt Camt & Section 199a Qbi Rules"],
+        "faq_entries": [
+            {
+                "question": "How is Corporate Amt Camt calculated under Section 199a Qbi and 280g rules?",
+                "answer": "Corporate Amt Camt applies 15% AFSI alongside Section 199a Qbi and Section 280g limits.",
+            }
+        ],
+    }
+    injected = inject_overlay_into_html(base_html, polluted_overlay)
+    assert "Amt Camt" not in injected and "AMT CAMT" in injected
+    assert "199a" not in injected and "199A" in injected
+    assert "Qbi" not in injected and "QBI" in injected
+    assert "280g" not in injected and "280G" in injected
+
+    repo_dir = tmp_path / "ph_stage3b_repo"
+    dist_dir = repo_dir / "dist"
+    leaf_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "hawaii"
+    leaf_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text("<!DOCTYPE html><html><head></head><body><main></main></body></html>", encoding="utf-8")
+    leaf_html = leaf_dir / "index.html"
+    leaf_html.write_text(base_html, encoding="utf-8")
+
+    ad = SubprocessPropertyAdapter(
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        dist_dir=dist_dir,
+        repo_path=repo_dir,
+        build_command=["true"],
+    )
+    reg = TenantRegistry()
+    reg.register_adapter(ad)
+
+    retro_calls: list[int] = []
+
+    def _fake_retrofit_estate(*args, **kwargs):
+        retro_calls.append(1)
+        return {"status": "PASS", "pages_retrofitted": 0, "porcelain_compiled": True}
+
+    def _fake_run_all_seo_growth_workflows(*args, **kwargs):
+        # Simulate overlay injection mutating HTML on disk while internal_links has 0 mutated_donor_pages
+        cur = leaf_html.read_text(encoding="utf-8")
+        leaf_html.write_text(
+            cur.replace("</main>", '<section class="overlay-section">Injected</section>\n</main>', 1),
+            encoding="utf-8",
+        )
+        return {"status": "PASS", "internal_links": {"mutated_donor_pages": []}}
+
+    def _clean_audit_all(self, adapter, *args, **kwargs):
+        return AssetIntegrityReport(
+            property_id=adapter.property_id,
+            total_assets_checked=2,
+            compliant_assets_count=2,
+            drifted_assets_count=0,
+            drifted_assets=[],
+            status="PASS",
+        )
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(AssetIntegrityEvaluator, "audit_all", _clean_audit_all)
+    monkeypatch.setattr(RetroReflectionEngine, "audit_estate", classmethod(lambda cls, *a, **k: {"stale_count": 0, "stale_pages": []}))
+    monkeypatch.setattr(RetroReflectionEngine, "retrofit_estate", classmethod(lambda cls, *a, **k: _fake_retrofit_estate(*a, **k)))
+    monkeypatch.setattr(aff_mod, "audit_callout_destination_message_match", lambda *a, **k: {"status": "PASS", "mismatch_count": 0})
+    monkeypatch.setattr(qual_mod, "reconcile_tenant_topical_authority_and_cannibalization", lambda *a, **k: {})
+    monkeypatch.setattr(sgl_mod, "run_all_seo_growth_workflows", _fake_run_all_seo_growth_workflows)
+
+    reflect_and_recompile_all_assets(
+        properties=["profithelm"],
+        force=True,
+        run_downstream=False,
+        registry=reg,
+        defer_live_indexing=True,
+        verbose=False,
+    )
+    assert len(retro_calls) == 2, (
+        f"Expected pre-retro + post-workflow retrofit_estate after overlay HTML mutation, got {len(retro_calls)} calls"
+    )
+
+
+

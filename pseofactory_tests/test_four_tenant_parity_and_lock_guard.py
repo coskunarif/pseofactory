@@ -1,7 +1,35 @@
 import os
+import shutil
 from pathlib import Path
 
+import pytest
+
 from pseofactory.action_bus import HumanActionBus
+
+
+_HEAVY_VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+
+
+def _copy_dist_without_video_copies(src_dist: Path, dst_dist: Path) -> None:
+    """Copies dist/ without duplicating heavy video binaries while keeping dist/videos/ strictly isolated."""
+    shutil.copytree(src_dist, dst_dist, dirs_exist_ok=True, ignore=shutil.ignore_patterns("videos"))
+    src_videos = src_dist / "videos"
+    if src_videos.is_dir():
+        dst_videos = dst_dist / "videos"
+        dst_videos.mkdir(parents=True, exist_ok=True)
+        for root_dir, _dirs, files in os.walk(src_videos):
+            rel_dir = Path(root_dir).relative_to(src_videos)
+            target_dir = dst_videos / rel_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for fname in files:
+                src_file = Path(root_dir) / fname
+                dst_file = target_dir / fname
+                if src_file.suffix.lower() in _HEAVY_VIDEO_EXTS:
+                    if dst_file.exists() or dst_file.is_symlink():
+                        dst_file.unlink()
+                    os.symlink(src_file, dst_file)
+                else:
+                    shutil.copy2(src_file, dst_file)
 from pseofactory.contracts import assert_youtube_transcript
 from pseofactory.distributor import _generate_youtube_transcript
 from pseofactory.gitops import (
@@ -416,7 +444,7 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
     gh_repo = tmp_path / "gainhelm"
     gh_dist = gh_repo / "dist"
     (gh_repo / ".agy").mkdir(parents=True, exist_ok=True)
-    shutil.copytree(live_gh_dist, gh_dist)
+    _copy_dist_without_video_copies(live_gh_dist, gh_dist)
     shutil.copy2(live_gh_eng, gh_repo / ".agy" / "outbound_partner_engagement.json")
     before_h2_by_slug = {}
     for html_file in sorted((gh_dist / "tools").glob("*/index.html")):
@@ -941,7 +969,21 @@ console.log(JSON.stringify(out));
     assert corrupt_ledger.read_text(encoding="utf-8") == corrupt_payload
 
 
-def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "prop,src_root",
+    [
+        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
+        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
+        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond")),
+    ],
+    ids=["gainhelm", "prexvo", "profithelm", "lienbond"],
+)
+def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity(
+    tmp_path: Path,
+    prop: str,
+    src_root: Path,
+) -> None:
     """
     Verifies on isolated copies of all 4 real tenant estates (dist + .agy):
     - load_property_partner_engagement_metrics prefers outbound_partner_engagement.json over stale partner_engagement_metrics.json
@@ -955,7 +997,6 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
     """
     import json
     import re
-    import shutil
     from bs4 import BeautifulSoup
     import pseofactory.affiliates as _aff
     from pseofactory.affiliates import (
@@ -1016,129 +1057,122 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
                 )
         return mismatches
 
-    tenants = [
-        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
-        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
-        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
-        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond")),
-    ]
-    for prop, src_root in tenants:
-        repo_copy = tmp_path / prop
-        dist_copy = repo_copy / "dist"
-        shutil.copytree(src_root / "dist", dist_copy)
-        if (src_root / ".agy").is_dir():
-            shutil.copytree(src_root / ".agy", repo_copy / ".agy")
+    repo_copy = tmp_path / prop
+    dist_copy = repo_copy / "dist"
+    _copy_dist_without_video_copies(src_root / "dist", dist_copy)
+    if (src_root / ".agy").is_dir():
+        shutil.copytree(src_root / ".agy", repo_copy / ".agy")
 
-        out_eng_file = repo_copy / ".agy" / "outbound_partner_engagement.json"
-        if out_eng_file.is_file():
-            loaded_eng = load_property_partner_engagement_metrics(repo_copy / ".agy", prop)
-            assert loaded_eng == json.loads(out_eng_file.read_text(encoding="utf-8")), (
-                f"{prop}: load_property_partner_engagement_metrics shadowed outbound_partner_engagement.json"
-            )
-
-        fb_report = run_gsc_affiliate_placement_feedback_pass(
-            property_id=prop,
-            repo_root=repo_copy,
-            dist_dir=dist_copy,
-            dry_run=False,
+    out_eng_file = repo_copy / ".agy" / "outbound_partner_engagement.json"
+    if out_eng_file.is_file():
+        loaded_eng = load_property_partner_engagement_metrics(repo_copy / ".agy", prop)
+        assert loaded_eng == json.loads(out_eng_file.read_text(encoding="utf-8")), (
+            f"{prop}: load_property_partner_engagement_metrics shadowed outbound_partner_engagement.json"
         )
-        if prop == "prexvo":
-            px_pages = [
-                p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
-            ]
-            assert len(px_pages) == 23
-            px_fb_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
-            assert px_fb_mismatches == [], f"Prexvo slot mismatches right after feedback_pass: {px_fb_mismatches}"
 
-        promoted_before = {}
-        for html_p in sorted((dist_copy / "tools").rglob("index.html")):
-            rel = html_p.relative_to(dist_copy).as_posix()
-            raw_t = html_p.read_text(encoding="utf-8")
-            m_in = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', raw_t)
-            if m_in:
-                promoted_before[rel] = m_in.group(1)
-
-        RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
-        snap_p1 = {
-            p.relative_to(dist_copy).as_posix(): p.read_text(encoding="utf-8")
-            for p in sorted(dist_copy.rglob("*.html"))
-        }
-        wiped = []
-        for rel, pk0 in promoted_before.items():
-            m_after = re.search(
-                r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
-                snap_p1[rel],
-            )
-            if not m_after or m_after.group(1) != pk0:
-                wiped.append((rel, pk0, m_after.group(1) if m_after else None))
-        assert not wiped, f"{prop} wiped GSC/empirical swaps during retrofit_estate Pass 1: {wiped}"
-
-        RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
-        snap_p2 = {
-            p.relative_to(dist_copy).as_posix(): p.read_text(encoding="utf-8")
-            for p in sorted(dist_copy.rglob("*.html"))
-        }
-        p1_p2_diffs = [rel for rel, b1 in snap_p1.items() if snap_p2[rel] != b1]
-        assert not p1_p2_diffs, f"{prop} Pass 1 -> Pass 2 HTML diffs did not converge: {p1_p2_diffs}"
-
-        RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
-        p2_p3_diffs = [
-            rel for rel, b2 in snap_p2.items() if (dist_copy / rel).read_text(encoding="utf-8") != b2
+    fb_report = run_gsc_affiliate_placement_feedback_pass(
+        property_id=prop,
+        repo_root=repo_copy,
+        dist_dir=dist_copy,
+        dry_run=False,
+    )
+    if prop == "prexvo":
+        px_pages = [
+            p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
         ]
-        assert not p2_p3_diffs, f"{prop} Pass 2 -> Pass 3 HTML diffs did not converge: {p2_p3_diffs}"
+        assert len(px_pages) == 23
+        px_fb_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
+        assert px_fb_mismatches == [], f"Prexvo slot mismatches right after feedback_pass: {px_fb_mismatches}"
 
-        wiped_p3 = []
-        for rel, pk0 in promoted_before.items():
-            txt_p3 = (dist_copy / rel).read_text(encoding="utf-8")
-            m_after3 = re.search(
-                r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
-                txt_p3,
-            )
-            if not m_after3 or m_after3.group(1) != pk0:
-                wiped_p3.append((rel, pk0, m_after3.group(1) if m_after3 else None))
-        assert not wiped_p3, f"{prop} downgraded swaps by Pass 3: {wiped_p3}"
+    promoted_before = {}
+    for html_p in sorted((dist_copy / "tools").rglob("index.html")):
+        rel = html_p.relative_to(dist_copy).as_posix()
+        raw_t = html_p.read_text(encoding="utf-8")
+        m_in = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', raw_t)
+        if m_in:
+            promoted_before[rel] = m_in.group(1)
 
-        callout_audit = audit_callout_destination_message_match(dist_copy, property_id=prop)
-        assert callout_audit["status"] == "PASS" and callout_audit["mismatch_count"] == 0, callout_audit
+    RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
+    snap_p1 = {
+        p.relative_to(dist_copy).as_posix(): p.read_text(encoding="utf-8")
+        for p in sorted(dist_copy.rglob("*.html"))
+    }
+    wiped = []
+    for rel, pk0 in promoted_before.items():
+        m_after = re.search(
+            r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
+            snap_p1[rel],
+        )
+        if not m_after or m_after.group(1) != pk0:
+            wiped.append((rel, pk0, m_after.group(1) if m_after else None))
+    assert not wiped, f"{prop} wiped GSC/empirical swaps during retrofit_estate Pass 1: {wiped}"
 
-        if prop == "gainhelm":
-            dora_html = (dist_copy / "tools/dora-ict-third-party-risk-compliance-cost-calculator/index.html").read_text(encoding="utf-8")
-            euai_html = (dist_copy / "tools/eu-ai-act-high-risk-conformity-assessment-cost-calculator/index.html").read_text(encoding="utf-8")
-            assert "Dora Ict" not in dora_html and "DORA ICT" in dora_html
-            assert "Eu Ai Act" not in euai_html and "EU AI Act" in euai_html
-        elif prop == "prexvo":
-            px_retro_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
-            assert px_retro_mismatches == [], (
-                f"Prexvo slot mismatches after retrofit_estate P1->P2->P3: {px_retro_mismatches}"
-            )
-        elif prop == "profithelm":
-            ledger_data = json.loads((repo_copy / ".agy" / "gsc_affiliate_placement_ledger.json").read_text(encoding="utf-8"))
-            assert fb_report["pages_scanned"] == 156
-            assert len(ledger_data["page_reports"]) == 156, len(ledger_data["page_reports"])
-            assert len(ledger_data["repositioned_pages"]) == fb_report["repositioned_pages_count"]
-            persisted_ph = load_persisted_gsc_placement_metrics_by_slug(repo_copy / ".agy", "profithelm")
-            assert "section-179-calculator" in persisted_ph and persisted_ph["section-179-calculator"]["impressions"] >= 70
-            assert "tcja-sunset-capital-gains" in persisted_ph and persisted_ph["tcja-sunset-capital-gains"]["impressions"] >= 25
-            ca_html = (dist_copy / "tools/irs-2027-tax-brackets/california/index.html").read_text(encoding="utf-8")
-            m_ca = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', ca_html)
-            assert m_ca and m_ca.group(1) == promoted_before["tools/irs-2027-tax-brackets/california/index.html"]
-        elif prop == "lienbond":
-            for lp in sorted((dist_copy / "tools").rglob("index.html")):
-                if lp.parent == dist_copy / "tools":
-                    continue
-                txt = lp.read_text(encoding="utf-8")
-                m_sec = re.search(r'<section[^>]*affiliates-section[^>]*>(.*?)</section>', txt, re.S)
-                assert m_sec is not None, lp
-                sec_pk_m = re.search(r'data-primary-partner=["\']([^"\']+)["\']', m_sec.group(0))
-                assert sec_pk_m is not None, lp
-                if sec_pk_m.group(1) == "levelset_lien_filing":
-                    h2_m = re.search(r"<h2[^>]*>(.*?)</h2>", m_sec.group(1), re.S)
-                    assert h2_m and "SuretyBondsDirect" not in h2_m.group(1)
-                m_bar = re.search(r'<div[^>]*comparison-table-cta-bar[^>]*>', txt)
-                if m_bar and 'data-gsc-repositioned="true"' in m_sec.group(0):
-                    p_bar = re.search(r'data-partner=["\']([^"\']+)["\']', m_bar.group(0))
-                    assert p_bar and p_bar.group(1) == sec_pk_m.group(1)
-                    assert "card pseo-card" in m_bar.group(0)
+    RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
+    snap_p2 = {
+        p.relative_to(dist_copy).as_posix(): p.read_text(encoding="utf-8")
+        for p in sorted(dist_copy.rglob("*.html"))
+    }
+    p1_p2_diffs = [rel for rel, b1 in snap_p1.items() if snap_p2[rel] != b1]
+    assert not p1_p2_diffs, f"{prop} Pass 1 -> Pass 2 HTML diffs did not converge: {p1_p2_diffs}"
+
+    RetroReflectionEngine.retrofit_estate(dist_dir=dist_copy, property_id=prop)
+    p2_p3_diffs = [
+        rel for rel, b2 in snap_p2.items() if (dist_copy / rel).read_text(encoding="utf-8") != b2
+    ]
+    assert not p2_p3_diffs, f"{prop} Pass 2 -> Pass 3 HTML diffs did not converge: {p2_p3_diffs}"
+
+    wiped_p3 = []
+    for rel, pk0 in promoted_before.items():
+        txt_p3 = (dist_copy / rel).read_text(encoding="utf-8")
+        m_after3 = re.search(
+            r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
+            txt_p3,
+        )
+        if not m_after3 or m_after3.group(1) != pk0:
+            wiped_p3.append((rel, pk0, m_after3.group(1) if m_after3 else None))
+    assert not wiped_p3, f"{prop} downgraded swaps by Pass 3: {wiped_p3}"
+
+    callout_audit = audit_callout_destination_message_match(dist_copy, property_id=prop)
+    assert callout_audit["status"] == "PASS" and callout_audit["mismatch_count"] == 0, callout_audit
+
+    if prop == "gainhelm":
+        dora_html = (dist_copy / "tools/dora-ict-third-party-risk-compliance-cost-calculator/index.html").read_text(encoding="utf-8")
+        euai_html = (dist_copy / "tools/eu-ai-act-high-risk-conformity-assessment-cost-calculator/index.html").read_text(encoding="utf-8")
+        assert "Dora Ict" not in dora_html and "DORA ICT" in dora_html
+        assert "Eu Ai Act" not in euai_html and "EU AI Act" in euai_html
+    elif prop == "prexvo":
+        px_retro_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
+        assert px_retro_mismatches == [], (
+            f"Prexvo slot mismatches after retrofit_estate P1->P2->P3: {px_retro_mismatches}"
+        )
+    elif prop == "profithelm":
+        ledger_data = json.loads((repo_copy / ".agy" / "gsc_affiliate_placement_ledger.json").read_text(encoding="utf-8"))
+        assert fb_report["pages_scanned"] == 156
+        assert len(ledger_data["page_reports"]) == 156, len(ledger_data["page_reports"])
+        assert len(ledger_data["repositioned_pages"]) == fb_report["repositioned_pages_count"]
+        persisted_ph = load_persisted_gsc_placement_metrics_by_slug(repo_copy / ".agy", "profithelm")
+        assert "section-179-calculator" in persisted_ph and persisted_ph["section-179-calculator"]["impressions"] >= 70
+        assert "tcja-sunset-capital-gains" in persisted_ph and persisted_ph["tcja-sunset-capital-gains"]["impressions"] >= 25
+        ca_html = (dist_copy / "tools/irs-2027-tax-brackets/california/index.html").read_text(encoding="utf-8")
+        m_ca = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', ca_html)
+        assert m_ca and m_ca.group(1) == promoted_before["tools/irs-2027-tax-brackets/california/index.html"]
+    elif prop == "lienbond":
+        for lp in sorted((dist_copy / "tools").rglob("index.html")):
+            if lp.parent == dist_copy / "tools":
+                continue
+            txt = lp.read_text(encoding="utf-8")
+            m_sec = re.search(r'<section[^>]*affiliates-section[^>]*>(.*?)</section>', txt, re.S)
+            assert m_sec is not None, lp
+            sec_pk_m = re.search(r'data-primary-partner=["\']([^"\']+)["\']', m_sec.group(0))
+            assert sec_pk_m is not None, lp
+            if sec_pk_m.group(1) == "levelset_lien_filing":
+                h2_m = re.search(r"<h2[^>]*>(.*?)</h2>", m_sec.group(1), re.S)
+                assert h2_m and "SuretyBondsDirect" not in h2_m.group(1)
+            m_bar = re.search(r'<div[^>]*comparison-table-cta-bar[^>]*>', txt)
+            if m_bar and 'data-gsc-repositioned="true"' in m_sec.group(0):
+                p_bar = re.search(r'data-partner=["\']([^"\']+)["\']', m_bar.group(0))
+                assert p_bar and p_bar.group(1) == sec_pk_m.group(1)
+                assert "card pseo-card" in m_bar.group(0)
 
 
 def test_engagement_precedence_prexvo_card1_and_non_empirical_gsc_preservation(tmp_path: Path) -> None:

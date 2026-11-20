@@ -403,6 +403,7 @@ def test_stage_3_unattended_maintenance_and_supervisor_self_heal_seeded_flaws(tm
     assert post_sup_report.drifted_assets_count == 0
 
 
+@pytest.mark.xdist_group("cdp_9222")
 def test_stage_4_unattended_reflection_and_real_browser_verification(tmp_path):
     """
     Challenges Stage 4 (RetroReflectionEngine.audit_estate, retrofit_estate, and

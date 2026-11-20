@@ -201,7 +201,7 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     assert json.loads(build_proc.stdout.strip())["status"] == "PASS"
 
     pytest_proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "tests/"],
+        [sys.executable, "-m", "pytest", "-n", "0", "-q", "tests/"],
         cwd=str(tmp_repo),
         env=standalone_env,
         capture_output=True,

@@ -25,4 +25,4 @@ where = ["."]
 include = ["pseofactory*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "-n auto"
+addopts = "-n auto --dist loadgroup"

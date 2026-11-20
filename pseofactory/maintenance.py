@@ -3471,7 +3471,12 @@ class AssetIntegrityEvaluator:
             and not self.enforce_operational_shield
             and not engine_drifted
         )
-        disk_eval_cache_path = Path("/tmp/pseofactory_asset_eval_cache_v1.json")
+        xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "").strip()
+        disk_eval_cache_path = Path(
+            f"/tmp/pseofactory_asset_eval_cache_v1_{xdist_worker}.json"
+            if xdist_worker
+            else "/tmp/pseofactory_asset_eval_cache_v1.json"
+        )
         if engine_drifted and disk_eval_cache_path.is_file():
             try:
                 disk_eval_cache_path.unlink(missing_ok=True)
@@ -14987,7 +14992,33 @@ class RetroReflectionEngine:
                 property_id.lower() == "gainhelm"
                 and cls._gainhelm_needs_framework_isolation_heal(updated_html, slug)
             )
-            if (
+            is_tool_rel = rel.startswith("tools/") and rel.endswith("/index.html") and rel.count("/") >= 2
+            ran_callout_via_reposition = False
+            reposition_changed = False
+            if is_tool_rel:
+                try:
+                    tool_slug = "/".join(rel.split("/")[1:-1])
+                    slug_gsc_metrics = (
+                        persisted_gsc_by_slug.get(tool_slug.lower())
+                        or persisted_gsc_by_slug.get(tool_slug.lower().replace("/", "-"))
+                    )
+                    repositioned_html, rep_report = reposition_affiliate_placements_from_gsc_signals(
+                        updated_html,
+                        property_id=property_id,
+                        slug=tool_slug,
+                        query=str((slug_gsc_metrics or {}).get("query") or ""),
+                        gsc_metrics=slug_gsc_metrics,
+                        engagement_metrics=estate_eng_metrics,
+                    )
+                    ran_callout_via_reposition = not bool(rep_report.get("restricted_public_service"))
+                    if repositioned_html != updated_html:
+                        updated_html = repositioned_html
+                        reposition_changed = True
+                        if "conversion_slots_repositioned" not in repaired:
+                            repaired.append("conversion_slots_repositioned")
+                except Exception:
+                    pass
+            needs_callout_check = (
                 "/r/" in updated_html
                 or "overlay-partner-offer" in updated_html
                 or overlay_injected
@@ -15009,44 +15040,28 @@ class RetroReflectionEngine:
                         or "EMR Audit Packet ($89)" in updated_html
                     )
                 )
-            ):
+            )
+            if needs_callout_check:
                 try:
-                    norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)
-                    callout_changed = norm_tool_html != updated_html
+                    if ran_callout_via_reposition:
+                        norm_tool_html = updated_html
+                        callout_changed = False
+                    else:
+                        norm_tool_html = normalize_html_callout_message_match(updated_html, property_id=property_id)
+                        callout_changed = norm_tool_html != updated_html
                     post_callout_heal = (
                         property_id.lower() == "gainhelm"
                         and cls._gainhelm_needs_framework_isolation_heal(norm_tool_html, slug)
                     )
-                    if callout_changed or overlay_injected or gh_needs_heal or post_callout_heal:
+                    if callout_changed or reposition_changed or overlay_injected or gh_needs_heal or post_callout_heal:
                         norm_tool_html = normalize_statutory_acronym_casing(norm_tool_html)
                         norm_tool_html, vp_rep = normalize_html_visual_primitives(norm_tool_html)
                         if norm_tool_html != updated_html:
                             updated_html = norm_tool_html
-                            if callout_changed and "callout_message_match" not in repaired:
+                            if callout_changed and not ran_callout_via_reposition and "callout_message_match" not in repaired:
                                 repaired.append("callout_message_match")
                             if vp_rep and "deterministic_visual_primitives" not in repaired:
                                 repaired.append("deterministic_visual_primitives")
-                except Exception:
-                    pass
-            if rel.startswith("tools/") and rel.endswith("/index.html") and rel.count("/") >= 2:
-                try:
-                    tool_slug = "/".join(rel.split("/")[1:-1])
-                    slug_gsc_metrics = (
-                        persisted_gsc_by_slug.get(tool_slug.lower())
-                        or persisted_gsc_by_slug.get(tool_slug.lower().replace("/", "-"))
-                    )
-                    repositioned_html, rep_report = reposition_affiliate_placements_from_gsc_signals(
-                        updated_html,
-                        property_id=property_id,
-                        slug=tool_slug,
-                        query=str((slug_gsc_metrics or {}).get("query") or ""),
-                        gsc_metrics=slug_gsc_metrics,
-                        engagement_metrics=estate_eng_metrics,
-                    )
-                    if repositioned_html != updated_html:
-                        updated_html = repositioned_html
-                        if "conversion_slots_repositioned" not in repaired:
-                            repaired.append("conversion_slots_repositioned")
                 except Exception:
                     pass
             if (repaired or overlay_injected) and updated_html != content:
@@ -18264,6 +18279,22 @@ def reflect_and_recompile_all_assets(
                 try:
                     repo_root_wf = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent)
                     from pseofactory.seo_growth_loops import run_all_seo_growth_workflows
+
+                    def _snapshot_dist_html_state(dist_root: Path) -> Dict[str, Tuple[int, int, int]]:
+                        snap: Dict[str, Tuple[int, int, int]] = {}
+                        if dist_root.is_dir():
+                            for html_p in dist_root.rglob("*.html"):
+                                if html_p.name.startswith("."):
+                                    continue
+                                try:
+                                    st = html_p.stat()
+                                    rel_k = html_p.relative_to(dist_root).as_posix()
+                                    snap[rel_k] = (int(st.st_mtime_ns), int(st.st_size), int(st.st_ino))
+                                except OSError:
+                                    continue
+                        return snap
+
+                    pre_wf_html_snap = _snapshot_dist_html_state(adapter.dist_dir)
                     wf_res_pre = run_all_seo_growth_workflows(
                         property_id=adapter.property_id,
                         repo_root=repo_root_wf,
@@ -18272,9 +18303,34 @@ def reflect_and_recompile_all_assets(
                         persist=True,
                         live_gsc=False if defer_live_indexing else None,
                     )
+                    post_wf_html_snap = _snapshot_dist_html_state(adapter.dist_dir)
                     seo_wf_pre_ran = True
                     mut_donors = (wf_res_pre.get("internal_links") or {}).get("mutated_donor_pages") or []
-                    if mut_donors:
+                    wf_workflows = wf_res_pre.get("workflows") or {}
+                    wf_briefs_block = wf_workflows.get("4_search_opportunity_briefs") or {}
+                    wf_briefs_injected = int(
+                        wf_briefs_block.get("html_pages_injected_count")
+                        or (wf_res_pre.get("search_briefs") or {}).get("html_pages_injected")
+                        or (wf_res_pre.get("search_opportunity_briefs") or {}).get("html_pages_injected")
+                        or 0
+                    )
+                    wf_cohort_block = wf_res_pre.get("cohort_reflection") or {}
+                    wf_cohort_inv = wf_cohort_block.get("inventory_propagation") or {}
+                    wf_cohort_propagated_count = int(
+                        wf_cohort_inv.get("newly_propagated_pages_count") or 0
+                    )
+                    wf_cohort_propagated = (
+                        wf_cohort_inv.get("propagated_slugs")
+                        or wf_cohort_block.get("newly_propagated_slugs")
+                        or []
+                    )
+                    if (
+                        mut_donors
+                        or wf_briefs_injected > 0
+                        or wf_cohort_propagated_count > 0
+                        or wf_cohort_propagated
+                        or post_wf_html_snap != pre_wf_html_snap
+                    ):
                         estate_needed_mutation = True
                         html_mutated_since_porcelain = True
                 except Exception:

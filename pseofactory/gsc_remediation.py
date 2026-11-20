@@ -10622,7 +10622,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         if ov_tenant == "prexvo"
         else ("GainHelm" if ov_tenant == "gainhelm" else ("LienBond" if ov_tenant == "lienbond" else "ProfitHelm"))
     )
-    title_rewrite = _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
+    from pseofactory.contracts import normalize_statutory_acronym_casing
+
+    title_rewrite = normalize_statutory_acronym_casing(
+        _strip_forbidden_dashes(str(overlay_data.get("title_rewrite") or "")).strip()
+    )
     if title_rewrite == "California, Texas and Florida Calculator | LienBond":
         title_rewrite = "California, Texas & Florida Notice Calculator | LienBond"
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
@@ -10745,6 +10749,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
             meta_desc = _normalize_meta_120_155("", ov_tenant, q_lbl, slug=ov_slug_hint)
     if meta_desc:
+        meta_desc = normalize_statutory_acronym_casing(meta_desc)
         escaped_desc = html_lib.escape(meta_desc)
         html = re.sub(
             r'(<meta\s+name=["\']description["\']\s+content=["\'])([^"\']*)(["\'])',
@@ -10783,6 +10788,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             ) and 40 <= ex_qa_words <= 60:
                 quick_answer = ""
     if quick_answer:
+        quick_answer = normalize_statutory_acronym_casing(quick_answer)
         escaped_qa = html_lib.escape(quick_answer)
         qa_pattern = re.compile(
             r'(<aside[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)(.*?)(</aside>)',
@@ -10832,7 +10838,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     "capped at a $31,300 Section 179 deduction in 2026",
                     "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
                 )
-            sanitized_assertions.append(a_str)
+            sanitized_assertions.append(normalize_statutory_acronym_casing(a_str))
         li_items = [
             f'    <li data-autonomous-assertion="{idx + 1}">{html_lib.escape(a_str)}</li>'
             for idx, a_str in enumerate(sanitized_assertions)
@@ -10865,6 +10871,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             h2_norm = re.sub(r"(?<![.\w&/-])([B-HJ-Z])\s+([A-Za-z0-9]+)(?![.\w-])", r"\1-\2", h2_norm)
             h2_norm = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", h2_norm)
             h2_norm = h2_norm.replace("31-U.S.C.", "31 U.S.C.").replace("Audit-Ready-S-Corp", "Audit-Ready S-Corp")
+            h2_norm = normalize_statutory_acronym_casing(h2_norm)
             clean_h2 = html_lib.escape(h2_norm)
             h2_parts.append(f'  <h2 class="section-title">{clean_h2}</h2>')
             h2_parts.append(_build_overlay_heading_guidance_html(clean_h2, idx, overlay_data))
@@ -11165,8 +11172,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         for f in raw_faqs:
             if isinstance(f, dict) and f.get("question") and f.get("answer"):
                 faq_items.append({
-                    "question": _strip_forbidden_dashes(str(f["question"])),
-                    "answer": _strip_forbidden_dashes(str(f["answer"])),
+                    "question": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(f["question"]))),
+                    "answer": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(f["answer"]))),
                 })
     elif isinstance(raw_faqs, dict) and isinstance(raw_faqs.get("mainEntity"), list):
         for entity in raw_faqs["mainEntity"]:
@@ -11176,8 +11183,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 a_text = acc.get("text") if isinstance(acc, dict) else ""
                 if q_name and a_text:
                     faq_items.append({
-                        "question": _strip_forbidden_dashes(str(q_name)),
-                        "answer": _strip_forbidden_dashes(str(a_text)),
+                        "question": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(q_name))),
+                        "answer": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(a_text))),
                     })
 
     def _find_existing_non_overlay_faq_section(doc: str) -> Optional[Tuple[int, int, str, str, str]]:
