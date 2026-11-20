@@ -9,8 +9,10 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import functools as _functools
+import hashlib
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from pseofactory.contracts import is_state_jurisdiction_tool
 
@@ -4430,6 +4432,7 @@ def _render_runtime_sync_events_js() -> str:
     }"""
 
 
+@_functools.lru_cache(maxsize=1)
 def render_runtime_synchronizer_script() -> str:
     """
     Renders the deterministic runtime calculator synchronizer (<script id="pseo-runtime-sync">).
@@ -4454,6 +4457,12 @@ def render_runtime_synchronizer_script() -> str:
 {events_js}
   }})();
   </script>"""
+
+
+@_functools.lru_cache(maxsize=1)
+def render_runtime_synchronizer_script_stripped() -> str:
+    """Cached stripped runtime synchronizer script for fast membership checks."""
+    return render_runtime_synchronizer_script().strip()
 
 
 REQUIRED_PRIMITIVE_TOKENS: Tuple[str, ...] = (
@@ -4510,13 +4519,19 @@ def _is_compiled_tenant_or_primitive_page(
     return any(marker in html_content for marker in tenant_markers)
 
 
+@_functools.lru_cache(maxsize=64)
+def _compile_attr_re(attr_name: str) -> re.Pattern[str]:
+    return re.compile(rf'\b{re.escape(attr_name)}\s*=\s*(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL)
+
+
 def _extract_attr(tag_html: str, attr_name: str) -> Optional[str]:
-    matches = list(
-        re.finditer(rf'\b{re.escape(attr_name)}\s*=\s*(["\'])(.*?)\1', tag_html, re.IGNORECASE | re.DOTALL)
-    )
+    attr_low = attr_name.lower()
+    if attr_low not in tag_html.lower():
+        return None
+    matches = list(_compile_attr_re(attr_low).finditer(tag_html))
     if not matches:
         return None
-    if attr_name.lower() == "style":
+    if attr_low == "style":
         return "; ".join(m.group(2).strip().rstrip(";") for m in matches if m.group(2).strip())
     return matches[-1].group(2)
 
@@ -4660,6 +4675,25 @@ def _heal_stacked_cta_callouts(doc: str) -> Tuple[str, bool]:
     return updated, changed
 
 
+_VISUAL_CONTRACT_ISSUES_CACHE: Dict[Tuple[str, str, Optional[bool]], Tuple[str, ...]] = {}
+
+
+@_functools.lru_cache(maxsize=4)
+def _get_porcelain_defined_css_vars(property_id: str = "profithelm") -> FrozenSet[str]:
+    try:
+        from pseofactory.porcelain_shell import (
+            extract_defined_and_referenced_css_vars,
+            generate_porcelain_stylesheet,
+        )
+
+        porcelain_defined, _ = extract_defined_and_referenced_css_vars(
+            generate_porcelain_stylesheet(property_id)
+        )
+        return frozenset(porcelain_defined)
+    except Exception:
+        return frozenset()
+
+
 def detect_visual_and_ux_contract_issues(
     html_content: str,
     rel_path: str = "index.html",
@@ -4677,7 +4711,16 @@ def detect_visual_and_ux_contract_issues(
     """
     if not html_content or not isinstance(html_content, str):
         return [f"[{rel_path}] Empty or non-string HTML content."]
-    return list(_detect_visual_and_ux_contract_issues_cached(html_content, rel_path, require_primitives))
+    digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
+    cache_key = (digest, str(rel_path), require_primitives)
+    cached = _VISUAL_CONTRACT_ISSUES_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
+    result = _detect_visual_and_ux_contract_issues_cached(html_content, rel_path, require_primitives)
+    if len(_VISUAL_CONTRACT_ISSUES_CACHE) >= 1024:
+        _VISUAL_CONTRACT_ISSUES_CACHE.clear()
+    _VISUAL_CONTRACT_ISSUES_CACHE[cache_key] = result
+    return list(result)
 
 
 def _detect_theme_and_token_polarity_issues(
@@ -4735,18 +4778,7 @@ def _detect_theme_and_token_polarity_issues(
         no_script_html = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", html_content, flags=re.IGNORECASE)
         defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_html))
         if has_external_porcelain_link:
-            try:
-                from pseofactory.porcelain_shell import (
-                    extract_defined_and_referenced_css_vars,
-                    generate_porcelain_stylesheet,
-                )
-
-                porcelain_defined, _ = extract_defined_and_referenced_css_vars(
-                    generate_porcelain_stylesheet("profithelm")
-                )
-                defined_vars |= porcelain_defined
-            except Exception:
-                pass
+            defined_vars |= _get_porcelain_defined_css_vars("profithelm")
         used_vars_no_fallback = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_html))
         undefined_vars = sorted(used_vars_no_fallback - defined_vars)
         if undefined_vars:
@@ -4756,9 +4788,14 @@ def _detect_theme_and_token_polarity_issues(
     return issues
 
 
-def _detect_structural_rhythm_and_dedup_issues(html_content: str, rel_path: str) -> List[str]:
+def _detect_structural_rhythm_and_dedup_issues(
+    html_content: str,
+    rel_path: str,
+    body_html: Optional[str] = None,
+) -> List[str]:
     issues: List[str] = []
-    body_html = _strip_style_and_script_blocks(html_content)
+    if body_html is None:
+        body_html = _strip_style_and_script_blocks(html_content)
     df_sections = re.findall(r"<section\b[^>]*\bdecision-framework-card\b[^>]*>", body_html, re.IGNORECASE)
     if len(df_sections) > 1:
         issues.append(
@@ -4783,7 +4820,6 @@ def _detect_structural_rhythm_and_dedup_issues(html_content: str, rel_path: str)
     return issues
 
 
-@_functools.lru_cache(maxsize=512)
 def _detect_visual_and_ux_contract_issues_cached(
     html_content: str,
     rel_path: str = "index.html",
@@ -4791,23 +4827,25 @@ def _detect_visual_and_ux_contract_issues_cached(
 ) -> Tuple[str, ...]:
     issues: List[str] = []
     expect_primitives = _is_compiled_tenant_or_primitive_page(html_content, require_primitives)
+    body_only = _strip_style_and_script_blocks(html_content)
 
     # --- 1. Theme Styles & CSS Custom Property Integrity ---
     style_blocks = re.findall(r"<style\b[^>]*>([\s\S]*?)</style>", html_content, re.IGNORECASE)
     issues.extend(_detect_theme_and_token_polarity_issues(html_content, rel_path, expect_primitives, style_blocks))
-    issues.extend(_detect_structural_rhythm_and_dedup_issues(html_content, rel_path))
+    issues.extend(_detect_structural_rhythm_and_dedup_issues(html_content, rel_path, body_html=body_only))
 
     # --- 2. Table Containment & Horizontal Overflow Checks ---
-    has_table_context = expect_primitives or "<main" in html_content.lower() or "table" in html_content.lower()
+    body_lower = body_only.lower()
+    has_table_context = expect_primitives or "<main" in body_lower or "<table" in body_lower
     if has_table_context:
-        for tm in re.finditer(r"<table\b[^>]*>", html_content, re.IGNORECASE):
-            preceding = html_content[max(0, tm.start() - 240) : tm.start()]
+        for tm in re.finditer(r"<table\b[^>]*>", body_only, re.IGNORECASE):
+            preceding = body_only[max(0, tm.start() - 240) : tm.start()]
             if not re.search(
                 r'<div[^>]*class=["\'][^"\']*(?:table-wrap|table-responsive|table-container|pseo-table-wrap)[^"\']*["\'][^>]*>\s*$',
                 preceding,
                 re.IGNORECASE,
             ):
-                if expect_primitives or "class=" in tm.group(0).lower() or "<main" in html_content.lower():
+                if expect_primitives or "class=" in tm.group(0).lower() or "<main" in body_lower:
                     issues.append(
                         f"[{rel_path}] Unwrapped <table> element risks horizontal mobile overflow (missing .table-wrap.pseo-table-wrap container)."
                     )
@@ -4821,7 +4859,6 @@ def _detect_visual_and_ux_contract_issues_cached(
             )
             break
 
-    body_only = _strip_style_and_script_blocks(html_content)
     has_calc_markers = 'id="calculation-manifest"' in html_content or any(
         tok in body_only
         for tok in (
@@ -4858,7 +4895,7 @@ def _detect_visual_and_ux_contract_issues_cached(
                 f"[{rel_path}] Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
             )
 
-    for m in re.finditer(r"<([a-zA-Z0-9]+)\b[^>]*>", html_content):
+    for m in re.finditer(r"<([a-zA-Z0-9]+)\b[^>]*>", body_only):
         tag_name = m.group(1).lower()
         tag = m.group(0)
         cls_val = (_extract_attr(tag, "class") or "").lower()

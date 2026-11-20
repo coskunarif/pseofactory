@@ -1452,24 +1452,49 @@ class GitOpsCoordinator:
         else:
             backoffs = [1.0, 2.0, 4.0]
 
-        # Refresh Wrangler OAuth token into GitHub Secrets prior to pushing tenant repos
+        # Refresh Wrangler OAuth token into GitHub Secrets prior to pushing tenant repos (process-level 300s TTL cache)
         if self.repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond") and shutil.which("gh"):
             wrangler_cfg = Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml")
             if wrangler_cfg.is_file():
                 try:
-                    subprocess.run(["npx", "wrangler", "whoami"], capture_output=True, text=True, check=False, timeout=20)
-                    cfg_txt = wrangler_cfg.read_text(encoding="utf-8", errors="ignore")
-                    m_tok = re.search(r'oauth_token\s*=\s*"([^"]+)"', cfg_txt)
-                    if m_tok:
+                    coord_cls = type(self)
+                    now_mono = time.monotonic()
+                    tok_cache = getattr(coord_cls, "_WRANGLER_TOKEN_CACHE", None)
+                    tok_val: Optional[str] = None
+                    if tok_cache is not None and (now_mono - tok_cache[0]) < 300.0 and tok_cache[1]:
+                        tok_val = tok_cache[1]
+                    else:
+                        wrangler_proc = subprocess.run(
+                            ["npx", "wrangler", "whoami"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=20,
+                        )
+                        cfg_txt = wrangler_cfg.read_text(encoding="utf-8", errors="ignore")
+                        m_tok = re.search(r'oauth_token\s*=\s*"([^"]+)"', cfg_txt)
+                        if m_tok and m_tok.group(1).strip():
+                            tok_val = m_tok.group(1).strip()
+                            if wrangler_proc.returncode == 0:
+                                coord_cls._WRANGLER_TOKEN_CACHE = (now_mono, tok_val)
+                    if tok_val:
                         slug = CICDWatcher().resolve_repo_slug(self.repo_path)
                         if slug:
-                            subprocess.run(
-                                ["gh", "secret", "set", "CLOUDFLARE_API_TOKEN", "-R", slug, "--body", m_tok.group(1)],
-                                capture_output=True,
-                                text=True,
-                                check=False,
-                                timeout=15,
-                            )
+                            sync_cache = getattr(coord_cls, "_GH_CF_SECRET_SYNC_CACHE", None)
+                            if sync_cache is None:
+                                sync_cache = {}
+                                coord_cls._GH_CF_SECRET_SYNC_CACHE = sync_cache
+                            last_sync = sync_cache.get((slug, tok_val))
+                            if last_sync is None or (now_mono - last_sync) >= 300.0:
+                                gh_proc = subprocess.run(
+                                    ["gh", "secret", "set", "CLOUDFLARE_API_TOKEN", "-R", slug, "--body", tok_val],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=15,
+                                )
+                                if gh_proc.returncode == 0:
+                                    sync_cache[(slug, tok_val)] = now_mono
                 except Exception:
                     pass
 

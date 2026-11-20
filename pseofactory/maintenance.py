@@ -3122,6 +3122,7 @@ class AssetIntegrityEvaluator:
             recorded_hash = ledger["assets"].get(rel_key)
 
         # Differential cache check for verified clean assets
+        live_fingerprint: Optional[str] = None
         if not engine_drifted and cache_key and cache_key in self._audit_cache and not self.enforce_operational_shield:
             cached_rec = self._audit_cache[cache_key]
             if cached_rec is None:
@@ -3145,7 +3146,7 @@ class AssetIntegrityEvaluator:
                 details=[f"Failed to read file: {ex}"],
             )
 
-        current_hash = compute_asset_fingerprint(p)
+        current_hash = live_fingerprint if live_fingerprint is not None else compute_asset_fingerprint(p)
 
         # 1. Engine hash / Asset hash drift (scoped to compiled dist distribution assets)
         is_in_dist = False
@@ -3198,7 +3199,7 @@ class AssetIntegrityEvaluator:
         # 6b. Visual Primitives & UX Contracts (Theme Tokens, Table Containment, Tap Targets, Hierarchy, Calculator Controls)
         if p.suffix == ".html":
             from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
-            from pseofactory.porcelain_shell import audit_porcelain_shell_page
+            from pseofactory.porcelain_shell import audit_porcelain_shell_page, get_porcelain_css_audit_sets
 
             visual_issues = detect_visual_and_ux_contract_issues(
                 content,
@@ -3218,17 +3219,19 @@ class AssetIntegrityEvaluator:
             has_porcelain_shell_link = bool(
                 re.search(r'<link\b[^>]*id=["\']pseo-visual-primitives["\']', content or "", re.IGNORECASE)
             )
-            porcelain_issues = (
-                audit_porcelain_shell_page(
+            if is_dist_html and has_porcelain_shell_link:
+                porc_vars, porc_classes = get_porcelain_css_audit_sets(adapter.property_id)
+                porcelain_issues = audit_porcelain_shell_page(
                     content,
                     rel_key,
+                    css_defined_vars=porc_vars,
+                    css_defined_classes=porc_classes,
                     check_shell_landmarks=has_compiled_porcelain_estate or has_porcelain_shell_link,
                     property_id=adapter.property_id,
                     dist_dir=adapter.dist_dir if has_compiled_porcelain_estate else None,
                 )
-                if (is_dist_html and has_porcelain_shell_link)
-                else []
-            )
+            else:
+                porcelain_issues = []
             visual_issues = list(visual_issues) + list(porcelain_issues)
             if visual_issues:
                 if DriftReason.STRUCTURAL_CONTRACT_VIOLATION not in reasons:
@@ -4569,6 +4572,41 @@ class MaintenanceLifecycle:
         self.trend_runner = trend_runner
         self.indexer = indexer
 
+    @staticmethod
+    def _latch_workspace_if_aligned(
+        current_engine_hash: str,
+        enable_gitops: bool,
+        run_id: Optional[str],
+    ) -> None:
+        ws_root = Path("/home/ubuntuadmin/projects")
+        from pseofactory.drift import verify_all_tenants_aligned_for_latch
+        all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
+            workspace_root=ws_root,
+            expected_hash=current_engine_hash,
+            require_git_clean_and_pushed=bool(enable_gitops),
+        )
+        if all_tenants_ok:
+            record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+            record_engine_hash(ws_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
+        try:
+            if all_tenants_ok:
+                from pseofactory.supervisor import HeartbeatTracker
+                HeartbeatTracker(heartbeat_path=ws_root / "pseofactory" / ".agy" / "supervisor_heartbeat.json").emit(
+                    status="HEALTHY",
+                    cycle_id=run_id or "maintenance_sync",
+                    current_tenant=None,
+                    engine_hash=current_engine_hash,
+                    consecutive_failures=0,
+                )
+            if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+                from pseofactory.gitops import reconcile_workspace_tracking_state
+                reconcile_workspace_tracking_state(
+                    restore_tenant_dist=False,
+                    untrack_agy_runs=not enable_gitops,
+                )
+        except Exception:
+            pass
+
     def run(
         self,
         property_or_adapter: Union[str, PropertyAdapter],
@@ -4583,6 +4621,7 @@ class MaintenanceLifecycle:
         workflow: Optional[str] = None,
         edge_url: Optional[str] = None,
         abort_event: Optional[Any] = None,
+        latch_workspace: bool = True,
     ) -> MaintenanceResult:
         """
         Executes single-tenant closed-loop maintenance lifecycle.
@@ -5299,35 +5338,16 @@ class MaintenanceLifecycle:
                         )
                     except Exception:
                         pass
-                if getattr(adapter, "repo_path", None) and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/"):
-                    ws_root = Path("/home/ubuntuadmin/projects")
-                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
-                    all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
-                        workspace_root=ws_root,
-                        expected_hash=current_engine_hash,
-                        require_git_clean_and_pushed=bool(enable_gitops),
+                if (
+                    latch_workspace
+                    and getattr(adapter, "repo_path", None)
+                    and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/")
+                ):
+                    self._latch_workspace_if_aligned(
+                        current_engine_hash=current_engine_hash,
+                        enable_gitops=enable_gitops,
+                        run_id=run_id,
                     )
-                    if all_tenants_ok:
-                        record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
-                        record_engine_hash(ws_root / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
-                    try:
-                        if all_tenants_ok:
-                            from pseofactory.supervisor import HeartbeatTracker
-                            HeartbeatTracker(heartbeat_path=ws_root / "pseofactory" / ".agy" / "supervisor_heartbeat.json").emit(
-                                status="HEALTHY",
-                                cycle_id=run_id or "maintenance_sync",
-                                current_tenant=None,
-                                engine_hash=current_engine_hash,
-                                consecutive_failures=0,
-                            )
-                        if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
-                            from pseofactory.gitops import reconcile_workspace_tracking_state
-                            reconcile_workspace_tracking_state(
-                                restore_tenant_dist=False,
-                                untrack_agy_runs=not enable_gitops,
-                            )
-                    except Exception:
-                        pass
             else:
                 current_engine_hash = compute_engine_hash(base_dirs=b_dirs)
 
@@ -5439,6 +5459,7 @@ class FleetMaintenanceCoordinator:
         )
 
         results: Dict[str, MaintenanceResult] = {}
+        latch_candidate_hash: Optional[str] = None
 
         for p_id in target_ids:
             adapter = all_adapters.get(p_id)
@@ -5463,8 +5484,17 @@ class FleetMaintenanceCoordinator:
                     run_id=run_id,
                     dry_run=dry_run,
                     skip_ci=skip_ci,
+                    latch_workspace=False,
                 )
                 results[p_id] = res
+                if (
+                    not dry_run
+                    and res.status in ("SUCCESS", "PARTIAL")
+                    and res.engine_hash
+                    and getattr(adapter, "repo_path", None)
+                    and str(adapter.repo_path).startswith("/home/ubuntuadmin/projects/")
+                ):
+                    latch_candidate_hash = res.engine_hash
             except PropertyContaminationError as pce:
                 print(f"[ERROR] Property contamination in tenant '{p_id}': {pce}")
                 results[p_id] = MaintenanceResult(
@@ -5498,6 +5528,13 @@ class FleetMaintenanceCoordinator:
                     assets_failed=1,
                     failed_records=[{"error": str(exc), "type": type(exc).__name__}],
                 )
+
+        if latch_candidate_hash:
+            self.lifecycle._latch_workspace_if_aligned(
+                current_engine_hash=latch_candidate_hash,
+                enable_gitops=enable_gitops,
+                run_id=run_id,
+            )
 
         return results
 
@@ -5960,17 +5997,18 @@ def _needs_page_structure_geo_normalization(
     ):
         return True
 
-    _camel_brand_scrub = re.sub(
-        r"\b(?:ezTaxReturn|SuretyBondsDirect|FreeTaxUSA|CoinLedger|WalletHub|LawDepot|LendKey|NextInsurance|QuickBooks|FreshBooks|TurboTax|TaxSlayer|FirstPromoter|PartnerStack|ZeptoMail)\b",
-        "Brand",
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    if re.search(
-        r"<h[23][^>]*>[^<]*(?:[a-z][A-Z][a-z]+[A-Z][a-z]+[^<]*|\b(?:Section|Form)\d+\b[^<]*|\bIrs 2027\b[^<]*|\b(?:Quantitative|Arbitrage|Differential)\s+Model\s*)</h[23]>",
-        _camel_brand_scrub,
-    ):
-        return True
+    for _h23_m in re.finditer(r"<h[23][^>]*>([^<]*)</h[23]>", html_content):
+        _h23_scrub = re.sub(
+            r"\b(?:ezTaxReturn|SuretyBondsDirect|FreeTaxUSA|CoinLedger|WalletHub|LawDepot|LendKey|NextInsurance|QuickBooks|FreshBooks|TurboTax|TaxSlayer|FirstPromoter|PartnerStack|ZeptoMail)\b",
+            "Brand",
+            _h23_m.group(1),
+            flags=re.IGNORECASE,
+        )
+        if re.search(
+            r"(?:[a-z][A-Z][a-z]+[A-Z][a-z]+|\b(?:Section|Form)\d+\b|\bIrs 2027\b|\b(?:Quantitative|Arbitrage|Differential)\s+Model\s*$)",
+            _h23_scrub,
+        ):
+            return True
 
     if len(re.findall(r"<section\b[^>]*\bdecision-framework-card\b", html_content, re.IGNORECASE)) > 1:
         return True
@@ -6415,13 +6453,14 @@ def _needs_page_structure_geo_normalization(
         return True
 
     from pseofactory.tenant_facts import TruthReconciliationEngine
+    html_lower = html_content.lower()
     inferred_tenant = (
         "prexvo"
-        if "prexvo.com" in html_content.lower() or "34 cfr" in html_content.lower()
+        if "prexvo.com" in html_lower or "34 cfr" in html_lower
         else (
             "gainhelm"
-            if "gainhelm.com" in html_content.lower()
-            else ("lienbond" if "lienbond.com" in html_content.lower() else "profithelm")
+            if "gainhelm.com" in html_lower
+            else ("lienbond" if "lienbond.com" in html_lower else "profithelm")
         )
     )
     if TruthReconciliationEngine.audit_html_truth_reconciliation(
@@ -10245,7 +10284,7 @@ class RetroReflectionEngine:
         from pseofactory.visual_primitives import (
             VISUAL_PRIMITIVES_VERSION,
             detect_visual_and_ux_contract_issues,
-            render_runtime_synchronizer_script,
+            render_runtime_synchronizer_script_stripped,
         )
         if (
             'id="pseo-visual-primitives"' not in html_content
@@ -10346,7 +10385,7 @@ class RetroReflectionEngine:
                 and '<div class="calc-metrics-grid"' in html_content
                 and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="calc-metrics-grid"')
             )
-            or render_runtime_synchronizer_script().strip() not in html_content
+            or render_runtime_synchronizer_script_stripped() not in html_content
                 )
             )
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
@@ -10814,7 +10853,7 @@ class RetroReflectionEngine:
             "proprietary_telemetry": signal_bundle["proprietary_telemetry"],
         }
 
-    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str, str], Tuple[str, List[str]]] = {}
+    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str, str, bool, Tuple[str, ...]], Tuple[str, List[str]]] = {}
 
     @classmethod
     def _collect_html_output_parity_missing(
@@ -11827,7 +11866,16 @@ class RetroReflectionEngine:
                 cls._RETROFIT_HTML_CACHE.clear()
             cls._RETROFIT_HTML_CACHE[cache_key] = (updated, list(repaired))
             updated_digest = hashlib.sha256(updated.encode("utf-8", errors="ignore")).hexdigest()
-            cls._RETROFIT_HTML_CACHE[(updated_digest, str(property_id).lower(), str(slug))] = (updated, [])
+            cls._RETROFIT_HTML_CACHE[
+                (
+                    updated_digest,
+                    cache_key[1],
+                    cache_key[2],
+                    cache_key[3],
+                    cache_key[4],
+                    cache_key[5],
+                )
+            ] = (updated, [])
 
         return updated, repaired
 
@@ -13900,6 +13948,7 @@ class RetroReflectionEngine:
         active_overlays = cls._resolve_active_estate_overlays(d, property_id, heal_legacy=False)
         degraded_overlays = _collect_degraded_rolled_back_overlays(d.parent)
         stale_pages: Dict[str, List[str]] = {}
+        html_cache: Dict[str, str] = {}
         scanned = 0
         for html_file in sorted(d.rglob("*.html")):
             if html_file.name.startswith("."):
@@ -13909,6 +13958,7 @@ class RetroReflectionEngine:
             except Exception:
                 continue
             rel = html_file.relative_to(d).as_posix()
+            html_cache[rel] = content
             if not cls.is_tool_or_calculator_page(html_file, d, content):
                 non_tool_issues = detect_visual_and_ux_contract_issues(
                     content,
@@ -14051,7 +14101,12 @@ class RetroReflectionEngine:
                         extract_defined_and_referenced_css_vars,
                     )
 
-                    porc_est_issues = audit_porcelain_estate_structure(d, property_id)
+                    porc_est_issues = audit_porcelain_estate_structure(
+                        d,
+                        property_id,
+                        preloaded_html=html_cache,
+                        skip_non_pwa_html_checks=True,
+                    )
                     if porc_est_issues:
                         stale_pages.setdefault("index.html", []).append("porcelain_shell_unification")
                     css_p = (
@@ -14066,12 +14121,9 @@ class RetroReflectionEngine:
                     else:
                         defined_vars = None
                         defined_classes = None
-                    for hp in sorted(d.rglob("*.html")):
-                        if hp.name.startswith("."):
-                            continue
-                        rel_hp = hp.relative_to(d).as_posix()
+                    for rel_hp, txt_hp in html_cache.items():
                         hp_issues = audit_porcelain_shell_page(
-                            hp.read_text(encoding="utf-8", errors="ignore"),
+                            txt_hp,
                             rel_hp,
                             css_defined_vars=defined_vars,
                             css_defined_classes=defined_classes,
@@ -14083,6 +14135,26 @@ class RetroReflectionEngine:
                             cur_m = stale_pages.setdefault(rel_hp, [])
                             if "porcelain_shell_unification" not in cur_m:
                                 cur_m.append("porcelain_shell_unification")
+                            if any(
+                                hi.startswith((
+                                    "Undefined CSS class(es)",
+                                    "Leaked raw Python formula",
+                                    "Placeholder data:, favicon",
+                                    "Duplicate FAQ",
+                                    "Legacy YMYL/FTC",
+                                    "Unversioned local script",
+                                    "Forbidden personal",
+                                    "Placeholder GSC token",
+                                    "Missing local",
+                                    "Missing JSON-LD",
+                                    "Broken local",
+                                    "Non-canonical OG image",
+                                ))
+                                for hi in hp_issues
+                            ):
+                                idx_m = stale_pages.setdefault("index.html", [])
+                                if "porcelain_shell_unification" not in idx_m:
+                                    idx_m.append("porcelain_shell_unification")
                 except Exception:
                     pass
 

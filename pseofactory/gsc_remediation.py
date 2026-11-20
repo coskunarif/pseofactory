@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import is_non_tool_or_governance_route
-from pseofactory.supervisor import AtomicStateLedger
 from pseofactory.tenant_facts import (
     TENANT_DEFAULT_CPC_USD,
     TENANT_DEFAULT_ERPM_USD,
@@ -9248,6 +9247,8 @@ def evaluate_expired_overlays(
     if results["total_evaluated"] > 0 and persist:
         m_ledger_path = agy_dir / "metric_recovery_ledger.json"
         try:
+            from pseofactory.supervisor import AtomicStateLedger
+
             agy_dir.mkdir(parents=True, exist_ok=True)
             m_data = AtomicStateLedger.load_json(m_ledger_path)
             if not isinstance(m_data, dict):
@@ -11572,12 +11573,16 @@ class AsyncRemediationQueue:
         self.queue_path = Path(queue_path or DEFAULT_REMEDIATION_QUEUE_PATH).resolve()
 
     def _load_state(self) -> Dict[str, Any]:
+        from pseofactory.supervisor import AtomicStateLedger
+
         data = AtomicStateLedger.load_json(self.queue_path)
         if not isinstance(data, dict) or "tenants" not in data:
             return {"version": 1, "tenants": {}}
         return data
 
     def _save_state(self, state: Dict[str, Any]) -> None:
+        from pseofactory.supervisor import AtomicStateLedger
+
         AtomicStateLedger.save_json(self.queue_path, state)
 
     @staticmethod
@@ -12162,19 +12167,31 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
     }
 
 
-from pseofactory.seo_growth_loops import (  # noqa: E402
-    compile_ai_citation_digital_pr_queue,
-    compile_search_opportunity_briefs,
-    compile_technical_seo_sprint,
-    discover_internal_linking_opportunities,
-    evaluate_content_portfolio_decisions,
-    harvest_and_sync_gsc_daily_timeline,
-    identify_content_decay,
-    investigate_competitor_traffic_spikes,
-    load_consolidated_gsc_query_rows,
-    monitor_post_release_seo_regressions,
-    resolve_true_asset_age_days,
-    run_all_seo_growth_workflows,
-    sync_real_gsc_baselines_to_recovery_ledger,
+_LAZY_SEO_GROWTH_LOOP_EXPORTS = frozenset(
+    (
+        "compile_ai_citation_digital_pr_queue",
+        "compile_search_opportunity_briefs",
+        "compile_technical_seo_sprint",
+        "discover_internal_linking_opportunities",
+        "evaluate_content_portfolio_decisions",
+        "harvest_and_sync_gsc_daily_timeline",
+        "identify_content_decay",
+        "investigate_competitor_traffic_spikes",
+        "load_consolidated_gsc_query_rows",
+        "monitor_post_release_seo_regressions",
+        "resolve_true_asset_age_days",
+        "run_all_seo_growth_workflows",
+        "sync_real_gsc_baselines_to_recovery_ledger",
+    )
 )
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_SEO_GROWTH_LOOP_EXPORTS:
+        import pseofactory.seo_growth_loops as _sgl_mod
+
+        val = getattr(_sgl_mod, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

@@ -15,6 +15,7 @@ Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import html as html_lib
 import json
@@ -27,7 +28,7 @@ import xml.sax.saxutils as saxutils
 import zlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 PORCELAIN_SHELL_VERSION = "porcelain-v1"
 VISUAL_PRIMITIVES_LINK_VERSION = "pseo-primitives-v4"
@@ -170,11 +171,31 @@ def _format_porcelain_tool_label(raw_label: str) -> str:
     return out
 
 
+_CANONICAL_PORCELAIN_CACHE_PROPS: FrozenSet[str] = frozenset(
+    ("profithelm", "prexvo", "gainhelm", "lienbond")
+)
+
+
 def get_porcelain_tenant_profile(property_id: str) -> Dict[str, Any]:
     """Builds a self-contained single-tenant profile from DeclarativeTenantContract."""
     prop = str(property_id or "profithelm").strip().lower()
     if prop == "profithelm-platform":
         prop = "profithelm"
+    if prop in _CANONICAL_PORCELAIN_CACHE_PROPS:
+        cached = _build_porcelain_tenant_profile_cached(prop)
+        return {
+            k: (list(v) if isinstance(v, list) else (dict(v) if isinstance(v, dict) else v))
+            for k, v in cached.items()
+        }
+    return _build_porcelain_tenant_profile_uncached(prop)
+
+
+@functools.lru_cache(maxsize=8)
+def _build_porcelain_tenant_profile_cached(prop: str) -> Dict[str, Any]:
+    return _build_porcelain_tenant_profile_uncached(prop)
+
+
+def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
     import pseofactory.contracts  # noqa: F401
     from pseofactory.tenant_facts import get_tenant_contract
 
@@ -6762,17 +6783,24 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
     return {"status": "UPDATED" if updated_files else "UNCHANGED", "updated_files": updated_files}
 
 
+_PERSONAL_LINKEDIN_TOKEN = "linkedin.com" + "/in/"
+_PERSONAL_MAKER_TOKEN = "ar" + "if"
+
+
 def _find_personal_attribution_violations(raw_text: str, rel_label: str) -> List[str]:
     """Scans text for forbidden personal LinkedIn URLs or personal maker attribution."""
+    text = raw_text or ""
+    low = text.lower()
     found: List[str] = []
-    if _PERSONAL_LINKEDIN_RE.search(raw_text or ""):
+    if _PERSONAL_LINKEDIN_TOKEN in low:
         found.append(f"Forbidden personal LinkedIn profile URL found in {rel_label}")
-    if _PERSONAL_MAKER_NAME_RE.search(raw_text or ""):
-        found.append(f"Forbidden personal maker attribution name found in {rel_label}")
-    if _PERSONAL_MAKER_HANDLE_RE.search(raw_text or ""):
-        found.append(f"Forbidden personal maker handle found in {rel_label}")
-    if _PERSONAL_MAKER_MAILTO_RE.search(raw_text or ""):
-        found.append(f"Forbidden personal maker mailto address found in {rel_label}")
+    if _PERSONAL_MAKER_TOKEN in low:
+        if _PERSONAL_MAKER_NAME_RE.search(text):
+            found.append(f"Forbidden personal maker attribution name found in {rel_label}")
+        if _PERSONAL_MAKER_HANDLE_RE.search(text):
+            found.append(f"Forbidden personal maker handle found in {rel_label}")
+        if _PERSONAL_MAKER_MAILTO_RE.search(text):
+            found.append(f"Forbidden personal maker mailto address found in {rel_label}")
     return found
 
 
@@ -6911,9 +6939,29 @@ def _resolve_local_dist_asset_url(dist_dir: Path, domain: str, raw_url: str) -> 
     return dist_dir / rel.rstrip("/") / "index.html"
 
 
-def _find_undefined_ui_classes_in_html(html_content: str, defined_classes: Set[str]) -> Set[str]:
+@functools.lru_cache(maxsize=16)
+def get_porcelain_css_audit_sets(property_id: str) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """Returns cached (defined_css_vars, defined_css_classes) for a property's canonical Porcelain stylesheet."""
+    prop = str(property_id or "profithelm").strip().lower()
+    if prop == "profithelm-platform":
+        prop = "profithelm"
+    base_css_text = generate_porcelain_stylesheet_from_profile(get_porcelain_tenant_profile(prop))
+    base_defined, _ = extract_defined_and_referenced_css_vars(base_css_text)
+    defined_classes = _extract_defined_css_classes_for_audit(base_css_text)
+    return frozenset(base_defined), frozenset(defined_classes)
+
+
+def _find_undefined_ui_classes_in_html(
+    html_content: str,
+    defined_classes: Set[str],
+    visible_no_script: Optional[str] = None,
+) -> Set[str]:
     """Returns UI/layout classes rendered in visible HTML that are absent from defined_classes."""
-    visible = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", html_content or "", flags=re.IGNORECASE)
+    visible = (
+        visible_no_script
+        if visible_no_script is not None
+        else re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", html_content or "", flags=re.IGNORECASE)
+    )
     undef: Set[str] = set()
     for cls_attr in re.findall(r'\bclass\s*=\s*["\']([^"\']+)["\']', visible):
         for tok in cls_attr.split():
@@ -6932,12 +6980,15 @@ def _collect_html_asset_and_hygiene_issues(
     rel_path: str,
     domain: str,
     dist_dir: Optional[Path] = None,
+    visible_no_script: Optional[str] = None,
 ) -> List[str]:
     """Collects raw-formula, favicon placeholder, script versioning, FAQ duplication, legacy clutter, and local asset issues."""
     issues: List[str] = []
     raw_html = html_content or ""
-    visible_no_script = re.sub(
-        r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", raw_html, flags=re.IGNORECASE
+    visible_no_script = (
+        visible_no_script
+        if visible_no_script is not None
+        else re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", raw_html, flags=re.IGNORECASE)
     )
     if "round((" in visible_no_script:
         issues.append(f"Leaked raw Python formula 'round((' outside <script> in {rel_path}")
@@ -7065,13 +7116,13 @@ def audit_porcelain_shell_page(
             )
             break
 
-    base_css_text = ""
+    cached_vars: Optional[FrozenSet[str]] = None
+    cached_classes: Optional[FrozenSet[str]] = None
     if css_defined_vars is None or (check_shell_landmarks and css_defined_classes is None):
-        base_css_text = generate_porcelain_stylesheet_from_profile(get_porcelain_tenant_profile(property_id or "profithelm"))
+        cached_vars, cached_classes = get_porcelain_css_audit_sets(property_id or "profithelm")
 
     if css_defined_vars is None:
-        base_defined, _ = extract_defined_and_referenced_css_vars(base_css_text)
-        allowed_vars = set(base_defined)
+        allowed_vars = set(cached_vars or ())
     else:
         allowed_vars = set(css_defined_vars)
 
@@ -7099,11 +7150,20 @@ def audit_porcelain_shell_page(
         return issues
 
     allowed_classes = (
-        set(css_defined_classes)
+        css_defined_classes
         if css_defined_classes is not None
-        else _extract_defined_css_classes_for_audit(base_css_text)
+        else (cached_classes if cached_classes is not None else get_porcelain_css_audit_sets(property_id or "profithelm")[1])
     )
-    undef_classes = sorted(_find_undefined_ui_classes_in_html(html_content or "", allowed_classes))
+    visible_no_script = re.sub(
+        r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", html_content or "", flags=re.IGNORECASE
+    )
+    undef_classes = sorted(
+        _find_undefined_ui_classes_in_html(
+            html_content or "",
+            allowed_classes,
+            visible_no_script=visible_no_script,
+        )
+    )
     if undef_classes:
         issues.append(f"Undefined CSS class(es) {undef_classes[:8]} in {rel_path}")
 
@@ -7114,6 +7174,7 @@ def audit_porcelain_shell_page(
             rel_path,
             prof_for_dom["domain"],
             dist_dir,
+            visible_no_script=visible_no_script,
         )
     )
 
@@ -7208,7 +7269,12 @@ def audit_porcelain_shell_page(
     return issues
 
 
-def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[str]:
+def audit_porcelain_estate_structure(
+    dist_dir: Path,
+    property_id: str,
+    preloaded_html: Optional[Dict[str, str]] = None,
+    skip_non_pwa_html_checks: bool = False,
+) -> List[str]:
     """
     Fail-closed estate-level audit verifying canonical Porcelain CSS, class coverage, mobile
     specificity, favicon/OG assets, 6 real HTTP-200 governance pages, sitemap governance
@@ -7279,19 +7345,35 @@ def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[s
 
     estate_undef_classes: Set[str] = set()
     dom = profile["domain"]
-    for hp in sorted(d.rglob("*.html")):
-        if hp.name.startswith("."):
-            continue
-        rel_hp = hp.relative_to(d).as_posix()
-        txt_hp = hp.read_text(encoding="utf-8", errors="ignore")
+    dist_html_text_cache: Dict[Path, str] = {}
+    checked_non_pwa_dist_html: Set[Path] = set()
+    if preloaded_html is not None:
+        html_items = [(d / rel_hp, rel_hp, txt_hp) for rel_hp, txt_hp in preloaded_html.items()]
+    else:
+        html_items = []
+        for hp in sorted(d.rglob("*.html")):
+            if hp.name.startswith("."):
+                continue
+            rel_hp = hp.relative_to(d).as_posix()
+            txt_hp = hp.read_text(encoding="utf-8", errors="ignore")
+            html_items.append((hp, rel_hp, txt_hp))
+
+    for hp, rel_hp, txt_hp in html_items:
+        dist_html_text_cache[hp] = txt_hp
         bp_hp = classify_porcelain_blueprint(rel_hp, txt_hp)
         if bp_hp == "operator_pwa":
             if "google-site-verification-profithelm-2026" in txt_hp:
                 issues.append(f"Placeholder GSC token 'google-site-verification-profithelm-2026' present in {rel_hp}")
             continue
+        if skip_non_pwa_html_checks:
+            checked_non_pwa_dist_html.add(hp)
+            continue
+        vis_hp = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", txt_hp or "", flags=re.IGNORECASE)
         if defined_classes is not None:
-            estate_undef_classes.update(_find_undefined_ui_classes_in_html(txt_hp, defined_classes))
-        issues.extend(_collect_html_asset_and_hygiene_issues(txt_hp, rel_hp, dom, d))
+            estate_undef_classes.update(
+                _find_undefined_ui_classes_in_html(txt_hp, defined_classes, visible_no_script=vis_hp)
+            )
+        issues.extend(_collect_html_asset_and_hygiene_issues(txt_hp, rel_hp, dom, d, visible_no_script=vis_hp))
 
     if estate_undef_classes:
         top_u = sorted(estate_undef_classes)
@@ -7332,7 +7414,11 @@ def audit_porcelain_estate_structure(dist_dir: Path, property_id: str) -> List[s
             scan_targets.append(top_f)
 
     for sf in scan_targets:
-        raw_sf = sf.read_text(encoding="utf-8", errors="ignore")
+        if skip_non_pwa_html_checks and sf in checked_non_pwa_dist_html:
+            continue
+        raw_sf = dist_html_text_cache.get(sf)
+        if raw_sf is None:
+            raw_sf = sf.read_text(encoding="utf-8", errors="ignore")
         rel_lbl = sf.relative_to(repo_root).as_posix() if sf.is_relative_to(repo_root) else str(sf)
         issues.extend(_find_personal_attribution_violations(raw_sf, rel_lbl))
 

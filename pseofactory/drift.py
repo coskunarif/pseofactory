@@ -218,6 +218,40 @@ def compute_two_tier_merkle_hash(
     }
 
 
+def _compute_dist_lock_metrics_with_hashes(
+    dist_dir: Union[str, Path],
+    include_md_hashes: bool = False,
+) -> Tuple[str, int, Dict[str, str]]:
+    """
+    Single-pass scanner computing (dist_fingerprint, total_assets, per_file_sha256_map)
+    for a tenant's compiled dist/ directory.
+    """
+    d_root = Path(dist_dir)
+    if not d_root.is_dir():
+        return hashlib.sha256(b"").hexdigest(), 0, {}
+    lock_exts = (".html", ".xml", ".txt", ".json")
+    scan_exts = (".html", ".xml", ".txt", ".json", ".md") if include_md_hashes else lock_exts
+    scanned_assets = sorted(
+        p
+        for p in d_root.glob("**/*")
+        if p.is_file()
+        and "syndication" not in p.relative_to(d_root).parts
+        and p.suffix.lower() in scan_exts
+        and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+    )
+    fp_hasher = hashlib.sha256()
+    file_hashes: Dict[str, str] = {}
+    lock_count = 0
+    for af in scanned_assets:
+        rel_a = af.relative_to(d_root).as_posix()
+        af_fp = hashlib.sha256(af.read_bytes()).hexdigest()
+        file_hashes[rel_a] = af_fp
+        if af.suffix.lower() in lock_exts:
+            fp_hasher.update(f"{rel_a}:{af_fp}\n".encode("utf-8"))
+            lock_count += 1
+    return fp_hasher.hexdigest(), lock_count, file_hashes
+
+
 def compute_dist_lock_metrics(dist_dir: Union[str, Path]) -> Tuple[str, int]:
     """
     Computes the canonical (dist_fingerprint, total_assets) tuple for a tenant's
@@ -225,23 +259,8 @@ def compute_dist_lock_metrics(dist_dir: Union[str, Path]) -> Tuple[str, int]:
     dist_dir (excluding .tmp, .orig, .backup) in sorted relative-path order.
     Zero em-dashes. Zero en-dashes.
     """
-    d_root = Path(dist_dir)
-    if not d_root.is_dir():
-        return hashlib.sha256(b"").hexdigest(), 0
-    dist_assets = sorted(
-        p
-        for p in d_root.glob("**/*")
-        if p.is_file()
-        and "syndication" not in p.relative_to(d_root).parts
-        and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
-        and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-    )
-    fp_hasher = hashlib.sha256()
-    for af in dist_assets:
-        rel_a = af.relative_to(d_root).as_posix()
-        af_fp = hashlib.sha256(af.read_bytes()).hexdigest()
-        fp_hasher.update(f"{rel_a}:{af_fp}\n".encode("utf-8"))
-    return fp_hasher.hexdigest(), len(dist_assets)
+    fp, lock_count, _ = _compute_dist_lock_metrics_with_hashes(dist_dir, include_md_hashes=False)
+    return fp, lock_count
 
 
 def write_substrate_lock(
@@ -402,7 +421,12 @@ def write_substrate_lock(
             freshness_f.write_text(json.dumps(lb_fresh_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except Exception:
             pass
-    fp, tot = compute_dist_lock_metrics(eff_dist)
+    al_file_precheck = r_root / ".agy" / "asset_ledger.json"
+    need_ledger_hashes = bool(sync_ledgers and eff_dist.is_dir() and al_file_precheck.is_file())
+    fp, tot, dist_asset_hashes = _compute_dist_lock_metrics_with_hashes(
+        eff_dist,
+        include_md_hashes=need_ledger_hashes,
+    )
     synced_sub_hash: Optional[str] = None
     for cand_pkg in ("profithelm", "prexvo", "gainhelm", "lienbond"):
         cand_sub_dir = r_root / cand_pkg / "_pseo_substrate" / "pseofactory"
@@ -448,19 +472,7 @@ def write_substrate_lock(
         if eh_file.is_file():
             record_engine_hash(eh_file, hash_value=eh, synced_substrate_hash=synced_sub_hash)
         if al_file.is_file():
-            html_assets = sorted(
-                p
-                for p in eff_dist.glob("**/*")
-                if p.is_file()
-                and "syndication" not in p.relative_to(eff_dist).parts
-                and p.suffix.lower() in (".html", ".xml", ".txt", ".json", ".md")
-                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-            )
-            asset_hashes = {
-                p.relative_to(eff_dist).as_posix(): compute_asset_fingerprint(p)
-                for p in html_assets
-            }
-            record_asset_ledger(al_file, asset_hashes=asset_hashes, engine_hash=eh)
+            record_asset_ledger(al_file, asset_hashes=dist_asset_hashes, engine_hash=eh)
     return payload
 
 

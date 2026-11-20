@@ -2528,12 +2528,18 @@ class TenantFactStore:
                     f"Client-side JS flat proxy multiplier '{p_js}' detected: embedded calculators and sensitivity tables must evaluate progressive statutory brackets and non-linear AST formulas"
                 )
 
-        if tenant_norm == "profithelm":
-            prose_scan_text = (
-                re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
-                if "<style" in text_lower
-                else text
+        prose_scan_text = text
+        if "<style" in text_lower:
+            prose_scan_text = re.sub(r"<style\b[^>]*>[\s\S]*?</style\s*>", " ", prose_scan_text, flags=re.IGNORECASE)
+        if "<script" in text_lower:
+            prose_scan_text = re.sub(
+                r"<script\b(?![^>]*ld\+json)[^>]*>[\s\S]*?</script\s*>",
+                " ",
+                prose_scan_text,
+                flags=re.IGNORECASE,
             )
+
+        if tenant_norm == "profithelm":
             # Section 179 SUV / heavy vehicle cap ($30,500 for 2024/2026 / $31,300 for 2025)
             if "suv" in text_lower or "heavy vehicle" in text_lower:
                 suv_clause_matches = re.finditer(
@@ -2809,7 +2815,7 @@ class TenantFactStore:
                     )
                 pslf_matches = re.finditer(
                     r'(?:(?:pslf|public\s+service\s+loan\s+forgiveness)[^\.\n]{0,140}?(?<![a-zA-Z0-9_\\])(\d+)\s+(?:qualifying\s+)?(?:monthly\s+)?payments?|(?<![a-zA-Z0-9_\\])(\d+)\s+(?:qualifying\s+)?(?:monthly\s+)?payments?[^\.\n]{0,140}?(?:pslf|public\s+service\s+loan\s+forgiveness))',
-                    text,
+                    prose_scan_text,
                     re.IGNORECASE,
                 )
                 for m_obj in pslf_matches:
@@ -4364,6 +4370,7 @@ class TruthReconciliationEngine:
         return raw_ov, False
 
     _AUDIT_TRUTH_CACHE: Dict[Tuple[str, str, str, str, bool], List[str]] = {}
+    _AUDIT_TRUTH_HTML_SCAN_CACHE: Dict[Tuple[str, str, Tuple[bool, bool, bool]], List[str]] = {}
 
     @classmethod
     def audit_html_truth_reconciliation(
@@ -4380,6 +4387,7 @@ class TruthReconciliationEngine:
         Returns a list of violation descriptions (empty list == PASS).
         """
         tenant_norm = resolve_canonical_property_id(tenant)
+        h_digest: Optional[str] = None
         cache_key: Optional[Tuple[str, str, str, str, bool]] = None
         if html_content and len(html_content) >= 256:
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
@@ -4395,46 +4403,72 @@ class TruthReconciliationEngine:
             if not ok:
                 violations.extend(store_violations)
 
-        for filler_old, _ in cls.SPECULATIVE_FILLER_REPLACEMENTS:
-            if filler_old in html_content:
-                violations.append(f"Speculative filler phrase detected: '{filler_old.strip()}'")
+        combined_slug = f"{rel_path.lower()} {slug.lower()}" if tenant_norm == "prexvo" else ""
+        slug_flags = (
+            (
+                any(k in combined_slug for k in ("ibr-hardship", "paye-sunset")),
+                "rap-vs-ibr" in combined_slug,
+                "ibr-hardship" in combined_slug,
+            )
+            if tenant_norm == "prexvo"
+            else (False, False, False)
+        )
+        scan_cache_key = (h_digest, tenant_norm, slug_flags) if h_digest is not None else None
+        cached_scan = cls._AUDIT_TRUTH_HTML_SCAN_CACHE.get(scan_cache_key) if scan_cache_key is not None else None
 
-        if tenant_norm == "profithelm":
-            for old_str, _ in cls.PROFITHELM_HTML_REPLACEMENTS:
-                if old_str in html_content:
-                    msg = f"Unreconciled ProfitHelm statutory figure or JS cap: '{old_str[:60]}'"
-                    if msg not in violations:
-                        violations.append(msg)
-            if "Math.min(cost, 31300)" in html_content or "Math.min(basis, 31300)" in html_content or "const suvCap = 31300" in html_content:
-                violations.append("Inline calculator JS uses stale 31300 Heavy SUV cap instead of 2026 statutory 30500 cap")
-            if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
-                violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
-        elif tenant_norm == "prexvo":
-            for old_str, _ in cls.PREXVO_ALL_HTML_REPLACEMENTS:
-                if old_str in html_content:
-                    msg = f"Unreconciled Prexvo statutory figure or plan claim: '{old_str[:60]}'"
-                    if msg not in violations:
-                        violations.append(msg)
-            combined_slug = f"{rel_path.lower()} {slug.lower()}"
-            is_ibr_or_paye = (
-                any(k in combined_slug for k in ("ibr-hardship", "paye-sunset"))
-                or "IBR Hardship Cap Calculator" in html_content
-                or "PAYE Sunset Eligibility" in html_content
-            ) and "rap-vs-ibr" not in combined_slug
-            if is_ibr_or_paye:
-                for old_str, _ in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
+        if cached_scan is not None:
+            for msg in cached_scan:
+                if msg not in violations:
+                    violations.append(msg)
+        else:
+            scan_violations: List[str] = []
+            for filler_old, _ in cls.SPECULATIVE_FILLER_REPLACEMENTS:
+                if filler_old in html_content:
+                    scan_violations.append(f"Speculative filler phrase detected: '{filler_old.strip()}'")
+
+            if tenant_norm == "profithelm":
+                for old_str, _ in cls.PROFITHELM_HTML_REPLACEMENTS:
                     if old_str in html_content:
-                        msg = f"Unreconciled Prexvo IBR/PAYE threshold figure: '{old_str[:60]}'"
-                        if msg not in violations:
-                            violations.append(msg)
-                if "ibr-hardship" in combined_slug and '"name": "RAP vs IBR Repayment Calculator"' in html_content:
-                    violations.append("IBR Hardship Cap Calculator JSON-LD SoftwareApplication name misattributed as 'RAP vs IBR Repayment Calculator'")
-        elif tenant_norm == "gainhelm":
-            for old_str, _ in cls.GAINHELM_HTML_REPLACEMENTS:
-                if old_str in html_content:
-                    msg = f"Unreconciled GainHelm statutory figure or pricing tier: '{old_str[:60]}'"
-                    if msg not in violations:
-                        violations.append(msg)
+                        msg = f"Unreconciled ProfitHelm statutory figure or JS cap: '{old_str[:60]}'"
+                        if msg not in scan_violations:
+                            scan_violations.append(msg)
+                if "Math.min(cost, 31300)" in html_content or "Math.min(basis, 31300)" in html_content or "const suvCap = 31300" in html_content:
+                    scan_violations.append("Inline calculator JS uses stale 31300 Heavy SUV cap instead of 2026 statutory 30500 cap")
+                if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
+                    scan_violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
+            elif tenant_norm == "prexvo":
+                for old_str, _ in cls.PREXVO_ALL_HTML_REPLACEMENTS:
+                    if old_str in html_content:
+                        msg = f"Unreconciled Prexvo statutory figure or plan claim: '{old_str[:60]}'"
+                        if msg not in scan_violations:
+                            scan_violations.append(msg)
+                is_ibr_or_paye = (
+                    slug_flags[0]
+                    or "IBR Hardship Cap Calculator" in html_content
+                    or "PAYE Sunset Eligibility" in html_content
+                ) and not slug_flags[1]
+                if is_ibr_or_paye:
+                    for old_str, _ in cls.PREXVO_IBR_PAYE_HTML_REPLACEMENTS:
+                        if old_str in html_content:
+                            msg = f"Unreconciled Prexvo IBR/PAYE threshold figure: '{old_str[:60]}'"
+                            if msg not in scan_violations:
+                                scan_violations.append(msg)
+                    if slug_flags[2] and '"name": "RAP vs IBR Repayment Calculator"' in html_content:
+                        scan_violations.append("IBR Hardship Cap Calculator JSON-LD SoftwareApplication name misattributed as 'RAP vs IBR Repayment Calculator'")
+            elif tenant_norm == "gainhelm":
+                for old_str, _ in cls.GAINHELM_HTML_REPLACEMENTS:
+                    if old_str in html_content:
+                        msg = f"Unreconciled GainHelm statutory figure or pricing tier: '{old_str[:60]}'"
+                        if msg not in scan_violations:
+                            scan_violations.append(msg)
+
+            if scan_cache_key is not None:
+                if len(cls._AUDIT_TRUTH_HTML_SCAN_CACHE) > 1024:
+                    cls._AUDIT_TRUTH_HTML_SCAN_CACHE.clear()
+                cls._AUDIT_TRUTH_HTML_SCAN_CACHE[scan_cache_key] = list(scan_violations)
+            for msg in scan_violations:
+                if msg not in violations:
+                    violations.append(msg)
 
         if cache_key is not None:
             if len(cls._AUDIT_TRUTH_CACHE) > 1024:

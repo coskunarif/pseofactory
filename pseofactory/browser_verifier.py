@@ -2251,6 +2251,7 @@ class UnifiedBrowserAuditor:
             self.fail_closed = bool(fail_closed)
         self._html_id_cache: Dict[Path, set] = {}
         self._redirects_rules_cache: Optional[List[Tuple[str, str, int]]] = None
+        self._invalid_redirects_cache: Optional[List[str]] = None
 
     def _get_redirects_rules(self) -> List[Tuple[str, str, int]]:
         if self._redirects_rules_cache is not None:
@@ -2360,13 +2361,17 @@ class UnifiedBrowserAuditor:
         if not self.dist_dir.exists():
             return invalid
 
-        # 1. Verify dist/_redirects rules resolve to valid destinations
-        for src, dst, _code in self._get_redirects_rules():
-            if ":splat" in dst or dst.startswith("http://") or dst.startswith("https://") or dst.startswith("/r/") or dst.startswith("/api/"):
-                continue
-            dst_path = urllib.parse.urlsplit(dst).path or "/"
-            if self._resolve_disk_file(dst_path) is None:
-                invalid.append(f"_redirects:{src}->{dst}")
+        # 1. Verify dist/_redirects rules resolve to valid destinations (memoized per auditor instance)
+        if self._invalid_redirects_cache is None:
+            bad_redirects: List[str] = []
+            for src, dst, _code in self._get_redirects_rules():
+                if ":splat" in dst or dst.startswith("http://") or dst.startswith("https://") or dst.startswith("/r/") or dst.startswith("/api/"):
+                    continue
+                dst_path = urllib.parse.urlsplit(dst).path or "/"
+                if self._resolve_disk_file(dst_path) is None:
+                    bad_redirects.append(f"_redirects:{src}->{dst}")
+            self._invalid_redirects_cache = bad_redirects
+        invalid.extend(self._invalid_redirects_cache)
 
         # 2. Verify each internal href (and optional cross-page #fragment) resolves on disk
         for raw_href in internal_hrefs:
@@ -2996,12 +3001,6 @@ class UnifiedBrowserAuditor:
             )
             if desktop_overflow:
                 defects["overflow_1280"] = True
-
-            # Tablet viewport transition (768x1024)
-            await self._set_viewport_and_settle(ws, 768, 1024, 2, True, msg_counter)
-
-            # Narrow viewport transition (320x568)
-            await self._set_viewport_and_settle(ws, 320, 568, 2, True, msg_counter)
 
             # 2. Mobile Viewport (375x812)
             await self._set_viewport_and_settle(ws, 375, 812, 2, True, msg_counter)

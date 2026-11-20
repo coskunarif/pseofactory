@@ -22,35 +22,6 @@ import time
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, Union
 import uuid
 
-from pseofactory.maintenance import (
-    CANONICAL_TENANT_CONFIGS,
-    LockContentionError,
-    SubprocessCrashError,
-    MaintenanceLifecycle,
-    MaintenanceResult,
-    PropertyAdapter,
-    PropertyContaminationError,
-    TenantRegistry,
-    WorkspacePropertyScanner,
-    sync_tenant_pseofactory_marker,
-)
-from pseofactory.telemetry import (
-    TelemetryEvent,
-    AtomicTelemetryLogger,
-)
-from pseofactory.drift import (
-    compute_asset_fingerprint,
-    compute_engine_hash,
-    detect_engine_drift,
-    record_asset_ledger,
-    record_engine_hash,
-)
-from pseofactory.tenant_facts import (
-    CANONICAL_TENANT_IDS,
-    TENANT_SMOKE_PROBES,
-    list_canonical_repo_dir_names,
-)
-
 MAX_CONSECUTIVE_FAILURES: int = 5
 DEFAULT_TICK_BUDGET: float = float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0"))
 DEFAULT_TENANT_BUDGET: float = 300.0
@@ -138,6 +109,36 @@ class AtomicStateLedger:
         else:
             with open(p, "r", encoding="utf-8") as f:
                 return json.load(f)
+
+
+from pseofactory.maintenance import (  # noqa: E402
+    CANONICAL_TENANT_CONFIGS,
+    LockContentionError,
+    SubprocessCrashError,
+    MaintenanceLifecycle,
+    MaintenanceResult,
+    PropertyAdapter,
+    PropertyContaminationError,
+    TenantRegistry,
+    WorkspacePropertyScanner,
+    sync_tenant_pseofactory_marker,
+)
+from pseofactory.telemetry import (  # noqa: E402
+    TelemetryEvent,
+    AtomicTelemetryLogger,
+)
+from pseofactory.drift import (  # noqa: E402
+    compute_asset_fingerprint,
+    compute_engine_hash,
+    detect_engine_drift,
+    record_asset_ledger,
+    record_engine_hash,
+)
+from pseofactory.tenant_facts import (  # noqa: E402
+    CANONICAL_TENANT_IDS,
+    TENANT_SMOKE_PROBES,
+    list_canonical_repo_dir_names,
+)
 
 
 class HeartbeatTracker:

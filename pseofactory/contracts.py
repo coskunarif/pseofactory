@@ -746,6 +746,8 @@ def detect_interactive_touch_target_gaps(html_content: str) -> List[str]:
         "calc-switcher-btn",
     }
 
+    tag_css_rule_cache: Dict[str, bool] = {}
+
     for match in re.finditer(r'<(button|input|select|summary)\b([^>]*)>', html_content, re.IGNORECASE):
         tag = match.group(1).lower()
         attrs = match.group(2) or ""
@@ -765,15 +767,21 @@ def detect_interactive_touch_target_gaps(html_content: str) -> List[str]:
         cls_tokens = set((cls_m.group(1) if cls_m else "").split())
         has_touch_cls = bool(cls_tokens & recognized_classes)
 
-        has_tag_css_rule = bool(
-            re.search(
-                rf'(?:^|[}}\s,]){re.escape(tag)}[^{{]*\{{[^}}]*min-height:\s*(?:4[4-9]|[5-9]\d|\d{{3,}})px',
-                html_content,
-                re.IGNORECASE | re.DOTALL,
-            )
-        )
+        if has_inline_44 or has_touch_cls or (tag == "summary" and has_global_touch_css):
+            continue
 
-        if not (has_inline_44 or has_touch_cls or has_tag_css_rule or (tag == "summary" and has_global_touch_css)):
+        has_tag_css_rule = tag_css_rule_cache.get(tag)
+        if has_tag_css_rule is None:
+            has_tag_css_rule = bool(
+                re.search(
+                    rf'(?:^|[}}\s,]){re.escape(tag)}[^{{]*\{{[^}}]*min-height:\s*(?:4[4-9]|[5-9]\d|\d{{3,}})px',
+                    html_content,
+                    re.IGNORECASE | re.DOTALL,
+                )
+            )
+            tag_css_rule_cache[tag] = has_tag_css_rule
+
+        if not has_tag_css_rule:
             gaps.append(
                 f"<{tag}> element lacks >= 44px touch-target sizing or class (.touch-target / .btn / .form-input)"
             )
@@ -8644,6 +8652,22 @@ class ToolUtilityHTMLParser(HTMLParser):
             self._current_button_text = []
 
 
+_NON_JSONLD_SCRIPT_BODY_RE = re.compile(
+    r"(<script\b(?![^>]*ld\+json)[^>]*>)[\s\S]*?(</script\s*>)",
+    re.IGNORECASE,
+)
+_STYLE_BODY_RE = re.compile(
+    r"(<style\b[^>]*>)[\s\S]*?(</style\s*>)",
+    re.IGNORECASE,
+)
+
+
+def _strip_non_jsonld_script_and_style_bodies(html_text: str) -> str:
+    """Strips inline JS (except application/ld+json) and CSS bodies while preserving tags."""
+    cleaned = _NON_JSONLD_SCRIPT_BODY_RE.sub(r"\1\2", html_text)
+    return _STYLE_BODY_RE.sub(r"\1\2", cleaned)
+
+
 def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> List[str]:
     """
     Detects contract violations for interactive micro-tools against ToolUtilityContract:
@@ -8672,7 +8696,7 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
 
     parser = ToolUtilityHTMLParser()
     try:
-        parser.feed(html_text)
+        parser.feed(_strip_non_jsonld_script_and_style_bodies(html_text))
     except Exception as ex:
         issues.append(f"Page {rel_path}: Failed to parse HTML for tool utility contract: {ex}")
         return issues
@@ -9728,9 +9752,10 @@ def detect_zero_signup_instant_result_issues(
     if "\u2013" in html_text:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
+    stripped_html = _strip_non_jsonld_script_and_style_bodies(html_text)
     parser = ZeroSignupInstantResultHTMLParser()
     try:
-        parser.feed(html_text)
+        parser.feed(stripped_html)
     except Exception:
         pass
 
@@ -9892,11 +9917,23 @@ def is_non_tool_or_governance_route(value: str) -> bool:
 
 
 
-from pseofactory.qualification import (
-    qualify_search_intent,
-    check_search_intent_cannibalization,
-    assert_search_intent_qualified,
+_LAZY_QUALIFICATION_EXPORTS = frozenset(
+    (
+        "qualify_search_intent",
+        "check_search_intent_cannibalization",
+        "assert_search_intent_qualified",
+    )
 )
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_QUALIFICATION_EXPORTS:
+        import pseofactory.qualification as _qual_mod
+
+        val = getattr(_qual_mod, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 

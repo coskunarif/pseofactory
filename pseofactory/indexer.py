@@ -21,12 +21,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 
+def _baseline_env_get(key: str, default: str) -> str:
+    maint_mod = sys.modules.get("pseofactory.maintenance")
+    if maint_mod is not None:
+        pa = getattr(maint_mod, "PropertyAdapter", None)
+        if pa is not None and getattr(pa, "_SCOPED_ENV_STACK", None):
+            base = getattr(pa, "_SCOPED_ENV_BASELINE", None) or {}
+            if key in base:
+                val = base[key]
+                return default if val is None else val
+    return os.environ.get(key, default)
+
+
 # Default constants (can be overridden per project instance or via PushIndexer)
-DEFAULT_DOMAIN = os.environ.get("FACTORY_DOMAIN", "profithelm.com")
-DEFAULT_CANONICAL_BASE = os.environ.get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
+DEFAULT_DOMAIN = _baseline_env_get("FACTORY_DOMAIN", "profithelm.com")
+DEFAULT_CANONICAL_BASE = _baseline_env_get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
 DEFAULT_INDEXNOW_KEY = os.environ.get("FACTORY_INDEXNOW_KEY", "8b3d6f1c4e9a2d0b5e7f1a3c4d5e6f7a")
 DEFAULT_BASE_DIR = Path(os.environ.get("FACTORY_BASE_DIR", "/home/ubuntuadmin/projects/profithelm-platform"))
-DEFAULT_DIST_DIR = Path(os.environ.get("FACTORY_DIST_DIR", str(DEFAULT_BASE_DIR / "dist")))
+DEFAULT_DIST_DIR = Path(_baseline_env_get("FACTORY_DIST_DIR", str(DEFAULT_BASE_DIR / "dist")))
 DEFAULT_TOOLS = []
 DEFAULT_INDEXMYSITE_PROJECT_ID = os.environ.get("FACTORY_INDEXMYSITE_PROJECT_ID", "profithelm-platform")
 

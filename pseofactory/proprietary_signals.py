@@ -222,6 +222,8 @@ def _load_trend_db_cache() -> Dict[str, Any]:
     db_path = next((p for p in candidate_db_paths if p.is_file()), candidate_db_paths[0])
     series_by_id: Dict[str, Dict[str, Any]] = {}
     keywords_by_prop: Dict[str, List[Dict[str, Any]]] = {}
+    keyword_tokens_by_prop: Dict[str, List[Tuple[str, Any, Any, float]]] = {}
+    _kw_stop_tokens = frozenset({"calculator", "tax", "2026", "2027", "and", "vs", "by", "for", "of", "the", "in", "to"})
 
     if db_path.is_file():
         try:
@@ -260,12 +262,21 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                 entry["timeline"].append({"epoch": yr, "value": val})
 
             try:
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_jev_eval_query_slug ON jev_evaluations(query_slug, jev_score, composite_profit_yield);"
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_metrics ON treg_metric_snapshots(query_slug, search_volume, cpc_usd, keyword_difficulty, historical_stability);"
-                )
+                existing_idx = {
+                    str(row[0])
+                    for row in cur.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' "
+                        "AND name IN ('idx_jev_eval_query_slug', 'idx_treg_snapshots_slug_metrics');"
+                    ).fetchall()
+                }
+                if "idx_jev_eval_query_slug" not in existing_idx:
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_jev_eval_query_slug ON jev_evaluations(query_slug, jev_score, composite_profit_yield);"
+                    )
+                if "idx_treg_snapshots_slug_metrics" not in existing_idx:
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_metrics ON treg_metric_snapshots(query_slug, search_volume, cpc_usd, keyword_difficulty, historical_stability);"
+                    )
             except Exception:
                 pass
             kw_rows = cur.execute(
@@ -326,22 +337,30 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                     prop = "lienbond"
                 else:
                     prop = "profithelm"
-                keywords_by_prop.setdefault(prop, []).append(
-                    {
-                        "query_slug": str(kr["query_slug"]),
-                        "query": str(kr["query"]),
-                        "property_id": prop,
-                        "source": "pseofactory/trends/data/trend_history.db",
-                        "consecutive_cycles_count": int(kr["consecutive_cycles_count"] or 1),
-                        "latest_velocity": round(float(kr["latest_velocity"] or 0.0), 4),
-                        "acceleration_2nd_deriv": round(float(kr["acceleration_2nd_deriv"] or 0.0), 4),
-                        "search_volume": int(kr["search_volume"] or 0),
-                        "cpc_usd": round(float(kr["cpc_usd"] or 0.0), 2),
-                        "keyword_difficulty": round(float(kr["keyword_difficulty"] or 0.0), 1),
-                        "historical_stability": round(float(kr["historical_stability"] or 0.0), 4),
-                        "jev_score": round(float(kr["jev_score"] or 0.0), 4),
-                        "composite_profit_yield": round(float(kr["composite_profit_yield"] or 0.0), 2),
-                    }
+                kw_entry = {
+                    "query_slug": str(kr["query_slug"]),
+                    "query": str(kr["query"]),
+                    "property_id": prop,
+                    "source": "pseofactory/trends/data/trend_history.db",
+                    "consecutive_cycles_count": int(kr["consecutive_cycles_count"] or 1),
+                    "latest_velocity": round(float(kr["latest_velocity"] or 0.0), 4),
+                    "acceleration_2nd_deriv": round(float(kr["acceleration_2nd_deriv"] or 0.0), 4),
+                    "search_volume": int(kr["search_volume"] or 0),
+                    "cpc_usd": round(float(kr["cpc_usd"] or 0.0), 2),
+                    "keyword_difficulty": round(float(kr["keyword_difficulty"] or 0.0), 1),
+                    "historical_stability": round(float(kr["historical_stability"] or 0.0), 4),
+                    "jev_score": round(float(kr["jev_score"] or 0.0), 4),
+                    "composite_profit_yield": round(float(kr["composite_profit_yield"] or 0.0), 2),
+                }
+                keywords_by_prop.setdefault(prop, []).append(kw_entry)
+                kw_toks = frozenset(re.findall(r"[a-z0-9]+", qs_low))
+                keyword_tokens_by_prop.setdefault(prop, []).append(
+                    (
+                        qs_low,
+                        kw_toks,
+                        kw_toks - _kw_stop_tokens,
+                        float(kw_entry["composite_profit_yield"] or 0.0) / 1000.0,
+                    )
                 )
             conn.close()
         except Exception:
@@ -378,6 +397,7 @@ def _load_trend_db_cache() -> Dict[str, Any]:
     _TREND_DB_CACHE = {
         "series_by_id": series_by_id,
         "keywords_by_prop": keywords_by_prop,
+        "keyword_tokens_by_prop": keyword_tokens_by_prop,
     }
     return _TREND_DB_CACHE
 
@@ -472,20 +492,31 @@ def resolve_proprietary_signal_bundle(
     ordered_series = [item[2] for item in matched_series]
 
     kw_list = db_cache["keywords_by_prop"].get(prop, [])
+    kw_tok_list = db_cache.get("keyword_tokens_by_prop", {}).get(prop, [])
     stop_tokens = {"calculator", "tax", "2026", "2027", "and", "vs", "by", "for", "of", "the", "in", "to"}
     meaningful_q = q_tokens - stop_tokens
     best_kw: Optional[Dict[str, Any]] = None
     best_kw_score = -1.0
-    for kw in kw_list:
-        ks = kw["query_slug"].lower()
-        kw_tokens = set(re.findall(r"[a-z0-9]+", ks))
-        exact_bonus = 100.0 if ks in (s_clean, base_slug) else 0.0
-        core_overlap = len(meaningful_q & (kw_tokens - stop_tokens)) * 5.0
-        full_overlap = float(len(q_tokens & kw_tokens))
-        score_kw = exact_bonus + core_overlap + full_overlap + (float(kw.get("composite_profit_yield") or 0.0) / 1000.0)
-        if score_kw > best_kw_score:
-            best_kw_score = score_kw
-            best_kw = kw
+    if len(kw_tok_list) == len(kw_list):
+        for kw, (ks, kw_tokens, kw_core_tokens, cpy_bonus) in zip(kw_list, kw_tok_list):
+            exact_bonus = 100.0 if ks in (s_clean, base_slug) else 0.0
+            core_overlap = len(meaningful_q & kw_core_tokens) * 5.0
+            full_overlap = float(len(q_tokens & kw_tokens))
+            score_kw = exact_bonus + core_overlap + full_overlap + cpy_bonus
+            if score_kw > best_kw_score:
+                best_kw_score = score_kw
+                best_kw = kw
+    else:
+        for kw in kw_list:
+            ks = kw["query_slug"].lower()
+            kw_tokens = set(re.findall(r"[a-z0-9]+", ks))
+            exact_bonus = 100.0 if ks in (s_clean, base_slug) else 0.0
+            core_overlap = len(meaningful_q & (kw_tokens - stop_tokens)) * 5.0
+            full_overlap = float(len(q_tokens & kw_tokens))
+            score_kw = exact_bonus + core_overlap + full_overlap + (float(kw.get("composite_profit_yield") or 0.0) / 1000.0)
+            if score_kw > best_kw_score:
+                best_kw_score = score_kw
+                best_kw = kw
     if best_kw is None and kw_list:
         best_kw = kw_list[0]
 

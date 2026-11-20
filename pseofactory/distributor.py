@@ -45,10 +45,22 @@ def _cleanup_registered_test_temp_paths() -> None:
 
 atexit.register(_cleanup_registered_test_temp_paths)
 
-CANONICAL_BASE = os.environ.get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
-SITE_NAME = os.environ.get("FACTORY_SITE_NAME", "ProfitHelm")
-LINKEDIN_COMPANY_ID = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID", "143884102")
-POST_URL_BASE = os.environ.get("FACTORY_POST_URL_BASE", CANONICAL_BASE)
+def _baseline_env_get(key: str, default: str) -> str:
+    maint_mod = sys.modules.get("pseofactory.maintenance")
+    if maint_mod is not None:
+        pa = getattr(maint_mod, "PropertyAdapter", None)
+        if pa is not None and getattr(pa, "_SCOPED_ENV_STACK", None):
+            base = getattr(pa, "_SCOPED_ENV_BASELINE", None) or {}
+            if key in base:
+                val = base[key]
+                return default if val is None else val
+    return os.environ.get(key, default)
+
+
+CANONICAL_BASE = _baseline_env_get("FACTORY_CANONICAL_BASE", "https://profithelm.com")
+SITE_NAME = _baseline_env_get("FACTORY_SITE_NAME", "ProfitHelm")
+LINKEDIN_COMPANY_ID = _baseline_env_get("FACTORY_LINKEDIN_COMPANY_ID", "143884102")
+POST_URL_BASE = _baseline_env_get("FACTORY_POST_URL_BASE", CANONICAL_BASE)
 TOOLS: List[Dict[str, Any]] = []
 
 from pseofactory.tenant_facts import (
