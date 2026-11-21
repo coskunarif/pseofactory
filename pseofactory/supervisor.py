@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -59,6 +60,45 @@ class AtomicStateLedger:
             finally:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
+    _STALE_TMP_PATTERN = re.compile(r"^tmp[a-z0-9_]{6,}$")
+
+    @classmethod
+    def cleanup_stale_temp_files(
+        cls,
+        directory: Union[str, Path],
+        max_age_seconds: float = 3600.0,
+        exclude_name: Optional[str] = None,
+    ) -> int:
+        """
+        Safely unlinks orphaned NamedTemporaryFile artifacts (matching ^tmp[a-z0-9_]{6,}$)
+        older than max_age_seconds inside directory.
+        Zero em-dashes. Zero en-dashes.
+        """
+        target_dir = Path(directory)
+        if not target_dir.is_dir():
+            return 0
+        now_ts = time.time()
+        removed = 0
+        try:
+            for entry in target_dir.iterdir():
+                name = entry.name
+                if exclude_name and name == exclude_name:
+                    continue
+                if not cls._STALE_TMP_PATTERN.match(name):
+                    continue
+                try:
+                    if entry.is_symlink() or not entry.is_file():
+                        continue
+                    age_secs = now_ts - entry.stat().st_mtime
+                    if age_secs >= max_age_seconds:
+                        entry.unlink()
+                        removed += 1
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        return removed
+
     @classmethod
     def save_json(cls, path: Union[str, Path], data: Dict[str, Any]) -> None:
         """
@@ -67,18 +107,21 @@ class AtomicStateLedger:
         """
         p = Path(path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
+        payload_text = json.dumps(data, indent=2)
         lock_path = Path(str(p) + ".lock")
         with open(lock_path, "a+", encoding="utf-8") as lock_file:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             tmp_name = None
             try:
                 with tempfile.NamedTemporaryFile("w", dir=p.parent, delete=False, encoding="utf-8") as tf:
-                    json.dump(data, tf, indent=2)
+                    tmp_name = tf.name
+                    tf.write(payload_text)
                     tf.flush()
                     os.fsync(tf.fileno())
-                    tmp_name = tf.name
                 os.replace(tmp_name, p)
                 tmp_name = None
+                if p.parent.name == ".agy":
+                    cls.cleanup_stale_temp_files(p.parent, max_age_seconds=3600.0)
             finally:
                 if tmp_name and os.path.exists(tmp_name):
                     try:

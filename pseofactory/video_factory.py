@@ -3406,6 +3406,7 @@ def run_autonomous_video_pipeline(
     uploaded_live_count = 0
     idempotent_hits_count = 0
     quota_deferred_count = 0
+    attempted_uploads = 0
     upload_errors: List[Dict[str, Any]] = []
 
     for elig in eligible_items:
@@ -3436,20 +3437,31 @@ def run_autonomous_video_pipeline(
         u_status = up_res.get("status")
         if u_status == "UPLOADED":
             uploaded_live_count += 1
+            attempted_uploads += 1
         elif u_status == "ALREADY_UPLOADED_IDEMPOTENT":
             idempotent_hits_count += 1
         elif u_status == "QUOTA_DEFERRED_STAGED":
             quota_deferred_count += 1
         elif u_status in ("UPLOAD_ERROR", "FAILED_INVALID_VIDEO_ASSET"):
             upload_errors.append(up_res)
+            attempted_uploads += 1
 
+    upload_error_count = len(upload_errors)
+    total_uploaded_verified = uploaded_live_count + idempotent_hits_count
     final_budget = gov.get_budget_status()
+    stage_4_status = (
+        "PASS"
+        if upload_error_count == 0
+        else ("UPLOAD_BLACKOUT" if (live_upload and total_uploaded_verified == 0) else "PARTIAL_ERROR")
+    )
     stage_4 = {
-        "status": "PASS" if len(upload_errors) == 0 else "PARTIAL_ERROR",
+        "status": stage_4_status,
         "live_upload_enabled": live_upload,
+        "attempted_uploads": attempted_uploads,
         "uploaded_live_count": uploaded_live_count,
         "idempotent_hits_count": idempotent_hits_count,
         "quota_deferred_count": quota_deferred_count,
+        "upload_error_count": upload_error_count,
         "errors": upload_errors,
         "final_quota_budget": final_budget.to_dict(),
         "results": upload_results,
@@ -3467,7 +3479,6 @@ def run_autonomous_video_pipeline(
         else []
     )
     total_rendered_on_disk = len(rendered_mp4_files)
-    total_uploaded_verified = uploaded_live_count + idempotent_hits_count
 
     blackout_detected = bool(
         synthesize_missing
@@ -3476,6 +3487,17 @@ def run_autonomous_video_pipeline(
         and total_rendered_on_disk == 0
         and total_uploaded_verified == 0
     )
+    upload_blackout_detected = bool(
+        live_upload
+        and upload_error_count > 0
+        and uploaded_live_count == 0
+    )
+    if blackout_detected:
+        pipeline_status = "BLACKOUT_DETECTED"
+    elif live_upload and upload_error_count > 0:
+        pipeline_status = "UPLOAD_BLACKOUT" if total_uploaded_verified == 0 else "UPLOAD_DEGRADED"
+    else:
+        pipeline_status = "PASS"
 
     per_slug_dispatch_status: Dict[str, str] = {}
     for elig in eligibilities:
@@ -3491,6 +3513,7 @@ def run_autonomous_video_pipeline(
             "RENDERED_STAGED",
             "DEFERRED_RENDER_CAP",
             "UPLOAD_ERROR",
+            "FAILED_INVALID_VIDEO_ASSET",
         ):
             per_slug_dispatch_status[elig.slug] = u_st
         elif elig.already_rendered:
@@ -3501,16 +3524,19 @@ def run_autonomous_video_pipeline(
     telemetry_payload: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "property_id": prop,
-        "status": "BLACKOUT_DETECTED" if blackout_detected else "PASS",
+        "status": pipeline_status,
         "blackout_detected": blackout_detected,
+        "upload_blackout_detected": upload_blackout_detected,
         "total_tools_evaluated": len(eligibilities),
         "eligible_tools_count": len(eligible_items),
         "skipped_low_value_count": len(skipped_low_value),
         "rendered_videos_on_disk_count": total_rendered_on_disk,
         "newly_synthesized_count": newly_synthesized_count,
+        "attempted_uploads": attempted_uploads,
         "uploaded_live_count": uploaded_live_count,
         "idempotent_uploaded_count": idempotent_hits_count,
         "quota_deferred_count": quota_deferred_count,
+        "upload_error_count": upload_error_count,
         "per_slug_dispatch_status": per_slug_dispatch_status,
         "quota_budget": final_budget.to_dict(),
         "stages": {

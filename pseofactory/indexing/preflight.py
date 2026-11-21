@@ -910,7 +910,39 @@ class IndexingPreflightEngine:
         elif self.dist_dir:
             target_path = Path(self.dist_dir).parent / ".agy" / "indexing_quarantine_ledger.json"
         else:
-            target_path = Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json")
+            tenant_repo_dir: Optional[Path] = None
+            try:
+                from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+
+                pid_key = str(self.property_id or "").strip().lower()
+                decl = CANONICAL_TENANT_DECLARATIONS.get(pid_key)
+                if decl is not None:
+                    repo_ref = (
+                        decl.get("repo_root_path")
+                        or decl.get("repo_root")
+                        or decl.get("repo_dir_name")
+                        or decl.get("repo_dir")
+                        if isinstance(decl, dict)
+                        else (
+                            getattr(decl, "repo_root_path", None)
+                            or getattr(decl, "repo_root", None)
+                            or getattr(decl, "repo_dir_name", None)
+                        )
+                    )
+                    if repo_ref:
+                        cand_repo = (
+                            Path(repo_ref)
+                            if (isinstance(repo_ref, Path) or str(repo_ref).startswith("/"))
+                            else (Path("/home/ubuntuadmin/projects") / str(repo_ref))
+                        )
+                        if cand_repo.is_dir():
+                            tenant_repo_dir = cand_repo
+            except Exception:
+                tenant_repo_dir = None
+            if tenant_repo_dir is not None:
+                target_path = tenant_repo_dir / ".agy" / "indexing_quarantine_ledger.json"
+            else:
+                target_path = Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json")
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1013,3 +1045,152 @@ def run_indexing_preflight(
         return engine.inspect_dist(dist_dir)
 
     return engine.inspect_dist()
+
+
+def prune_stale_cross_domain_quarantine_entries(
+    ledger_path: Union[str, Path],
+    tenant_dist_dirs: Optional[Dict[str, Path]] = None,
+    dry_run: bool = False,
+) -> List[str]:
+    """
+    Prunes stale cross-tenant quarantine entries (for example, profithelm.com URLs
+    whose canonical points to gainhelm.com and whose route does not exist on
+    profithelm-platform/dist) from a quarantine ledger file (dict or list format).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import os
+
+    q_path = Path(ledger_path)
+    if not q_path.is_file():
+        return []
+    if (
+        not dry_run
+        and os.environ.get("PYTEST_CURRENT_TEST")
+        and str(q_path.resolve()).startswith("/home/ubuntuadmin/projects/")
+    ):
+        return []
+
+    domain_to_dist: Dict[str, Path] = {}
+    known_domains: Set[str] = set()
+    try:
+        from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+
+        for _pid, decl in CANONICAL_TENANT_DECLARATIONS.items():
+            dom = str(
+                (decl.get("domain") if isinstance(decl, dict) else getattr(decl, "domain", None)) or ""
+            ).strip().lower().removeprefix("www.")
+            repo_ref = (
+                decl.get("repo_root_path")
+                or decl.get("repo_root")
+                or decl.get("repo_dir_name")
+                or decl.get("repo_dir")
+                if isinstance(decl, dict)
+                else (
+                    getattr(decl, "repo_root_path", None)
+                    or getattr(decl, "repo_root", None)
+                    or getattr(decl, "repo_dir_name", None)
+                )
+            )
+            dist_rel = str(
+                (decl.get("dist_dir") if isinstance(decl, dict) else getattr(decl, "dist_dir", None)) or "dist"
+            ).strip()
+            if dom:
+                known_domains.add(dom)
+                if repo_ref:
+                    cand_repo = (
+                        Path(repo_ref)
+                        if (isinstance(repo_ref, Path) or str(repo_ref).startswith("/"))
+                        else (Path("/home/ubuntuadmin/projects") / str(repo_ref))
+                    )
+                    cand_dist = cand_repo / dist_rel
+                    if cand_dist.is_dir():
+                        domain_to_dist[dom] = cand_dist
+    except Exception:
+        known_domains = {"profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com"}
+
+    if isinstance(tenant_dist_dirs, dict):
+        for dom_k, d_val in tenant_dist_dirs.items():
+            clean_dom = str(dom_k).strip().lower().removeprefix("www.")
+            if clean_dom:
+                known_domains.add(clean_dom)
+                domain_to_dist[clean_dom] = Path(d_val)
+
+    def _is_stale_cross_domain_entry(url_str: str, details: Any) -> bool:
+        if not url_str:
+            return False
+        parsed = urllib.parse.urlsplit(str(url_str))
+        url_dom = (parsed.netloc or "").strip().lower().removeprefix("www.")
+        if url_dom not in known_domains:
+            return False
+        url_rel = (parsed.path or "").strip("/")
+
+        # Check explicit cross-domain metadata mismatch
+        if isinstance(details, dict):
+            meta_dom = str(details.get("domain") or "").strip().lower().removeprefix("www.")
+            if meta_dom and meta_dom in known_domains and meta_dom != url_dom:
+                return True
+
+            text_blob = " ".join(
+                str(details.get(k) or "")
+                for k in ("reason", "details", "error", "canonical_url")
+            )
+            referenced_urls = re.findall(r"https?://[^\s'\"<>]+", text_blob)
+            other_tenant_domains: Set[str] = set()
+            for ref_u in referenced_urls:
+                ref_dom = (urllib.parse.urlsplit(ref_u).netloc or "").strip().lower().removeprefix("www.")
+                if ref_dom in known_domains and ref_dom != url_dom:
+                    other_tenant_domains.add(ref_dom)
+
+            if other_tenant_domains:
+                src_dist = domain_to_dist.get(url_dom)
+                if src_dist is not None and src_dist.is_dir():
+                    route_exists_on_src = (
+                        (src_dist / "index.html").is_file()
+                        if not url_rel
+                        else (
+                            (src_dist / url_rel / "index.html").is_file()
+                            or (src_dist / url_rel).is_file()
+                        )
+                    )
+                    if not route_exists_on_src:
+                        return True
+                else:
+                    # Standalone ledger without live dist_dir: canonical mismatch between
+                    # two distinct canonical tenant domains is unambiguously cross-tenant.
+                    low_blob = text_blob.lower()
+                    if "canonical" in low_blob or "mismatch" in low_blob:
+                        return True
+        return False
+
+    try:
+        raw = json.loads(q_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    pruned_urls: List[str] = []
+    if isinstance(raw, dict):
+        kept_dict: Dict[str, Any] = {}
+        for k, v in raw.items():
+            u_str = str(v.get("url", k) if isinstance(v, dict) else k)
+            if _is_stale_cross_domain_entry(u_str, v):
+                pruned_urls.append(u_str)
+            else:
+                kept_dict[k] = v
+        if pruned_urls and not dry_run:
+            tmp_p = q_path.with_name(f"{q_path.name}.{os.getpid()}.tmp")
+            tmp_p.write_text(json.dumps(kept_dict, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp_p, q_path)
+    elif isinstance(raw, list):
+        kept_list: List[Any] = []
+        for item in raw:
+            u_str = str(item.get("url") if isinstance(item, dict) else item or "")
+            if _is_stale_cross_domain_entry(u_str, item):
+                pruned_urls.append(u_str)
+            else:
+                kept_list.append(item)
+        if pruned_urls and not dry_run:
+            tmp_p = q_path.with_name(f"{q_path.name}.{os.getpid()}.tmp")
+            tmp_p.write_text(json.dumps(kept_list, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp_p, q_path)
+
+    return pruned_urls

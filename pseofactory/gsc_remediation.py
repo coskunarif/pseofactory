@@ -7045,9 +7045,6 @@ def prioritize_gsc_signals(
         else:
             continue
 
-        if eng_metrics_arg and "engagement_metrics" not in rec:
-            rec["engagement_metrics"] = eng_metrics_arg
-
         item_tenant = str(rec.get("tenant_id") or rec.get("property_id") or eff_tenant).strip().lower()
         item_domain = (
             "prexvo.com"
@@ -7194,6 +7191,11 @@ def prioritize_gsc_signals(
         query = str(rec.get("query") or "").strip()
         slug = str(rec.get("slug") or "").strip()
 
+        eval_cand = (
+            {**rec, "engagement_metrics": eng_metrics_arg}
+            if eng_metrics_arg and "engagement_metrics" not in rec
+            else rec
+        )
         if (
             base_dir_arg is not None
             or dist_dir_arg is not None
@@ -7212,7 +7214,7 @@ def prioritize_gsc_signals(
                 position=float(rec.get("position", 0.0) or 0.0),
                 dist_dir=dist_dir_arg,
                 base_dir=base_dir_arg,
-                candidate=rec,
+                candidate=eval_cand,
             )
             rec.setdefault("conversion_gap_detected", readiness["conversion_gap_detected"])
             rec.setdefault("distribution_gap_detected", readiness["distribution_gap_detected"])
@@ -7222,7 +7224,12 @@ def prioritize_gsc_signals(
             rec.setdefault("current_partner_key", readiness["current_partner_key"])
             rec.setdefault("optimal_partner_key", readiness["optimal_partner_key"])
 
-        roi_metrics = calculate_candidate_roi(rec, tenant_id=item_tenant)
+        eval_cand = (
+            {**rec, "engagement_metrics": eng_metrics_arg}
+            if eng_metrics_arg and "engagement_metrics" not in rec
+            else rec
+        )
+        roi_metrics = calculate_candidate_roi(eval_cand, tenant_id=item_tenant)
         merged_cand = {
             **rec,
             **roi_metrics,
@@ -7232,7 +7239,14 @@ def prioritize_gsc_signals(
             "target_url": target_url,
             "query": query,
         }
-        overlay_spec = compile_remediation_overlay_spec(merged_cand, tenant_id=item_tenant)
+        merged_cand.pop("engagement_metrics", None)
+        eff_spec_eng = rec.get("engagement_metrics") or eng_metrics_arg
+        spec_input = (
+            {**merged_cand, "engagement_metrics": eff_spec_eng}
+            if eff_spec_eng
+            else merged_cand
+        )
+        overlay_spec = compile_remediation_overlay_spec(spec_input, tenant_id=item_tenant)
         merged_cand["section"] = overlay_spec["section"]
         merged_cand["template_section"] = overlay_spec["template_section"]
         merged_cand["child_sitemap"] = overlay_spec["child_sitemap"]
@@ -11581,8 +11595,244 @@ class AsyncRemediationQueue:
     Zero em-dashes. Zero en-dashes.
     """
 
+    MAX_COMPLETED_TASKS_PER_TENANT: int = 50
+    COMPLETED_TASK_TTL_DAYS: int = 14
+    _ALLOWED_PERSISTED_TASK_KEYS: frozenset = frozenset({
+        "tenant_id",
+        "property_id",
+        "slug",
+        "target_url",
+        "url",
+        "canonical_url",
+        "query",
+        "section",
+        "child_sitemap",
+        "anomaly_type",
+        "action_type",
+        "classification",
+        "reason",
+        "remediation_action",
+        "baseline_source",
+        "idempotency_key",
+        "content_sha256",
+        "status",
+        "attempt_count",
+        "enqueued_at",
+        "updated_at",
+        "completed_at",
+        "next_attempt_at",
+        "last_error",
+        "measurement_lock_days",
+        "lock_days",
+        "locked_until",
+        "roi_score",
+        "impressions",
+        "clicks",
+        "ctr",
+        "position",
+        "intent_class",
+        "is_high_intent_calculator_or_guide",
+        "conversion_gap_detected",
+        "distribution_gap_detected",
+        "has_strong_conversion_path",
+        "has_external_distribution",
+        "yield_optimization_needed",
+        "current_partner_key",
+        "optimal_partner_key",
+        "manual_requirement_detected",
+        "restricted_public_service",
+        "commercial_offers_allowed",
+        "consolidation_needed",
+        "slug_engagement_summary",
+    })
+
     def __init__(self, queue_path: Optional[Union[str, Path]] = None):
         self.queue_path = Path(queue_path or DEFAULT_REMEDIATION_QUEUE_PATH).resolve()
+
+    @staticmethod
+    def _parse_iso_dt(value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+
+    @classmethod
+    def _task_dedup_key(cls, task: Dict[str, Any]) -> Tuple[str, str, str]:
+        slug = str(task.get("slug") or "").strip().lower()
+        target_url = str(task.get("target_url") or task.get("url") or "").strip().rstrip("/").lower()
+        action_or_engine = str(
+            task.get("anomaly_type") or task.get("action_type") or "REMEDIATE"
+        ).strip().upper()
+        return (slug, target_url, action_or_engine)
+
+    @classmethod
+    def _compact_task_record(cls, task: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Persists only compact per-slug metadata (slug, url, reasons, action flags,
+        compact per-slug metric summary < 2 KB, timestamps, and status). Strips all
+        giant tenant-wide engagement_metrics, partner_offer, partner_roster, slot_plan,
+        and overlay_spec blobs; full context is resolved live at execution time.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not isinstance(task, dict):
+            return {}
+        compact: Dict[str, Any] = {}
+        ov = task.get("overlay_spec") if isinstance(task.get("overlay_spec"), dict) else None
+        for k in cls._ALLOWED_PERSISTED_TASK_KEYS:
+            if k not in task:
+                continue
+            v = task[k]
+            if v is None:
+                continue
+            if k == "slug_engagement_summary":
+                if isinstance(v, dict):
+                    compact[k] = {
+                        sk: sv
+                        for sk, sv in v.items()
+                        if not isinstance(sv, (dict, list))
+                    }
+                continue
+            if isinstance(v, (dict, list)):
+                continue
+            if isinstance(v, str) and len(v) > 512:
+                v = v[:512]
+            compact[k] = v
+
+        # Promote lock metadata from overlay_spec before dropping overlay_spec
+        if ov is not None:
+            if "measurement_lock_days" not in compact and ov.get("measurement_lock_days") is not None:
+                compact["measurement_lock_days"] = ov.get("measurement_lock_days")
+            if "lock_days" not in compact and ov.get("lock_days") is not None:
+                compact["lock_days"] = ov.get("lock_days")
+            if "locked_until" not in compact and ov.get("locked_until"):
+                compact["locked_until"] = ov.get("locked_until")
+
+        # Keep only a tiny per-slug engagement summary (< 512 B) if available
+        raw_eng = task.get("engagement_metrics")
+        if isinstance(raw_eng, dict) and "slug_engagement_summary" not in compact:
+            slug_key = str(compact.get("slug") or "").strip()
+            by_slug = raw_eng.get("by_slug")
+            if slug_key and isinstance(by_slug, dict) and isinstance(by_slug.get(slug_key), dict):
+                s_rec = by_slug[slug_key]
+                summary = {
+                    sk: s_rec[sk]
+                    for sk in ("clicks", "outbound_clicks", "events", "total_events", "impressions", "cta_ctr")
+                    if sk in s_rec and not isinstance(s_rec[sk], (dict, list))
+                }
+                if summary:
+                    compact["slug_engagement_summary"] = summary
+        return compact
+
+    @classmethod
+    def _compact_and_prune_state(
+        cls,
+        state: Dict[str, Any],
+        max_completed_per_tenant: Optional[int] = None,
+        completed_ttl_days: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Compacts all persisted tasks, deduplicates repeated slug tasks, and bounds
+        historical COMPLETED tasks while preserving every PENDING/IN_PROGRESS/ROLLOVER/FAILED task.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not isinstance(state, dict) or "tenants" not in state:
+            return {"version": 1, "tenants": {}}
+
+        max_comp = (
+            cls.MAX_COMPLETED_TASKS_PER_TENANT
+            if max_completed_per_tenant is None
+            else max(0, int(max_completed_per_tenant))
+        )
+        ttl_days = (
+            cls.COMPLETED_TASK_TTL_DAYS
+            if completed_ttl_days is None
+            else max(0, int(completed_ttl_days))
+        )
+        now_dt = datetime.now(timezone.utc)
+        cutoff_dt = now_dt - timedelta(days=ttl_days)
+        tenants_map = state.get("tenants")
+        if not isinstance(tenants_map, dict):
+            state["tenants"] = {}
+            return state
+
+        for _tid, t_bucket in list(tenants_map.items()):
+            if not isinstance(t_bucket, dict):
+                continue
+            raw_tasks = t_bucket.get("tasks", [])
+            if not isinstance(raw_tasks, list):
+                t_bucket["tasks"] = []
+                continue
+
+            active_by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+            completed_by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+            for raw_t in raw_tasks:
+                if not isinstance(raw_t, dict):
+                    continue
+                comp_t = cls._compact_task_record(raw_t)
+                d_key = cls._task_dedup_key(comp_t)
+                st = str(comp_t.get("status") or "PENDING").upper()
+                if st == "COMPLETED":
+                    existing = completed_by_key.get(d_key)
+                    if existing is None:
+                        completed_by_key[d_key] = comp_t
+                    else:
+                        new_lock = cls._parse_iso_dt(comp_t.get("locked_until"))
+                        old_lock = cls._parse_iso_dt(existing.get("locked_until"))
+                        new_ts = cls._parse_iso_dt(
+                            comp_t.get("completed_at") or comp_t.get("updated_at") or comp_t.get("enqueued_at")
+                        )
+                        old_ts = cls._parse_iso_dt(
+                            existing.get("completed_at") or existing.get("updated_at") or existing.get("enqueued_at")
+                        )
+                        if (new_lock and (not old_lock or new_lock > old_lock)) or (
+                            new_ts and (not old_ts or new_ts >= old_ts)
+                        ):
+                            completed_by_key[d_key] = comp_t
+                else:
+                    existing = active_by_key.get(d_key)
+                    if existing is None:
+                        active_by_key[d_key] = comp_t
+                    else:
+                        new_ts = cls._parse_iso_dt(comp_t.get("updated_at") or comp_t.get("enqueued_at"))
+                        old_ts = cls._parse_iso_dt(existing.get("updated_at") or existing.get("enqueued_at"))
+                        if (new_ts and (not old_ts or new_ts >= old_ts)) or (
+                            float(comp_t.get("roi_score", 0.0) or 0.0)
+                            > float(existing.get("roi_score", 0.0) or 0.0)
+                        ):
+                            active_by_key[d_key] = comp_t
+
+            # Preserve every COMPLETED task still inside its active measurement lock window
+            # (locked_until > now_dt) unconditionally; apply TTL and rolling cap only to
+            # unlocked historical COMPLETED tasks.
+            locked_completed: List[Tuple[float, Dict[str, Any]]] = []
+            unlocked_completed: List[Tuple[float, Dict[str, Any]]] = []
+            for ct in completed_by_key.values():
+                c_dt = cls._parse_iso_dt(
+                    ct.get("completed_at") or ct.get("updated_at") or ct.get("enqueued_at")
+                )
+                lock_dt = cls._parse_iso_dt(ct.get("locked_until"))
+                sort_ts = c_dt.timestamp() if c_dt is not None else 0.0
+                if lock_dt is not None and lock_dt > now_dt:
+                    locked_completed.append((sort_ts, ct))
+                    continue
+                if c_dt is not None and c_dt < cutoff_dt:
+                    continue
+                unlocked_completed.append((sort_ts, ct))
+
+            locked_completed.sort(key=lambda pair: -pair[0])
+            unlocked_completed.sort(key=lambda pair: -pair[0])
+            kept_completed = [pair[1] for pair in locked_completed] + [
+                pair[1] for pair in unlocked_completed[:max_comp]
+            ]
+            t_bucket["tasks"] = list(active_by_key.values()) + kept_completed
+
+        return state
 
     def _load_state(self) -> Dict[str, Any]:
         from pseofactory.supervisor import AtomicStateLedger
@@ -11590,12 +11840,13 @@ class AsyncRemediationQueue:
         data = AtomicStateLedger.load_json(self.queue_path)
         if not isinstance(data, dict) or "tenants" not in data:
             return {"version": 1, "tenants": {}}
-        return data
+        return self._compact_and_prune_state(data)
 
     def _save_state(self, state: Dict[str, Any]) -> None:
         from pseofactory.supervisor import AtomicStateLedger
 
-        AtomicStateLedger.save_json(self.queue_path, state)
+        compacted = self._compact_and_prune_state(state)
+        AtomicStateLedger.save_json(self.queue_path, compacted)
 
     @staticmethod
     def compute_payload_sha256(payload: Any) -> str:
@@ -11659,8 +11910,8 @@ class AsyncRemediationQueue:
     ) -> Dict[str, Any]:
         """
         Enqueues a batch of remediation candidates under tenant isolation.
-        If all candidates already exist by composite idempotency_key, returns
-        status='DEDUPLICATED_NO_OP' and enqueued_count=0.
+        If all candidates already exist by composite idempotency_key or active/locked
+        slug+action deduplication, returns status='DEDUPLICATED_NO_OP' and enqueued_count=0.
         """
         state = self._load_state()
         tenants_map = state.setdefault("tenants", {})
@@ -11668,7 +11919,8 @@ class AsyncRemediationQueue:
         enqueued_count = 0
         deduplicated_count = 0
         results: List[Dict[str, Any]] = []
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now_iso = now_dt.isoformat()
 
         for cand in candidates:
             if not isinstance(cand, dict):
@@ -11712,10 +11964,22 @@ class AsyncRemediationQueue:
                 payload_hash=payload_hash,
             )
 
-            existing = next(
-                (t for t in tasks_list if t.get("idempotency_key") == idemp_key),
-                None,
-            )
+            cand_dedup_key = (slug.strip().lower(), target_url.strip().rstrip("/").lower(), action_or_engine)
+            existing = None
+            for t in tasks_list:
+                if t.get("idempotency_key") == idemp_key:
+                    existing = t
+                    break
+                if self._task_dedup_key(t) == cand_dedup_key:
+                    t_status = str(t.get("status") or "PENDING").upper()
+                    if t_status != "COMPLETED":
+                        existing = t
+                        break
+                    lock_dt = self._parse_iso_dt(t.get("locked_until"))
+                    if lock_dt is not None and lock_dt > now_dt:
+                        existing = t
+                        break
+
             if existing is not None:
                 deduplicated_count += 1
                 results.append({
@@ -11726,7 +11990,7 @@ class AsyncRemediationQueue:
                 })
                 continue
 
-            task_record = {
+            raw_task_record = {
                 **cand,
                 "tenant_id": eff_tenant,
                 "property_id": eff_tenant,
@@ -11740,7 +12004,7 @@ class AsyncRemediationQueue:
                 "updated_at": now_iso,
                 "next_attempt_at": cand.get("next_attempt_at"),
             }
-            tasks_list.append(task_record)
+            tasks_list.append(self._compact_task_record(raw_task_record))
             enqueued_count += 1
             results.append({
                 "status": "ENQUEUED",
@@ -11774,6 +12038,14 @@ class AsyncRemediationQueue:
         tasks = t_bucket.get("tasks", [])
         return [dict(t) for t in tasks if isinstance(t, dict) and t.get("tenant_id") == eff_tenant]
 
+    def get_pending_tasks(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """Returns strictly the non-completed tasks belonging to tenant_id."""
+        return [
+            t
+            for t in self.get_tenant_tasks(tenant_id)
+            if str(t.get("status") or "").upper() != "COMPLETED"
+        ]
+
     def process_tenant_batch(
         self,
         tenant_id: str,
@@ -11787,6 +12059,7 @@ class AsyncRemediationQueue:
         Processes queued tasks for tenant_id within execution_budget_seconds.
         Preserves all unprocessed and failed items in ROLLOVER/PENDING state with
         exponential backoff upon network partition or HTTP 429 errors.
+        Persists compacted state once cleanly at batch end.
         Zero em-dashes. Zero en-dashes.
         """
         eff_tenant = str(tenant_id or "profithelm").strip().lower()
@@ -11853,7 +12126,6 @@ class AsyncRemediationQueue:
                     task["measurement_lock_days"] = lock_days_val
                     task["locked_until"] = (done_now + timedelta(days=lock_days_val)).isoformat()
                     completed_count += 1
-                    self._save_state(state)
                 else:
                     raise RuntimeError(f"Worker returned non-success status: {res_status}")
             except Exception as exc:
@@ -11876,7 +12148,6 @@ class AsyncRemediationQueue:
                             rem.setdefault("status", "PENDING")
                             if rem["status"] not in ("PENDING", "ROLLOVER"):
                                 rem["status"] = "ROLLOVER"
-                    self._save_state(state)
                     break
 
         self._save_state(state)

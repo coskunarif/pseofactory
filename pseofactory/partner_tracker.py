@@ -2433,7 +2433,15 @@ class PartnerTrackingEngine:
             "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm"),
             "lienbond": Path("/home/ubuntuadmin/projects/lienbond"),
         }
-        base_ledger_dir = Path(ledger_dir) if ledger_dir is not None else None
+        explicit_ledger_dir = ledger_dir is not None
+        base_ledger_dir = Path(ledger_dir) if explicit_ledger_dir else None
+        if base_ledger_dir is None and os.environ.get("PYTEST_CURRENT_TEST"):
+            import tempfile
+            bus_p = getattr(getattr(self, "action_bus", None), "bus_path", None)
+            if bus_p and not str(Path(bus_p).resolve()).startswith("/home/ubuntuadmin/projects/"):
+                base_ledger_dir = Path(bus_p).resolve().parent / "_pytest_telemetry_ledgers"
+            else:
+                base_ledger_dir = Path(tempfile.gettempdir()) / f"pseofactory_pytest_telemetry_{os.getpid()}"
         results: Dict[str, Dict[str, Any]] = {}
         fetch_errors: Dict[str, str] = {}
 
@@ -2528,7 +2536,7 @@ class PartnerTrackingEngine:
                 fetch_errors[prop_id] = fetch_error
 
             if (
-                base_ledger_dir is None
+                not explicit_ledger_dir
                 and not fetch_live
                 and not injected_events
                 and not existing_events
@@ -3242,11 +3250,17 @@ class PartnerTrackingEngine:
             sum(float(p["modeled_epc_pipeline_usd"]) for p in partners_reconciliation.values()), 2
         )
 
-        target_ledger_path = (
-            Path(ledger_path)
-            if ledger_path is not None
-            else Path(__file__).resolve().parent.parent / ".agy" / "partner_earnings_ledger.json"
-        )
+        if ledger_path is not None:
+            target_ledger_path = Path(ledger_path)
+        elif os.environ.get("PYTEST_CURRENT_TEST"):
+            import tempfile
+            bus_p = getattr(getattr(self, "action_bus", None), "bus_path", None)
+            if bus_p and not str(Path(bus_p).resolve()).startswith("/home/ubuntuadmin/projects/"):
+                target_ledger_path = Path(bus_p).resolve().parent / "partner_earnings_ledger.json"
+            else:
+                target_ledger_path = Path(tempfile.gettempdir()) / f"pseofactory_pytest_earnings_{os.getpid()}.json"
+        else:
+            target_ledger_path = Path(__file__).resolve().parent.parent / ".agy" / "partner_earnings_ledger.json"
         if not use_live and ledger_path is None and "PYTEST_CURRENT_TEST" not in os.environ and target_ledger_path.is_file():
             try:
                 prev_ledger = json.loads(target_ledger_path.read_text(encoding="utf-8"))

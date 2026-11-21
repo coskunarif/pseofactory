@@ -208,16 +208,19 @@ class HumanActionBus:
         if os.path.isfile(self.bus_path):
             lock_path = f"{self.bus_path}.lock"
             try:
-                self._ensure_dir()
-                with open(lock_path, "a+", encoding="utf-8") as lock_file:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
-                    try:
-                        if not os.path.isfile(self.bus_path):
-                            return {}
-                        with open(self.bus_path, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                    finally:
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                if os.path.isfile(lock_path):
+                    with open(lock_path, "r", encoding="utf-8") as lock_file:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+                        try:
+                            if not os.path.isfile(self.bus_path):
+                                return {}
+                            with open(self.bus_path, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                        finally:
+                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                else:
+                    with open(self.bus_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
                 return self._parse_actions_data(data, track_migrations=True)
             except Exception:
                 pass
@@ -288,6 +291,12 @@ class HumanActionBus:
         # Validate in-memory items before acquiring lock
         for it in self.items.values():
             self._assert_item_invariants(it)
+
+        if self._is_default_bus_path and os.environ.get("PYTEST_CURRENT_TEST"):
+            self.bus_path = os.path.join(
+                tempfile.gettempdir(), f"pseofactory_pytest_bus_{os.getpid()}.json"
+            )
+            self._is_default_bus_path = False
 
         target_dir = os.path.dirname(os.path.abspath(self.bus_path))
         os.makedirs(target_dir, exist_ok=True)

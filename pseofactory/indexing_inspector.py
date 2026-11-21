@@ -260,11 +260,27 @@ class DailyIndexingInspector:
                 continue
         return quarantined_records, active_path
 
-    def audit_airlock_quarantine(self) -> Dict[str, Any]:
+    def audit_airlock_quarantine(self, prune_stale: bool = True) -> Dict[str, Any]:
         """
         Audits preflight airlock quarantine anomalies including HTTP 404,
         thin content, robots disallow, redirect, and canonical mismatch.
+        Automatically prunes stale cross-tenant split-brain entries from quarantine ledgers.
+        Zero em-dashes. Zero en-dashes.
         """
+        if prune_stale:
+            try:
+                from pseofactory.indexing.preflight import prune_stale_cross_domain_quarantine_entries
+
+                candidate_ledgers = [self.quarantine_ledger_path]
+                local_q = self.base_dir / ".agy" / "indexing_quarantine_ledger.json"
+                if not self._custom_quarantine_path and local_q.is_file() and local_q.resolve() != self.quarantine_ledger_path.resolve():
+                    candidate_ledgers.append(local_q)
+                for lp in candidate_ledgers:
+                    if lp.is_file():
+                        prune_stale_cross_domain_quarantine_entries(lp, dry_run=False)
+            except Exception:
+                pass
+
         quarantined_records, q_path = self._load_merged_quarantine_records()
 
         categories: Dict[str, List[Dict[str, Any]]] = {

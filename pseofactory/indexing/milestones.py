@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -258,6 +259,7 @@ class MilestoneTracker:
         tenant: str = "unassigned",
         now_fn: Optional[Callable[[], datetime]] = None,
         envelopes: Optional[Dict[str, MilestoneEnvelope]] = None,
+        ledger_path: Optional[Union[str, Path]] = None,
     ):
         if tenant not in VALID_TENANTS:
             raise ValueError(
@@ -266,6 +268,7 @@ class MilestoneTracker:
         self.tenant = tenant
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self.envelopes = envelopes or dict(self.DEFAULT_ENVELOPES)
+        self.ledger_path = Path(ledger_path) if ledger_path is not None else None
         self.records: Dict[str, URLMilestoneRecord] = {}
         self.event_log: List[Dict[str, Any]] = []
         self._seen_event_keys: Set[Tuple[str, str, str, Optional[str]]] = set()
@@ -447,11 +450,20 @@ class MilestoneTracker:
 
     def save_ledger(self, target_path: Optional[Union[str, Path]] = None) -> Path:
         if target_path is None:
-            base_dir = Path(
-                f"/home/ubuntuadmin/projects/.agy/runs/ledgers/{self.tenant}"
-            )
-            base_dir.mkdir(parents=True, exist_ok=True)
-            target_path = base_dir / "milestone_ledger.json"
+            if self.ledger_path is not None:
+                target_path = self.ledger_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+            elif os.environ.get("PYTEST_CURRENT_TEST"):
+                import tempfile
+                base_dir = Path(tempfile.gettempdir()) / f"pseofactory_pytest_milestones_{os.getpid()}" / self.tenant
+                base_dir.mkdir(parents=True, exist_ok=True)
+                target_path = base_dir / "milestone_ledger.json"
+            else:
+                base_dir = Path(
+                    f"/home/ubuntuadmin/projects/.agy/runs/ledgers/{self.tenant}"
+                )
+                base_dir.mkdir(parents=True, exist_ok=True)
+                target_path = base_dir / "milestone_ledger.json"
         else:
             target_path = Path(target_path)
             target_path.parent.mkdir(parents=True, exist_ok=True)

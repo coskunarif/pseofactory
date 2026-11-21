@@ -576,3 +576,125 @@ def test_cross_platform_syndication_parity_and_public_visibility_verification(tm
             assert vis["platforms"]["linkedin"]["credential_gap"] is not None
 
 
+def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_path: Path):
+    """
+    Regression test for truthful YouTube upload failure reporting:
+      1. 14/14 UPLOAD_ERROR with 0 verified uploads must NEVER report status == "PASS";
+         must report status == "UPLOAD_BLACKOUT" and upload_blackout_detected is True.
+      2. Mixed prior idempotent uploads + live UPLOAD_ERROR must report status == "UPLOAD_DEGRADED"
+         and upload_blackout_detected is True (uploaded_live_count == 0).
+      3. Legitimate dry-run/offline mode (live_upload=False) preserves status == "PASS".
+    """
+    vf_mod = _require_video_factory_module()
+    YouTubeQuotaGovernor = vf_mod.YouTubeQuotaGovernor
+    run_autonomous_video_pipeline = vf_mod.run_autonomous_video_pipeline
+
+    repo_dir = tmp_path / "lienbond"
+    dist_dir = repo_dir / "dist"
+    videos_dir = dist_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+
+    tools_list = [
+        {"slug": f"lien-deadline-tool-{i:02d}", "title": f"State {i:02d} Mechanics Lien Deadline Calculator"}
+        for i in range(1, 15)
+    ]
+    for tool in tools_list:
+        slug = tool["slug"]
+        t_dir = dist_dir / "tools" / slug
+        t_dir.mkdir(parents=True, exist_ok=True)
+        (t_dir / "index.html").write_text(
+            f"<!DOCTYPE html><html><head><title>{tool['title']}</title></head>"
+            f"<body><main><h1>{tool['title']}</h1></main></body></html>",
+            encoding="utf-8",
+        )
+        # Seed pre-rendered valid-sized MP4 assets on disk
+        (videos_dir / f"{slug}.mp4").write_bytes(b"\x00" * 65536)
+
+    gov = YouTubeQuotaGovernor(
+        ledger_path=repo_dir / ".agy" / "youtube_quota_ledger.json",
+        upload_log_path=repo_dir / ".agy" / "upload_log.json",
+    )
+
+    def _always_fail_upload(**kwargs):
+        return {
+            "status": "UPLOAD_ERROR",
+            "slug": kwargs["slug"],
+            "property_id": kwargs["property_id"],
+            "error": "OAuth token expired (HTTP 401)",
+            "quota_units_used": 0,
+        }
+
+    with patch("pseofactory.video_factory.upload_tool_video_to_youtube", side_effect=_always_fail_upload):
+        blackout_tel = run_autonomous_video_pipeline(
+            property_id="lienbond",
+            tools=tools_list,
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            max_renders=0,
+            synthesize_missing=False,
+            live_upload=True,
+            quota_governor=gov,
+        )
+
+    assert blackout_tel["status"] == "UPLOAD_BLACKOUT"
+    assert blackout_tel["status"] != "PASS"
+    assert blackout_tel["upload_blackout_detected"] is True
+    assert blackout_tel["upload_error_count"] == 14
+    assert blackout_tel["attempted_uploads"] == 14
+    assert blackout_tel["uploaded_live_count"] == 0
+    assert blackout_tel["stages"]["4_youtube_distribution"]["status"] == "UPLOAD_BLACKOUT"
+    assert blackout_tel["stages"]["4_youtube_distribution"]["upload_error_count"] == 14
+    assert blackout_tel["stages"]["4_youtube_distribution"]["attempted_uploads"] == 14
+
+    # Case 2: Prior idempotent uploads exist alongside new live UPLOAD_ERROR -> UPLOAD_DEGRADED
+    def _mixed_idempotent_and_error(**kwargs):
+        if kwargs["slug"].endswith("-01"):
+            return {
+                "status": "ALREADY_UPLOADED_IDEMPOTENT",
+                "slug": kwargs["slug"],
+                "property_id": kwargs["property_id"],
+                "video_id": "yt_existing_01",
+                "quota_units_used": 0,
+            }
+        return _always_fail_upload(**kwargs)
+
+    with patch("pseofactory.video_factory.upload_tool_video_to_youtube", side_effect=_mixed_idempotent_and_error):
+        degraded_tel = run_autonomous_video_pipeline(
+            property_id="lienbond",
+            tools=tools_list[:2],
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            max_renders=0,
+            synthesize_missing=False,
+            live_upload=True,
+            quota_governor=gov,
+        )
+
+    assert degraded_tel["status"] == "UPLOAD_DEGRADED"
+    assert degraded_tel["status"] != "PASS"
+    assert degraded_tel["upload_blackout_detected"] is True
+    assert degraded_tel["upload_error_count"] == 1
+    assert degraded_tel["attempted_uploads"] == 1
+    assert degraded_tel["idempotent_uploaded_count"] == 1
+
+    # Case 3: Dry-run / offline (live_upload=False) preserves PASS
+    with patch(
+        "pseofactory.video_factory.probe_media_file",
+        return_value={"valid": True, "has_video": True, "has_audio": True, "size_bytes": 65536},
+    ):
+        dry_tel = run_autonomous_video_pipeline(
+            property_id="lienbond",
+            tools=tools_list[:2],
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            max_renders=0,
+            synthesize_missing=False,
+            live_upload=False,
+            quota_governor=gov,
+        )
+    assert dry_tel["status"] == "PASS"
+    assert dry_tel["upload_blackout_detected"] is False
+    assert dry_tel["upload_error_count"] == 0
+
+
+

@@ -1132,7 +1132,11 @@ class IndexingFeedbackLoop:
             self.domain = domain or adapter.domain
             self.canonical_base = canonical_base or adapter.canonical_base
             self.base_dir = Path(base_dir).resolve() if base_dir else adapter.dist_dir.parent
-            self.dist_dir = Path(dist_dir).resolve() if dist_dir else adapter.dist_dir
+            self.dist_dir = (
+                Path(dist_dir).resolve()
+                if dist_dir
+                else ((self.base_dir / "dist").resolve() if base_dir else adapter.dist_dir)
+            )
         else:
             self.domain = domain or f"{self.property_id}.com"
             self.canonical_base = canonical_base or f"https://{self.domain}"
@@ -1144,7 +1148,15 @@ class IndexingFeedbackLoop:
 
         valid_tenants = {"profithelm", "prexvo", "gainhelm", "lienbond", "unassigned"}
         t_space = self.property_id if self.property_id in valid_tenants else "unassigned"
-        self.milestone_tracker = milestone_tracker or MilestoneTracker(tenant=t_space)
+        isolated_milestone_path = (
+            self.base_dir / ".agy" / "milestone_ledger.json"
+            if (base_dir is not None and (not str(self.base_dir).startswith("/home/ubuntuadmin/projects/") or os.environ.get("PYTEST_CURRENT_TEST")))
+            else None
+        )
+        self.milestone_tracker = milestone_tracker or MilestoneTracker(
+            tenant=t_space,
+            ledger_path=isolated_milestone_path,
+        )
 
         if indexer is not None:
             self.indexer = indexer
@@ -1640,6 +1652,12 @@ class IndexingFeedbackLoop:
                 repaired = inject_overlay_into_html(repaired, overlay_spec)
 
             if repaired != raw_html:
+                if self._is_live_repo_mutation_blocked(target_file):
+                    logger.warning(
+                        "Blocked live tenant HTML mutation during test execution: %s",
+                        target_file,
+                    )
+                    return False
                 target_file.write_text(repaired, encoding="utf-8")
                 IndexingPreflightEngine.clear_cache()
             return True
@@ -1759,8 +1777,6 @@ class IndexingFeedbackLoop:
         merged_source_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for rec in source_records:
             rec_copy = dict(rec)
-            if has_eng_signal and "engagement_metrics" not in rec_copy:
-                rec_copy["engagement_metrics"] = eff_engagement
             t_url = str(rec_copy.get("target_url") or rec_copy.get("page") or rec_copy.get("url") or "").strip()
             q_str = str(rec_copy.get("query") or rec_copy.get("primary_keyword") or "").strip()
             slug = _slug_from_url_or_query(
@@ -1824,6 +1840,11 @@ class IndexingFeedbackLoop:
             slug = str(rec.get("slug") or "")
             impr = int(float(rec.get("impressions", 0) or 0))
             pos = float(rec.get("position", 0.0) or 0.0)
+            eval_rec = (
+                {**rec, "engagement_metrics": eff_engagement}
+                if has_eng_signal and "engagement_metrics" not in rec
+                else rec
+            )
             readiness = evaluate_asset_conversion_and_distribution_readiness(
                 slug=slug,
                 tenant_id=self.property_id,
@@ -1832,7 +1853,7 @@ class IndexingFeedbackLoop:
                 position=pos,
                 dist_dir=self.dist_dir,
                 base_dir=self.base_dir,
-                candidate=rec,
+                candidate=eval_rec,
             )
             p_offer = readiness.get("partner_offer") or {}
             is_yield_opt = bool(
@@ -1858,6 +1879,7 @@ class IndexingFeedbackLoop:
                 "manual_requirement_detected": readiness["manual_requirement_detected"],
                 "manual_requirement": readiness["manual_requirement"],
             }
+            merged.pop("engagement_metrics", None)
             if readiness["is_high_intent_calculator_or_guide"] and slug not in high_intent_slugs:
                 high_intent_slugs.append(slug)
             if readiness["conversion_gap_detected"] and slug not in conversion_gap_slugs:
@@ -1912,6 +1934,28 @@ class IndexingFeedbackLoop:
             and "pytest" not in sys.modules
             and self._is_canonical_prod_tenant_dir(self.base_dir)
         )
+
+    @classmethod
+    def _is_live_repo_mutation_blocked(cls, target_file: Union[str, Path]) -> bool:
+        """
+        Fail-closed guard ensuring pytest executions can never overwrite files inside
+        canonical live production tenant repositories under /home/ubuntuadmin/projects/.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+            return False
+        try:
+            from pseofactory.tenant_facts import list_canonical_repo_dir_names
+
+            resolved = Path(target_file).resolve()
+            prod_root = Path("/home/ubuntuadmin/projects").resolve()
+            for repo_dir in list_canonical_repo_dir_names():
+                repo_root = (prod_root / repo_dir).resolve()
+                if resolved == repo_root or repo_root in resolved.parents:
+                    return True
+        except Exception:
+            return False
+        return False
 
     def _is_foreign_tenant_candidate(
         self,
@@ -2481,14 +2525,41 @@ class IndexingFeedbackLoop:
     ) -> List[str]:
         """
         Removes URLs from indexing_quarantine_ledger.json once they have been repaired
-        and verified to pass preflight inspection in self.dist_dir.
+        and verified to pass preflight inspection in self.dist_dir, and prunes stale
+        cross-domain split-brain entries from both tenant and root quarantine ledgers.
         Zero em-dashes. Zero en-dashes.
         """
-        if dry_run or not self.base_dir or not diagnoses:
+        if dry_run or not self.base_dir:
             return []
-        q_path = self.base_dir / ".agy" / "indexing_quarantine_ledger.json"
-        if not q_path.is_file():
-            return []
+        from pseofactory.indexing.preflight import prune_stale_cross_domain_quarantine_entries
+
+        cleared: List[str] = []
+        ledger_paths: List[Path] = [self.base_dir / ".agy" / "indexing_quarantine_ledger.json"]
+        root_q = Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json")
+        if (
+            "PYTEST_CURRENT_TEST" not in os.environ
+            and str(self.base_dir.resolve()).startswith("/home/ubuntuadmin/projects/")
+            and root_q.is_file()
+            and root_q.resolve() != ledger_paths[0].resolve()
+        ):
+            ledger_paths.append(root_q)
+
+        tenant_dist_map = {self.domain: self.dist_dir} if (self.domain and self.dist_dir) else None
+        for lp in ledger_paths:
+            if lp.is_file():
+                try:
+                    pruned_cross = prune_stale_cross_domain_quarantine_entries(
+                        lp,
+                        tenant_dist_dirs=tenant_dist_map,
+                        dry_run=dry_run,
+                    )
+                    cleared.extend(pruned_cross)
+                except Exception as err:
+                    logger.warning("Failed pruning stale cross-domain quarantine entries from %s: %s", lp, err)
+
+        if not diagnoses:
+            return cleared
+
         repairable_classes = {
             RootCauseClassification.CONTENT_QUALITY_OR_ANSWER_DEFICIENCY.value,
             RootCauseClassification.CANONICAL_TEMPLATE_DEFECT.value,
@@ -2506,33 +2577,38 @@ class IndexingFeedbackLoop:
             except Exception:
                 continue
         if not passing_urls:
-            return []
-        cleared: List[str] = []
-        try:
-            raw = json.loads(q_path.read_text(encoding="utf-8"))
-            if isinstance(raw, list):
-                kept = []
-                for item in raw:
-                    u = str(item.get("url") if isinstance(item, dict) else item or "").rstrip("/")
-                    if u in passing_urls:
-                        cleared.append(u + "/")
-                    else:
-                        kept.append(item)
-                if cleared:
-                    q_path.write_text(json.dumps(kept, indent=2), encoding="utf-8")
-            elif isinstance(raw, dict):
-                changed = False
-                for k in list(raw.keys()):
-                    v = raw[k]
-                    u = str(v.get("url", k) if isinstance(v, dict) else k).rstrip("/")
-                    if u in passing_urls:
-                        cleared.append(u + "/")
-                        del raw[k]
-                        changed = True
-                if changed:
-                    q_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-        except Exception as err:
-            logger.warning("Failed pruning repaired URLs from quarantine ledger: %s", err)
+            return cleared
+
+        for q_path in ledger_paths:
+            if not q_path.is_file():
+                continue
+            try:
+                raw = json.loads(q_path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    kept = []
+                    local_cleared = []
+                    for item in raw:
+                        u = str(item.get("url") if isinstance(item, dict) else item or "").rstrip("/")
+                        if u in passing_urls:
+                            local_cleared.append(u + "/")
+                        else:
+                            kept.append(item)
+                    if local_cleared:
+                        q_path.write_text(json.dumps(kept, indent=2), encoding="utf-8")
+                        cleared.extend(local_cleared)
+                elif isinstance(raw, dict):
+                    changed = False
+                    for k in list(raw.keys()):
+                        v = raw[k]
+                        u = str(v.get("url", k) if isinstance(v, dict) else k).rstrip("/")
+                        if u in passing_urls:
+                            cleared.append(u + "/")
+                            del raw[k]
+                            changed = True
+                    if changed:
+                        q_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+            except Exception as err:
+                logger.warning("Failed pruning repaired URLs from quarantine ledger %s: %s", q_path, err)
         return cleared
 
     def enforce_preflight_airlock(self, max_hub_urls: int = 150, dry_run: bool = False) -> PreflightReport:
@@ -2809,7 +2885,12 @@ class IndexingFeedbackLoop:
             t_url = str(task.get("target_url") or "")
             spec = task.get("overlay_spec")
             if not isinstance(spec, dict) or "title_rewrite" not in spec:
-                spec = compile_remediation_overlay_spec(task, tenant_id=self.property_id)
+                live_task = (
+                    {**task, "engagement_metrics": eff_engagement}
+                    if has_eng_signal and "engagement_metrics" not in task
+                    else task
+                )
+                spec = compile_remediation_overlay_spec(live_task, tenant_id=self.property_id)
             repaired_html = False
             if t_slug and not dry_run:
                 if reflection_succeeded and t_slug in already_repaired_slugs:

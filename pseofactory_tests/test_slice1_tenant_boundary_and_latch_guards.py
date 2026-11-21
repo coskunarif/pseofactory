@@ -92,6 +92,7 @@ def test_feedback_loop_blocks_foreign_syndication_and_overlays_and_protects_lien
 
     loop = IndexingFeedbackLoop(
         base_dir=ph_repo,
+        dist_dir=ph_repo / "dist",
         property_id="profithelm",
         domain="profithelm.com",
     )

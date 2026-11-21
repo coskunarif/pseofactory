@@ -4124,7 +4124,11 @@ class RefactorCascadeEngine:
                 # 1. Transactional isolation & backup in scratch outside dist (HWL-1370)
                 if target_path.is_file():
                     scratch_base = Path("/home/ubuntuadmin/projects/.agy/scratch")
-                    if scratch_base.is_dir():
+                    if (
+                        "PYTEST_CURRENT_TEST" not in os.environ
+                        and str(target_path.resolve()).startswith("/home/ubuntuadmin/projects/")
+                        and scratch_base.is_dir()
+                    ):
                         backup_dir = scratch_base / f"backups_{os.getpid()}"
                     else:
                         backup_dir = Path(tempfile.gettempdir()) / f"pseofactory_backups_{os.getpid()}"
@@ -15740,11 +15744,18 @@ class RetroReflectionEngine:
             except Exception:
                 pass
             try:
+                from pseofactory.indexing.preflight import (
+                    IndexingPreflightEngine,
+                    prune_stale_cross_domain_quarantine_entries,
+                )
+
                 q_file = agy_dir / "indexing_quarantine_ledger.json"
                 if q_file.is_file() and "PYTEST_CURRENT_TEST" not in os.environ:
+                    pruned_local = prune_stale_cross_domain_quarantine_entries(q_file, dry_run=False)
+                    if pruned_local and ".agy/indexing_quarantine_ledger.json" not in retrofitted_paths:
+                        retrofitted_paths.append(".agy/indexing_quarantine_ledger.json")
                     raw_q = json.loads(q_file.read_text(encoding="utf-8"))
                     if isinstance(raw_q, list) and raw_q:
-                        from pseofactory.indexing.preflight import IndexingPreflightEngine
                         dom_q = (
                             "prexvo.com"
                             if property_id.lower() == "prexvo"
@@ -15768,6 +15779,13 @@ class RetroReflectionEngine:
                             q_file.write_text(json.dumps(kept_q, indent=2) + "\n", encoding="utf-8")
                             if ".agy/indexing_quarantine_ledger.json" not in retrofitted_paths:
                                 retrofitted_paths.append(".agy/indexing_quarantine_ledger.json")
+                root_q_file = Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json")
+                if (
+                    root_q_file.is_file()
+                    and "PYTEST_CURRENT_TEST" not in os.environ
+                    and str(d.parent.resolve()).startswith("/home/ubuntuadmin/projects/")
+                ):
+                    prune_stale_cross_domain_quarantine_entries(root_q_file, dry_run=False)
             except Exception:
                 pass
             try:
@@ -16246,7 +16264,11 @@ def _execute_autonomous_downstream_chain(
             summary["youtube_uploaded_videos_count"] = int(
                 (yt_vf.get("uploaded_live_count", 0) or 0) + (yt_vf.get("idempotent_uploaded_count", 0) or 0)
             )
-            summary["youtube_blackout_detected"] = bool(yt_vf.get("blackout_detected", False))
+            summary["youtube_upload_error_count"] = int(yt_vf.get("upload_error_count", 0) or 0)
+            summary["youtube_upload_blackout_detected"] = bool(yt_vf.get("upload_blackout_detected", False))
+            summary["youtube_blackout_detected"] = bool(
+                yt_vf.get("blackout_detected", False) or yt_vf.get("upload_blackout_detected", False)
+            )
     except Exception as dist_err:
         summary["syndication_status"] = "EXCEPTION_ROUTED"
         act = bus.route_stage_exception(

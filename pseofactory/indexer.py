@@ -1772,15 +1772,30 @@ class PushIndexer:
 
     def ensure_indexnow_key_file(self) -> Path:
         """Places the IndexNow verification key text file in dist/ and ~/.indexnow/ cache."""
-        self.dist_dir.mkdir(parents=True, exist_ok=True)
         key_file = self.dist_dir / f"{self.indexnow_key}.txt"
-        key_file.write_text(self.indexnow_key, encoding="utf-8")
+        if (
+            os.environ.get("PYTEST_CURRENT_TEST")
+            and "/home/ubuntuadmin/projects/" in str(self.dist_dir.resolve())
+        ):
+            return key_file
+        self.dist_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            existing_key = key_file.read_text(encoding="utf-8").strip() if key_file.is_file() else None
+        except OSError:
+            existing_key = None
+        if existing_key != self.indexnow_key:
+            key_file.write_text(self.indexnow_key, encoding="utf-8")
         if (
             "profithelm" in self.domain.lower()
             and self.indexnow_key != DEFAULT_INDEXNOW_KEY
         ):
             legacy_file = self.dist_dir / f"{DEFAULT_INDEXNOW_KEY}.txt"
-            legacy_file.write_text(DEFAULT_INDEXNOW_KEY, encoding="utf-8")
+            try:
+                existing_legacy = legacy_file.read_text(encoding="utf-8").strip() if legacy_file.is_file() else None
+            except OSError:
+                existing_legacy = None
+            if existing_legacy != DEFAULT_INDEXNOW_KEY:
+                legacy_file.write_text(DEFAULT_INDEXNOW_KEY, encoding="utf-8")
 
         if (
             not os.environ.get("PYTEST_CURRENT_TEST")

@@ -13453,6 +13453,164 @@ export async function onRequestPost(context) {
     return lead_js
 
 
+def generate_edge_signal_function() -> str:
+    """
+    Generates the deterministic, fail-closed Cloudflare Pages Function (functions/api/signal.js)
+    for Bearer-authenticated signal intake. Contains zero hardcoded fallback secrets and fails
+    closed with HTTP 503 whenever env.AGY_PHONE_SIGNAL_TOKEN is missing or empty.
+    Zero em-dashes. Zero en-dashes.
+    """
+    signal_js = '''/**
+ * Cloudflare Pages Function: /api/signal
+ * Validates Bearer token authentication from env.AGY_PHONE_SIGNAL_TOKEN only.
+ * Fails closed with HTTP 503 when AGY_PHONE_SIGNAL_TOKEN is not configured.
+ * Zero em-dashes. Zero en-dashes.
+ */
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
+function timingSafeStringEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") {
+    return false;
+  }
+  const len = Math.max(a.length, b.length);
+  let mismatch = a.length ^ b.length;
+  for (let i = 0; i < len; i += 1) {
+    const ca = i < a.length ? a.charCodeAt(i) : 0;
+    const cb = i < b.length ? b.charCodeAt(i) : 0;
+    mismatch |= ca ^ cb;
+  }
+  return mismatch === 0 && a.length > 0;
+}
+
+export async function onRequestOptions() {
+  return new Response(null, {
+    status: 204,
+    headers: CORS_HEADERS,
+  });
+}
+
+export async function onRequestPost(context) {
+  try {
+    const { request, env } = context;
+    const expectedSecret =
+      env && typeof env.AGY_PHONE_SIGNAL_TOKEN === "string"
+        ? env.AGY_PHONE_SIGNAL_TOKEN.trim()
+        : "";
+
+    if (!expectedSecret) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Service unavailable: AGY_PHONE_SIGNAL_TOKEN is not configured",
+        }),
+        {
+          status: 503,
+          headers: {
+            "Content-Type": "application/json",
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
+
+    const authHeader = request.headers.get("authorization") || request.headers.get("Authorization") || "";
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Missing Authorization header" }),
+        {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
+
+    const parts = authHeader.trim().split(/\\s+/);
+    if (
+      parts.length !== 2 ||
+      parts[0].toLowerCase() !== "bearer" ||
+      !parts[1] ||
+      !timingSafeStringEqual(parts[1], expectedSecret)
+    ) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Unauthorized: Invalid Bearer token" }),
+        {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            ...CORS_HEADERS,
+          },
+        }
+      );
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const receiptId =
+      body && typeof body === "object" && !Array.isArray(body) && body.receipt_id !== undefined
+        ? body.receipt_id
+        : null;
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        success: true,
+        message: "Signal accepted.",
+        receipt_id: receiptId,
+        timestamp: new Date().toISOString(),
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ ok: false, error: "Internal server error" }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...CORS_HEADERS,
+        },
+      }
+    );
+  }
+}
+
+export async function onRequest(context) {
+  if (context.request.method === "OPTIONS") {
+    return onRequestOptions(context);
+  }
+  if (context.request.method === "POST") {
+    return onRequestPost(context);
+  }
+  return new Response(
+    JSON.stringify({ error: "Method not allowed. Use POST." }),
+    {
+      status: 405,
+      headers: {
+        "Content-Type": "application/json",
+        "Allow": "POST, OPTIONS",
+        ...CORS_HEADERS,
+      },
+    }
+  );
+}
+'''
+    assert_no_forbidden_dashes(signal_js, "generate_edge_signal_function")
+    return signal_js
+
+
 def sync_tenant_edge_redirect_function(
     repo_path: Union[str, Path],
     property_id: str = "profithelm",
@@ -13578,6 +13736,12 @@ def sync_tenant_edge_redirect_function(
         if not fulfillment_file.is_file() or fulfillment_file.read_text(encoding="utf-8") != fulfillment_js:
             fulfillment_file.write_text(fulfillment_js, encoding="utf-8")
             lead_capture_updated = True
+        signal_file = api_dir / "signal.js"
+        if signal_file.is_file():
+            signal_js = generate_edge_signal_function()
+            if signal_file.read_text(encoding="utf-8") != signal_js:
+                signal_file.write_text(signal_js, encoding="utf-8")
+                lead_capture_updated = True
     except Exception:
         pass
 
@@ -14085,6 +14249,17 @@ def verify_tenant_edge_functions_parity(
                     reasons.append(f"{property_id}: {rel_path} byte mismatch against pseofactory.edge")
             except Exception as exc:
                 reasons.append(f"{property_id}: unreadable {rel_path} ({exc})")
+    signal_path = repo / "functions" / "api" / "signal.js"
+    if signal_path.is_file():
+        try:
+            expected_signal_src = generate_edge_signal_function()
+            actual_signal_src = signal_path.read_text(encoding="utf-8")
+            if actual_signal_src != expected_signal_src:
+                reasons.append(
+                    f"{property_id}: functions/api/signal.js byte mismatch against fail-closed pseofactory.edge template"
+                )
+        except Exception as exc:
+            reasons.append(f"{property_id}: unreadable functions/api/signal.js ({exc})")
     return len(reasons) == 0, reasons
 
 
