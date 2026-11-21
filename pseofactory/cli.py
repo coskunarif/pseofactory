@@ -336,10 +336,28 @@ def cmd_audit(args: argparse.Namespace) -> int:
     }
 
     if property_id == "all":
+        from concurrent.futures import ThreadPoolExecutor
+        from pseofactory.verifier import audit_estate_seo_fix_checklist
+
         all_passed = True
         reports_dict: Dict[str, Any] = {}
         all_tenant_ids = list(dict.fromkeys(list(CANONICAL_TENANT_IDS) + ["lienbond"]))
-        for p_id in all_tenant_ids:
+        explicit_cdp_port = getattr(args, "cdp_port", None)
+        use_parallel = (
+            explicit_cdp_port is None
+            and len(all_tenant_ids) > 1
+            and "PYTEST_XDIST_WORKER" not in os.environ
+        )
+        max_tenant_workers = 2 if use_parallel else 1
+        req_browser_workers = getattr(args, "workers", None)
+        if use_parallel and req_browser_workers is None:
+            per_tenant_browser_workers: Optional[int] = max(1, ((os.cpu_count() or 4) + 1) // 3)
+        elif use_parallel and req_browser_workers is not None:
+            per_tenant_browser_workers = max(1, int(req_browser_workers) // max_tenant_workers)
+        else:
+            per_tenant_browser_workers = req_browser_workers
+
+        def _audit_single_tenant(p_id: str) -> Tuple[str, Any, Dict[str, Any], Dict[str, Any]]:
             adp = reg.get_adapter(p_id)
             rep = audit_property_assets(
                 property_id=p_id,
@@ -350,16 +368,33 @@ def cmd_audit(args: argparse.Namespace) -> int:
             if run_default_browser and p_id in _default_adapter_map:
                 b_auditor = _DefaultBrowserAuditor(
                     adapter=_default_adapter_map[p_id](),
-                    cdp_port=getattr(args, "cdp_port", None),
+                    cdp_port=explicit_cdp_port,
                     fail_closed=getattr(args, "fail_closed", None),
-                    workers=getattr(args, "workers", None),
+                    workers=per_tenant_browser_workers,
                     no_verify_cache=getattr(args, "no_verify_cache", False),
                     shard=getattr(args, "shard", None),
                 )
                 b_rep = b_auditor.run_audit(sample_size=default_sample)
                 rep_dict["browser_audit"] = b_rep
-                if b_rep.get("status") != "PASS":
-                    all_passed = False
+            seo_fix_rep = audit_estate_seo_fix_checklist(property_id=p_id)
+            return p_id, rep, rep_dict, seo_fix_rep
+
+        if use_parallel:
+            with ThreadPoolExecutor(max_workers=max_tenant_workers) as pool:
+                tenant_results = dict(
+                    (res[0], res)
+                    for res in pool.map(_audit_single_tenant, all_tenant_ids)
+                )
+        else:
+            tenant_results = {
+                p_id: _audit_single_tenant(p_id)
+                for p_id in all_tenant_ids
+            }
+
+        for p_id in all_tenant_ids:
+            _, rep, rep_dict, seo_fix_rep = tenant_results[p_id]
+            if "browser_audit" in rep_dict and rep_dict["browser_audit"].get("status") != "PASS":
+                all_passed = False
             reports_dict[p_id] = rep_dict
             if not args.json:
                 print(
@@ -373,9 +408,15 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     )
                 if "browser_audit" in rep_dict:
                     _print_browser_audit_report(p_id, rep_dict["browser_audit"])
+                print(
+                    f"[{seo_fix_rep['status']}] SEO Fix Checklist for '{p_id}': "
+                    f"Pages: {seo_fix_rep.get('html_files_scanned', 0)} | Issues: {len(seo_fix_rep['issues'])}"
+                )
+                for issue in seo_fix_rep["issues"][:20]:
+                    print(f"  - {issue}")
             if rep.status != "PASS":
                 all_passed = False
-            if not _run_seo_fix_checklist_gate(p_id, args.json):
+            if not bool(seo_fix_rep["passed"]):
                 all_passed = False
         if args.json:
             print(json.dumps({"status": "PASS" if all_passed else "DRIFT", "properties": reports_dict}, indent=2))

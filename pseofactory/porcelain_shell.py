@@ -15,6 +15,7 @@ Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import collections
 import functools
 import hashlib
 import html as html_lib
@@ -23,6 +24,7 @@ import os
 import re
 import shutil
 import struct
+import threading
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils as saxutils
 import zlib
@@ -5914,6 +5916,49 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
     return mutated
 
 
+_PORCELAIN_CONVERGED_LOCK = threading.Lock()
+_PORCELAIN_CONVERGED_CACHE: "collections.OrderedDict[Tuple[str, str], Tuple[str, int, Dict[str, int]]]" = collections.OrderedDict()
+_PORCELAIN_CONVERGED_MAXSIZE = 64
+
+
+def _compute_porcelain_estate_convergence_sig(
+    target_dist: Path,
+    property_id: str,
+    css_hash: str,
+    profile_hash: str = "",
+    inferred_repo: Optional[Path] = None,
+    pkg_static_css: Optional[Path] = None,
+) -> Optional[str]:
+    """Computes a content-addressed fingerprint across all HTML, CSS, JS, XML, icon/OG, profile, and edge routing files in target_dist."""
+    try:
+        h = hashlib.sha256()
+        h.update(
+            f"{property_id}|{PORCELAIN_SHELL_VERSION}|{VISUAL_PRIMITIVES_LINK_VERSION}|{css_hash}|{profile_hash}|{str(inferred_repo) if inferred_repo else ''}\n".encode("utf-8")
+        )
+        if pkg_static_css is not None:
+            if pkg_static_css.is_file():
+                h.update(f"pkg_css:{hashlib.sha256(pkg_static_css.read_bytes()).hexdigest()}\n".encode("utf-8"))
+            else:
+                h.update(b"pkg_css:MISSING\n")
+        for fp in sorted(target_dist.rglob("*")):
+            if not fp.is_file() or fp.name.startswith("."):
+                continue
+            rel = fp.relative_to(target_dist).as_posix()
+            sfx = fp.suffix.lower()
+            if rel.startswith("videos/") or sfx in (".mp4", ".webm", ".mov", ".jpg", ".jpeg", ".webp"):
+                continue
+            if (
+                sfx in (".html", ".css", ".js", ".xml", ".ico", ".svg", ".webmanifest")
+                or fp.name in ("_headers", "_redirects")
+                or (sfx == ".png" and rel.startswith("static/img/"))
+            ):
+                fh = hashlib.sha256(fp.read_bytes()).hexdigest()
+                h.update(f"{rel}:{fh}\n".encode("utf-8"))
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
 def compile_tenant_porcelain_estate_with_profile(
     dist_dir: Path,
     profile: Dict[str, Any],
@@ -5934,6 +5979,75 @@ def compile_tenant_porcelain_estate_with_profile(
         }
 
     css_text = generate_porcelain_stylesheet_from_profile(profile)
+    css_hash = hashlib.sha256(css_text.encode("utf-8")).hexdigest()
+    profile_hash = hashlib.sha256(
+        json.dumps(profile, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    prop_id = str(profile.get("property_id") or "profithelm")
+    inferred_repo = Path(repo_root).resolve() if repo_root else target_dist.parent
+    is_live_repo_under_unmerged = (
+        ("PYTEST_CURRENT_TEST" in os.environ or "/.agy/worktrees/" in Path(__file__).resolve().as_posix())
+        and str(inferred_repo).startswith("/home/ubuntuadmin/projects/")
+    )
+    pkg_static_css_cand = inferred_repo / profile["package_name"] / "static" / "css" / "style.css"
+    pkg_static_css_check: Optional[Path] = (
+        pkg_static_css_cand
+        if (not is_live_repo_under_unmerged and pkg_static_css_cand.parent.is_dir())
+        else None
+    )
+    cache_id = (str(target_dist), prop_id)
+
+    is_full_estate = (
+        (target_dist / "index.html").is_file()
+        or (target_dist / "tools" / "index.html").is_file()
+        or (target_dist / "sitemap.xml").is_file()
+        or any((target_dist / g / "index.html").is_file() for g in GOVERNANCE_ROUTES)
+    )
+    og_rel_check = target_dist / "static" / "img" / f"{prop_id}-og.png"
+    ico_check = target_dist / "favicon.ico"
+    has_required_assets = (
+        (target_dist / "css" / "style.css").is_file()
+        and (target_dist / "static" / "css" / "style.css").is_file()
+        and (pkg_static_css_check is None or pkg_static_css_check.is_file())
+        and (
+            not is_full_estate
+            or (
+                (target_dist / "404.html").is_file()
+                and (target_dist / "favicon.svg").is_file()
+                and ico_check.is_file()
+                and ico_check.stat().st_size > 0
+                and og_rel_check.is_file()
+                and og_rel_check.stat().st_size > 0
+                and (target_dist / "site.webmanifest").is_file()
+                and all((target_dist / g / "index.html").is_file() for g in GOVERNANCE_ROUTES)
+            )
+        )
+    )
+    if has_required_assets:
+        with _PORCELAIN_CONVERGED_LOCK:
+            cached_entry = _PORCELAIN_CONVERGED_CACHE.get(cache_id)
+        if cached_entry is not None:
+            cur_sig = _compute_porcelain_estate_convergence_sig(
+                target_dist,
+                prop_id,
+                css_hash,
+                profile_hash=profile_hash,
+                inferred_repo=inferred_repo,
+                pkg_static_css=pkg_static_css_check,
+            )
+            if cur_sig is not None and cur_sig == cached_entry[0]:
+                with _PORCELAIN_CONVERGED_LOCK:
+                    _PORCELAIN_CONVERGED_CACHE.move_to_end(cache_id)
+                return {
+                    "status": "PASS",
+                    "property_id": prop_id,
+                    "pages_compiled": cached_entry[1],
+                    "pages_mutated": 0,
+                    "mutated_paths": [],
+                    "governance_written": False,
+                    "blueprints": dict(cached_entry[2]),
+                }
+
     known_vars, _ = extract_defined_and_referenced_css_vars(css_text)
     mutated_paths: List[str] = []
 
@@ -5952,16 +6066,9 @@ def compile_tenant_porcelain_estate_with_profile(
         if rt_js_rel not in mutated_paths:
             mutated_paths.append(rt_js_rel)
 
-    inferred_repo = Path(repo_root).resolve() if repo_root else target_dist.parent
-    is_live_repo_under_unmerged = (
-        ("PYTEST_CURRENT_TEST" in os.environ or "/.agy/worktrees/" in Path(__file__).resolve().as_posix())
-        and str(inferred_repo).startswith("/home/ubuntuadmin/projects/")
-    )
-    if not is_live_repo_under_unmerged:
-        pkg_static_css = inferred_repo / profile["package_name"] / "static" / "css" / "style.css"
-        if pkg_static_css.parent.is_dir():
-            if not pkg_static_css.is_file() or pkg_static_css.read_text(encoding="utf-8", errors="ignore") != css_text:
-                pkg_static_css.write_text(css_text, encoding="utf-8")
+    if pkg_static_css_check is not None:
+        if not pkg_static_css_check.is_file() or pkg_static_css_check.read_text(encoding="utf-8", errors="ignore") != css_text:
+            pkg_static_css_check.write_text(css_text, encoding="utf-8")
 
     active_tools, gsc_token = _discover_estate_tools_and_gsc_token(target_dist, profile)
 
@@ -6058,6 +6165,21 @@ def compile_tenant_porcelain_estate_with_profile(
         for aux_rel in _sync_sitemaps_headers_and_redirects(target_dist, profile):
             if aux_rel not in mutated_paths:
                 mutated_paths.append(aux_rel)
+
+    post_sig = _compute_porcelain_estate_convergence_sig(
+        target_dist,
+        prop_id,
+        css_hash,
+        profile_hash=profile_hash,
+        inferred_repo=inferred_repo,
+        pkg_static_css=pkg_static_css_check,
+    )
+    if post_sig is not None:
+        with _PORCELAIN_CONVERGED_LOCK:
+            _PORCELAIN_CONVERGED_CACHE[cache_id] = (post_sig, compiled_count, dict(blueprint_counts))
+            _PORCELAIN_CONVERGED_CACHE.move_to_end(cache_id)
+            while len(_PORCELAIN_CONVERGED_CACHE) > _PORCELAIN_CONVERGED_MAXSIZE:
+                _PORCELAIN_CONVERGED_CACHE.popitem(last=False)
 
     return {
         "status": "PASS",
@@ -6626,30 +6748,60 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
             porc_call_marker = "_pseo_porcelain.compile_tenant_porcelain_estate"
             if pkg_name == "profithelm":
                 old_retro_line = '    RetroReflectionEngine.retrofit_estate(DIST_DIR, "profithelm", canonical_base=CANONICAL_BASE)\n'
-                new_retro_line = '    _retro_res = RetroReflectionEngine.retrofit_estate(DIST_DIR, "profithelm", canonical_base=CANONICAL_BASE)\n'
-                if old_retro_line in b_src:
-                    b_src = b_src.replace(old_retro_line, new_retro_line, 1)
+                mid_retro_line = '    _retro_res = RetroReflectionEngine.retrofit_estate(DIST_DIR, "profithelm", canonical_base=CANONICAL_BASE)\n'
+                new_retro_block = (
+                    '    if os.environ.get("PSEO_IN_REFLECT") == "1" and not extra_tools:\n'
+                    '        _retro_res = {"status": "DEFERRED_TO_REFLECT", "porcelain_compiled": False}\n'
+                    '    else:\n'
+                    '        _retro_res = RetroReflectionEngine.retrofit_estate(DIST_DIR, "profithelm", canonical_base=CANONICAL_BASE)\n'
+                )
+                if new_retro_block not in b_src:
+                    if mid_retro_line in b_src:
+                        b_src = b_src.replace(mid_retro_line, new_retro_block, 1)
+                    elif old_retro_line in b_src:
+                        b_src = b_src.replace(old_retro_line, new_retro_block, 1)
                 old_unguarded_porc = (
                     "    from profithelm import _pseo_porcelain\n"
                     "    _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n"
                 )
-                new_guarded_porc = (
+                mid_guarded_porc = (
                     "    if extra_tools or not (isinstance(_retro_res, dict) and _retro_res.get(\"porcelain_compiled\")):\n"
                     "        from profithelm import _pseo_porcelain\n"
                     "        _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n"
                 )
-                if old_unguarded_porc in b_src and new_guarded_porc not in b_src and "_retro_res =" in b_src:
-                    b_src = b_src.replace(old_unguarded_porc, new_guarded_porc, 1)
-                elif porc_call_marker not in b_src:
-                    anchor = "    # 6. Master 18-Rule SEO Checklist Mechanical Audit Gate\n"
-                    injection = (
-                        "    if extra_tools or not (isinstance(locals().get(\"_retro_res\"), dict) and locals().get(\"_retro_res\", {}).get(\"porcelain_compiled\")):\n"
-                        "        from profithelm import _pseo_porcelain\n"
-                        "        _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n\n"
-                        + anchor
-                    )
-                    if anchor in b_src:
-                        b_src = b_src.replace(anchor, injection, 1)
+                new_guarded_porc = (
+                    '    if (os.environ.get("PSEO_IN_REFLECT") != "1" or extra_tools) and (extra_tools or not (isinstance(_retro_res, dict) and _retro_res.get("porcelain_compiled"))):\n'
+                    "        from profithelm import _pseo_porcelain\n"
+                    "        _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n"
+                )
+                if new_guarded_porc not in b_src:
+                    if mid_guarded_porc in b_src:
+                        b_src = b_src.replace(mid_guarded_porc, new_guarded_porc, 1)
+                    elif old_unguarded_porc in b_src and "_retro_res =" in b_src:
+                        b_src = b_src.replace(old_unguarded_porc, new_guarded_porc, 1)
+                    elif porc_call_marker not in b_src:
+                        anchor = "    # 6. Master 18-Rule SEO Checklist Mechanical Audit Gate\n"
+                        injection = (
+                            '    if (os.environ.get("PSEO_IN_REFLECT") != "1" or extra_tools) and (extra_tools or not (isinstance(locals().get("_retro_res"), dict) and locals().get("_retro_res", {}).get("porcelain_compiled"))):\n'
+                            "        from profithelm import _pseo_porcelain\n"
+                            "        _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n\n"
+                            + anchor
+                        )
+                        if anchor in b_src:
+                            b_src = b_src.replace(anchor, injection, 1)
+                old_seo_audit = (
+                    "    # 6. Master 18-Rule SEO Checklist Mechanical Audit Gate\n"
+                    "    from profithelm.seo_verifier import audit_seo_checklist\n"
+                    "    audit_seo_checklist(dist_dir=DIST_DIR, raise_on_error=True)\n"
+                )
+                new_seo_audit = (
+                    "    # 6. Master 18-Rule SEO Checklist Mechanical Audit Gate\n"
+                    '    if os.environ.get("PSEO_IN_REFLECT") != "1" or extra_tools:\n'
+                    "        from profithelm.seo_verifier import audit_seo_checklist\n"
+                    "        audit_seo_checklist(dist_dir=DIST_DIR, raise_on_error=True)\n"
+                )
+                if old_seo_audit in b_src and new_seo_audit not in b_src:
+                    b_src = b_src.replace(old_seo_audit, new_seo_audit, 1)
             elif porc_call_marker not in b_src:
                 anchor = f"    # Master 18-Rule SEO Checklist Mechanical Audit Gate\n    from {pkg_name}.seo_verifier import audit_seo_checklist\n"
                 injection = (

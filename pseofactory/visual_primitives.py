@@ -7339,6 +7339,14 @@ def _sync_runtime_synchronizer_tag(
     return updated + "\n" + script_block, True
 
 
+_VP_SCRIPT_TAG_RE = re.compile(r"<script\b[^>]*>[\s\S]*?</script>", re.IGNORECASE)
+_VP_DEFINED_CSS_VAR_RE = re.compile(r"(--[a-zA-Z0-9_-]+)\s*:")
+_VP_USED_CSS_VAR_RE = re.compile(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)")
+_VP_STYLE_TAG_RE = re.compile(r"\s*<style\b[^>]*>[\s\S]*?</style>", re.IGNORECASE)
+_VP_HAS_STYLE_TAG_RE = re.compile(r"<style\b", re.IGNORECASE)
+_VP_LINK_PRIM_RE = re.compile(r'<link\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>', re.IGNORECASE)
+
+
 def normalize_html_visual_primitives(
     html_content: str,
     is_tenant_porcelain: Optional[bool] = None,
@@ -7404,21 +7412,17 @@ def normalize_html_visual_primitives(
             repaired.append("visual_primitives_css")
 
     # 1. Inject or repair <style id="pseo-visual-primitives"> unless external Porcelain <link> is active
-    link_prim_m = re.search(
-        r'<link\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>',
-        updated,
-        re.IGNORECASE,
-    )
+    link_prim_m = _VP_LINK_PRIM_RE.search(updated)
     has_ext_porcelain = bool(
         link_prim_m and f'data-version="{VISUAL_PRIMITIVES_VERSION}"' in link_prim_m.group(0)
     )
-    style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
     if "2027 2027 " in updated:
         updated = updated.replace("2027 2027 ", "2027 ")
         repaired.append("duplicate_year_label")
     if has_ext_porcelain:
         pass
     elif 'id="pseo-visual-primitives"' in updated or "id='pseo-visual-primitives'" in updated:
+        style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
         prim_match = re.search(
             r'<style\b[^>]*id=["\']pseo-visual-primitives["\'][^>]*>([\s\S]*?)</style>',
             updated,
@@ -7455,6 +7459,7 @@ def normalize_html_visual_primitives(
             )
             repaired.append("visual_primitives_css")
     else:
+        style_block = render_visual_primitives_style(is_tenant_porcelain=is_tenant_porcelain)
         head_close_idx = updated.rfind("</head>")
         if head_close_idx != -1:
             updated = updated[:head_close_idx] + style_block + "\n" + updated[head_close_idx:]
@@ -7468,22 +7473,16 @@ def normalize_html_visual_primitives(
             repaired.append("visual_primitives_css")
 
     # 1b. Synthesize safe fallback tokens for any undefined var(--...) custom properties
-    no_script_doc = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", updated, flags=re.IGNORECASE)
-    defined_vars = set(re.findall(r"(--[a-zA-Z0-9_-]+)\s*:", no_script_doc))
+    no_script_doc = _VP_SCRIPT_TAG_RE.sub("", updated)
+    defined_vars = set(_VP_DEFINED_CSS_VAR_RE.findall(no_script_doc))
     if has_ext_porcelain:
         try:
-            from pseofactory.porcelain_shell import (
-                extract_defined_and_referenced_css_vars,
-                generate_porcelain_stylesheet,
-            )
+            from pseofactory.porcelain_shell import get_porcelain_css_audit_sets
 
-            porcelain_defined, _ = extract_defined_and_referenced_css_vars(
-                generate_porcelain_stylesheet("profithelm")
-            )
-            defined_vars |= porcelain_defined
+            defined_vars |= get_porcelain_css_audit_sets("profithelm")[0]
         except Exception:
             pass
-    used_vars = set(re.findall(r"var\(\s*(--[a-zA-Z0-9_-]+)\s*\)", no_script_doc))
+    used_vars = set(_VP_USED_CSS_VAR_RE.findall(no_script_doc))
     orphan_vars = sorted(used_vars - defined_vars)
     if orphan_vars:
         if has_ext_porcelain:
@@ -7536,30 +7535,31 @@ def normalize_html_visual_primitives(
             if "orphan_css_token_repair" not in repaired:
                 repaired.append("orphan_css_token_repair")
 
-    if has_ext_porcelain and re.search(r"<style\b", updated, flags=re.IGNORECASE):
-        updated = re.sub(r"\s*<style\b[^>]*>[\s\S]*?</style>", "", updated, flags=re.IGNORECASE)
+    if has_ext_porcelain and _VP_HAS_STYLE_TAG_RE.search(updated):
+        updated = _VP_STYLE_TAG_RE.sub("", updated)
         if "strip_competing_inline_style" not in repaired:
             repaired.append("strip_competing_inline_style")
 
     # 1c. Normalize any stylesheet rules that set min-height or min-width < 44px
-    def _fix_style_block_touch_targets(m: re.Match) -> str:
-        return re.sub(
-            r"(min-(?:height|width)\s*:\s*)(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b",
-            r"\g<1>44px",
-            m.group(0),
+    if _VP_HAS_STYLE_TAG_RE.search(updated):
+        def _fix_style_block_touch_targets(m: re.Match) -> str:
+            return re.sub(
+                r"(min-(?:height|width)\s*:\s*)(?:[0-9]|[1-3][0-9]|4[0-3])(?:\.\d+)?px\b",
+                r"\g<1>44px",
+                m.group(0),
+                flags=re.IGNORECASE,
+            )
+
+        new_updated_styles = re.sub(
+            r"<style\b[^>]*>[\s\S]*?</style>",
+            _fix_style_block_touch_targets,
+            updated,
             flags=re.IGNORECASE,
         )
-
-    new_updated_styles = re.sub(
-        r"<style\b[^>]*>[\s\S]*?</style>",
-        _fix_style_block_touch_targets,
-        updated,
-        flags=re.IGNORECASE,
-    )
-    if new_updated_styles != updated:
-        updated = new_updated_styles
-        if "touch_target_normalization" not in repaired:
-            repaired.append("touch_target_normalization")
+        if new_updated_styles != updated:
+            updated = new_updated_styles
+            if "touch_target_normalization" not in repaired:
+                repaired.append("touch_target_normalization")
 
     # 1d. Heal duplicate .decision-framework-card sections and top-level container drift
     updated, rhythm_actions = _heal_structural_rhythm_and_dedup(updated)

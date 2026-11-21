@@ -155,7 +155,13 @@ def test_shared_gcp_quota_breaker_and_no_duplicate_fast_index(tmp_path: Path) ->
     mock_proc_429.stdout = ""
     mock_proc_429.stderr = "Quota exceeded for quota metric 'Publish requests' and limit 'Publish requests per day' (429)"
 
-    with patch("subprocess.run", return_value=mock_proc_429) as run_mock:
+    fake_gsccli = tmp_path / "gsccli"
+    fake_gsccli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    with (
+        patch("pseofactory.indexer.shutil.which", return_value=str(fake_gsccli)),
+        patch("subprocess.run", return_value=mock_proc_429) as run_mock,
+    ):
         res = indexer.submit_gsc_indexing(urls=[u1, u2], live=True, drain_rollover=False)
         gov_path = indexer._get_gsc_quota_governor_path()
         assert gov_path.is_file(), "Quota governor file must be written when 429 breaker trips"

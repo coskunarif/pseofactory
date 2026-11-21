@@ -5,6 +5,7 @@ All 18 Opus 5.5 SEO Rules + Auxiliary Architectural Quality Gates.
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
+import fcntl
 import functools
 import hashlib
 import re
@@ -12,13 +13,15 @@ import sys
 import os
 import json
 import html
+import threading
 import time
+import uuid
 import posixpath
 import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Set, Callable, Union
+from typing import Dict, Any, List, Optional, Tuple, Set, FrozenSet, Callable, Union
 
 
 from pseofactory.contracts import (
@@ -1693,6 +1696,9 @@ class MasterSEOVerifier:
                 "/contact/",
             ]
         self._file_cache: Dict[str, Tuple[float, int, str]] = MasterSEOVerifier._GLOBAL_FILE_CACHE
+        self._audit_target_key: Optional[str] = None
+        self._audit_html_files: Optional[List[Path]] = None
+        self._html_content_cache: Dict[str, str] = {}
 
         if (
             self.dist_dir
@@ -1750,14 +1756,177 @@ class MasterSEOVerifier:
 
     _GLOBAL_FILE_CACHE: Dict[str, Tuple[float, int, str]] = {}
     _GLOBAL_AUDIT_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    _GLOBAL_AUDIT_CACHE_LOCK = threading.Lock()
+    _DISK_AUDIT_CACHE_LOCK = threading.Lock()
+
+    _ALLOWLISTED_CALC_LEAF_FNS = frozenset((
+        "_profithelm_calculation_leaf",
+        "_prexvo_calculation_leaf",
+        "_gainhelm_calculation_leaf",
+        "_lienbond_calculation_leaf",
+    ))
+    _ALLOWLISTED_LEAF_ROUTE_FNS = frozenset((
+        "_profithelm_leaf_route_checker",
+        "_prexvo_leaf_route_checker",
+        "_gainhelm_leaf_route_checker",
+        "_lienbond_leaf_route_checker",
+    ))
+    _ALLOWLISTED_GEO_LEAF_FNS = frozenset((
+        "_profithelm_is_geo_leaf",
+        "_prexvo_is_geo_leaf",
+        "_gainhelm_is_geo_leaf",
+        "_lienbond_is_geo_leaf",
+    ))
+
+    @staticmethod
+    def _is_allowlisted_disk_callable(fn: Any, allowlist: FrozenSet[str]) -> bool:
+        if fn is None:
+            return True
+        fn_name = getattr(fn, "__name__", None)
+        fn_qual = getattr(fn, "__qualname__", None)
+        fn_mod = getattr(fn, "__module__", None)
+        return (
+            isinstance(fn_name, str)
+            and fn_name != "<lambda>"
+            and fn_name in allowlist
+            and isinstance(fn_qual, str)
+            and "<locals>" not in fn_qual
+            and "<lambda>" not in fn_qual
+            and bool(fn_mod)
+        )
+
+    @staticmethod
+    def _callable_mem_sig(fn: Any) -> Optional[Tuple[int, str, str]]:
+        if fn is None:
+            return None
+        return (id(fn), str(getattr(fn, "__module__", "") or ""), str(getattr(fn, "__qualname__", "") or ""))
+
+    @staticmethod
+    def _callable_disk_sig(fn: Any) -> Optional[Tuple[str, str]]:
+        if fn is None:
+            return None
+        return (str(getattr(fn, "__module__", "") or ""), str(getattr(fn, "__qualname__", "") or ""))
+
+    @staticmethod
+    def _tools_sig(tools: List[Any]) -> Tuple[str, ...]:
+        items: List[str] = []
+        for t in tools or ():
+            if isinstance(t, dict):
+                items.append(json.dumps(t, sort_keys=True, default=str))
+            else:
+                items.append(repr(t))
+        items.sort()
+        return tuple(items)
+
+    @classmethod
+    def _write_disk_audit_cache_entry(
+        cls,
+        disk_cache_path: Path,
+        disk_cache_key: str,
+        result: Dict[str, Any],
+    ) -> None:
+        """Thread-safe and process-safe atomic read-modify-write for disk SEO audit cache."""
+        disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = disk_cache_path.with_name(f"{disk_cache_path.name}.lock")
+        tmp_path = disk_cache_path.with_name(
+            f"{disk_cache_path.name}.tmp.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}"
+        )
+        with cls._DISK_AUDIT_CACHE_LOCK:
+            with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+                try:
+                    disk_store: Dict[str, Any] = {}
+                    if disk_cache_path.is_file():
+                        try:
+                            loaded = json.loads(disk_cache_path.read_text(encoding="utf-8"))
+                            if isinstance(loaded, dict):
+                                disk_store = loaded
+                        except Exception:
+                            disk_store = {}
+                    disk_store.pop(disk_cache_key, None)
+                    disk_store[disk_cache_key] = result
+                    while len(disk_store) > 256:
+                        disk_store.pop(next(iter(disk_store)))
+                    tmp_path.write_text(json.dumps(disk_store), encoding="utf-8")
+                    os.replace(tmp_path, disk_cache_path)
+                except Exception:
+                    tmp_path.unlink(missing_ok=True)
+                    raise
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+                    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
+    @classmethod
+    def _read_disk_audit_cache_entry(
+        cls,
+        disk_cache_path: Path,
+        disk_cache_key: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Thread-safe and process-safe lookup for disk SEO audit cache."""
+        if not disk_cache_path.is_file():
+            return None
+        lock_path = disk_cache_path.with_name(f"{disk_cache_path.name}.lock")
+        with cls._DISK_AUDIT_CACHE_LOCK:
+            try:
+                with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+                    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_SH)
+                    try:
+                        if not disk_cache_path.is_file():
+                            return None
+                        disk_store = json.loads(disk_cache_path.read_text(encoding="utf-8"))
+                        if isinstance(disk_store, dict) and disk_cache_key in disk_store:
+                            return disk_store[disk_cache_key]
+                    finally:
+                        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                return None
+        return None
+
+    def _iter_html_files(self, target: Path) -> List[Path]:
+        """Returns sorted HTML files under target, reusing pre-collected inventory during audit_seo_checklist."""
+        if self._audit_html_files is not None and self._audit_target_key is not None:
+            try:
+                if str(target.resolve()) == self._audit_target_key:
+                    return self._audit_html_files
+            except OSError:
+                pass
+        if not target.exists():
+            return []
+        return sorted(target.glob("**/*.html"))
+
+    def _iter_tool_index_files(self, target: Path) -> List[Path]:
+        """Returns sorted tools/**/index.html files under target, reusing pre-collected inventory when active."""
+        tools_dir = target / "tools"
+        if not tools_dir.is_dir():
+            return []
+        if self._audit_html_files is not None and self._audit_target_key is not None:
+            try:
+                if str(target.resolve()) == self._audit_target_key:
+                    tools_prefix = str(tools_dir.resolve()) + "/"
+                    return [
+                        p
+                        for p in self._audit_html_files
+                        if p.name == "index.html" and str(p).startswith(tools_prefix)
+                    ]
+            except OSError:
+                pass
+        return sorted(tools_dir.glob("**/index.html"))
 
     def _read_cached_html(self, file_path: Union[str, Path]) -> str:
         """
         Reads HTML from file, memoizing by (st_mtime_ns, st_size) across gate passes.
         Zero em-dashes. Zero en-dashes.
         """
+        if self._html_content_cache:
+            direct = self._html_content_cache.get(str(file_path))
+            if direct is not None:
+                return direct
         p = Path(file_path).resolve()
         key = str(p)
+        if self._html_content_cache:
+            resolved_hit = self._html_content_cache.get(key)
+            if resolved_hit is not None:
+                return resolved_hit
         try:
             st = p.stat()
             mtime, size = st.st_mtime_ns, st.st_size
@@ -1779,7 +1948,7 @@ class MasterSEOVerifier:
         issues = []
         images_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
                 for m in re.finditer(r'<img\b([^>]*)>', content, re.IGNORECASE):
@@ -1869,7 +2038,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 pages_checked += 1
@@ -1906,7 +2075,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html":
                     continue
                 pages_checked += 1
@@ -1957,7 +2126,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html":
                     continue
                 pages_checked += 1
@@ -1983,7 +2152,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html":
                     continue
                 pages_checked += 1
@@ -2246,7 +2415,7 @@ class MasterSEOVerifier:
         issues = []
         kebab_seg_re = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 rel = p.relative_to(target).as_posix()
                 if p.name not in ["index.html", "404.html"]:
                     issues.append(f"Non-canonical URL path (raw .html file exposed): {rel}")
@@ -2272,7 +2441,7 @@ class MasterSEOVerifier:
         issues = []
         schemas_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -2304,7 +2473,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 pages_checked += 1
@@ -2328,7 +2497,7 @@ class MasterSEOVerifier:
         pages_checked = 0
         tools_dir = target / "tools"
         if tools_dir.is_dir():
-            for p in tools_dir.glob("**/index.html"):
+            for p in self._iter_tool_index_files(target):
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
@@ -2372,7 +2541,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
@@ -2412,7 +2581,7 @@ class MasterSEOVerifier:
         pages_checked = 0
         seen_descriptions: Dict[str, List[str]] = {}
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 pages_checked += 1
@@ -2558,7 +2727,7 @@ class MasterSEOVerifier:
                             )
 
             if is_full_build and non_wildcard_sources:
-                for html_f in sorted(target.rglob("*.html")):
+                for html_f in self._iter_html_files(target):
                     if html_f.name == "404.html" or html_f.name.startswith("."):
                         continue
                     rel_h = html_f.relative_to(target).as_posix()
@@ -2593,7 +2762,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html":
                     continue
                 pages_checked += 1
@@ -2627,7 +2796,7 @@ class MasterSEOVerifier:
         pages_checked = 0
         worst_ratio = 0.0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html":
                     continue
                 pages_checked += 1
@@ -2752,12 +2921,12 @@ class MasterSEOVerifier:
         pages_checked = 0
         tools_dir = target / "tools"
         if tools_dir.is_dir():
-            for p in tools_dir.glob("**/index.html"):
+            from pseofactory.contracts import _fast_strip_style_and_js
+            for p in self._iter_tool_index_files(target):
                 pages_checked += 1
                 rel = p.relative_to(target).as_posix()
                 content = self._read_cached_html(p)
-                clean = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', content, flags=re.IGNORECASE)
-                clean = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', clean, flags=re.IGNORECASE)
+                clean = _fast_strip_style_and_js(content)
                 text = re.sub(r'<[^>]+>', ' ', clean)
 
                 # Check for skeleton/placeholder containers and phrases
@@ -2831,7 +3000,7 @@ class MasterSEOVerifier:
         issues = []
         boxes_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 content = self._read_cached_html(p)
@@ -2869,7 +3038,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 pages_checked += 1
@@ -2987,7 +3156,7 @@ class MasterSEOVerifier:
         issues: List[str] = []
         pages_checked = 0
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3049,7 +3218,7 @@ class MasterSEOVerifier:
         b_domain = brand_domain or self.brand_domain
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3119,7 +3288,7 @@ class MasterSEOVerifier:
         total_numeric_facts = 0
         total_tables = 0
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3202,7 +3371,7 @@ class MasterSEOVerifier:
         total_orphaned = 0
         page_set: Dict[str, str] = {}
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3381,7 +3550,7 @@ class MasterSEOVerifier:
         manifests_dir = target / "manifests" if target.exists() else None
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3457,7 +3626,7 @@ class MasterSEOVerifier:
         total_constants = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3520,7 +3689,7 @@ class MasterSEOVerifier:
         total_publishers = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3595,7 +3764,7 @@ class MasterSEOVerifier:
         total_steps = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3662,7 +3831,7 @@ class MasterSEOVerifier:
         total_widgets = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3736,7 +3905,7 @@ class MasterSEOVerifier:
         total_target_entities = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3895,7 +4064,7 @@ class MasterSEOVerifier:
         tools_checked = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -3938,7 +4107,7 @@ class MasterSEOVerifier:
         pages_checked = 0
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -4017,7 +4186,7 @@ class MasterSEOVerifier:
         from pseofactory.contracts import _fast_strip_style_and_js
 
         if target.exists():
-            for p in sorted(target.glob("**/*.html")):
+            for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
@@ -4108,7 +4277,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 rel = p.relative_to(target).as_posix()
                 if "tools" not in p.parts:
                     continue
@@ -4133,7 +4302,7 @@ class MasterSEOVerifier:
         issues = []
         pages_checked = 0
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 pages_checked += 1
                 content = self._read_cached_html(p)
                 rel = p.relative_to(target).as_posix()
@@ -4223,7 +4392,7 @@ class MasterSEOVerifier:
         target = Path(dist_dir) if dist_dir else self.dist_dir
         parsed_docs: Dict[str, Tuple[Path, str, SinglePassSEODocumentParser]] = {}
         if target.exists():
-            for p in target.glob("**/*.html"):
+            for p in self._iter_html_files(target):
                 rel = p.relative_to(target).as_posix()
                 raw_html = self._read_cached_html(p)
                 parser = _parse_seo_doc_cached(raw_html, self.domain)
@@ -4669,75 +4838,138 @@ class MasterSEOVerifier:
         cache_sig: Optional[Tuple[Any, ...]] = None
         disk_cache_key: Optional[str] = None
         disk_cache_path = Path("/tmp/pseofactory_seo_audit_cache_v1.json")
+        can_write_disk_cache = True
+        preloaded_html_files: List[Path] = []
+        preloaded_html_map: Dict[str, str] = {}
+        resolved_target_str = str(target.resolve())
         try:
             file_sigs = []
             content_sigs = []
-            resolved_target_str = str(target.resolve())
-            allow_disk_cache = (
-                getattr(self.is_calculation_leaf, "__name__", None)
-                in (
-                    None,
-                    "_profithelm_calculation_leaf",
-                    "_prexvo_calculation_leaf",
-                    "_gainhelm_calculation_leaf",
-                    "_lienbond_calculation_leaf",
-                )
-                and "/tmp/" not in resolved_target_str
-                and "/pytest-" not in resolved_target_str
+            is_isolated_tmp = "/tmp/" in resolved_target_str or "/pytest-" in resolved_target_str
+            supported_callables = (
+                self._is_allowlisted_disk_callable(self.is_calculation_leaf, self._ALLOWLISTED_CALC_LEAF_FNS)
+                and self._is_allowlisted_disk_callable(self.leaf_route_checker, self._ALLOWLISTED_LEAF_ROUTE_FNS)
+                and self._is_allowlisted_disk_callable(self.is_geo_leaf, self._ALLOWLISTED_GEO_LEAF_FNS)
             )
+            if is_isolated_tmp:
+                has_repo_anchor = bool(
+                    target.parent
+                    and (
+                        (target.parent / ".agy").is_dir()
+                        or (target.parent / ".pseofactory.json").is_file()
+                    )
+                )
+                allow_disk_cache = supported_callables and has_repo_anchor
+                disk_cache_path = target.parent / ".agy" / "seo_audit_cache.json"
+                can_write_disk_cache = bool(self.allow_mutations or disk_cache_path.parent.is_dir())
+            else:
+                allow_disk_cache = supported_callables
             for fp in sorted(target.rglob("*")):
                 if fp.is_file():
                     st = fp.stat()
                     rel_fp = fp.relative_to(target).as_posix()
                     file_sigs.append((rel_fp, st.st_mtime_ns, st.st_size))
+                    is_html_fp = fp.suffix == ".html"
+                    if is_html_fp:
+                        preloaded_html_files.append(fp)
                     if allow_disk_cache:
+                        raw_bytes = fp.read_bytes()
                         content_sigs.append(
-                            (rel_fp, st.st_size, hashlib.sha256(fp.read_bytes()).hexdigest()[:12])
+                            (rel_fp, st.st_size, hashlib.sha256(raw_bytes).hexdigest()[:12])
                         )
-            parent_entries = tuple(sorted(p.name for p in target.parent.iterdir())) if target.parent and target.parent.exists() else ()
+                        if is_html_fp:
+                            decoded_html = raw_bytes.decode("utf-8", errors="ignore")
+                            fp_str = str(fp)
+                            fp_res_str = str(fp.resolve())
+                            preloaded_html_map[fp_str] = decoded_html
+                            preloaded_html_map[fp_res_str] = decoded_html
+                            self._file_cache[fp_res_str] = (st.st_mtime_ns, st.st_size, decoded_html)
+            cohort_sigs = []
+            if target.parent and target.parent.is_dir():
+                cr_ledger = target.parent / ".agy" / "cohort_reflection_ledger.json"
+                if cr_ledger.is_file():
+                    cohort_sigs.append(
+                        (".agy/cohort_reflection_ledger.json", hashlib.sha256(cr_ledger.read_bytes()).hexdigest()[:12])
+                    )
+                for ov_rel_dir in (".agy/overlays", "content/overlays"):
+                    ov_d = target.parent / ov_rel_dir
+                    if ov_d.is_dir():
+                        for ov_fp in sorted(ov_d.rglob("*.json")):
+                            if ov_fp.is_file():
+                                cohort_sigs.append(
+                                    (
+                                        f"{ov_rel_dir}/{ov_fp.relative_to(ov_d).as_posix()}",
+                                        hashlib.sha256(ov_fp.read_bytes()).hexdigest()[:12],
+                                    )
+                                )
+            parent_entries = (
+                tuple(sorted(p.name for p in target.parent.iterdir() if p.name != ".agy"))
+                if target.parent and target.parent.exists()
+                else ()
+            )
             pkg_root = Path(__file__).resolve().parent
             engine_sigs = []
             for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py", "visual_primitives.py", "tenant_facts.py"):
                 efp = pkg_root / rel_eng
                 if efp.is_file():
                     engine_sigs.append((rel_eng, hashlib.sha256(efp.read_bytes()).hexdigest()[:16]))
+            cls_sig = f"{type(self).__module__}.{type(self).__qualname__}"
+            tools_sig = self._tools_sig(self.tools)
+            code_dirs_sig = tuple(sorted(str(Path(cd).resolve()) for cd in (self.code_dirs or ())))
+            repo_root_sig = str(self.repo_root.resolve()) if self.repo_root is not None else None
             cache_sig = (
+                cls_sig,
                 resolved_target_str,
                 self.domain,
                 self.canonical_base,
                 self.brand_name,
                 self.min_manifests,
                 self.strict_robots,
-                len(self.tools),
+                tools_sig,
+                code_dirs_sig,
+                repo_root_sig,
                 tuple(self.required_endpoints),
                 enforce_relevance,
-                getattr(self.is_calculation_leaf, "__name__", None),
+                self._callable_mem_sig(self.is_calculation_leaf),
+                self._callable_mem_sig(self.leaf_route_checker),
+                self._callable_mem_sig(self.is_geo_leaf),
                 parent_entries,
+                tuple(cohort_sigs),
                 tuple(file_sigs),
                 tuple(engine_sigs),
             )
             if allow_disk_cache:
                 disk_sig = (
+                    cls_sig,
                     self.domain,
                     self.canonical_base,
                     self.brand_name,
                     self.min_manifests,
                     self.strict_robots,
+                    tools_sig,
+                    code_dirs_sig,
+                    repo_root_sig,
                     tuple(self.required_endpoints),
                     enforce_relevance,
+                    self._callable_disk_sig(self.is_calculation_leaf),
+                    self._callable_disk_sig(self.leaf_route_checker),
+                    self._callable_disk_sig(self.is_geo_leaf),
+                    parent_entries,
+                    tuple(cohort_sigs),
                     tuple(content_sigs),
                     tuple(engine_sigs),
                 )
                 disk_cache_key = hashlib.sha256(repr(disk_sig).encode("utf-8")).hexdigest()
-                if cache_sig not in MasterSEOVerifier._GLOBAL_AUDIT_CACHE and disk_cache_path.is_file():
-                    try:
-                        disk_store = json.loads(disk_cache_path.read_text(encoding="utf-8"))
-                        if isinstance(disk_store, dict) and disk_cache_key in disk_store:
-                            MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = disk_store[disk_cache_key]
-                    except Exception:
-                        pass
-            if cache_sig in MasterSEOVerifier._GLOBAL_AUDIT_CACHE:
-                cached_res = MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig]
+                with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                    in_mem_cached = MasterSEOVerifier._GLOBAL_AUDIT_CACHE.get(cache_sig)
+                if in_mem_cached is None:
+                    disk_hit = self._read_disk_audit_cache_entry(disk_cache_path, disk_cache_key)
+                    if disk_hit is not None:
+                        with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                            MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = disk_hit
+            with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                cached_res = MasterSEOVerifier._GLOBAL_AUDIT_CACHE.get(cache_sig)
+            if cached_res is not None:
                 if raise_on_error and cached_res.get("status") != "PASS":
                     c_issues = cached_res.get("issues", [])
                     issue_summary = "; ".join(c_issues[:3])
@@ -4755,56 +4987,77 @@ class MasterSEOVerifier:
             cache_sig = None
             disk_cache_key = None
 
-        content_relevance_gate = self.check_content_relevance_gate(target)
+        if not preloaded_html_files:
+            preloaded_html_files = sorted(target.glob("**/*.html"))
+        if len(preloaded_html_map) < len(preloaded_html_files):
+            for hfp in preloaded_html_files:
+                hfp_str = str(hfp)
+                if hfp_str not in preloaded_html_map:
+                    txt = self._read_cached_html(hfp)
+                    preloaded_html_map[hfp_str] = txt
+                    preloaded_html_map[str(hfp.resolve())] = txt
 
-        g_alt_text = self.check_alt_text_gate(target)
-        g_sitemap = self.check_sitemap_gate(target)
-        g_page_titles = self.check_page_titles_gate(target)
-        g_single_h1 = self.check_single_h1_gate(target)
-        g_image_compression = self.check_image_compression_gate(target)
-        g_page_language = self.check_page_language_gate(target)
-        g_canonical_tags = self.check_canonical_tags_gate(target)
-        g_robots_txt = self.check_robots_txt_gate(target)
-        g_readable_urls = self.check_readable_urls_gate(target)
-        g_schema_markup = self.check_schema_markup_gate(target)
-        g_noindex_tags = self.check_noindex_tags_gate(target)
-        g_internal_linking = self.check_internal_linking_gate(target)
-        g_load_performance = self.check_load_performance_gate(target)
-        g_meta_descriptions = self.check_meta_descriptions_gate(target)
-        g_url_redirects = self.check_url_redirects_gate(target)
-        g_search_console_tag = self.check_search_console_tag_gate(target)
-        g_hide_test_pages = self.check_hide_test_pages_gate(target)
-        g_no_js_rendering = self.check_no_js_rendering_gate(target)
-        g_http_link_canonical = self.check_http_link_canonical_gate(target)
-        g_snippet_eligibility = self.check_snippet_eligibility_gate(target)
-        g_query_answer_match = self.check_query_answer_match_gate(target)
-        g_brand_entity = self.check_brand_entity_in_llm_memory_gate(target)
-        g_citable_facts = self.check_citable_specific_facts_gate(target)
-        g_organic_fan_out = self.check_organic_fan_out_coverage_gate(target)
-        g_organic_search = self.check_organic_search_ranking_gate(target)
-        g_unique_first_party = self.check_unique_first_party_information_gate(target)
-        g_cross_web_consensus = self.check_cross_web_consensus_and_corroboration_gate(target)
-        g_source_publisher = self.check_source_publisher_reputation_gate(target)
-        g_extractable_structure = self.check_extractable_content_structure_gate(target)
-        g_answer_prominence = self.check_answer_prominence_gate(target)
-        g_structured_data = self.check_structured_data_gate(target)
-        g_llms_txt = self.check_llms_txt_gate(target)
-        g_tool_utility = self.check_tool_utility_gate(target)
-        g_free_web_app_schema = self.check_free_web_application_schema_gate(target)
-        g_operational_shield = self.check_operational_shield_gate(target)
-        g_comparison_layout = self.check_comparison_layout_gate(target)
-        g_ai_mode_manifest = self.check_ai_mode_manifest_gate(target)
-        g_source_kw_inflation = self.check_source_keyword_inflation_gate(target)
-        g_cohort_reflection = self.check_cohort_reflection_gate(target)
-        g_existence = self.check_existence_gate(target)
-        g_title_length = self.check_title_gate(target)
-        g_snippet = self.check_snippet_gate(target)
-        g_schema = self.check_schema_gate(target)
-        g_citability = self.check_citability_gate(target)
-        g_cleanliness = self.check_cleanliness_gate(target)
-        g_indexing = self.check_indexing_gate(target)
-        g_host_hygiene = self.check_host_hygiene_gate(target.parent if target else None)
-        g_edge_cache_policy = self.check_edge_cache_policy_gate(target)
+        prev_audit_target_key = self._audit_target_key
+        prev_audit_html_files = self._audit_html_files
+        prev_html_content_cache = self._html_content_cache
+        self._audit_target_key = resolved_target_str
+        self._audit_html_files = preloaded_html_files
+        self._html_content_cache = preloaded_html_map
+        try:
+            content_relevance_gate = self.check_content_relevance_gate(target)
+
+            g_alt_text = self.check_alt_text_gate(target)
+            g_sitemap = self.check_sitemap_gate(target)
+            g_page_titles = self.check_page_titles_gate(target)
+            g_single_h1 = self.check_single_h1_gate(target)
+            g_image_compression = self.check_image_compression_gate(target)
+            g_page_language = self.check_page_language_gate(target)
+            g_canonical_tags = self.check_canonical_tags_gate(target)
+            g_robots_txt = self.check_robots_txt_gate(target)
+            g_readable_urls = self.check_readable_urls_gate(target)
+            g_schema_markup = self.check_schema_markup_gate(target)
+            g_noindex_tags = self.check_noindex_tags_gate(target)
+            g_internal_linking = self.check_internal_linking_gate(target)
+            g_load_performance = self.check_load_performance_gate(target)
+            g_meta_descriptions = self.check_meta_descriptions_gate(target)
+            g_url_redirects = self.check_url_redirects_gate(target)
+            g_search_console_tag = self.check_search_console_tag_gate(target)
+            g_hide_test_pages = self.check_hide_test_pages_gate(target)
+            g_no_js_rendering = self.check_no_js_rendering_gate(target)
+            g_http_link_canonical = self.check_http_link_canonical_gate(target)
+            g_snippet_eligibility = self.check_snippet_eligibility_gate(target)
+            g_query_answer_match = self.check_query_answer_match_gate(target)
+            g_brand_entity = self.check_brand_entity_in_llm_memory_gate(target)
+            g_citable_facts = self.check_citable_specific_facts_gate(target)
+            g_organic_fan_out = self.check_organic_fan_out_coverage_gate(target)
+            g_organic_search = self.check_organic_search_ranking_gate(target)
+            g_unique_first_party = self.check_unique_first_party_information_gate(target)
+            g_cross_web_consensus = self.check_cross_web_consensus_and_corroboration_gate(target)
+            g_source_publisher = self.check_source_publisher_reputation_gate(target)
+            g_extractable_structure = self.check_extractable_content_structure_gate(target)
+            g_answer_prominence = self.check_answer_prominence_gate(target)
+            g_structured_data = self.check_structured_data_gate(target)
+            g_llms_txt = self.check_llms_txt_gate(target)
+            g_tool_utility = self.check_tool_utility_gate(target)
+            g_free_web_app_schema = self.check_free_web_application_schema_gate(target)
+            g_operational_shield = self.check_operational_shield_gate(target)
+            g_comparison_layout = self.check_comparison_layout_gate(target)
+            g_ai_mode_manifest = self.check_ai_mode_manifest_gate(target)
+            g_source_kw_inflation = self.check_source_keyword_inflation_gate(target)
+            g_cohort_reflection = self.check_cohort_reflection_gate(target)
+            g_existence = self.check_existence_gate(target)
+            g_title_length = dict(g_page_titles, gate="Title Length Gate")
+            g_snippet = self.check_snippet_gate(target)
+            g_schema = dict(g_schema_markup, gate="Schema Validation Gate")
+            g_citability = self.check_citability_gate(target)
+            g_cleanliness = self.check_cleanliness_gate(target)
+            g_indexing = self.check_indexing_gate(target)
+            g_host_hygiene = self.check_host_hygiene_gate(target.parent if target else None)
+            g_edge_cache_policy = self.check_edge_cache_policy_gate(target)
+        finally:
+            self._audit_target_key = prev_audit_target_key
+            self._audit_html_files = prev_audit_html_files
+            self._html_content_cache = prev_html_content_cache
 
         gates = {
             "check_alt_text_gate": g_alt_text,
@@ -4990,20 +5243,11 @@ class MasterSEOVerifier:
             "content_relevance": content_relevance_gate,
         }
         if cache_sig is not None:
-            MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = result
-            if disk_cache_key is not None and all_passed:
+            with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = result
+            if disk_cache_key is not None and all_passed and can_write_disk_cache:
                 try:
-                    disk_store = {}
-                    if disk_cache_path.is_file():
-                        loaded = json.loads(disk_cache_path.read_text(encoding="utf-8"))
-                        if isinstance(loaded, dict):
-                            disk_store = loaded
-                    if len(disk_store) >= 16:
-                        disk_store.clear()
-                    disk_store[disk_cache_key] = result
-                    tmp_path = disk_cache_path.with_suffix(f".tmp.{os.getpid()}")
-                    tmp_path.write_text(json.dumps(disk_store), encoding="utf-8")
-                    tmp_path.replace(disk_cache_path)
+                    self._write_disk_audit_cache_entry(disk_cache_path, disk_cache_key, result)
                 except Exception:
                     pass
 
@@ -5737,11 +5981,11 @@ def verify_html_organic_fan_out_coverage(
 
     from pseofactory.contracts import (
         _fast_strip_style_and_js,
+        _extract_subquery_sections_ro,
+        _extract_calculation_variant_nodes_ro,
         assert_no_thin_fan_out_cannibalization,
         assert_subquery_clustering,
         assert_calculation_variant_cross_links,
-        extract_subquery_sections,
-        extract_calculation_variant_nodes,
         detect_orphaned_calculation_nodes,
     )
 
@@ -5775,8 +6019,8 @@ def verify_html_organic_fan_out_coverage(
     except Exception as ex:
         issues.append(str(ex))
 
-    subqueries = [s for s in extract_subquery_sections(clean_html) if s.get("is_subquery")]
-    variants = extract_calculation_variant_nodes(clean_html)
+    subqueries = [s for s in _extract_subquery_sections_ro(clean_html) if s.get("is_subquery")]
+    variants = _extract_calculation_variant_nodes_ro(clean_html)
     total_links = sum(len(v.get("outgoing_links", [])) for v in variants)
     orphaned = detect_orphaned_calculation_nodes(variants)
 
@@ -6209,13 +6453,13 @@ def verify_html_source_publisher_reputation(
 
     from pseofactory.contracts import (
         detect_publisher_reputation_issues,
-        extract_author_and_publisher_metadata,
+        _extract_author_and_publisher_metadata_ro,
     )
 
     detected = detect_publisher_reputation_issues(html_content, rel_path=rel_path, require_strict=require_strict)
     issues.extend(detected)
 
-    meta = extract_author_and_publisher_metadata(html_content)
+    meta = _extract_author_and_publisher_metadata_ro(html_content)
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -6275,7 +6519,7 @@ def verify_html_extractable_content_structure(
 
     from pseofactory.contracts import (
         detect_extractable_content_issues,
-        extract_content_structure_metadata,
+        _extract_content_structure_metadata_ro,
     )
 
     detected = detect_extractable_content_issues(
@@ -6285,7 +6529,7 @@ def verify_html_extractable_content_structure(
     )
     issues.extend(detected)
 
-    meta = extract_content_structure_metadata(html_content)
+    meta = _extract_content_structure_metadata_ro(html_content)
     ordered_steps_count = sum(len(b.get("items", [])) for b in meta.get("ordered_lists", []))
 
     return {
@@ -6347,7 +6591,7 @@ def verify_html_answer_prominence(
 
     from pseofactory.contracts import (
         detect_answer_prominence_issues,
-        extract_answer_prominence_metadata,
+        _extract_answer_prominence_metadata_ro,
     )
 
     detected = detect_answer_prominence_issues(
@@ -6358,7 +6602,7 @@ def verify_html_answer_prominence(
     )
     issues.extend(detected)
 
-    meta = extract_answer_prominence_metadata(html_content)
+    meta = _extract_answer_prominence_metadata_ro(html_content)
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -6418,7 +6662,7 @@ def verify_html_structured_data(
     from pseofactory.contracts import (
         detect_structured_data_issues,
         assert_structured_data,
-        extract_structured_data_metadata,
+        _extract_structured_data_metadata_ro,
     )
 
     detected = detect_structured_data_issues(
@@ -6433,27 +6677,27 @@ def verify_html_structured_data(
         free_issues = detect_free_web_application_schema_issues(html_content, rel_path=rel_path)
         issues.extend(free_issues)
 
-    try:
-        assert_structured_data(
-            html_content,
-            require_strict=require_strict,
-            context=f"Page {rel_path}",
-        )
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
+    if detected or issues:
+        try:
+            assert_structured_data(
+                html_content,
+                require_strict=require_strict,
+                context=f"Page {rel_path}",
+            )
+        except Exception as ex:
+            err_msg = str(ex)
+            if err_msg not in issues:
+                issues.append(err_msg)
 
-
-    meta = extract_structured_data_metadata(html_content)
+    meta = _extract_structured_data_metadata_ro(html_content)
 
     return {
         "status": "PASS" if not issues else "FAIL",
         "gate": "check_structured_data_gate",
         "violations_count": len(issues),
         "issues": issues,
-        "schemas_found": meta.get("schema_types", []),
-        "target_schemas": meta.get("target_schemas_found", []),
+        "schemas_found": list(meta.get("schema_types", [])),
+        "target_schemas": list(meta.get("target_schemas_found", [])),
         "graphs_count": len(meta.get("parsed_graphs", [])),
         "entities_count": meta.get("total_entities", 0),
     }
@@ -6601,12 +6845,13 @@ def verify_html_tool_utility_contract(
         if ssr_err not in issues:
             issues.append(ssr_err)
 
-    try:
-        assert_tool_utility_contract(html_content, context=f"Page {rel_path}")
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
+    if detected:
+        try:
+            assert_tool_utility_contract(html_content, context=f"Page {rel_path}")
+        except Exception as ex:
+            err_msg = str(ex)
+            if err_msg not in issues:
+                issues.append(err_msg)
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -6643,12 +6888,13 @@ def verify_html_free_web_application_schema(
     detected = detect_free_web_application_schema_issues(html_content, rel_path=rel_path)
     issues.extend(detected)
 
-    try:
-        assert_free_web_application_schema(html_content, context=f"Page {rel_path}")
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
+    if detected:
+        try:
+            assert_free_web_application_schema(html_content, context=f"Page {rel_path}")
+        except Exception as ex:
+            err_msg = str(ex)
+            if err_msg not in issues:
+                issues.append(err_msg)
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -6675,12 +6921,13 @@ def verify_rate_limit_and_bot_shield(
     detected = detect_rate_limit_and_bot_shield_issues(headers_or_html, context=context)
     issues.extend(detected)
 
-    try:
-        assert_rate_limit_and_bot_shield(headers_or_html, context=context)
-    except Exception as ex:
-        err_msg = str(ex)
-        if err_msg not in issues:
-            issues.append(err_msg)
+    if detected:
+        try:
+            assert_rate_limit_and_bot_shield(headers_or_html, context=context)
+        except Exception as ex:
+            err_msg = str(ex)
+            if err_msg not in issues:
+                issues.append(err_msg)
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -6688,6 +6935,27 @@ def verify_rate_limit_and_bot_shield(
         "violations_count": len(issues),
         "issues": issues,
     }
+
+
+_KW_INF_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_KW_INF_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_KW_INF_TAG_RE = re.compile(r"<[^>]+>")
+_KW_INF_WORD_RE = re.compile(r"[a-zA-Z0-9]{4,}")
+_KW_INF_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+_KW_INF_META_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_KW_INF_ATTR_RE = re.compile(
+    r'\b(?:href|src|item|url|contentUrl|data-tool|data-subid|data-cta-id|data-partner|data-partner-roster|data-partner-companies|data-company-brand|data-partner-tier|data-cta-slot|data-gsc-tier|data-conversion-slot|id|for|name)\s*=\s*["\'][^"\']*["\']',
+    re.IGNORECASE,
+)
+_KW_INF_HYPHEN_RE = re.compile(r"\b[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+")
+_KW_INF_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_KW_INF_SCRIPT_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)
+_KW_INF_STYLE_RE = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
+_KW_INF_STOPWORDS = frozenset({
+    "calculator", "calculators", "profithelm", "prexvo", "gainhelm", "lienbond",
+    "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules",
+    "2026", "2027", "title", "about", "signal", "year", "years", "form", "item", "part", "section",
+})
 
 
 def verify_html_source_keyword_inflation_ratio(
@@ -6710,14 +6978,13 @@ def verify_html_source_keyword_inflation_ratio(
             "max_ratio": max_ratio,
         }
 
-    h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", raw, flags=re.IGNORECASE | re.DOTALL)
-    title_m = re.search(r"<title[^>]*>(.*?)</title>", raw, flags=re.IGNORECASE | re.DOTALL)
-    heading_text = re.sub(r"<[^>]+>", " ", (h1_m.group(1) if h1_m else (title_m.group(1) if title_m else "")))
-    stop = {"calculator", "calculators", "profithelm", "prexvo", "gainhelm", "lienbond", "the", "and", "for", "with", "under", "from", "guide", "model", "tool", "rules", "2026", "2027", "title", "about", "signal", "year", "years", "form", "item", "part", "section"}
+    h1_m = _KW_INF_H1_RE.search(raw)
+    title_m = _KW_INF_TITLE_RE.search(raw)
+    heading_text = _KW_INF_TAG_RE.sub(" ", (h1_m.group(1) if h1_m else (title_m.group(1) if title_m else "")))
     tokens = [
         t.lower()
-        for t in re.findall(r"[a-zA-Z0-9]{4,}", heading_text)
-        if t.lower() not in stop
+        for t in _KW_INF_WORD_RE.findall(heading_text)
+        if t.lower() not in _KW_INF_STOPWORDS
     ]
     primary_kw = tokens[0] if tokens else "calculator"
 
@@ -6726,22 +6993,17 @@ def verify_html_source_keyword_inflation_ratio(
     # keyword frequency so standard canonical links, OpenGraph/Twitter meta tags,
     # JSON-LD @id URIs, and subid tracking parameters are not conflated with hidden-attribute
     # keyword stuffing.
-    source_for_count = re.sub(r"https?://[^\s\"'<>]+", " ", raw, flags=re.IGNORECASE)
-    source_for_count = re.sub(r"<meta\b[^>]*>", " ", source_for_count, flags=re.IGNORECASE)
-    source_for_count = re.sub(
-        r'\b(?:href|src|item|url|contentUrl|data-tool|data-subid|data-cta-id|data-partner|data-partner-roster|data-partner-companies|data-company-brand|data-partner-tier|data-cta-slot|data-gsc-tier|data-conversion-slot|id|for|name)\s*=\s*["\'][^"\']*["\']',
-        " ",
-        source_for_count,
-        flags=re.IGNORECASE,
-    )
-    source_for_count = re.sub(r"\b[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+", " ", source_for_count)
+    source_for_count = _KW_INF_URL_RE.sub(" ", raw)
+    source_for_count = _KW_INF_META_RE.sub(" ", source_for_count)
+    source_for_count = _KW_INF_ATTR_RE.sub(" ", source_for_count)
+    source_for_count = _KW_INF_HYPHEN_RE.sub(" ", source_for_count)
 
     # Strip scripts, styles, comments, and HTML tags to isolate visible text
-    visible = re.sub(r"<!--.*?-->", " ", raw, flags=re.DOTALL)
-    visible = re.sub(r"<script\b[^>]*>.*?</script>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
-    visible = re.sub(r"<style\b[^>]*>.*?</style>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
-    visible = re.sub(r"<[^>]+>", " ", visible)
-    visible_clean = re.sub(r"\b[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+", " ", visible)
+    visible = _KW_INF_COMMENT_RE.sub(" ", raw)
+    visible = _KW_INF_SCRIPT_RE.sub(" ", visible)
+    visible = _KW_INF_STYLE_RE.sub(" ", visible)
+    visible = _KW_INF_TAG_RE.sub(" ", visible)
+    visible_clean = _KW_INF_HYPHEN_RE.sub(" ", visible)
 
     pat = re.compile(rf"\b{re.escape(primary_kw)}\b", flags=re.IGNORECASE)
     source_count = len(pat.findall(source_for_count))

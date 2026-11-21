@@ -9914,6 +9914,7 @@ def reposition_affiliate_placements_from_gsc_signals(
     query: str = "",
     gsc_metrics: Optional[Dict[str, Any]] = None,
     engagement_metrics: Optional[Dict[str, Any]] = None,
+    skip_callout_if_unchanged: bool = False,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Analyzes live GSC query, impression, CTR, and position signals alongside empirical
@@ -10364,11 +10365,17 @@ def reposition_affiliate_placements_from_gsc_signals(
         )
         updated = _ov_partner_sec_re.sub(ov_markup, updated, count=1)
 
-    updated = normalize_html_callout_message_match(
-        updated,
-        property_id=prop,
-        preserve_promoted_primary=bool(slot_plan.get("gsc_repositioned")),
+    callout_skipped = bool(
+        skip_callout_if_unchanged
+        and updated == html_content
+        and not slot_plan.get("gsc_repositioned")
     )
+    if not callout_skipped:
+        updated = normalize_html_callout_message_match(
+            updated,
+            property_id=prop,
+            preserve_promoted_primary=bool(slot_plan.get("gsc_repositioned")),
+        )
     after_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', updated, flags=re.I)))
     after_primary = str(slot_plan.get("promoted_partner_key") or "")
 
@@ -10379,6 +10386,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         "page_archetype": roster["page_archetype"],
         "commercial_intent": roster["commercial_intent"],
         "restricted_public_service": False,
+        "callout_normalized": not callout_skipped,
         "repositioned": bool(updated != html_content or slot_plan.get("gsc_repositioned")),
         "gsc_repositioned": bool(slot_plan.get("gsc_repositioned")),
         "gsc_opportunity_tier": gsc_tier,

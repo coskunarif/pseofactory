@@ -10442,7 +10442,11 @@ def _resolve_non_colliding_baseline_title(
     )
 
 
-def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any]) -> str:
+def rollback_degraded_overlay_from_html(
+    html: str,
+    overlay_data: Dict[str, Any],
+    skip_geo_norm: bool = False,
+) -> str:
     """
     Rolls back a degraded overlay's title rewrite and heading overrides from HTML,
     restoring a clean 50-60 character canonical title and stripping degraded headings.
@@ -10511,37 +10515,38 @@ def rollback_degraded_overlay_from_html(html: str, overlay_data: Dict[str, Any])
         )
 
     html = _strip_overlay_dom_sections(html)
-    try:
-        from pseofactory.maintenance import _normalize_page_structure_and_geo_parity
-        canon_m = re.search(
-            r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
-            html,
-            re.IGNORECASE,
-        ) or re.search(
-            r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
-            html,
-            re.IGNORECASE,
-        )
-        canon_url = canon_m.group(1).strip() if canon_m else ""
-        slug_rb = str(overlay_data.get("slug") or "").strip("/")
-        if "/tools/" in canon_url:
-            slug_rb = canon_url.split("/tools/", 1)[1].split("?")[0].strip("/")
-        if "/" in slug_rb:
-            h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
-            topic_lbl = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else slug_rb.replace("-", " ").title()
-            html, _ = _normalize_page_structure_and_geo_parity(
+    if not skip_geo_norm:
+        try:
+            from pseofactory.maintenance import _normalize_page_structure_and_geo_parity
+            canon_m = re.search(
+                r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
                 html,
-                property_id=tenant_norm,
-                slug=slug_rb,
-                topic_label=topic_lbl,
-                canonical_url=canon_url,
-                stat_auth="IRC Section 1(j); IRC Section 179; IRC Section 1031",
-                econ_ds="IRS SOI Tax Statistics",
-                preserve_title=True,
-                forbidden_titles=([rolled_title] if rolled_title else None),
+                re.IGNORECASE,
+            ) or re.search(
+                r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+                html,
+                re.IGNORECASE,
             )
-    except Exception:
-        pass
+            canon_url = canon_m.group(1).strip() if canon_m else ""
+            slug_rb = str(overlay_data.get("slug") or "").strip("/")
+            if "/tools/" in canon_url:
+                slug_rb = canon_url.split("/tools/", 1)[1].split("?")[0].strip("/")
+            if "/" in slug_rb:
+                h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
+                topic_lbl = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else slug_rb.replace("-", " ").title()
+                html, _ = _normalize_page_structure_and_geo_parity(
+                    html,
+                    property_id=tenant_norm,
+                    slug=slug_rb,
+                    topic_label=topic_lbl,
+                    canonical_url=canon_url,
+                    stat_auth="IRC Section 1(j); IRC Section 179; IRC Section 1031",
+                    econ_ds="IRS SOI Tax Statistics",
+                    preserve_title=True,
+                    forbidden_titles=([rolled_title] if rolled_title else None),
+                )
+        except Exception:
+            pass
     return _strip_forbidden_dashes(html)
 
 

@@ -10,13 +10,16 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import ast
+import collections
 import copy
 import functools
+import hashlib
 import operator
 import re
 import json
 import posixpath
 import html
+import threading
 import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
@@ -1045,15 +1048,30 @@ class _FallbackHTMLTreeParser(HTMLParser):
 
 
 def _parse_html_soup(raw_html: str) -> Any:
-    """Parses HTML via BeautifulSoup when installed, falling back to stdlib HTMLParser."""
-    try:
-        from bs4 import BeautifulSoup
-        return BeautifulSoup(raw_html, "html.parser")
-    except ImportError:
-        parser = _FallbackHTMLTreeParser()
-        parser.feed(raw_html)
-        parser.close()
-        return parser.root
+    """Parses HTML using the lightweight stdlib HTMLParser tree builder matching BeautifulSoup's contract API."""
+    parser = _FallbackHTMLTreeParser()
+    parser.feed(raw_html)
+    parser.close()
+    return parser.root
+
+
+_COMP_LAYOUT_TAG_RE = re.compile(r"^(layout|carousel|list|imagegrid)$", re.IGNORECASE)
+_COMP_LAYOUT_ITEM_RE = re.compile(r"^(item|entity|card|article|tr|li)$", re.IGNORECASE)
+_COMP_LAYOUT_CLASSES = frozenset(
+    ("comparison-container", "comparison-table", "carousel-container", "carousel", "image-grid", "list-container")
+)
+_COMP_LAYOUT_FAST_TOKENS = (
+    "<layout",
+    "<carousel",
+    "<list",
+    "<imagegrid",
+    "comparison-container",
+    "comparison-table",
+    "carousel-container",
+    "carousel",
+    "image-grid",
+    "list-container",
+)
 
 
 def assert_comparison_layout_contracts(html: str) -> bool:
@@ -1066,15 +1084,19 @@ def assert_comparison_layout_contracts(html: str) -> bool:
     Zero em-dashes. Zero en-dashes.
     """
     assert_no_forbidden_dashes(html, context="HTML layout content")
+    clean_html = _fast_strip_style_and_js(html)
+    clean_lower = clean_html.lower()
+    if not any(tok in clean_lower for tok in _COMP_LAYOUT_FAST_TOKENS):
+        return True
     try:
-        soup = _parse_html_soup(html)
+        soup = _parse_html_soup(clean_html)
     except Exception as ex:
         raise ValueError(f"Failed to parse HTML for comparison layout check: {ex}") from ex
 
-    layout_tags = soup.find_all(re.compile(r"^(layout|carousel|list|imagegrid)$", re.IGNORECASE))
+    layout_tags = soup.find_all(_COMP_LAYOUT_TAG_RE)
     class_containers = soup.find_all(
         lambda tag: tag.get("class") and any(
-            c in ("comparison-container", "comparison-table", "carousel-container", "carousel", "image-grid", "list-container")
+            c in _COMP_LAYOUT_CLASSES
             for c in tag.get("class")
         )
     )
@@ -1094,7 +1116,7 @@ def assert_comparison_layout_contracts(html: str) -> bool:
             or any(cls in ("comparison-container", "comparison-table", "list-container") for cls in c.get("class", []))
         )
 
-        items = c.find_all(re.compile(r"^(item|entity|card|article|tr|li)$", re.IGNORECASE))
+        items = c.find_all(_COMP_LAYOUT_ITEM_RE)
         if not items:
             items = [child for child in c.find_all(recursive=False) if getattr(child, "name", None)]
 
@@ -2189,6 +2211,30 @@ _MALFORMED_PLACEHOLDER_SEC_RE = re.compile(
 )
 
 
+def _extract_anchor_windows(text: str, text_lower: str, tokens: Tuple[str, ...], pre: int = 32, post: int = 128) -> str:
+    """Extracts merged substring windows around literal token occurrences for fast exact regex matching."""
+    n = len(text)
+    spans: List[Tuple[int, int]] = []
+    for tok in tokens:
+        tlen = len(tok)
+        pos = text_lower.find(tok)
+        while pos != -1:
+            spans.append((max(0, pos - pre), min(n, pos + tlen + post)))
+            pos = text_lower.find(tok, pos + tlen)
+    if not spans:
+        return ""
+    spans.sort()
+    merged: List[Tuple[int, int]] = [spans[0]]
+    for s, e in spans[1:]:
+        ps, pe = merged[-1]
+        if s <= pe:
+            if e > pe:
+                merged[-1] = (ps, e)
+        else:
+            merged.append((s, e))
+    return ("\n" + ("\x00" * 120) + "\n").join(text[s:e] for s, e in merged)
+
+
 def detect_malformed_statutory_citations(text: str) -> List[str]:
     """
     Detects malformed, incomplete, or invalid statutory code syntax.
@@ -2205,54 +2251,65 @@ def detect_malformed_statutory_citations(text: str) -> List[str]:
     if not (has_usc or has_cfr or has_irc):
         return issues
 
+    usc_win = _extract_anchor_windows(text, text_lower, ("usc", "u.s.c", "u.sc", "us.c")) if has_usc else ""
+    cfr_win = _extract_anchor_windows(text, text_lower, ("cfr", "c.f.r", "c.fr", "cf.r")) if has_cfr else ""
+    irc_win = _extract_anchor_windows(text, text_lower, ("irc", "i.r.c", "i.rc", "ir.c")) if has_irc else ""
+
     # 1. Dangling title/code without section number
-    if has_usc:
-        for m in _MALFORMED_USC_DANGLING_RE.finditer(text):
-            after_text = text[m.end():]
+    if usc_win:
+        for m in _MALFORMED_USC_DANGLING_RE.finditer(usc_win):
+            after_text = usc_win[m.end():]
             if not _MALFORMED_USC_AFTER_RE.match(after_text):
                 issues.append(f"Malformed USC citation lacking valid section number: '{m.group(0).strip()}'")
 
-    if has_cfr:
-        for m in _MALFORMED_CFR_DANGLING_RE.finditer(text):
-            after_text = text[m.end():]
+    if cfr_win:
+        for m in _MALFORMED_CFR_DANGLING_RE.finditer(cfr_win):
+            after_text = cfr_win[m.end():]
             if not _MALFORMED_CFR_AFTER_RE.match(after_text):
                 issues.append(f"Malformed CFR citation lacking valid section or part number: '{m.group(0).strip()}'")
 
-    if has_irc:
-        for m in _MALFORMED_IRC_DANGLING_RE.finditer(text):
-            after_text = text[m.end():]
+    if irc_win:
+        for m in _MALFORMED_IRC_DANGLING_RE.finditer(irc_win):
+            after_text = irc_win[m.end():]
             if not _MALFORMED_IRC_AFTER_RE.match(after_text):
                 issues.append(f"Malformed IRC citation lacking valid section number: '{m.group(0).strip()}'")
 
     # 2. Out-of-bounds title numbers
-    if has_usc:
-        for m in _MALFORMED_USC_TITLE_RE.finditer(text):
+    if usc_win:
+        for m in _MALFORMED_USC_TITLE_RE.finditer(usc_win):
             t_num = int(m.group(1))
             if t_num < 1 or t_num > 54:
                 issues.append(f"Invalid statutory title number {t_num} in USC citation (USC titles range from 1 to 54): '{m.group(0).strip()}'")
 
-    if has_cfr:
-        for m in _MALFORMED_CFR_TITLE_RE.finditer(text):
+    if cfr_win:
+        for m in _MALFORMED_CFR_TITLE_RE.finditer(cfr_win):
             t_num = int(m.group(1))
             if t_num < 1 or t_num > 50:
                 issues.append(f"Invalid statutory title number {t_num} in CFR citation (CFR titles range from 1 to 50): '{m.group(0).strip()}'")
 
     # 3. Missing preceding title before U.S.C. or CFR
-    if has_usc:
-        for m in _MALFORMED_USC_NO_TITLE_RE.finditer(text):
+    if usc_win:
+        for m in _MALFORMED_USC_NO_TITLE_RE.finditer(usc_win):
             issues.append(f"Malformed statutory citation missing preceding title number: '{m.group(0).strip()}'")
 
-    if has_cfr:
-        for m in _MALFORMED_CFR_NO_TITLE_RE.finditer(text):
+    if cfr_win:
+        for m in _MALFORMED_CFR_NO_TITLE_RE.finditer(cfr_win):
             issues.append(f"Malformed statutory citation missing preceding title number: '{m.group(0).strip()}'")
 
-    # 4. Negative section numbers
-    for m in _MALFORMED_NEGATIVE_SEC_RE.finditer(text):
-        issues.append(f"Malformed statutory citation contains negative section number: '{m.group(0).strip()}'")
+    all_tokens = (
+        (("usc", "u.s.c", "u.sc", "us.c") if has_usc else ())
+        + (("cfr", "c.f.r", "c.fr", "cf.r") if has_cfr else ())
+        + (("irc", "i.r.c", "i.rc", "ir.c") if has_irc else ())
+    )
+    all_win = _extract_anchor_windows(text, text_lower, all_tokens)
+    if all_win:
+        # 4. Negative section numbers
+        for m in _MALFORMED_NEGATIVE_SEC_RE.finditer(all_win):
+            issues.append(f"Malformed statutory citation contains negative section number: '{m.group(0).strip()}'")
 
-    # 5. Placeholder or unfinalized section numbers
-    for m in _MALFORMED_PLACEHOLDER_SEC_RE.finditer(text):
-        issues.append(f"Malformed statutory citation contains placeholder or unfinalized section: '{m.group(0).strip()}'")
+        # 5. Placeholder or unfinalized section numbers
+        for m in _MALFORMED_PLACEHOLDER_SEC_RE.finditer(all_win):
+            issues.append(f"Malformed statutory citation contains placeholder or unfinalized section: '{m.group(0).strip()}'")
 
     return issues
 
@@ -2272,6 +2329,9 @@ def detect_vague_generalizations(text: str) -> List[str]:
     return found
 
 
+_INCOMPLETE_BRACKET_TOKENS = ("[amount]", "[number]", "[rate]", "[percentage]", "[figure]", "[placeholder]")
+
+
 def detect_incomplete_figures(text: str) -> List[str]:
     """
     Detects incomplete or placeholder numeric figures.
@@ -2280,8 +2340,21 @@ def detect_incomplete_figures(text: str) -> List[str]:
     issues: List[str] = []
     if not text or not isinstance(text, str):
         return issues
-    for pat in INCOMPLETE_FIGURE_PATTERNS:
-        for match in pat.finditer(text):
+    text_lower = text.lower()
+    if "$x" in text_lower:
+        for match in INCOMPLETE_FIGURE_PATTERNS[0].finditer(text):
+            issues.append(f"Incomplete or placeholder figure detected: '{match.group(0).strip()}'")
+    if "x%" in text_lower:
+        for match in INCOMPLETE_FIGURE_PATTERNS[1].finditer(text):
+            issues.append(f"Incomplete or placeholder figure detected: '{match.group(0).strip()}'")
+    if "$[" in text_lower:
+        for match in INCOMPLETE_FIGURE_PATTERNS[2].finditer(text):
+            issues.append(f"Incomplete or placeholder figure detected: '{match.group(0).strip()}'")
+    if "[" in text_lower and any(tok in text_lower for tok in _INCOMPLETE_BRACKET_TOKENS):
+        for match in INCOMPLETE_FIGURE_PATTERNS[3].finditer(text):
+            issues.append(f"Incomplete or placeholder figure detected: '{match.group(0).strip()}'")
+    if "TBD" in text or "NaN" in text or "[placeholder]" in text:
+        for match in INCOMPLETE_FIGURE_PATTERNS[4].finditer(text):
             issues.append(f"Incomplete or placeholder figure detected: '{match.group(0).strip()}'")
     return issues
 
@@ -3139,6 +3212,13 @@ def _extract_subquery_sections_cached(html_or_text: str) -> Tuple[Dict[str, Any]
     return tuple(sections)
 
 
+def _extract_subquery_sections_ro(html_or_text: str) -> Tuple[Dict[str, Any], ...]:
+    """Read-only cached view of subquery sections without allocating copies."""
+    if not isinstance(html_or_text, str):
+        return ()
+    return _extract_subquery_sections_cached(html_or_text)
+
+
 def extract_subquery_sections(html_or_text: str) -> List[Dict[str, Any]]:
     """
     Extracts subheadings (h2, h3, h4) and their following content sections from HTML or text.
@@ -3189,7 +3269,7 @@ def assert_subquery_clustering(
 
     assert_no_forbidden_dashes(html_or_text, context=f"document{ctx}")
 
-    sections = extract_subquery_sections(html_or_text)
+    sections = _extract_subquery_sections_ro(html_or_text)
     subqueries = [s for s in sections if s.get("is_subquery")]
 
     if len(subqueries) < min_subqueries:
@@ -3310,6 +3390,13 @@ def _extract_calculation_variant_nodes_cached(html_or_text: str) -> Tuple[Dict[s
             })
 
     return tuple(nodes)
+
+
+def _extract_calculation_variant_nodes_ro(html_or_text: str) -> Tuple[Dict[str, Any], ...]:
+    """Read-only cached view of calculation variant nodes without copy.deepcopy."""
+    if not isinstance(html_or_text, str):
+        return ()
+    return _extract_calculation_variant_nodes_cached(html_or_text)
 
 
 def extract_calculation_variant_nodes(html_or_text: str) -> List[Dict[str, Any]]:
@@ -3441,7 +3528,7 @@ def assert_calculation_variant_cross_links(
 
     assert_no_forbidden_dashes(html_or_text, context=f"document{ctx}")
 
-    nodes = extract_calculation_variant_nodes(html_or_text)
+    nodes = _extract_calculation_variant_nodes_ro(html_or_text)
 
     if len(nodes) < min_variants:
         raise ValueError(
@@ -4186,6 +4273,27 @@ def safe_eval_mathematical_formula(formula: str, inputs: Dict[str, Any]) -> floa
     return _eval_node(parsed_ast)
 
 
+_UNGROUNDED_SYNTHETIC_COMPILED: Tuple[Tuple[str, re.Pattern], ...] = tuple(
+    (pat.removeprefix(r"\b").removesuffix(r"\b"), re.compile(pat))
+    for pat in UNGROUNDED_SYNTHETIC_PATTERNS
+)
+_ORPHAN_TABLE_RE = re.compile(r'<table\b([^>]*)>(.*?)</table>', re.IGNORECASE | re.DOTALL)
+_ORPHAN_PROV_BODY_RE = re.compile(r'<table\b[^>]*>.*?data provenance.*?</table>', re.IGNORECASE | re.DOTALL)
+_ORPHAN_PROV_ATTR_RE = re.compile(r'<table\b[^>]*(?:data-provenance|data-statutory)[^>]*>', re.IGNORECASE)
+_ORPHAN_STATUTORY_KW = (
+    "irc", "cfr", "usc", "u.s.c.", "internal revenue code", "statutory", "statute",
+    "rev. proc.", "treas. reg.", "public law", "p.l.", "section 179", "section 168",
+    "section 199a", "section 1256", "form 1099", "statutory authority", "bls", "fred", "bea",
+    "census", "tcja", "tax cuts and jobs act", "irs", "federal reserve", "treasury",
+    "cftc", "sec", "gaap", "asc", "commodity exchange act", "financial accounts",
+    "balance sheet", "going concern", "burn rate", "statutory rate", "statutory code",
+)
+_ORPHAN_STATUTORY_RE = re.compile(
+    r'\b(?:' + '|'.join(re.escape(k) for k in _ORPHAN_STATUTORY_KW) + r')\b',
+    re.IGNORECASE,
+)
+
+
 def detect_ungrounded_synthetic_claims(text: str) -> List[str]:
     """
     Detects ungrounded synthetic claims, mock datasets lacking verified formulas,
@@ -4198,10 +4306,11 @@ def detect_ungrounded_synthetic_claims(text: str) -> List[str]:
     text_lower = text.lower()
     if not any(k in text_lower for k in ("mock", "synthetic", "hypothetical", "placeholder", "arbitrary", "random")):
         return issues
-    for pat in UNGROUNDED_SYNTHETIC_PATTERNS:
-        m = re.search(pat, text_lower)
-        if m:
-            issues.append(f"Ungrounded synthetic claim detected: '{m.group(0)}'")
+    for literal, pat in _UNGROUNDED_SYNTHETIC_COMPILED:
+        if literal in text_lower:
+            m = pat.search(text_lower)
+            if m:
+                issues.append(f"Ungrounded synthetic claim detected: '{m.group(0)}'")
     return issues
 
 
@@ -4219,25 +4328,12 @@ def detect_orphaned_calculation_tables(
         return []
     orphans: List[str] = []
 
-    table_pat = re.compile(r'<table\b([^>]*)>(.*?)</table>', re.IGNORECASE | re.DOTALL)
+    table_pat = _ORPHAN_TABLE_RE
     has_page_provenance_table = bool(
-        re.search(r'<table\b[^>]*>.*?data provenance.*?</table>', html_content, re.IGNORECASE | re.DOTALL)
-        or re.search(r'<table\b[^>]*(?:data-provenance|data-statutory)[^>]*>', html_content, re.IGNORECASE)
+        ("data provenance" in html_content.lower() and _ORPHAN_PROV_BODY_RE.search(html_content))
+        or (("data-provenance" in html_content.lower() or "data-statutory" in html_content.lower()) and _ORPHAN_PROV_ATTR_RE.search(html_content))
     )
-
-
-    statutory_kw = [
-        "irc", "cfr", "usc", "u.s.c.", "internal revenue code", "statutory", "statute",
-        "rev. proc.", "treas. reg.", "public law", "p.l.", "section 179", "section 168",
-        "section 199a", "section 1256", "form 1099", "statutory authority", "bls", "fred", "bea",
-        "census", "tcja", "tax cuts and jobs act", "irs", "federal reserve", "treasury",
-        "cftc", "sec", "gaap", "asc", "commodity exchange act", "financial accounts",
-        "balance sheet", "going concern", "burn rate", "statutory rate", "statutory code"
-    ]
-    statutory_pat = re.compile(
-        r'\b(?:' + '|'.join(re.escape(k) for k in statutory_kw) + r')\b',
-        re.IGNORECASE
-    )
+    statutory_pat = _ORPHAN_STATUTORY_RE
 
     for idx, match in enumerate(table_pat.finditer(html_content)):
         attrs_str = match.group(1).lower()
@@ -4514,6 +4610,20 @@ def assert_unique_calculation_manifest(manifest: Dict[str, Any], context: str = 
     return True
 
 
+_MULTI_DATASET_STATUTORY_COMPILED: Tuple[re.Pattern, ...] = (
+    re.compile(r"\b(?:26\s+u\.?s\.?c\.?|title\s+26)\b"),
+    re.compile(r"\b(?:26\s+c\.?f\.?r\.?|treas\.?\s+reg\.?)\b"),
+    re.compile(r"\birc\s+(?:section\s+|§\s*)?\d+[a-z0-9_\(\)]*"),
+    re.compile(r"\binternal\s+revenue\s+code\b"),
+    re.compile(r"\birs\s+(?:form|pub|notice|rev\.?\s*proc\.?|rev\.?\s*rul\.?)\b"),
+    re.compile(r"\bp\.?l\.?\s+\d+-\d+\b"),
+    re.compile(r"\bstatutory\s+(?:rate|threshold|cap|limit|provision|schedule|phaseout|guideline|deduction|authority|provenance)\b"),
+)
+_MULTI_DATASET_ECONOMIC_COMPILED: Tuple[re.Pattern, ...] = tuple(
+    re.compile(ep, re.IGNORECASE) for ep in ECONOMIC_DATASET_PATTERNS
+)
+
+
 def assert_multi_dataset_enrichment(content_or_dict: Any, context: str = "") -> bool:
     """
     Mechanical contract validating multi-dataset enrichment for Factor 7.
@@ -4537,26 +4647,9 @@ def assert_multi_dataset_enrichment(content_or_dict: Any, context: str = "") -> 
     if synthetic_issues:
         raise ValueError(f"Ungrounded synthetic claim detected{ctx}: {synthetic_issues[0]}")
 
-    has_statutory = False
-    statutory_patterns = [
-        r"\b(?:26\s+U\.?S\.?C\.?|Title\s+26)\b",
-        r"\b(?:26\s+C\.?F\.?R\.?|Treas\.?\s+Reg\.?)\b",
-        r"\bIRC\s+(?:Section\s+|§\s*)?\d+[a-zA-Z0-9_\(\)]*",
-        r"\bInternal\s+Revenue\s+Code\b",
-        r"\bIRS\s+(?:Form|Pub|Notice|Rev\.?\s*Proc\.?|Rev\.?\s*Rul\.?)\b",
-        r"\bP\.?L\.?\s+\d+-\d+\b",
-        r"\bstatutory\s+(?:rate|threshold|cap|limit|provision|schedule|phaseout|guideline|deduction|authority|provenance)\b",
-    ]
-    for sp in statutory_patterns:
-        if re.search(sp, text_repr, re.IGNORECASE):
-            has_statutory = True
-            break
-
-    has_economic = False
-    for ep in ECONOMIC_DATASET_PATTERNS:
-        if re.search(ep, text_repr, re.IGNORECASE):
-            has_economic = True
-            break
+    text_lower = text_repr.lower()
+    has_statutory = any(sp.search(text_lower) for sp in _MULTI_DATASET_STATUTORY_COMPILED)
+    has_economic = any(ep.search(text_repr) for ep in _MULTI_DATASET_ECONOMIC_COMPILED)
 
     if not has_statutory and not has_economic:
         raise ValueError(
@@ -5106,6 +5199,36 @@ def _fast_strip_style_and_js(content: str) -> str:
     return "".join(out)
 
 
+_UNCORROB_TAX_RATE_RE = re.compile(
+    r'\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:federal\s+)?(?:marginal\s+tax\s+rate|marginal\s+rate|tax\s+bracket|bracket)\b'
+)
+_UNCORROB_STD_DED_RE = re.compile(
+    r'(?:standard\s+deduction(?:\s+(?:is|of|for|amount|value|drops?\s+to))?|deduction\s+of)\s*[:=]?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})'
+)
+_UNCORROB_SEC179_LIMIT_RE = re.compile(
+    r'(?:section\s+179|sec\.?\s*179)\s+(?:max(?:imum)?\s+(?:deduction|expensing)|expensing\s+(?:cap|limit)|deduction\s+(?:cap|limit)|limit|cap)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})'
+)
+_UNCORROB_SEC179_PHASE_RE = re.compile(
+    r'(?:section\s+179|sec\.?\s*179)[^\.\n]{0,140}?phase-?out\s+(?:threshold|limit|begins?|starts?)\s*(?:of|at|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})'
+)
+_UNCORROB_QSBS_ASSET_RE = re.compile(
+    r'(?:section\s+1202|qsbs|qualified\s+small\s+business\s+stock)[^\.\n]{0,140}?(?:gross\s+assets?|asset\s+(?:ceiling|limit|cap))\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})'
+)
+_UNCORROB_QSBS_EXCL_RE = re.compile(
+    r'(?:section\s+1202|qsbs|qualified\s+small\s+business\s+stock)[^\.\n]{0,140}?(?:gain\s+exclusion\s+cap|exclusion\s+(?:limit|cap)|maximum\s+exclusion)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})'
+)
+_UNCORROB_401K_RE = re.compile(
+    r'(?:401\(?k\)?|403\(?b\)?)\s+(?:elective\s+deferral(?:\s+limit)?|contribution\s+limit|maximum\s+deferral|annual\s+limit|deferral\s+limit|limit)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})'
+)
+_UNCORROB_IRA_RE = re.compile(
+    r'(?:traditional\s+ira|roth\s+ira|\bira\b)\s+(?:contribution\s+limit|annual\s+limit|maximum\s+contribution)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})'
+)
+_UNCORROB_APP_JSON_RE = re.compile(
+    r'<script[^>]*type=[\'"]application/json[\'"][^>]*id=[\'"]([^\'"]*)[\'"][^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.html") -> List[str]:
     """
     Detects uncorroborated tax constants, invented statutory limits, orphaned deduction figures,
@@ -5128,214 +5251,191 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
 
     # 2. Silent fallback defaults check
     if "default" in clean_lower or "fallback" in clean_lower or "hardcoded" in clean_lower or "unverified" in clean_lower:
-        for pat in SILENT_FALLBACK_DEFAULT_PATTERNS:
-            for m in pat.finditer(clean_text):
-                issues.append(
-                    f"Page {rel_path}: Silent fallback default detected ('{m.group(0).strip()}'): "
-                    f"statutory constants must be explicitly reconciled against official published schedules"
-                )
+        fb_win = _extract_anchor_windows(clean_text, clean_lower, ("default", "fallback", "hardcoded", "unverified"), pre=16, post=48)
+        if fb_win:
+            for pat in SILENT_FALLBACK_DEFAULT_PATTERNS:
+                for m in pat.finditer(fb_win):
+                    issues.append(
+                        f"Page {rel_path}: Silent fallback default detected ('{m.group(0).strip()}'): "
+                        f"statutory constants must be explicitly reconciled against official published schedules"
+                    )
 
     # 3. Invented federal tax rates check
     if "%" in clean_text and ("rate" in clean_lower or "bracket" in clean_lower):
-        for m in re.finditer(r'\b([0-9]{1,2}(?:\.[0-9]+)?)\s*%\s*(?:federal\s+)?(?:marginal\s+tax\s+rate|marginal\s+rate|tax\s+bracket|bracket)\b', clean_text, re.IGNORECASE):
-            try:
-                rate = float(m.group(1))
-                surrounding = clean_lower[max(0, m.start()-40):min(len(clean_lower), m.end()+40)]
-                if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding):
-                    if rate not in VALID_FEDERAL_TAX_RATES and rate not in {0.0, 15.0, 20.0}:
-                        issues.append(
-                            f"Page {rel_path}: Invented federal tax rate '{rate}%' is not an official IRS statutory marginal bracket"
-                        )
-            except Exception:
-                pass
+        rate_win = _extract_anchor_windows(clean_lower, clean_lower, ("%",), pre=48, post=80)
+        if rate_win:
+            for m in _UNCORROB_TAX_RATE_RE.finditer(rate_win):
+                try:
+                    rate = float(m.group(1))
+                    surrounding = rate_win[max(0, m.start()-40):min(len(rate_win), m.end()+40)]
+                    if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding):
+                        if rate not in VALID_FEDERAL_TAX_RATES and rate not in {0.0, 15.0, 20.0}:
+                            issues.append(
+                                f"Page {rel_path}: Invented federal tax rate '{rate}%' is not an official IRS statutory marginal bracket"
+                            )
+                except Exception:
+                    pass
 
     # 4. Standard deduction checks
     if "deduction" in clean_lower and "$" in clean_text:
-        std_ded_matches = re.finditer(
-            r'(?:standard\s+deduction(?:\s+(?:is|of|for|amount|value|drops?\s+to))?|deduction\s+of)\s*[:=]?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-            clean_text,
-            re.IGNORECASE
-        )
-        for m in std_ded_matches:
-            raw_val = m.group(1).replace(",", "")
-            try:
-                val = float(raw_val)
-                surrounding = clean_lower[max(0, m.start()-60):min(len(clean_lower), m.end()+60)]
-                if "standard deduction" in surrounding:
-                    if val not in ALL_OFFICIAL_STANDARD_DEDUCTIONS:
-                        issues.append(
-                            f"Page {rel_path}: Mismatched standard deduction value '${val:,.0f}': "
-                            f"does not match official published IRS standard deduction schedules"
-                        )
-                    else:
-                        if "single" in surrounding and "married" not in surrounding and "mfj" not in surrounding:
-                            if val not in {8600.0, 14600.0, 15000.0, 15350.0, 16100.0, 16500.0}:
-                                issues.append(
-                                    f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
-                                    f"official published Single standard deduction is $14,600 (2024), $15,000 (2025), $16,100 (2026 Rev. Proc. 2025-32), or $16,500 (2027 OBBBA)"
-                                )
-                        elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
-                            if val not in {17200.0, 29200.0, 30000.0, 30700.0, 32200.0, 33000.0}:
-                                issues.append(
-                                    f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
-                                    f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025), $32,200 (2026 Rev. Proc. 2025-32), or $33,000 (2027 OBBBA)"
-                                )
-                        # Year- and legal-status bound enforcement:
-                        # 1) 2024/2025 standard deductions ($14,600/$29,200 or $15,000/$30,000) presented as active 2026/2027 law
-                        has_hist_qual = any(
-                            q in surrounding
-                            for q in ("2024", "2025", "prior", "historical", "moved from", "moving from", "up from", "increased from")
-                        )
-                        if val in {14600.0, 29200.0, 21900.0, 15000.0, 30000.0, 22500.0} and (
-                            "2026" in surrounding or "2027" in surrounding
-                        ) and not has_hist_qual:
-                            issues.append(
-                                f"Page {rel_path}: Year-bound standard deduction violation '${val:,.0f}': "
-                                f"2024/2025 standard deduction presented as active 2026/2027 law instead of IRS Rev. Proc. 2025-32 ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027 OBBBA)"
-                            )
-                        # 2) Repealed pre-OBBBA TCJA sunset standard deductions ($8,600 / $17,200 / $12,900) presented as enacted 2026/2027 law
-                        has_repealed_qual = any(
-                            q in surrounding
-                            for q in ("repealed", "pre-obbba", "prevented", "avoided", "hypothetical", "prior to obbba", "without obbba", "post-tcja")
-                        )
-                        if val in {8600.0, 17200.0, 12900.0} and (
-                            "2026" in surrounding or "2027" in surrounding or "sunset" in surrounding
-                        ) and not has_repealed_qual:
-                            issues.append(
-                                f"Page {rel_path}: Repealed TCJA sunset standard deduction '${val:,.0f}' presented as active 2026/2027 law: "
-                                f"OBBBA (P.L. 119-21) permanently extended the enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027)"
-                            )
-            except Exception:
-                pass
-
-    # 5. Section 179 maximum deduction and phaseout limits
-    if "179" in clean_text and "$" in clean_text:
-        sec179_matches = re.finditer(
-            r'(?:Section\s+179|Sec\.?\s*179)\s+(?:max(?:imum)?\s+(?:deduction|expensing)|expensing\s+(?:cap|limit)|deduction\s+(?:cap|limit)|limit|cap)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
-            clean_text,
-            re.IGNORECASE
-        )
-        for m in sec179_matches:
-            raw_val = m.group(1).replace(",", "")
-            try:
-                val = float(raw_val)
-                if val not in {1220000.0, 1250000.0, 1290000.0, 2560000.0, 2620000.0}:
-                    issues.append(
-                        f"Page {rel_path}: Mismatched Section 179 expensing limit '${val:,.0f}': "
-                        f"does not match official published schedule ($1,220,000 for 2024, $1,250,000 for 2025, $2,560,000 for 2026 OBBBA)"
-                    )
-            except Exception:
-                pass
-
-        if "phase" in clean_lower:
-            sec179_phaseout = re.finditer(
-                r'(?:Section\s+179|Sec\.?\s*179)[^\.\n]{0,140}?phase-?out\s+(?:threshold|limit|begins?|starts?)\s*(?:of|at|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,8})',
-                clean_text,
-                re.IGNORECASE
-            )
-            for m in sec179_phaseout:
+        ded_win = _extract_anchor_windows(clean_lower, clean_lower, ("deduction",), pre=80, post=120)
+        if ded_win:
+            for m in _UNCORROB_STD_DED_RE.finditer(ded_win):
                 raw_val = m.group(1).replace(",", "")
                 try:
                     val = float(raw_val)
-                    if val not in {3050000.0, 3130000.0, 3220000.0, 4090000.0, 4190000.0}:
+                    surrounding = ded_win[max(0, m.start()-60):min(len(ded_win), m.end()+60)]
+                    if "standard deduction" in surrounding or (
+                        "standard" in surrounding and bool(re.search(r"standard\s+deduction", surrounding))
+                    ):
+                        if val not in ALL_OFFICIAL_STANDARD_DEDUCTIONS:
+                            issues.append(
+                                f"Page {rel_path}: Mismatched standard deduction value '${val:,.0f}': "
+                                f"does not match official published IRS standard deduction schedules"
+                            )
+                        else:
+                            if "single" in surrounding and "married" not in surrounding and "mfj" not in surrounding:
+                                if val not in {8600.0, 14600.0, 15000.0, 15350.0, 16100.0, 16500.0}:
+                                    issues.append(
+                                        f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
+                                        f"official published Single standard deduction is $14,600 (2024), $15,000 (2025), $16,100 (2026 Rev. Proc. 2025-32), or $16,500 (2027 OBBBA)"
+                                    )
+                            elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
+                                if val not in {17200.0, 29200.0, 30000.0, 30700.0, 32200.0, 33000.0}:
+                                    issues.append(
+                                        f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
+                                        f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025), $32,200 (2026 Rev. Proc. 2025-32), or $33,000 (2027 OBBBA)"
+                                    )
+                            # Year- and legal-status bound enforcement:
+                            # 1) 2024/2025 standard deductions ($14,600/$29,200 or $15,000/$30,000) presented as active 2026/2027 law
+                            has_hist_qual = any(
+                                q in surrounding
+                                for q in ("2024", "2025", "prior", "historical", "moved from", "moving from", "up from", "increased from")
+                            )
+                            if val in {14600.0, 29200.0, 21900.0, 15000.0, 30000.0, 22500.0} and (
+                                "2026" in surrounding or "2027" in surrounding
+                            ) and not has_hist_qual:
+                                issues.append(
+                                    f"Page {rel_path}: Year-bound standard deduction violation '${val:,.0f}': "
+                                    f"2024/2025 standard deduction presented as active 2026/2027 law instead of IRS Rev. Proc. 2025-32 ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027 OBBBA)"
+                                )
+                            # 2) Repealed pre-OBBBA TCJA sunset standard deductions ($8,600 / $17,200 / $12,900) presented as enacted 2026/2027 law
+                            has_repealed_qual = any(
+                                q in surrounding
+                                for q in ("repealed", "pre-obbba", "prevented", "avoided", "hypothetical", "prior to obbba", "without obbba", "post-tcja")
+                            )
+                            if val in {8600.0, 17200.0, 12900.0} and (
+                                "2026" in surrounding or "2027" in surrounding or "sunset" in surrounding
+                            ) and not has_repealed_qual:
+                                issues.append(
+                                    f"Page {rel_path}: Repealed TCJA sunset standard deduction '${val:,.0f}' presented as active 2026/2027 law: "
+                                    f"OBBBA (P.L. 119-21) permanently extended the enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027)"
+                                )
+                except Exception:
+                    pass
+
+    # 5. Section 179 maximum deduction and phaseout limits
+    if "179" in clean_text and "$" in clean_text:
+        s179_win = _extract_anchor_windows(clean_lower, clean_lower, ("179",), pre=16, post=200)
+        if s179_win:
+            for m in _UNCORROB_SEC179_LIMIT_RE.finditer(s179_win):
+                raw_val = m.group(1).replace(",", "")
+                try:
+                    val = float(raw_val)
+                    if val not in {1220000.0, 1250000.0, 1290000.0, 2560000.0, 2620000.0}:
                         issues.append(
-                            f"Page {rel_path}: Mismatched Section 179 phaseout threshold '${val:,.0f}': "
-                            f"does not match official published schedule ($3,050,000 for 2024, $3,130,000 for 2025, $4,090,000 for 2026 OBBBA)"
+                            f"Page {rel_path}: Mismatched Section 179 expensing limit '${val:,.0f}': "
+                            f"does not match official published schedule ($1,220,000 for 2024, $1,250,000 for 2025, $2,560,000 for 2026 OBBBA)"
                         )
                 except Exception:
                     pass
 
+            if "phase" in s179_win:
+                for m in _UNCORROB_SEC179_PHASE_RE.finditer(s179_win):
+                    raw_val = m.group(1).replace(",", "")
+                    try:
+                        val = float(raw_val)
+                        if val not in {3050000.0, 3130000.0, 3220000.0, 4090000.0, 4190000.0}:
+                            issues.append(
+                                f"Page {rel_path}: Mismatched Section 179 phaseout threshold '${val:,.0f}': "
+                                f"does not match official published schedule ($3,050,000 for 2024, $3,130,000 for 2025, $4,090,000 for 2026 OBBBA)"
+                            )
+                    except Exception:
+                        pass
+
     # 6. Section 1202 QSBS
     if ("1202" in clean_text or "qsbs" in clean_lower or "qualified small business" in clean_lower) and "$" in clean_text:
-        qsbs_asset = re.finditer(
-            r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock)[^\.\n]{0,140}?(?:gross\s+assets?|asset\s+(?:ceiling|limit|cap))\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
-            clean_text,
-            re.IGNORECASE
-        )
-        for m in qsbs_asset:
-            raw_val = m.group(1).replace(",", "")
-            try:
-                val = float(raw_val)
-                if val != 50000000.0:
-                    issues.append(
-                        f"Page {rel_path}: Mismatched Section 1202 QSBS asset ceiling '${val:,.0f}': "
-                        f"statutory ceiling under IRC 1202(d)(1) is strictly $50,000,000"
-                    )
-            except Exception:
-                pass
+        qsbs_win = _extract_anchor_windows(clean_lower, clean_lower, ("1202", "qsbs", "qualified small business"), pre=16, post=200)
+        if qsbs_win:
+            for m in _UNCORROB_QSBS_ASSET_RE.finditer(qsbs_win):
+                raw_val = m.group(1).replace(",", "")
+                try:
+                    val = float(raw_val)
+                    if val != 50000000.0:
+                        issues.append(
+                            f"Page {rel_path}: Mismatched Section 1202 QSBS asset ceiling '${val:,.0f}': "
+                            f"statutory ceiling under IRC 1202(d)(1) is strictly $50,000,000"
+                        )
+                except Exception:
+                    pass
 
-        qsbs_excl = re.finditer(
-            r'(?:Section\s+1202|QSBS|qualified\s+small\s+business\s+stock)[^\.\n]{0,140}?(?:gain\s+exclusion\s+cap|exclusion\s+(?:limit|cap)|maximum\s+exclusion)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,9})',
-            clean_text,
-            re.IGNORECASE
-        )
-        for m in qsbs_excl:
-            raw_val = m.group(1).replace(",", "")
-            try:
-                val = float(raw_val)
-                if val != 10000000.0:
-                    issues.append(
-                        f"Page {rel_path}: Mismatched Section 1202 QSBS exclusion cap '${val:,.0f}': "
-                        f"statutory cap under IRC 1202(b)(1) is strictly $10,000,000"
-                    )
-            except Exception:
-                pass
+            for m in _UNCORROB_QSBS_EXCL_RE.finditer(qsbs_win):
+                raw_val = m.group(1).replace(",", "")
+                try:
+                    val = float(raw_val)
+                    if val != 10000000.0:
+                        issues.append(
+                            f"Page {rel_path}: Mismatched Section 1202 QSBS exclusion cap '${val:,.0f}': "
+                            f"statutory cap under IRC 1202(b)(1) is strictly $10,000,000"
+                        )
+                except Exception:
+                    pass
 
     # 7. Retirement 401(k) and IRA limits
     if ("401" in clean_text or "403" in clean_text) and "$" in clean_text:
-        ret_401k = re.finditer(
-            r'(?:401\(?k\)?|403\(?b\)?)\s+(?:elective\s+deferral(?:\s+limit)?|contribution\s+limit|maximum\s+deferral|annual\s+limit|deferral\s+limit|limit)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-            clean_text,
-            re.IGNORECASE
-        )
-        for m in ret_401k:
-            raw_val = m.group(1).replace(",", "")
-            try:
-                val = float(raw_val)
-                if val not in {23000.0, 23500.0, 24000.0, 24500.0}:
-                    issues.append(
-                        f"Page {rel_path}: Mismatched 401(k) deferral limit '${val:,.0f}': "
-                        f"does not match official published IRS schedule ($23,000 for 2024, $23,500 for 2025, $24,500 for 2026)"
-                    )
-                else:
-                    s_start = max(0, m.start() - 100)
-                    s_end = min(len(clean_text), m.end() + 100)
-                    s_ctx = clean_text[s_start:s_end].lower()
-                    if val in {23000.0, 23500.0} and ("2026" in s_ctx or "2027" in s_ctx) and not any(
-                        q in s_ctx for q in ("2024", "2025", "prior", "historical", "up from", "increased from")
-                    ):
+        r401_win = _extract_anchor_windows(clean_lower, clean_lower, ("401", "403"), pre=100, post=160)
+        if r401_win:
+            for m in _UNCORROB_401K_RE.finditer(r401_win):
+                raw_val = m.group(1).replace(",", "")
+                try:
+                    val = float(raw_val)
+                    if val not in {23000.0, 23500.0, 24000.0, 24500.0}:
                         issues.append(
-                            f"Page {rel_path}: Year-bound 401(k) deferral limit violation '${val:,.0f}': "
-                            f"2024/2025 limit presented as active 2026/2027 law instead of IRS Notice 2025-67 ($24,500 for 2026)"
+                            f"Page {rel_path}: Mismatched 401(k) deferral limit '${val:,.0f}': "
+                            f"does not match official published IRS schedule ($23,000 for 2024, $23,500 for 2025, $24,500 for 2026)"
                         )
-            except Exception:
-                pass
+                    else:
+                        s_start = max(0, m.start() - 100)
+                        s_end = min(len(r401_win), m.end() + 100)
+                        s_ctx = r401_win[s_start:s_end]
+                        if val in {23000.0, 23500.0} and ("2026" in s_ctx or "2027" in s_ctx) and not any(
+                            q in s_ctx for q in ("2024", "2025", "prior", "historical", "up from", "increased from")
+                        ):
+                            issues.append(
+                                f"Page {rel_path}: Year-bound 401(k) deferral limit violation '${val:,.0f}': "
+                                f"2024/2025 limit presented as active 2026/2027 law instead of IRS Notice 2025-67 ($24,500 for 2026)"
+                            )
+                except Exception:
+                    pass
 
     if "ira" in clean_lower and "$" in clean_text:
-        ret_ira = re.finditer(
-            r'(?:traditional\s+ira|roth\s+ira|\bira\b)\s+(?:contribution\s+limit|annual\s+limit|maximum\s+contribution)\s*(?:of|is|:|=|amount)?\s*\$([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})',
-            clean_text,
-            re.IGNORECASE
-        )
-        for m in ret_ira:
-            raw_val = m.group(1).replace(",", "")
-            try:
-                val = float(raw_val)
-                if val not in {7000.0, 7500.0}:
-                    issues.append(
-                        f"Page {rel_path}: Mismatched IRA contribution limit '${val:,.0f}': "
-                        f"does not match official published IRS schedule ($7,000 for 2024-2025, $7,500 for 2026)"
-                    )
-            except Exception:
-                pass
+        ira_win = _extract_anchor_windows(clean_lower, clean_lower, ("ira",), pre=24, post=80)
+        if ira_win:
+            for m in _UNCORROB_IRA_RE.finditer(ira_win):
+                raw_val = m.group(1).replace(",", "")
+                try:
+                    val = float(raw_val)
+                    if val not in {7000.0, 7500.0}:
+                        issues.append(
+                            f"Page {rel_path}: Mismatched IRA contribution limit '${val:,.0f}': "
+                            f"does not match official published IRS schedule ($7,000 for 2024-2025, $7,500 for 2026)"
+                        )
+                except Exception:
+                    pass
 
     # 8. Structured manifests and scripts
     if "application/json" in content:
-        for script_match in re.finditer(
-            r'<script[^>]*type=[\'"]application/json[\'"][^>]*id=[\'"]([^\'"]*)[\'"][^>]*>(.*?)</script>',
-            content,
-            re.DOTALL | re.IGNORECASE,
-        ):
+        for script_match in _UNCORROB_APP_JSON_RE.finditer(content):
             script_raw = script_match.group(2).strip()
             try:
                 data = json.loads(script_raw)
@@ -5577,12 +5677,8 @@ def extract_schemas_from_json_ld(data: Any) -> List[Dict[str, Any]]:
     return items
 
 
-def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
-    """
-    Extracts author credentials, Person and Organization schema, editorial policies,
-    freshness signals, and about/contact linkages from document text and structured data.
-    Zero em-dashes. Zero en-dashes.
-    """
+@functools.lru_cache(maxsize=512)
+def _extract_author_and_publisher_metadata_cached(content: str) -> Dict[str, Any]:
     authors: List[Dict[str, Any]] = []
     publishers: List[Dict[str, Any]] = []
     raw_blocks: List[str] = []
@@ -5591,18 +5687,6 @@ def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
     has_editorial_policy: bool = False
     has_about_link: bool = False
     has_contact_link: bool = False
-
-    if not content or not isinstance(content, str):
-        return {
-            "authors": authors,
-            "publishers": publishers,
-            "raw_blocks": raw_blocks,
-            "date_published": date_published,
-            "date_modified": date_modified,
-            "has_editorial_policy": has_editorial_policy,
-            "has_about_link": has_about_link,
-            "has_contact_link": has_contact_link,
-        }
 
     # 1. Structured data JSON-LD extraction
     json_ld_matches = re.findall(
@@ -5721,6 +5805,42 @@ def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
     }
 
 
+def _extract_author_and_publisher_metadata_ro(content: str) -> Dict[str, Any]:
+    """Read-only cached author/publisher metadata view without copy.deepcopy."""
+    if not content or not isinstance(content, str):
+        return {
+            "authors": [],
+            "publishers": [],
+            "raw_blocks": [],
+            "date_published": None,
+            "date_modified": None,
+            "has_editorial_policy": False,
+            "has_about_link": False,
+            "has_contact_link": False,
+        }
+    return _extract_author_and_publisher_metadata_cached(content)
+
+
+def extract_author_and_publisher_metadata(content: str) -> Dict[str, Any]:
+    """
+    Extracts author credentials, Person and Organization schema, editorial policies,
+    freshness signals, and about/contact linkages from document text and structured data.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not content or not isinstance(content, str):
+        return {
+            "authors": [],
+            "publishers": [],
+            "raw_blocks": [],
+            "date_published": None,
+            "date_modified": None,
+            "has_editorial_policy": False,
+            "has_about_link": False,
+            "has_contact_link": False,
+        }
+    return copy.deepcopy(_extract_author_and_publisher_metadata_cached(content))
+
+
 def detect_publisher_reputation_issues(
     content: str,
     rel_path: str = "index.html",
@@ -5742,7 +5862,7 @@ def detect_publisher_reputation_issues(
     if "\u2013" in content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
-    meta = extract_author_and_publisher_metadata(content)
+    meta = _extract_author_and_publisher_metadata_ro(content)
 
     # 2. JSON-LD existence check
     if not meta["raw_blocks"]:
@@ -6405,6 +6525,23 @@ def extract_content_structure_metadata(content: str) -> Dict[str, Any]:
     return copy.deepcopy(_extract_content_structure_metadata_cached(content))
 
 
+def _extract_content_structure_metadata_ro(content: str) -> Dict[str, Any]:
+    """Read-only cached content structure metadata view without copy.deepcopy."""
+    if not content or not isinstance(content, str):
+        return {
+            "headings": [],
+            "heading_skips": [],
+            "tables": [],
+            "lists": [],
+            "ordered_lists": [],
+            "unordered_lists": [],
+            "procedural_blocks": [],
+            "passages": [],
+            "empty_passages_count": 0,
+        }
+    return _extract_content_structure_metadata_cached(content)
+
+
 def detect_extractable_content_issues(
     content: str,
     rel_path: str = "index.html",
@@ -6430,7 +6567,7 @@ def detect_extractable_content_issues(
     if "\u2013" in content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
-    meta = extract_content_structure_metadata(content)
+    meta = _extract_content_structure_metadata_ro(content)
 
     # 2. Heading hierarchy check
     headings = meta["headings"]
@@ -7046,6 +7183,24 @@ def extract_answer_prominence_metadata(content: str) -> Dict[str, Any]:
     return copy.deepcopy(_extract_answer_prominence_metadata_cached(content))
 
 
+def _extract_answer_prominence_metadata_ro(content: str) -> Dict[str, Any]:
+    """Read-only cached answer prominence metadata view without copy.deepcopy."""
+    if not content or not isinstance(content, str):
+        return {
+            "answer_found": False,
+            "answer_type": "none",
+            "answer_word_position": -1,
+            "answer_text": "",
+            "total_body_words": 0,
+            "is_above_fold": False,
+            "has_secondary_discussion_before_answer": False,
+            "secondary_discussion_headings_before_answer": [],
+            "all_answers_and_widgets": [],
+            "dom_depth": 0,
+        }
+    return _extract_answer_prominence_metadata_cached(content)
+
+
 def detect_answer_prominence_issues(
     content: str,
     rel_path: str = "index.html",
@@ -7070,7 +7225,7 @@ def detect_answer_prominence_issues(
     if "\u2013" in content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
-    meta = extract_answer_prominence_metadata(content)
+    meta = _extract_answer_prominence_metadata_ro(content)
 
     if not meta["answer_found"]:
         issues.append(
@@ -7598,6 +7753,13 @@ def extract_structured_data_metadata(content: Any) -> Dict[str, Any]:
     return _extract_structured_data_metadata_raw(content)
 
 
+def _extract_structured_data_metadata_ro(content: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Read-only cached structured data metadata view without copy.deepcopy."""
+    if isinstance(content, str):
+        return _extract_structured_data_metadata_str_cached(content)
+    return _extract_structured_data_metadata_raw(content)
+
+
 def detect_structured_data_issues(
     content: str,
     rel_path: str = "index.html",
@@ -7629,7 +7791,7 @@ def detect_structured_data_issues(
     if "\u2013" in content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
-    meta = extract_structured_data_metadata(content)
+    meta = _extract_structured_data_metadata_ro(content)
 
     # 2. JSON-LD existence
     if not meta["has_json_ld"]:
@@ -8668,6 +8830,16 @@ def _strip_non_jsonld_script_and_style_bodies(html_text: str) -> str:
     return _STYLE_BODY_RE.sub(r"\1\2", cleaned)
 
 
+_CONTRACT_DETECT_CACHE_LOCK = threading.Lock()
+_TOOL_UTILITY_ISSUES_CACHE: "collections.OrderedDict[Tuple[str, str], Tuple[str, ...]]" = collections.OrderedDict()
+_FREE_WEB_APP_SCHEMA_ISSUES_CACHE: "collections.OrderedDict[Tuple[str, str], Tuple[str, ...]]" = collections.OrderedDict()
+_CONTRACT_DETECT_CACHE_MAXSIZE = 2048
+_FREE_WEB_APP_SCRIPT_RE = re.compile(
+    r'<script\s+type=["\']application/ld\+json["\']\s*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> List[str]:
     """
     Detects contract violations for interactive micro-tools against ToolUtilityContract:
@@ -8683,6 +8855,13 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
         return [f"Page {rel_path}: HTML content must be a string"]
     if not html_text.strip():
         return [f"Page {rel_path}: HTML content is empty"]
+
+    cache_key = (hashlib.sha256(html_text.encode("utf-8", errors="ignore")).hexdigest(), str(rel_path))
+    with _CONTRACT_DETECT_CACHE_LOCK:
+        cached = _TOOL_UTILITY_ISSUES_CACHE.get(cache_key)
+        if cached is not None:
+            _TOOL_UTILITY_ISSUES_CACHE.move_to_end(cache_key)
+            return list(cached)
 
     if "\u2014" in html_text:
         issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
@@ -8740,6 +8919,12 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
         if v_issue not in issues:
             issues.append(f"Page {rel_path}: {v_issue}")
 
+    with _CONTRACT_DETECT_CACHE_LOCK:
+        _TOOL_UTILITY_ISSUES_CACHE[cache_key] = tuple(issues)
+        _TOOL_UTILITY_ISSUES_CACHE.move_to_end(cache_key)
+        while len(_TOOL_UTILITY_ISSUES_CACHE) > _CONTRACT_DETECT_CACHE_MAXSIZE:
+            _TOOL_UTILITY_ISSUES_CACHE.popitem(last=False)
+
     return issues
 
 
@@ -8769,18 +8954,29 @@ def detect_free_web_application_schema_issues(html_text: str, rel_path: str = "i
     if not html_text.strip():
         return [f"Page {rel_path}: HTML content is empty"]
 
+    cache_key = (hashlib.sha256(html_text.encode("utf-8", errors="ignore")).hexdigest(), str(rel_path))
+    with _CONTRACT_DETECT_CACHE_LOCK:
+        cached = _FREE_WEB_APP_SCHEMA_ISSUES_CACHE.get(cache_key)
+        if cached is not None:
+            _FREE_WEB_APP_SCHEMA_ISSUES_CACHE.move_to_end(cache_key)
+            return list(cached)
+
+    def _store_and_return(res: List[str]) -> List[str]:
+        with _CONTRACT_DETECT_CACHE_LOCK:
+            _FREE_WEB_APP_SCHEMA_ISSUES_CACHE[cache_key] = tuple(res)
+            _FREE_WEB_APP_SCHEMA_ISSUES_CACHE.move_to_end(cache_key)
+            while len(_FREE_WEB_APP_SCHEMA_ISSUES_CACHE) > _CONTRACT_DETECT_CACHE_MAXSIZE:
+                _FREE_WEB_APP_SCHEMA_ISSUES_CACHE.popitem(last=False)
+        return res
+
     if "\u2014" in html_text:
         issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
     if "\u2013" in html_text:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
 
-    script_pattern = re.compile(
-        r'<script\s+type=["\']application/ld\+json["\']\s*>(.*?)</script>',
-        re.DOTALL | re.IGNORECASE,
-    )
-    blocks = script_pattern.findall(html_text)
+    blocks = _FREE_WEB_APP_SCRIPT_RE.findall(html_text)
     if not blocks:
-        return [f"Page {rel_path}: Missing application/ld+json structured data block"]
+        return _store_and_return([f"Page {rel_path}: Missing application/ld+json structured data block"])
 
     parsed_blocks: List[Any] = []
     for raw in blocks:
@@ -8790,7 +8986,7 @@ def detect_free_web_application_schema_issues(html_text: str, rel_path: str = "i
             issues.append(f"Page {rel_path}: Invalid JSON-LD syntax: {ex}")
 
     if issues:
-        return issues
+        return _store_and_return(issues)
 
     # Collect entities and graph id map
     entities: List[Dict[str, Any]] = []
@@ -8830,9 +9026,9 @@ def detect_free_web_application_schema_issues(html_text: str, rel_path: str = "i
             matching_entities.append(ent)
 
     if not matching_entities:
-        return [
+        return _store_and_return([
             f"Page {rel_path}: Missing WebApplication or SoftwareApplication schema in JSON-LD"
-        ]
+        ])
 
     for app_ent in matching_entities:
         ent_type = app_ent.get("@type")
@@ -8896,7 +9092,7 @@ def detect_free_web_application_schema_issues(html_text: str, rel_path: str = "i
                 f"Page {rel_path}: Free tool schema in {ent_name} requires valid ISO 4217 currency (e.g. 'priceCurrency': 'USD')"
             )
 
-    return issues
+    return _store_and_return(issues)
 
 
 def assert_free_web_application_schema(html_text: str, context: str = "") -> bool:
@@ -9532,8 +9728,9 @@ def tokenize_preserving_url_slugs(text: str) -> List[Tuple[bool, str]]:
 
 
 _FAST_STATUTORY_ACRONYM_GATE_RE = re.compile(
-    r"(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Csf|Fedramp|C3[Pp]ao|3[Pp]ao|Cmmc|Tcja|Qsbs|Pci|Dss|Nist|Sprs|Dfars|Dora|Ict|Eu|Ai|Sdi|Emr|Hpsl|Nhsc|Cpa|Grc|Ssae|Soc|Amt|Camt|Qbi|199a|280g|HITRUST\s+Csf|CSF\s+E1|E1\s+I1|CMMC\s+2\s+0|PCI\s+DSS\s+4\s+0|/tools/[^\s\"'<>)\]]*[A-Z])"
+    r"\b(?:Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Csf|Fedramp|C3[Pp]ao|3[Pp]ao|Cmmc|Tcja|Qsbs|Pci|Dss|Nist|Sprs|Dfars|Dora|Ict|Eu|Ai|Sdi|Emr|Hpsl|Nhsc|Cpa|Grc|Ssae|Soc|Amt|Camt|Qbi|199a|280g|HITRUST\s+Csf|CSF\s+E1\s+I1\s+R2|E1\s+I1\s+R2|CMMC\s+2\s+0|PCI\s+DSS\s+4\s+0)\b|/tools/[A-Za-z0-9/_-]*[A-Z]"
 )
+_CALC_DUP_WORD_LOWER_RE = re.compile(r"\bcalculator\s+calculator\b")
 _EXTRA_STATUTORY_ACRONYM_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"\bHITRUST\s+Csf\b"), "HITRUST CSF"),
     (re.compile(r"\bCSF\s+E1\s+I1\s+R2\b"), "CSF e1, i1 & r2"),
@@ -9552,7 +9749,9 @@ def normalize_statutory_acronym_casing(text: str) -> str:
     """
     if not isinstance(text, str) or not text:
         return ""
-    if "calculator" not in text.lower() and not _FAST_STATUTORY_ACRONYM_GATE_RE.search(text):
+    text_lower = text.lower()
+    has_dup_calc = "calculator" in text_lower and bool(_CALC_DUP_WORD_LOWER_RE.search(text_lower))
+    if not has_dup_calc and not _FAST_STATUTORY_ACRONYM_GATE_RE.search(text):
         return text
     rebuilt: List[str] = []
     for is_slug_or_url, segment in tokenize_preserving_url_slugs(text):
@@ -9562,7 +9761,9 @@ def normalize_statutory_acronym_casing(text: str) -> str:
             else:
                 rebuilt.append(segment)
             continue
-        if "calculator" not in segment.lower() and not _FAST_STATUTORY_ACRONYM_GATE_RE.search(segment):
+        seg_lower = segment.lower() if has_dup_calc else ""
+        seg_has_dup_calc = has_dup_calc and "calculator" in seg_lower and bool(_CALC_DUP_WORD_LOWER_RE.search(seg_lower))
+        if not seg_has_dup_calc and not _FAST_STATUTORY_ACRONYM_GATE_RE.search(segment):
             rebuilt.append(segment)
             continue
         cleaned = segment
@@ -9759,14 +9960,19 @@ def detect_zero_signup_instant_result_issues(
     except Exception:
         pass
 
+    html_lower = html_text.lower()
     # 1. Zero password inputs or login/paywall gates
-    if parser.has_password_input or re.search(r'<input\b[^>]*\btype=["\']password["\']', html_text, re.IGNORECASE):
+    if parser.has_password_input or (
+        "password" in html_lower and re.search(r'<input\b[^>]*\btype=["\']password["\']', html_lower)
+    ):
         issues.append(f"Page {rel_path}: Free tool contains forbidden password input (<input type='password'>)")
 
-    if parser.has_paywall_gate or re.search(
-        r'\b(?:data-paywall=["\']true["\']|id=["\'](?:paywall-modal|signup-gate|login-wall)["\']|class=["\'][^"\']*\b(?:paywall-gate|signup-wall|login-wall|auth-gate-overlay)\b)',
-        html_text,
-        re.IGNORECASE,
+    if parser.has_paywall_gate or (
+        any(k in html_lower for k in ("paywall", "signup-gate", "login-wall", "signup-wall", "auth-gate-overlay"))
+        and re.search(
+            r'\b(?:data-paywall=["\']true["\']|id=["\'](?:paywall-modal|signup-gate|login-wall)["\']|class=["\'][^"\']*\b(?:paywall-gate|signup-wall|login-wall|auth-gate-overlay)\b)',
+            html_lower,
+        )
     ):
         issues.append(f"Page {rel_path}: Free tool contains forbidden signup/paywall gate overlay")
 
@@ -9775,18 +9981,20 @@ def detect_zero_signup_instant_result_issues(
             f"Page {rel_path}: Primary calculator form gates calculation behind a required email input"
         )
 
-    if re.search(
+    if (
+        ("sign" in html_lower and "up" in html_lower)
+        or ("email" in html_lower and "unlock" in html_lower)
+    ) and re.search(
         r"(?:sign\s+up\s+to\s+(?:view|unlock|see)\s+(?:your\s+)?(?:result|calculation)|enter\s+your\s+email\s+to\s+unlock\s+results)",
-        html_text,
-        re.IGNORECASE,
+        html_lower,
     ):
         issues.append(f"Page {rel_path}: Free tool gates output behind signup/email unlock prompt")
 
     # 2. Instant SSR result readiness
     if require_ssr_output:
         has_ssr_result = parser.has_ssr_result_element or bool(
-            re.search(r'class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>\s*[^<\s]', html_text, re.IGNORECASE)
-            or re.search(r'id=["\'](?:calculation-manifest|res-[a-z0-9_-]+|sec179-res-[a-z0-9_-]+|sec1031-res-[a-z0-9_-]+)["\']', html_text, re.IGNORECASE)
+            ("output-value" in html_lower and re.search(r'class=["\'][^"\']*\boutput-value\b[^"\']*["\'][^>]*>\s*[^<\s]', html_lower))
+            or re.search(r'id=["\'](?:calculation-manifest|res-[a-z0-9_-]+|sec179-res-[a-z0-9_-]+|sec1031-res-[a-z0-9_-]+)["\']', html_lower)
         )
         if not has_ssr_result:
             issues.append(
@@ -9794,7 +10002,7 @@ def detect_zero_signup_instant_result_issues(
             )
 
     # 3. Anti-slop title/H1/HowTo/acronym hygiene
-    if re.search(r"\bCalculator\s+Calculator\b", html_text, re.IGNORECASE):
+    if "calculator" in html_lower and _CALC_DUP_WORD_LOWER_RE.search(html_lower):
         issues.append(f"Page {rel_path}: Contains duplicate 'Calculator Calculator' token")
 
     jsonld_names, howto_issues = _collect_jsonld_names_and_howto_issues(parser.jsonld_blocks, rel_path=rel_path)

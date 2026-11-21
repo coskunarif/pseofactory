@@ -10,6 +10,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from pseofactory.audit import (
     X_LIKE_2107194110046060952_CAPABILITY_MATRIX,
     audit_code_slop_ratchet,
@@ -35,6 +37,7 @@ from pseofactory.seo_growth_loops import (
 )
 
 
+@pytest.mark.host_estate
 def test_x_like_2107194110046060952_capability_matrix_and_tradeoffs() -> None:
     """
     Verifies X_LIKE_2107194110046060952_CAPABILITY_MATRIX covers all 7 claims from

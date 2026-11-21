@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import re
+import collections
 import urllib.parse
 import fcntl
 import json
@@ -2897,6 +2898,7 @@ class LiveTruthAuditEngine:
         self,
         file_path: Union[str, Path],
         property_id: str,
+        content: Optional[str] = None,
     ) -> List[str]:
         """Audits a single static asset file path (HTML, JSON, XML, TXT, MD, JS, VTT). Returns violations."""
         p = Path(file_path).resolve()
@@ -2906,7 +2908,8 @@ class LiveTruthAuditEngine:
         if p.suffix.lower() not in valid_suffixes:
             return []
         try:
-            content = p.read_text(encoding="utf-8", errors="ignore")
+            if content is None:
+                content = p.read_text(encoding="utf-8", errors="ignore")
             if p.suffix == ".html":
                 ctx = p.name
                 if p.name == "index.html" and p.parent.parent.name == "tools":
@@ -3090,6 +3093,7 @@ class AssetIntegrityEvaluator:
         adapter: PropertyAdapter,
         ledger: Optional[Dict[str, Any]] = None,
         engine_drifted: bool = False,
+        degraded_overlays: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Optional[AssetDriftRecord]:
         """
         Audits a single compiled asset against all structural and property contracts.
@@ -3258,8 +3262,12 @@ class AssetIntegrityEvaluator:
                         "tools/irs-2027-tax-brackets/" in rel_key
                         and any(
                             k
-                            in _collect_degraded_rolled_back_overlays(
-                                getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
+                            in (
+                                degraded_overlays
+                                if degraded_overlays is not None
+                                else _collect_degraded_rolled_back_overlays(
+                                    getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
+                                )
                             )
                             for k in (
                                 rel_key.strip("/").removeprefix("tools/").removesuffix("/index.html").strip("/"),
@@ -3318,6 +3326,7 @@ class AssetIntegrityEvaluator:
         file_truth_violations = self.truth_engine.audit_file(
             file_path=p,
             property_id=adapter.property_id,
+            content=content,
         )
         if file_truth_violations:
             reasons.append(DriftReason.TRUTH_CONTRADICTION)
@@ -3551,12 +3560,16 @@ class AssetIntegrityEvaluator:
             except Exception:
                 pass
 
+        estate_degraded_overlays = _collect_degraded_rolled_back_overlays(
+            getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
+        )
         for asset in assets:
             record = self.audit_asset(
                 asset,
                 adapter=adapter,
                 ledger=ledger,
                 engine_drifted=engine_drifted,
+                degraded_overlays=estate_degraded_overlays,
             )
             if record:
                 drifted.append(record)
@@ -6008,12 +6021,30 @@ def _effective_non_tool_qa_plain_and_word_count(
     return qa_plain, qa_total_words
 
 
-def _collect_degraded_rolled_back_overlays(repo_root: Optional[Path]) -> Dict[str, Dict[str, Any]]:
+def _collect_degraded_rolled_back_overlays(
+    repo_root: Optional[Path],
+    overlay_snapshot: Optional[List[Tuple[Path, Path, str, Optional[Dict[str, Any]]]]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """
     Collects DEGRADED_ROLLED_BACK overlay specs indexed by slug and nested hub/leaf alias.
     Skips non-rolled-back files without JSON parsing for O(ms) estate checks.
     """
     rolled: Dict[str, Dict[str, Any]] = {}
+    if overlay_snapshot is not None:
+        for _ov_dir, _ov_file, rel_s, ov_spec in overlay_snapshot:
+            if not isinstance(ov_spec, dict) or str(ov_spec.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
+                continue
+            spec_s = str(ov_spec.get("slug") or "").strip("/")
+            target_u = str(ov_spec.get("target_url") or "")
+            url_s = target_u.split("/tools/", 1)[1].split("?")[0].strip("/") if "/tools/" in target_u else ""
+            for s in (rel_s, spec_s, url_s):
+                if not s:
+                    continue
+                rolled[s] = ov_spec
+                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if s.startswith(f"{hub_pfx}-"):
+                        rolled[f"{hub_pfx}/{s[len(hub_pfx) + 1:]}"] = ov_spec
+        return rolled
     if repo_root is None:
         return rolled
     r_path = Path(repo_root)
@@ -10943,7 +10974,32 @@ class RetroReflectionEngine:
             "proprietary_telemetry": signal_bundle["proprietary_telemetry"],
         }
 
-    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str, str, bool, bool, Tuple[str, ...]], Tuple[str, List[str]]] = {}
+    _RETROFIT_HTML_CACHE_LOCK = threading.Lock()
+    _RETROFIT_HTML_CACHE_MAXSIZE = 4096
+    _RETROFIT_HTML_CACHE: "collections.OrderedDict[Tuple[str, str, str, str, bool, bool, Tuple[str, ...]], Tuple[str, List[str]]]" = collections.OrderedDict()
+
+    @classmethod
+    def _retrofit_cache_get(
+        cls,
+        key: Tuple[str, str, str, str, bool, bool, Tuple[str, ...]],
+    ) -> Optional[Tuple[str, List[str]]]:
+        with cls._RETROFIT_HTML_CACHE_LOCK:
+            val = cls._RETROFIT_HTML_CACHE.get(key)
+            if val is not None:
+                cls._RETROFIT_HTML_CACHE.move_to_end(key)
+            return val
+
+    @classmethod
+    def _retrofit_cache_set(
+        cls,
+        key: Tuple[str, str, str, str, bool, bool, Tuple[str, ...]],
+        val: Tuple[str, List[str]],
+    ) -> None:
+        with cls._RETROFIT_HTML_CACHE_LOCK:
+            cls._RETROFIT_HTML_CACHE[key] = val
+            cls._RETROFIT_HTML_CACHE.move_to_end(key)
+            while len(cls._RETROFIT_HTML_CACHE) > cls._RETROFIT_HTML_CACHE_MAXSIZE:
+                cls._RETROFIT_HTML_CACHE.popitem(last=False)
 
     @classmethod
     def _collect_html_output_parity_missing(
@@ -11138,6 +11194,7 @@ class RetroReflectionEngine:
         write_sidecar: bool = True,
         preserve_title: Optional[bool] = None,
         forbidden_titles: Optional[Collection[str]] = None,
+        runtime_sync_asset_written: bool = False,
     ) -> Tuple[str, List[str]]:
         """
         Deterministically retro-reflects missing or stale pseofactory engine mechanics into an HTML document.
@@ -11219,10 +11276,10 @@ class RetroReflectionEngine:
                 eff_preserve_title,
                 tuple(sorted(eff_forbidden_titles)),
             )
-            cached_res = cls._RETROFIT_HTML_CACHE.get(cache_key)
+            cached_res = cls._retrofit_cache_get(cache_key)
             if cached_res is not None:
                 out_html, out_rep = cached_res
-                if dist_dir is not None and "/static/js/pseo-runtime-sync." in out_html:
+                if not runtime_sync_asset_written and dist_dir is not None and "/static/js/pseo-runtime-sync." in out_html:
                     from pseofactory.visual_primitives import write_runtime_synchronizer_asset
                     write_runtime_synchronizer_asset(Path(dist_dir))
                 if dist_dir is None or not cls._sidecar_needs_sync(Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json", out_html):
@@ -11316,11 +11373,9 @@ class RetroReflectionEngine:
                     ext_html, _ = normalize_html_visual_primitives(html_content, dist_dir=dist_dir)
                     if ext_html != html_content:
                         if cache_key is not None:
-                            if len(cls._RETROFIT_HTML_CACHE) > 512:
-                                cls._RETROFIT_HTML_CACHE.clear()
-                            cls._RETROFIT_HTML_CACHE[cache_key] = (ext_html, ["deterministic_visual_primitives"])
+                            cls._retrofit_cache_set(cache_key, (ext_html, ["deterministic_visual_primitives"]))
                             ext_digest = hashlib.sha256(ext_html.encode("utf-8", errors="ignore")).hexdigest()
-                            cls._RETROFIT_HTML_CACHE[
+                            cls._retrofit_cache_set(
                                 (
                                     ext_digest,
                                     cache_key[1],
@@ -11329,15 +11384,14 @@ class RetroReflectionEngine:
                                     cache_key[4],
                                     cache_key[5],
                                     cache_key[6],
-                                )
-                            ] = (ext_html, [])
+                                ),
+                                (ext_html, []),
+                            )
                         return ext_html, ["deterministic_visual_primitives"]
-                else:
+                elif not runtime_sync_asset_written:
                     write_runtime_synchronizer_asset(Path(dist_dir))
             if cache_key is not None:
-                if len(cls._RETROFIT_HTML_CACHE) > 512:
-                    cls._RETROFIT_HTML_CACHE.clear()
-                cls._RETROFIT_HTML_CACHE[cache_key] = (html_content, [])
+                cls._retrofit_cache_set(cache_key, (html_content, []))
             return html_content, []
 
         repaired: List[str] = []
@@ -11987,11 +12041,9 @@ class RetroReflectionEngine:
                 repaired.append("gainhelm_framework_isolation")
 
         if cache_key is not None:
-            if len(cls._RETROFIT_HTML_CACHE) > 512:
-                cls._RETROFIT_HTML_CACHE.clear()
-            cls._RETROFIT_HTML_CACHE[cache_key] = (updated, list(repaired))
+            cls._retrofit_cache_set(cache_key, (updated, list(repaired)))
             updated_digest = hashlib.sha256(updated.encode("utf-8", errors="ignore")).hexdigest()
-            cls._RETROFIT_HTML_CACHE[
+            cls._retrofit_cache_set(
                 (
                     updated_digest,
                     cache_key[1],
@@ -12000,8 +12052,9 @@ class RetroReflectionEngine:
                     cache_key[4],
                     cache_key[5],
                     cache_key[6],
-                )
-            ] = (updated, [])
+                ),
+                (updated, []),
+            )
 
         return updated, repaired
 
@@ -12294,19 +12347,16 @@ class RetroReflectionEngine:
         return False
 
     @classmethod
-    def _prune_non_tool_overlays_and_manifests(
+    def _load_overlay_snapshot(
         cls,
         repo_root: Path,
-        dist_dir: Optional[Path] = None,
-    ) -> List[str]:
-        """Removes stale non-tool overlay files and bogus non-tool calculator manifests."""
-        removed: List[str] = []
+    ) -> List[Tuple[Path, Path, str, Optional[Dict[str, Any]]]]:
+        """Loads and parses all overlay JSON files once across content/overlays and .agy/overlays."""
+        snapshot: List[Tuple[Path, Path, str, Optional[Dict[str, Any]]]] = []
         for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
             if not ov_dir.is_dir():
                 continue
             for ov_file in sorted(ov_dir.rglob("*.json")):
-                if _is_live_repo_mutation_blocked(ov_file):
-                    continue
                 rel_s = ov_file.relative_to(ov_dir).with_suffix("").as_posix().strip("/")
                 raw_ov: Optional[Dict[str, Any]] = None
                 try:
@@ -12315,9 +12365,48 @@ class RetroReflectionEngine:
                         raw_ov = parsed
                 except Exception:
                     raw_ov = None
+                snapshot.append((ov_dir, ov_file, rel_s, raw_ov))
+        return snapshot
+
+    @classmethod
+    def _prune_non_tool_overlays_and_manifests(
+        cls,
+        repo_root: Path,
+        dist_dir: Optional[Path] = None,
+        overlay_snapshot: Optional[List[Tuple[Path, Path, str, Optional[Dict[str, Any]]]]] = None,
+    ) -> List[str]:
+        """Removes stale non-tool overlay files and bogus non-tool calculator manifests."""
+        removed: List[str] = []
+        if overlay_snapshot is not None:
+            kept_snapshot: List[Tuple[Path, Path, str, Optional[Dict[str, Any]]]] = []
+            for ov_dir, ov_file, rel_s, raw_ov in overlay_snapshot:
+                if _is_live_repo_mutation_blocked(ov_file):
+                    kept_snapshot.append((ov_dir, ov_file, rel_s, raw_ov))
+                    continue
                 if cls._is_non_tool_overlay_spec(rel_s, raw_ov):
                     ov_file.unlink(missing_ok=True)
                     removed.append(str(ov_file.relative_to(repo_root)))
+                else:
+                    kept_snapshot.append((ov_dir, ov_file, rel_s, raw_ov))
+            overlay_snapshot[:] = kept_snapshot
+        else:
+            for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
+                if not ov_dir.is_dir():
+                    continue
+                for ov_file in sorted(ov_dir.rglob("*.json")):
+                    if _is_live_repo_mutation_blocked(ov_file):
+                        continue
+                    rel_s = ov_file.relative_to(ov_dir).with_suffix("").as_posix().strip("/")
+                    raw_ov = None
+                    try:
+                        parsed = json.loads(ov_file.read_text(encoding="utf-8"))
+                        if isinstance(parsed, dict):
+                            raw_ov = parsed
+                    except Exception:
+                        raw_ov = None
+                    if cls._is_non_tool_overlay_spec(rel_s, raw_ov):
+                        ov_file.unlink(missing_ok=True)
+                        removed.append(str(ov_file.relative_to(repo_root)))
 
         if dist_dir is not None and (dist_dir / "manifests").is_dir():
             tools_dir = dist_dir / "tools"
@@ -12352,6 +12441,8 @@ class RetroReflectionEngine:
         property_id: str,
         heal_legacy: bool = False,
         canonical_base: Optional[str] = None,
+        overlay_snapshot: Optional[List[Tuple[Path, Path, str, Optional[Dict[str, Any]]]]] = None,
+        prune_first: bool = True,
     ) -> Dict[str, Tuple[Path, Dict[str, Any]]]:
         """
         Resolves active remediation overlays across content/overlays/ and .agy/overlays/
@@ -12372,332 +12463,319 @@ class RetroReflectionEngine:
                 )
             )
         ).rstrip("/")
+        if overlay_snapshot is None:
+            overlay_snapshot = cls._load_overlay_snapshot(repo_root)
         if heal_legacy:
-            cls._prune_non_tool_overlays_and_manifests(repo_root, dist_dir=None)
+            if prune_first:
+                cls._prune_non_tool_overlays_and_manifests(repo_root, dist_dir=None, overlay_snapshot=overlay_snapshot)
             try:
                 from pseofactory.gsc_remediation import compile_remediation_overlay_spec
                 from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
                 from pseofactory.tenant_facts import TruthReconciliationEngine
                 veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
-                for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
-                    if not ov_dir.is_dir():
-                        continue
-                    for ov_path in sorted(ov_dir.rglob("*.json")):
-                        try:
-                            raw_ov = json.loads(ov_path.read_text(encoding="utf-8"))
-                            if not isinstance(raw_ov, dict):
-                                continue
-                            ov_s = str(raw_ov.get("slug") or ov_path.stem)
-                            if cls._is_non_tool_overlay_spec(ov_path.relative_to(ov_dir).with_suffix("").as_posix(), raw_ov):
-                                continue
-                            if str(raw_ov.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
-                                continue
-                            raw_ov, ov_reconciled = TruthReconciliationEngine.reconcile_overlay_spec_truth(
-                                raw_ov,
+                for snap_idx, (ov_dir, ov_path, rel_ov_s, raw_ov) in enumerate(overlay_snapshot):
+                    try:
+                        if not isinstance(raw_ov, dict):
+                            continue
+                        ov_s = str(raw_ov.get("slug") or ov_path.stem)
+                        if cls._is_non_tool_overlay_spec(rel_ov_s, raw_ov):
+                            continue
+                        if str(raw_ov.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                            continue
+                        raw_ov, ov_reconciled = TruthReconciliationEngine.reconcile_overlay_spec_truth(
+                            raw_ov,
+                            tenant=property_id,
+                            slug=ov_s,
+                        )
+                        if (
+                            str(raw_ov.get("status") or "ACTIVE_LOCKED").upper() == "ACTIVE_LOCKED"
+                            and int(raw_ov.get("measurement_lock_days") or raw_ov.get("lock_days") or 28) < 28
+                        ):
+                            raw_ov["measurement_lock_days"] = 28
+                            raw_ov["lock_days"] = 28
+                            try:
+                                c_dt = datetime.fromisoformat(str(raw_ov.get("created_at") or "").replace("Z", "+00:00"))
+                                if c_dt.tzinfo is None:
+                                    c_dt = c_dt.replace(tzinfo=timezone.utc)
+                                new_lock = (c_dt + timedelta(days=28)).isoformat()
+                                raw_ov["locked_until"] = new_lock
+                                raw_ov["lock_until"] = new_lock
+                            except Exception:
+                                pass
+                            ov_reconciled = True
+                        if ov_reconciled:
+                            ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+                        if cls._overlay_spec_needs_heal(ov_s, raw_ov):
+                            healed_ov = compile_remediation_overlay_spec(
+                                {
+                                    "slug": ov_s,
+                                    "target_url": raw_ov.get("target_url") or f"{canon}/tools/{ov_s}/",
+                                    "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                                    "position": raw_ov.get("baseline_position", 12.0),
+                                    "impressions": raw_ov.get("baseline_impressions", 50),
+                                },
+                                tenant_id=property_id,
+                            )
+                            for preserve_key in (
+                                "partner_offer",
+                                "restricted_public_service",
+                                "commercial_offers_allowed",
+                                "locked_until",
+                                "created_at",
+                                "status",
+                                "baseline_impressions",
+                                "baseline_position",
+                                "baseline_clicks",
+                                "baseline_ctr",
+                                "baseline_source",
+                                "current_metrics",
+                                "post_eval_metrics",
+                                "grouped_queries",
+                                "secondary_title_modifier",
+                                "conversion_slot_weights",
+                                "early_regression_flagged",
+                                "early_regression_at",
+                                "early_regression_reason",
+                                "current_position",
+                                "position_delta",
+                                "current_impressions",
+                                "impressions_pct_delta",
+                            ):
+                                if preserve_key in raw_ov:
+                                    healed_ov[preserve_key] = raw_ov[preserve_key]
+                            raw_ov, _ = TruthReconciliationEngine.reconcile_overlay_spec_truth(
+                                healed_ov,
                                 tenant=property_id,
                                 slug=ov_s,
                             )
-                            if (
-                                str(raw_ov.get("status") or "ACTIVE_LOCKED").upper() == "ACTIVE_LOCKED"
-                                and int(raw_ov.get("measurement_lock_days") or raw_ov.get("lock_days") or 28) < 28
-                            ):
-                                raw_ov["measurement_lock_days"] = 28
-                                raw_ov["lock_days"] = 28
-                                try:
-                                    c_dt = datetime.fromisoformat(str(raw_ov.get("created_at") or "").replace("Z", "+00:00"))
-                                    if c_dt.tzinfo is None:
-                                        c_dt = c_dt.replace(tzinfo=timezone.utc)
-                                    new_lock = (c_dt + timedelta(days=28)).isoformat()
-                                    raw_ov["locked_until"] = new_lock
-                                    raw_ov["lock_until"] = new_lock
-                                except Exception:
-                                    pass
-                                ov_reconciled = True
-                            if ov_reconciled:
-                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
-                            if cls._overlay_spec_needs_heal(ov_s, raw_ov):
-                                healed_ov = compile_remediation_overlay_spec(
-                                    {
-                                        "slug": ov_s,
-                                        "target_url": raw_ov.get("target_url") or f"{canon}/tools/{ov_s}/",
-                                        "query": raw_ov.get("query") or ov_s.replace("-", " "),
-                                        "position": raw_ov.get("baseline_position", 12.0),
-                                        "impressions": raw_ov.get("baseline_impressions", 50),
-                                    },
-                                    tenant_id=property_id,
-                                )
-                                for preserve_key in (
-                                    "partner_offer",
-                                    "restricted_public_service",
-                                    "commercial_offers_allowed",
-                                    "locked_until",
-                                    "created_at",
-                                    "status",
-                                    "baseline_impressions",
-                                    "baseline_position",
-                                    "baseline_clicks",
-                                    "baseline_ctr",
-                                    "baseline_source",
-                                    "current_metrics",
-                                    "post_eval_metrics",
-                                    "grouped_queries",
-                                    "secondary_title_modifier",
-                                    "conversion_slot_weights",
-                                    "early_regression_flagged",
-                                    "early_regression_at",
-                                    "early_regression_reason",
-                                    "current_position",
-                                    "position_delta",
-                                    "current_impressions",
-                                    "impressions_pct_delta",
+                            ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+
+                        if property_id.lower() != "prexvo":
+                            from pseofactory.gsc_remediation import (
+                                ZERO_INCOME_TAX_STATES,
+                                build_zero_tax_state_spoke_copy,
+                            )
+
+                            zt_leaf = ""
+                            if ov_s.startswith("irs-2027-tax-brackets/"):
+                                zt_leaf = ov_s.split("irs-2027-tax-brackets/", 1)[1].strip("/").lower()
+                            elif ov_s.startswith("irs-2027-tax-brackets-"):
+                                zt_leaf = ov_s[len("irs-2027-tax-brackets-") :].strip("/").lower()
+                            if zt_leaf in ZERO_INCOME_TAX_STATES:
+                                zt_html_f = dist_dir / "tools" / "irs-2027-tax-brackets" / zt_leaf / "index.html"
+                                if zt_html_f.is_file():
+                                    try:
+                                        zt_raw_h = zt_html_f.read_text(encoding="utf-8", errors="ignore")
+                                        tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', zt_raw_h)
+                                        eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', zt_raw_h)
+                                        th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', zt_raw_h)
+                                        inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', zt_raw_h)
+                                        if tot_m and eff_m and th_m:
+                                            inc_v = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
+                                            zt_cp = build_zero_tax_state_spoke_copy(
+                                                zt_leaf,
+                                                inc_val=inc_v,
+                                                tot_val=tot_m.group(1).strip(),
+                                                eff_val=eff_m.group(1).strip(),
+                                                th_val=th_m.group(1).strip(),
+                                            )
+                                            zt_dirty = False
+                                            if raw_ov.get("title_rewrite") != zt_cp["title"]:
+                                                raw_ov["title_rewrite"] = zt_cp["title"]
+                                                raw_ov["title"] = zt_cp["title"]
+                                                zt_dirty = True
+                                            if raw_ov.get("meta_description") != zt_cp["meta_description"]:
+                                                raw_ov["meta_description"] = zt_cp["meta_description"]
+                                                raw_ov["description"] = zt_cp["meta_description"]
+                                                zt_dirty = True
+                                            if raw_ov.get("quick_answer") != zt_cp["quick_answer"]:
+                                                raw_ov["quick_answer"] = zt_cp["quick_answer"]
+                                                zt_dirty = True
+                                            for ps_item in raw_ov.get("preset_scenarios") or []:
+                                                if isinstance(ps_item, dict) and isinstance(ps_item.get("params"), dict):
+                                                    if ps_item["params"].get("state_rate") != 0.0:
+                                                        ps_item["params"]["state_rate"] = 0.0
+                                                        zt_dirty = True
+                                            if zt_dirty:
+                                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+                                    except Exception:
+                                        pass
+
+                        if isinstance(raw_ov.get("partner_offer"), dict) and not raw_ov.get("restricted_public_service"):
+                            from pseofactory.affiliates import bind_asset_partner_roster
+                            ov_low = ov_s.lower()
+                            po = dict(raw_ov["partner_offer"])
+                            ov_gsc = {
+                                "impressions": raw_ov.get("baseline_impressions", 50),
+                                "clicks": raw_ov.get("baseline_clicks", 0),
+                                "ctr": raw_ov.get("baseline_ctr", 0.02),
+                                "position": raw_ov.get("baseline_position", 12.0),
+                                "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                            }
+                            roster_b = bind_asset_partner_roster(
+                                property_id=property_id,
+                                slug=ov_s,
+                                query=str(ov_gsc["query"]),
+                                gsc_metrics=ov_gsc,
+                            )
+                            primary_off = roster_b.get("primary_offer") or {}
+                            if property_id.lower() == "prexvo":
+                                t_pk = str(primary_off.get("partner_key") or "splash_financial")
+                                t_name = str(primary_off.get("name") or "Splash Financial Student Loan Refinancing")
+                                t_url = str(primary_off.get("default_url") or "https://www.splashfinancial.com/")
+                                t_cta = str(primary_off.get("cta_text") or "Compare Rates with Splash Financial")
+                            elif property_id.lower() == "gainhelm":
+                                t_pk = str(primary_off.get("partner_key") or "vanta_security")
+                                t_name = str(primary_off.get("name") or "Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance")
+                                t_url = str(primary_off.get("default_url") or "https://www.vanta.com/")
+                                t_cta = str(primary_off.get("cta_text") or "Automate Audit Readiness with Vanta")
+                            elif property_id.lower() == "lienbond":
+                                t_pk = str(primary_off.get("partner_key") or "suretybonds_direct")
+                                t_name = str(primary_off.get("name") or "SuretyBonds Direct Commercial Surety Underwriting")
+                                t_url = str(primary_off.get("default_url") or "https://www.suretybondsdirect.com/")
+                                t_cta = str(primary_off.get("cta_text") or "Request Instant Surety Bond Quote")
+                            else:
+                                if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
+                                    t_pk = "kalshi"
+                                    t_name = "Kalshi CFTC-Regulated Event Contract Exchange"
+                                    t_url = "https://kalshi.pxf.io/c/7932737/3078072/37770"
+                                    t_cta = "Trade Regulated Event Contracts on Kalshi"
+                                elif any(k in ov_low for k in ("crypto", "1099-da", "8949", "prediction-market-tax")):
+                                    t_pk = "coinledger"
+                                    t_name = "CoinLedger Crypto Tax Automation"
+                                    t_url = "https://coinledger.io/?fpr=arif-554004"
+                                    t_cta = "Generate IRS Form 8949 with CoinLedger"
+                                elif any(k in ov_low for k in ("s-corp", "reasonable-salary", "workers-comp", "payroll-burden")):
+                                    t_pk = str(primary_off.get("partner_key") or "rippling")
+                                    t_name = str(primary_off.get("name") or "Rippling Workforce & Payroll Platform")
+                                    t_url = str(primary_off.get("default_url") or "https://try.rippling.com/mcfo1m09qiwt")
+                                    t_cta = str(primary_off.get("cta_text") or "Schedule Rippling Demo")
+                                elif "1031" in ov_low:
+                                    t_pk = str(primary_off.get("partner_key") or "lawdepot")
+                                    t_name = str(primary_off.get("name") or "LawDepot Real Estate & LLC Legal Templates")
+                                    t_url = str(primary_off.get("default_url") or "https://www.jdoqocy.com/click-101906407-16985242")
+                                    t_cta = str(primary_off.get("cta_text") or "Draft Real Estate & LLC Agreements on LawDepot")
+                                elif any(
+                                    k in ov_low
+                                    for k in (
+                                        "tax-bracket",
+                                        "irs-2027",
+                                        "ca-tax-brackets",
+                                        "capital-gains",
+                                        "tcja",
+                                    )
                                 ):
-                                    if preserve_key in raw_ov:
-                                        healed_ov[preserve_key] = raw_ov[preserve_key]
-                                raw_ov, _ = TruthReconciliationEngine.reconcile_overlay_spec_truth(
-                                    healed_ov,
-                                    tenant=property_id,
-                                    slug=ov_s,
-                                )
-                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
-
-                            if property_id.lower() != "prexvo":
-                                from pseofactory.gsc_remediation import (
-                                    ZERO_INCOME_TAX_STATES,
-                                    build_zero_tax_state_spoke_copy,
-                                )
-
-                                zt_leaf = ""
-                                if ov_s.startswith("irs-2027-tax-brackets/"):
-                                    zt_leaf = ov_s.split("irs-2027-tax-brackets/", 1)[1].strip("/").lower()
-                                elif ov_s.startswith("irs-2027-tax-brackets-"):
-                                    zt_leaf = ov_s[len("irs-2027-tax-brackets-") :].strip("/").lower()
-                                if zt_leaf in ZERO_INCOME_TAX_STATES:
-                                    zt_html_f = dist_dir / "tools" / "irs-2027-tax-brackets" / zt_leaf / "index.html"
-                                    if zt_html_f.is_file():
-                                        try:
-                                            zt_raw_h = zt_html_f.read_text(encoding="utf-8", errors="ignore")
-                                            tot_m = re.search(r'id=["\']res-total-tax["\'][^>]*>\s*([^<]+)<', zt_raw_h)
-                                            eff_m = re.search(r'id=["\']res-effective-rate["\'][^>]*>\s*([^<]+)<', zt_raw_h)
-                                            th_m = re.search(r'id=["\']res-take-home["\'][^>]*>\s*([^<]+)<', zt_raw_h)
-                                            inc_m = re.search(r'id=["\'](?:tax-income|inp-income)["\'][^>]*value=["\'](\d+)["\']', zt_raw_h)
-                                            if tot_m and eff_m and th_m:
-                                                inc_v = f"${int(inc_m.group(1)):,}" if inc_m else "$75,000"
-                                                zt_cp = build_zero_tax_state_spoke_copy(
-                                                    zt_leaf,
-                                                    inc_val=inc_v,
-                                                    tot_val=tot_m.group(1).strip(),
-                                                    eff_val=eff_m.group(1).strip(),
-                                                    th_val=th_m.group(1).strip(),
-                                                )
-                                                zt_dirty = False
-                                                if raw_ov.get("title_rewrite") != zt_cp["title"]:
-                                                    raw_ov["title_rewrite"] = zt_cp["title"]
-                                                    raw_ov["title"] = zt_cp["title"]
-                                                    zt_dirty = True
-                                                if raw_ov.get("meta_description") != zt_cp["meta_description"]:
-                                                    raw_ov["meta_description"] = zt_cp["meta_description"]
-                                                    raw_ov["description"] = zt_cp["meta_description"]
-                                                    zt_dirty = True
-                                                if raw_ov.get("quick_answer") != zt_cp["quick_answer"]:
-                                                    raw_ov["quick_answer"] = zt_cp["quick_answer"]
-                                                    zt_dirty = True
-                                                for ps_item in raw_ov.get("preset_scenarios") or []:
-                                                    if isinstance(ps_item, dict) and isinstance(ps_item.get("params"), dict):
-                                                        if ps_item["params"].get("state_rate") != 0.0:
-                                                            ps_item["params"]["state_rate"] = 0.0
-                                                            zt_dirty = True
-                                                if zt_dirty:
-                                                    ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
-                                        except Exception:
-                                            pass
-
-                            if isinstance(raw_ov.get("partner_offer"), dict) and not raw_ov.get("restricted_public_service"):
-                                from pseofactory.affiliates import bind_asset_partner_roster
-                                ov_low = ov_s.lower()
-                                po = dict(raw_ov["partner_offer"])
-                                ov_gsc = {
-                                    "impressions": raw_ov.get("baseline_impressions", 50),
-                                    "clicks": raw_ov.get("baseline_clicks", 0),
-                                    "ctr": raw_ov.get("baseline_ctr", 0.02),
-                                    "position": raw_ov.get("baseline_position", 12.0),
-                                    "query": raw_ov.get("query") or ov_s.replace("-", " "),
-                                }
-                                roster_b = bind_asset_partner_roster(
-                                    property_id=property_id,
-                                    slug=ov_s,
-                                    query=str(ov_gsc["query"]),
-                                    gsc_metrics=ov_gsc,
-                                )
-                                primary_off = roster_b.get("primary_offer") or {}
-                                if property_id.lower() == "prexvo":
-                                    t_pk = str(primary_off.get("partner_key") or "splash_financial")
-                                    t_name = str(primary_off.get("name") or "Splash Financial Student Loan Refinancing")
-                                    t_url = str(primary_off.get("default_url") or "https://www.splashfinancial.com/")
-                                    t_cta = str(primary_off.get("cta_text") or "Compare Rates with Splash Financial")
-                                elif property_id.lower() == "gainhelm":
-                                    t_pk = str(primary_off.get("partner_key") or "vanta_security")
-                                    t_name = str(primary_off.get("name") or "Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance")
-                                    t_url = str(primary_off.get("default_url") or "https://www.vanta.com/")
-                                    t_cta = str(primary_off.get("cta_text") or "Automate Audit Readiness with Vanta")
-                                elif property_id.lower() == "lienbond":
-                                    t_pk = str(primary_off.get("partner_key") or "suretybonds_direct")
-                                    t_name = str(primary_off.get("name") or "SuretyBonds Direct Commercial Surety Underwriting")
-                                    t_url = str(primary_off.get("default_url") or "https://www.suretybondsdirect.com/")
-                                    t_cta = str(primary_off.get("cta_text") or "Request Instant Surety Bond Quote")
-                                else:
-                                    if any(k in ov_low for k in ("prediction-market-odds", "kalshi", "polymarket")):
-                                        t_pk = "kalshi"
-                                        t_name = "Kalshi CFTC-Regulated Event Contract Exchange"
-                                        t_url = "https://kalshi.pxf.io/c/7932737/3078072/37770"
-                                        t_cta = "Trade Regulated Event Contracts on Kalshi"
-                                    elif any(k in ov_low for k in ("crypto", "1099-da", "8949", "prediction-market-tax")):
-                                        t_pk = "coinledger"
-                                        t_name = "CoinLedger Crypto Tax Automation"
-                                        t_url = "https://coinledger.io/?fpr=arif-554004"
-                                        t_cta = "Generate IRS Form 8949 with CoinLedger"
-                                    elif any(k in ov_low for k in ("s-corp", "reasonable-salary", "workers-comp", "payroll-burden")):
-                                        t_pk = str(primary_off.get("partner_key") or "rippling")
-                                        t_name = str(primary_off.get("name") or "Rippling Workforce & Payroll Platform")
-                                        t_url = str(primary_off.get("default_url") or "https://try.rippling.com/mcfo1m09qiwt")
-                                        t_cta = str(primary_off.get("cta_text") or "Schedule Rippling Demo")
-                                    elif "1031" in ov_low:
-                                        t_pk = str(primary_off.get("partner_key") or "lawdepot")
-                                        t_name = str(primary_off.get("name") or "LawDepot Real Estate & LLC Legal Templates")
-                                        t_url = str(primary_off.get("default_url") or "https://www.jdoqocy.com/click-101906407-16985242")
-                                        t_cta = str(primary_off.get("cta_text") or "Draft Real Estate & LLC Agreements on LawDepot")
-                                    elif any(
+                                    t_pk = str(primary_off.get("partner_key") or "efile_com")
+                                    t_name = str(primary_off.get("name") or "E-file.com IRS Authorized Individual Tax E-File")
+                                    t_url = str(primary_off.get("default_url") or "https://www.jdoqocy.com/click-101906407-11917161")
+                                    t_cta = str(primary_off.get("cta_text") or "E-File Your Federal & State Tax Return on E-file.com")
+                                elif (
+                                    ov_low in veh_slugs
+                                    or any(
                                         k in ov_low
                                         for k in (
-                                            "tax-bracket",
-                                            "irs-2027",
-                                            "ca-tax-brackets",
-                                            "capital-gains",
-                                            "tcja",
+                                            "179",
+                                            "equipment",
+                                            "lease",
+                                            "macrs",
+                                            "depreciation",
+                                            "vehicle",
+                                            "gvwr",
+                                            "174",
+                                            "r-and-d",
                                         )
-                                    ):
-                                        t_pk = str(primary_off.get("partner_key") or "efile_com")
-                                        t_name = str(primary_off.get("name") or "E-file.com IRS Authorized Individual Tax E-File")
-                                        t_url = str(primary_off.get("default_url") or "https://www.jdoqocy.com/click-101906407-11917161")
-                                        t_cta = str(primary_off.get("cta_text") or "E-File Your Federal & State Tax Return on E-file.com")
-                                    elif (
-                                        ov_low in veh_slugs
-                                        or any(
-                                            k in ov_low
-                                            for k in (
-                                                "179",
-                                                "equipment",
-                                                "lease",
-                                                "macrs",
-                                                "depreciation",
-                                                "vehicle",
-                                                "gvwr",
-                                                "174",
-                                                "r-and-d",
-                                            )
-                                        )
-                                    ):
-                                        t_pk = "xendoo"
-                                        t_name = "Xendoo Section 179 & Business Tax Accounting"
-                                        t_url = "https://xendoo.pxf.io/c/7932737/1357375/16354"
-                                        t_cta = "Optimize Section 179 Accounting with Xendoo"
-                                    else:
-                                        t_pk = str(primary_off.get("partner_key") or "mercury")
-                                        t_name = str(primary_off.get("name") or "Mercury Business Banking")
-                                        t_url = str(primary_off.get("default_url") or "https://mercury.com/r/profithelm-llc")
-                                        t_cta = str(primary_off.get("cta_text") or "Open a Mercury Account")
-                                if (
-                                    po.get("partner_key") != t_pk
-                                    or po.get("url") != t_url
-                                    or po.get("redirect_path") != f"/r/{t_pk}"
-                                    or po.get("partner_name") != t_name
-                                    or "partner_roster" not in raw_ov
+                                    )
                                 ):
-                                    po["partner_key"] = t_pk
-                                    po["partner_name"] = t_name
-                                    po["url"] = t_url
-                                    po["redirect_path"] = f"/r/{t_pk}"
-                                    po["cta_text"] = t_cta
-                                    po["cta_id"] = f"cta-{property_id.lower()}-{ov_s}-{t_pk}"
-                                    po["partner_roster"] = roster_b
-                                    po["slot_plan"] = roster_b.get("slot_plan")
-                                    raw_ov["partner_offer"] = po
-                                    raw_ov["partner_roster"] = roster_b
-                                    raw_ov["slot_plan"] = roster_b.get("slot_plan")
-                                    ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
-                        except Exception:
-                            pass
+                                    t_pk = "xendoo"
+                                    t_name = "Xendoo Section 179 & Business Tax Accounting"
+                                    t_url = "https://xendoo.pxf.io/c/7932737/1357375/16354"
+                                    t_cta = "Optimize Section 179 Accounting with Xendoo"
+                                else:
+                                    t_pk = str(primary_off.get("partner_key") or "mercury")
+                                    t_name = str(primary_off.get("name") or "Mercury Business Banking")
+                                    t_url = str(primary_off.get("default_url") or "https://mercury.com/r/profithelm-llc")
+                                    t_cta = str(primary_off.get("cta_text") or "Open a Mercury Account")
+                            if (
+                                po.get("partner_key") != t_pk
+                                or po.get("url") != t_url
+                                or po.get("redirect_path") != f"/r/{t_pk}"
+                                or po.get("partner_name") != t_name
+                                or "partner_roster" not in raw_ov
+                            ):
+                                po["partner_key"] = t_pk
+                                po["partner_name"] = t_name
+                                po["url"] = t_url
+                                po["redirect_path"] = f"/r/{t_pk}"
+                                po["cta_text"] = t_cta
+                                po["cta_id"] = f"cta-{property_id.lower()}-{ov_s}-{t_pk}"
+                                po["partner_roster"] = roster_b
+                                po["slot_plan"] = roster_b.get("slot_plan")
+                                raw_ov["partner_offer"] = po
+                                raw_ov["partner_roster"] = roster_b
+                                raw_ov["slot_plan"] = roster_b.get("slot_plan")
+                                ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
+                        overlay_snapshot[snap_idx] = (ov_dir, ov_path, rel_ov_s, raw_ov)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
         rolled_back_slugs: Set[str] = set()
-        for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
-            if not overlays_dir.is_dir():
-                continue
-            for ov_file in sorted(overlays_dir.rglob("*.json")):
-                try:
-                    ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                if isinstance(ov_spec, dict) and str(ov_spec.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
-                    rel_s = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
-                    spec_s = str(ov_spec.get("slug") or "").strip("/")
-                    rolled_back_slugs.add(rel_s)
-                    if spec_s:
-                        rolled_back_slugs.add(spec_s)
+        for _ov_dir, _ov_file, rel_s, ov_spec in overlay_snapshot:
+            if isinstance(ov_spec, dict) and str(ov_spec.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                spec_s = str(ov_spec.get("slug") or "").strip("/")
+                rolled_back_slugs.add(rel_s)
+                if spec_s:
+                    rolled_back_slugs.add(spec_s)
+
+        ph_veh_slugs: Optional[Set[str]] = None
+        if property_id.lower() == "profithelm":
+            from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
+            ph_veh_slugs = {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}
 
         resolved: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
-        for overlays_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
-            if not overlays_dir.is_dir():
+        for _ov_dir, ov_file, rel_slug, ov_spec in overlay_snapshot:
+            if not isinstance(ov_spec, dict) or ov_spec.get("status") == "DEGRADED_ROLLED_BACK":
                 continue
-            for ov_file in sorted(overlays_dir.rglob("*.json")):
-                try:
-                    ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                if not isinstance(ov_spec, dict) or ov_spec.get("status") == "DEGRADED_ROLLED_BACK":
-                    continue
-                rel_slug = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
-                spec_slug = str(ov_spec.get("slug") or "").strip("/")
-                if (
-                    rel_slug in rolled_back_slugs
-                    or (spec_slug and spec_slug in rolled_back_slugs)
-                    or cls._is_non_tool_overlay_spec(rel_slug, ov_spec)
+            spec_slug = str(ov_spec.get("slug") or "").strip("/")
+            if (
+                rel_slug in rolled_back_slugs
+                or (spec_slug and spec_slug in rolled_back_slugs)
+                or cls._is_non_tool_overlay_spec(rel_slug, ov_spec)
+            ):
+                continue
+            target_url = str(ov_spec.get("target_url") or "")
+            url_slug = ""
+            if "/tools/" in target_url:
+                url_slug = target_url.split("/tools/", 1)[1].split("?")[0].strip("/")
+
+            candidates: List[str] = []
+            for s in (rel_slug, spec_slug, url_slug):
+                if s and s not in candidates:
+                    candidates.append(s)
+                for hub_prefix in (
+                    "irs-2027-tax-brackets",
+                    "section-1031-calculator",
+                    "section-179-calculator",
                 ):
+                    if s.startswith(f"{hub_prefix}-"):
+                        nested_s = f"{hub_prefix}/{s[len(hub_prefix) + 1:]}"
+                        if nested_s not in candidates:
+                            candidates.append(nested_s)
+                if ph_veh_slugs is not None and s in ph_veh_slugs:
+                    veh_nested = f"section-179-calculator/{s}"
+                    if veh_nested not in candidates:
+                        candidates.append(veh_nested)
+
+            for cand in candidates:
+                if cand == "statutory-calculator" or is_non_tool_or_governance_route(cand):
                     continue
-                target_url = str(ov_spec.get("target_url") or "")
-                url_slug = ""
-                if "/tools/" in target_url:
-                    url_slug = target_url.split("/tools/", 1)[1].split("?")[0].strip("/")
-
-                candidates: List[str] = []
-                for s in (rel_slug, spec_slug, url_slug):
-                    if s and s not in candidates:
-                        candidates.append(s)
-                    for hub_prefix in (
-                        "irs-2027-tax-brackets",
-                        "section-1031-calculator",
-                        "section-179-calculator",
-                    ):
-                        if s.startswith(f"{hub_prefix}-"):
-                            nested_s = f"{hub_prefix}/{s[len(hub_prefix) + 1:]}"
-                            if nested_s not in candidates:
-                                candidates.append(nested_s)
-                    if property_id.lower() == "profithelm":
-                        from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES
-                        if s in {v[0] for v in PROFITHELM_SECTION_179_VEHICLES}:
-                            veh_nested = f"section-179-calculator/{s}"
-                            if veh_nested not in candidates:
-                                candidates.append(veh_nested)
-
-                for cand in candidates:
-                    if cand == "statutory-calculator" or is_non_tool_or_governance_route(cand):
-                        continue
-                    rel_html = f"tools/{cand}/index.html"
-                    if rel_html in resolved:
-                        break
-                    if (dist_dir / rel_html).is_file():
-                        resolved[rel_html] = (ov_file, ov_spec)
-                        break
+                rel_html = f"tools/{cand}/index.html"
+                if rel_html in resolved:
+                    break
+                if (dist_dir / rel_html).is_file():
+                    resolved[rel_html] = (ov_file, ov_spec)
+                    break
         return resolved
 
     @classmethod
@@ -14489,19 +14567,82 @@ class RetroReflectionEngine:
             "stale_pages": stale_pages,
         }
 
+    _RETROFIT_ESTATE_CONVERGED_LOCK = threading.Lock()
+    _RETROFIT_ESTATE_CONVERGED_CACHE: "collections.OrderedDict[Tuple[str, str], Tuple[str, int, bool]]" = collections.OrderedDict()
+    _RETROFIT_ESTATE_CONVERGED_MAXSIZE = 64
+
+    @classmethod
+    def _compute_retrofit_estate_sig(
+        cls,
+        d: Path,
+        property_id: str,
+        canonical_base: Optional[str],
+        defer_live_indexing: bool,
+    ) -> Optional[str]:
+        """Content-addressed estate signature across dist/, overlays, and .agy telemetry ledgers."""
+        try:
+            h = hashlib.sha256()
+            h.update(f"{property_id.lower()}|{canonical_base or ''}|{bool(defer_live_indexing)}|{'PYTEST_CURRENT_TEST' in os.environ}\n".encode("utf-8"))
+            for fp in sorted(d.rglob("*")):
+                if not fp.is_file() or fp.name.startswith("."):
+                    continue
+                rel = fp.relative_to(d).as_posix()
+                if rel.startswith("videos/") or fp.suffix.lower() in (".mp4", ".webm", ".mov", ".png", ".jpg", ".jpeg", ".webp"):
+                    continue
+                fh = hashlib.sha256(fp.read_bytes()).hexdigest()
+                h.update(f"d:{rel}:{fh}\n".encode("utf-8"))
+            if d.parent.is_dir():
+                for ov_rel in ("content/overlays", ".agy/overlays"):
+                    ov_d = d.parent / ov_rel
+                    if ov_d.is_dir():
+                        for ov_fp in sorted(ov_d.rglob("*.json")):
+                            if ov_fp.is_file():
+                                fh = hashlib.sha256(ov_fp.read_bytes()).hexdigest()
+                                h.update(f"o:{ov_rel}/{ov_fp.relative_to(ov_d).as_posix()}:{fh}\n".encode("utf-8"))
+                for led_rel in (
+                    "content/deployed_voids.json",
+                    ".agy/deployed_voids.json",
+                    ".agy/gsc_affiliate_placement_ledger.json",
+                    ".agy/gsc_lifecycle_telemetry.json",
+                    ".agy/cohort_reflection_ledger.json",
+                    ".agy/internal_linking_opportunities.json",
+                    ".agy/indexing_quarantine_ledger.json",
+                    ".agy/partner_engagement_metrics.json",
+                ):
+                    led_p = d.parent / led_rel
+                    if led_p.is_file():
+                        fh = hashlib.sha256(led_p.read_bytes()).hexdigest()
+                        h.update(f"l:{led_rel}:{fh}\n".encode("utf-8"))
+                syn_d = d.parent / "syndication"
+                if syn_d.is_dir():
+                    for syn_fp in sorted(syn_d.rglob("*")):
+                        if not syn_fp.is_file() or syn_fp.name.startswith("."):
+                            continue
+                        if syn_fp.suffix.lower() in (".mp4", ".webm", ".mov", ".png", ".jpg", ".jpeg", ".webp"):
+                            continue
+                        fh = hashlib.sha256(syn_fp.read_bytes()).hexdigest()
+                        h.update(f"s:{syn_fp.relative_to(syn_d).as_posix()}:{fh}\n".encode("utf-8"))
+            return h.hexdigest()
+        except Exception:
+            return None
+
     @classmethod
     def retrofit_estate(
         cls,
         dist_dir: Union[str, Path],
         property_id: str,
         canonical_base: Optional[str] = None,
+        defer_live_indexing: bool = False,
     ) -> Dict[str, Any]:
         """
         Scans existing HTML inventory in dist_dir and automatically retro-reflects missing
         pseofactory engine mechanics into every tool and calculator page in a single pass,
         while normalizing deterministic visual primitives across all HTML pages in the estate.
         """
-        from pseofactory.visual_primitives import normalize_html_visual_primitives
+        from pseofactory.visual_primitives import (
+            normalize_html_visual_primitives,
+            write_runtime_synchronizer_asset,
+        )
         from pseofactory.gsc_remediation import (
             inject_overlay_into_html,
             rollback_degraded_overlay_from_html,
@@ -14526,6 +14667,23 @@ class RetroReflectionEngine:
                 "pages_retrofitted": 0,
                 "retrofitted_paths": [],
             }
+        estate_cache_id = (str(d), str(property_id).lower())
+        with cls._RETROFIT_ESTATE_CONVERGED_LOCK:
+            conv_entry = cls._RETROFIT_ESTATE_CONVERGED_CACHE.get(estate_cache_id)
+        if conv_entry is not None:
+            pre_estate_sig = cls._compute_retrofit_estate_sig(d, property_id, canonical_base, defer_live_indexing)
+            if pre_estate_sig is not None and pre_estate_sig == conv_entry[0]:
+                with cls._RETROFIT_ESTATE_CONVERGED_LOCK:
+                    cls._RETROFIT_ESTATE_CONVERGED_CACHE.move_to_end(estate_cache_id)
+                return {
+                    "status": "PASS",
+                    "property_id": property_id,
+                    "pages_scanned": conv_entry[1],
+                    "total_pages": conv_entry[1],
+                    "pages_retrofitted": 0,
+                    "retrofitted_paths": [],
+                    "porcelain_compiled": conv_entry[2],
+                }
         if property_id.lower() == "lienbond" and not (d / "index.html").is_file():
             from pseofactory.compiler import compile_lienbond_estate
 
@@ -14580,18 +14738,36 @@ class RetroReflectionEngine:
                     except Exception:
                         pass
 
-        if len(cls._RETROFIT_HTML_CACHE) > 1024:
-            cls._RETROFIT_HTML_CACHE.clear()
         scanned = 0
         retrofitted_paths: List[str] = []
+        agy_dir = d.parent / ".agy"
+        overlay_snapshot = cls._load_overlay_snapshot(d.parent)
 
+        # Prune stale non-tool overlays and bogus non-tool dist/manifests/*.json before rollback/healing
+        for pruned_rel in cls._prune_non_tool_overlays_and_manifests(
+            d.parent,
+            dist_dir=d,
+            overlay_snapshot=overlay_snapshot,
+        ):
+            if pruned_rel.startswith("manifests/") and pruned_rel not in retrofitted_paths:
+                retrofitted_paths.append(pruned_rel)
+
+        degraded_overlays = _collect_degraded_rolled_back_overlays(
+            d.parent,
+            overlay_snapshot=overlay_snapshot,
+        )
+
+        recon1_mutated = False
         try:
             from pseofactory.tenant_facts import TruthReconciliationEngine
             recon_repaired = TruthReconciliationEngine.reconcile_estate_assets(
                 dist_dir=d,
                 property_id=property_id,
                 repo_root=d.parent,
+                sync_llms=False,
+                degraded_overlays=degraded_overlays,
             )
+            recon1_mutated = bool(recon_repaired)
             for rp in recon_repaired:
                 try:
                     rel_rp = Path(rp).relative_to(d).as_posix()
@@ -14601,7 +14777,6 @@ class RetroReflectionEngine:
                     retrofitted_paths.append(rel_rp)
         except Exception:
             pass
-        agy_dir = d.parent / ".agy"
 
         gsc_lifecycle_data: Dict[str, Any] = {}
         is_prod_repo = (
@@ -14617,6 +14792,7 @@ class RetroReflectionEngine:
                         property_id=property_id,
                         repo_root=d.parent,
                         persist=True,
+                        live_gsc=False if defer_live_indexing else None,
                     )
                 except Exception:
                     gsc_lifecycle_data = {}
@@ -14626,59 +14802,55 @@ class RetroReflectionEngine:
                 except Exception:
                     gsc_lifecycle_data = {}
 
-        # Prune stale non-tool overlays and bogus non-tool dist/manifests/*.json before rollback/healing
-        for pruned_rel in cls._prune_non_tool_overlays_and_manifests(d.parent, dist_dir=d):
-            if pruned_rel.startswith("manifests/") and pruned_rel not in retrofitted_paths:
-                retrofitted_paths.append(pruned_rel)
-
         # Scrub any DEGRADED_ROLLED_BACK overlays from eligible tool dist HTML before overlay healing
-        for overlays_dir in (d.parent / "content" / "overlays", agy_dir / "overlays"):
-            if not overlays_dir.is_dir():
+        for _ov_dir, _ov_file, rel_s, ov_spec in overlay_snapshot:
+            if not isinstance(ov_spec, dict) or str(ov_spec.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
                 continue
-            for ov_file in sorted(overlays_dir.rglob("*.json")):
-                try:
-                    ov_spec = json.loads(ov_file.read_text(encoding="utf-8"))
-                except Exception:
+            spec_s = str(ov_spec.get("slug") or "").strip("/")
+            target_u = str(ov_spec.get("target_url") or "")
+            url_s = target_u.split("/tools/", 1)[1].split("?")[0].strip("/") if "/tools/" in target_u else ""
+            if cls._is_non_tool_overlay_spec(rel_s, ov_spec):
+                continue
+            rb_cands = [s for s in (rel_s, spec_s, url_s) if s and not is_non_tool_or_governance_route(s)]
+            for s in list(rb_cands):
+                for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                    if s.startswith(f"{hub_pfx}-"):
+                        rb_cands.append(f"{hub_pfx}/{s[len(hub_pfx) + 1:]}")
+            for rb_s in rb_cands:
+                if not rb_s or is_non_tool_or_governance_route(rb_s):
                     continue
-                if not isinstance(ov_spec, dict) or str(ov_spec.get("status") or "").upper() != "DEGRADED_ROLLED_BACK":
-                    continue
-                rel_s = ov_file.relative_to(overlays_dir).with_suffix("").as_posix().strip("/")
-                spec_s = str(ov_spec.get("slug") or "").strip("/")
-                target_u = str(ov_spec.get("target_url") or "")
-                url_s = target_u.split("/tools/", 1)[1].split("?")[0].strip("/") if "/tools/" in target_u else ""
-                if cls._is_non_tool_overlay_spec(rel_s, ov_spec):
-                    continue
-                rb_cands = [s for s in (rel_s, spec_s, url_s) if s and not is_non_tool_or_governance_route(s)]
-                for s in list(rb_cands):
-                    for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
-                        if s.startswith(f"{hub_pfx}-"):
-                            rb_cands.append(f"{hub_pfx}/{s[len(hub_pfx) + 1:]}")
-                for rb_s in rb_cands:
-                    if not rb_s or is_non_tool_or_governance_route(rb_s):
+                for h_cand in (d / "tools" / rb_s / "index.html", d / f"{rb_s}.html", d / rb_s / "index.html"):
+                    if not h_cand.is_file():
                         continue
-                    for h_cand in (d / "tools" / rb_s / "index.html", d / f"{rb_s}.html", d / rb_s / "index.html"):
-                        if not h_cand.is_file():
+                    try:
+                        rel_rb = h_cand.relative_to(d).as_posix()
+                        if is_non_tool_or_governance_route(rel_rb):
                             continue
-                        try:
-                            rel_rb = h_cand.relative_to(d).as_posix()
-                            if is_non_tool_or_governance_route(rel_rb):
-                                continue
-                            raw_h = h_cand.read_text(encoding="utf-8", errors="ignore")
-                            cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_spec)
-                            if cleaned_h != raw_h:
-                                h_cand.write_text(cleaned_h, encoding="utf-8")
-                                if rel_rb not in retrofitted_paths:
-                                    retrofitted_paths.append(rel_rb)
-                        except Exception:
-                            pass
+                        raw_h = h_cand.read_text(encoding="utf-8", errors="ignore")
+                        cleaned_h = rollback_degraded_overlay_from_html(raw_h, ov_spec, skip_geo_norm=True)
+                        if cleaned_h != raw_h:
+                            h_cand.write_text(cleaned_h, encoding="utf-8")
+                            if rel_rb not in retrofitted_paths:
+                                retrofitted_paths.append(rel_rb)
+                    except Exception:
+                        pass
 
         active_overlays = cls._resolve_active_estate_overlays(
             d,
             property_id,
             heal_legacy=True,
             canonical_base=canonical_base,
+            overlay_snapshot=overlay_snapshot,
+            prune_first=False,
         )
-        degraded_overlays = _collect_degraded_rolled_back_overlays(d.parent)
+        degraded_overlays = _collect_degraded_rolled_back_overlays(
+            d.parent,
+            overlay_snapshot=overlay_snapshot,
+        )
+        try:
+            write_runtime_synchronizer_asset(d)
+        except Exception:
+            pass
         from pseofactory.affiliates import (
             load_persisted_gsc_placement_metrics_by_slug,
             load_property_partner_engagement_metrics,
@@ -15118,7 +15290,10 @@ class RetroReflectionEngine:
                 dist_dir=d,
                 preserve_title=(rb_ov_for_slug is not None),
                 forbidden_titles=rb_forbidden,
+                runtime_sync_asset_written=True,
             )
+            callout_done_in_retrofit = bool(repaired and repaired != ["deterministic_visual_primitives"])
+            vp_done_in_retrofit = bool(repaired)
             if overlay_injected and "gsc_striking_overlay" not in repaired:
                 repaired.append("gsc_striking_overlay")
             if gsc_lifecycle_data:
@@ -15181,8 +15356,12 @@ class RetroReflectionEngine:
                         query=str((slug_gsc_metrics or {}).get("query") or ""),
                         gsc_metrics=slug_gsc_metrics,
                         engagement_metrics=estate_eng_metrics,
+                        skip_callout_if_unchanged=callout_done_in_retrofit,
                     )
-                    ran_callout_via_reposition = not bool(rep_report.get("restricted_public_service"))
+                    ran_callout_via_reposition = (
+                        not bool(rep_report.get("restricted_public_service"))
+                        and (bool(rep_report.get("callout_normalized", True)) or callout_done_in_retrofit)
+                    )
                     if repositioned_html != updated_html:
                         updated_html = repositioned_html
                         reposition_changed = True
@@ -15225,7 +15404,13 @@ class RetroReflectionEngine:
                         property_id.lower() == "gainhelm"
                         and cls._gainhelm_needs_framework_isolation_heal(norm_tool_html, slug)
                     )
-                    if callout_changed or reposition_changed or overlay_injected or gh_needs_heal or post_callout_heal:
+                    if (
+                        callout_changed
+                        or reposition_changed
+                        or (overlay_injected and not vp_done_in_retrofit)
+                        or gh_needs_heal
+                        or post_callout_heal
+                    ):
                         norm_tool_html = normalize_statutory_acronym_casing(norm_tool_html)
                         norm_tool_html, vp_rep = normalize_html_visual_primitives(norm_tool_html, dist_dir=d)
                         if norm_tool_html != updated_html:
@@ -15308,12 +15493,6 @@ class RetroReflectionEngine:
                     retrofitted_paths.append(".agy/cohort_reflection_ledger.json")
             except Exception:
                 pass
-
-        # Synchronize llms.txt and llms-full.txt machine endpoints with retrofitted HTML inventory
-        if (d / "llms.txt").is_file() or ((d / "index.html").is_file() and (d / "tools" / "index.html").is_file()):
-            for llms_rel in cls.sync_tenant_llms_manifests(d, property_id, canonical_base=canonical_base):
-                if llms_rel not in retrofitted_paths:
-                    retrofitted_paths.append(llms_rel)
 
         # Synchronize publisher verification meta tags, governance redirects, and media-kit.json on full tenant builds
         if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
@@ -15477,25 +15656,28 @@ class RetroReflectionEngine:
             except Exception:
                 pass
 
-        try:
-            from pseofactory.tenant_facts import TruthReconciliationEngine
-            reconcile_post_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
-            if callable(reconcile_post_fn):
-                post_repaired = reconcile_post_fn(
-                    dist_dir=d,
-                    property_id=property_id,
-                    repo_root=d.parent,
-                )
-                _cleanup_reconciled_html_files(post_repaired)
-                for rp in post_repaired or []:
-                    try:
-                        rel_rp = Path(rp).relative_to(d).as_posix()
-                    except Exception:
-                        rel_rp = Path(rp).name
-                    if rel_rp not in retrofitted_paths:
-                        retrofitted_paths.append(rel_rp)
-        except Exception:
-            pass
+        if retrofitted_paths or recon1_mutated:
+            try:
+                from pseofactory.tenant_facts import TruthReconciliationEngine
+                reconcile_post_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
+                if callable(reconcile_post_fn):
+                    post_repaired = reconcile_post_fn(
+                        dist_dir=d,
+                        property_id=property_id,
+                        repo_root=d.parent,
+                        sync_llms=False,
+                        degraded_overlays=degraded_overlays,
+                    )
+                    _cleanup_reconciled_html_files(post_repaired)
+                    for rp in post_repaired or []:
+                        try:
+                            rel_rp = Path(rp).relative_to(d).as_posix()
+                        except Exception:
+                            rel_rp = Path(rp).name
+                        if rel_rp not in retrofitted_paths:
+                            retrofitted_paths.append(rel_rp)
+            except Exception:
+                pass
 
         agy_dir = d.parent / ".agy"
         if agy_dir.is_dir():
@@ -15665,14 +15847,6 @@ class RetroReflectionEngine:
                     if str(mut_rel).endswith(".html") and mut_rel not in retrofitted_paths:
                         retrofitted_paths.append(mut_rel)
                 if porc_res.get("governance_written"):
-                    if (d / "llms.txt").is_file() or (
-                        (d / "index.html").is_file() and (d / "tools" / "index.html").is_file()
-                    ):
-                        cls.sync_tenant_llms_manifests(
-                            dist_dir=d,
-                            property_id=property_id,
-                            canonical_base=canonical_base,
-                        )
                     if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
                         cls.sync_tenant_publisher_prerequisites(
                             dist_dir=d,
@@ -15688,6 +15862,8 @@ class RetroReflectionEngine:
                                 dist_dir=d,
                                 property_id=property_id,
                                 repo_root=d.parent,
+                                sync_llms=False,
+                                degraded_overlays=degraded_overlays,
                             )
                             gov_html_paths = _extract_reconciled_html_paths(post_gov_rec, d)
                             _cleanup_reconciled_html_files(gov_html_paths or post_gov_rec)
@@ -15705,6 +15881,12 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
+        # Synchronize llms.txt and llms-full.txt ONCE after all HTML and Porcelain mutations settle
+        if (d / "llms.txt").is_file() or ((d / "index.html").is_file() and (d / "tools" / "index.html").is_file()):
+            for llms_rel in cls.sync_tenant_llms_manifests(d, property_id, canonical_base=canonical_base):
+                if llms_rel not in retrofitted_paths:
+                    retrofitted_paths.append(llms_rel)
+
         runner_dist_map = {
             Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
                 "/home/ubuntuadmin/.local/share/actions-runner/profithelm-platform/_work/profithelm-platform/profithelm-platform/dist"
@@ -15719,9 +15901,27 @@ class RetroReflectionEngine:
         runner_dist = runner_dist_map.get(d)
         if runner_dist and runner_dist.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ and not _is_live_repo_mutation_blocked(d):
             try:
-                shutil.copytree(d, runner_dist, dirs_exist_ok=True)
+                shutil.copytree(
+                    d,
+                    runner_dist,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("videos", "*.mp4"),
+                )
+                src_videos = d / "videos"
+                dst_videos = runner_dist / "videos"
+                if src_videos.is_dir() and not dst_videos.exists() and not dst_videos.is_symlink():
+                    dst_videos.symlink_to(src_videos)
             except Exception:
                 pass
+
+        if not retrofitted_paths:
+            post_estate_sig = cls._compute_retrofit_estate_sig(d, property_id, canonical_base, defer_live_indexing)
+            if post_estate_sig is not None:
+                with cls._RETROFIT_ESTATE_CONVERGED_LOCK:
+                    cls._RETROFIT_ESTATE_CONVERGED_CACHE[estate_cache_id] = (post_estate_sig, scanned, porcelain_compiled)
+                    cls._RETROFIT_ESTATE_CONVERGED_CACHE.move_to_end(estate_cache_id)
+                    while len(cls._RETROFIT_ESTATE_CONVERGED_CACHE) > cls._RETROFIT_ESTATE_CONVERGED_MAXSIZE:
+                        cls._RETROFIT_ESTATE_CONVERGED_CACHE.popitem(last=False)
 
         return {
             "status": "PASS",
@@ -16326,7 +16526,7 @@ def _execute_autonomous_downstream_chain(
         tracker = PartnerTrackingEngine(action_bus=bus)
         in_pytest = "PYTEST_CURRENT_TEST" in os.environ
         telemetry_sync = tracker.sync_edge_click_telemetry(
-            fetch_live=(not dry_run and not in_pytest)
+            fetch_live=(not dry_run and not in_pytest and not defer_live_indexing)
         )
         prop_agg = telemetry_sync.get(adapter.property_id, {}).get("aggregation", {})
         dash = tracker.sync_and_evaluate(
@@ -16735,16 +16935,6 @@ def is_foreign_tenant_tool_slug(
 
     gainhelm_extra: Set[str] = set(_GAINHELM_EXPANSION_TOOL_SLUGS)
     lienbond_extra: Set[str] = set()
-    try:
-        from pseofactory.gainhelm_estate import GAINHELM_TOOLS
-
-        gainhelm_extra.update(
-            str(t.get("slug", "")).strip().lower()
-            for t in GAINHELM_TOOLS
-            if isinstance(t, dict) and t.get("slug")
-        )
-    except Exception:
-        pass
     try:
         from pseofactory.compiler import LIENBOND_EXPANSION_SPECS
 
@@ -18467,13 +18657,14 @@ def reflect_and_recompile_all_assets(
             and not is_live_repo_blocked
             and not source_sync_changed
             and not force_compiled_build
-            and (stale_mechanic_count > 0 or callout_mismatch_count > 0 or edge_functions_updated or force)
+            and (stale_mechanic_count > 0 or callout_mismatch_count > 0 or edge_functions_updated)
         ):
             try:
                 pre_retro_res = RetroReflectionEngine.retrofit_estate(
                     dist_dir=adapter.dist_dir,
                     property_id=adapter.property_id,
                     canonical_base=adapter.canonical_base,
+                    defer_live_indexing=defer_live_indexing,
                 )
                 pre_retro_ran = pre_retro_res.get("status") != "BLOCKED_LIVE_WORKTREE"
                 pre_retrofitted_count = int(pre_retro_res.get("pages_retrofitted", 0))
@@ -18759,10 +18950,10 @@ def reflect_and_recompile_all_assets(
                 except Exception:
                     pass
 
-            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, or non-subprocess reflection is requested
+            # Execute single-pass retro-reflection across existing dist inventory when full build, mutation, force, or non-subprocess reflection is requested
             if (
                 not build_failed
-                and (should_run_full_build or estate_needed_mutation or not isinstance(adapter, SubprocessPropertyAdapter))
+                and (should_run_full_build or estate_needed_mutation or force or not isinstance(adapter, SubprocessPropertyAdapter))
                 and not (pre_retro_ran and not should_run_full_build and not html_mutated_since_porcelain and porcelain_compiled)
             ):
                 try:
@@ -18770,6 +18961,7 @@ def reflect_and_recompile_all_assets(
                         dist_dir=adapter.dist_dir,
                         property_id=adapter.property_id,
                         canonical_base=adapter.canonical_base,
+                        defer_live_indexing=defer_live_indexing,
                     )
                     retrofitted_count = max(
                         retrofitted_count,
@@ -18866,6 +19058,7 @@ def reflect_and_recompile_all_assets(
                         dist_dir=adapter.dist_dir,
                         property_id=adapter.property_id,
                         canonical_base=adapter.canonical_base,
+                        defer_live_indexing=defer_live_indexing,
                     )
                     retrofitted_count += int(ds_retro.get("pages_retrofitted", ds_retro.get("retrofitted_count", 0)))
                     if ds_retro.get("porcelain_compiled"):
@@ -18906,6 +19099,63 @@ def reflect_and_recompile_all_assets(
                 downstream_summary = {"status": "EXCEPTION_ROUTED", "error": str(ds_err)}
                 build_verified = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
 
+        profithelm_seo_summary: Optional[Dict[str, Any]] = None
+        if (
+            adapter.property_id == "profithelm"
+            and not build_failed
+            and build_verified.status == "PASS"
+            and (adapter.dist_dir / "sitemap.xml").is_file()
+        ):
+            ph_repo_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent).resolve()
+            ph_seo_file = ph_repo_root / "profithelm" / "seo_verifier.py"
+            if ph_seo_file.is_file():
+                _added_ph_path = False
+                try:
+                    loaded_ph = sys.modules.get("profithelm.seo_verifier")
+                    loaded_ph_file = getattr(loaded_ph, "__file__", None) if loaded_ph is not None else None
+                    if loaded_ph_file:
+                        try:
+                            if not Path(loaded_ph_file).resolve().is_relative_to(ph_repo_root):
+                                for mk in list(sys.modules.keys()):
+                                    if mk == "profithelm" or mk.startswith("profithelm."):
+                                        sys.modules.pop(mk, None)
+                        except Exception:
+                            pass
+                    if str(ph_repo_root) not in sys.path:
+                        sys.path.insert(0, str(ph_repo_root))
+                        _added_ph_path = True
+                    from profithelm.seo_verifier import (
+                        audit_seo_checklist as _ph_audit_seo_checklist,
+                        compute_dist_digest as _ph_compute_dist_digest,
+                    )
+                    ph_res = _ph_audit_seo_checklist(
+                        dist_dir=adapter.dist_dir,
+                        raise_on_error=True,
+                    )
+                    if not isinstance(ph_res, dict) or ph_res.get("status") != "PASS":
+                        build_failed = True
+                        ph_issues = ph_res.get("issues", []) if isinstance(ph_res, dict) else []
+                        build_error_msg = (
+                            f"ProfitHelm tenant SEO audit failed: {ph_issues[:5]}"
+                            if ph_issues
+                            else "ProfitHelm tenant SEO audit did not return PASS"
+                        )
+                    else:
+                        profithelm_seo_summary = dict(ph_res)
+                        if not profithelm_seo_summary.get("_dist_digest"):
+                            profithelm_seo_summary["_dist_digest"] = _ph_compute_dist_digest(adapter.dist_dir)
+                except Exception as ph_seo_err:
+                    build_failed = True
+                    build_error_msg = f"ProfitHelm tenant SEO audit failed: {ph_seo_err}"
+                finally:
+                    if _added_ph_path:
+                        try:
+                            sys.path.remove(str(ph_repo_root))
+                        except ValueError:
+                            pass
+                    if hasattr(adapter, "_enforce_sys_modules_isolation"):
+                        adapter._enforce_sys_modules_isolation()
+
         substrate_lock_stale = False
         if getattr(adapter, "repo_path", None) and not is_live_repo_blocked:
             t_repo = Path(adapter.repo_path)
@@ -18929,11 +19179,19 @@ def reflect_and_recompile_all_assets(
                             substrate_lock_stale = True
                     except Exception:
                         substrate_lock_stale = True
+        will_defer_lock_and_ledger = bool(
+            latch_state
+            and adapter.dist_dir.parent != scanner.workspace_root
+            and not is_live_repo_blocked
+            and not build_failed
+            and build_verified.status == "PASS"
+        )
         if (
             (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or force or substrate_lock_stale)
             and not build_failed
             and build_verified.status == "PASS"
             and not is_live_repo_blocked
+            and not will_defer_lock_and_ledger
         ):
             if getattr(adapter, "repo_path", None):
                 t_repo = Path(adapter.repo_path)
@@ -18968,6 +19226,22 @@ def reflect_and_recompile_all_assets(
             except Exception:
                 freshness_needs_refresh = True
 
+        def _dist_fast_stat_sig(dist_root: Path) -> Tuple[Tuple[str, int, int], ...]:
+            items: List[Tuple[str, int, int]] = []
+            if dist_root.is_dir():
+                for fp in sorted(dist_root.rglob("*")):
+                    if fp.is_file() and not fp.name.startswith("."):
+                        try:
+                            st = fp.stat()
+                            items.append((fp.relative_to(dist_root).as_posix(), st.st_mtime_ns, st.st_size))
+                        except OSError:
+                            pass
+            return tuple(items)
+
+        pre_latch_dist_sig = _dist_fast_stat_sig(adapter.dist_dir) if build_verified.status == "PASS" else ()
+        post_sync_4_mutated = False
+        ledger_verified_fresh = False
+
         if (
             (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh or substrate_lock_stale or force)
             and not build_failed
@@ -18981,8 +19255,10 @@ def reflect_and_recompile_all_assets(
                 s_file.parent.mkdir(parents=True, exist_ok=True)
                 b_dirs = getattr(adapter, "base_dirs", None)
                 cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
-                asset_hashes = _collect_adapter_asset_hashes(adapter)
-                record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                if not will_defer_lock_and_ledger:
+                    asset_hashes = _collect_adapter_asset_hashes(adapter)
+                    record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                    ledger_verified_fresh = l_file.is_file()
 
                 if not is_live_repo_blocked and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     try:
@@ -19063,18 +19339,34 @@ def reflect_and_recompile_all_assets(
                                     with sqlite3.connect(str(jev_db)) as conn:
                                         conn.execute("DELETE FROM jev_decision_cache WHERE verdict = 'REJECTED'")
                                         conn.commit()
-                                from profithelm.freshness import run_freshness_audit
-                                from profithelm.seo_verifier import compute_dist_digest
-                                cached_seo = (
-                                    {"status": "PASS", "_dist_digest": compute_dist_digest(adapter.dist_dir)}
-                                    if build_verified.status == "PASS"
-                                    else None
-                                )
-                                run_freshness_audit(
-                                    dist_dir=adapter.dist_dir,
-                                    in_pipeline=True,
-                                    cached_seo_summary=cached_seo,
-                                )
+                                _ph_fr_root = Path(getattr(adapter, "repo_path", None) or adapter.dist_dir.parent).resolve()
+                                _added_ph_fr_path = False
+                                try:
+                                    _loaded_ph_fr = sys.modules.get("profithelm.freshness")
+                                    _loaded_ph_fr_file = getattr(_loaded_ph_fr, "__file__", None) if _loaded_ph_fr is not None else None
+                                    if _loaded_ph_fr_file:
+                                        try:
+                                            if not Path(_loaded_ph_fr_file).resolve().is_relative_to(_ph_fr_root):
+                                                for _mk in list(sys.modules.keys()):
+                                                    if _mk == "profithelm" or _mk.startswith("profithelm."):
+                                                        sys.modules.pop(_mk, None)
+                                        except Exception:
+                                            pass
+                                    if (_ph_fr_root / "profithelm" / "freshness.py").is_file() and str(_ph_fr_root) not in sys.path:
+                                        sys.path.insert(0, str(_ph_fr_root))
+                                        _added_ph_fr_path = True
+                                    from profithelm.freshness import run_freshness_audit
+                                    run_freshness_audit(
+                                        dist_dir=adapter.dist_dir,
+                                        in_pipeline=True,
+                                        cached_seo_summary=profithelm_seo_summary,
+                                    )
+                                finally:
+                                    if _added_ph_fr_path:
+                                        try:
+                                            sys.path.remove(str(_ph_fr_root))
+                                        except ValueError:
+                                            pass
                             else:
                                 import importlib
                                 try:
@@ -19192,6 +19484,7 @@ def reflect_and_recompile_all_assets(
                     )
                     porcelain_compiled = bool(post_sync_4["porcelain_compiled"])
                     html_mutated_since_porcelain = bool(post_sync_4["html_mutated"])
+                    post_sync_4_mutated = bool(post_sync_4["html_mutated"] or post_sync_4["porcelain_invoked"])
                     if getattr(adapter, "repo_path", None):
                         t_repo_l = Path(adapter.repo_path)
                         if (t_repo_l / ".git").exists() and t_repo_l.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
@@ -19209,6 +19502,12 @@ def reflect_and_recompile_all_assets(
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                     asset_hashes = _collect_adapter_asset_hashes(adapter)
                     record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
+                    if l_file.is_file():
+                        written_l = load_asset_ledger(l_file)
+                        ledger_verified_fresh = bool(
+                            isinstance(written_l, dict)
+                            and written_l.get("assets") == asset_hashes
+                        )
                     if finalize_workspace and not is_workspace_mutation_blocked:
                         from pseofactory.drift import verify_all_tenants_aligned_for_latch
                         all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
@@ -19282,10 +19581,21 @@ def reflect_and_recompile_all_assets(
                     if verbose:
                         print(f"Error refreshing existing asset ledger for '{p_id}': {l_err}")
 
+        can_reuse_build_verified = bool(
+            build_verified.status == "PASS"
+            and ledger_verified_fresh
+            and not post_sync_4_mutated
+            and bool(pre_latch_dist_sig)
+            and _dist_fast_stat_sig(adapter.dist_dir) == pre_latch_dist_sig
+        )
         post_report = (
-            evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
-            if ((recompiled_count > 0 or retrofitted_count > 0) and not build_failed and latch_state and not is_live_repo_blocked)
-            else build_verified
+            build_verified
+            if can_reuse_build_verified
+            else (
+                evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
+                if ((recompiled_count > 0 or retrofitted_count > 0) and not build_failed and latch_state and not is_live_repo_blocked)
+                else build_verified
+            )
         )
         prop_final_status = "FAIL" if build_failed else post_report.status
 
@@ -19366,13 +19676,41 @@ def finalize_workspace_reflection_state(
         verify_all_tenants_aligned_for_latch,
     )
 
+    # Fast-fail before hashing 4 full dist/ trees when any canonical tenant repo has dirty git state
+    dirty_git_reasons: List[str] = []
+    for _pid_chk, _repo_chk in (
+        ("profithelm", ws / "profithelm-platform"),
+        ("prexvo", ws / "prexvo"),
+        ("gainhelm", ws / "gainhelm"),
+        ("lienbond", ws / "lienbond"),
+    ):
+        if (_repo_chk / ".git").exists():
+            try:
+                _st_chk = subprocess.run(
+                    ["git", "-C", str(_repo_chk), "status", "--porcelain"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if _st_chk.returncode == 0 and _st_chk.stdout.strip():
+                    _first_dirty = _st_chk.stdout.strip().splitlines()[0].strip()
+                    dirty_git_reasons.append(
+                        f"{_pid_chk}: uncommitted changes in dist/ or substrate_lock.json or tracked tenant files ({_first_dirty})"
+                    )
+            except Exception:
+                pass
+
     cur_engine_hash = compute_engine_hash()
-    all_tenants_ok, reasons = verify_all_tenants_aligned_for_latch(
-        workspace_root=ws,
-        expected_hash=cur_engine_hash,
-        require_git_clean_and_pushed=True,
-        allow_tenant_scoped_hash=allow_tenant_scoped_hash,
-    )
+    if dirty_git_reasons:
+        all_tenants_ok, reasons = False, dirty_git_reasons
+    else:
+        all_tenants_ok, reasons = verify_all_tenants_aligned_for_latch(
+            workspace_root=ws,
+            expected_hash=cur_engine_hash,
+            require_git_clean_and_pushed=True,
+            allow_tenant_scoped_hash=allow_tenant_scoped_hash,
+        )
     out["all_tenants_aligned"] = all_tenants_ok
     out["reasons"] = reasons
 

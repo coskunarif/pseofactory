@@ -2541,20 +2541,23 @@ class TenantFactStore:
             )
 
         if tenant_norm == "profithelm":
+            prose_lower = prose_scan_text.lower()
+            from pseofactory.contracts import _extract_anchor_windows
             # Section 179 SUV / heavy vehicle cap ($30,500 for 2024/2026 / $31,300 for 2025)
-            if "suv" in text_lower or "heavy vehicle" in text_lower:
+            if ("suv" in prose_lower or "vehicle" in prose_lower) and "$" in prose_scan_text:
+                suv_win = _extract_anchor_windows(prose_scan_text, prose_lower, ("suv", "vehicle"), pre=260, post=260)
                 suv_clause_matches = re.finditer(
                     r'(?:(?:suv|heavy\s*vehicle)[^\.\n]{0,140}?(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|allowance|expens(?:e|ing)|cap|limit|maximum)\s+(?:of\s+)?(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?(?:suv|heavy\s*vehicle))',
-                    prose_scan_text,
+                    suv_win,
                     re.IGNORECASE,
-                )
+                ) if suv_win else ()
                 for m_obj in suv_clause_matches:
                     raw_val = m_obj.group(1) or m_obj.group(2)
                     clause_low = m_obj.group(0).lower()
                     # Check a tight window around the match for explicit 2025 qualification
                     win_start = max(0, m_obj.start() - 60)
-                    win_end = min(len(prose_scan_text), m_obj.end() + 80)
-                    window_low = prose_scan_text[win_start:win_end].lower()
+                    win_end = min(len(suv_win), m_obj.end() + 80)
+                    window_low = suv_win[win_start:win_end].lower()
                     try:
                         val = float(raw_val.replace(",", ""))
                         has_2025_qual = "2025" in window_low and "in 2026" not in clause_low
@@ -2594,12 +2597,13 @@ class TenantFactStore:
                     )
 
             # Section 179 overall expense limit ($1,220,000 for 2024 / $1,250,000 for 2025 / $2,560,000 for 2026 OBBBA)
-            if "section 179" in text_lower or "section179" in text_lower:
+            if "179" in prose_lower and "$" in prose_scan_text:
+                s179_win = _extract_anchor_windows(prose_scan_text, prose_lower, ("179",), pre=260, post=260)
                 s179_matches = re.findall(
                     r'(?:section\s*179[^\.\n]{0,140}?(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)|(?:deduct(?:ion)?|expense(?:\s+limit)?|cap|maximum)\s+(?:up to\s+)?\$([0-9,]+)[^\.\n]{0,140}?section\s*179)',
-                    prose_scan_text,
+                    s179_win,
                     re.IGNORECASE,
-                )
+                ) if s179_win else []
                 for m in s179_matches:
                     raw_val = m[0] or m[1]
                     try:
@@ -2631,7 +2635,7 @@ class TenantFactStore:
                     violations.append(
                         f"Section 179 2026 statutory limit contradiction: '{st_179}' contradicts 2026 OBBBA statutory deduction cap of $2,560,000 ($2.56M) and $4,090,000 phase-out threshold"
                     )
-            if re.search(r"in\s+2026[^\.\n]{0,140}?up\s+to\s+\$1,250,000\s+in\s+qualifying", text, re.IGNORECASE):
+            if "$1,250,000" in text and "2026" in text_lower and re.search(r"in\s+2026[^\.\n]{0,140}?up\s+to\s+\$1,250,000\s+in\s+qualifying", text, re.IGNORECASE):
                 violations.append(
                     "Section 179 2026 statutory limit contradiction: claiming 'In 2026 ... up to $1,250,000' contradicts 2026 OBBBA statutory deduction cap of $2,560,000"
                 )
@@ -2657,9 +2661,15 @@ class TenantFactStore:
                 violations.append(
                     "Stale 80% bonus depreciation multiplier ('* 0.80') detected in workbench calculation logic: 2026 statutory IRC 168(k) bonus depreciation rate is 20% ('* 0.20')"
                 )
-            if re.search(
-                r"(?:(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation[^\.\n]{0,80}?2026|bonus\s+depreciation\s+(?:is|rate\s+is)\s+(?:60|80)%[^\.\n]{0,80}?2026|in\s+2026[^\.\n]{0,80}?(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation)",
-                text_lower,
+            if (
+                "bonus" in text_lower
+                and "depreciation" in text_lower
+                and ("60%" in text_lower or "80%" in text_lower)
+                and "2026" in text_lower
+                and re.search(
+                    r"(?:(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation[^\.\n]{0,80}?2026|bonus\s+depreciation\s+(?:is|rate\s+is)\s+(?:60|80)%[^\.\n]{0,80}?2026|in\s+2026[^\.\n]{0,80}?(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation)",
+                    text_lower,
+                )
             ):
                 violations.append(
                     "Stale 2026 bonus depreciation rate (60%/80%) detected: 2026 statutory IRC 168(k) bonus depreciation rate is 20%"
@@ -4562,6 +4572,8 @@ class TruthReconciliationEngine:
         dist_dir: Union[str, Path],
         property_id: str,
         repo_root: Optional[Union[str, Path]] = None,
+        sync_llms: bool = True,
+        degraded_overlays: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[str]:
         """
         Scans and deterministically reconciles all estate assets (HTML, JSON, XML, TXT, MD, JS, VTT)
@@ -4712,27 +4724,28 @@ class TruthReconciliationEngine:
                         pass
 
         # 2e. Index degraded rolled-back overlays
-        degraded_overlays: Dict[str, Dict[str, Any]] = {}
-        ov_search_dirs = []
-        if r_root:
-            ov_search_dirs.extend([r_root / "content" / "overlays", r_root / ".agy" / "overlays"])
-        if d.parent != r_root:
-            ov_search_dirs.extend([d.parent / "content" / "overlays", d.parent / ".agy" / "overlays"])
-        for ov_dir in ov_search_dirs:
-            if not ov_dir.is_dir():
-                continue
-            for ov_file in sorted(ov_dir.rglob("*.json")):
-                try:
-                    ov_data = _json_lib.loads(ov_file.read_text(encoding="utf-8"))
-                    if isinstance(ov_data, dict) and str(ov_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
-                        rel_s = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix()).strip("/")
-                        degraded_overlays[rel_s] = ov_data
-                        for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
-                            if rel_s.startswith(f"{hub_pfx}-"):
-                                alt_s = f"{hub_pfx}/{rel_s[len(hub_pfx) + 1:]}"
-                                degraded_overlays[alt_s] = ov_data
-                except Exception:
-                    pass
+        if degraded_overlays is None:
+            degraded_overlays = {}
+            ov_search_dirs = []
+            if r_root:
+                ov_search_dirs.extend([r_root / "content" / "overlays", r_root / ".agy" / "overlays"])
+            if d.parent != r_root:
+                ov_search_dirs.extend([d.parent / "content" / "overlays", d.parent / ".agy" / "overlays"])
+            for ov_dir in ov_search_dirs:
+                if not ov_dir.is_dir():
+                    continue
+                for ov_file in sorted(ov_dir.rglob("*.json")):
+                    try:
+                        ov_data = _json_lib.loads(ov_file.read_text(encoding="utf-8"))
+                        if isinstance(ov_data, dict) and str(ov_data.get("status") or "").upper() == "DEGRADED_ROLLED_BACK":
+                            rel_s = str(ov_data.get("slug") or ov_file.relative_to(ov_dir).with_suffix("").as_posix()).strip("/")
+                            degraded_overlays[rel_s] = ov_data
+                            for hub_pfx in ("irs-2027-tax-brackets", "section-1031-calculator", "section-179-calculator"):
+                                if rel_s.startswith(f"{hub_pfx}-"):
+                                    alt_s = f"{hub_pfx}/{rel_s[len(hub_pfx) + 1:]}"
+                                    degraded_overlays[alt_s] = ov_data
+                    except Exception:
+                        pass
 
         # 3. Reconcile HTML files in dist/
         if d.is_dir():
@@ -4933,15 +4946,16 @@ class TruthReconciliationEngine:
                             repaired_paths.append(str(mf_p))
                     except Exception:
                         pass
-        try:
-            from pseofactory.maintenance import AutonomousFreshnessMaintenanceEngine
+        if sync_llms:
+            try:
+                from pseofactory.maintenance import AutonomousFreshnessMaintenanceEngine
 
-            AutonomousFreshnessMaintenanceEngine.sync_tenant_llms_manifests(
-                dist_dir=d,
-                property_id=tenant_norm,
-            )
-        except Exception:
-            pass
+                AutonomousFreshnessMaintenanceEngine.sync_tenant_llms_manifests(
+                    dist_dir=d,
+                    property_id=tenant_norm,
+                )
+            except Exception:
+                pass
 
         # 5. Reconcile syndication/ and affiliate routes
         target_synd_dirs = []
