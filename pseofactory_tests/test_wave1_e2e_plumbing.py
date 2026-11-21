@@ -462,9 +462,17 @@ def test_preflight_reads_declarative_contract_dataclass_and_preserves_existing_a
     assert len(written) == 1
     assert written[0]["url"] == "https://profithelm.com/tools/broken-test/"
 
-    # (b) Pruner without explicit tenant_dist_dirs discovers live dist/ via DeclarativeTenantContract
+    # (b) Pruner without explicit tenant_dist_dirs discovers dist/ via DeclarativeTenantContract
     # and preserves existing routes (saas-runway-calculator) and root homepage (/) while pruning
     # non-existent cross-tenant routes (soc-2-audit-cost-calculator).
+    fake_dist = fake_repo / "dist"
+    (fake_dist / "tools" / "saas-runway-calculator").mkdir(parents=True, exist_ok=True)
+    (fake_dist / "index.html").write_text("<!DOCTYPE html><html><body>ProfitHelm</body></html>", encoding="utf-8")
+    (fake_dist / "tools" / "saas-runway-calculator" / "index.html").write_text(
+        "<!DOCTYPE html><html><body>SaaS Runway Calculator</body></html>",
+        encoding="utf-8",
+    )
+
     q_file = tmp_path / "live_dist_probe_quarantine.json"
     q_file.write_text(
         json.dumps(
@@ -489,7 +497,8 @@ def test_preflight_reads_declarative_contract_dataclass_and_preserves_existing_a
         ),
         encoding="utf-8",
     )
-    pruned = prune_stale_cross_domain_quarantine_entries(q_file, dry_run=False)
+    with patch("pseofactory.tenant_facts.CANONICAL_TENANT_DECLARATIONS", patched_decls):
+        pruned = prune_stale_cross_domain_quarantine_entries(q_file, dry_run=False)
     assert pruned == ["https://profithelm.com/tools/soc-2-audit-cost-calculator/"]
     kept = json.loads(q_file.read_text(encoding="utf-8"))
     assert "https://profithelm.com/tools/saas-runway-calculator/" in kept
