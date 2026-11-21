@@ -460,7 +460,7 @@ def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_ba
         '  echo "Deployment complete!"\n'
         "  exit 0\n"
         "fi\n"
-        'echo "ERROR [code: 10429] Too Many Requests" >&2\n'
+        'echo "${FAKE_NPX_ERROR_MSG:-ERROR [code: 10429] Too Many Requests}" >&2\n'
         "exit 1\n",
         encoding="utf-8",
     )
@@ -492,7 +492,16 @@ def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_ba
         ci_text = (repo_dir / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         assert "npx wrangler pages deploy dist" in ci_text
         assert "for attempt in 1 2 3 4; do" in ci_text
-        assert "sleep $((attempt * 12))" in ci_text
+        if prop_id == "lienbond":
+            assert "backoffs=(0 20 45 90)" in ci_text
+            assert 'sleep "$wait_s"' in ci_text
+            assert "Invalid access token" in ci_text
+            assert r"\[code: 9109\]" in ci_text
+            assert r"\[code: 10000?\]" in ci_text
+            expected_sleeps = ["20", "45", "90"]
+        else:
+            assert "sleep $((attempt * 12))" in ci_text
+            expected_sleeps = ["12", "24", "36"]
         assert "\u2014" not in ci_text
         assert "\u2013" not in ci_text
 
@@ -529,7 +538,7 @@ def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_ba
         )
         assert proc_ok.returncode == 0, f"{prop_id} 4th-attempt recovery failed: {proc_ok.stderr}"
         assert cnt_ok.read_text(encoding="utf-8").strip() == "4"
-        assert sleep_ok.read_text(encoding="utf-8").splitlines() == ["12", "24", "36"]
+        assert sleep_ok.read_text(encoding="utf-8").splitlines() == expected_sleeps
         assert prop_id in args_ok.read_text(encoding="utf-8")
 
         # Case (b): 4 consecutive rate-limit 10429 failures under bash -eo pipefail -> fails closed (returncode != 0)
@@ -554,7 +563,33 @@ def test_sync_tenant_test_isolation_guards_includes_wrangler_rate_limit_retry_ba
         )
         assert proc_fail.returncode != 0
         assert cnt_fail.read_text(encoding="utf-8").strip() == "4"
-        assert sleep_fail.read_text(encoding="utf-8").splitlines() == ["12", "24", "36"]
+        assert sleep_fail.read_text(encoding="utf-8").splitlines() == expected_sleeps
+
+        # Case (c): LienBond cloud deploy fails fast on auth error (code 9109/10000) without wasting retries
+        if prop_id == "lienbond":
+            cnt_auth = tmp_path / f"{prop_id}_auth_count.txt"
+            args_auth = tmp_path / f"{prop_id}_auth_args.txt"
+            sleep_auth = tmp_path / f"{prop_id}_auth_sleep.txt"
+            env_auth = {
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+                "FAKE_NPX_COUNT_FILE": str(cnt_auth),
+                "FAKE_NPX_ARGS_FILE": str(args_auth),
+                "FAKE_NPX_SUCCEED_ON": "0",
+                "FAKE_SLEEP_LOG": str(sleep_auth),
+                "FAKE_NPX_ERROR_MSG": "ERROR Invalid access token [code: 9109]",
+            }
+            proc_auth = subprocess.run(
+                ["bash", "-eo", "pipefail", "-c", deploy_run_script],
+                cwd=repo_dir,
+                env=env_auth,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert proc_auth.returncode != 0
+            assert cnt_auth.read_text(encoding="utf-8").strip() == "1"
+            assert not sleep_auth.exists()
 
 
 def test_legacy_duplicate_cloudflare_workflows_removed_and_reflect_no_gitops_syncs(
