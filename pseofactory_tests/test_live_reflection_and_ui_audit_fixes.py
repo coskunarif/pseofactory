@@ -978,19 +978,22 @@ def test_stage3b_overlay_mutation_triggers_post_workflow_retrofit_and_normalizes
     reg = TenantRegistry()
     reg.register_adapter(ad)
 
-    retro_calls: list[int] = []
+    event_log: list[str] = []
+    mutate_on_workflow = {"enabled": True}
 
     def _fake_retrofit_estate(*args, **kwargs):
-        retro_calls.append(1)
+        event_log.append("retrofit")
         return {"status": "PASS", "pages_retrofitted": 0, "porcelain_compiled": True}
 
     def _fake_run_all_seo_growth_workflows(*args, **kwargs):
-        # Simulate overlay injection mutating HTML on disk while internal_links has 0 mutated_donor_pages
-        cur = leaf_html.read_text(encoding="utf-8")
-        leaf_html.write_text(
-            cur.replace("</main>", '<section class="overlay-section">Injected</section>\n</main>', 1),
-            encoding="utf-8",
-        )
+        event_log.append("workflow")
+        if mutate_on_workflow["enabled"]:
+            # Simulate overlay injection mutating HTML on disk while internal_links has 0 mutated_donor_pages
+            cur = leaf_html.read_text(encoding="utf-8")
+            leaf_html.write_text(
+                cur.replace("</main>", '<section class="overlay-section">Injected</section>\n</main>', 1),
+                encoding="utf-8",
+            )
         return {"status": "PASS", "internal_links": {"mutated_donor_pages": []}}
 
     def _clean_audit_all(self, adapter, *args, **kwargs):
@@ -1011,6 +1014,7 @@ def test_stage3b_overlay_mutation_triggers_post_workflow_retrofit_and_normalizes
     monkeypatch.setattr(qual_mod, "reconcile_tenant_topical_authority_and_cannibalization", lambda *a, **k: {})
     monkeypatch.setattr(sgl_mod, "run_all_seo_growth_workflows", _fake_run_all_seo_growth_workflows)
 
+    # Case 1: Clean estate (stale_count=0) with force=True skips redundant pre-retro and runs retrofit AFTER workflow mutation
     reflect_and_recompile_all_assets(
         properties=["profithelm"],
         force=True,
@@ -1019,8 +1023,41 @@ def test_stage3b_overlay_mutation_triggers_post_workflow_retrofit_and_normalizes
         defer_live_indexing=True,
         verbose=False,
     )
-    assert len(retro_calls) == 2, (
-        f"Expected pre-retro + post-workflow retrofit_estate after overlay HTML mutation, got {len(retro_calls)} calls"
+    assert event_log == ["workflow", "retrofit"], (
+        f"Expected single post-workflow retrofit_estate after overlay HTML mutation on clean estate, got {event_log}"
+    )
+
+    # Case 2: When pre-retro already ran (stale_count=1, porcelain_compiled=True), workflow HTML mutation on disk
+    # MUST still trigger a second post-workflow retrofit_estate even with mutated_donor_pages=[]
+    event_log.clear()
+    mutate_on_workflow["enabled"] = True
+    monkeypatch.setattr(RetroReflectionEngine, "audit_estate", classmethod(lambda cls, *a, **k: {"stale_count": 1, "stale_pages": ["index.html"]}))
+    reflect_and_recompile_all_assets(
+        properties=["profithelm"],
+        force=True,
+        run_downstream=False,
+        registry=reg,
+        defer_live_indexing=True,
+        verbose=False,
+    )
+    assert event_log == ["retrofit", "workflow", "retrofit"], (
+        f"Expected pre-retro + post-workflow retrofit_estate after overlay HTML mutation, got {event_log}"
+    )
+
+    # Case 3: Control check - when pre-retro already ran and workflow makes ZERO HTML mutations on disk,
+    # post-workflow retrofit_estate is skipped (proving Case 2 is driven by the HTML snapshot check, not force=True)
+    event_log.clear()
+    mutate_on_workflow["enabled"] = False
+    reflect_and_recompile_all_assets(
+        properties=["profithelm"],
+        force=True,
+        run_downstream=False,
+        registry=reg,
+        defer_live_indexing=True,
+        verbose=False,
+    )
+    assert event_log == ["retrofit", "workflow"], (
+        f"Expected no redundant post-workflow retrofit_estate when workflow did not mutate HTML, got {event_log}"
     )
 
 

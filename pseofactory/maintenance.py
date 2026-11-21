@@ -11,6 +11,7 @@ import os
 import sys
 import re
 import collections
+import inspect
 import urllib.parse
 import fcntl
 import json
@@ -7112,6 +7113,33 @@ def _collapse_duplicate_faq_sections(html_text: str) -> Tuple[str, bool]:
     from pseofactory.visual_primitives import _collapse_duplicate_faq_sections as _shared_collapse_faq
 
     return _shared_collapse_faq(html_text)
+
+
+def _invoke_reconcile_estate_assets(
+    fn: Callable[..., Any],
+    *,
+    dist_dir: Path,
+    property_id: str,
+    repo_root: Path,
+    sync_llms: bool = False,
+    degraded_overlays: Optional[Any] = None,
+) -> Any:
+    """Invokes reconcile_estate_assets, passing optional Slice 2 kwargs only when accepted by fn."""
+    kwargs: Dict[str, Any] = {
+        "dist_dir": dist_dir,
+        "property_id": property_id,
+        "repo_root": repo_root,
+    }
+    try:
+        params = inspect.signature(fn).parameters
+        has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if has_var_kw or "sync_llms" in params:
+            kwargs["sync_llms"] = sync_llms
+        if has_var_kw or "degraded_overlays" in params:
+            kwargs["degraded_overlays"] = degraded_overlays
+    except (TypeError, ValueError):
+        pass
+    return fn(**kwargs)
 
 
 def _extract_reconciled_html_paths(rec_result: Any, dist_dir: Path) -> List[Path]:
@@ -14760,7 +14788,8 @@ class RetroReflectionEngine:
         recon1_mutated = False
         try:
             from pseofactory.tenant_facts import TruthReconciliationEngine
-            recon_repaired = TruthReconciliationEngine.reconcile_estate_assets(
+            recon_repaired = _invoke_reconcile_estate_assets(
+                TruthReconciliationEngine.reconcile_estate_assets,
                 dist_dir=d,
                 property_id=property_id,
                 repo_root=d.parent,
@@ -15661,7 +15690,8 @@ class RetroReflectionEngine:
                 from pseofactory.tenant_facts import TruthReconciliationEngine
                 reconcile_post_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
                 if callable(reconcile_post_fn):
-                    post_repaired = reconcile_post_fn(
+                    post_repaired = _invoke_reconcile_estate_assets(
+                        reconcile_post_fn,
                         dist_dir=d,
                         property_id=property_id,
                         repo_root=d.parent,
@@ -15858,7 +15888,8 @@ class RetroReflectionEngine:
 
                         reconcile_gov_fn = getattr(TruthReconciliationEngine, "reconcile_estate_assets", None)
                         if callable(reconcile_gov_fn):
-                            post_gov_rec = reconcile_gov_fn(
+                            post_gov_rec = _invoke_reconcile_estate_assets(
+                                reconcile_gov_fn,
                                 dist_dir=d,
                                 property_id=property_id,
                                 repo_root=d.parent,
