@@ -816,9 +816,16 @@ def test_runtime_sync_tenant_neutral_and_head_tenant_inference() -> None:
 
 def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path: Path) -> None:
     from pseofactory.verifier import MasterSEOVerifier
+    from pseofactory.visual_primitives import (
+        get_runtime_synchronizer_script_src,
+        has_current_external_runtime_sync_tag,
+        render_external_runtime_synchronizer_tag,
+    )
 
     engine_root = Path(__file__).resolve().parents[1]
     base_env = {"PATH": os.environ.get("PATH", "")}
+    expected_sync_src = get_runtime_synchronizer_script_src()
+    expected_sync_tag = render_external_runtime_synchronizer_tag().strip()
 
     live_px = Path("/home/ubuntuadmin/projects/prexvo")
     if (live_px / ".git").is_dir():
@@ -854,7 +861,13 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
         legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
         px_sample = (px_dist / "tools" / "student-loan-repayment-calculator" / "index.html").read_text(encoding="utf-8")
         assert legacy_sync_hook not in px_sample
-        assert "__complianceSyncWorkspaceOutputs" in px_sample
+        assert has_current_external_runtime_sync_tag(px_sample)
+        assert expected_sync_tag in px_sample
+        px_sync_js_path = px_dist / expected_sync_src.lstrip("/")
+        assert px_sync_js_path.is_file(), f"Missing external runtime sync JS at {px_sync_js_path}"
+        px_sync_js = px_sync_js_path.read_text(encoding="utf-8")
+        assert legacy_sync_hook not in px_sync_js
+        assert "__complianceSyncWorkspaceOutputs" in px_sync_js
 
     live_ph = Path("/home/ubuntuadmin/projects/profithelm-platform")
     if (live_ph / ".git").is_dir():
@@ -890,4 +903,10 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
         legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
         ph_sample = (ph_dist / "tools" / "section-179-calculator" / "index.html").read_text(encoding="utf-8")
         assert legacy_sync_hook not in ph_sample
-        assert "__complianceSyncWorkspaceOutputs" in ph_sample
+        assert has_current_external_runtime_sync_tag(ph_sample)
+        assert expected_sync_tag in ph_sample
+        ph_sync_js_path = ph_dist / expected_sync_src.lstrip("/")
+        assert ph_sync_js_path.is_file(), f"Missing external runtime sync JS at {ph_sync_js_path}"
+        ph_sync_js = ph_sync_js_path.read_text(encoding="utf-8")
+        assert legacy_sync_hook not in ph_sync_js
+        assert "__complianceSyncWorkspaceOutputs" in ph_sync_js

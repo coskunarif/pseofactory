@@ -423,6 +423,12 @@ def test_stage_4_unattended_reflection_and_real_browser_verification(tmp_path):
         shutil.copytree(ph_src / "static" / "css", ph_dist / "static" / "css")
     if (ph_src / "static" / "img").is_dir():
         shutil.copytree(ph_src / "static" / "img", ph_dist / "static" / "img")
+    if (ph_src / "static" / "js").is_dir():
+        shutil.copytree(
+            ph_src / "static" / "js",
+            ph_dist / "static" / "js",
+            ignore=shutil.ignore_patterns("pseo-runtime-sync.*.js"),
+        )
 
     px_dist = tmp_path / "prexvo" / "dist"
     px_tools = px_dist / "tools" / "grad-plus-borrowing-cap-calculator"

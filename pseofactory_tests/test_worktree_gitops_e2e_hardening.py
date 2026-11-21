@@ -661,7 +661,7 @@ def test_new_dist_assets_staged_and_verify_all_tenants_aligned_rejects_untracked
             encoding="utf-8",
         )
         subprocess.run(["git", "-C", str(rp), "add", ".gitignore", ".pseofactory.json", "substrate_lock.json"], check=True)
-        subprocess.run(["git", "-C", str(rp), "add", "-f", "dist/index.html"], check=True)
+        subprocess.run(["git", "-C", str(rp), "add", "-f", "dist"], check=True)
         subprocess.run(
             ["git", "-C", str(rp), "commit", "-m", "initial tenant state"],
             check=True,
