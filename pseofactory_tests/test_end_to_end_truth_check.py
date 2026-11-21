@@ -1581,8 +1581,11 @@ def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path)
     )
     evaluator._audit_cache.clear()
     drift_rep = evaluator.audit_all(adapter, check_engine_drift=True, check_ledger=False)
-    assert drift_rep.drifted_assets_count == 1
-    assert DriftReason.ENGINE_HASH_DRIFT in drift_rep.drifted_assets[0].reasons
+    drifted_rel_keys = {r.metadata.get("rel_key") for r in drift_rep.drifted_assets}
+    assert "tools/irs-2027-tax-brackets/alabama/index.html" in drifted_rel_keys
+    assert any(str(k).startswith("static/js/pseo-runtime-sync.") for k in drifted_rel_keys)
+    assert drift_rep.drifted_assets_count == 2
+    assert all(DriftReason.ENGINE_HASH_DRIFT in r.reasons for r in drift_rep.drifted_assets)
 
     # Once substrate_lock.json matches compute_engine_hash(), audit_all passes
     cur_hash = compute_engine_hash()

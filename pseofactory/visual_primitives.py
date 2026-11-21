@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import functools as _functools
 import hashlib
+import os
+from pathlib import Path
 import re
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
+import uuid
 
 from pseofactory.contracts import is_state_jurisdiction_tool
 
@@ -4434,6 +4437,145 @@ def _render_runtime_sync_events_js() -> str:
 
 
 @_functools.lru_cache(maxsize=1)
+def render_runtime_synchronizer_js() -> str:
+    """
+    Renders the raw IIFE JavaScript body for the deterministic runtime calculator synchronizer
+    without enclosing <script> tags.
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    maps_js = _render_runtime_sync_maps_js()
+    workbench_js = _render_runtime_sync_workbench_js()
+    events_js = _render_runtime_sync_events_js()
+    return f"""  (function() {{
+    if (window.__pseoRuntimeSyncInitialized) return;
+    window.__pseoRuntimeSyncInitialized = true;
+
+{maps_js}
+
+{workbench_js}
+
+{events_js}
+  }})();"""
+
+
+@_functools.lru_cache(maxsize=1)
+def get_runtime_synchronizer_js_sha10() -> str:
+    """Returns the deterministic 10-char SHA-256 hex digest of the runtime synchronizer JS bundle."""
+    return hashlib.sha256(render_runtime_synchronizer_js().encode("utf-8")).hexdigest()[:10]
+
+
+@_functools.lru_cache(maxsize=1)
+def get_runtime_synchronizer_script_src() -> str:
+    """Returns the content-hashed static URL path for the external runtime synchronizer JS bundle."""
+    return f"/static/js/pseo-runtime-sync.{get_runtime_synchronizer_js_sha10()}.js"
+
+
+@_functools.lru_cache(maxsize=1)
+def render_external_runtime_synchronizer_tag() -> str:
+    """Renders the canonical deferred external <script id='pseo-runtime-sync'> tag."""
+    src = get_runtime_synchronizer_script_src()
+    return f'  <script id="pseo-runtime-sync" data-version="{VISUAL_PRIMITIVES_VERSION}" src="{src}" defer></script>'
+
+
+_EXTERNAL_RUNTIME_SYNC_TAG_RE = re.compile(
+    r'<script\b([^>]*(?<![a-zA-Z0-9_-])id\s*=\s*["\']pseo-runtime-sync["\'][^>]*)>([\s\S]*?)</script>',
+    re.IGNORECASE,
+)
+
+_HTML_ATTR_TOKEN_RE = re.compile(
+    r'([a-zA-Z_:][a-zA-Z0-9_.:-]*)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+)))?'
+)
+
+_VALID_JS_SCRIPT_TYPES: FrozenSet[str] = frozenset(
+    {"text/javascript", "application/javascript", "module"}
+)
+
+
+def has_current_external_runtime_sync_tag(html_content: str) -> bool:
+    """
+    Returns True iff html_content contains exactly one uncommented <script id='pseo-runtime-sync'> tag
+    with exact current data-version, exact current content-hashed src, valid defer attribute,
+    valid JS type (or omitted), and an empty inline body. Fails closed on any mismatch or duplicate tag.
+    """
+    if not html_content or "pseo-runtime-sync" not in html_content:
+        return False
+    expected_src = get_runtime_synchronizer_script_src()
+    if expected_src not in html_content:
+        return False
+    cleaned = re.sub(r"<!--[\s\S]*?-->", "", html_content)
+    if expected_src not in cleaned:
+        return False
+    matches = list(_EXTERNAL_RUNTIME_SYNC_TAG_RE.finditer(cleaned))
+    if len(matches) != 1:
+        return False
+    attrs, body = matches[0].group(1), matches[0].group(2)
+    if body.strip():
+        return False
+    attr_map: Dict[str, str] = {}
+    for am in _HTML_ATTR_TOKEN_RE.finditer(attrs):
+        a_name = am.group(1).lower()
+        a_val = am.group(2) if am.group(2) is not None else (am.group(3) if am.group(3) is not None else (am.group(4) or ""))
+        if a_name not in attr_map:
+            attr_map[a_name] = a_val
+    if attr_map.get("id") != "pseo-runtime-sync":
+        return False
+    if attr_map.get("data-version") != VISUAL_PRIMITIVES_VERSION:
+        return False
+    if attr_map.get("src") != expected_src:
+        return False
+    if "defer" not in attr_map or attr_map["defer"].strip().lower() not in ("", "defer", "true"):
+        return False
+    script_type = attr_map.get("type", "").strip().lower()
+    if script_type and script_type not in _VALID_JS_SCRIPT_TYPES:
+        return False
+    return True
+
+
+def write_runtime_synchronizer_asset(dist_dir: Union[str, Path]) -> Tuple[Path, bool]:
+    """
+    Idempotently writes dist/static/js/pseo-runtime-sync.<sha10>.js via thread-safe atomic replace
+    and prunes any stale pseo-runtime-sync.*.js bundles in dist/static/js/.
+    Returns (target_path, changed).
+    """
+    d = Path(dist_dir)
+    js_dir = d / "static" / "js"
+    js_dir.mkdir(parents=True, exist_ok=True)
+    expected_sha10 = get_runtime_synchronizer_js_sha10()
+    filename = f"pseo-runtime-sync.{expected_sha10}.js"
+    target_path = js_dir / filename
+    payload_bytes = render_runtime_synchronizer_js().encode("utf-8")
+    changed = False
+
+    needs_write = True
+    if target_path.is_file():
+        try:
+            if target_path.read_bytes() == payload_bytes:
+                needs_write = False
+        except Exception:
+            needs_write = True
+
+    if needs_write:
+        tmp_path = js_dir / f".{filename}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            tmp_path.write_bytes(payload_bytes)
+            os.replace(tmp_path, target_path)
+            changed = True
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    for stale_f in sorted(js_dir.glob("pseo-runtime-sync.*.js")):
+        if stale_f.name != filename and stale_f.is_file():
+            try:
+                stale_f.unlink(missing_ok=True)
+                changed = True
+            except OSError:
+                pass
+
+    return target_path, changed
+
+
+@_functools.lru_cache(maxsize=1)
 def render_runtime_synchronizer_script() -> str:
     """
     Renders the deterministic runtime calculator synchronizer (<script id="pseo-runtime-sync">).
@@ -4443,20 +4585,9 @@ def render_runtime_synchronizer_script() -> str:
     .calc-metric-value, .metric-value, [id^="val-"], [id^="res-"], [id^="metric-"]).
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
-    maps_js = _render_runtime_sync_maps_js()
-    workbench_js = _render_runtime_sync_workbench_js()
-    events_js = _render_runtime_sync_events_js()
+    body_js = render_runtime_synchronizer_js()
     return f"""  <script id="pseo-runtime-sync" data-version="{VISUAL_PRIMITIVES_VERSION}">
-  (function() {{
-    if (window.__pseoRuntimeSyncInitialized) return;
-    window.__pseoRuntimeSyncInitialized = true;
-
-{maps_js}
-
-{workbench_js}
-
-{events_js}
-  }})();
+{body_js}
   </script>"""
 
 
@@ -4873,28 +5004,29 @@ def _detect_visual_and_ux_contract_issues_cached(
         )
     )
     if expect_primitives and has_calc_markers:
-        sync_match = re.search(
-            r'<script\b[^>]*id=["\']pseo-runtime-sync["\'][^>]*>([\s\S]*?)</script>',
-            html_content,
-            re.IGNORECASE,
-        )
-        if (
-            not sync_match
-            or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
-            or "__pseoRuntimeSyncInitialized" not in sync_match.group(1)
-            or "updateOutputsSynchronously" not in sync_match.group(1)
-            or "_lastInteractionScope" not in sync_match.group(1)
-            or "data-preset-crit" not in sync_match.group(1)
-            or "carryShield" not in sync_match.group(1)
-            or "keepalive: true" in sync_match.group(1)
-            or "remBasis * 0.80" in sync_match.group(1)
-            or "rem179 * 0.80" in sync_match.group(1)
-            or "offer_price_usd || 29" in sync_match.group(1)
-            or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_match.group(1)
-        ):
-            issues.append(
-                f"[{rel_path}] Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
+        if not has_current_external_runtime_sync_tag(html_content):
+            sync_match = re.search(
+                r'<script\b[^>]*id=["\']pseo-runtime-sync["\'][^>]*>([\s\S]*?)</script>',
+                html_content,
+                re.IGNORECASE,
             )
+            if (
+                not sync_match
+                or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
+                or "__pseoRuntimeSyncInitialized" not in sync_match.group(1)
+                or "updateOutputsSynchronously" not in sync_match.group(1)
+                or "_lastInteractionScope" not in sync_match.group(1)
+                or "data-preset-crit" not in sync_match.group(1)
+                or "carryShield" not in sync_match.group(1)
+                or "keepalive: true" in sync_match.group(1)
+                or "remBasis * 0.80" in sync_match.group(1)
+                or "rem179 * 0.80" in sync_match.group(1)
+                or "offer_price_usd || 29" in sync_match.group(1)
+                or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_match.group(1)
+            ):
+                issues.append(
+                    f"[{rel_path}] Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
+                )
 
     for m in re.finditer(r"<([a-zA-Z0-9]+)\b[^>]*>", body_only):
         tag_name = m.group(1).lower()
@@ -7156,10 +7288,62 @@ def _collapse_duplicate_faq_sections(html_text: str) -> Tuple[str, bool]:
     return collapsed, collapsed != html_text
 
 
+def _sync_runtime_synchronizer_tag(
+    updated: str,
+    dist_dir: Optional[Union[str, Path]] = None,
+) -> Tuple[str, bool]:
+    """
+    Injects or repairs <script id='pseo-runtime-sync'> using the external deferred bundle when
+    dist_dir is provided (or preserves an existing valid external tag when dist_dir is None),
+    falling back to the inline script when dist_dir is None and no valid external tag is present.
+    """
+    if dist_dir is not None:
+        write_runtime_synchronizer_asset(Path(dist_dir))
+        if has_current_external_runtime_sync_tag(updated):
+            return updated, False
+        script_block = render_external_runtime_synchronizer_tag()
+    else:
+        if has_current_external_runtime_sync_tag(updated):
+            return updated, False
+        script_block = render_runtime_synchronizer_script()
+
+    sync_matches = list(_EXTERNAL_RUNTIME_SYNC_TAG_RE.finditer(updated))
+    if sync_matches:
+        needs_sync_repair = (
+            len(sync_matches) != 1
+            or sync_matches[0].group(0).strip() != script_block.strip()
+        )
+        if not needs_sync_repair:
+            return updated, False
+        # Replace first occurrence and strip any extra duplicate tags
+        first_replaced = False
+
+        def _repl_sync(_m: re.Match[str]) -> str:
+            nonlocal first_replaced
+            if not first_replaced:
+                first_replaced = True
+                return "\n" + script_block
+            return ""
+
+        repaired_html = re.sub(
+            r'\s*<script\b[^>]*(?<![a-zA-Z0-9_-])id\s*=\s*["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?</script>',
+            _repl_sync,
+            updated,
+            flags=re.IGNORECASE,
+        )
+        return repaired_html, True
+
+    body_close_idx = updated.rfind("</body>")
+    if body_close_idx != -1:
+        return updated[:body_close_idx] + script_block + "\n" + updated[body_close_idx:], True
+    return updated + "\n" + script_block, True
+
+
 def normalize_html_visual_primitives(
     html_content: str,
     is_tenant_porcelain: Optional[bool] = None,
     theme: Optional[str] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[str, List[str]]:
     """
     Normalizes an HTML document to enforce deterministic visual primitives and self-heal
@@ -7662,35 +7846,9 @@ def normalize_html_visual_primitives(
         if stripped_legacy_file_rt != updated:
             updated = stripped_legacy_file_rt
             repaired.append("legacy_file_runtime_dedup")
-        script_block = render_runtime_synchronizer_script()
-        if 'id="pseo-runtime-sync"' in updated or "id='pseo-runtime-sync'" in updated:
-            sync_match = re.search(
-                r'<script\b[^>]*id=["\']pseo-runtime-sync["\'][^>]*>([\s\S]*?)</script>',
-                updated,
-                re.IGNORECASE,
-            )
-            sync_body = sync_match.group(1) if sync_match else ""
-            needs_sync_repair = (
-                sync_match is None
-                or sync_match.group(0).strip() != script_block.strip()
-            )
-            if needs_sync_repair:
-                updated = re.sub(
-                    r'\s*<script[^>]*id=["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?</script>',
-                    lambda _m: "\n" + script_block,
-                    updated,
-                    count=1,
-                    flags=re.IGNORECASE,
-                )
-                repaired.append("interactive_runtime_sync")
-        else:
-            body_close_idx = updated.rfind("</body>")
-            if body_close_idx != -1:
-                updated = updated[:body_close_idx] + script_block + "\n" + updated[body_close_idx:]
-                repaired.append("interactive_runtime_sync")
-            else:
-                updated = updated + "\n" + script_block
-                repaired.append("interactive_runtime_sync")
+        updated, rt_repaired = _sync_runtime_synchronizer_tag(updated, dist_dir=dist_dir)
+        if rt_repaired:
+            repaired.append("interactive_runtime_sync")
 
     return updated, repaired
 
@@ -8434,6 +8592,21 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
         t_preset_btns = 0
         t_submit_btns = 0
         t_page_records: List[Dict[str, Any]] = []
+        expected_rt_sha10 = get_runtime_synchronizer_js_sha10()
+        expected_rt_bytes = render_runtime_synchronizer_js().encode("utf-8")
+        ext_rt_js_path = tools_dir.parent / "static" / "js" / f"pseo-runtime-sync.{expected_rt_sha10}.js"
+        ext_rt_js_valid = False
+        if ext_rt_js_path.is_file():
+            try:
+                ext_rt_bytes = ext_rt_js_path.read_bytes()
+                ext_rt_txt = ext_rt_bytes.decode("utf-8", errors="ignore")
+                ext_rt_js_valid = (
+                    ext_rt_bytes == expected_rt_bytes
+                    and hashlib.sha256(ext_rt_bytes).hexdigest()[:10] == expected_rt_sha10
+                    and "resolveActiveScenarioAmount" in ext_rt_txt
+                )
+            except Exception:
+                ext_rt_js_valid = False
 
         for html_file in html_files:
             rel_parts = html_file.relative_to(tools_dir).parts[:-1]
@@ -8538,7 +8711,18 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
 
             if n_pre == 0:
                 page_issues.append("missing_scenario_preset_buttons")
-            if 'id="pseo-runtime-sync"' not in norm_html or "resolveActiveScenarioAmount" not in norm_html:
+            raw_no_comments = re.sub(r"<!--[\s\S]*?-->", "", raw_html)
+            has_valid_runtime_sync = (
+                (has_current_external_runtime_sync_tag(raw_html) and ext_rt_js_valid)
+                or bool(
+                    re.search(
+                        r'<script\b[^>]*(?<![a-zA-Z0-9_-])id\s*=\s*["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?resolveActiveScenarioAmount[\s\S]*?</script>',
+                        raw_no_comments,
+                        re.IGNORECASE,
+                    )
+                )
+            )
+            if not has_valid_runtime_sync:
                 page_issues.append("missing_upgraded_runtime_synchronizer")
 
             if page_issues:
@@ -8610,6 +8794,12 @@ __all__ = [
     "classify_screen_archetype",
     "get_screen_archetype_contract",
     "render_visual_primitives_style",
+    "render_runtime_synchronizer_js",
+    "get_runtime_synchronizer_js_sha10",
+    "get_runtime_synchronizer_script_src",
+    "render_external_runtime_synchronizer_tag",
+    "has_current_external_runtime_sync_tag",
+    "write_runtime_synchronizer_asset",
     "render_runtime_synchronizer_script",
     "detect_visual_and_ux_contract_issues",
     "assert_visual_and_ux_contracts",

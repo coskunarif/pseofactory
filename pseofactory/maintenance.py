@@ -9906,6 +9906,13 @@ class RetroReflectionEngine:
         allow_rolled_back_zero_tax_title: bool = False,
     ) -> List[str]:
         """Returns list of missing upgraded engine mechanics for a tool/calculator HTML document."""
+        from pseofactory.visual_primitives import (
+            VISUAL_PRIMITIVES_VERSION,
+            detect_visual_and_ux_contract_issues,
+            has_current_external_runtime_sync_tag,
+            render_runtime_synchronizer_script_stripped,
+        )
+        has_ext_rt_sync = has_current_external_runtime_sync_tag(html_content)
         missing: List[str] = []
         has_manifest = (
             'id="calculation-manifest"' in html_content
@@ -9950,7 +9957,11 @@ class RetroReflectionEngine:
         if 'data-mechanic="compliant_intent_monetization"' not in html_content:
             missing.append("compliant_intent_monetization")
 
-        if 'type="range"' not in html_content and "type='range'" not in html_content:
+        if (
+            'type="range"' not in html_content
+            and "type='range'" not in html_content
+            and not has_ext_rt_sync
+        ):
             missing.append("range_slider")
 
         canon_m = re.search(
@@ -10348,11 +10359,6 @@ class RetroReflectionEngine:
         ):
             missing.append("serp_incumbent_depth_upgrade")
 
-        from pseofactory.visual_primitives import (
-            VISUAL_PRIMITIVES_VERSION,
-            detect_visual_and_ux_contract_issues,
-            render_runtime_synchronizer_script_stripped,
-        )
         if (
             'id="pseo-visual-primitives"' not in html_content
             or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
@@ -10361,25 +10367,33 @@ class RetroReflectionEngine:
                 ".serp-depth-workbench" not in html_content
                 and not re.search(r'<link\b[^>]*id=["\']pseo-visual-primitives["\']', html_content, re.IGNORECASE)
             )
-            or "updateSerpWorkbenchSynchronously" not in html_content
-            or "updateInteractiveCliffAndComparator" not in html_content
-            or "emitWorkbenchEngagementBeacon" not in html_content
-            or "partner-quote-intake-form" not in html_content
-            or "hydrateInputsFromLocationSearch" not in html_content
-            or "resolveBlueprintStatusNode" not in html_content
-            or "appendActionLink" not in html_content
-            or '["input-med_school_loan_balance", "serp-loan-balance"]' not in html_content
-            or '["input-bond_amount", "serp-b2b-gross"]' not in html_content
-            or ('id="cg-ordinary-income"' in html_content and "cgTaxGrossEl" not in html_content)
-            or "renderPlaybookAndFulfillmentDrawer" not in html_content
-            or "qThreshAmt" not in html_content
-            or "evalProgressiveFederalTax" not in html_content
-            or "_lastInteractionScope" not in html_content
-            or "epochBase" not in html_content
+            or (
+                not has_ext_rt_sync
+                and (
+                    "updateSerpWorkbenchSynchronously" not in html_content
+                    or "updateInteractiveCliffAndComparator" not in html_content
+                    or "emitWorkbenchEngagementBeacon" not in html_content
+                    or "partner-quote-intake-form" not in html_content
+                    or "hydrateInputsFromLocationSearch" not in html_content
+                    or "resolveBlueprintStatusNode" not in html_content
+                    or "appendActionLink" not in html_content
+                    or '["input-med_school_loan_balance", "serp-loan-balance"]' not in html_content
+                    or '["input-bond_amount", "serp-b2b-gross"]' not in html_content
+                    or ('id="cg-ordinary-income"' in html_content and "cgTaxGrossEl" not in html_content)
+                    or "renderPlaybookAndFulfillmentDrawer" not in html_content
+                    or "qThreshAmt" not in html_content
+                    or "evalProgressiveFederalTax" not in html_content
+                    or "_lastInteractionScope" not in html_content
+                    or "epochBase" not in html_content
+                    or "data-preset-crit" not in html_content
+                    or "carryShield" not in html_content
+                    or "data-focused-target" not in html_content
+                    or "data-checkout-trigger" not in html_content
+                    or "checkout-settlement-attribution-banner" not in html_content
+                    or "playbook_csv_url" not in html_content
+                )
+            )
             or "48350" in html_content
-            or "data-preset-crit" not in html_content
-            or "carryShield" not in html_content
-            or "data-focused-target" not in html_content
             or "keepalive: true" in html_content
             or "0.285" in html_content
             or "0.235 : 0.252" in html_content
@@ -10409,9 +10423,6 @@ class RetroReflectionEngine:
                 and 'id="saveable-decision-blueprint"' in html_content
                 and 'id="post-calculation-upgrade-drawer"' not in html_content
             )
-            or "data-checkout-trigger" not in html_content
-            or "checkout-settlement-attribution-banner" not in html_content
-            or "playbook_csv_url" not in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or "window.location.protocol === 'file:'" in html_content
             or (
@@ -10431,28 +10442,33 @@ class RetroReflectionEngine:
                     '"dateModified": "2026-10-27"' in html_content
                     or '"dateModified":"2026-10-27"' in html_content
                     or 'placeholder="Work email address..."' in html_content
-            or "autoPrevBtn" not in html_content
-            or "primaryCalcIds" not in html_content
-            or (
-                'id="calc-result-quick-unlock-bar"' in html_content
-                and 'data-contextual-v2="1"' not in html_content
-            )
-            or (
-                '<div class="calc-inline-cta"' in html_content
-                and '<div class="kpi-block"' in html_content
-                and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="kpi-block"')
-            )
-            or (
-                '<div class="calc-inline-cta"' in html_content
-                and 'id="rap-subsidy-meter"' in html_content
-                and html_content.find('<div class="calc-inline-cta"') < html_content.find('id="rap-subsidy-meter"')
-            )
-            or (
-                '<div class="calc-inline-cta"' in html_content
-                and '<div class="calc-metrics-grid"' in html_content
-                and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="calc-metrics-grid"')
-            )
-            or render_runtime_synchronizer_script_stripped() not in html_content
+                    or (
+                        not has_ext_rt_sync
+                        and (
+                            "autoPrevBtn" not in html_content
+                            or "primaryCalcIds" not in html_content
+                            or render_runtime_synchronizer_script_stripped() not in html_content
+                        )
+                    )
+                    or (
+                        'id="calc-result-quick-unlock-bar"' in html_content
+                        and 'data-contextual-v2="1"' not in html_content
+                    )
+                    or (
+                        '<div class="calc-inline-cta"' in html_content
+                        and '<div class="kpi-block"' in html_content
+                        and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="kpi-block"')
+                    )
+                    or (
+                        '<div class="calc-inline-cta"' in html_content
+                        and 'id="rap-subsidy-meter"' in html_content
+                        and html_content.find('<div class="calc-inline-cta"') < html_content.find('id="rap-subsidy-meter"')
+                    )
+                    or (
+                        '<div class="calc-inline-cta"' in html_content
+                        and '<div class="calc-metrics-grid"' in html_content
+                        and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="calc-metrics-grid"')
+                    )
                 )
             )
             or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
@@ -10920,7 +10936,7 @@ class RetroReflectionEngine:
             "proprietary_telemetry": signal_bundle["proprietary_telemetry"],
         }
 
-    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str, str, bool, Tuple[str, ...]], Tuple[str, List[str]]] = {}
+    _RETROFIT_HTML_CACHE: Dict[Tuple[str, str, str, str, bool, bool, Tuple[str, ...]], Tuple[str, List[str]]] = {}
 
     @classmethod
     def _collect_html_output_parity_missing(
@@ -11183,7 +11199,7 @@ class RetroReflectionEngine:
                 if rb_t_val and rb_t_val not in eff_forbidden_titles:
                     eff_forbidden_titles.append(rb_t_val)
 
-        cache_key: Optional[Tuple[str, str, str, str, bool, Tuple[str, ...]]] = None
+        cache_key: Optional[Tuple[str, str, str, str, bool, bool, Tuple[str, ...]]] = None
         if manifest_override is None and html_content:
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
             dist_key = str(Path(dist_dir).resolve()) if dist_dir is not None else ""
@@ -11192,12 +11208,16 @@ class RetroReflectionEngine:
                 str(property_id).lower(),
                 str(slug),
                 dist_key,
+                dist_dir is not None,
                 eff_preserve_title,
                 tuple(sorted(eff_forbidden_titles)),
             )
             cached_res = cls._RETROFIT_HTML_CACHE.get(cache_key)
             if cached_res is not None:
                 out_html, out_rep = cached_res
+                if dist_dir is not None and "/static/js/pseo-runtime-sync." in out_html:
+                    from pseofactory.visual_primitives import write_runtime_synchronizer_asset
+                    write_runtime_synchronizer_asset(Path(dist_dir))
                 if dist_dir is None or not cls._sidecar_needs_sync(Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json", out_html):
                     return out_html, list(out_rep)
 
@@ -11276,6 +11296,37 @@ class RetroReflectionEngine:
             ):
                 missing.append("serp_incumbent_depth_upgrade")
         if not missing:
+            if dist_dir is not None and (
+                'id="pseo-runtime-sync"' in html_content or "id='pseo-runtime-sync'" in html_content
+            ):
+                from pseofactory.visual_primitives import (
+                    has_current_external_runtime_sync_tag,
+                    normalize_html_visual_primitives,
+                    write_runtime_synchronizer_asset,
+                )
+
+                if not has_current_external_runtime_sync_tag(html_content):
+                    ext_html, _ = normalize_html_visual_primitives(html_content, dist_dir=dist_dir)
+                    if ext_html != html_content:
+                        if cache_key is not None:
+                            if len(cls._RETROFIT_HTML_CACHE) > 512:
+                                cls._RETROFIT_HTML_CACHE.clear()
+                            cls._RETROFIT_HTML_CACHE[cache_key] = (ext_html, ["deterministic_visual_primitives"])
+                            ext_digest = hashlib.sha256(ext_html.encode("utf-8", errors="ignore")).hexdigest()
+                            cls._RETROFIT_HTML_CACHE[
+                                (
+                                    ext_digest,
+                                    cache_key[1],
+                                    cache_key[2],
+                                    cache_key[3],
+                                    cache_key[4],
+                                    cache_key[5],
+                                    cache_key[6],
+                                )
+                            ] = (ext_html, [])
+                        return ext_html, ["deterministic_visual_primitives"]
+                else:
+                    write_runtime_synchronizer_asset(Path(dist_dir))
             if cache_key is not None:
                 if len(cls._RETROFIT_HTML_CACHE) > 512:
                     cls._RETROFIT_HTML_CACHE.clear()
@@ -11918,7 +11969,7 @@ class RetroReflectionEngine:
         )
 
         from pseofactory.visual_primitives import normalize_html_visual_primitives
-        updated, vp_repaired = normalize_html_visual_primitives(updated)
+        updated, vp_repaired = normalize_html_visual_primitives(updated, dist_dir=dist_dir)
         if "deterministic_visual_primitives" in missing or vp_repaired or geo_norm_changed:
             if "deterministic_visual_primitives" not in repaired:
                 repaired.append("deterministic_visual_primitives")
@@ -11941,6 +11992,7 @@ class RetroReflectionEngine:
                     cache_key[3],
                     cache_key[4],
                     cache_key[5],
+                    cache_key[6],
                 )
             ] = (updated, [])
 
@@ -14009,7 +14061,12 @@ class RetroReflectionEngine:
         if not d.is_dir():
             return {"status": "PASS", "pages_scanned": 0, "total_pages": 0, "stale_pages": {}, "stale_count": 0}
 
-        from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
+        from pseofactory.visual_primitives import (
+            detect_visual_and_ux_contract_issues,
+            get_runtime_synchronizer_js_sha10,
+            has_current_external_runtime_sync_tag,
+            render_runtime_synchronizer_js,
+        )
         from pseofactory.tenant_facts import TruthReconciliationEngine
 
         active_overlays = cls._resolve_active_estate_overlays(d, property_id, heal_legacy=False)
@@ -14057,7 +14114,17 @@ class RetroReflectionEngine:
                         "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
                         for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)
                     )
-                    or ('id="pseo-runtime-sync"' in content and ("resolveBlueprintStatusNode" not in content or "appendActionLink" not in content or '["input-med_school_loan_balance", "serp-loan-balance"]' not in content or '["input-bond_amount", "serp-b2b-gross"]' not in content or ('id="cg-ordinary-income"' in content and "cgTaxGrossEl" not in content)))
+                    or (
+                        'id="pseo-runtime-sync"' in content
+                        and not has_current_external_runtime_sync_tag(content)
+                        and (
+                            "resolveBlueprintStatusNode" not in content
+                            or "appendActionLink" not in content
+                            or '["input-med_school_loan_balance", "serp-loan-balance"]' not in content
+                            or '["input-bond_amount", "serp-b2b-gross"]' not in content
+                            or ('id="cg-ordinary-income"' in content and "cgTaxGrossEl" not in content)
+                        )
+                    )
                 ):
                     stale_pages[rel] = ["deterministic_visual_primitives"]
                 continue
@@ -14140,6 +14207,34 @@ class RetroReflectionEngine:
 
         if cls._has_stale_llms_manifests(d, property_id):
             stale_pages["llms.txt"] = ["llms_manifest_parity"]
+
+        if any("/static/js/pseo-runtime-sync." in txt for txt in html_cache.values()):
+            expected_rt_sha10 = get_runtime_synchronizer_js_sha10()
+            expected_rt_bytes = render_runtime_synchronizer_js().encode("utf-8")
+            expected_rt_name = f"pseo-runtime-sync.{expected_rt_sha10}.js"
+            rt_js_dir = d / "static" / "js"
+            expected_rt_path = rt_js_dir / expected_rt_name
+            rt_bundle_ok = False
+            if expected_rt_path.is_file():
+                try:
+                    rt_bundle_bytes = expected_rt_path.read_bytes()
+                    rt_bundle_ok = (
+                        len(rt_bundle_bytes) > 0
+                        and rt_bundle_bytes == expected_rt_bytes
+                        and hashlib.sha256(rt_bundle_bytes).hexdigest()[:10] == expected_rt_sha10
+                    )
+                except Exception:
+                    rt_bundle_ok = False
+            if not rt_bundle_ok:
+                stale_pages.setdefault(f"static/js/{expected_rt_name}", []).append(
+                    "external_runtime_sync_bundle_integrity"
+                )
+            if rt_js_dir.is_dir():
+                for cand_rt_js in sorted(rt_js_dir.glob("pseo-runtime-sync.*.js")):
+                    if cand_rt_js.name != expected_rt_name and cand_rt_js.is_file():
+                        stale_pages.setdefault(f"static/js/{cand_rt_js.name}", []).append(
+                            "stale_external_runtime_sync_bundle"
+                        )
 
         if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
             hdr_f = d / "_headers"
@@ -14949,7 +15044,11 @@ class RetroReflectionEngine:
                     content = nt_geo_html
                     if rel not in retrofitted_paths:
                         retrofitted_paths.append(rel)
-                norm_html, norm_rep = normalize_html_visual_primitives(content, is_tenant_porcelain=True)
+                norm_html, norm_rep = normalize_html_visual_primitives(
+                    content,
+                    is_tenant_porcelain=True,
+                    dist_dir=d,
+                )
                 if norm_rep and norm_html != content:
                     html_file.write_text(norm_html, encoding="utf-8")
                     if rel not in retrofitted_paths:
@@ -15117,7 +15216,7 @@ class RetroReflectionEngine:
                     )
                     if callout_changed or reposition_changed or overlay_injected or gh_needs_heal or post_callout_heal:
                         norm_tool_html = normalize_statutory_acronym_casing(norm_tool_html)
-                        norm_tool_html, vp_rep = normalize_html_visual_primitives(norm_tool_html)
+                        norm_tool_html, vp_rep = normalize_html_visual_primitives(norm_tool_html, dist_dir=d)
                         if norm_tool_html != updated_html:
                             updated_html = norm_tool_html
                             if callout_changed and not ran_callout_via_reposition and "callout_message_match" not in repaired:

@@ -4289,6 +4289,9 @@ def _resolve_local_js_version_hash(
     return hashlib.sha256(seed).hexdigest()[:10]
 
 
+_CONTENT_HASHED_JS_RE = re.compile(r"\.[0-9a-f]{10}\.js$", re.IGNORECASE)
+
+
 def _rewrite_local_js_version_tags(
     html_content: str,
     profile: Dict[str, Any],
@@ -4301,6 +4304,10 @@ def _rewrite_local_js_version_tags(
         src_val = m.group(3)
         suffix = m.group(4)
         clean_src = src_val.split("?", 1)[0]
+        if _CONTENT_HASHED_JS_RE.search(clean_src):
+            if src_val != clean_src:
+                return f"<script{prefix}{quote}{clean_src}{quote}{suffix}>"
+            return m.group(0)
         has_v = bool(re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_val))
         disk_bytes = _read_local_js_bytes(clean_src, profile, dist_dir=dist_dir)
         if disk_bytes is not None:
@@ -4651,6 +4658,45 @@ def normalize_html_to_porcelain_shell(
 
     inner_main, trailing_scripts = _strip_legacy_shell_chrome(body_no_style)
 
+    from pseofactory.visual_primitives import (
+        has_current_external_runtime_sync_tag,
+        render_external_runtime_synchronizer_tag,
+        write_runtime_synchronizer_asset,
+    )
+
+    _rt_sync_tag_re = re.compile(
+        r'<script\b[^>]*(?<![a-zA-Z0-9_-])id\s*=\s*["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?</script>',
+        re.IGNORECASE,
+    )
+    extracted_runtime_sync_tags: List[str] = []
+
+    def _capture_runtime_sync_tag(m: re.Match[str]) -> str:
+        extracted_runtime_sync_tags.append(m.group(0).strip())
+        return ""
+
+    inner_main = _rt_sync_tag_re.sub(_capture_runtime_sync_tag, inner_main)
+    filtered_trailing_scripts: List[str] = []
+    for ts in trailing_scripts:
+        if _rt_sync_tag_re.search(ts):
+            _rt_sync_tag_re.sub(_capture_runtime_sync_tag, ts)
+        else:
+            filtered_trailing_scripts.append(ts)
+    trailing_scripts = filtered_trailing_scripts
+    had_runtime_sync = bool(extracted_runtime_sync_tags)
+    had_external_runtime_sync = (
+        has_current_external_runtime_sync_tag(body_no_style)
+        or any(
+            bool(
+                re.search(
+                    r'(?<![a-zA-Z0-9_-])src\s*=\s*["\']/static/js/pseo-runtime-sync\.[0-9a-f]{10}\.js["\']',
+                    tag.split(">", 1)[0],
+                    re.IGNORECASE,
+                )
+            )
+            for tag in extracted_runtime_sync_tags
+        )
+    )
+
     if blueprint == "calculator_leaf":
         inner_main = _enforce_calculator_leaf_slot_order(inner_main, rel_path, profile)
     elif blueprint in ("comparison_leaf", "editorial_guide"):
@@ -4781,6 +4827,17 @@ def normalize_html_to_porcelain_shell(
         s.strip().replace("'#16a34a'", "'var(--status-positive)'").replace('"#16a34a"', '"var(--status-positive)"')
         for s in trailing_scripts
     ]
+    if had_runtime_sync:
+        if dist_dir is not None or had_external_runtime_sync:
+            if dist_dir is not None:
+                write_runtime_synchronizer_asset(Path(dist_dir))
+            cleaned_scripts.append(render_external_runtime_synchronizer_tag().strip())
+        else:
+            cleaned_scripts.append(
+                extracted_runtime_sync_tags[-1]
+                .replace("'#16a34a'", "'var(--status-positive)'")
+                .replace('"#16a34a"', '"var(--status-positive)"')
+            )
     scripts_tail = ("\n  " + "\n  ".join(cleaned_scripts)) if cleaned_scripts else ""
 
     assembled = (
@@ -5687,6 +5744,12 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 force_active=True,
             )
         _ensure_block("/ai-benchmarks/*", [fresh_cc], replace_cc=True, force_active=True)
+        _ensure_block(
+            "/static/js/*",
+            ["Cache-Control: public, max-age=31536000, immutable"],
+            replace_cc=True,
+            force_active=True,
+        )
 
         for g in GOVERNANCE_ROUTES:
             route = f"/{g}/"
@@ -5880,6 +5943,14 @@ def compile_tenant_porcelain_estate_with_profile(
         if not out_css.is_file() or out_css.read_text(encoding="utf-8", errors="ignore") != css_text:
             out_css.write_text(css_text, encoding="utf-8")
             mutated_paths.append(css_rel)
+
+    from pseofactory.visual_primitives import write_runtime_synchronizer_asset
+
+    rt_js_path, rt_js_changed = write_runtime_synchronizer_asset(target_dist)
+    if rt_js_changed:
+        rt_js_rel = rt_js_path.relative_to(target_dist).as_posix()
+        if rt_js_rel not in mutated_paths:
+            mutated_paths.append(rt_js_rel)
 
     inferred_repo = Path(repo_root).resolve() if repo_root else target_dist.parent
     is_live_repo_under_unmerged = (
@@ -7072,8 +7143,16 @@ def _collect_html_asset_and_hygiene_issues(
         ):
             src_u = js_m.group(1)
             clean_js_src = src_u.split("?", 1)[0].split("#", 1)[0]
-            local_js_exists = (d_root / clean_js_src.lstrip("/")).is_file()
-            if (local_js_exists or has_compiled_estate) and not re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_u):
+            local_js_path = d_root / clean_js_src.lstrip("/")
+            local_js_exists = local_js_path.is_file()
+            is_content_hashed = bool(_CONTENT_HASHED_JS_RE.search(clean_js_src))
+            if has_compiled_estate and (not local_js_exists or local_js_path.stat().st_size == 0):
+                issues.append(f"Missing local script asset '{clean_js_src}' referenced in {rel_path}")
+            if (
+                (local_js_exists or has_compiled_estate)
+                and not is_content_hashed
+                and not re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_u)
+            ):
                 issues.append(f"Unversioned local script '{src_u}' without ?v= in {rel_path}")
         for og_u in re.findall(
             r'<meta\b[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
