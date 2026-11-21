@@ -228,10 +228,11 @@ def harvest_and_sync_gsc_daily_timeline(
 
         if records and persist and (db_path is not None or local_tdb.parent.is_dir() or "PYTEST_CURRENT_TEST" not in os.environ):
             with TrendHistoryDB(target_db_path) as tdb:
-                tdb.upsert_gsc_daily_metrics(records)
-                tdb.upsert_google_update_events(DEFAULT_GOOGLE_UPDATES)
-                ceil_analysis = detect_algorithmic_ceiling(records, updates=DEFAULT_GOOGLE_UPDATES)
-                tdb.record_gsc_ceiling_snapshot(ceil_analysis)
+                with tdb.acquire_lock(non_blocking=True, timeout=30.0):
+                    tdb.upsert_gsc_daily_metrics(records)
+                    tdb.upsert_google_update_events(DEFAULT_GOOGLE_UPDATES)
+                    ceil_analysis = detect_algorithmic_ceiling(records, updates=DEFAULT_GOOGLE_UPDATES)
+                    tdb.record_gsc_ceiling_snapshot(ceil_analysis)
         elif not records and target_db_path.is_file():
             with TrendHistoryDB(target_db_path, read_only=True) as tdb:
                 records = tdb.get_gsc_daily_metrics(prop, days=days)
@@ -1535,10 +1536,11 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                 can_mutate_pre_db = bool(persist_db and _resolve_safe_persist_flag(True, target_db_path))
                 with TrendHistoryDB(target_db_path, read_only=not can_mutate_pre_db) as tdb_pre:
                     if can_mutate_pre_db and valid_sitemap_norm:
-                        tdb_pre.sanitize_gsc_url_inspection_states(
-                            prop,
-                            valid_urls=[f"{u}/" for u in valid_sitemap_norm],
-                        )
+                        with tdb_pre.acquire_lock(non_blocking=True, timeout=30.0):
+                            tdb_pre.sanitize_gsc_url_inspection_states(
+                                prop,
+                                valid_urls=[f"{u}/" for u in valid_sitemap_norm],
+                            )
                     for db_rec in tdb_pre.get_gsc_url_inspection_states(prop):
                         raw_insp_items.append(db_rec.to_dict())
             except Exception:
@@ -1634,70 +1636,71 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                         pass
 
                 if can_mutate_db:
-                    try:
-                        if device_records:
-                            tdb.upsert_gsc_device_metrics(device_records)
-                        if live_gsc and not fixture_payload:
-                            if cli_ok_device_prop and not any((not r.page and not r.query) for r in device_records):
-                                tdb.delete_gsc_device_metrics(prop, property_wide_only=True)
-                            if (
-                                cli_ok_device_page
-                                and cli_ok_device_qpd
-                                and not any((r.page and not r.query) for r in device_records)
-                            ):
-                                tdb.delete_gsc_device_metrics(prop, page_only=True)
-                    except Exception:
-                        pass
+                    with tdb.acquire_lock(non_blocking=True, timeout=30.0):
+                        try:
+                            if device_records:
+                                tdb.upsert_gsc_device_metrics(device_records)
+                            if live_gsc and not fixture_payload:
+                                if cli_ok_device_prop and not any((not r.page and not r.query) for r in device_records):
+                                    tdb.delete_gsc_device_metrics(prop, property_wide_only=True)
+                                if (
+                                    cli_ok_device_page
+                                    and cli_ok_device_qpd
+                                    and not any((r.page and not r.query) for r in device_records)
+                                ):
+                                    tdb.delete_gsc_device_metrics(prop, page_only=True)
+                        except Exception:
+                            pass
 
-                    try:
-                        if appearance_records:
-                            tdb.upsert_gsc_search_appearance_metrics(appearance_records)
-                        elif live_gsc and not fixture_payload and cli_ok_appearance:
-                            tdb.delete_gsc_search_appearance_metrics(prop)
-                    except Exception:
-                        pass
+                        try:
+                            if appearance_records:
+                                tdb.upsert_gsc_search_appearance_metrics(appearance_records)
+                            elif live_gsc and not fixture_payload and cli_ok_appearance:
+                                tdb.delete_gsc_search_appearance_metrics(prop)
+                        except Exception:
+                            pass
 
-                    try:
-                        if window_records:
-                            tdb.upsert_gsc_query_page_windows(window_records)
-                        if live_gsc and not fixture_payload and cli_ok_qp_windows:
-                            present_qp_keys = {r.window_key for r in window_records}
-                            empty_qp_keys = cli_ok_qp_windows - present_qp_keys
-                            if empty_qp_keys:
-                                tdb.delete_gsc_query_page_windows(prop, sorted(empty_qp_keys))
-                    except Exception:
-                        pass
+                        try:
+                            if window_records:
+                                tdb.upsert_gsc_query_page_windows(window_records)
+                            if live_gsc and not fixture_payload and cli_ok_qp_windows:
+                                present_qp_keys = {r.window_key for r in window_records}
+                                empty_qp_keys = cli_ok_qp_windows - present_qp_keys
+                                if empty_qp_keys:
+                                    tdb.delete_gsc_query_page_windows(prop, sorted(empty_qp_keys))
+                        except Exception:
+                            pass
 
-                    try:
-                        if page_daily_records:
-                            tdb.upsert_gsc_page_daily(
-                                page_daily_records,
-                                replace_property=bool(live_gsc and not fixture_payload),
-                            )
-                        elif live_gsc and not fixture_payload and cli_ok_page_daily:
-                            tdb.delete_gsc_page_daily(prop)
-                    except Exception:
-                        pass
+                        try:
+                            if page_daily_records:
+                                tdb.upsert_gsc_page_daily(
+                                    page_daily_records,
+                                    replace_property=bool(live_gsc and not fixture_payload),
+                                )
+                            elif live_gsc and not fixture_payload and cli_ok_page_daily:
+                                tdb.delete_gsc_page_daily(prop)
+                        except Exception:
+                            pass
 
-                    try:
-                        if page_window_records:
-                            tdb.upsert_gsc_page_windows(
-                                page_window_records,
-                                replace_window=bool(live_gsc and not fixture_payload),
-                            )
-                        if live_gsc and not fixture_payload and cli_queried_page_windows:
-                            present_pw_keys = {r.window_key for r in page_window_records}
-                            empty_queried_keys = cli_queried_page_windows - present_pw_keys
-                            if empty_queried_keys:
-                                tdb.delete_gsc_page_windows(prop, sorted(empty_queried_keys))
-                    except Exception:
-                        pass
+                        try:
+                            if page_window_records:
+                                tdb.upsert_gsc_page_windows(
+                                    page_window_records,
+                                    replace_window=bool(live_gsc and not fixture_payload),
+                                )
+                            if live_gsc and not fixture_payload and cli_queried_page_windows:
+                                present_pw_keys = {r.window_key for r in page_window_records}
+                                empty_queried_keys = cli_queried_page_windows - present_pw_keys
+                                if empty_queried_keys:
+                                    tdb.delete_gsc_page_windows(prop, sorted(empty_queried_keys))
+                        except Exception:
+                            pass
 
-                    try:
-                        if inspection_records:
-                            tdb.upsert_gsc_url_inspection_states(inspection_records)
-                    except Exception:
-                        pass
+                        try:
+                            if inspection_records:
+                                tdb.upsert_gsc_url_inspection_states(inspection_records)
+                        except Exception:
+                            pass
 
                 if not fixture_payload:
                     try:

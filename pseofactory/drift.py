@@ -15,11 +15,18 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 
 
 _ENGINE_HASH_CACHE: Dict[Tuple[Any, ...], Tuple[float, str]] = {}
+_TENANT_SUBSTRATE_HASH_CACHE: Dict[Tuple[str, str], Tuple[Tuple[Tuple[str, float, int], ...], str]] = {}
 
 
 def clear_engine_hash_cache() -> None:
-    """Clears the in-memory engine hash cache."""
+    """Clears the in-memory engine hash and tenant substrate hash caches."""
     _ENGINE_HASH_CACHE.clear()
+    _TENANT_SUBSTRATE_HASH_CACHE.clear()
+    try:
+        from pseofactory.impact_planner import clear_partition_cache
+        clear_partition_cache()
+    except Exception:
+        pass
 
 
 def compute_engine_hash(
@@ -148,6 +155,55 @@ def compute_engine_hash(
     final_hash = master.hexdigest()
     _ENGINE_HASH_CACHE[cache_key] = (composite_mtime, final_hash)
     return final_hash
+
+
+def compute_tenant_substrate_hash(
+    property_id: str,
+    pkg_dir: Optional[Union[str, Path]] = None,
+) -> str:
+    """
+    Computes a deterministic SHA-256 fingerprint over SHARED union EXCLUSIVE[property_id]
+    engine Python files using the AST-backed conservative partition in impact_planner.py.
+    Editing a tenant-exclusive module (e.g. pseofactory/gainhelm_estate.py) changes ONLY
+    that tenant's substrate hash while leaving unaffected tenants' substrate hashes unchanged.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.impact_planner import get_tenant_engine_file_partition
+
+    raw_pid = (property_id or "").strip().lower()
+    norm_pid = "profithelm" if raw_pid in ("profithelm-platform", "factory") else raw_pid
+    resolved_pkg = Path(pkg_dir).resolve() if pkg_dir is not None else Path(__file__).resolve().parent
+    partition = get_tenant_engine_file_partition(resolved_pkg)
+    target_files = sorted(
+        set(partition.get("shared") or set())
+        | set((partition.get("exclusive") or {}).get(norm_pid, set()))
+    )
+    stat_sig_items: List[Tuple[str, float, int]] = []
+    for rel_path in target_files:
+        sub_rel = rel_path[len("pseofactory/") :] if rel_path.startswith("pseofactory/") else rel_path
+        fp = resolved_pkg / sub_rel
+        try:
+            st = fp.stat()
+            stat_sig_items.append((rel_path, st.st_mtime, st.st_size))
+        except OSError:
+            stat_sig_items.append((rel_path, -1.0, -1))
+    stat_sig = tuple(stat_sig_items)
+    t_cache_key = (str(resolved_pkg), norm_pid)
+    cached_t = _TENANT_SUBSTRATE_HASH_CACHE.get(t_cache_key)
+    if cached_t is not None and cached_t[0] == stat_sig:
+        return cached_t[1]
+    master = hashlib.sha256()
+    for rel_path in target_files:
+        sub_rel = rel_path[len("pseofactory/") :] if rel_path.startswith("pseofactory/") else rel_path
+        fp = resolved_pkg / sub_rel
+        try:
+            file_sha = hashlib.sha256(fp.read_bytes()).hexdigest()
+            master.update(f"{rel_path}:{file_sha}\n".encode("utf-8"))
+        except Exception:
+            pass
+    final_tsh = master.hexdigest()
+    _TENANT_SUBSTRATE_HASH_CACHE[t_cache_key] = (stat_sig, final_tsh)
+    return final_tsh
 
 
 def compute_two_tier_merkle_hash(
@@ -455,6 +511,7 @@ def write_substrate_lock(
     payload["dist_fingerprint"] = fp
     payload["engine_hash"] = eh
     payload["substrate_hash"] = eh
+    payload["tenant_substrate_hash"] = compute_tenant_substrate_hash(pid)
     if synced_sub_hash:
         payload["synced_substrate_hash"] = synced_sub_hash
     payload["total_assets"] = tot
@@ -480,6 +537,7 @@ def verify_all_tenants_aligned_for_latch(
     workspace_root: Union[str, Path] = "/home/ubuntuadmin/projects",
     expected_hash: Optional[str] = None,
     require_git_clean_and_pushed: bool = True,
+    allow_tenant_scoped_hash: bool = False,
 ) -> Tuple[bool, List[str]]:
     """
     Verifies that every canonical tenant repository (profithelm-platform, prexvo, gainhelm)
@@ -524,7 +582,12 @@ def verify_all_tenants_aligned_for_latch(
                 lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
                 l_eh = str(lock_data.get("engine_hash") or "")
                 l_sh = str(lock_data.get("substrate_hash") or l_eh)
-                if l_eh != target_hash or l_sh != target_hash:
+                hash_aligned = (l_eh == target_hash and l_sh == target_hash)
+                if not hash_aligned and allow_tenant_scoped_hash:
+                    l_tsh = str(lock_data.get("tenant_substrate_hash") or "")
+                    if l_tsh and l_tsh == compute_tenant_substrate_hash(pid):
+                        hash_aligned = True
+                if not hash_aligned:
                     reasons.append(
                         f"{pid}: substrate_lock.json hash '{l_eh[:12]}' != expected '{target_hash[:12]}'"
                     )
@@ -674,6 +737,7 @@ def detect_engine_drift(
     lock_path: Optional[Union[str, Path]] = None,
     verify_tenants: Optional[bool] = None,
     workspace_root: Optional[Union[str, Path]] = None,
+    allow_tenant_scoped_hash: bool = False,
 ) -> Dict[str, Any]:
     """
     Audits the current engine hash against recorded state in state_file (.agy/engine_hash.json).
@@ -769,11 +833,53 @@ def detect_engine_drift(
             eff_ws / "pseofactory" / ".agy" / "engine_hash.json",
         )
     )
+    if (
+        allow_tenant_scoped_hash
+        and drift_detected
+        and not is_workspace_engine_hash
+        and base_dirs is None
+        and include_paths is None
+        and recorded_hash is not None
+    ):
+        cand_lock: Optional[Path] = None
+        cand_repo: Optional[Path] = None
+        if s_path.name == "substrate_lock.json":
+            cand_repo = s_resolved.parent
+            cand_lock = s_resolved
+        elif s_path.name == "engine_hash.json" and s_path.parent.name == ".agy":
+            cand_repo = s_resolved.parent.parent
+            cand_lock = cand_repo / "substrate_lock.json"
+        if cand_lock is not None and cand_repo is not None and cand_lock.is_file():
+            try:
+                lock_data = json.loads(cand_lock.read_text(encoding="utf-8"))
+                if isinstance(lock_data, dict):
+                    l_pid = str(lock_data.get("property_id") or lock_data.get("property") or "").strip().lower()
+                    l_tsh = str(lock_data.get("tenant_substrate_hash") or "").strip()
+                    l_eh = str(lock_data.get("engine_hash") or "").strip()
+                    if (
+                        l_pid
+                        and l_tsh
+                        and l_eh == str(recorded_hash)
+                        and l_tsh == compute_tenant_substrate_hash(l_pid)
+                    ):
+                        dist_ok = True
+                        cand_dist = cand_repo / "dist"
+                        if cand_dist.is_dir() and lock_data.get("dist_fingerprint"):
+                            live_fp, live_tot = compute_dist_lock_metrics(cand_dist)
+                            dist_ok = (
+                                live_fp == lock_data.get("dist_fingerprint")
+                                and live_tot == lock_data.get("total_assets")
+                            )
+                        if dist_ok:
+                            drift_detected = False
+            except Exception:
+                pass
     if is_workspace_engine_hash and base_dirs is None and include_paths is None:
         all_ok, unaligned_reasons = verify_all_tenants_aligned_for_latch(
             workspace_root=eff_ws,
             expected_hash=current_hash,
             require_git_clean_and_pushed=bool(auto_record or verify_tenants),
+            allow_tenant_scoped_hash=allow_tenant_scoped_hash,
         )
         if not all_ok:
             drift_detected = True
@@ -923,7 +1029,7 @@ def trigger_drift_cascade(
     l_path = Path(ledger_file).resolve() if ledger_file else root / ".agy" / "asset_ledger.json"
 
     # 1. Drift Detection
-    drift_report = detect_engine_drift(s_path)
+    drift_report = detect_engine_drift(s_path, allow_tenant_scoped_hash=True)
     drift_detected = bool(drift_report.get("drift_detected", False))
 
     # Lazy imports from pseofactory to maintain modular decoupling and prevent circular imports

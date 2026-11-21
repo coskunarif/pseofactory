@@ -15,12 +15,14 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
@@ -435,38 +437,80 @@ class EmailIngestionEngine:
 
     def load_state(self) -> Dict[str, Any]:
         if os.path.isfile(self.state_path):
+            lock_path = f"{self.state_path}.lock"
             try:
-                with open(self.state_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                self._ensure_dirs()
+                with open(lock_path, "a+", encoding="utf-8") as lock_f:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        with open(self.state_path, "r", encoding="utf-8") as f:
+                            return json.load(f)
+                    finally:
+                        fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
         return {"accounts": {}, "last_updated": ""}
 
     def save_state(self, state: Dict[str, Any]) -> None:
+        self._ensure_dirs()
         state["last_updated"] = datetime.now(timezone.utc).isoformat()
-        tmp_path = f"{self.state_path}.{os.getpid()}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, self.state_path)
+        lock_path = f"{self.state_path}.lock"
+        tmp_path = f"{self.state_path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        with open(lock_path, "a+", encoding="utf-8") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.state_path)
+            except Exception:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def load_cache(self) -> Dict[str, Any]:
         if os.path.isfile(self.cache_path):
+            lock_path = f"{self.cache_path}.lock"
             try:
-                with open(self.cache_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                self._ensure_dirs()
+                with open(lock_path, "a+", encoding="utf-8") as lock_f:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        with open(self.cache_path, "r", encoding="utf-8") as f:
+                            return json.load(f)
+                    finally:
+                        fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
         return {"messages": {}, "classifications": []}
 
     def save_cache(self, cache: Dict[str, Any]) -> None:
-        tmp_path = f"{self.cache_path}.{os.getpid()}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(cache, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, self.cache_path)
+        self._ensure_dirs()
+        lock_path = f"{self.cache_path}.lock"
+        tmp_path = f"{self.cache_path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        with open(lock_path, "a+", encoding="utf-8") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(cache, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.cache_path)
+            except Exception:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def can_poll(self, account: str, force: bool = False) -> Tuple[bool, int]:
         """

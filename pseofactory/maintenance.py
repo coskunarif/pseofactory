@@ -544,7 +544,7 @@ class PropertyAdapter(ABC):
             self.property_id.lower(), set()
         )
 
-    _SCOPED_ENV_LOCK = threading.Lock()
+    _SCOPED_ENV_LOCK = threading.RLock()
     _SCOPED_ENV_SEQ: int = 0
     _SCOPED_ENV_BASELINE: Dict[str, Optional[str]] = {}
     _SCOPED_ENV_STACK: List[Tuple[int, Dict[str, str]]] = []
@@ -553,8 +553,9 @@ class PropertyAdapter(ABC):
     def scoped_environment(self) -> Iterator[None]:
         """
         Context manager isolating and restoring FACTORY_* environment variables.
-        Guarantees stateless worker physics between tenant runs, including when
-        interleaved across concurrent supervisor ThreadPoolExecutor workers.
+        Holds a re-entrant lock across the full yield critical section so concurrent
+        threads never observe cross-tenant os.environ bleed while same-thread nested
+        re-entry continues to unwind cleanly via _SCOPED_ENV_STACK.
         Zero em-dashes. Zero en-dashes.
         """
         keys = [
@@ -579,10 +580,9 @@ class PropertyAdapter(ABC):
             PropertyAdapter._SCOPED_ENV_STACK.append((scope_id, target_env))
             for k, val in target_env.items():
                 os.environ[k] = val
-        try:
-            yield
-        finally:
-            with PropertyAdapter._SCOPED_ENV_LOCK:
+            try:
+                yield
+            finally:
                 PropertyAdapter._SCOPED_ENV_STACK = [
                     item for item in PropertyAdapter._SCOPED_ENV_STACK if item[0] != scope_id
                 ]
@@ -2995,8 +2995,9 @@ class AssetIntegrityEvaluator:
     Zero em-dashes. Zero en-dashes.
     """
 
-    _GLOBAL_AUDIT_CACHE: Dict[Tuple[str, float, int], Optional[AssetDriftRecord]] = {}
-    _GLOBAL_FINGERPRINT_CACHE: Dict[Tuple[str, float, int], str] = {}
+    _AUDIT_CACHE_LOCK = threading.RLock()
+    _GLOBAL_AUDIT_CACHE: Dict[Tuple[str, str, float, int], Optional[AssetDriftRecord]] = {}
+    _GLOBAL_FINGERPRINT_CACHE: Dict[Tuple[str, str, float, int], str] = {}
 
     def __init__(
         self,
@@ -3011,9 +3012,9 @@ class AssetIntegrityEvaluator:
         self.enforce_operational_shield = enforce_operational_shield
         self.truth_engine = truth_engine or LiveTruthAuditEngine()
         self.auto_reconcile = auto_reconcile
-        self._audit_cache: Dict[Tuple[str, float, int], Optional[AssetDriftRecord]] = self._GLOBAL_AUDIT_CACHE
+        self._audit_cache: Dict[Tuple[str, str, float, int], Optional[AssetDriftRecord]] = self._GLOBAL_AUDIT_CACHE
         self._asset_audit_cache = self._audit_cache
-        self._fingerprint_cache: Dict[Tuple[str, float, int], str] = self._GLOBAL_FINGERPRINT_CACHE
+        self._fingerprint_cache: Dict[Tuple[str, str, float, int], str] = self._GLOBAL_FINGERPRINT_CACHE
         self._seo_verifier: Optional[Any] = None
         self._seo_verifiers: Dict[str, Any] = {}
 
@@ -3110,7 +3111,8 @@ class AssetIntegrityEvaluator:
         except OSError:
             mtime, size = None, None
 
-        cache_key = (str(p), mtime, size) if mtime is not None else None
+        prop_cache_id = (adapter.property_id or "").strip().lower()
+        cache_key = (prop_cache_id, str(p), mtime, size) if mtime is not None else None
         rel_key = (
             p.relative_to(adapter.dist_dir).as_posix()
             if p.is_relative_to(adapter.dist_dir)
@@ -3123,14 +3125,16 @@ class AssetIntegrityEvaluator:
 
         # Differential cache check for verified clean assets
         live_fingerprint: Optional[str] = None
-        if not engine_drifted and cache_key and cache_key in self._audit_cache and not self.enforce_operational_shield:
-            cached_rec = self._audit_cache[cache_key]
-            if cached_rec is None:
+        if not engine_drifted and cache_key and not self.enforce_operational_shield:
+            with self._AUDIT_CACHE_LOCK:
+                in_cache = cache_key in self._audit_cache
+                cached_rec = self._audit_cache.get(cache_key) if in_cache else None
                 cached_fingerprint = (
                     self._fingerprint_cache.get(cache_key)
-                    if hasattr(self, "_fingerprint_cache")
+                    if in_cache and hasattr(self, "_fingerprint_cache")
                     else None
                 )
+            if in_cache and cached_rec is None:
                 live_fingerprint = compute_asset_fingerprint(p)
                 if cached_fingerprint is not None and cached_fingerprint == live_fingerprint:
                     if recorded_hash is None or cached_fingerprint == recorded_hash:
@@ -3363,18 +3367,20 @@ class AssetIntegrityEvaluator:
                 metadata={"rel_key": rel_key},
             )
             if cache_key:
-                if reasons == [DriftReason.ENGINE_HASH_DRIFT]:
-                    self._audit_cache[cache_key] = None
-                    if hasattr(self, "_fingerprint_cache"):
-                        self._fingerprint_cache[cache_key] = current_hash
-                elif not engine_drifted:
-                    self._audit_cache[cache_key] = rec
+                with self._AUDIT_CACHE_LOCK:
+                    if reasons == [DriftReason.ENGINE_HASH_DRIFT]:
+                        self._audit_cache[cache_key] = None
+                        if hasattr(self, "_fingerprint_cache"):
+                            self._fingerprint_cache[cache_key] = current_hash
+                    elif not engine_drifted:
+                        self._audit_cache[cache_key] = rec
             return rec
 
         if cache_key:
-            self._audit_cache[cache_key] = None
-            if hasattr(self, "_fingerprint_cache"):
-                self._fingerprint_cache[cache_key] = current_hash
+            with self._AUDIT_CACHE_LOCK:
+                self._audit_cache[cache_key] = None
+                if hasattr(self, "_fingerprint_cache"):
+                    self._fingerprint_cache[cache_key] = current_hash
         return None
 
     def audit_all(
@@ -3441,10 +3447,12 @@ class AssetIntegrityEvaluator:
                     if cp.is_file():
                         s_file = cp
                         break
+            recorded_hash_from_state: Optional[str] = None
             if s_file is not None and (state_file is not None or s_file.exists()):
                 drift_res = detect_engine_drift(s_file, base_dirs=b_dirs)
                 engine_drifted = bool(drift_res.get("drift_detected", False))
-            if not engine_drifted and getattr(adapter, "repo_path", None) and state_file is None:
+                recorded_hash_from_state = drift_res.get("recorded_hash")
+            if getattr(adapter, "repo_path", None) and state_file is None:
                 t_repo = Path(adapter.repo_path)
                 lock_file = t_repo / "substrate_lock.json"
                 if lock_file.is_file():
@@ -3455,11 +3463,42 @@ class AssetIntegrityEvaluator:
                         if in_synced_substrate and lock_data.get("synced_substrate_hash"):
                             if lock_data.get("synced_substrate_hash") != expected_eng:
                                 engine_drifted = True
-                        elif (
-                            lock_data.get("engine_hash") != expected_eng
-                            or lock_data.get("substrate_hash") != expected_eng
-                        ):
-                            engine_drifted = True
+                        else:
+                            lock_exact = (
+                                lock_data.get("engine_hash") == expected_eng
+                                and lock_data.get("substrate_hash") == expected_eng
+                            )
+                            scoped_ok = False
+                            if b_dirs is None and lock_data.get("tenant_substrate_hash"):
+                                try:
+                                    from pseofactory.drift import (
+                                        compute_dist_lock_metrics,
+                                        compute_tenant_substrate_hash,
+                                    )
+
+                                    tsh_match = (
+                                        str(lock_data.get("tenant_substrate_hash"))
+                                        == compute_tenant_substrate_hash(adapter.property_id)
+                                    )
+                                    state_consistent = (
+                                        recorded_hash_from_state is None
+                                        or str(lock_data.get("engine_hash") or "") == str(recorded_hash_from_state)
+                                    )
+                                    dist_match = True
+                                    if adapter.dist_dir and adapter.dist_dir.is_dir() and lock_data.get("dist_fingerprint"):
+                                        live_fp, live_tot = compute_dist_lock_metrics(adapter.dist_dir)
+                                        dist_match = (
+                                            str(lock_data.get("dist_fingerprint") or "") == live_fp
+                                            and lock_data.get("total_assets") == live_tot
+                                        )
+                                    scoped_ok = bool(tsh_match and state_consistent and dist_match)
+                                except Exception:
+                                    scoped_ok = False
+                            if engine_drifted:
+                                if scoped_ok:
+                                    engine_drifted = False
+                            elif not lock_exact and not scoped_ok:
+                                engine_drifted = True
                     except Exception:
                         engine_drifted = True
 
@@ -3471,11 +3510,12 @@ class AssetIntegrityEvaluator:
             and not self.enforce_operational_shield
             and not engine_drifted
         )
+        prop_key = (adapter.property_id or "").strip().lower()
+        prop_slug = re.sub(r"[^a-z0-9_-]+", "_", prop_key) or "default"
         xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "").strip()
+        worker_tag = f"_{xdist_worker}" if xdist_worker else ""
         disk_eval_cache_path = Path(
-            f"/tmp/pseofactory_asset_eval_cache_v1_{xdist_worker}.json"
-            if xdist_worker
-            else "/tmp/pseofactory_asset_eval_cache_v1.json"
+            f"/tmp/pseofactory_asset_eval_cache_v2_{prop_slug}{worker_tag}.json"
         )
         if engine_drifted and disk_eval_cache_path.is_file():
             try:
@@ -3493,13 +3533,14 @@ class AssetIntegrityEvaluator:
                         entries = raw_disk.get("entries", {})
                         if isinstance(entries, dict):
                             disk_clean_entries = entries
-                            for k_str, fp_hash in entries.items():
-                                parts = k_str.split("|")
-                                if len(parts) == 3:
-                                    ck = (parts[0], float(parts[1]), int(parts[2]))
-                                    if ck not in self._audit_cache:
-                                        self._audit_cache[ck] = None
-                                        self._fingerprint_cache[ck] = fp_hash
+                            with self._AUDIT_CACHE_LOCK:
+                                for k_str, fp_hash in entries.items():
+                                    parts = k_str.split("|")
+                                    if len(parts) == 4 and parts[0] == prop_key:
+                                        ck = (parts[0], parts[1], float(parts[2]), int(parts[3]))
+                                        if ck not in self._audit_cache:
+                                            self._audit_cache[ck] = None
+                                            self._fingerprint_cache[ck] = fp_hash
             except Exception:
                 pass
 
@@ -3515,24 +3556,44 @@ class AssetIntegrityEvaluator:
 
         if use_disk_eval_cache and eng_code_sig_str:
             try:
-                updated_entries = dict(disk_clean_entries)
+                updated_entries = {
+                    k: v for k, v in disk_clean_entries.items() if k.startswith(f"{prop_key}|")
+                }
                 changed = False
-                for ck, rec_val in list(self._audit_cache.items()):
-                    if rec_val is None and ck in self._fingerprint_cache:
-                        k_str = f"{ck[0]}|{ck[1]}|{ck[2]}"
-                        fp_val = self._fingerprint_cache[ck]
+                with self._AUDIT_CACHE_LOCK:
+                    cache_snapshot = list(self._audit_cache.items())
+                    fp_snapshot = dict(self._fingerprint_cache)
+                for ck, rec_val in cache_snapshot:
+                    if (
+                        isinstance(ck, tuple)
+                        and len(ck) == 4
+                        and ck[0] == prop_key
+                        and rec_val is None
+                        and ck in fp_snapshot
+                    ):
+                        k_str = f"{ck[0]}|{ck[1]}|{ck[2]}|{ck[3]}"
+                        fp_val = fp_snapshot[ck]
                         if updated_entries.get(k_str) != fp_val:
                             updated_entries[k_str] = fp_val
                             changed = True
                 if changed:
                     if len(updated_entries) > 10000:
                         updated_entries = dict(list(updated_entries.items())[-5000:])
-                    tmp_path = disk_eval_cache_path.with_suffix(f".tmp.{os.getpid()}")
-                    tmp_path.write_text(
-                        json.dumps({"engine_sig": eng_code_sig_str, "entries": updated_entries}),
-                        encoding="utf-8",
+                    tmp_path = disk_eval_cache_path.with_name(
+                        f"{disk_eval_cache_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
                     )
-                    tmp_path.replace(disk_eval_cache_path)
+                    try:
+                        with open(tmp_path, "w", encoding="utf-8") as tf:
+                            json.dump({"engine_sig": eng_code_sig_str, "entries": updated_entries}, tf)
+                            tf.flush()
+                            os.fsync(tf.fileno())
+                        os.replace(tmp_path, disk_eval_cache_path)
+                    except Exception:
+                        try:
+                            if tmp_path.exists():
+                                tmp_path.unlink()
+                        except OSError:
+                            pass
             except Exception:
                 pass
 
@@ -4589,6 +4650,7 @@ class MaintenanceLifecycle:
             workspace_root=ws_root,
             expected_hash=current_engine_hash,
             require_git_clean_and_pushed=bool(enable_gitops),
+            allow_tenant_scoped_hash=True,
         )
         if all_tenants_ok:
             record_engine_hash(ws_root / "pseofactory" / ".agy" / "engine_hash.json", hash_value=current_engine_hash)
@@ -15718,6 +15780,7 @@ def _execute_autonomous_downstream_chain(
     action_bus: Optional[Any] = None,
     defer_live_indexing: bool = False,
     skip_seo_workflows: bool = False,
+    finalize_workspace: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes the full downstream growth and monetization chain for a tenant property:
@@ -16157,7 +16220,7 @@ def _execute_autonomous_downstream_chain(
         )
         prop_agg = telemetry_sync.get(adapter.property_id, {}).get("aggregation", {})
         dash = tracker.sync_and_evaluate(
-            force_mail_poll=(not dry_run and not in_pytest),
+            force_mail_poll=(not dry_run and not in_pytest and finalize_workspace),
             engagement_metrics=prop_agg,
         )
         if not dry_run and not in_pytest:
@@ -16538,6 +16601,7 @@ def reflect_and_recompile_all_assets(
     registry: Optional[TenantRegistry] = None,
     workspace_root: Optional[Union[str, Path]] = None,
     defer_live_indexing: bool = False,
+    finalize_workspace: bool = True,
 ) -> Dict[str, Any]:
     """
     Scans workspace properties and audits existing static assets using
@@ -17634,12 +17698,10 @@ def reflect_and_recompile_all_assets(
                 if ph_test_fr.is_file():
                     ph_fr_src = ph_test_fr.read_text(encoding="utf-8")
                     ph_fr_orig = ph_fr_src
-                    if "def test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):" in ph_fr_src and '@pytest.mark.xdist_group(name="pipeline_build")' not in ph_fr_src:
-                        ph_fr_src = ph_fr_src.replace(
-                            "def test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):",
-                            '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):',
-                            1,
-                        )
+                    old_fr_group = '@pytest.mark.xdist_group(name="pipeline_build")\ndef test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):'
+                    new_fr_ungroup = "def test_stage3_pipeline_integration_recovers_synthesis_exception(monkeypatch):"
+                    if old_fr_group in ph_fr_src:
+                        ph_fr_src = ph_fr_src.replace(old_fr_group, new_fr_ungroup, 1)
                     old_fr_mock = 'monkeypatch.setattr("profithelm.seo_verifier.audit_seo_checklist", lambda **k: {"gates": {f"gate_{i}": True for i in range(18)}})'
                     new_fr_mock = 'monkeypatch.setattr("profithelm.seo_verifier.audit_seo_checklist", lambda **k: {"status": "PASS", "gates": {f"gate_{i}": True for i in range(18)}})'
                     if old_fr_mock in ph_fr_src:
@@ -18429,6 +18491,7 @@ def reflect_and_recompile_all_assets(
                     dry_run=False,
                     defer_live_indexing=defer_live_indexing,
                     skip_seo_workflows=locals().get("seo_wf_pre_ran", False),
+                    finalize_workspace=finalize_workspace,
                 )
                 dist_html_sig_after = _compute_estate_and_overlay_sig()
                 post_ds_audit = RetroReflectionEngine.audit_estate(adapter.dist_dir, adapter.property_id)
@@ -18689,15 +18752,14 @@ def reflect_and_recompile_all_assets(
                     for agy_dir in agy_cleanup_dirs:
                         try:
                             fail_marker = agy_dir / f"FAILED.{adapter.property_id}_factory"
-                            if fail_marker.exists():
-                                fail_marker.unlink()
+                            fail_marker.unlink(missing_ok=True)
                             last_fail = agy_dir / "runs" / "last_failure.json"
                             if last_fail.is_file():
                                 try:
                                     lf_data = json.loads(last_fail.read_text(encoding="utf-8"))
                                     lf_cmd = str(lf_data.get("failed_command", "")).lower()
                                     if adapter.property_id in lf_cmd or agy_dir == adapter.dist_dir.parent / ".agy":
-                                        last_fail.unlink()
+                                        last_fail.unlink(missing_ok=True)
                                 except Exception:
                                     pass
                         except Exception:
@@ -18717,17 +18779,38 @@ def reflect_and_recompile_all_assets(
                             streak_file = scanner.workspace_root / ".agy" / "supervisor_failure_streak.json"
                             if streak_file.is_file():
                                 from pseofactory.supervisor import AtomicStateLedger
-                                s_data = AtomicStateLedger.load_json(streak_file)
-                                if isinstance(s_data, dict):
-                                    tenants_map = s_data.get("tenants")
-                                    if isinstance(tenants_map, dict):
-                                        tenants_map.pop(adapter.property_id, None)
-                                        s_data["tenants"] = tenants_map
-                                        if not tenants_map:
-                                            s_data["consecutive_failures"] = 0
-                                    else:
-                                        s_data["consecutive_failures"] = 0
-                                    AtomicStateLedger.save_json(streak_file, s_data)
+                                with AtomicStateLedger.acquire_lock(streak_file):
+                                    if streak_file.is_file():
+                                        s_data = json.loads(streak_file.read_text(encoding="utf-8"))
+                                        if isinstance(s_data, dict):
+                                            tenants_map = s_data.get("tenants")
+                                            if isinstance(tenants_map, dict):
+                                                tenants_map.pop(adapter.property_id, None)
+                                                s_data["tenants"] = tenants_map
+                                                if not tenants_map:
+                                                    s_data["consecutive_failures"] = 0
+                                            else:
+                                                s_data["consecutive_failures"] = 0
+                                            tmp_name = None
+                                            try:
+                                                with tempfile.NamedTemporaryFile(
+                                                    "w",
+                                                    dir=streak_file.parent,
+                                                    delete=False,
+                                                    encoding="utf-8",
+                                                ) as tf:
+                                                    json.dump(s_data, tf, indent=2)
+                                                    tf.flush()
+                                                    os.fsync(tf.fileno())
+                                                    tmp_name = tf.name
+                                                os.replace(tmp_name, streak_file)
+                                                tmp_name = None
+                                            finally:
+                                                if tmp_name and os.path.exists(tmp_name):
+                                                    try:
+                                                        os.unlink(tmp_name)
+                                                    except OSError:
+                                                        pass
                         except Exception:
                             pass
 
@@ -18765,12 +18848,13 @@ def reflect_and_recompile_all_assets(
                     cur_engine_hash = record_engine_hash(s_file, base_dirs=b_dirs)
                     asset_hashes = _collect_adapter_asset_hashes(adapter)
                     record_asset_ledger(l_file, asset_hashes=asset_hashes, engine_hash=cur_engine_hash)
-                    if not is_workspace_mutation_blocked:
+                    if finalize_workspace and not is_workspace_mutation_blocked:
                         from pseofactory.drift import verify_all_tenants_aligned_for_latch
                         all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
                             workspace_root=scanner.workspace_root,
                             expected_hash=cur_engine_hash,
                             require_git_clean_and_pushed=True,
+                            allow_tenant_scoped_hash=True,
                         )
                         root_s_file = scanner.workspace_root / ".agy" / "engine_hash.json"
                         root_l_file = scanner.workspace_root / ".agy" / "asset_ledger.json"
@@ -18865,7 +18949,8 @@ def reflect_and_recompile_all_assets(
         reflect_lock_guard.__exit__(None, None, None)
 
     if (
-        latch_state
+        finalize_workspace
+        and latch_state
         and "PYTEST_CURRENT_TEST" not in os.environ
         and "pytest" not in sys.modules
         and not _is_live_repo_mutation_blocked(scanner.workspace_root)
@@ -18893,6 +18978,106 @@ def reflect_and_recompile_all_assets(
                 pass
 
     return results
+
+
+def finalize_workspace_reflection_state(
+    workspace_root: Optional[Union[str, Path]] = None,
+    property_ids: Optional[List[str]] = None,
+    allow_tenant_scoped_hash: bool = True,
+) -> Dict[str, Any]:
+    """
+    Executes global workspace ledger, heartbeat, tracking, and department handoff
+    finalization ONCE serially after parallel per-tenant reflect workers succeed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ws = Path(workspace_root).resolve() if workspace_root is not None else Path("/home/ubuntuadmin/projects").resolve()
+    out: Dict[str, Any] = {"workspace_root": str(ws), "all_tenants_aligned": False}
+    if (
+        "PYTEST_CURRENT_TEST" in os.environ
+        or "pytest" in sys.modules
+        or _is_live_repo_mutation_blocked(ws)
+    ):
+        out["skipped"] = True
+        return out
+
+    from pseofactory.drift import (
+        compute_engine_hash,
+        verify_all_tenants_aligned_for_latch,
+    )
+
+    cur_engine_hash = compute_engine_hash()
+    all_tenants_ok, reasons = verify_all_tenants_aligned_for_latch(
+        workspace_root=ws,
+        expected_hash=cur_engine_hash,
+        require_git_clean_and_pushed=True,
+        allow_tenant_scoped_hash=allow_tenant_scoped_hash,
+    )
+    out["all_tenants_aligned"] = all_tenants_ok
+    out["reasons"] = reasons
+
+    if all_tenants_ok:
+        scanner = WorkspacePropertyScanner(workspace_root=ws)
+        discovered = scanner.discover_properties()
+        merged_root_hashes: Dict[str, str] = {}
+        root_l_file = ws / ".agy" / "asset_ledger.json"
+        try:
+            prev_root = load_asset_ledger(root_l_file)
+            if isinstance(prev_root, dict) and isinstance(prev_root.get("assets"), dict):
+                merged_root_hashes.update(prev_root["assets"])
+        except Exception:
+            pass
+        for adp in discovered:
+            try:
+                ah = _collect_adapter_asset_hashes(adp)
+                merged_root_hashes.update(ah)
+                merged_root_hashes.update({f"{adp.property_id}/{k}": v for k, v in ah.items()})
+            except Exception:
+                pass
+        root_s_file = ws / ".agy" / "engine_hash.json"
+        root_s_file.parent.mkdir(parents=True, exist_ok=True)
+        record_engine_hash(root_s_file, hash_value=cur_engine_hash)
+        record_asset_ledger(root_l_file, asset_hashes=merged_root_hashes, engine_hash=cur_engine_hash)
+        pf_dir = ws / "pseofactory"
+        if pf_dir.is_dir():
+            record_engine_hash(pf_dir / ".agy" / "engine_hash.json", hash_value=cur_engine_hash)
+            record_asset_ledger(
+                pf_dir / ".agy" / "asset_ledger.json",
+                asset_hashes=merged_root_hashes,
+                engine_hash=cur_engine_hash,
+            )
+            from pseofactory.supervisor import HeartbeatTracker
+
+            HeartbeatTracker(heartbeat_path=pf_dir / ".agy" / "supervisor_heartbeat.json").emit(
+                status="HEALTHY",
+                cycle_id="reflect_sync",
+                current_tenant=None,
+                engine_hash=cur_engine_hash,
+                consecutive_failures=0,
+            )
+
+    if ws == Path("/home/ubuntuadmin/projects").resolve():
+        try:
+            from pseofactory.gitops import reconcile_workspace_tracking_state
+
+            reconcile_workspace_tracking_state(
+                restore_tenant_dist=False,
+                untrack_agy_runs=True,
+            )
+        except Exception:
+            pass
+    try:
+        from pseofactory.supervisor import verify_department_handoff_chain
+
+        handoff_res = verify_department_handoff_chain(
+            workspace_root=ws,
+            property_ids=property_ids or None,
+            persist=True,
+            cycle_id="reflect_sync",
+        )
+        out["department_pipeline"] = handoff_res.get("department_pipeline")
+    except Exception:
+        pass
+    return out
 
 
 recompile_drifted_assets = reflect_and_recompile_all_assets

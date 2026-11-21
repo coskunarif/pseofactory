@@ -1174,6 +1174,7 @@ _LAZY_SUBMODULES = frozenset(
         "gainhelm_estate",
         "gitops",
         "gsc_remediation",
+        "impact_planner",
         "indexer",
         "indexing",
         "indexing_inspector",

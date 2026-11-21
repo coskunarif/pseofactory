@@ -100,6 +100,7 @@ def test_cls_sources_summary_formatting() -> None:
     assert any("CLS 0.042" in r and "div.hero-banner" in r for r in reasons), reasons
 
 
+@pytest.mark.xdist_group("ephemeral_chrome_workers")
 def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Path) -> None:
     chrome_bin, _ = discover_headless_chrome_binary()
     if not chrome_bin:
@@ -140,7 +141,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
 
     # --no-verify-cache bypasses reads and runs all routes live
     rep_nocache = aud_cold.run_audit(no_verify_cache=True)
-    assert rep_nocache["passed"] is True
+    assert rep_nocache["passed"] is True, f"no-verify-cache audit failed: {[f for f in rep_nocache['findings'] if UnifiedBrowserAuditor._is_finding_failed(f)]}"
     assert rep_nocache["live_audited_routes"] == total_routes
     assert rep_nocache["cached_receipt_routes"] == 0
 
@@ -149,7 +150,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
     orig_alpha_html = alpha_html_path.read_text(encoding="utf-8")
     alpha_html_path.write_text(orig_alpha_html + "\n<!-- 1-byte-delta -->", encoding="utf-8")
     rep_html_flip = aud_cold.run_audit()
-    assert rep_html_flip["passed"] is True
+    assert rep_html_flip["passed"] is True, f"html-flip audit failed: {[f for f in rep_html_flip['findings'] if UnifiedBrowserAuditor._is_finding_failed(f)]}"
     assert rep_html_flip["live_audited_routes"] == 1
     assert rep_html_flip["cached_receipt_routes"] == total_routes - 1
     alpha_finding = next(f for f in rep_html_flip["findings"] if f["route"] == "/tools/alpha-model/")
@@ -161,7 +162,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
     css_orig = css_path.read_text(encoding="utf-8")
     css_path.write_text(css_orig + "\n/* 1-byte-css-delta */\n", encoding="utf-8")
     rep_css_flip = aud_cold.run_audit()
-    assert rep_css_flip["passed"] is True
+    assert rep_css_flip["passed"] is True, f"css-flip audit failed: {[f for f in rep_css_flip['findings'] if UnifiedBrowserAuditor._is_finding_failed(f)]}"
     assert rep_css_flip["live_audited_routes"] == total_routes
     assert rep_css_flip["cached_receipt_routes"] == 0
 
@@ -170,7 +171,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
     redir_orig = redir_path.read_text(encoding="utf-8")
     redir_path.write_text(redir_orig + "# 1-byte-redir-delta\n", encoding="utf-8")
     rep_redir_flip = aud_cold.run_audit()
-    assert rep_redir_flip["passed"] is True
+    assert rep_redir_flip["passed"] is True, f"redir-flip audit failed: {[f for f in rep_redir_flip['findings'] if UnifiedBrowserAuditor._is_finding_failed(f)]}"
     assert rep_redir_flip["live_audited_routes"] == total_routes
     assert rep_redir_flip["cached_receipt_routes"] == 0
 
@@ -184,7 +185,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
     )
     aud_new_chrome._chrome_version_override = "Google Chrome for Testing 999.0.0.1"
     rep_chrome_flip = aud_new_chrome.run_audit()
-    assert rep_chrome_flip["passed"] is True
+    assert rep_chrome_flip["passed"] is True, f"chrome-flip audit failed: {[f for f in rep_chrome_flip['findings'] if UnifiedBrowserAuditor._is_finding_failed(f)]}"
     assert rep_chrome_flip["live_audited_routes"] == total_routes
     assert rep_chrome_flip["cached_receipt_routes"] == 0
 
@@ -199,7 +200,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
     aud_new_verifier._chrome_version_override = "Google Chrome for Testing 999.0.0.1"
     aud_new_verifier._verifier_digest_override = "deadbeef" * 8
     rep_verifier_flip = aud_new_verifier.run_audit()
-    assert rep_verifier_flip["passed"] is True
+    assert rep_verifier_flip["passed"] is True, f"verifier-flip audit failed: {[f for f in rep_verifier_flip['findings'] if UnifiedBrowserAuditor._is_finding_failed(f)]}"
     assert rep_verifier_flip["live_audited_routes"] == total_routes
     assert rep_verifier_flip["cached_receipt_routes"] == 0
 
@@ -364,6 +365,7 @@ def test_cold_load_unsized_image_cls_not_silenced_by_reload_or_shared_worker(
     assert by_route["/page2/"]["cls_value"] > 0.0, f"Route /page2/ silenced unsized image CLS: {by_route['/page2/']}"
 
 
+@pytest.mark.xdist_group("ephemeral_chrome_workers")
 def test_receipt_invalidation_same_size_corrupt_png_and_deleted_llms_txt(tmp_path: Path) -> None:
     """
     Blocker #2 reproducers:

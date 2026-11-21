@@ -6553,21 +6553,39 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
                 b_src = b_src.replace(old_dist_fn_copy, new_dist_fn_clean, 1)
 
             porc_call_marker = "_pseo_porcelain.compile_tenant_porcelain_estate"
-            if porc_call_marker not in b_src:
-                if pkg_name == "profithelm":
+            if pkg_name == "profithelm":
+                old_retro_line = '    RetroReflectionEngine.retrofit_estate(DIST_DIR, "profithelm", canonical_base=CANONICAL_BASE)\n'
+                new_retro_line = '    _retro_res = RetroReflectionEngine.retrofit_estate(DIST_DIR, "profithelm", canonical_base=CANONICAL_BASE)\n'
+                if old_retro_line in b_src:
+                    b_src = b_src.replace(old_retro_line, new_retro_line, 1)
+                old_unguarded_porc = (
+                    "    from profithelm import _pseo_porcelain\n"
+                    "    _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n"
+                )
+                new_guarded_porc = (
+                    "    if extra_tools or not (isinstance(_retro_res, dict) and _retro_res.get(\"porcelain_compiled\")):\n"
+                    "        from profithelm import _pseo_porcelain\n"
+                    "        _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n"
+                )
+                if old_unguarded_porc in b_src and new_guarded_porc not in b_src and "_retro_res =" in b_src:
+                    b_src = b_src.replace(old_unguarded_porc, new_guarded_porc, 1)
+                elif porc_call_marker not in b_src:
                     anchor = "    # 6. Master 18-Rule SEO Checklist Mechanical Audit Gate\n"
                     injection = (
-                        "    from profithelm import _pseo_porcelain\n"
-                        "    _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n\n"
+                        "    if extra_tools or not (isinstance(locals().get(\"_retro_res\"), dict) and locals().get(\"_retro_res\", {}).get(\"porcelain_compiled\")):\n"
+                        "        from profithelm import _pseo_porcelain\n"
+                        "        _pseo_porcelain.compile_tenant_porcelain_estate(DIST_DIR, extra_tools=extra_tools)\n\n"
                         + anchor
                     )
-                else:
-                    anchor = f"    # Master 18-Rule SEO Checklist Mechanical Audit Gate\n    from {pkg_name}.seo_verifier import audit_seo_checklist\n"
-                    injection = (
-                        f"    from {pkg_name} import _pseo_porcelain\n"
-                        "    _pseo_porcelain.compile_tenant_porcelain_estate(target_dist, extra_tools=extra_tools)\n\n"
-                        + anchor
-                    )
+                    if anchor in b_src:
+                        b_src = b_src.replace(anchor, injection, 1)
+            elif porc_call_marker not in b_src:
+                anchor = f"    # Master 18-Rule SEO Checklist Mechanical Audit Gate\n    from {pkg_name}.seo_verifier import audit_seo_checklist\n"
+                injection = (
+                    f"    from {pkg_name} import _pseo_porcelain\n"
+                    "    _pseo_porcelain.compile_tenant_porcelain_estate(target_dist, extra_tools=extra_tools)\n\n"
+                    + anchor
+                )
                 if anchor in b_src:
                     b_src = b_src.replace(anchor, injection, 1)
 

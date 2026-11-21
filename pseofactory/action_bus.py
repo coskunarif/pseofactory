@@ -136,6 +136,7 @@ class HumanActionBus:
         )
         self.hub = hub
         self._needs_migration_save = False
+        self._migrated_removed_keys: set = set()
         self._ensure_dir()
         self.items: Dict[str, ActionItem] = self._load()
         self._recompute_revenue_priority_ranks()
@@ -148,51 +149,76 @@ class HumanActionBus:
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
 
+    def _parse_actions_data(
+        self,
+        data: Dict[str, Any],
+        track_migrations: bool = True,
+    ) -> Dict[str, ActionItem]:
+        items_dict: Dict[str, ActionItem] = {}
+        valid_fields = set(ActionItem.__dataclass_fields__.keys())
+        raw_actions = data.get("actions", {}) if isinstance(data, dict) else {}
+        for k, v in raw_actions.items():
+            src_eid = str((v or {}).get("source_email_id") or "")
+            act_id_val = str((v or {}).get("action_id") or "")
+            if str(k).startswith("act-email-pers-") or act_id_val.startswith("act-email-pers-"):
+                if track_migrations:
+                    self._needs_migration_save = True
+                    self._migrated_removed_keys.add(str(k))
+                continue
+            if src_eid.startswith("pers-"):
+                if track_migrations:
+                    self._needs_migration_save = True
+                if str((v or {}).get("status") or "") in ("REJECTED", "RESOLVED", "CONFIRMED"):
+                    v = dict(v)
+                    v["source_email_id"] = ""
+                else:
+                    if track_migrations:
+                        self._migrated_removed_keys.add(str(k))
+                    continue
+            filtered_v = {fk: fv for fk, fv in v.items() if fk in valid_fields}
+            item = ActionItem(**filtered_v)
+            if (
+                item.property_id == "profithelm"
+                and item.partner_key in LIENBOND_AFFILIATES
+                and item.partner_key not in PROFITHELM_AFFILIATES
+            ):
+                new_key = (
+                    f"act-lienbond-{k[len('act-profithelm-'):]}"
+                    if str(k).startswith("act-profithelm-")
+                    else str(k)
+                )
+                item.property_id = "lienbond"
+                item.action_id = new_key
+                if track_migrations and str(k) != new_key:
+                    self._migrated_removed_keys.add(str(k))
+                k = new_key
+                if track_migrations:
+                    self._needs_migration_save = True
+            if item.estimated_monthly_revenue_impact_usd <= 0.0:
+                self._compute_and_apply_revenue_impact(item)
+            self._assert_item_invariants(item)
+            items_dict[k] = item
+        if track_migrations:
+            meta_total = (data.get("bus_metadata") or {}).get("total_items")
+            if meta_total != len(items_dict):
+                self._needs_migration_save = True
+        return items_dict
+
     def _load(self) -> Dict[str, ActionItem]:
         if os.path.isfile(self.bus_path):
+            lock_path = f"{self.bus_path}.lock"
             try:
-                with open(self.bus_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                items_dict = {}
-                valid_fields = set(ActionItem.__dataclass_fields__.keys())
-                raw_actions = data.get("actions", {})
-                for k, v in raw_actions.items():
-                    src_eid = str((v or {}).get("source_email_id") or "")
-                    act_id_val = str((v or {}).get("action_id") or "")
-                    if str(k).startswith("act-email-pers-") or act_id_val.startswith("act-email-pers-"):
-                        self._needs_migration_save = True
-                        continue
-                    if src_eid.startswith("pers-"):
-                        self._needs_migration_save = True
-                        if str((v or {}).get("status") or "") in ("REJECTED", "RESOLVED", "CONFIRMED"):
-                            v = dict(v)
-                            v["source_email_id"] = ""
-                        else:
-                            continue
-                    filtered_v = {fk: fv for fk, fv in v.items() if fk in valid_fields}
-                    item = ActionItem(**filtered_v)
-                    if (
-                        item.property_id == "profithelm"
-                        and item.partner_key in LIENBOND_AFFILIATES
-                        and item.partner_key not in PROFITHELM_AFFILIATES
-                    ):
-                        new_key = (
-                            f"act-lienbond-{k[len('act-profithelm-'):]}"
-                            if str(k).startswith("act-profithelm-")
-                            else str(k)
-                        )
-                        item.property_id = "lienbond"
-                        item.action_id = new_key
-                        k = new_key
-                        self._needs_migration_save = True
-                    if item.estimated_monthly_revenue_impact_usd <= 0.0:
-                        self._compute_and_apply_revenue_impact(item)
-                    self._assert_item_invariants(item)
-                    items_dict[k] = item
-                meta_total = (data.get("bus_metadata") or {}).get("total_items")
-                if meta_total != len(items_dict):
-                    self._needs_migration_save = True
-                return items_dict
+                self._ensure_dir()
+                with open(lock_path, "a+", encoding="utf-8") as lock_file:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+                    try:
+                        if not os.path.isfile(self.bus_path):
+                            return {}
+                        with open(self.bus_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                    finally:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                return self._parse_actions_data(data, track_migrations=True)
             except Exception:
                 pass
         return {}
@@ -258,43 +284,71 @@ class HumanActionBus:
                 it.revenue_priority_rank = 0
 
     def save(self) -> None:
-        """Persists action bus atomically with zero-dash and boundary checks."""
-        self._recompute_revenue_priority_ranks()
-        data = {
-            "bus_metadata": {
-                "version": "1.0.0",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "total_items": len(self.items),
-                "pending_operator_count": sum(1 for it in self.items.values() if it.status == "PENDING_OPERATOR"),
-                "total_pending_monthly_revenue_impact_usd": round(
-                    sum(
-                        float(it.estimated_monthly_revenue_impact_usd or 0.0)
-                        for it in self.items.values()
-                        if it.status == "PENDING_OPERATOR"
-                    ),
-                    2,
-                ),
-            },
-            "actions": {k: it.to_dict() for k, it in self.items.items()},
-        }
-
-        # Validate all items
+        """Persists action bus atomically under LOCK_EX with disk-merge, zero-dash, and boundary checks."""
+        # Validate in-memory items before acquiring lock
         for it in self.items.values():
             self._assert_item_invariants(it)
 
         target_dir = os.path.dirname(os.path.abspath(self.bus_path))
         os.makedirs(target_dir, exist_ok=True)
         lock_path = f"{self.bus_path}.lock"
-        with open(lock_path, "w", encoding="utf-8") as lock_file:
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            tmp_name = None
             try:
+                if os.path.isfile(self.bus_path):
+                    try:
+                        with open(self.bus_path, "r", encoding="utf-8") as existing_f:
+                            disk_raw = json.load(existing_f)
+                        disk_items = self._parse_actions_data(disk_raw, track_migrations=False)
+                        for dk, d_item in disk_items.items():
+                            if dk in self._migrated_removed_keys:
+                                continue
+                            if dk not in self.items:
+                                self.items[dk] = d_item
+                            else:
+                                d_upd = str(d_item.updated_at or "")
+                                l_upd = str(self.items[dk].updated_at or "")
+                                if d_upd > l_upd:
+                                    self.items[dk] = d_item
+                    except Exception:
+                        pass
+
+                self._recompute_revenue_priority_ranks()
+                for it in self.items.values():
+                    self._assert_item_invariants(it)
+
+                data = {
+                    "bus_metadata": {
+                        "version": "1.0.0",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "total_items": len(self.items),
+                        "pending_operator_count": sum(1 for it in self.items.values() if it.status == "PENDING_OPERATOR"),
+                        "total_pending_monthly_revenue_impact_usd": round(
+                            sum(
+                                float(it.estimated_monthly_revenue_impact_usd or 0.0)
+                                for it in self.items.values()
+                                if it.status == "PENDING_OPERATOR"
+                            ),
+                            2,
+                        ),
+                    },
+                    "actions": {k: it.to_dict() for k, it in self.items.items()},
+                }
+
                 with tempfile.NamedTemporaryFile("w", dir=target_dir, delete=False, encoding="utf-8") as tf:
                     json.dump(data, tf, indent=2)
                     tf.flush()
                     os.fsync(tf.fileno())
                     tmp_name = tf.name
                 os.replace(tmp_name, self.bus_path)
+                tmp_name = None
             finally:
+                if tmp_name and os.path.exists(tmp_name):
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _assert_item_invariants(self, item: ActionItem) -> None:

@@ -67,6 +67,7 @@ class TrendHistoryDB:
     def get_connection(self) -> sqlite3.Connection:
         """Returns SQLite connection with WAL mode and pragmas configured, or URI mode=ro when read_only."""
         if self._conn is None:
+            busy_ms = int(os.environ.get("PSEOFACTORY_TRENDS_BUSY_TIMEOUT_MS", "5000"))
             if self.read_only:
                 wal_path = Path(f"{self.db_path}-wal")
                 has_non_empty_wal = wal_path.is_file() and wal_path.stat().st_size > 0
@@ -74,21 +75,21 @@ class TrendHistoryDB:
                 conn = sqlite3.connect(
                     f"{self.db_path.as_uri()}?{ro_query}",
                     uri=True,
-                    timeout=10.0,
+                    timeout=30.0,
                     isolation_level=None,
                 )
                 conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA busy_timeout = 5000;")
+                conn.execute(f"PRAGMA busy_timeout = {busy_ms};")
                 conn.execute("PRAGMA query_only = ON;")
             else:
                 conn = sqlite3.connect(
                     str(self.db_path),
-                    timeout=10.0,
+                    timeout=30.0,
                     isolation_level=None,  # Autocommit mode; transactions handled explicitly
                 )
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode = WAL;")
-                conn.execute("PRAGMA busy_timeout = 5000;")
+                conn.execute(f"PRAGMA busy_timeout = {busy_ms};")
                 conn.execute("PRAGMA synchronous = NORMAL;")
                 conn.execute("PRAGMA foreign_keys = ON;")
             self._conn = conn
@@ -170,10 +171,74 @@ class TrendHistoryDB:
             conn.execute("ROLLBACK;")
             raise
 
+    _REQUIRED_SCHEMA_TABLES = frozenset(
+        (
+            "crawl_cycles",
+            "raw_crawl_observations",
+            "keyword_history",
+            "property_assignments",
+            "treg_metric_snapshots",
+            "jev_evaluations",
+            "niche_cluster_proposals",
+            "gsc_daily_metrics",
+            "google_update_events",
+            "gsc_ceiling_snapshots",
+            "market_intel_candidates",
+            "gsc_device_metrics",
+            "gsc_search_appearance_metrics",
+            "gsc_query_page_windows",
+            "gsc_page_windows",
+            "gsc_page_daily",
+            "gsc_url_inspection_states",
+            "statutory_economic_timeseries",
+        )
+    )
+    _TENANT_CHECK_MIGRATED_TABLES = frozenset(
+        (
+            "property_assignments",
+            "jev_evaluations",
+            "statutory_economic_timeseries",
+        )
+    )
+
+    def _schema_already_initialized(self) -> bool:
+        """Fast read-only check verifying all required tables and migrations already exist."""
+        if not self.db_path.is_file() or self.db_path.stat().st_size == 0:
+            return False
+        try:
+            conn = self.get_connection()
+            rows = conn.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='table';"
+            ).fetchall()
+            tables_sql = {str(r[0]): str(r[1] or "") for r in rows}
+            if not self._REQUIRED_SCHEMA_TABLES.issubset(tables_sql.keys()):
+                return False
+            treg_cols = {
+                str(r[1])
+                for r in conn.execute("PRAGMA table_info(treg_metric_snapshots);").fetchall()
+            }
+            if "serp_weaknesses" not in treg_cols:
+                return False
+            for tbl_name in self._TENANT_CHECK_MIGRATED_TABLES:
+                ddl = tables_sql.get(tbl_name, "")
+                if "'gainhelm'" not in ddl or "'lienbond'" not in ddl:
+                    return False
+            return True
+        except Exception:
+            return False
+
     def init_schema(self) -> None:
-        """Initializes idempotent relational schema across all 7 tables and indexes."""
+        """Initializes idempotent relational schema across all tables and indexes."""
         if self.read_only:
             return
+        if self._schema_already_initialized():
+            return
+        with self.acquire_lock(non_blocking=True, timeout=30.0):
+            if self._schema_already_initialized():
+                return
+            self._init_schema_locked()
+
+    def _init_schema_locked(self) -> None:
         conn = self.get_connection()
         with conn:
             # 1. crawl_cycles

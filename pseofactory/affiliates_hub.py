@@ -13,8 +13,12 @@ Key Invariants:
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
+import fcntl
+import hashlib
 import json
 import os
+import tempfile
+import uuid
 from typing import Dict, Any, List, Optional, Set, Union
 from datetime import datetime, timezone
 import urllib.parse
@@ -254,13 +258,29 @@ class MonetizationHub:
                                 existing["url"] = cat_url
                                 existing["direct_url"] = cat_url
 
+    @staticmethod
+    def _vault_lock_path(vault_file: str) -> str:
+        """Returns a deterministic temp-dir lock path keyed by canonical vault_file path."""
+        canon = os.path.abspath(vault_file)
+        digest = hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+        return os.path.join(tempfile.gettempdir(), f"pseofactory_monetization_vault_{digest}.lock")
+
     def _load_vault(self) -> Dict[str, Any]:
-        """Loads vault JSON or provides fallback defaults."""
+        """Loads vault JSON under shared advisory lock or provides fallback defaults."""
         if os.path.isfile(self.vault_path):
+            lock_path = self._vault_lock_path(self.vault_path)
             try:
-                with open(self.vault_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data
+                lock_dir = os.path.dirname(os.path.abspath(lock_path))
+                if lock_dir:
+                    os.makedirs(lock_dir, exist_ok=True)
+                with open(lock_path, "a+", encoding="utf-8") as lock_f:
+                    fcntl.flock(lock_f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        with open(self.vault_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            return data
+                    finally:
+                        fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
 
@@ -508,14 +528,26 @@ class MonetizationHub:
         if target_dir:
             os.makedirs(target_dir, exist_ok=True)
 
-        tmp_path = f"{path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(self.vault_data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-
-        os.replace(tmp_path, path)
+        lock_path = self._vault_lock_path(path)
+        tmp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        with open(lock_path, "a+", encoding="utf-8") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(self.vault_data, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, path)
+            except Exception:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def sync_partner_program(
         self,

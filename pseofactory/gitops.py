@@ -20,6 +20,7 @@ import tempfile
 import subprocess
 import fcntl
 import threading
+import uuid
 import concurrent.futures
 import urllib.request
 import urllib.error
@@ -177,6 +178,34 @@ class IdempotencyLedger:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.ledger_path.with_suffix(".lock")
 
+    def _read_records_unlocked(self) -> Dict[str, Any]:
+        if not self.ledger_path.exists():
+            return {}
+        try:
+            data = json.loads(self.ledger_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _write_records_unlocked(self, records: Dict[str, Any]) -> None:
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.ledger_path.with_name(
+            f"{self.ledger_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        )
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(records, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.ledger_path)
+        except Exception:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise
+
     def _read_records(self) -> Dict[str, Any]:
         if not self.ledger_path.exists():
             return {}
@@ -185,9 +214,7 @@ class IdempotencyLedger:
             with open(self.lock_path, "a+") as lock_f:
                 fcntl.flock(lock_f.fileno(), fcntl.LOCK_SH)
                 try:
-                    if not self.ledger_path.exists():
-                        return {}
-                    return json.loads(self.ledger_path.read_text(encoding="utf-8"))
+                    return self._read_records_unlocked()
                 finally:
                     fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
         except Exception:
@@ -199,9 +226,7 @@ class IdempotencyLedger:
         with open(self.lock_path, "a+") as lock_f:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
             try:
-                tmp = self.ledger_path.with_suffix(".tmp")
-                tmp.write_text(json.dumps(records, indent=2), encoding="utf-8")
-                tmp.replace(self.ledger_path)
+                self._write_records_unlocked(records)
             finally:
                 fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
@@ -210,19 +235,38 @@ class IdempotencyLedger:
         return token in records
 
     def record_token(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> None:
-        records = self._read_records()
-        records[token] = {
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-            **(metadata or {}),
-        }
-        self._write_records(records)
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                records = self._read_records_unlocked()
+                records[token] = {
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    **(metadata or {}),
+                }
+                self._write_records_unlocked(records)
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
     def check_and_record(self, token: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
-        """Returns True if duplicate, False if newly recorded."""
-        if self.has_token(token):
-            return True
-        self.record_token(token, metadata)
-        return False
+        """Returns True if duplicate, False if newly recorded (atomic under single LOCK_EX)."""
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                records = self._read_records_unlocked()
+                if token in records:
+                    return True
+                records[token] = {
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    **(metadata or {}),
+                }
+                self._write_records_unlocked(records)
+                return False
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 def check_persistent_idempotency(token: str, ledger_path: Optional[Union[str, Path]] = None) -> bool:
@@ -6419,6 +6463,10 @@ def sync_tenant_test_isolation_guards(
             new_sunset_assert = 'assert (row.get("sunset_2027_tax") or row.get("repealed_pre_obbba_sunset_tax")) == f"${round(comp[\'sunset_tax\']):,}"'
             if old_sunset_assert in to_new:
                 to_new = to_new.replace(old_sunset_assert, new_sunset_assert, 1)
+            old_copytree = "    shutil.copytree(DIST_DIR, temp_dist)\n"
+            new_copytree = '    shutil.copytree(DIST_DIR, temp_dist, ignore=shutil.ignore_patterns("videos", "*.mp4"))\n'
+            if old_copytree in to_new:
+                to_new = to_new.replace(old_copytree, new_copytree, 1)
             if 'pytestmark = pytest.mark.xdist_group(name="pipeline_build")' not in to_new:
                 if not re.search(r"^import pytest\b", to_new, re.MULTILINE):
                     to_new = 'import pytest\npytestmark = pytest.mark.xdist_group(name="pipeline_build")\n' + to_new

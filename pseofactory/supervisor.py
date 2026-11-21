@@ -1680,6 +1680,7 @@ class DepartmentHandoffChainVerifier:
             lock_file = repo_path / "substrate_lock.json"
             lock_hash = ""
             sub_hash = ""
+            scoped_ok = False
             if not lock_file.is_file():
                 t_errs.append(f"missing substrate_lock.json at {lock_file}")
             else:
@@ -1713,7 +1714,16 @@ class DepartmentHandoffChainVerifier:
                         t_errs.append(
                             f"substrate_lock.json hash mismatch: engine_hash='{lock_hash}', substrate_hash='{sub_hash}'"
                         )
-                    if self.strict_current_engine_hash and lock_hash != current_engine_hash:
+                    scoped_ok = False
+                    if lock_hash != current_engine_hash:
+                        lock_tsh = str(lock_data.get("tenant_substrate_hash") or "").strip()
+                        if lock_tsh:
+                            try:
+                                from pseofactory.drift import compute_tenant_substrate_hash
+                                scoped_ok = (lock_tsh == compute_tenant_substrate_hash(pid))
+                            except Exception:
+                                scoped_ok = False
+                    if self.strict_current_engine_hash and lock_hash != current_engine_hash and not scoped_ok:
                         t_errs.append(
                             f"substrate_lock.json engine_hash '{lock_hash[:12]}' != current '{current_engine_hash[:12]}'"
                         )
@@ -1778,7 +1788,7 @@ class DepartmentHandoffChainVerifier:
             substrate_locks_by_tenant[pid] = {
                 "present": lock_file.is_file(),
                 "engine_hash": lock_hash,
-                "aligned_to_current_engine": bool(lock_hash == current_engine_hash),
+                "aligned_to_current_engine": bool(lock_hash == current_engine_hash or scoped_ok),
             }
 
             eh_file = repo_path / ".agy" / "engine_hash.json"
@@ -2901,7 +2911,7 @@ class AutonomousLifecycleSupervisor:
             except Exception:
                 pass
 
-        drift_report = detect_engine_drift(state_file=self.state_file)
+        drift_report = detect_engine_drift(state_file=self.state_file, allow_tenant_scoped_hash=True)
         current_engine_hash = drift_report.get("current_hash")
         drift_detected = bool(drift_report.get("drift_detected", False))
 
@@ -3259,6 +3269,7 @@ class AutonomousLifecycleSupervisor:
                         workspace_root=self.workspace_root,
                         expected_hash=current_engine_hash,
                         require_git_clean_and_pushed=bool(enable_gitops),
+                        allow_tenant_scoped_hash=True,
                     )
                     if all_tenants_ok:
                         record_engine_hash(self.state_file, hash_value=current_engine_hash)

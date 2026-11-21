@@ -209,6 +209,10 @@ def compute_auto_worker_count(num_routes: int, requested_workers: Optional[int] 
         req = max(1, int(requested_workers))
         return max(1, min(req, num_routes, cpu_count, ram_cap))
 
+    # Avoid nested Chrome worker oversubscription when already parallelized under pytest-xdist
+    if "PYTEST_XDIST_WORKER" in os.environ:
+        return 1
+
     auto_cpu_cap = max(1, cpu_count // 2)
     return max(1, min(num_routes, auto_cpu_cap, ram_cap))
 
@@ -1152,11 +1156,15 @@ class UnifiedBrowserAuditor:
         };
         const toRect = (r) => r ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null;
         let cls = 0.0;
+        let maxShiftStart = 0.0;
         const sources = [];
         const observer = new PerformanceObserver(list => {
             for (const entry of list.getEntries()) {
                 if (!entry.hadRecentInput) {
                     cls += entry.value;
+                    if (entry.value > 0 && typeof entry.startTime === 'number' && entry.startTime > maxShiftStart) {
+                        maxShiftStart = entry.startTime;
+                    }
                     if (entry.value > 0 && Array.isArray(entry.sources) && sources.length < 10) {
                         for (const src of entry.sources) {
                             if (sources.length >= 10) break;
@@ -1184,7 +1192,37 @@ class UnifiedBrowserAuditor:
                 window.scrollTo({ top: 0, behavior: 'instant' });
                 setTimeout(() => {
                     try { observer.disconnect(); } catch(e) {}
-                    resolve({ value: Math.round(cls * 1000) / 1000, sources: sources });
+                    const navEntry = (typeof performance !== 'undefined' && performance.getEntriesByType)
+                        ? (performance.getEntriesByType('navigation')[0] || null)
+                        : null;
+                    const loadEnd = (navEntry && typeof navEntry.loadEventEnd === 'number' && navEntry.loadEventEnd > 0)
+                        ? navEntry.loadEventEnd
+                        : ((navEntry && typeof navEntry.domInteractive === 'number') ? navEntry.domInteractive : 0);
+                    const paintEntries = (typeof performance !== 'undefined' && performance.getEntriesByType)
+                        ? performance.getEntriesByType('paint')
+                        : [];
+                    const maxPaint = paintEntries.reduce(
+                        (acc, p) => Math.max(acc, (p && typeof p.startTime === 'number') ? p.startTime : 0),
+                        0
+                    );
+                    const hasUnsizedMedia = Array.from(document.querySelectorAll('img, video, iframe')).some(
+                        el => !(el.hasAttribute('width') && el.hasAttribute('height'))
+                    );
+                    const hasWebFonts = Boolean(document.fonts && document.fonts.size > 0);
+                    const parseWindowEnd = Math.max(loadEnd, maxPaint) + 120;
+                    const staticParsePreemptionCandidate = Boolean(
+                        cls > 0
+                        && !hasUnsizedMedia
+                        && !hasWebFonts
+                        && maxShiftStart > 0
+                        && parseWindowEnd > 120
+                        && maxShiftStart <= parseWindowEnd
+                    );
+                    resolve({
+                        value: Math.round(cls * 1000) / 1000,
+                        sources: sources,
+                        static_parse_preemption_candidate: staticParsePreemptionCandidate
+                    });
                 }, 150);
             }, 150);
         });
@@ -3576,29 +3614,43 @@ class UnifiedBrowserAuditor:
         ws: Any,
         msg_counter: List[int],
         expected_width: Optional[int] = None,
+        expected_height: Optional[int] = None,
     ) -> None:
-        """Flushes layout and waits two animation frames (capped at 60ms if rAF throttled)."""
-        width_check = (
-            f"window.innerWidth === {int(expected_width)}"
-            if expected_width is not None
-            else "true"
-        )
+        """Flushes layout and waits for expected viewport dimensions plus two animation frames."""
+        checks = []
+        if expected_width is not None:
+            checks.append(f"window.innerWidth === {int(expected_width)}")
+        if expected_height is not None:
+            checks.append(f"window.innerHeight === {int(expected_height)}")
+        dim_check = " && ".join(checks) if checks else "true"
         js_settle = f"""new Promise(resolve => {{
             let done = false;
+            const deadline = Date.now() + 250;
             const finish = () => {{
                 if (done) return;
                 done = true;
-                resolve({width_check});
+                resolve({dim_check});
             }};
-            if (document.documentElement) {{
-                void document.documentElement.offsetWidth;
-            }}
-            setTimeout(finish, 60);
-            if (typeof requestAnimationFrame === 'function') {{
-                requestAnimationFrame(() => requestAnimationFrame(finish));
-            }} else {{
-                setTimeout(finish, 20);
-            }}
+            const waitFrames = () => {{
+                if (typeof requestAnimationFrame === 'function') {{
+                    requestAnimationFrame(() => requestAnimationFrame(finish));
+                }} else {{
+                    setTimeout(finish, 20);
+                }}
+            }};
+            const check = () => {{
+                if (done) return;
+                if (document.documentElement) {{
+                    void document.documentElement.offsetWidth;
+                }}
+                if (({dim_check}) || Date.now() >= deadline) {{
+                    waitFrames();
+                    return;
+                }}
+                setTimeout(check, 15);
+            }};
+            setTimeout(finish, 320);
+            check();
         }})"""
         msg_counter[0] += 1
         await self._eval_js(ws, js_settle, msg_id=msg_counter[0])
@@ -3627,12 +3679,22 @@ class UnifiedBrowserAuditor:
             msg_id=msg_counter[0],
         )
         if settle_layout:
-            await self._wait_for_layout_settle(ws, msg_counter, expected_width=width)
+            await self._wait_for_layout_settle(
+                ws,
+                msg_counter,
+                expected_width=width,
+                expected_height=height,
+            )
         else:
             await asyncio.sleep(0.02)
 
     async def _prepare_audit_viewport(self, ws: Any, msg_counter: List[int]) -> None:
-        """Brings the CDP tab forward, enables focus emulation, and locks initial 1440x900 viewport."""
+        """
+        Brings the CDP tab forward, enables focus emulation, and locks initial 1440x900 viewport
+        before Page.navigate. Uses native CDP Page.getLayoutMetrics to confirm BOTH 1440 width
+        and 900 height are committed in Blink/compositor (avoiding extra Runtime.evaluate calls
+        on a stale pre-navigation document) plus verifies window.innerWidth === 1440.
+        """
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
         msg_counter[0] += 1
@@ -3646,11 +3708,42 @@ class UnifiedBrowserAuditor:
             msg_counter,
             settle_layout=False,
         )
-        try:
-            msg_counter[0] += 1
-            await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
-        except CDPEvalError:
-            pass
+        # Confirm both 1440x900 layout & visual viewport via native CDP Page.getLayoutMetrics
+        metrics_deadline = time.monotonic() + 0.35
+        while True:
+            try:
+                msg_counter[0] += 1
+                m_res = await self._send_cdp(ws, "Page.getLayoutMetrics", {}, msg_id=msg_counter[0])
+                payload = m_res.get("result") if isinstance(m_res, dict) else None
+                if not isinstance(payload, dict) or not payload:
+                    # Mock/minimal CDP transport with no layout metrics payload
+                    break
+                css_vis = payload.get("cssVisualViewport") or payload.get("visualViewport") or {}
+                css_lay = payload.get("cssLayoutViewport") or payload.get("layoutViewport") or {}
+                vw = int(round(float(css_vis.get("clientWidth") or 0)))
+                vh = int(round(float(css_vis.get("clientHeight") or 0)))
+                lw = int(round(float(css_lay.get("clientWidth") or vw)))
+                lh = int(round(float(css_lay.get("clientHeight") or vh)))
+                if vw == 1440 and vh == 900 and lw == 1440 and lh == 900:
+                    break
+            except Exception:
+                break
+            if time.monotonic() >= metrics_deadline:
+                break
+            await asyncio.sleep(0.015)
+
+        deadline = time.monotonic() + 0.30
+        while True:
+            try:
+                msg_counter[0] += 1
+                cur_w = await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
+                if cur_w == 1440:
+                    break
+            except CDPEvalError:
+                break
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.015)
 
     async def _navigate_and_wait_ready(
         self,
@@ -3820,7 +3913,7 @@ class UnifiedBrowserAuditor:
         try:
             msg_counter[0] += 1
             await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-            await self._wait_for_layout_settle(ws, msg_counter, expected_width=1440)
+            await self._wait_for_layout_settle(ws, msg_counter, expected_width=1440, expected_height=900)
 
             # 1a. Wide Desktop Viewport (1440x900)
             msg_counter[0] += 1
@@ -3850,6 +3943,28 @@ class UnifiedBrowserAuditor:
             msg_counter[0] += 1
             cls_raw = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
             cls_val, cls_sources = self._parse_cls_result(cls_raw)
+            if (
+                cls_val > 0.0
+                and isinstance(cls_raw, dict)
+                and cls_raw.get("static_parse_preemption_candidate") is True
+            ):
+                # Under heavy CPU contention, Blink's HTMLDocumentParser can yield mid-header/footer
+                # at its 5ms token budget (e.g. byte 2048/4096), painting a half-parsed static DOM
+                # before the next compositor frame finishes rendering the rest of the HTML.
+                # Confirm strictly with a cold-cache re-navigation (never skipping unsized media,
+                # webfonts, or deterministic JS/CSS layout shifts).
+                msg_counter[0] += 1
+                await self._send_cdp(ws, "Network.clearBrowserCache", {}, msg_id=msg_counter[0])
+                msg_counter[0] += 1
+                await self._send_cdp(ws, "Network.setCacheDisabled", {"cacheDisabled": True}, msg_id=msg_counter[0])
+                await self._prepare_audit_viewport(ws, msg_counter)
+                retry_ok, _ = await self._navigate_and_wait_ready(ws, base_url, route, msg_counter)
+                if retry_ok:
+                    await self._wait_for_layout_settle(ws, msg_counter, expected_width=1440, expected_height=900)
+                    msg_counter[0] += 1
+                    retry_cls_raw = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
+                    retry_cls_val, retry_cls_sources = self._parse_cls_result(retry_cls_raw)
+                    cls_val, cls_sources = retry_cls_val, retry_cls_sources
             if cls_val > 0.0:
                 defects["cls_value"] = cls_val
                 if cls_sources:

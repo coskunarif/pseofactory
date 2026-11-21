@@ -248,11 +248,14 @@ class GSCSearchConsoleCollector(BaseSuggestCollector):
         return [s.query for s in spikes]
 
     def harvest_gsc_spikes(self, seed_filter: str = "") -> List[FeedSpike]:
+        from pathlib import Path
         from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
 
-        target_db = self.db_path or DEFAULT_DB_PATH
+        target_db = Path(self.db_path or DEFAULT_DB_PATH)
+        if not target_db.is_file():
+            return []
         try:
-            tdb = TrendHistoryDB(target_db)
+            tdb = TrendHistoryDB(target_db, read_only=True)
         except Exception:
             return []
 
@@ -261,92 +264,95 @@ class GSCSearchConsoleCollector(BaseSuggestCollector):
         seen: set[str] = set()
         seed_low = str(seed_filter or "").strip().lower()
 
-        for prop in self.properties:
-            try:
-                recent_rows = tdb.get_gsc_query_page_windows(prop, window_key="recent_28d")
-                prior_rows = tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")
-                dev_rows = tdb.get_gsc_device_metrics(prop, window_key="recent_90d") or tdb.get_gsc_device_metrics(prop, window_key="recent_28d")
-                sa_rows = tdb.get_gsc_search_appearance_metrics(prop, window_key="recent_90d")
-            except Exception:
-                continue
-
-            prior_map = {(r.page, r.query.lower()): r for r in prior_rows}
-            dev_by_qp: Dict[tuple[str, str], Dict[str, Any]] = {}
-            for dr in dev_rows:
-                if dr.query and dr.page:
-                    dev_by_qp.setdefault((dr.page, dr.query.lower()), {})[dr.device] = {
-                        "clicks": dr.clicks,
-                        "impressions": dr.impressions,
-                        "ctr": dr.ctr,
-                        "position": dr.position,
-                    }
-            sa_names = [s.search_appearance for s in sa_rows]
-
-            for r in recent_rows:
-                q_clean = r.query.strip()
-                q_low = q_clean.lower()
-                if not q_clean or q_low in seen:
+        try:
+            for prop in self.properties:
+                try:
+                    recent_rows = tdb.get_gsc_query_page_windows(prop, window_key="recent_28d")
+                    prior_rows = tdb.get_gsc_query_page_windows(prop, window_key="prior_28d_baseline")
+                    dev_rows = tdb.get_gsc_device_metrics(prop, window_key="recent_90d") or tdb.get_gsc_device_metrics(prop, window_key="recent_28d")
+                    sa_rows = tdb.get_gsc_search_appearance_metrics(prop, window_key="recent_90d")
+                except Exception:
                     continue
-                if seed_low and seed_low not in q_low and q_low not in seed_low:
-                    continue
-                prior = prior_map.get((r.page, q_low))
-                prior_imp = prior.impressions if prior else 0
-                imp_delta = r.impressions - prior_imp
-                pos_delta = (prior.position - r.position) if (prior and prior.position > 0 and r.position > 0) else 0.0
 
-                dev_info = dev_by_qp.get((r.page, q_low), {})
-                mob_ctr = float((dev_info.get("MOBILE") or {}).get("ctr", 0.0) or 0.0)
-                desk_ctr = float((dev_info.get("DESKTOP") or {}).get("ctr", 0.0) or 0.0)
-                mob_ctr_gap = round(desk_ctr - mob_ctr, 4)
+                prior_map = {(r.page, r.query.lower()): r for r in prior_rows}
+                dev_by_qp: Dict[tuple[str, str], Dict[str, Any]] = {}
+                for dr in dev_rows:
+                    if dr.query and dr.page:
+                        dev_by_qp.setdefault((dr.page, dr.query.lower()), {})[dr.device] = {
+                            "clicks": dr.clicks,
+                            "impressions": dr.impressions,
+                            "ctr": dr.ctr,
+                            "position": dr.position,
+                        }
+                sa_names = [s.search_appearance for s in sa_rows]
 
-                # Qualify if breakout impressions, striking distance (4..20), or mobile CTR deficit
-                if r.impressions < 2 and imp_delta <= 0:
-                    continue
-                seen.add(q_low)
-                velocity = round(max(25.0, float(r.impressions) * 4.0 + max(0.0, imp_delta * 3.0)), 2)
-                accel = round(max(2.0, float(imp_delta) * 1.5 + max(0.0, pos_delta * 2.0)), 2)
-                z_val = round(min(6.0, 2.0 + (r.impressions / 20.0) + (0.5 if 4.0 <= r.position <= 20.0 else 0.0)), 2)
-                spike_id = generate_spike_id(self.source_name, q_clean, now)
-                results.append(
-                    FeedSpike(
-                        id=spike_id,
-                        query=q_clean,
-                        source=self.source_name,
-                        detected_at=now,
-                        sample_count=max(100, r.impressions * 25),
-                        velocity=velocity,
-                        acceleration=accel,
-                        z_score=z_val,
-                        baseline_mean=float(max(1, prior_imp)),
-                        baseline_std=2.5,
-                        raw_payload={
-                            "property_id": prop,
-                            "page": r.page,
-                            "impressions": r.impressions,
-                            "clicks": r.clicks,
-                            "ctr": r.ctr,
-                            "current_position": r.position,
-                            "prior_28d_impressions": prior_imp,
-                            "mobile_ctr": mob_ctr,
-                            "desktop_ctr": desk_ctr,
-                            "mobile_ctr_gap": mob_ctr_gap,
-                            "search_appearances": sa_names,
-                            "gsc_telemetry": {
+                for r in recent_rows:
+                    q_clean = r.query.strip()
+                    q_low = q_clean.lower()
+                    if not q_clean or q_low in seen:
+                        continue
+                    if seed_low and seed_low not in q_low and q_low not in seed_low:
+                        continue
+                    prior = prior_map.get((r.page, q_low))
+                    prior_imp = prior.impressions if prior else 0
+                    imp_delta = r.impressions - prior_imp
+                    pos_delta = (prior.position - r.position) if (prior and prior.position > 0 and r.position > 0) else 0.0
+
+                    dev_info = dev_by_qp.get((r.page, q_low), {})
+                    mob_ctr = float((dev_info.get("MOBILE") or {}).get("ctr", 0.0) or 0.0)
+                    desk_ctr = float((dev_info.get("DESKTOP") or {}).get("ctr", 0.0) or 0.0)
+                    mob_ctr_gap = round(desk_ctr - mob_ctr, 4)
+
+                    # Qualify if breakout impressions, striking distance (4..20), or mobile CTR deficit
+                    if r.impressions < 2 and imp_delta <= 0:
+                        continue
+                    seen.add(q_low)
+                    velocity = round(max(25.0, float(r.impressions) * 4.0 + max(0.0, imp_delta * 3.0)), 2)
+                    accel = round(max(2.0, float(imp_delta) * 1.5 + max(0.0, pos_delta * 2.0)), 2)
+                    z_val = round(min(6.0, 2.0 + (r.impressions / 20.0) + (0.5 if 4.0 <= r.position <= 20.0 else 0.0)), 2)
+                    spike_id = generate_spike_id(self.source_name, q_clean, now)
+                    results.append(
+                        FeedSpike(
+                            id=spike_id,
+                            query=q_clean,
+                            source=self.source_name,
+                            detected_at=now,
+                            sample_count=max(100, r.impressions * 25),
+                            velocity=velocity,
+                            acceleration=accel,
+                            z_score=z_val,
+                            baseline_mean=float(max(1, prior_imp)),
+                            baseline_std=2.5,
+                            raw_payload={
                                 "property_id": prop,
                                 "page": r.page,
                                 "impressions": r.impressions,
                                 "clicks": r.clicks,
                                 "ctr": r.ctr,
-                                "position": r.position,
+                                "current_position": r.position,
                                 "prior_28d_impressions": prior_imp,
                                 "mobile_ctr": mob_ctr,
                                 "desktop_ctr": desk_ctr,
                                 "mobile_ctr_gap": mob_ctr_gap,
                                 "search_appearances": sa_names,
+                                "gsc_telemetry": {
+                                    "property_id": prop,
+                                    "page": r.page,
+                                    "impressions": r.impressions,
+                                    "clicks": r.clicks,
+                                    "ctr": r.ctr,
+                                    "position": r.position,
+                                    "prior_28d_impressions": prior_imp,
+                                    "mobile_ctr": mob_ctr,
+                                    "desktop_ctr": desk_ctr,
+                                    "mobile_ctr_gap": mob_ctr_gap,
+                                    "search_appearances": sa_names,
+                                },
                             },
-                        },
+                        )
                     )
-                )
+        finally:
+            tdb.close()
         return results
 
 

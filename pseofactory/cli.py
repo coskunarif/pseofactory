@@ -601,6 +601,7 @@ def cmd_reflect(args: argparse.Namespace) -> int:
             verbose=getattr(args, "verbose", False),
             latch_state=True,
             defer_live_indexing=True,
+            finalize_workspace=not getattr(args, "no_workspace_finalize", False),
         )
         from pseofactory.gitops import sync_tenant_test_isolation_guards
 
@@ -731,6 +732,7 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                     all_aligned, align_reasons = verify_all_tenants_aligned_for_latch(
                         expected_hash=cur_hash,
                         require_git_clean_and_pushed=True,
+                        allow_tenant_scoped_hash=True,
                     )
                     res["all_tenants_aligned"] = all_aligned
                     res["alignment_reasons"] = align_reasons
@@ -853,7 +855,14 @@ def cmd_drift(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     state_file = args.state_file or ".agy/engine_hash.json"
-    drift_res = detect_engine_drift(state_file=state_file, auto_record=args.record)
+    allow_scoped = not getattr(args, "strict_global_hash", False)
+    if getattr(args, "allow_tenant_scoped_hash", False):
+        allow_scoped = True
+    drift_res = detect_engine_drift(
+        state_file=state_file,
+        auto_record=args.record,
+        allow_tenant_scoped_hash=allow_scoped,
+    )
     if args.json:
         print(json.dumps(drift_res, indent=2))
     else:
@@ -865,6 +874,37 @@ def cmd_drift(args: argparse.Namespace) -> int:
     if args.record:
         return 0
     return 0 if drift_res["status"] == "ALIGNED" else 1
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """
+    Computes a fail-closed per-tenant impact plan from git diff (or explicit --files)
+    unioned with live tenant drift inspection.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.impact_planner import plan_tenant_impact
+
+    files_arg = getattr(args, "files", None)
+    changed_files = list(files_arg) if files_arg is not None else None
+    plan = plan_tenant_impact(
+        base_ref=getattr(args, "base", None),
+        repo_root=getattr(args, "repo_root", None),
+        workspace_root=getattr(args, "workspace_root", None),
+        changed_files=changed_files,
+        check_live_drift=not getattr(args, "no_live_drift", False),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(plan, indent=2))
+    else:
+        impacted = ", ".join(plan["impacted_tenants"]) or "none"
+        unaffected = ", ".join(plan["unaffected_tenants"]) or "none"
+        print(f"[PLAN:{plan['mode']}] impacted=[{impacted}] | unaffected=[{unaffected}] | changed_files={len(plan['changed_files'])}")
+        for trig in plan.get("fail_closed_triggers", []) or []:
+            print(f"  ! fail-closed: {trig}")
+        for tid in plan["impacted_tenants"]:
+            rs = "; ".join(plan["reasons_by_tenant"].get(tid, []))
+            print(f"  - {tid}: {rs}")
+    return 0
 
 
 def cmd_replay_dlq(args: argparse.Namespace) -> int:
@@ -2367,7 +2407,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_drift = subparsers.add_parser("drift", help="Audit engine hash drift")
     p_drift.add_argument("--state-file", type=str, default=None, help="Path to engine_hash.json")
     p_drift.add_argument("--record", action="store_true", help="Persist current engine hash into state file")
+    p_drift.add_argument("--allow-tenant-scoped-hash", action="store_true", help="Accept matching per-tenant tenant_substrate_hash for unaffected tenants")
     p_drift.add_argument("--json", action="store_true", help="Output result as JSON")
+
+    # plan
+    p_plan = subparsers.add_parser("plan", help="Compute fail-closed per-tenant impact plan")
+    p_plan.add_argument("--base", type=str, default=None, help="Base git commit/ref for diff (defaults to last_full_audit_receipt.json)")
+    p_plan.add_argument("--files", nargs="*", default=None, help="Explicit list of changed repo-relative file paths")
+    p_plan.add_argument("--repo-root", type=str, default=None, help="Path to pseofactory git repository root")
+    p_plan.add_argument("--workspace-root", type=str, default=None, help="Path to multi-tenant workspace root")
+    p_plan.add_argument("--no-live-drift", action="store_true", help="Skip live tenant drift union (diff classification only)")
+    p_plan.add_argument("--json", action="store_true", help="Output plan as structured JSON")
 
     # replay-dlq
     p_dlq = subparsers.add_parser("replay-dlq", help="Inspect and replay quarantined Dead Letter Queue (DLQ) entries")
@@ -2645,6 +2695,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ref.add_argument("--verbose", action="store_true", help="Verbose log output")
     p_ref.add_argument("--json", action="store_true", help="Output summary as JSON")
     p_ref.add_argument("--no-gitops", action="store_true", help="Bypass automated gitops staging and verification")
+    p_ref.add_argument(
+        "--no-workspace-finalize",
+        action="store_true",
+        help="Skip global workspace ledger, heartbeat, tracking, and handoff finalization (for parallel workers)",
+    )
 
     # seo-workflows
     p_seowf = subparsers.add_parser(
@@ -2897,6 +2952,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_fleet_maintain(args)
     elif args.command == "drift":
         return cmd_drift(args)
+    elif args.command == "plan":
+        return cmd_plan(args)
     elif args.command == "replay-dlq":
         return cmd_replay_dlq(args)
     elif args.command == "trend-intake":
