@@ -1161,10 +1161,10 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"current_qre_spend": 800000, "prior_three_year_avg_qre": 500000, "asc_credit_rate": 0.14},
     },
     "s-corp-reasonable-salary-tax-calculator": {
-        "formula": "round((min(net_business_income * 0.9235, 176100.0) - reasonable_salary) * 0.124 + (net_business_income * 0.9235 - reasonable_salary) * 0.029, 0)",
+        "formula": "round((min(net_business_income * 0.9235, 184500.0) - reasonable_salary) * 0.124 + (net_business_income * 0.9235 - reasonable_salary) * 0.029, 0)",
         "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0},
-        "published_output": 13193.0,
-        "sample_calculation": "On $220,000 S-Corp net income ($203,170 Schedule SE base) vs $95,000 W-2 salary, OASDI caps at the $176,100 wage base ($10,056.40 OASDI savings + $3,136.93 Medicare savings = $13,193 annual FICA tax savings under IRC Section 1366)",
+        "published_output": 14235.0,
+        "sample_calculation": "On $220,000 S-Corp net income ($203,170 Schedule SE base) vs $95,000 W-2 salary, OASDI caps at the $184,500 2026 wage base ($11,098.00 OASDI savings + $3,136.93 Medicare savings = $14,235 annual FICA tax savings under IRC Section 1366)",
         "statutory_claim_key": "standard_deduction_2026_single",
         "statutory_claim_value": 16100,
         "query_params": {"net_business_income": 220000, "reasonable_salary": 95000, "se_tax_rate": 0.153},
@@ -1628,10 +1628,10 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
             claim_val = 16100
             q_params = {"cash": 1200000, "burn": 65000, "rev": 25000, "growth": 5}
         else:
-            formula = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2027) - 12400.0), 38000.0) * 0.12 + max(0.0, (gross_income - standard_deduction_2027) - 50400.0) * 0.22, 0)"
-            inputs = {"gross_income": 125000.0, "standard_deduction_2027": 16500.0}
+            formula = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
+            inputs = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
             published_output = 18734.0
-            sample_calc = "$18,734 federal income tax on $125,000 single income under OBBBA P.L. 119-21 permanent 10%-37% brackets ($16,500 standard deduction)"
+            sample_calc = "$18,734 federal income tax on $125,000 single income under OBBBA P.L. 119-21 permanent 10%-37% brackets ($16,100 2026 standard deduction)"
             claim_key = "standard_deduction_2026_single"
             claim_val = 16100
             q_params = {"income": 125000, "status": "single", "state": "CA"}
@@ -2137,10 +2137,10 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=linkedin&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator&utm_content=company_post"
         text = (
-            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $13,193 in annual FICA payroll tax.\n\n"
+            f"Splitting $220,000 of S-Corp profit into a $95,000 W-2 salary and $125,000 K-1 distribution saves $14,235 in annual FICA payroll tax.\n\n"
             f"Under IRC Section 1366 and IRS Revenue Ruling 74-44, S-corporation shareholder-employees must pay reasonable W-2 compensation before taking FICA-exempt pass-through distributions.\n\n"
             f"Key findings from our S-Corp compensation optimizer:\n"
-            f"• Accounting for the $176,100 Social Security OASDI wage base cap and 92.35% Schedule SE factor, shielding $125,000 in K-1 distributions yields $13,193 in FICA savings.\n"
+            f"• Accounting for the $184,500 Social Security OASDI wage base cap and 92.35% Schedule SE factor, shielding $125,000 in K-1 distributions yields $14,235 in FICA savings.\n"
             f"• Lower W-2 wages reduce the W-2 wage base available for the 20% IRC Section 199A QBI deduction.\n"
             f"• BLS OEWS occupational wage percentiles anchor audit-defensible officer compensation benchmarks.\n\n"
             f"Model your exact S-Corp W-2 salary, FICA savings, and Section 199A QBI impact:\n"
@@ -2351,7 +2351,7 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
         text = (
-            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $13,193 in FICA payroll tax.\n\n"
+            f"on $220k S-Corp profit, a $95k W-2 salary + $125k K-1 split saves $14,235 in FICA payroll tax.\n\n"
             f"check your S-Corp split:\n{url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
@@ -2401,7 +2401,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     if slug == "irs-2027-tax-brackets":
         url = f"{POST_URL_BASE}/tools/irs-2027-tax-brackets/?income=125000&status=single&state=CA&utm_source=facebook&utm_medium=social&utm_campaign=irs-2027-tax-brackets"
         text = (
-            f"A single filer earning $125,000 in California owes $18,734 in 2027 federal income tax ($16,500 standard deduction) under permanently enacted OBBBA P.L. 119-21 10%-37% brackets, saving $4,796 compared to the repealed pre-OBBBA sunset.\n\n"
+            f"A single filer earning $125,000 in California owes $18,734 in 2026 federal income tax ($16,100 standard deduction) under permanently enacted OBBBA P.L. 119-21 10%-37% brackets, saving $4,796 compared to the repealed pre-OBBBA sunset.\n\n"
             f"We mapped the exact 2026 and 2027 bracket thresholds across all 50 states so you can see where your marginal dollar lands: {url}"
         )
     elif slug == "crypto-tax-calculator":
@@ -2509,7 +2509,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=facebook&utm_medium=social&utm_campaign=s-corp-reasonable-salary-tax-calculator"
         text = (
-            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,193 in FICA self-employment taxes under IRC Section 1366.\n\n"
+            f"On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $14,235 in FICA self-employment taxes under IRC Section 1366.\n\n"
             f"Compare your S-Corp salary split and Section 199A QBI deduction trade-offs here: {url}"
         )
     elif slug == "section-301-tariff-landed-cost-calculator":
@@ -4731,7 +4731,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     elif slug == "s-corp-reasonable-salary-tax-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?income=220000&salary=95000&utm_source=x"
         text = (
-            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $13,193 in FICA tax.\n\n"
+            f"on $220k S-Corp profit, a $95k W-2 + $125k K-1 split saves $14,235 in FICA tax.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -5267,7 +5267,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "OPTIMIZE YOUR S-CORP SALARY VS DISTRIBUTION SPLIT:\n"
-            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $13,193 in FICA self-employment tax.\n\n"
+            "On $220,000 in net S-Corp profit, paying a $95,000 reasonable W-2 salary and taking $125,000 in K-1 distributions saves $14,235 in FICA self-employment tax.\n\n"
             "Model your exact S-Corp FICA savings and QBI impact on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/s-corp-reasonable-salary-tax-calculator/?net_business_income=220000&reasonable_salary=95000&se_tax_rate=0.153&utm_source=youtube&utm_medium=video&utm_campaign=s-corp-reasonable-salary-tax-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under IRC Section 1366, Section 3111, Section 199A, and IRS Rev. Rul. 74-44."
@@ -7790,7 +7790,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
         citables = [
             {
                 "id": "stat-scorp-fica-shield",
-                "headline_stat": "In 2026, an S-Corporation earning $220,000 in net operating profit ($203,170 Schedule SE base) that pays a $95,000 reasonable officer salary saves $13,193 annually in federal FICA self-employment taxes under IRC Section 1366 and IRS Form 1120-S.",
+                "headline_stat": "In 2026, an S-Corporation earning $220,000 in net operating profit ($203,170 Schedule SE base) that pays a $95,000 reasonable officer salary saves $14,235 annually in federal FICA self-employment taxes under IRC Section 1366 and IRS Form 1120-S.",
                 "statutory_authority": "IRC Section 1401, IRC Section 3121, IRS Form 1120-S",
                 "canonical_calculator_url": f"{base_url}/tools/s-corp-reasonable-salary-tax-calculator/",
             },

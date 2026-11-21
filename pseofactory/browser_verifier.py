@@ -3211,11 +3211,24 @@ class UnifiedBrowserAuditor:
         # sibling routes against canonical workspace tenant dist directories while still
         # catching genuinely broken 404 targets.
         if not (self.dist_dir / "sitemap.xml").is_file():
-            for fallback_root in (
-                Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
-                Path("/home/ubuntuadmin/projects/prexvo/dist"),
-                Path("/home/ubuntuadmin/projects/gainhelm/dist"),
-            ):
+            try:
+                from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+                resolved_roots = []
+                for decl in CANONICAL_TENANT_DECLARATIONS.values():
+                    r_path = getattr(decl, "repo_root_path", None)
+                    if r_path is not None:
+                        resolved_roots.append(Path(r_path) / "dist")
+                    elif getattr(decl, "repo_root", ""):
+                        resolved_roots.append(Path(getattr(decl, "repo_root")) / "dist")
+                fallback_roots = tuple(resolved_roots)
+            except Exception:
+                fallback_roots = (
+                    Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
+                    Path("/home/ubuntuadmin/projects/prexvo/dist"),
+                    Path("/home/ubuntuadmin/projects/gainhelm/dist"),
+                    Path("/home/ubuntuadmin/projects/lienbond/dist"),
+                )
+            for fallback_root in fallback_roots:
                 if fallback_root.is_dir():
                     fb = self._resolve_in_root(fallback_root, rel)
                     if fb is not None:

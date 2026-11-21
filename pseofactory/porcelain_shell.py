@@ -6800,7 +6800,7 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
                 "      const sal = Math.min(net, Math.max(0, Number(inputs.reasonable_salary) || 0));\n"
                 "      const dist = Math.max(0, net - sal);\n"
                 "      const margRate = Math.max(0.10, Math.min(0.37, (Number(inputs.marginal_tax_rate_pct) || 32) / 100));\n"
-                "      const ssWageCap = 176100;\n"
+                "      const ssWageCap = 184500;\n"
                 "      const solePropSs = Math.min(net * 0.9235, ssWageCap) * 0.124;\n"
                 "      const solePropMed = (net * 0.9235) * 0.029;\n"
                 "      const sCorpSs = Math.min(sal, ssWageCap) * 0.124;\n"
@@ -6815,14 +6815,21 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
                 "      };\n"
                 '    """,\n'
                 "    compute_py=lambda v: {\n"
-                '        "annual_fica_savings": 13193,\n'
+                '        "annual_fica_savings": 14235,\n'
                 '        "shareholder_distribution": int(max(0, v.get("net_business_income", 220000) - v.get("reasonable_salary", 95000))),\n'
                 '        "qbi_deduction_estimate": 25000,\n'
-                '        "combined_tax_savings": int(round(13193 + 25000 * (float(v.get("marginal_tax_rate_pct", 32)) / 100.0))),\n'
+                '        "combined_tax_savings": int(round(14235 + 25000 * (float(v.get("marginal_tax_rate_pct", 32)) / 100.0))),\n'
                 "    },"
             )
             if old_scorp_metrics in ic_src:
                 ic_src = ic_src.replace(old_scorp_metrics, new_scorp_metrics, 1)
+            for old_cap_s, new_cap_s in (
+                ("const ssWageCap = 176100;", "const ssWageCap = 184500;"),
+                ('"annual_fica_savings": 13193,', '"annual_fica_savings": 14235,'),
+                ('int(round(13193 + 25000 *', 'int(round(14235 + 25000 *'),
+            ):
+                if old_cap_s in ic_src:
+                    ic_src = ic_src.replace(old_cap_s, new_cap_s)
             if ic_src != ic_orig:
                 ic_p.write_text(ic_src, encoding="utf-8")
                 updated_files.append("profithelm/interactive_calculator.py")

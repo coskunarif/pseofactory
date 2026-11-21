@@ -3846,7 +3846,7 @@ def _build_vertical_profithelm_overlay_blocks(
                     "baseline_ctr": ctr,
                     "impressions": impr,
                     "params": {"net_business_income": 220000, "reasonable_salary": 95000, "marginal_tax_rate_pct": 32},
-                    "description": "Splitting $220,000 net profit into a $95,000 BLS-benchmarked W-2 salary and $125,000 K-1 distribution saves $13,193 in FICA taxes.",
+                    "description": "Splitting $220,000 net profit into a $95,000 BLS-benchmarked W-2 salary and $125,000 K-1 distribution saves $14,235 in FICA taxes.",
                 },
                 {
                     "id": "preset-scorp-agency",
@@ -3862,16 +3862,16 @@ def _build_vertical_profithelm_overlay_blocks(
             "comparison_rows": [
                 {
                     "scenario": "$220,000 Net Operating Profit ($95k W-2 Salary / $125k K-1 Split)",
-                    "baseline": "$27,728 Schedule C Self-Employment Tax",
+                    "baseline": "$28,770 Schedule C Self-Employment Tax",
                     "optimized": "$14,535 S-Corp FICA Tax + $25,000 Sec. 199A QBI Deduction",
-                    "delta": "+$13,193 Annual FICA Payroll Tax Saved",
+                    "delta": "+$14,235 Annual FICA Payroll Tax Saved",
                     "authority": "IRC Section 3121, Section 199A & Rev. Rul. 74-44",
                 },
                 {
-                    "scenario": "$400,000 Net Profit Crossing OASDI $176,100 Social Security Cap",
-                    "baseline": "$32,549 Unstructured Pass-Through SE Tax",
+                    "scenario": "$400,000 Net Profit Crossing OASDI $184,500 Social Security Cap",
+                    "baseline": "$33,591 Unstructured Pass-Through SE Tax",
                     "optimized": "$22,185 S-Corp FICA + $51,000 Sec. 199A QBI Deduction",
-                    "delta": "+$10,364 Medicare Surtax & FICA Shield",
+                    "delta": "+$11,406 Medicare Surtax & FICA Shield",
                     "authority": "IRC Section 1366, Section 3111 & Form 1120-S",
                 },
             ],
@@ -6020,10 +6020,10 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
             matrix = [
                 {
-                    "profile": "Solo Service Operator ($175k Net Profit, Single Filer)",
-                    "statutory_threshold": "48.57% Reasonable Compensation Safe-Harbor Benchmark ($85k W-2)",
+                    "profile": "Solo Service Operator ($220k Net Profit, Single Filer)",
+                    "statutory_threshold": "43.18% Reasonable Compensation Safe-Harbor Benchmark ($95k W-2)",
                     "optimal_path": "S-Corp Election (Form 2553) + Automated Officer Payroll",
-                    "net_dollar_impact": "$13,193 Annual Payroll Tax Savings vs Sole Proprietorship",
+                    "net_dollar_impact": "$14,235 Annual Payroll Tax Savings vs Sole Proprietorship",
                     "next_action": "Configure Reasonable W-2 Salary & K-1 Split",
                 },
                 {
@@ -6312,7 +6312,7 @@ def _build_autonomous_citation_assertions_and_matrix(
         elif any(k in low for k in ("workers-comp", "payroll-burden", "invoice-factoring", "surety-bond", "llc")):
             assertions = [
                 f"In 2026, {heading_label} quantifies statutory employer payroll taxes (IRC Section 3111 and Section 3301), NCCI workers' compensation Experience Modification Rate (EMR) premiums, and commercial operating costs.",
-                "Under IRC Section 3111 and 3301, employers pay 6.2% OASDI (up to $176,100 per employee), 1.45% Medicare, and 0.6% net FUTA (after the 5.4% SUTA credit on the first $7,000), while NCCI workers' comp manual rates scale by the employer's EMR.",
+                "Under IRC Section 3111 and 3301, employers pay 6.2% OASDI (up to $184,500 per employee), 1.45% Medicare, and 0.6% net FUTA (after the 5.4% SUTA credit on the first $7,000), while NCCI workers' comp manual rates scale by the employer's EMR.",
                 "For a $1,250,000 covered payroll with a $7.00 per $100 NCCI manual rate, achieving a 0.85 safety EMR credit reduces annual workers' compensation premium from $87,500 to $74,375 ($13,125 saved; $115,375 total burden with $41,000 FICA/FUTA/SUTA).",
             ]
             matrix = [

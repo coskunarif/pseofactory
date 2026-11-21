@@ -245,8 +245,8 @@ def _build_profithelm_profile() -> TenantTruthProfile:
             "tcja_vs_sunset_single_125k_tcja_tax": 19181.0,
             "tcja_vs_sunset_single_125k_sunset_tax": 23530.0,
             "tcja_vs_sunset_single_125k_delta": 4349.0,
-            "obbba_2026_single_125k_fed_tax": 18918.0,
-            "obbba_2027_single_125k_fed_tax": 18734.0,
+            "obbba_2026_single_125k_fed_tax": 18734.0,
+            "obbba_2027_single_125k_fed_tax": 18638.0,
             "ca_sdi_rate_2026_pct": 1.3,
             "ca_top_marginal_rate_2026_pct": 14.6,
             "ssa_oasdi_wage_base_2025": 176100.0,
@@ -254,7 +254,8 @@ def _build_profithelm_profile() -> TenantTruthProfile:
             "saas_runway_baseline_monthly_revenue": 33000.0,
             "saas_runway_baseline_monthly_burn": 45000.0,
             "saas_runway_baseline_net_monthly_burn": 12000.0,
-            "scorp_155k_95k_salary_fica_savings": 13193.0,
+            "scorp_155k_95k_salary_fica_savings": 7366.0,
+            "scorp_220k_95k_salary_fica_savings": 14235.0,
             "section_301_tariff_120k_fob_landed_cost": 160966.0,
             "section_179_heavy_suv_85k_80pct_first_year_deduction": 38000.0,
         },
@@ -2676,7 +2677,7 @@ class TenantFactStore:
                     "Corrupted mathematical subtraction syntax detected ('(1: 13.3% state rate)' or '(100%: 15% exclusion)'); must preserve minus sign in mathematical formulas"
                 )
 
-            # Un-capped or inexact OASDI S-Corp FICA savings ($19,125 or $13,180 instead of $13,193 at $220k net / $95k salary)
+            # Un-capped or stale 2025 OASDI S-Corp FICA savings ($19,125, $13,180, or 2025 $13,193/$176,100 instead of 2026 $14,235 at $184,500 cap)
             if (
                 "$19,125" in text
                 or '"published_output": 19125' in text
@@ -2684,11 +2685,27 @@ class TenantFactStore:
                 or "$13,180" in text
                 or '"published_output": 13180' in text
                 or "produces 13,180.00" in text_lower
+                or '"published_output": 13193' in text
+                or "produces 13,193.00" in text_lower
+                or '"ss_wage_cap": 176100' in text
+                or "const ssWageCap = 176100;" in text
+                or "$13,193 in self-employment tax" in text
+                or 'id="val-annual_fica_savings">$13,193<' in text
+                or 'id="val-combined_tax_savings">$21,193<' in text
+                or "+$13,193 Annual FICA Payroll Tax Saved" in text
+                or "saves $13,193 in FICA" in text
+                or "saves $13,193 annually" in text
             ) and (
                 "s-corp" in text_lower or "reasonable salary" in text_lower or "reasonable-salary" in text_lower
             ):
                 violations.append(
-                    "Stale S-Corp FICA tax savings figure ('$19,125' or '$13,180') detected: under the 2026 $176,100 Social Security OASDI wage base cap and 92.35% Schedule SE factor ($203,170 SE base on $220,000 net), verified savings at $95,000 salary is $13,193 ($10,056.40 OASDI + $3,136.93 Medicare)"
+                    "Stale S-Corp FICA tax savings figure ('$19,125', '$13,180', or 2025 '$13,193'/'$176,100') detected: under the 2026 $184,500 Social Security OASDI wage base cap and 92.35% Schedule SE factor ($203,170 SE base on $220,000 net), verified savings at $95,000 salary is $14,235 ($11,098.00 OASDI + $3,136.93 Medicare)"
+                )
+
+            # Stale 2026 Single $125k OBBBA federal tax ($18,918 instead of $18,734 under Rev. Proc. 2025-32)
+            if "$18,918" in text and ("2026" in text_lower or "obbba" in text_lower or "rev. proc. 2025-32" in text_lower):
+                violations.append(
+                    "Contradictory 2026 federal tax figure '$18,918' detected: under OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32 ($16,100 standard deduction), Single $125,000 federal income tax is $18,734 in 2026 ($18,638 in 2027 at $16,500 standard deduction)"
                 )
 
             # Rounded Section 301 tariff landed cost ($161,000 instead of $160,966 when MPF/HMF are $528.40/$237.50)
@@ -2773,7 +2790,7 @@ class TenantFactStore:
             for st_25 in stale_2025_in_2026_tokens:
                 if st_25 in text_lower:
                     violations.append(
-                        f"Stale 2025 or contradictory statutory limit '{st_25}' presented in 2026/2027 schedule: 2026 law requires $16,100 Single / $32,200 MFJ standard deduction (Rev. Proc. 2025-32), $24,500 401(k) cap (Notice 2025-67), 1.3% CA SDI (14.6% top CA rate), 20% Section 168(k) bonus depreciation, and $13,193 S-Corp FICA savings"
+                        f"Stale 2025 or contradictory statutory limit '{st_25}' presented in 2026/2027 schedule: 2026 law requires $16,100 Single / $32,200 MFJ standard deduction (Rev. Proc. 2025-32), $24,500 401(k) cap (Notice 2025-67), $184,500 OASDI wage base, 1.3% CA SDI (14.6% top CA rate), 20% Section 168(k) bonus depreciation, and $14,235 S-Corp FICA savings"
                     )
 
             # Equipment Lease vs Section 179 capital expensing misattribution
@@ -3194,51 +3211,106 @@ class TruthReconciliationEngine:
         ),
         ('"price":"29"', '"price":"49"'),
         ('"price": "29"', '"price": "49"'),
-        ("$19,125 in self-employment tax ($15,500 OASDI + $3,625 Medicare)", "$13,193 in self-employment tax ($10,056 OASDI + $3,137 Medicare)"),
-        ("$13,180 in self-employment tax ($10,056 OASDI + $3,124 Medicare)", "$13,193 in self-employment tax ($10,056 OASDI + $3,137 Medicare)"),
-        ("($10,056.40 OASDI savings below the $176,100 cap plus $3,123.60 Medicare savings)", "($10,056.40 OASDI savings below the $176,100 cap plus $3,136.93 Medicare savings)"),
-        ('id="val-se_tax_savings">$13,180<', 'id="val-se_tax_savings">$13,193<'),
-        ('id="val-annual_fica_savings">$13,180<', 'id="val-annual_fica_savings">$13,193<'),
-        ('id="val-sole_prop_se_tax">$27,705<', 'id="val-sole_prop_se_tax">$27,728<'),
+        ("$19,125 in self-employment tax ($15,500 OASDI + $3,625 Medicare)", "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)"),
+        ("$13,180 in self-employment tax ($10,056 OASDI + $3,124 Medicare)", "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)"),
+        ("$13,193 in self-employment tax ($10,056 OASDI + $3,137 Medicare)", "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)"),
+        ("($10,056.40 OASDI savings below the $176,100 cap plus $3,123.60 Medicare savings)", "($11,098.00 OASDI savings below the $184,500 cap plus $3,136.93 Medicare savings)"),
+        ("($10,056.40 OASDI savings below the $176,100 cap plus $3,136.93 Medicare savings)", "($11,098.00 OASDI savings below the $184,500 cap plus $3,136.93 Medicare savings)"),
+        ("const ssWageCap = 176100;", "const ssWageCap = 184500;"),
+        ('id="val-se_tax_savings">$13,180<', 'id="val-se_tax_savings">$14,235<'),
+        ('id="val-se_tax_savings">$13,193<', 'id="val-se_tax_savings">$14,235<'),
+        ('id="val-annual_fica_savings">$13,180<', 'id="val-annual_fica_savings">$14,235<'),
+        ('id="val-annual_fica_savings">$13,193<', 'id="val-annual_fica_savings">$14,235<'),
+        ('id="val-combined_tax_savings">$21,193<', 'id="val-combined_tax_savings">$22,235<'),
+        ('id="val-sole_prop_se_tax">$27,705<', 'id="val-sole_prop_se_tax">$28,770<'),
+        ('id="val-sole_prop_se_tax">$27,728<', 'id="val-sole_prop_se_tax">$28,770<'),
         ('id="val-scorp_fica_tax">$14,525<', 'id="val-scorp_fica_tax">$14,535<'),
         ("<td>$12,393</td>", "<td>$10,484</td>"),
         ("<td>$11,082</td>", "<td>$10,484</td>"),
-        ("<td>$13,180</td>", "<td>$13,193</td>"),
-        ("<td>$11,010</td>", "<td>$10,364</td>"),
-        ("<td>$10,485</td>", "<td>$10,364</td>"),
-        ("$27,713 Schedule C Self-Employment Tax", "$27,728 Schedule C Self-Employment Tax"),
-        ("+$13,180 Annual FICA Payroll Tax Saved", "+$13,193 Annual FICA Payroll Tax Saved"),
-        ("saves $13,180 in FICA taxes.", "saves $13,193 in FICA taxes."),
-        ("$34,425 Unstructured Pass-Through SE Tax", "$32,549 Unstructured Pass-Through SE Tax"),
-        ("+$12,240 Medicare Surtax &amp; FICA Shield", "+$10,364 Medicare Surtax &amp; FICA Shield"),
-        ("+$12,240 Medicare Surtax & FICA Shield", "+$10,364 Medicare Surtax & FICA Shield"),
+        ("<td>$13,180</td>", "<td>$14,235</td>"),
+        ("<td>$13,193</td>", "<td>$14,235</td>"),
+        ("<td>$11,010</td>", "<td>$11,406</td>"),
+        ("<td>$10,485</td>", "<td>$11,406</td>"),
+        ("<td>$10,364</td>", "<td>$11,406</td>"),
+        ("$27,713 Schedule C Self-Employment Tax", "$28,770 Schedule C Self-Employment Tax"),
+        ("$27,728 Schedule C Self-Employment Tax", "$28,770 Schedule C Self-Employment Tax"),
+        ("$27,728 Schedule SE Tax", "$28,770 Schedule SE Tax"),
+        ("+$13,180 Annual FICA Payroll Tax Saved", "+$14,235 Annual FICA Payroll Tax Saved"),
+        ("+$13,193 Annual FICA Payroll Tax Saved", "+$14,235 Annual FICA Payroll Tax Saved"),
+        ("saves $13,180 in FICA taxes.", "saves $14,235 in FICA taxes."),
+        ("saves $13,193 in FICA taxes.", "saves $14,235 in FICA taxes."),
+        ("saves $13,193 annually in self-employment taxes", "saves $14,235 annually in self-employment taxes"),
+        ("$13,193 Annual FICA Saved", "$14,235 Annual FICA Saved"),
+        ("+$13,193 Self-Employment Tax Drag", "+$14,235 Self-Employment Tax Drag"),
+        ("$13,193 Verified FICA Alpha", "$14,235 Verified FICA Alpha"),
+        ("$13,193 Annual Payroll Tax Savings vs Sole Proprietorship", "$14,235 Annual Payroll Tax Savings vs Sole Proprietorship"),
+        ("$34,425 Unstructured Pass-Through SE Tax", "$33,591 Unstructured Pass-Through SE Tax"),
+        ("$32,549 Unstructured Pass-Through SE Tax", "$33,591 Unstructured Pass-Through SE Tax"),
+        ("+$12,240 Medicare Surtax &amp; FICA Shield", "+$11,406 Medicare Surtax &amp; FICA Shield"),
+        ("+$12,240 Medicare Surtax & FICA Shield", "+$11,406 Medicare Surtax & FICA Shield"),
+        ("+$10,364 Medicare Surtax &amp; FICA Shield", "+$11,406 Medicare Surtax &amp; FICA Shield"),
+        ("+$10,364 Medicare Surtax & FICA Shield", "+$11,406 Medicare Surtax & FICA Shield"),
+        ("OASDI $176,100 Social Security Cap", "OASDI $184,500 Social Security Cap"),
+        ("OASDI wage base limit ($176,100)", "OASDI wage base limit ($184,500)"),
+        ("OASDI Social Security wage base cap ($176,100)", "OASDI Social Security wage base cap ($184,500)"),
+        ("up to $176,100 OASDI base;", "up to $184,500 OASDI base;"),
+        ("up to $176,100 per employee)", "up to $184,500 per employee)"),
+        ('id="cliff-exposure-2026" class="calc-metric-value"><strong>$13,193 FICA Saved</strong>', 'id="cliff-exposure-2026" class="calc-metric-value"><strong>$14,235 FICA Saved</strong>'),
+        ('data-range-low="$10,554" data-range-baseline="$13,193" data-range-high="$15,832"', 'data-range-low="$11,388" data-range-baseline="$14,235" data-range-high="$17,082"'),
+        ('id="hero-range-low">$10,554<', 'id="hero-range-low">$11,388<'),
+        ('id="hero-range-baseline">$13,193<', 'id="hero-range-baseline">$14,235<'),
+        ('id="hero-range-high">$15,832<', 'id="hero-range-high">$17,082<'),
+        ('data-baseline-output="13193.0">13,193<', 'data-baseline-output="14235.0">14,235<'),
+        ('class="scenario-baseline">13,193<', 'class="scenario-baseline">14,235<'),
+        ('class="scenario-ast-eval" data-tier="baseline">13,193<', 'class="scenario-ast-eval" data-tier="baseline">14,235<'),
+        ('class="scenario-conservative">10,554.40<', 'class="scenario-conservative">11,388.00<'),
+        ('class="scenario-moderate-contraction">11,873.70<', 'class="scenario-moderate-contraction">12,811.50<'),
+        ('class="scenario-moderate-expansion">14,512.30<', 'class="scenario-moderate-expansion">15,658.50<'),
+        ('class="scenario-aggressive">15,831.60<', 'class="scenario-aggressive">17,082.00<'),
+        ("ss_wage_cap=140880", "ss_wage_cap=147600"),
+        ("ss_wage_cap=176100", "ss_wage_cap=184500"),
+        ("ss_wage_cap=211320", "ss_wage_cap=221400"),
+        # 2026 vs 2027 Single $125k OBBBA reconciliation ($18,918 -> $18,734 in 2026; $18,638 in 2027)
+        ("$18,918 ($25,358 w/ CA)", "$18,734 ($25,621 w/ CA)"),
+        ("$18,918 2026 Federal Income Tax", "$18,734 2026 Federal Income Tax"),
+        ("$18,734 2027 OBBBA Federal Tax", "$18,638 2027 OBBBA Federal Tax"),
+        ('id="cliff-exposure-2027" class="calc-metric-value"><strong>$18,734 Federal Tax</strong>', 'id="cliff-exposure-2027" class="calc-metric-value"><strong>$18,638 Federal Tax</strong>'),
+        ("-$184 Chained-CPI Indexing Relief", "-$96 Chained-CPI Indexing Relief"),
         # Corrupted mathematical subtraction syntax
         ("(1: 13.3% state rate)", "(1 - 13.3% state rate)"),
         ("(100%: 15% exclusion)", "(100% - 15% exclusion)"),
-        # S-Corp reasonable salary OASDI wage base cap reconciliation ($19,125 / $13,180 -> $13,193)
+        # S-Corp reasonable salary OASDI wage base cap reconciliation ($19,125 / $13,180 / 2025 $13,193 -> 2026 $14,235)
         (
             '"formula": "round((net_business_income - reasonable_w2_salary) * 0.153, 0)",\n  "inputs": {\n    "net_business_income": 225000.0,\n    "reasonable_w2_salary": 100000.0\n  },\n  "published_output": 19125.0,',
-            '"formula": "round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0)",\n  "inputs": {\n    "net_business_income": 220000.0,\n    "reasonable_salary": 95000.0,\n    "ss_wage_cap": 176100.0\n  },\n  "published_output": 13193.0,',
+            '"formula": "round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0)",\n  "inputs": {\n    "net_business_income": 220000.0,\n    "reasonable_salary": 95000.0,\n    "ss_wage_cap": 184500.0\n  },\n  "published_output": 14235.0,',
         ),
         (
             '"formula": "round((oasdi_taxable_delta * 0.124) + (medicare_taxable_delta * 0.029), 0)",\n  "inputs": {\n    "oasdi_taxable_delta": 81100.0,\n    "medicare_taxable_delta": 107425.0\n  },\n  "published_output": 13180.0,',
-            '"formula": "round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0)",\n  "inputs": {\n    "net_business_income": 220000.0,\n    "reasonable_salary": 95000.0,\n    "ss_wage_cap": 176100.0\n  },\n  "published_output": 13193.0,',
+            '"formula": "round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0)",\n  "inputs": {\n    "net_business_income": 220000.0,\n    "reasonable_salary": 95000.0,\n    "ss_wage_cap": 184500.0\n  },\n  "published_output": 14235.0,',
+        ),
+        (
+            '"inputs": {\n    "net_business_income": 220000.0,\n    "reasonable_salary": 95000.0,\n    "ss_wage_cap": 176100.0\n  },\n  "published_output": 13193.0,',
+            '"inputs": {\n    "net_business_income": 220000.0,\n    "reasonable_salary": 95000.0,\n    "ss_wage_cap": 184500.0\n  },\n  "published_output": 14235.0,',
         ),
         (
             "Deterministic evaluation of round((net_business_income: reasonable_w2_salary) * 0.153, 0) produces 19,125.00.",
-            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 13,193.00.",
+            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00.",
         ),
         (
             "Deterministic evaluation of round((net_business_income - reasonable_w2_salary) * 0.153, 0) produces 19,125.00.",
-            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 13,193.00.",
+            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00.",
         ),
         (
             "Deterministic evaluation of round((oasdi_taxable_delta * 0.124) + (medicare_taxable_delta * 0.029), 0) produces 13,180.00.",
-            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 13,193.00.",
+            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00.",
         ),
         (
             "Deterministic evaluation of round(oasdi_savings + medicare_savings, 0) produces 13,180.00.",
+            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00.",
+        ),
+        (
             "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 13,193.00.",
+            "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00.",
         ),
         # Treasury yield calculator state TEY table reconciliation
         ("<td>10.90%</td>\n                  <td>5.64%</td>", "<td>10.90%</td>\n                  <td>5.84%</td>"),
@@ -4268,11 +4340,19 @@ class TruthReconciliationEngine:
                     "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
                     "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
                 ),
-                ("$27,713 Schedule C Self-Employment Tax", "$27,728 Schedule C Self-Employment Tax"),
-                ("+$13,180 Annual FICA Payroll Tax Saved", "+$13,193 Annual FICA Payroll Tax Saved"),
-                ("saves $13,180 in FICA taxes.", "saves $13,193 in FICA taxes."),
-                ("$34,425 Unstructured Pass-Through SE Tax", "$32,549 Unstructured Pass-Through SE Tax"),
-                ("+$12,240 Medicare Surtax & FICA Shield", "+$10,364 Medicare Surtax & FICA Shield"),
+                ("$27,713 Schedule C Self-Employment Tax", "$28,770 Schedule C Self-Employment Tax"),
+                ("$27,728 Schedule C Self-Employment Tax", "$28,770 Schedule C Self-Employment Tax"),
+                ("+$13,180 Annual FICA Payroll Tax Saved", "+$14,235 Annual FICA Payroll Tax Saved"),
+                ("+$13,193 Annual FICA Payroll Tax Saved", "+$14,235 Annual FICA Payroll Tax Saved"),
+                ("saves $13,180 in FICA taxes.", "saves $14,235 in FICA taxes."),
+                ("saves $13,193 in FICA taxes.", "saves $14,235 in FICA taxes."),
+                ("$34,425 Unstructured Pass-Through SE Tax", "$33,591 Unstructured Pass-Through SE Tax"),
+                ("$32,549 Unstructured Pass-Through SE Tax", "$33,591 Unstructured Pass-Through SE Tax"),
+                ("+$12,240 Medicare Surtax & FICA Shield", "+$11,406 Medicare Surtax & FICA Shield"),
+                ("+$10,364 Medicare Surtax & FICA Shield", "+$11,406 Medicare Surtax & FICA Shield"),
+                ("OASDI $176,100 Social Security Cap", "OASDI $184,500 Social Security Cap"),
+                ("$13,193 Annual Payroll Tax Savings vs Sole Proprietorship", "$14,235 Annual Payroll Tax Savings vs Sole Proprietorship"),
+                ("up to $176,100 per employee)", "up to $184,500 per employee)"),
                 (
                     "or default to First-In, First-Out (FIFO) on Form 8949.",
                     "or apply the statutory First-In, First-Out (FIFO) sequence on Form 8949.",
@@ -4507,6 +4587,15 @@ class TruthReconciliationEngine:
                         if "2,560,000" in raw_txt and ("suv" in man_f.name.lower() or "vehicle" in man_f.name.lower()):
                             raw_txt = raw_txt.replace("2,560,000", "30,500")
                             man_d = _json_lib.loads(raw_txt)
+                            changed = True
+                        if man_f.name == "s-corp-reasonable-salary-tax-calculator.json" and (
+                            man_d.get("published_output") in (19125.0, 13180.0, 13193.0)
+                            or (isinstance(man_d.get("inputs"), dict) and man_d["inputs"].get("ss_wage_cap") == 176100.0)
+                        ):
+                            man_d["formula"] = "round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0)"
+                            man_d["inputs"] = {"net_business_income": 220000.0, "reasonable_salary": 95000.0, "ss_wage_cap": 184500.0}
+                            man_d["published_output"] = 14235.0
+                            man_d["sample_calculation"] = "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00."
                             changed = True
                         if man_f.name == "irs-2027-tax-brackets.json" and (
                             "sunset_standard_deduction" in raw_txt or man_d.get("published_output") == 23530.0
@@ -5005,7 +5094,7 @@ class TruthReconciliationEngine:
                         pass
 
         # GainHelm HIPAA 45 CFR 160.404 Tier 3 benchmark parity across syndication, ai-benchmarks, and video catalog
-        if tenant_norm == "gainhelm" and repo_root.is_dir():
+        if tenant_norm == "gainhelm" and r_root is not None and r_root.is_dir():
             gh_repls = [
                 (
                     "(2,500 ePHI records * $165 forensic/notification cost) + $100,000 45 CFR 160.404 Tier 2 reasonable cause penalty = $512,500 total HIPAA breach exposure",
@@ -5029,7 +5118,7 @@ class TruthReconciliationEngine:
             ]
             gh_targets: List[Path] = []
             for sub_rel in ("syndication", "ai-benchmarks", "dist/ai-benchmarks", "dist/videos"):
-                sub_p = repo_root / sub_rel
+                sub_p = r_root / sub_rel
                 if sub_p.is_dir():
                     for ext in ("*.html", "*.md", "*.txt", "*.json", "*.jsonl"):
                         gh_targets.extend(sub_p.rglob(ext))

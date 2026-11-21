@@ -11735,7 +11735,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
         metric_label: "Social Security OASDI Maximum Taxable Wage Base",
         statutory_citation: "26 U.S.C. 3121",
         unit: "USD",
-        points: { "2024": 168600.0, "2025": 176100.0, "2026": 181800.0, "2027": 187500.0, "2028": 193500.0, "2029": 199700.0, "2030": 206100.0 },
+        points: { "2024": 168600.0, "2025": 176100.0, "2026": 184500.0, "2027": 190500.0, "2028": 196500.0, "2029": 202800.0, "2030": 209300.0 },
       },
       {
         series_id: "irs_sec168k_bonus",

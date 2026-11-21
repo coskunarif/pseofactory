@@ -1,5 +1,5 @@
 """
-pseofactory: Unified Programmatic SEO Substrate for Prexvo and ProfitHelm
+pseofactory: Unified Multi-Tenant Autonomous pSEO and GEO Software Factory Substrate
 Provides shared SEO verification, indexing velocity governors, content hash diffing,
 parasite syndication growth hacks, and engine hash drift gate.
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.

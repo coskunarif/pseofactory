@@ -3047,17 +3047,24 @@ class AssetIntegrityEvaluator:
             projects_root / "gainhelm" / "gainhelm" / "engine" / "compliance_formulas.py",
             projects_root / "prexvo" / "prexvo" / "engine" / "repayment_formulas.py",
             projects_root / "profithelm-platform" / "profithelm" / "data" / "statutory.db",
+            projects_root / "lienbond" / "lienbond" / "builder.py",
+            projects_root / "lienbond" / "lienbond" / "_pseo_porcelain.py",
         ]
         ph_engine_dir = projects_root / "profithelm-platform" / "profithelm" / "engine"
         if ph_engine_dir.is_dir():
             for pef in sorted(ph_engine_dir.glob("*.py")):
                 formula_candidates.append(pef)
+        lb_engine_dir = projects_root / "lienbond" / "lienbond" / "engine"
+        if lb_engine_dir.is_dir():
+            for lbf in sorted(lb_engine_dir.glob("*.py")):
+                formula_candidates.append(lbf)
 
         for fc in formula_candidates:
             if fc.is_file():
                 try:
                     h = hashlib.sha256(fc.read_bytes()).hexdigest()[:16]
-                    sig_parts.append(f"{fc.name}:{h}")
+                    label = f"{fc.parent.name}/{fc.name}" if fc.parent.name == "lienbond" else fc.name
+                    sig_parts.append(f"{label}:{h}")
                 except Exception:
                     pass
 
@@ -9106,11 +9113,11 @@ class RetroReflectionEngine:
         "s-corp-reasonable-salary-tax-calculator": {
             "model_name": "S-Corp Reasonable Salary and FICA Tax Savings Model",
             "formula": "round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0)",
-            "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0, "ss_wage_cap": 176100.0},
-            "published_output": 13193.0,
+            "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0, "ss_wage_cap": 184500.0},
+            "published_output": 14235.0,
             "statutory_authority": "26 U.S.C. Section 1366; IRC Section 3111 and Section 3121; IRS Rev. Rul. 74-44",
             "economic_dataset": "BLS Occupational Employment and Wage Statistics (OEWS) and IRS S-Corporation SOI Tables",
-            "sample_calculation": "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 13,193.00.",
+            "sample_calculation": "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00.",
         },
         "section-301-tariff-landed-cost-calculator": {
             "model_name": "Section 301 Tariff and Landed Import Cost Model",
@@ -12145,7 +12152,11 @@ class RetroReflectionEngine:
                 "$23,530",
                 "+$4,349",
                 "$15,240 Annual Payroll Tax Savings",
+                "$13,193 Annual Payroll Tax Savings",
+                "+$13,193 Annual FICA Payroll Tax Saved",
+                "OASDI $176,100 Social Security Cap",
                 "$176,100 statutory wage base",
+                "up to $176,100 per employee)",
                 "10%, 15%, 25%, 28%, 33%, 35%, and 39.6%",
             )
         ):
@@ -16991,11 +17002,18 @@ def reflect_and_recompile_all_assets(
                             "const suvCap = 31300 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 0.60;",
                             "const suvCap = Math.min(basis, 30500);\n      const suvBonus = Math.max(0, basis - suvCap) * 0.20;",
                         ),
-                        ('"annual_fica_savings": 13180,', '"annual_fica_savings": 13193,'),
-                        ("saves $19,125 annually", "saves $13,193 annually"),
+                        ("const ssWageCap = 176100;", "const ssWageCap = 184500;"),
+                        ('"annual_fica_savings": 13180,', '"annual_fica_savings": 14235,'),
+                        ('"annual_fica_savings": 13193,', '"annual_fica_savings": 14235,'),
+                        ('int(round(13193 + 25000 *', 'int(round(14235 + 25000 *'),
+                        ("saves $19,125 annually", "saves $14,235 annually"),
+                        ("saves $13,193 annually", "saves $14,235 annually"),
                         ('"annual_fica_savings": "$11,082"', '"annual_fica_savings": "$10,484"'),
-                        ('"annual_fica_savings": "$13,180"', '"annual_fica_savings": "$13,193"'),
-                        ('"annual_fica_savings": "$10,485"', '"annual_fica_savings": "$10,364"'),
+                        ('"annual_fica_savings": "$13,180"', '"annual_fica_savings": "$14,235"'),
+                        ('"annual_fica_savings": "$13,193"', '"annual_fica_savings": "$14,235"'),
+                        ('"annual_fica_savings": "$10,485"', '"annual_fica_savings": "$11,406"'),
+                        ('"annual_fica_savings": "$10,364"', '"annual_fica_savings": "$11,406"'),
+                        ("OASDI wage base limit ($176,100)", "OASDI wage base limit ($184,500)"),
                         ('"heavy_suv_capped_savings": 21895,', '"heavy_suv_capped_savings": 14525,'),
                         ('"year_1_deduction_95k": "$62,556", "cash_tax_savings_35pct": "$21,895"', '"year_1_deduction_95k": "$41,500", "cash_tax_savings_35pct": "$14,525"'),
                         ("$53,320", "$38,000"),

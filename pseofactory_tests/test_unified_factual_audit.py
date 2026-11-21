@@ -234,3 +234,150 @@ def test_uncorrigible_math_contradiction_fails_closed(temp_estate):
     engine = LiveTruthAuditEngine()
     violations = engine.audit_file(html_f, property_id="profithelm")
     assert any("SSR .output-value" in v or "diverges" in v for v in violations)
+
+
+def test_gainhelm_reconcile_estate_assets_handles_none_and_str_repo_root(tmp_path):
+    """Regression: reconcile_estate_assets for gainhelm must not crash when repo_root is None or str."""
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir(parents=True)
+    synd_dir = tmp_path / "syndication"
+    synd_dir.mkdir(parents=True)
+    hipaa_file = synd_dir / "hipaa_benchmark.md"
+    hipaa_file.write_text(
+        "Legacy estimate: $512,500 total HIPAA breach exposure for 2,500 ePHI records.\n",
+        encoding="utf-8",
+    )
+
+    # 1. repo_root=None must resolve via dist_dir.parent without AttributeError
+    repaired_none = TruthReconciliationEngine.reconcile_estate_assets(
+        dist_dir,
+        "gainhelm",
+        repo_root=None,
+    )
+    assert str(hipaa_file) in repaired_none
+    healed_txt = hipaa_file.read_text(encoding="utf-8")
+    assert "$2,455,313 total HIPAA breach exposure" in healed_txt
+    assert "1,500 ePHI records" in healed_txt
+
+    # 2. repo_root=str(tmp_path) must convert str to Path without AttributeError or TypeError
+    hipaa_file.write_text(
+        "Legacy estimate: $525,500 total HIPAA breach exposure for 2,500 ePHI records.\n",
+        encoding="utf-8",
+    )
+    repaired_str = TruthReconciliationEngine.reconcile_estate_assets(
+        dist_dir,
+        "gainhelm",
+        repo_root=str(tmp_path),
+    )
+    assert str(hipaa_file) in repaired_str
+    assert "$2,455,313 total HIPAA breach exposure" in hipaa_file.read_text(encoding="utf-8")
+
+
+def test_evaluator_cache_fingerprint_invalidates_on_lienbond_formula_change(tmp_path, monkeypatch):
+    """Regression: _compute_engine_fingerprint must include LienBond formula/builder files and change when edited."""
+    fp_live = AssetIntegrityEvaluator._compute_engine_fingerprint()
+    assert "lienbond/builder.py:" in fp_live
+
+    # Build a fake projects root with a LienBond builder file and prove fingerprint invalidates on edit
+    fake_projects = tmp_path / "projects"
+    lb_pkg = fake_projects / "lienbond" / "lienbond"
+    lb_pkg.mkdir(parents=True)
+    lb_builder = lb_pkg / "builder.py"
+    lb_builder.write_text("MILLER_ACT_THRESHOLD = 150000.0\n", encoding="utf-8")
+
+    orig_path = Path
+
+    class _PatchedPath(type(Path())):
+        def __new__(cls, *args, **kwargs):
+            if args and str(args[0]) == "/home/ubuntuadmin/projects":
+                return orig_path(fake_projects)
+            return orig_path(*args, **kwargs)
+
+    import pseofactory.maintenance as maint_mod
+    monkeypatch.setattr(maint_mod, "Path", _PatchedPath)
+
+    fp_before = AssetIntegrityEvaluator._compute_engine_fingerprint()
+    assert "lienbond/builder.py:" in fp_before
+
+    lb_builder.write_text("MILLER_ACT_THRESHOLD = 200000.0\n", encoding="utf-8")
+    fp_after = AssetIntegrityEvaluator._compute_engine_fingerprint()
+    assert "lienbond/builder.py:" in fp_after
+    assert fp_before != fp_after
+
+
+def test_sync_cloudflare_secret_prefers_verified_permanent_token_over_wrangler_oauth(tmp_path, monkeypatch):
+    """Regression: Cloudflare secret sync must prefer verified permanent API token and pass via stdin."""
+    import subprocess
+    import pseofactory.gitops as gitops_mod
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("CLOUDFLARE_API_TOKEN=perm_fake_token_value_1234567890\n", encoding="utf-8")
+    wrangler_cfg = tmp_path / "default.toml"
+    wrangler_cfg.write_text('oauth_token = "oauth_short_lived_token"\n', encoding="utf-8")
+
+    gitops_mod._CF_TOKEN_VERIFY_CACHE.clear()
+    gitops_mod._CF_GH_SECRET_SYNC_CACHE.clear()
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+    monkeypatch.setattr(gitops_mod.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    monkeypatch.setattr(gitops_mod, "_verify_cloudflare_api_token_active", lambda tok, timeout=8.0: tok == "perm_fake_token_value_1234567890")
+    monkeypatch.setattr(gitops_mod.CICDWatcher, "resolve_repo_slug", lambda self, rp: "owner/lienbond")
+
+    captured = []
+
+    def _fake_run(cmd, **kwargs):
+        captured.append((cmd, kwargs.get("input")))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gitops_mod.subprocess, "run", _fake_run)
+
+    res = gitops_mod.sync_cloudflare_secret_for_tenant_repo(
+        tmp_path,
+        wrangler_cfg=wrangler_cfg,
+        dotenv_path=dotenv,
+    )
+    assert res["synced"] is True
+    assert res["source"] == "permanent_api_token"
+    assert "perm_fake_token_value_1234567890" not in str(res)
+    assert len(captured) == 1
+    cmd, stdin_val = captured[0]
+    assert cmd == ["gh", "secret", "set", "CLOUDFLARE_API_TOKEN", "-R", "owner/lienbond"]
+    assert stdin_val == "perm_fake_token_value_1234567890"
+
+
+def test_sync_cloudflare_secret_does_not_push_stale_oauth_when_wrangler_whoami_fails(tmp_path, monkeypatch):
+    """Regression: when no permanent token is active and wrangler whoami fails, never push stale default.toml token."""
+    import subprocess
+    import pseofactory.gitops as gitops_mod
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("CLOUDFLARE_API_TOKEN=revoked_token_value\n", encoding="utf-8")
+    wrangler_cfg = tmp_path / "default.toml"
+    wrangler_cfg.write_text('oauth_token = "stale_oauth_token_must_not_be_pushed"\n', encoding="utf-8")
+
+    gitops_mod._CF_TOKEN_VERIFY_CACHE.clear()
+    gitops_mod._CF_WRANGLER_TOKEN_CACHE = None
+    gitops_mod._CF_GH_SECRET_SYNC_CACHE.clear()
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+    monkeypatch.setattr(gitops_mod.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    monkeypatch.setattr(gitops_mod, "_verify_cloudflare_api_token_active", lambda tok, timeout=8.0: False)
+    monkeypatch.setattr(gitops_mod.CICDWatcher, "resolve_repo_slug", lambda self, rp: "owner/lienbond")
+
+    calls = []
+
+    def _fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["npx", "wrangler", "whoami"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="expired")
+        raise AssertionError(f"Unexpected subprocess call: {cmd}")
+
+    monkeypatch.setattr(gitops_mod.subprocess, "run", _fake_run)
+
+    res = gitops_mod.sync_cloudflare_secret_for_tenant_repo(
+        tmp_path,
+        wrangler_cfg=wrangler_cfg,
+        dotenv_path=dotenv,
+    )
+    assert res["synced"] is False
+    assert res["reason"] == "wrangler_whoami_rc_1"
+    assert "stale_oauth_token_must_not_be_pushed" not in str(res)
+    assert calls == [["npx", "wrangler", "whoami"]]

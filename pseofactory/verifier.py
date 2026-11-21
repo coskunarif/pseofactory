@@ -8419,6 +8419,7 @@ def audit_aeo_geo_three_plane_readiness(
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
             "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
+            "lienbond": Path("/home/ubuntuadmin/projects/lienbond/dist"),
         }
         d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
 
@@ -8656,6 +8657,7 @@ def evaluate_x_like_2110401032035709427_capability_matrix(
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
             ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
+            ("lienbond", Path("/home/ubuntuadmin/projects/lienbond/dist")),
         ):
             if r_path.is_dir():
                 rep = audit_aeo_geo_three_plane_readiness(dist_dir=r_path, property_id=t_id)
@@ -9260,6 +9262,7 @@ def audit_free_tool_seo_and_instant_ux_readiness(
             "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
             "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
             "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
+            "lienbond": Path("/home/ubuntuadmin/projects/lienbond/dist"),
         }
         d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
 
@@ -9421,6 +9424,7 @@ def evaluate_x_like_2108272246804648049_capability_matrix(
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
             ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
+            ("lienbond", Path("/home/ubuntuadmin/projects/lienbond/dist")),
         ):
             if r_path.is_dir():
                 rep = audit_free_tool_seo_and_instant_ux_readiness(dist_dir=r_path, property_id=t_id)
@@ -9651,7 +9655,7 @@ def evaluate_x_like_2098466289282842729_capability_matrix(
         and len(flagged_unverified) == 1
         and len(rejected_fragile) == 1
         and probes_passed
-        and all(t in TENANT_CATEGORY_SEED_TAXONOMY for t in ("profithelm", "prexvo", "gainhelm"))
+        and all(t in TENANT_CATEGORY_SEED_TAXONOMY for t in ("profithelm", "prexvo", "gainhelm", "lienbond"))
         and len(drill_down_specific_subtopics("section 179", property_id="profithelm")) >= 4
     )
 
@@ -9660,6 +9664,8 @@ def evaluate_x_like_2098466289282842729_capability_matrix(
         for t_id, r_path in (
             ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
             ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
+            ("lienbond", Path("/home/ubuntuadmin/projects/lienbond")),
         ):
             if r_path.is_dir():
                 rt_res = route_validated_inflection_signals(

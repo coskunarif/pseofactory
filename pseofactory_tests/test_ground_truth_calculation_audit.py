@@ -196,11 +196,21 @@ def test_prexvo_fallback_manifests_match_ground_truth_repayment_math() -> None:
 
 def test_profithelm_fallback_manifests_match_ground_truth_statutory_math() -> None:
     """Every ProfitHelm fallback manifest must use non-tautological statutory formulas and match SSR outputs."""
+    from pseofactory.tenant_facts import TenantFactStore
+
     manifests = RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS
-    assert manifests["s-corp-reasonable-salary-tax-calculator"]["published_output"] == 13193.0
+    assert manifests["s-corp-reasonable-salary-tax-calculator"]["inputs"]["ss_wage_cap"] == 184500.0
+    assert manifests["s-corp-reasonable-salary-tax-calculator"]["published_output"] == 14235.0
+    assert manifests["irs-2027-tax-brackets"]["published_output"] == 18734.0
     assert manifests["treasury-yield-calculator"]["published_output"] == 6.13
     assert manifests["section-179-vehicle-deduction"]["published_output"] == 38000.0
     assert manifests["commercial-heavy-vehicle-section-179-weight-calculator"]["published_output"] == 14525.0
+
+    ph_limits = TenantFactStore.get_instance().get_profile("profithelm").statutory_truth.limits_and_thresholds
+    assert ph_limits["obbba_2026_single_125k_fed_tax"] == 18734.0
+    assert ph_limits["obbba_2027_single_125k_fed_tax"] == 18638.0
+    assert ph_limits["ssa_oasdi_wage_base_2026"] == 184500.0
+    assert ph_limits["scorp_220k_95k_salary_fica_savings"] == 14235.0
 
     for slug, manifest in manifests.items():
         formula = str(manifest["formula"])

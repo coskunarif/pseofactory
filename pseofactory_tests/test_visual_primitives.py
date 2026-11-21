@@ -427,10 +427,12 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
     assert audit["tenants"]["prexvo"]["coexistence_pass_count"] == audit["tenants"]["prexvo"]["total_pages"]
     assert audit["tenants"]["gainhelm"]["total_pages"] >= 10
     assert audit["tenants"]["gainhelm"]["coexistence_pass_count"] == audit["tenants"]["gainhelm"]["total_pages"]
+    assert audit["tenants"]["lienbond"]["total_pages"] >= 10
+    assert audit["tenants"]["lienbond"]["coexistence_pass_count"] == audit["tenants"]["lienbond"]["total_pages"]
 
     sim = audit["dom_action_simulation"]
     assert sim["all_passed"] is True
-    assert len(sim["tenants"]) == 3
+    assert len(sim["tenants"]) == 4
     for t_sim in sim["tenants"]:
         assert t_sim["passed"] is True
         assert t_sim["preset_hydration_passed"] is True

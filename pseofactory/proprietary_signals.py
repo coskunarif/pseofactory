@@ -1033,9 +1033,9 @@ def compute_multi_year_longitudinal_trajectory(
         rows = [
             ("2024 Enacted Baseline", f"IRC 3121 OASDI Cap ${w24:,.0f} (12.4% + 2.9% FICA)", "20% IRC Section 199A QBI Deduction Active", "cliff-exposure-2024", "$12,263 FICA Saved"),
             ("2025 Enacted Window", f"IRC 3121 OASDI Cap ${w25:,.0f} (92.35% SE Factor)", "20% Section 199A QBI Permanent Extension", "cliff-exposure-2025", "$13,193 FICA Saved"),
-            ("2026 Statutory Schedule", f"OASDI Cap ${w26:,.0f} (2026 SSA COLA / $176,100 2025 Base)", "Permanent 20% IRC 199A QBI Deduction (P.L. 119-21)", "cliff-exposure-2026", "$13,193 FICA Saved"),
-            ("2027 Enacted OBBBA Regime", f"Projected OASDI Cap ${w27:,.0f} (+$6,000 Base)", "Permanent 10%-37% Brackets + 20% QBI Shield", "cliff-exposure-2027", "$14,607 FICA Saved"),
-            ("2028-2030 Forward Projection", f"Projected OASDI Cap ${w30:,.0f} by 2030", "0.9% Additional Medicare Tax Unindexed at $200k", "cliff-exposure-2028", "$16,913 FICA Saved"),
+            ("2026 Statutory Schedule", f"OASDI Cap ${w26:,.0f} (2026 SSA COLA / $176,100 2025 Base)", "Permanent 20% IRC 199A QBI Deduction (P.L. 119-21)", "cliff-exposure-2026", "$14,235 FICA Saved"),
+            ("2027 Enacted OBBBA Regime", f"Projected OASDI Cap ${w27:,.0f} (+$6,000 Base)", "Permanent 10%-37% Brackets + 20% QBI Shield", "cliff-exposure-2027", "$14,979 FICA Saved"),
+            ("2028-2030 Forward Projection", f"Projected OASDI Cap ${w30:,.0f} by 2030", "0.9% Additional Medicare Tax Unindexed at $200k", "cliff-exposure-2028", "$16,550 FICA Saved"),
         ]
     elif any(k in s_low for k in ("301", "tariff", "bond", "factoring")):
         m24 = mpf_pts.get("2024", 614.35)
@@ -1072,14 +1072,14 @@ def compute_multi_year_longitudinal_trajectory(
         summary = (
             f"2026-2027 Enacted OBBBA (P.L. 119-21) Schedule: Under IRC Section 1(j) and IRS Rev. Proc. 2025-32, "
             f"the Single standard deduction increases from $15,000 (2025) to $16,100 (2026) and $16,500 (2027) while "
-            f"the 10%-37% marginal brackets and 20% Section 199A QBI deduction are permanently extended, setting 2027 "
-            f"federal tax on a $125,000 Single filer at $18,734 (preventing the repealed pre-OBBBA sunset hike). {telemetry_tag}"
+            f"the 10%-37% marginal brackets and 20% Section 199A QBI deduction are permanently extended, setting 2026 "
+            f"federal tax on a $125,000 Single filer at $18,734 and 2027 at $18,638 (preventing the repealed pre-OBBBA sunset hike). {telemetry_tag}"
         )
         rows = [
             ("2024 Enacted Baseline", "IRC 1(j) 10%-37% Brackets ($14,600 Single Std Ded)", f"20% Section 199A QBI / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$19,093 Federal Tax"),
             ("2025 Enacted Window", "IRC 1(j) 10%-37% Brackets ($15,000 Single Std Ded)", "OBBBA P.L. 119-21 Enacted / PTET Shield", "cliff-exposure-2025", "$19,181 Federal Tax"),
-            ("2026 Rev. Proc. 2025-32", "Permanent 10%-37% ($16,100 Single / $32,200 MFJ)", "Permanent 20% Section 199A QBI + $24,500 401(k)", "cliff-exposure-2026", "$18,918 ($25,358 w/ CA)"),
-            ("2027 Enacted OBBBA Regime", "Inflation-Indexed 10%-37% ($16,500 Single / $33,000 MFJ)", "20% Section 199A QBI Permanent (Repealed Sunset)", "cliff-exposure-2027", "$18,734 Federal Tax"),
+            ("2026 Rev. Proc. 2025-32", "Permanent 10%-37% ($16,100 Single / $32,200 MFJ)", "Permanent 20% Section 199A QBI + $24,500 401(k)", "cliff-exposure-2026", "$18,734 ($25,621 w/ CA)"),
+            ("2027 Enacted OBBBA Regime", "Inflation-Indexed 10%-37% ($16,500 Single / $33,000 MFJ)", "20% Section 199A QBI Permanent (Repealed Sunset)", "cliff-exposure-2027", "$18,638 Federal Tax"),
             ("2028-2030 Forward Projection", "Chained-CPI Indexed 10%/12%/22%/24%/32%/35%/37% Tiers", "Unindexed $200k/$250k 3.8% NIIT Surcharge Base", "cliff-exposure-2028", "$18,390 Federal Tax"),
         ]
     elif any(k in s_low for k in ("crypto", "1099-da", "prediction", "1256")):
@@ -1372,10 +1372,10 @@ def compute_stateful_comparator_defaults(
             "ret_b": "$0 FICA-Exempt ($203,170 SE Base)",
             "ret_live": "$125,000 K-1 Pass-Through Shield",
             "tax_a": "$14,535 W-2 FICA Liability",
-            "tax_b": "$27,728 Schedule SE Tax",
-            "tax_live": "$13,193 Annual FICA Saved",
-            "delta_b": "+$13,193 Self-Employment Tax Drag",
-            "delta_live": "$13,193 Verified FICA Alpha",
+            "tax_b": "$28,770 Schedule SE Tax",
+            "tax_live": "$14,235 Annual FICA Saved",
+            "delta_b": "+$14,235 Self-Employment Tax Drag",
+            "delta_live": "$14,235 Verified FICA Alpha",
         }
     if any(k in s_low for k in ("179", "equipment", "vehicle", "lease")):
         return {
@@ -1409,14 +1409,14 @@ def compute_stateful_comparator_defaults(
         return {
             "base_a": "$125,000 Single (2026 Rev. Proc. 2025-32)",
             "base_b": "$125,000 Single (2027 OBBBA P.L. 119-21)",
-            "base_live": "$125,000 Gross / $16,500 2027 OBBBA Std Ded",
+            "base_live": "$125,000 Gross / $16,100 2026 OBBBA Std Ded",
             "ret_a": "$16,100 Standard Deduction + 22%/24% Tiers",
             "ret_b": "$16,500 Indexed Deduction + 22%/24% Tiers",
-            "ret_live": "$108,500 2027 OBBBA Taxable Income",
-            "tax_a": "$18,918 2026 Federal Income Tax",
-            "tax_b": "$18,734 2027 OBBBA Federal Tax",
+            "ret_live": "$108,900 2026 OBBBA Taxable Income",
+            "tax_a": "$18,734 2026 Federal Income Tax",
+            "tax_b": "$18,638 2027 OBBBA Federal Tax",
             "tax_live": "$18,734",
-            "delta_b": "-$184 Chained-CPI Indexing Relief",
+            "delta_b": "-$96 Chained-CPI Indexing Relief",
             "delta_live": "-$4,796 Saved vs Repealed Pre-OBBBA Sunset",
         }
     return {
@@ -1584,7 +1584,7 @@ def build_non_ca_state_tax_brackets_spec(
             (
                 "Federal Tier 3: 22% Permanent OBBBA Bracket",
                 "$50,401 to $105,700 Single / $100,801 to $211,400 MFJ",
-                "Permanent 22% Marginal Rate ($18,734 2027 Single tax at $125k)",
+                "Permanent 22% Marginal Rate ($18,734 2026 Single tax at $125k; $18,638 in 2027)",
                 "Pre-tax 401(k) ($24,500) and HSA ($4,400/$8,750) shield AGI",
             ),
             (

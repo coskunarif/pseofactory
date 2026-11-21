@@ -47,6 +47,148 @@ def sanitize_dashes(text: str) -> str:
     return text.replace("\u2014", "-").replace("\u2013", "-")
 
 
+_CF_TOKEN_VERIFY_CACHE: Dict[str, Any] = {}
+_CF_WRANGLER_TOKEN_CACHE: Optional[Any] = None
+_CF_GH_SECRET_SYNC_CACHE: Dict[Any, float] = {}
+
+
+def _read_permanent_cloudflare_api_token(
+    dotenv_path: Path = Path("/home/ubuntuadmin/projects/pseofactory/.env"),
+) -> Optional[str]:
+    """Reads CLOUDFLARE_API_TOKEN from environment or pseofactory .env without logging it."""
+    env_tok = str(os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    if env_tok:
+        return env_tok
+    if dotenv_path.is_file():
+        try:
+            for line in dotenv_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("CLOUDFLARE_API_TOKEN="):
+                    val = stripped.split("=", 1)[1].strip().strip("\"'")
+                    if val:
+                        return val
+        except Exception:
+            return None
+    return None
+
+
+def _verify_cloudflare_api_token_active(token: str, timeout: float = 8.0) -> bool:
+    """Checks Cloudflare /user/tokens/verify (cached 300s by sha256 digest; never logs token)."""
+    if not token:
+        return False
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    now_mono = time.monotonic()
+    cached = _CF_TOKEN_VERIFY_CACHE.get(digest)
+    if cached is not None and (now_mono - cached[0]) < 300.0:
+        return bool(cached[1])
+    active = False
+    try:
+        req = urllib.request.Request(
+            "https://api.cloudflare.com/client/v4/user/tokens/verify",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                active = bool(payload.get("success")) and (payload.get("result") or {}).get("status") == "active"
+    except Exception:
+        active = False
+    _CF_TOKEN_VERIFY_CACHE[digest] = (now_mono, active)
+    return active
+
+
+def sync_cloudflare_secret_for_tenant_repo(
+    repo_path: Union[str, Path],
+    cache_owner: Optional[Any] = None,
+    wrangler_cfg: Path = Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml"),
+    dotenv_path: Path = Path("/home/ubuntuadmin/projects/pseofactory/.env"),
+) -> Dict[str, Any]:
+    """
+    Syncs CLOUDFLARE_API_TOKEN into a tenant repo's GitHub Actions secrets before push.
+    Prefers a verified active permanent Cloudflare API token (env or .env) so local Wrangler
+    OAuth token rotation cannot invalidate in-flight cloud GitHub Actions deploys; falls back
+    to refreshing local Wrangler OAuth only when no verified permanent API token is configured.
+    Passes secret over stdin (never argv) and never logs or returns any secret value.
+    Zero em-dashes. Zero en-dashes.
+    """
+    global _CF_WRANGLER_TOKEN_CACHE
+    repo_p = Path(repo_path).resolve()
+    if not shutil.which("gh"):
+        return {"synced": False, "source": "none", "reason": "gh_cli_unavailable"}
+
+    now_mono = time.monotonic()
+    tok_val: Optional[str] = None
+    source = "none"
+
+    perm_tok = _read_permanent_cloudflare_api_token(dotenv_path=dotenv_path)
+    if perm_tok and _verify_cloudflare_api_token_active(perm_tok):
+        tok_val = perm_tok
+        source = "permanent_api_token"
+    elif wrangler_cfg.is_file():
+        try:
+            tok_cache = getattr(cache_owner, "_WRANGLER_TOKEN_CACHE", None) if cache_owner is not None else _CF_WRANGLER_TOKEN_CACHE
+            if tok_cache is not None and (now_mono - tok_cache[0]) < 300.0 and tok_cache[1]:
+                tok_val = tok_cache[1]
+                source = "wrangler_oauth_cached"
+            else:
+                wrangler_proc = subprocess.run(
+                    ["npx", "wrangler", "whoami"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=20,
+                )
+                if wrangler_proc.returncode != 0:
+                    return {
+                        "synced": False,
+                        "source": "wrangler_oauth",
+                        "reason": f"wrangler_whoami_rc_{wrangler_proc.returncode}",
+                    }
+                cfg_txt = wrangler_cfg.read_text(encoding="utf-8", errors="ignore")
+                m_tok = re.search(r'oauth_token\s*=\s*"([^"]+)"', cfg_txt)
+                if m_tok and m_tok.group(1).strip():
+                    tok_val = m_tok.group(1).strip()
+                    source = "wrangler_oauth"
+                    if cache_owner is not None:
+                        cache_owner._WRANGLER_TOKEN_CACHE = (now_mono, tok_val)
+                    _CF_WRANGLER_TOKEN_CACHE = (now_mono, tok_val)
+        except Exception:
+            pass
+
+    if not tok_val:
+        return {"synced": False, "source": source, "reason": "no_valid_token"}
+
+    try:
+        slug = CICDWatcher().resolve_repo_slug(repo_p)
+        if not slug:
+            return {"synced": False, "source": source, "reason": "no_repo_slug"}
+        tok_digest = hashlib.sha256(tok_val.encode("utf-8")).hexdigest()[:16]
+        if cache_owner is not None:
+            sync_cache = getattr(cache_owner, "_GH_CF_SECRET_SYNC_CACHE", None)
+            if sync_cache is None:
+                sync_cache = {}
+                cache_owner._GH_CF_SECRET_SYNC_CACHE = sync_cache
+        else:
+            sync_cache = _CF_GH_SECRET_SYNC_CACHE
+        last_sync = sync_cache.get((slug, tok_digest))
+        if last_sync is not None and (now_mono - last_sync) < 300.0:
+            return {"synced": True, "source": source, "cached": True, "slug": slug}
+        gh_proc = subprocess.run(
+            ["gh", "secret", "set", "CLOUDFLARE_API_TOKEN", "-R", slug],
+            input=tok_val,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if gh_proc.returncode == 0:
+            sync_cache[(slug, tok_digest)] = now_mono
+            return {"synced": True, "source": source, "cached": False, "slug": slug}
+        return {"synced": False, "source": source, "reason": f"gh_secret_set_rc_{gh_proc.returncode}", "slug": slug}
+    except Exception:
+        return {"synced": False, "source": source, "reason": "sync_exception"}
+
+
 @dataclass
 class GitOpsResult:
     """
@@ -1496,51 +1638,9 @@ class GitOpsCoordinator:
         else:
             backoffs = [1.0, 2.0, 4.0]
 
-        # Refresh Wrangler OAuth token into GitHub Secrets prior to pushing tenant repos (process-level 300s TTL cache)
+        # Sync Cloudflare API token (preferring verified permanent API token over short-lived Wrangler OAuth)
         if self.repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond") and shutil.which("gh"):
-            wrangler_cfg = Path("/home/ubuntuadmin/.config/.wrangler/config/default.toml")
-            if wrangler_cfg.is_file():
-                try:
-                    coord_cls = type(self)
-                    now_mono = time.monotonic()
-                    tok_cache = getattr(coord_cls, "_WRANGLER_TOKEN_CACHE", None)
-                    tok_val: Optional[str] = None
-                    if tok_cache is not None and (now_mono - tok_cache[0]) < 300.0 and tok_cache[1]:
-                        tok_val = tok_cache[1]
-                    else:
-                        wrangler_proc = subprocess.run(
-                            ["npx", "wrangler", "whoami"],
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=20,
-                        )
-                        cfg_txt = wrangler_cfg.read_text(encoding="utf-8", errors="ignore")
-                        m_tok = re.search(r'oauth_token\s*=\s*"([^"]+)"', cfg_txt)
-                        if m_tok and m_tok.group(1).strip():
-                            tok_val = m_tok.group(1).strip()
-                            if wrangler_proc.returncode == 0:
-                                coord_cls._WRANGLER_TOKEN_CACHE = (now_mono, tok_val)
-                    if tok_val:
-                        slug = CICDWatcher().resolve_repo_slug(self.repo_path)
-                        if slug:
-                            sync_cache = getattr(coord_cls, "_GH_CF_SECRET_SYNC_CACHE", None)
-                            if sync_cache is None:
-                                sync_cache = {}
-                                coord_cls._GH_CF_SECRET_SYNC_CACHE = sync_cache
-                            last_sync = sync_cache.get((slug, tok_val))
-                            if last_sync is None or (now_mono - last_sync) >= 300.0:
-                                gh_proc = subprocess.run(
-                                    ["gh", "secret", "set", "CLOUDFLARE_API_TOKEN", "-R", slug, "--body", tok_val],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False,
-                                    timeout=15,
-                                )
-                                if gh_proc.returncode == 0:
-                                    sync_cache[(slug, tok_val)] = now_mono
-                except Exception:
-                    pass
+            sync_cloudflare_secret_for_tenant_repo(self.repo_path, cache_owner=type(self))
 
         for attempt in range(1, max_attempts + 1):
             cmd = ["git", "-C", str(self.repo_path), "push", "origin", tb]
@@ -5726,17 +5826,27 @@ def sync_tenant_test_isolation_guards(
                     "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"
                     "          CLOUDFLARE_ACCOUNT_ID: '8789c54bef2d281d4a8afb4df34f9878'\n"
                     "        run: |\n"
+                    "          set -o pipefail\n"
                     "          deployed=0\n"
+                    "          backoffs=(0 20 45 90)\n"
+                    "          log_f=\"$(mktemp)\"\n"
                     "          for attempt in 1 2 3 4; do\n"
-                    "            if npx wrangler pages deploy dist --project-name=lienbond --branch=main --commit-dirty=true; then\n"
+                    "            if npx wrangler pages deploy dist --project-name=lienbond --branch=main --commit-dirty=true 2>&1 | tee \"$log_f\"; then\n"
                     "              deployed=1\n"
                     "              break\n"
                     "            fi\n"
+                    "            if grep -qE \"Invalid access token|Authentication error|\\[code: 9109\\]|\\[code: 10000?\\]\" \"$log_f\"; then\n"
+                    "              echo \"ERROR: CLOUDFLARE_API_TOKEN secret is invalid, expired, or rotated (code 9109/1000/10000). Configure a long-lived scoped Cloudflare Pages API Token in GitHub Secrets.\" >&2\n"
+                    "              rm -f \"$log_f\"\n"
+                    "              exit 1\n"
+                    "            fi\n"
                     "            if [ \"$attempt\" -lt 4 ]; then\n"
-                    "              echo \"Wrangler deploy attempt $attempt failed; retrying after $((attempt * 12))s backoff...\" >&2\n"
-                    "              sleep $((attempt * 12))\n"
+                    "              wait_s=\"${backoffs[$attempt]}\"\n"
+                    "              echo \"Wrangler deploy attempt $attempt failed (rate limit 10429 or transient API error); retrying after ${wait_s}s backoff...\" >&2\n"
+                    "              sleep \"$wait_s\"\n"
                     "            fi\n"
                     "          done\n"
+                    "          rm -f \"$log_f\"\n"
                     "          if [ \"$deployed\" -ne 1 ]; then\n"
                     "            echo \"Wrangler deploy failed after 4 attempts.\" >&2\n"
                     "            exit 1\n"

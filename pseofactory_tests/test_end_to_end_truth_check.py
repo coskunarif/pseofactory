@@ -1917,7 +1917,7 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
     assert ph_repairs
     assert "remBasis * 0.20" in healed_ph_html
     assert "hoh: 12900" in healed_ph_html
-    assert "$13,193 in self-employment tax ($10,056 OASDI + $3,137 Medicare)" in healed_ph_html
+    assert "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)" in healed_ph_html
     assert "(1 - 13.3% state rate)" in healed_ph_html
     assert '"price":"49"' in healed_ph_html
     assert (

@@ -2357,7 +2357,7 @@ def _resolve_tax_bracket_and_entity_competitor_content(s_low: str) -> Optional[D
             ),
             "checklist_items": [
                 "Benchmark officer W-2 compensation against BLS OEWS occupational wage percentiles across technical, management, and administrative hours.",
-                "Model the IRC Section 3121 OASDI Social Security wage base cap ($176,100) alongside the uncapped 2.9% Medicare and 0.9% Additional Medicare surtax.",
+                "Model the IRC Section 3121 OASDI Social Security wage base cap ($184,500) alongside the uncapped 2.9% Medicare and 0.9% Additional Medicare surtax.",
                 "Balance W-2 salary against remaining K-1 pass-through profit to maximize the 20% IRC Section 199A Qualified Business Income (QBI) deduction.",
                 "Report >2% S-Corp shareholder health insurance premiums on Form W-2 Box 1 (exempt from Box 3 and Box 5 FICA under IRS Notice 2008-1) to preserve above-the-line deductibility.",
             ],
@@ -4501,7 +4501,7 @@ def _build_b2b_depth_spec(
             (
                 "S-Corp Reasonable Salary &amp; QBI Pass-Through",
                 "IRC Section 1366, Section 3111 &amp; Section 199A",
-                "15.3% FICA on W-2 up to $176,100 OASDI base; 20% QBI deduction ($197,300/$394,600 threshold)",
+                "15.3% FICA on W-2 up to $184,500 OASDI base; 20% QBI deduction ($197,300/$394,600 threshold)",
                 "IRS Form 1120-S, Schedule K-1, and W-2 reasonable compensation benchmark logs",
             ),
             (
@@ -7063,7 +7063,7 @@ COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
         ],
         "calculator_interactivity": (
             "Gusto and Collective compute W-2 officer salary vs K-1 shareholder distribution splits, 15.3% FICA "
-            "self-employment tax savings up to the $176,100 OASDI cap, 0.9% Additional Medicare Tax, and the "
+            "self-employment tax savings up to the $184,500 OASDI cap, 0.9% Additional Medicare Tax, and the "
             "20% IRC Section 199A QBI deduction trade-off."
         ),
         "visual_hierarchy": (

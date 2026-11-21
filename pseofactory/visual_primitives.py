@@ -8499,7 +8499,8 @@ async function runSimulationForTenant(tenantConfig) {
   const configs = [
     { tenant: 'profithelm', host: 'profithelm.com', slug: 's-corp-tax-advantage', mode: 'b2b', sku: 'ph_tax_election_pack', price: 49, partner: 'collective', vertical: 'tax_compliance' },
     { tenant: 'prexvo', host: 'prexvo.com', slug: 'student-loan-refinance-math', mode: 'student_loan', sku: 'px_loan_refi_pack', price: 39, partner: 'sofi', vertical: 'student_loans' },
-    { tenant: 'gainhelm', host: 'gainhelm.com', slug: 'hipaa-fine-calculator', mode: 'cyber_grc', sku: 'gh_hipaa_compliance_pack', price: 59, partner: 'vanta', vertical: 'cyber_compliance' }
+    { tenant: 'gainhelm', host: 'gainhelm.com', slug: 'hipaa-fine-calculator', mode: 'cyber_grc', sku: 'gh_hipaa_compliance_pack', price: 59, partner: 'vanta', vertical: 'cyber_compliance' },
+    { tenant: 'lienbond', host: 'lienbond.com', slug: 'contractor-license-bond-cost-calculator-by-credit-score', mode: 'b2b', sku: 'lb_surety_compliance_pack', price: 69, partner: 'suretybonds_direct', vertical: 'construction_surety' }
   ];
   const results = [];
   for (const c of configs) {
@@ -8539,7 +8540,7 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
 ) -> Dict[str, Any]:
     """
     Deterministic UI/UX surface and button action-mechanic audit across all compiled
-    calculator pages in profithelm, prexvo, and gainhelm.
+    calculator pages across active workspace tenants.
     Verifies:
     1. Coexistence of outbound affiliate CTAs (a[href^="/r/"]) and statutory data pack
        checkout buttons (#btn-post-calc-upgrade-checkout) on every commercial page, and
@@ -8558,6 +8559,7 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
             "profithelm": workspace_root / "profithelm-platform" / "dist" / "tools",
             "prexvo": workspace_root / "prexvo" / "dist" / "tools",
             "gainhelm": workspace_root / "gainhelm" / "dist" / "tools",
+            "lienbond": workspace_root / "lienbond" / "dist" / "tools",
         }
 
     tenant_summaries: Dict[str, Any] = {}
