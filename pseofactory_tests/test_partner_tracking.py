@@ -1515,6 +1515,7 @@ def test_cj_and_impact_inbound_approval_parsing_and_notification_filter():
     assert by_id["sent-275"].classification_type == "APPLICATION_SUBMITTED"
 
 
+@pytest.mark.host_estate
 def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts(tmp_path, temp_bus_path, temp_email_paths):
     """
     Asserts that PartnerTrackingEngine.audit_readiness_and_vault_parity():
@@ -2738,6 +2739,7 @@ def test_sovrn_inbox_1032_gainhelm_prerequisites_and_department_pipeline_handoff
     assert rc == 0
 
 
+@pytest.mark.host_estate
 def test_gainhelm_youtube_metadata_contract_uses_gainhelm_brand(tmp_path):
     """Verifies AssetIntegrityEvaluator audits GainHelm syndication youtube_metadata.json against brand 'GainHelm'."""
     import shutil
@@ -3160,6 +3162,7 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
     assert proc.returncode == 0, f"Yield-gated routing Node test failed (exit {proc.returncode}): {proc.stderr}"
 
 
+@pytest.mark.host_estate
 def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
     """
     Verifies that the active gainhelm (gainhelm.com) pseofactory tenant is strictly

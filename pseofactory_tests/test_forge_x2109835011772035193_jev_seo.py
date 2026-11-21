@@ -306,6 +306,7 @@ def test_verifier_catches_six_new_jev_seo_search_central_rules(tmp_path: Path) -
     assert rep["multiple_titles_count"] >= 1
 
 
+@pytest.mark.host_estate
 def test_x_like_2109835011772035193_capability_matrix_and_live_estates() -> None:
     from pseofactory import verifier
 
@@ -340,6 +341,7 @@ def test_x_like_2109835011772035193_capability_matrix_and_live_estates() -> None
         assert rubric["status"] == "PASS"
 
 
+@pytest.mark.host_estate
 def test_p2_builder_distinct_models_and_zero_broken_links_on_real_estate(tmp_path: Path) -> None:
     """
     Verifies:

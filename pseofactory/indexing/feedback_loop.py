@@ -1882,6 +1882,72 @@ class IndexingFeedbackLoop:
             "enriched_records": enriched_records,
         }
 
+    @staticmethod
+    def _is_canonical_prod_tenant_dir(
+        base_dir: Optional[Path],
+        projects_root: Path = Path("/home/ubuntuadmin/projects"),
+    ) -> bool:
+        """
+        Dynamically checks whether base_dir matches any canonical production tenant repo
+        derived from CANONICAL_TENANT_DECLARATIONS (including profithelm-platform, prexvo,
+        gainhelm, lienbond, and any newly declared tenant).
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not base_dir:
+            return False
+        from pseofactory.tenant_facts import list_canonical_repo_dir_names
+
+        prod_root = Path(projects_root).resolve()
+        resolved = Path(base_dir).resolve()
+        prod_repo_paths = {
+            str((prod_root / repo_dir).resolve())
+            for repo_dir in list_canonical_repo_dir_names()
+        }
+        return str(resolved) in prod_repo_paths
+
+    def _is_prod_tenant_repo(self) -> bool:
+        return bool(
+            self.base_dir
+            and "PYTEST_CURRENT_TEST" not in os.environ
+            and "pytest" not in sys.modules
+            and self._is_canonical_prod_tenant_dir(self.base_dir)
+        )
+
+    def _is_foreign_tenant_candidate(
+        self,
+        slug: str,
+        target_url: str = "",
+        extra_text: str = "",
+    ) -> bool:
+        """
+        Fail-closed tenant boundary guard preventing cross-property overlay or syndication
+        writes when a URL, reason/canonical text, or tool slug belongs to a foreign tenant.
+        Zero em-dashes. Zero en-dashes.
+        """
+        from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+
+        foreign_domains = {
+            c.domain.lower()
+            for pid, c in CANONICAL_TENANT_DECLARATIONS.items()
+            if pid != self.property_id and c.domain
+        }
+        for blob in (target_url, extra_text):
+            low = str(blob or "").lower()
+            if low and any(fdom in low for fdom in foreign_domains):
+                return True
+
+        norm_slug = str(slug or "").strip().strip("/").split("/")[0].lower()
+        if norm_slug:
+            try:
+                from pseofactory.maintenance import is_foreign_tenant_tool_slug
+
+                dist_cand = (self.base_dir / "dist") if self.base_dir else None
+                if is_foreign_tenant_tool_slug(norm_slug, self.property_id, dist_dir=dist_cand):
+                    return True
+            except Exception:
+                pass
+        return False
+
     def _sync_external_distribution_for_candidate(
         self,
         slug: str,
@@ -1898,8 +1964,18 @@ class IndexingFeedbackLoop:
         if dry_run or not self.base_dir or not slug or self._is_protected_hub_route(slug, target_url):
             return []
 
-        synd_dir = self.base_dir / "syndication"
-        synd_dir.mkdir(parents=True, exist_ok=True)
+        if self._is_foreign_tenant_candidate(
+            slug=slug,
+            target_url=target_url,
+            extra_text=str(overlay_spec.get("target_url") or "") + " " + str(overlay_spec.get("reason") or ""),
+        ):
+            logger.warning(
+                "Blocked cross-property syndication write for foreign candidate slug=%s url=%s on tenant=%s",
+                slug,
+                target_url,
+                self.property_id,
+            )
+            return []
 
         def _scrub(text: str) -> str:
             return (
@@ -1934,8 +2010,56 @@ class IndexingFeedbackLoop:
         )
 
         from pseofactory.distributor import _resolve_tool_calculation_proof
+        from pseofactory.maintenance import CrossPropertyContaminationScanner
+
         proof = _resolve_tool_calculation_proof({"slug": slug, "title": title}, property_id=self.property_id)
         param_url = _scrub(proof.get("parameterized_url") or canon_url)
+
+        # Fail closed if resolved proof URL or rendered text references any foreign tenant
+        if self._is_foreign_tenant_candidate(slug=slug, target_url=param_url, extra_text=str(proof.get("sample_calculation") or "")):
+            logger.warning(
+                "Blocked cross-property syndication write after proof resolution: slug=%s param_url=%s tenant=%s",
+                slug,
+                param_url,
+                self.property_id,
+            )
+            return []
+
+        linkedin_body = _scrub(
+            f"# {title}\n\n"
+            f"{quick_ans}\n\n"
+            f"Verified Statutory Proof ({proof['scenario_label']}): {proof['sample_calculation']} "
+            f"(Formula: `{proof['formula']}` -> `{proof['published_output_formatted']}`).\n\n"
+            f"Key statutory highlights ({auth_tag}):\n"
+            f"* Deterministic scenario modeling with audit-ready assumptions\n"
+            f"* Real-time sensitivity analysis across marginal brackets and thresholds\n\n"
+            f"Run the interactive calculator on {brand}: {param_url}\n"
+        )
+        newsletter_body = _scrub(
+            f"Subject: {title}\n\n"
+            f"## {title}\n\n"
+            f"{quick_ans}\n\n"
+            f"Verified Calculation ({proof['scenario_label']}): {proof['sample_calculation']} ({proof['published_output_formatted']}).\n\n"
+            f"Access the full interactive calculator and scenario comparison table at {param_url}\n"
+        )
+        substack_body = _scrub(
+            f"{title}: {quick_ans} "
+            f"Verified Output ({proof['scenario_label']}): {proof['published_output_formatted']}. "
+            f"Explore the interactive {brand} model at {param_url}\n"
+        )
+
+        contam_scanner = CrossPropertyContaminationScanner()
+        combined_payload = f"{linkedin_body}\n{newsletter_body}\n{substack_body}"
+        if contam_scanner.scan_text(combined_payload, self.property_id, context=f"syndication/{slug}"):
+            logger.warning(
+                "Blocked contaminated syndication payload for slug=%s on tenant=%s",
+                slug,
+                self.property_id,
+            )
+            return []
+
+        synd_dir = self.base_dir / "syndication"
+        synd_dir.mkdir(parents=True, exist_ok=True)
 
         file_slug = slug.replace("/", "-")
         linkedin_path = synd_dir / f"{file_slug}-linkedin.md"
@@ -1944,37 +2068,15 @@ class IndexingFeedbackLoop:
 
         written_files: List[str] = []
         if not linkedin_path.is_file():
-            linkedin_body = (
-                f"# {title}\n\n"
-                f"{quick_ans}\n\n"
-                f"Verified Statutory Proof ({proof['scenario_label']}): {proof['sample_calculation']} "
-                f"(Formula: `{proof['formula']}` -> `{proof['published_output_formatted']}`).\n\n"
-                f"Key statutory highlights ({auth_tag}):\n"
-                f"* Deterministic scenario modeling with audit-ready assumptions\n"
-                f"* Real-time sensitivity analysis across marginal brackets and thresholds\n\n"
-                f"Run the interactive calculator on {brand}: {param_url}\n"
-            )
-            linkedin_path.write_text(_scrub(linkedin_body), encoding="utf-8")
+            linkedin_path.write_text(linkedin_body, encoding="utf-8")
             written_files.append(str(linkedin_path))
 
         if not newsletter_path.is_file():
-            newsletter_body = (
-                f"Subject: {title}\n\n"
-                f"## {title}\n\n"
-                f"{quick_ans}\n\n"
-                f"Verified Calculation ({proof['scenario_label']}): {proof['sample_calculation']} ({proof['published_output_formatted']}).\n\n"
-                f"Access the full interactive calculator and scenario comparison table at {param_url}\n"
-            )
-            newsletter_path.write_text(_scrub(newsletter_body), encoding="utf-8")
+            newsletter_path.write_text(newsletter_body, encoding="utf-8")
             written_files.append(str(newsletter_path))
 
         if not substack_path.is_file():
-            substack_body = (
-                f"{title}: {quick_ans} "
-                f"Verified Output ({proof['scenario_label']}): {proof['published_output_formatted']}. "
-                f"Explore the interactive {brand} model at {param_url}\n"
-            )
-            substack_path.write_text(_scrub(substack_body), encoding="utf-8")
+            substack_path.write_text(substack_body, encoding="utf-8")
             written_files.append(str(substack_path))
 
         # Record in local broadcast ledger so distribution tracking stays synchronized
@@ -2156,15 +2258,7 @@ class IndexingFeedbackLoop:
         syndication_files_generated: List[str] = []
 
         if not dry_run and self.base_dir:
-            is_prod_tenant_repo = (
-                "PYTEST_CURRENT_TEST" not in os.environ
-                and "pytest" not in sys.modules
-                and str(self.base_dir.resolve()) in (
-                    "/home/ubuntuadmin/projects/profithelm-platform",
-                    "/home/ubuntuadmin/projects/prexvo",
-                    "/home/ubuntuadmin/projects/gainhelm",
-                )
-            )
+            is_prod_tenant_repo = self._is_prod_tenant_repo()
             overlays_dir = (
                 (self.base_dir / ".agy" / "overlays")
                 if is_prod_tenant_repo
@@ -2190,6 +2284,12 @@ class IndexingFeedbackLoop:
                 if not isinstance(spec, dict) or "title_rewrite" not in spec:
                     spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
                 t_url = str(cand.get("target_url") or spec.get("target_url") or "")
+                cand_extra_txt = " ".join(
+                    str(cand.get(k) or "")
+                    for k in ("reason", "google_canonical", "user_canonical", "canonical")
+                )
+                if self._is_foreign_tenant_candidate(c_slug, t_url, extra_text=cand_extra_txt):
+                    continue
                 if self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     res_c = resolve_redirected_gsc_target(
                         target_url=t_url,
@@ -2206,6 +2306,8 @@ class IndexingFeedbackLoop:
                             target_url=t_url,
                             query=str(cand.get("query") or ""),
                         )
+                        if self._is_foreign_tenant_candidate(c_slug, t_url):
+                            continue
                         cand["target_url"] = t_url
                         cand["slug"] = c_slug
                         if isinstance(spec, dict):
@@ -2252,6 +2354,17 @@ class IndexingFeedbackLoop:
                     continue
                 d_url = d.url
                 d_slug = _slug_from_url_or_query(target_url=d_url)
+                d_meta_pre = d.metadata if isinstance(d.metadata, dict) else {}
+                d_extra_txt = " ".join(
+                    str(v or "")
+                    for v in (
+                        d.reason,
+                        d_meta_pre.get("google_canonical"),
+                        d_meta_pre.get("user_canonical"),
+                    )
+                )
+                if self._is_foreign_tenant_candidate(d_slug, d_url, extra_text=d_extra_txt):
+                    continue
                 if self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
                     res_d = resolve_redirected_gsc_target(
                         target_url=d_url,
@@ -2264,6 +2377,8 @@ class IndexingFeedbackLoop:
                     if res_d.get("is_redirected") and res_d.get("canonical_url"):
                         d_url = str(res_d["canonical_url"])
                         d_slug = _slug_from_url_or_query(target_url=d_url)
+                        if self._is_foreign_tenant_candidate(d_slug, d_url):
+                            continue
                 if self._is_protected_hub_route(d_slug, d_url):
                     continue
                 ov_stem_d = d_slug.replace("/", "-")
@@ -2314,14 +2429,7 @@ class IndexingFeedbackLoop:
 
         reflection_res: Dict[str, Any] = {"status": "SKIPPED", "total_recompiled": 0}
         is_prod_only_overlays = bool(
-            self.base_dir
-            and "PYTEST_CURRENT_TEST" not in os.environ
-            and "pytest" not in sys.modules
-            and str(self.base_dir.resolve()) in (
-                "/home/ubuntuadmin/projects/profithelm-platform",
-                "/home/ubuntuadmin/projects/prexvo",
-                "/home/ubuntuadmin/projects/gainhelm",
-            )
+            self._is_prod_tenant_repo()
             and self.gitops_coordinator is None
         )
         if needs_recompile or (overlays_written and not skip_recompile):
@@ -2693,16 +2801,7 @@ class IndexingFeedbackLoop:
 
         already_repaired_slugs = set(repair_summary.get("repaired_slugs") or repair_summary.get("overlays_written") or [])
         reflection_succeeded = repair_summary.get("reflection", {}).get("status") == "SUCCESS"
-        is_prod_tenant_repo = bool(
-            self.base_dir
-            and "PYTEST_CURRENT_TEST" not in os.environ
-            and "pytest" not in sys.modules
-            and str(self.base_dir.resolve()) in (
-                "/home/ubuntuadmin/projects/profithelm-platform",
-                "/home/ubuntuadmin/projects/prexvo",
-                "/home/ubuntuadmin/projects/gainhelm",
-            )
-        )
+        is_prod_tenant_repo = self._is_prod_tenant_repo()
         allow_worker_html_mutation = not is_prod_tenant_repo or enable_gitops or self.gitops_coordinator is not None
 
         def _remediation_worker(task: Dict[str, Any]) -> Dict[str, Any]:

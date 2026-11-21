@@ -213,6 +213,7 @@ def test_lead_classifier_and_revenue_summary_are_truthful():
     assert summ["synthetic_probe_leads"] == 1
 
 
+@pytest.mark.host_estate
 def test_load_stripe_credentials_prefers_live_dotenv_key_over_cli_test_key(monkeypatch):
     from pseofactory.partner_tracker import _load_stripe_credentials
 

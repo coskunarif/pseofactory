@@ -5,6 +5,7 @@ autonomous trend arbitrage cross-examination, signal velocity, intent qualificat
 and closed-loop inflection-to-page routing.
 Zero em-dashes. Zero en-dashes.
 """
+import pytest
 
 from pathlib import Path
 from unittest.mock import patch
@@ -333,6 +334,7 @@ def test_closed_loop_inflection_signal_routing_existing_vs_new(tmp_path: Path):
     assert (tmp_path / ".agy" / "inflection_signal_routing.json").is_file()
 
 
+@pytest.mark.host_estate
 def test_code_slop_ratchet_and_zero_forbidden_dashes():
     """Verifies AST slop ratchet (0 duplicate AST blocks and <=450 lines on all new/modified functions) and zero forbidden dashes."""
     repo_root = Path("/home/ubuntuadmin/projects/pseofactory")

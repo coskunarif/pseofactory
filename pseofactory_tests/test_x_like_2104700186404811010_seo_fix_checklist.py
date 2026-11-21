@@ -3,6 +3,7 @@ Tests for x-like:2104700186404811010 (@TheCoolestCool) 18 SEO fixes: capability 
 and the deterministic estate_seo_fix_checklist gate, proven on both a clean and a broken dist.
 Zero em-dashes. Zero en-dashes.
 """
+import pytest
 
 import json
 
@@ -86,6 +87,7 @@ def test_capability_matrix_covers_all_18():
     assert s["new_deterministic_gates_count"] + s["already_solved_in_substrate_count"] == 18
 
 
+@pytest.mark.host_estate
 def test_live_tenants_pass_both_audits():
     s = audit_mod.evaluate_x_like_2104700186404811010_capability_matrix()
     for t, rep in s["tenant_reports"].items():

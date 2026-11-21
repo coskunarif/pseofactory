@@ -243,6 +243,7 @@ def test_jev_engine_untangles_commercial_vs_consumer_yield_and_blocks_contaminat
     assert "prohibited on Prexvo" in contaminated_decision.decision_reason
 
 
+@pytest.mark.host_estate
 def test_pre_treg_noise_and_cannibalization_filtering_across_substrate_and_tenants(monkeypatch, tmp_path):
     """
     Verifies that transient noise spikes, cross-tenant contamination, and search intent
@@ -514,6 +515,7 @@ def test_multi_cycle_prospective_niche_expansion_and_tenant_routing(tmp_path):
     assert spec["estimated_monthly_revenue_usd"] > 0.0
 
 
+@pytest.mark.host_estate
 def test_independent_corollary_checks_content_quality_and_partner_alignment():
     """
     Executes independent corollary checks on:

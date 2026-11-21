@@ -43,6 +43,7 @@ from pseofactory.tenant_facts import (
 )
 
 
+@pytest.mark.host_estate
 def test_audit_host_hygiene_live():
     """Asserts live profithelm-platform has zero host hygiene violations."""
     ok, msg = audit_host_hygiene(DEFAULT_PROFITHELM_REPO)
@@ -143,6 +144,7 @@ def test_default_endpoints_includes_active_gainhelm():
     assert "https://prexvo.com" in DEFAULT_ENDPOINTS
 
 
+@pytest.mark.host_estate
 def test_audit_hibernated_and_retired_dns_isolation_live():
     """
     Verifies live Cloudflare DNS isolation across all 4 retired domains
@@ -268,6 +270,7 @@ def test_audit_hibernated_and_retired_dns_isolation_catches_dangling_records():
         assert "adspendguardian.com has 1 dangling routing record(s)" in msg
 
 
+@pytest.mark.host_estate
 def test_active_zone_dns_hygiene_live_and_registrar_attestation_ledger():
     """
     Verifies live active-zone DNS hygiene (profithelm.com, prexvo.com, arifcoskun.com)

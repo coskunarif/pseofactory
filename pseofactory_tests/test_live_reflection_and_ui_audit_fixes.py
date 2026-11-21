@@ -464,6 +464,7 @@ def test_sync_tenant_porcelain_shell_enforces_no_dist_functions_in_staging_lockd
     assert "assert not dist_mw.exists()" in patched_test
 
 
+@pytest.mark.host_estate
 def test_serp_b2b_deduction_responsiveness_pslf_widget_spec_and_metrics_grid_order(monkeypatch) -> None:
     """
     1. #serp-b2b-deduction must reactively update SERP workbench outputs even when primary gross < $194k (e.g. $50k).
@@ -641,6 +642,7 @@ def test_porcelain_shell_scrubs_q499388_marks_inline_prose_links_and_wraps_mobil
     assert "white-space: normal !important;" in css
 
 
+@pytest.mark.host_estate
 def test_calculate_btn_preserves_edited_input_before_url_debounce_and_hero_state_picker_routes(tmp_path: Path) -> None:
     """
     Verifies in headless Chromium:
@@ -833,6 +835,7 @@ def test_calculate_btn_preserves_edited_input_before_url_debounce_and_hero_state
         srv.shutdown()
 
 
+@pytest.mark.host_estate
 def test_profithelm_app_js_crypto_state_audit_retrofit_and_live_guard(tmp_path: Path) -> None:
     """
     Verifies RetroReflectionEngine.audit_estate detects missing stateTaxDisplay assignment

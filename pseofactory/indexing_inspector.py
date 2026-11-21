@@ -78,13 +78,35 @@ class DailyIndexingInspector:
     def _url_belongs_to_tenant(self, url: str, record: Optional[Dict[str, Any]] = None) -> bool:
         """
         Determines whether a URL or ledger record belongs to self.tenant_id.
-        Strictly rejects URLs or records explicitly bound to a foreign tenant domain.
+        Strictly rejects URLs or records explicitly bound to a foreign tenant domain,
+        canonical/reason pointing to a foreign tenant domain, or tool slugs exclusively
+        owned by a foreign tenant.
         Zero em-dashes. Zero en-dashes.
         """
+        from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+
+        foreign_domains = {
+            c.domain.lower()
+            for pid, c in CANONICAL_TENANT_DECLARATIONS.items()
+            if pid != self.tenant_id and c.domain
+        }
+        foreign_ids = {
+            pid.lower()
+            for pid in CANONICAL_TENANT_DECLARATIONS
+            if pid.lower() != self.tenant_id
+        }
+
         if isinstance(record, dict):
             rec_tenant = str(record.get("tenant_id") or record.get("property_id") or "").strip().lower()
             if rec_tenant:
-                return rec_tenant == self.tenant_id
+                if rec_tenant != self.tenant_id:
+                    return False
+
+            # Reject records whose canonical, redirect target, or quarantine reason points to a foreign tenant domain
+            for field in ("canonical", "google_canonical", "user_canonical", "redirect_target", "reason", "details", "error"):
+                val = str(record.get(field) or "").lower()
+                if val and any(fdom in val for fdom in foreign_domains):
+                    return False
 
         url_str = str(url or "").strip().lower()
         if not url_str:
@@ -93,10 +115,31 @@ class DailyIndexingInspector:
         parsed = urllib.parse.urlparse(url_str)
         netloc = parsed.netloc.lower()
         if netloc:
-            return self.tenant_id in netloc
-        return self.tenant_id in url_str or not any(
-            other in url_str for other in ("profithelm", "prexvo", "gainhelm", "lienbond") if other != self.tenant_id
-        )
+            if any(fdom in netloc for fdom in foreign_domains):
+                return False
+            if self.tenant_id not in netloc:
+                return False
+        else:
+            if any(other in url_str for other in foreign_ids):
+                return False
+
+        # Reject /tools/<slug>/ routes whose slug is exclusively owned by a foreign canonical tenant
+        path_parts = [seg for seg in parsed.path.strip("/").split("/") if seg]
+        if len(path_parts) >= 2 and path_parts[0] == "tools":
+            cand_slug = path_parts[1]
+            try:
+                from pseofactory.maintenance import is_foreign_tenant_tool_slug
+
+                if is_foreign_tenant_tool_slug(
+                    cand_slug,
+                    self.tenant_id,
+                    dist_dir=self.base_dir / "dist",
+                ):
+                    return False
+            except Exception:
+                pass
+
+        return True
 
     def audit_gsc_rollover_queue(self) -> Dict[str, Any]:
         """

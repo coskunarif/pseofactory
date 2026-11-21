@@ -1,4 +1,5 @@
 from __future__ import annotations
+import pytest
 
 import json
 import os
@@ -180,6 +181,7 @@ def test_gainhelm_core_tools_ux_polish_partner_cards_serp_and_overlay_pruning(tm
         assert not has_gainhelm_cross_framework_leak(wb, slug=non_soc2_slug)
 
 
+@pytest.mark.host_estate
 def test_gainhelm_datapack_edge_metadata_and_ci_temp_build_parity(tmp_path: Path) -> None:
     dora_slug = "dora-ict-third-party-risk-compliance-cost-calculator"
     spec = resolve_post_calculation_upgrade_spec("gainhelm", dora_slug)
@@ -294,6 +296,7 @@ console.log("NODE_PARITY_OK");
         assert sentinel.read_text(encoding="utf-8") == "<html><body>STAGE7_COMMITTED_SENTINEL</body></html>"
 
 
+@pytest.mark.host_estate
 def test_gainhelm_overlay_pruning_all_fields_and_void_isolation(tmp_path: Path) -> None:
     from pseofactory.estate_common import strip_cross_framework_leaks_from_overlay
     from pseofactory.gsc_remediation import compile_remediation_overlay_spec
@@ -551,6 +554,7 @@ def test_gainhelm_legacy_de_baseline_retrofit_healing_and_idempotency() -> None:
     assert rep2 == []
 
 
+@pytest.mark.host_estate
 def test_gainhelm_full_page_chromium_script1_and_script2_parity(tmp_path: Path) -> None:
     import functools
     import http.server
@@ -814,7 +818,9 @@ def test_runtime_sync_tenant_neutral_and_head_tenant_inference() -> None:
     assert "waives federal protections" in guarded_html.lower()
 
 
-def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path: Path) -> None:
+@pytest.mark.host_estate
+@pytest.mark.parametrize("tenant", ["prexvo", "profithelm"])
+def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path: Path, tenant: str) -> None:
     from pseofactory.verifier import MasterSEOVerifier
     from pseofactory.visual_primitives import (
         get_runtime_synchronizer_script_src,
@@ -827,47 +833,49 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
     expected_sync_src = get_runtime_synchronizer_script_src()
     expected_sync_tag = render_external_runtime_synchronizer_tag().strip()
 
-    live_px = Path("/home/ubuntuadmin/projects/prexvo")
-    if (live_px / ".git").is_dir():
-        px_repo = tmp_path / "px_cli_repo"
-        px_repo.mkdir(parents=True)
-        arch_px = subprocess.run(
-            f"git -C {str(live_px)!r} archive HEAD | tar -x -C {str(px_repo)!r}",
-            shell=True,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert arch_px.returncode == 0, arch_px.stderr
-        px_dist = tmp_path / "px_cli_dist"
-        px_env = {**base_env, "PYTHONPATH": f"{engine_root}:{px_repo}"}
-        px_build = subprocess.run(
-            [sys.executable, "-m", "prexvo.cli", "build", "--dist", str(px_dist)],
-            cwd=str(px_repo),
-            env=px_env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert px_build.returncode == 0, f"prexvo build failed:\n{px_build.stdout}\n{px_build.stderr}"
-        px_verifier = MasterSEOVerifier(
-            dist_dir=px_dist,
-            domain="prexvo.com",
-            brand_name="Prexvo",
-            allow_mutations=False,
-        )
-        px_audit = px_verifier.audit_seo_checklist(dist_dir=px_dist, raise_on_error=True)
-        assert px_audit["status"] == "PASS" and px_audit["total_issues_count"] == 0
-        legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
-        px_sample = (px_dist / "tools" / "student-loan-repayment-calculator" / "index.html").read_text(encoding="utf-8")
-        assert legacy_sync_hook not in px_sample
-        assert has_current_external_runtime_sync_tag(px_sample)
-        assert expected_sync_tag in px_sample
-        px_sync_js_path = px_dist / expected_sync_src.lstrip("/")
-        assert px_sync_js_path.is_file(), f"Missing external runtime sync JS at {px_sync_js_path}"
-        px_sync_js = px_sync_js_path.read_text(encoding="utf-8")
-        assert legacy_sync_hook not in px_sync_js
-        assert "__complianceSyncWorkspaceOutputs" in px_sync_js
+    if tenant == "prexvo":
+        live_px = Path("/home/ubuntuadmin/projects/prexvo")
+        if (live_px / ".git").is_dir():
+            px_repo = tmp_path / "px_cli_repo"
+            px_repo.mkdir(parents=True)
+            arch_px = subprocess.run(
+                f"git -C {str(live_px)!r} archive HEAD | tar -x -C {str(px_repo)!r}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert arch_px.returncode == 0, arch_px.stderr
+            px_dist = tmp_path / "px_cli_dist"
+            px_env = {**base_env, "PYTHONPATH": f"{engine_root}:{px_repo}"}
+            px_build = subprocess.run(
+                [sys.executable, "-m", "prexvo.cli", "build", "--dist", str(px_dist)],
+                cwd=str(px_repo),
+                env=px_env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert px_build.returncode == 0, f"prexvo build failed:\n{px_build.stdout}\n{px_build.stderr}"
+            px_verifier = MasterSEOVerifier(
+                dist_dir=px_dist,
+                domain="prexvo.com",
+                brand_name="Prexvo",
+                allow_mutations=False,
+            )
+            px_audit = px_verifier.audit_seo_checklist(dist_dir=px_dist, raise_on_error=True)
+            assert px_audit["status"] == "PASS" and px_audit["total_issues_count"] == 0
+            legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
+            px_sample = (px_dist / "tools" / "student-loan-repayment-calculator" / "index.html").read_text(encoding="utf-8")
+            assert legacy_sync_hook not in px_sample
+            assert has_current_external_runtime_sync_tag(px_sample)
+            assert expected_sync_tag in px_sample
+            px_sync_js_path = px_dist / expected_sync_src.lstrip("/")
+            assert px_sync_js_path.is_file(), f"Missing external runtime sync JS at {px_sync_js_path}"
+            px_sync_js = px_sync_js_path.read_text(encoding="utf-8")
+            assert legacy_sync_hook not in px_sync_js
+            assert "__complianceSyncWorkspaceOutputs" in px_sync_js
+        return
 
     live_ph = Path("/home/ubuntuadmin/projects/profithelm-platform")
     if (live_ph / ".git").is_dir():
@@ -881,7 +889,7 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
             check=False,
         )
         assert arch_ph.returncode == 0, arch_ph.stderr
-        ph_env = {**base_env, "PYTHONPATH": f"{engine_root}:{ph_repo}"}
+        ph_env = {**base_env, "PYTHONPATH": f"{engine_root}:{ph_repo}", "PROFITHELM_OFFLINE_JEV": "1"}
         ph_build = subprocess.run(
             [sys.executable, "-m", "profithelm.cli", "build"],
             cwd=str(ph_repo),

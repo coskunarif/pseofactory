@@ -55,6 +55,7 @@ def _extract_clean_gainhelm_repo(dst_repo: Path) -> Path:
     return dst_repo
 
 
+@pytest.mark.host_estate
 def test_slice0_css_commentary_title_and_compiler_select_and_gitops_slug(tmp_path: Path) -> None:
     # 1. CSS .commentary-title split from .variant-title (>= 18px: 1.25rem = 20px)
     for tenant_id in ("gainhelm", "prexvo", "lienbond", "profithelm"):
@@ -133,6 +134,7 @@ def test_slice0_css_commentary_title_and_compiler_select_and_gitops_slug(tmp_pat
     assert "prediction-market-tax-calculator" not in ph_builder
 
 
+@pytest.mark.host_estate
 def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path: Path) -> None:
     from pseofactory.drift import write_substrate_lock
     from pseofactory.estate_common import build_thin_estate_builder_source
@@ -421,6 +423,7 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     assert browser_errors == [], f"Headless browser errors detected: {browser_errors}"
 
 
+@pytest.mark.host_estate
 def test_gainhelm_overlay_leak_guard_and_slop_ratchet(tmp_path: Path) -> None:
     ratchet = audit_code_slop_ratchet()
     assert ratchet["status"] == "PASS", ratchet
@@ -542,6 +545,7 @@ def test_gainhelm_overlay_leak_guard_and_slop_ratchet(tmp_path: Path) -> None:
     assert "dora-ict-third-party-risk-compliance-cost-calculator" in RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS
 
 
+@pytest.mark.host_estate
 def test_reflect_recompiles_gainhelm_when_substrate_syncs_and_force(tmp_path: Path) -> None:
     """
     Verifies real un-mocked SubprocessPropertyAdapter.build_all() inside reflect_and_recompile_all_assets:
@@ -710,6 +714,7 @@ def test_standalone_lienbond_cli_build_and_audit_preserve_bootstrap(tmp_path: Pa
     assert audit_env["score"] == 10.0
 
 
+@pytest.mark.host_estate
 def test_unmocked_subprocess_reflect_latch_false_refreshes_existing_ledger_outside_pytest(
     tmp_path: Path,
 ) -> None:

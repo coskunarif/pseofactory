@@ -273,6 +273,7 @@ def test_gainhelm_reconcile_estate_assets_handles_none_and_str_repo_root(tmp_pat
     assert "$2,455,313 total HIPAA breach exposure" in hipaa_file.read_text(encoding="utf-8")
 
 
+@pytest.mark.host_estate
 def test_evaluator_cache_fingerprint_invalidates_on_lienbond_formula_change(tmp_path, monkeypatch):
     """Regression: _compute_engine_fingerprint must include LienBond formula/builder files and change when edited."""
     fp_live = AssetIntegrityEvaluator._compute_engine_fingerprint()

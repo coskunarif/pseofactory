@@ -653,6 +653,7 @@ def _extract_run_parallel_tenant_cascades_fn() -> str:
     return txt[start:end]
 
 
+@pytest.mark.host_estate
 def test_parallel_tenant_cascades_unique_child_run_ids_and_fail_closed(tmp_path: Path) -> None:
     fn_src = _extract_run_parallel_tenant_cascades_fn()
     runs_base = tmp_path / "runs"
@@ -902,6 +903,7 @@ def test_impact_planner_ast_branch_and_boolean_negation_demotion(tmp_path: Path)
     assert "pseofactory/gainhelm_estate.py" not in pos_part["shared"]
 
 
+@pytest.mark.host_estate
 def test_release_pipeline_receipt_refresh_non_forging_and_happy_path(tmp_path: Path) -> None:
     """
     Blocker #3 regression: refresh_receipt_head_if_prior_matches must:

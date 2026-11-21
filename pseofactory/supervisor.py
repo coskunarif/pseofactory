@@ -1193,6 +1193,7 @@ class DepartmentHandoffChainVerifier:
             stale_cnt = int(retro_rep.get("stale_count", 0))
             p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
             aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
+            aeo_mutated = False
 
             if in_flight_build and (
                 rep.status != "PASS" or rep.drifted_assets_count > 0 or stale_cnt > 0 or not aeo_ready
@@ -1241,6 +1242,7 @@ class DepartmentHandoffChainVerifier:
             ):
                 if self.heal_markers:
                     RetroReflectionEngine.retrofit_estate(adapter.dist_dir, pid)
+                    aeo_mutated = True
                     evaluator._audit_cache.clear()
                     rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
                 else:
@@ -1390,8 +1392,9 @@ class DepartmentHandoffChainVerifier:
                 "violations_count": len(contam_violations),
             }
 
-            p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
-            aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
+            if aeo_mutated:
+                p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
+                aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
             if in_flight_build and not aeo_ready:
                 aeo_ready = True
                 p_aeo["status"] = "PASS"

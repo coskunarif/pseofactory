@@ -289,6 +289,7 @@ def test_inspector_does_not_override_failed_auto_remediation_to_pass(tmp_path):
     assert rep["audit_status"] == "FAIL"
 
 
+@pytest.mark.host_estate
 def test_supervisor_escalation_triggers_autonomous_self_healing(tmp_path):
     from pseofactory.maintenance import TenantRegistry
     from pseofactory.supervisor import AutonomousLifecycleSupervisor, MaintenanceResult
@@ -329,6 +330,7 @@ def test_supervisor_escalation_triggers_autonomous_self_healing(tmp_path):
     assert (tmp_path / ".agy" / "self_healing_ledger.jsonl").is_file()
 
 
+@pytest.mark.host_estate
 def test_retro_reflection_flags_and_heals_volatile_telemetry_in_html_and_sidecar(tmp_path):
     import json
     from pseofactory.maintenance import RetroReflectionEngine

@@ -50,6 +50,42 @@ from pseofactory.tenant_facts import (
 )
 
 
+@pytest.fixture(scope="module")
+def compiled_lienbond_baseline(tmp_path_factory: pytest.TempPathFactory):
+    """
+    Session-shared compiled, retrofitted, and substrate-synced LienBond estate baseline.
+    Coordinates via fcntl.flock across pytest-xdist workers so compilation runs once per
+    runner; each test copies this baseline into its own tmp_path for isolated mutations.
+    test_compile_lienbond_estate_end_to_end still executes a fresh compile.
+    """
+    import fcntl
+    import json
+    import os
+    from pseofactory.drift import write_substrate_lock
+    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
+
+    base_tmp = tmp_path_factory.getbasetemp()
+    shared_root = base_tmp.parent if os.environ.get("PYTEST_XDIST_WORKER") else base_tmp
+    shared_dir = shared_root / "lienbond_compiled_baseline_shared"
+    ready_file = shared_root / "lienbond_compiled_baseline_shared.ready.json"
+    lock_file = shared_root / "lienbond_compiled_baseline_shared.lock"
+
+    with open(lock_file, "w", encoding="utf-8") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        try:
+            if ready_file.is_file() and (shared_dir / "substrate_lock.json").is_file():
+                estate_res = json.loads(ready_file.read_text(encoding="utf-8"))
+                return shared_dir, estate_res
+            estate_res = compile_lienbond_estate(shared_dir, run_retrofit=True)
+            assert estate_res["status"] == "PASS"
+            sync_tenant_porcelain_shell(shared_dir, "lienbond")
+            write_substrate_lock(shared_dir, property_id="lienbond", sync_ledgers=False)
+            ready_file.write_text(json.dumps(estate_res), encoding="utf-8")
+            return shared_dir, estate_res
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
 def test_domain_registration_availability_verification() -> None:
     """Verifies that lienbond.com is available while insurebond.com is registered."""
     avail_res = verify_domain_registration_availability("lienbond.com", probe_live=False)
@@ -211,7 +247,7 @@ def test_provision_tenant_custom_domain_and_dns_reconciler() -> None:
     assert cname_targets == ["lienbond.pages.dev", "lienbond.pages.dev"]
 
 
-def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path) -> None:
+def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path, compiled_lienbond_baseline) -> None:
     """
     Verifies that execute_autonomous_daily_trend_page_build:
       1. Builds a Factor-7-verified P2 page for lienbond and records source='p2_autonomous_daily_builder'
@@ -219,6 +255,7 @@ def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path) -> None
       2. Preserves the P2 page across subsequent compile_lienbond_estate() rebuilds.
     """
     import json
+    import shutil
     from pseofactory.compiler import compile_lienbond_estate
     from pseofactory.pipeline import (
         ConfigurablePropertyAdapter,
@@ -226,8 +263,9 @@ def test_lienbond_p2_daily_build_and_rebuild_persistence(tmp_path: Path) -> None
         execute_autonomous_daily_trend_page_build,
     )
 
+    baseline_dir, init_res = compiled_lienbond_baseline
     lb_root = tmp_path / "lienbond"
-    init_res = compile_lienbond_estate(lb_root)
+    shutil.copytree(baseline_dir, lb_root)
     assert init_res["status"] == "PASS"
     assert init_res["compiled_count"] == 10
 
@@ -415,12 +453,17 @@ def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None
     assert "bond_amount=99000" in out["postSubmitCalls"][0]
 
 
-@pytest.mark.xdist_group("cdp_9222")
-def test_lienbond_readable_formulas_and_compiled_estate_zero_spaced_hyphens(tmp_path: Path) -> None:
+@pytest.mark.host_estate
+def test_lienbond_readable_formulas_and_compiled_estate_zero_spaced_hyphens(
+    tmp_path: Path,
+    compiled_lienbond_baseline,
+) -> None:
     """
     Verifies _format_human_readable_formula emits zero spaced hyphens (\\s+-\\s+) across all
     LIENBOND_EXPANSION_SPECS and fallback paths, and compiled LienBond HTML passes UnifiedBrowserAuditor dashes=0.
     """
+    import shutil
+
     spaced_hyphen_re = re.compile(r"\s+-\s+")
 
     for spec in LIENBOND_EXPANSION_SPECS:
@@ -437,9 +480,11 @@ def test_lienbond_readable_formulas_and_compiled_estate_zero_spaced_hyphens(tmp_
     assert not spaced_hyphen_re.search(fallback_readable), f"Fallback emitted spaced hyphen: {fallback_readable!r}"
     assert "minus" in fallback_readable
 
-    estate_res = compile_lienbond_estate(tmp_path)
+    baseline_dir, estate_res = compiled_lienbond_baseline
     assert estate_res["status"] == "PASS"
-    dist_dir = tmp_path / "dist"
+    lb_copy = tmp_path / "lienbond"
+    shutil.copytree(baseline_dir, lb_copy)
+    dist_dir = lb_copy / "dist"
 
     for hp in sorted(dist_dir.rglob("*.html")):
         txt = hp.read_text(encoding="utf-8", errors="ignore")
@@ -622,80 +667,97 @@ def _run_lienbond_substrate_audit_subprocess(lb_repo: Path) -> dict:
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-def test_lienbond_clean_ci_and_local_substrate_audit_drift_parity(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "case_name",
+    [
+        "clean_ci",
+        "corrupt_synced_substrate_hash",
+        "tampered_substrate_module",
+        "local_agy_ok",
+        "local_agy_corrupt",
+    ],
+)
+def test_lienbond_clean_ci_and_local_substrate_audit_drift_parity(
+    tmp_path: Path,
+    compiled_lienbond_baseline,
+    case_name: str,
+) -> None:
     """
     Verifies _pseo_substrate audit alignment and tamper detection for both:
     (a) clean CI checkouts without .agy/ (using synced_substrate_hash vs full engine_hash), and
     (b) local checkouts with .agy/engine_hash.json alongside substrate_lock.json.
+    Parametrized across all 5 audit cases so xdist executes subprocess audits concurrently.
     """
     import json
     import shutil
-    from pseofactory.drift import record_engine_hash, write_substrate_lock
-    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
+    from pseofactory.drift import record_engine_hash
 
-    lb_repo = tmp_path / "lienbond"
-    estate_res = compile_lienbond_estate(lb_repo, run_retrofit=True)
-    assert estate_res["status"] == "PASS"
-    sync_tenant_porcelain_shell(lb_repo, "lienbond")
-    write_substrate_lock(lb_repo, property_id="lienbond", sync_ledgers=False)
+    baseline_dir, _ = compiled_lienbond_baseline
+    lb_repo = tmp_path / f"lienbond_{case_name}"
+    shutil.copytree(baseline_dir, lb_repo)
 
     lock_path = lb_repo / "substrate_lock.json"
     orig_lock_text = lock_path.read_text(encoding="utf-8")
     lock_data = json.loads(orig_lock_text)
     assert lock_data["engine_hash"] != lock_data["synced_substrate_hash"]
 
-    # Case (a): Clean CI checkout without .agy/ passes enforce_master_seo=True and bs4=None
-    shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
-    clean_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
-    assert "_pseo_substrate" in clean_res["pseofactory_file"]
-    assert clean_res["drift"]["status"] == "ALIGNED"
-    assert clean_res["drift"]["drift_detected"] is False
-    assert clean_res["status"] == "PASS"
-    assert clean_res["drifted_assets_count"] == 0
+    if case_name == "clean_ci":
+        # Case (a): Clean CI checkout without .agy/ passes enforce_master_seo=True and bs4=None
+        shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
+        clean_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+        assert "_pseo_substrate" in clean_res["pseofactory_file"]
+        assert clean_res["drift"]["status"] == "ALIGNED"
+        assert clean_res["drift"]["drift_detected"] is False
+        assert clean_res["status"] == "PASS"
+        assert clean_res["drifted_assets_count"] == 0
+    elif case_name == "corrupt_synced_substrate_hash":
+        # Case (a.2): Corrupting synced_substrate_hash in substrate_lock.json fails with ENGINE_HASH_DRIFT
+        shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
+        corrupted_lock = dict(lock_data)
+        corrupted_lock["synced_substrate_hash"] = "f" * 64
+        lock_path.write_text(json.dumps(corrupted_lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        corrupt_lock_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+        assert corrupt_lock_res["drift"]["drift_detected"] is True
+        assert corrupt_lock_res["drifted_assets_count"] > 0
+        assert "ENGINE_HASH_DRIFT" in corrupt_lock_res["reasons"]
+    elif case_name == "tampered_substrate_module":
+        # Case (a.3): Editing a synced _pseo_substrate module fails with ENGINE_HASH_DRIFT
+        shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
+        sub_contracts = lb_repo / "lienbond" / "_pseo_substrate" / "pseofactory" / "contracts.py"
+        orig_contracts = sub_contracts.read_text(encoding="utf-8")
+        sub_contracts.write_text(orig_contracts + "\n# tampered substrate check\n", encoding="utf-8")
+        tamper_sub_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+        assert tamper_sub_res["drift"]["drift_detected"] is True
+        assert tamper_sub_res["drifted_assets_count"] > 0
+        assert "ENGINE_HASH_DRIFT" in tamper_sub_res["reasons"]
+    elif case_name == "local_agy_ok":
+        # Case (b): Local checkout WITH .agy/engine_hash.json (full hash) + matching substrate_lock.json passes
+        shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
+        agy_eh_path = lb_repo / ".agy" / "engine_hash.json"
+        record_engine_hash(agy_eh_path, hash_value=lock_data["engine_hash"])
+        agy_eh_data = json.loads(agy_eh_path.read_text(encoding="utf-8"))
+        assert "synced_substrate_hash" not in agy_eh_data
+        assert agy_eh_data["engine_hash"] == lock_data["engine_hash"]
 
-    # Case (a.2): Corrupting synced_substrate_hash in substrate_lock.json fails with ENGINE_HASH_DRIFT
-    corrupted_lock = dict(lock_data)
-    corrupted_lock["synced_substrate_hash"] = "f" * 64
-    lock_path.write_text(json.dumps(corrupted_lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    corrupt_lock_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
-    assert corrupt_lock_res["drift"]["drift_detected"] is True
-    assert corrupt_lock_res["drifted_assets_count"] > 0
-    assert "ENGINE_HASH_DRIFT" in corrupt_lock_res["reasons"]
-    lock_path.write_text(orig_lock_text, encoding="utf-8")
-
-    # Case (a.3): Editing a synced _pseo_substrate module fails with ENGINE_HASH_DRIFT
-    sub_contracts = lb_repo / "lienbond" / "_pseo_substrate" / "pseofactory" / "contracts.py"
-    orig_contracts = sub_contracts.read_text(encoding="utf-8")
-    sub_contracts.write_text(orig_contracts + "\n# tampered substrate check\n", encoding="utf-8")
-    tamper_sub_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
-    assert tamper_sub_res["drift"]["drift_detected"] is True
-    assert tamper_sub_res["drifted_assets_count"] > 0
-    assert "ENGINE_HASH_DRIFT" in tamper_sub_res["reasons"]
-    sub_contracts.write_text(orig_contracts, encoding="utf-8")
-
-    # Case (b): Local checkout WITH .agy/engine_hash.json (full hash) + matching substrate_lock.json passes
-    agy_eh_path = lb_repo / ".agy" / "engine_hash.json"
-    record_engine_hash(agy_eh_path, hash_value=lock_data["engine_hash"])
-    agy_eh_data = json.loads(agy_eh_path.read_text(encoding="utf-8"))
-    assert "synced_substrate_hash" not in agy_eh_data
-    assert agy_eh_data["engine_hash"] == lock_data["engine_hash"]
-
-    local_ok_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
-    assert local_ok_res["drift"]["status"] == "ALIGNED"
-    assert local_ok_res["drift"]["drift_detected"] is False
-    assert local_ok_res["status"] == "PASS"
-    assert local_ok_res["drifted_assets_count"] == 0
-
-    # Case (b.2): Corrupting .agy/engine_hash.json fails closed with ENGINE_HASH_DRIFT
-    agy_eh_path.write_text(
-        json.dumps({"engine_hash": "0" * 64, "substrate_hash": "0" * 64}),
-        encoding="utf-8",
-    )
-    local_bad_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
-    assert local_bad_res["drift"]["status"] == "DRIFT"
-    assert local_bad_res["drift"]["drift_detected"] is True
-    assert local_bad_res["drifted_assets_count"] > 0
-    assert "ENGINE_HASH_DRIFT" in local_bad_res["reasons"]
+        local_ok_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+        assert local_ok_res["drift"]["status"] == "ALIGNED"
+        assert local_ok_res["drift"]["drift_detected"] is False
+        assert local_ok_res["status"] == "PASS"
+        assert local_ok_res["drifted_assets_count"] == 0
+    elif case_name == "local_agy_corrupt":
+        # Case (b.2): Corrupting .agy/engine_hash.json fails closed with ENGINE_HASH_DRIFT
+        shutil.rmtree(lb_repo / ".agy", ignore_errors=True)
+        agy_eh_path = lb_repo / ".agy" / "engine_hash.json"
+        agy_eh_path.parent.mkdir(parents=True, exist_ok=True)
+        agy_eh_path.write_text(
+            json.dumps({"engine_hash": "0" * 64, "substrate_hash": "0" * 64}),
+            encoding="utf-8",
+        )
+        local_bad_res = _run_lienbond_substrate_audit_subprocess(lb_repo)
+        assert local_bad_res["drift"]["status"] == "DRIFT"
+        assert local_bad_res["drift"]["drift_detected"] is True
+        assert local_bad_res["drifted_assets_count"] > 0
+        assert "ENGINE_HASH_DRIFT" in local_bad_res["reasons"]
 
 
 def test_contracts_bs4_fallback_strict_when_bs4_unavailable(monkeypatch) -> None:
@@ -848,6 +910,7 @@ def test_lienbond_synced_ci_workflow_installs_pytest_and_beautifulsoup4(tmp_path
 
 def test_lienbond_git_archive_ci_audit_tracks_substrate_syndication_and_ignores_top_level(
     tmp_path: Path,
+    compiled_lienbond_baseline,
 ) -> None:
     """
     Verifies anchored /syndication/ and /dist/syndication/ rules in .gitignore keep
@@ -858,22 +921,19 @@ def test_lienbond_git_archive_ci_audit_tracks_substrate_syndication_and_ignores_
     import io
     import json
     import os
+    import shutil
     import subprocess
     import sys
     import tarfile
     from pseofactory.drift import write_substrate_lock
     from pseofactory.gitops import GitOpsCoordinator, sync_tenant_test_isolation_guards
-    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
 
+    baseline_dir, _ = compiled_lienbond_baseline
     lb_repo = tmp_path / "lienbond"
-    lb_repo.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(baseline_dir, lb_repo)
     subprocess.run(["git", "init", "-b", "main", str(lb_repo)], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(lb_repo), "config", "user.email", "ci@lienbond.com"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(lb_repo), "config", "user.name", "LienBond CI"], check=True, capture_output=True)
-
-    estate_res = compile_lienbond_estate(lb_repo, run_retrofit=True)
-    assert estate_res["status"] == "PASS"
-    sync_tenant_porcelain_shell(lb_repo, "lienbond")
 
     (lb_repo / "syndication").mkdir(parents=True, exist_ok=True)
     (lb_repo / "syndication" / "pack.json").write_text('{"pack": "ignored"}\n', encoding="utf-8")
@@ -993,6 +1053,7 @@ def test_lienbond_git_archive_ci_audit_tracks_substrate_syndication_and_ignores_
 
 def test_lienbond_upgrades_legacy_gitignore_and_recompute_stages_substrate_syndication(
     tmp_path: Path,
+    compiled_lienbond_baseline,
 ) -> None:
     """
     Verifies sync_tenant_test_isolation_guards upgrades legacy bare syndication/ and
@@ -1000,22 +1061,19 @@ def test_lienbond_upgrades_legacy_gitignore_and_recompute_stages_substrate_syndi
     recompute_and_amend_tenant_lock_and_ledger stages _pseo_substrate/pseofactory/**/*.py
     without staging ignored top-level syndication files.
     """
+    import shutil
     import subprocess
     from pseofactory.gitops import (
         recompute_and_amend_tenant_lock_and_ledger,
         sync_tenant_test_isolation_guards,
     )
-    from pseofactory.porcelain_shell import sync_tenant_porcelain_shell
 
+    baseline_dir, _ = compiled_lienbond_baseline
     lb_repo = tmp_path / "lienbond_legacy"
-    lb_repo.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(baseline_dir, lb_repo)
     subprocess.run(["git", "init", "-b", "main", str(lb_repo)], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(lb_repo), "config", "user.email", "ci@lienbond.com"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(lb_repo), "config", "user.name", "LienBond CI"], check=True, capture_output=True)
-
-    estate_res = compile_lienbond_estate(lb_repo, run_retrofit=False)
-    assert estate_res["status"] == "PASS"
-    sync_tenant_porcelain_shell(lb_repo, "lienbond")
 
     (lb_repo / ".gitignore").write_text(
         "__pycache__/\n*.py[cod]\n.agy/\ndist/\nsyndication/\ndist/syndication/\n",

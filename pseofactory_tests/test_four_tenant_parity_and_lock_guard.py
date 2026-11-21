@@ -313,6 +313,7 @@ def test_no_copy_oscillation_between_reposition_and_normalize_and_no_inline_lock
         assert norm_html == rep_html, f"Copy oscillation detected between reposition and normalize for {slug}"
 
 
+@pytest.mark.host_estate
 def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path: Path):
     """
     Verifies GainHelm query-intent swaps, empirical-yield swaps (real dist + outbound_partner_engagement.json),
@@ -529,6 +530,7 @@ def test_idempotency_of_write_substrate_lock_on_lienbond_result_box_and_prexvo_r
     assert px_pass2 == px_pass1
 
 
+@pytest.mark.host_estate
 def test_cloudflare_redirects_cap_and_middleware_sync_across_four_tenants(tmp_path: Path):
     import json
     from pseofactory.edge import sync_tenant_edge_redirect_function
@@ -969,6 +971,7 @@ console.log(JSON.stringify(out));
     assert corrupt_ledger.read_text(encoding="utf-8") == corrupt_payload
 
 
+@pytest.mark.host_estate
 @pytest.mark.parametrize(
     "prop,src_root",
     [

@@ -2013,6 +2013,7 @@ def test_zero_click_crawl_budget_triage_404_noindex_and_schema_breadcrumb_hierar
     }
 
 
+@pytest.mark.host_estate
 def test_closed_loop_serp_dom_structural_diff_rma_velocity_and_tenant_isolation(
     tmp_path: Path,
 ) -> None:

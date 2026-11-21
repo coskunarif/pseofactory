@@ -533,6 +533,210 @@ def write_substrate_lock(
     return payload
 
 
+def _verify_single_tenant_for_latch(
+    ws_str: str,
+    pid: str,
+    repo_dir_name: str,
+    target_hash: str,
+    is_prod_ws: bool,
+    require_git_clean_and_pushed: bool,
+    allow_tenant_scoped_hash: bool,
+) -> List[str]:
+    """
+    Top-level picklable worker verifying a single canonical tenant repository for
+    verify_all_tenants_aligned_for_latch (safe across ProcessPoolExecutor workers).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import subprocess
+    from pseofactory.edge import verify_tenant_edge_functions_parity
+    from pseofactory.maintenance import CrossPropertyContaminationScanner, RetroReflectionEngine
+
+    ws = Path(ws_str)
+    t_reasons: List[str] = []
+    t_repo = ws / repo_dir_name
+    has_git = (t_repo / ".git").exists()
+    lock_file = t_repo / "substrate_lock.json"
+    if not is_prod_ws and not has_git and not lock_file.is_file():
+        return t_reasons
+    if not t_repo.is_dir():
+        t_reasons.append(f"{pid}: missing tenant repository at {t_repo}")
+        return t_reasons
+    dist_dir = t_repo / "dist"
+    if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
+        t_reasons.append(f"{pid}: missing compiled dist/index.html in {t_repo}")
+
+    if not lock_file.is_file():
+        t_reasons.append(f"{pid}: missing substrate_lock.json at {lock_file}")
+    else:
+        try:
+            lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+            l_eh = str(lock_data.get("engine_hash") or "")
+            l_sh = str(lock_data.get("substrate_hash") or l_eh)
+            hash_aligned = (l_eh == target_hash and l_sh == target_hash)
+            if not hash_aligned and allow_tenant_scoped_hash:
+                l_tsh = str(lock_data.get("tenant_substrate_hash") or "")
+                if l_tsh and l_tsh == compute_tenant_substrate_hash(pid):
+                    hash_aligned = True
+            if not hash_aligned:
+                t_reasons.append(
+                    f"{pid}: substrate_lock.json hash '{l_eh[:12]}' != expected '{target_hash[:12]}'"
+                )
+            if dist_dir.is_dir():
+                exp_fp, exp_tot = compute_dist_lock_metrics(dist_dir)
+                l_fp = str(lock_data.get("dist_fingerprint") or "")
+                l_tot = lock_data.get("total_assets")
+                if l_fp != exp_fp:
+                    t_reasons.append(
+                        f"{pid}: substrate_lock.json dist_fingerprint '{l_fp[:12]}' != actual dist '{exp_fp[:12]}'"
+                    )
+                if l_tot != exp_tot:
+                    t_reasons.append(
+                        f"{pid}: substrate_lock.json total_assets '{l_tot}' != actual dist '{exp_tot}'"
+                    )
+        except Exception as exc:
+            t_reasons.append(f"{pid}: invalid substrate_lock.json ({exc})")
+
+    if (t_repo / "functions" / "r").is_dir() or is_prod_ws:
+        try:
+            edge_ok, edge_reasons = verify_tenant_edge_functions_parity(t_repo, pid)
+            if not edge_ok:
+                t_reasons.extend(edge_reasons)
+        except Exception as exc:
+            t_reasons.append(f"{pid}: edge function parity check failed ({exc})")
+
+    try:
+        scanner = CrossPropertyContaminationScanner()
+        if dist_dir.is_dir():
+            dist_contam = scanner.scan_directory(dist_dir, pid)
+            if dist_contam:
+                t_reasons.append(f"{pid}: cross-property contamination in dist/: {dist_contam}")
+        func_dir = t_repo / "functions"
+        if func_dir.is_dir():
+            func_contam = scanner.scan_directory(func_dir, pid)
+            if func_contam:
+                t_reasons.append(f"{pid}: cross-property contamination in functions/: {func_contam}")
+        if dist_dir.is_dir() and ((dist_dir / "tools").is_dir() or is_prod_ws):
+            retro_rep = RetroReflectionEngine.audit_estate(dist_dir, pid)
+            if retro_rep.get("status") != "PASS" or retro_rep.get("stale_count", 0) != 0:
+                t_reasons.append(
+                    f"{pid}: RetroReflectionEngine.audit_estate failed (stale_count={retro_rep.get('stale_count', 0)})"
+                )
+    except Exception as exc:
+        t_reasons.append(f"{pid}: contamination or retro-reflection audit failed ({exc})")
+
+    if require_git_clean_and_pushed and has_git:
+        try:
+            st_res = subprocess.run(
+                ["git", "-C", str(t_repo), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if st_res.returncode == 0 and st_res.stdout.strip():
+                first_dirty = st_res.stdout.strip().splitlines()[0].strip()
+                t_reasons.append(
+                    f"{pid}: uncommitted changes in dist/ or substrate_lock.json or tracked tenant files ({first_dirty})"
+                )
+        except Exception:
+            pass
+        if dist_dir.is_dir():
+            try:
+                ls_res = subprocess.run(
+                    ["git", "-C", str(t_repo), "ls-files", "dist"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if ls_res.returncode == 0:
+                    tracked_dist_set = {
+                        ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()
+                    }
+                    lock_assets = [
+                        f"dist/{p.relative_to(dist_dir).as_posix()}"
+                        for p in sorted(dist_dir.glob("**/*"))
+                        if p.is_file()
+                        and "syndication" not in p.relative_to(dist_dir).parts
+                        and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
+                        and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+                    ]
+                    untracked_lock = [p for p in lock_assets if p not in tracked_dist_set]
+                    if untracked_lock:
+                        t_reasons.append(
+                            f"{pid}: {len(untracked_lock)} untracked lock asset(s) in dist/ (first: {untracked_lock[0]})"
+                        )
+                    else:
+                        all_dist_files = [
+                            f"dist/{p.relative_to(dist_dir).as_posix()}"
+                            for p in sorted(dist_dir.glob("**/*"))
+                            if p.is_file()
+                            and "syndication" not in p.relative_to(dist_dir).parts
+                            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+                        ]
+                        untracked_dist = [p for p in all_dist_files if p not in tracked_dist_set]
+                        if untracked_dist:
+                            t_reasons.append(
+                                f"{pid}: {len(untracked_dist)} untracked asset(s) in dist/ (first: {untracked_dist[0]})"
+                            )
+            except Exception:
+                pass
+        try:
+            rem_res = subprocess.run(
+                ["git", "-C", str(t_repo), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if rem_res.returncode == 0 and rem_res.stdout.strip():
+                ref_res = subprocess.run(
+                    ["git", "-C", str(t_repo), "rev-parse", "--verify", "origin/main"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                if ref_res.returncode == 0:
+                    ahead_res = subprocess.run(
+                        ["git", "-C", str(t_repo), "rev-list", "--count", "origin/main..HEAD"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    if ahead_res.returncode == 0 and int(ahead_res.stdout.strip() or "0") > 0:
+                        t_reasons.append(
+                            f"{pid}: {ahead_res.stdout.strip()} unpushed commit(s) on main ahead of origin/main"
+                        )
+        except Exception:
+            pass
+    return t_reasons
+
+
+def _is_strictly_single_threaded_os_process() -> bool:
+    """
+    Returns True only when Python threading, xdist worker env, and Linux /proc/self/status
+    all confirm exactly 1 OS thread (preventing unsafe fork() deadlocks and Python 3.12
+    DeprecationWarnings under xdist/execnet/SQLite/OpenSSL). Fails closed to False.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import threading
+
+    if "PYTEST_XDIST_WORKER" in os.environ:
+        return False
+    if threading.active_count() != 1:
+        return False
+    try:
+        status_txt = Path("/proc/self/status").read_text(encoding="utf-8")
+        for ln in status_txt.splitlines():
+            if ln.startswith("Threads:"):
+                return int(ln.split(":", 1)[1].strip()) == 1
+    except Exception:
+        return False
+    return False
+
+
 def verify_all_tenants_aligned_for_latch(
     workspace_root: Union[str, Path] = "/home/ubuntuadmin/projects",
     expected_hash: Optional[str] = None,
@@ -540,191 +744,78 @@ def verify_all_tenants_aligned_for_latch(
     allow_tenant_scoped_hash: bool = False,
 ) -> Tuple[bool, List[str]]:
     """
-    Verifies that every canonical tenant repository (profithelm-platform, prexvo, gainhelm)
+    Verifies that every canonical tenant repository (profithelm-platform, prexvo, gainhelm, lienbond)
     has compiled, updated substrate_lock.json to match expected_hash (or compute_engine_hash())
     as well as the live dist/ fingerprint and total_assets count, and when
     require_git_clean_and_pushed is True, has a completely clean git working tree
     and 0 unpushed commits on main relative to origin/main.
+    Runs multi-tenant audits concurrently across processes on production workspaces when strictly
+    single-threaded to avoid GIL contention while preserving deterministic canonical tenant ordering.
     Returns (all_aligned, reasons).
     Zero em-dashes. Zero en-dashes.
     """
-    import subprocess
+    import concurrent.futures
+    import multiprocessing
 
     ws = Path(workspace_root).resolve()
     target_hash = expected_hash or compute_engine_hash()
     is_prod_ws = (ws == Path("/home/ubuntuadmin/projects").resolve())
-    reasons: List[str] = []
 
     canonical_tenants = [
         ("profithelm", "profithelm-platform"),
         ("prexvo", "prexvo"),
         ("gainhelm", "gainhelm"),
     ]
-    if (ws / "lienbond" / "substrate_lock.json").is_file():
+    if is_prod_ws or (ws / "lienbond" / "substrate_lock.json").is_file() or (ws / "lienbond" / ".git").exists():
         canonical_tenants.append(("lienbond", "lienbond"))
-    for pid, repo_dir_name in canonical_tenants:
-        t_repo = ws / repo_dir_name
-        has_git = (t_repo / ".git").exists()
-        lock_file = t_repo / "substrate_lock.json"
-        if not is_prod_ws and not has_git and not lock_file.is_file():
-            continue
-        if not t_repo.is_dir():
-            reasons.append(f"{pid}: missing tenant repository at {t_repo}")
-            continue
-        dist_dir = t_repo / "dist"
-        if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
-            reasons.append(f"{pid}: missing compiled dist/index.html in {t_repo}")
 
-        if not lock_file.is_file():
-            reasons.append(f"{pid}: missing substrate_lock.json at {lock_file}")
-        else:
-            try:
-                lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
-                l_eh = str(lock_data.get("engine_hash") or "")
-                l_sh = str(lock_data.get("substrate_hash") or l_eh)
-                hash_aligned = (l_eh == target_hash and l_sh == target_hash)
-                if not hash_aligned and allow_tenant_scoped_hash:
-                    l_tsh = str(lock_data.get("tenant_substrate_hash") or "")
-                    if l_tsh and l_tsh == compute_tenant_substrate_hash(pid):
-                        hash_aligned = True
-                if not hash_aligned:
-                    reasons.append(
-                        f"{pid}: substrate_lock.json hash '{l_eh[:12]}' != expected '{target_hash[:12]}'"
-                    )
-                if dist_dir.is_dir():
-                    exp_fp, exp_tot = compute_dist_lock_metrics(dist_dir)
-                    l_fp = str(lock_data.get("dist_fingerprint") or "")
-                    l_tot = lock_data.get("total_assets")
-                    if l_fp != exp_fp:
-                        reasons.append(
-                            f"{pid}: substrate_lock.json dist_fingerprint '{l_fp[:12]}' != actual dist '{exp_fp[:12]}'"
-                        )
-                    if l_tot != exp_tot:
-                        reasons.append(
-                            f"{pid}: substrate_lock.json total_assets '{l_tot}' != actual dist '{exp_tot}'"
-                        )
-            except Exception as exc:
-                reasons.append(f"{pid}: invalid substrate_lock.json ({exc})")
-
-        if (t_repo / "functions" / "r").is_dir() or is_prod_ws:
-            try:
-                from pseofactory.edge import verify_tenant_edge_functions_parity
-
-                edge_ok, edge_reasons = verify_tenant_edge_functions_parity(t_repo, pid)
-                if not edge_ok:
-                    reasons.extend(edge_reasons)
-            except Exception as exc:
-                reasons.append(f"{pid}: edge function parity check failed ({exc})")
-
+    reasons: List[str] = []
+    avail_methods = multiprocessing.get_all_start_methods()
+    use_process_pool = (
+        is_prod_ws
+        and len(canonical_tenants) > 1
+        and "fork" in avail_methods
+        and _is_strictly_single_threaded_os_process()
+    )
+    if use_process_pool:
         try:
-            from pseofactory.maintenance import CrossPropertyContaminationScanner, RetroReflectionEngine
+            max_workers = min(4, len(canonical_tenants))
+            mp_ctx = multiprocessing.get_context("fork")
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=max_workers,
+                mp_context=mp_ctx,
+            ) as pool:
+                future_by_tenant = [
+                    pool.submit(
+                        _verify_single_tenant_for_latch,
+                        str(ws),
+                        pid,
+                        repo_dir_name,
+                        target_hash,
+                        is_prod_ws,
+                        require_git_clean_and_pushed,
+                        allow_tenant_scoped_hash,
+                    )
+                    for pid, repo_dir_name in canonical_tenants
+                ]
+                for fut in future_by_tenant:
+                    reasons.extend(fut.result())
+            return len(reasons) == 0, reasons
+        except Exception:
+            reasons = []
 
-            scanner = CrossPropertyContaminationScanner()
-            if dist_dir.is_dir():
-                dist_contam = scanner.scan_directory(dist_dir, pid)
-                if dist_contam:
-                    reasons.append(f"{pid}: cross-property contamination in dist/: {dist_contam}")
-            func_dir = t_repo / "functions"
-            if func_dir.is_dir():
-                func_contam = scanner.scan_directory(func_dir, pid)
-                if func_contam:
-                    reasons.append(f"{pid}: cross-property contamination in functions/: {func_contam}")
-            if dist_dir.is_dir() and ((dist_dir / "tools").is_dir() or is_prod_ws):
-                retro_rep = RetroReflectionEngine.audit_estate(dist_dir, pid)
-                if retro_rep.get("status") != "PASS" or retro_rep.get("stale_count", 0) != 0:
-                    reasons.append(
-                        f"{pid}: RetroReflectionEngine.audit_estate failed (stale_count={retro_rep.get('stale_count', 0)})"
-                    )
-        except Exception as exc:
-            reasons.append(f"{pid}: contamination or retro-reflection audit failed ({exc})")
-
-        if require_git_clean_and_pushed and has_git:
-            try:
-                st_res = subprocess.run(
-                    ["git", "-C", str(t_repo), "status", "--porcelain"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=5,
-                )
-                if st_res.returncode == 0 and st_res.stdout.strip():
-                    first_dirty = st_res.stdout.strip().splitlines()[0].strip()
-                    reasons.append(
-                        f"{pid}: uncommitted changes in dist/ or substrate_lock.json or tracked tenant files ({first_dirty})"
-                    )
-            except Exception:
-                pass
-            if dist_dir.is_dir():
-                try:
-                    ls_res = subprocess.run(
-                        ["git", "-C", str(t_repo), "ls-files", "dist"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=5,
-                    )
-                    if ls_res.returncode == 0:
-                        tracked_dist_set = {
-                            ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()
-                        }
-                        lock_assets = [
-                            f"dist/{p.relative_to(dist_dir).as_posix()}"
-                            for p in sorted(dist_dir.glob("**/*"))
-                            if p.is_file()
-                            and "syndication" not in p.relative_to(dist_dir).parts
-                            and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
-                            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-                        ]
-                        untracked_lock = [p for p in lock_assets if p not in tracked_dist_set]
-                        if untracked_lock:
-                            reasons.append(
-                                f"{pid}: {len(untracked_lock)} untracked lock asset(s) in dist/ (first: {untracked_lock[0]})"
-                            )
-                        else:
-                            all_dist_files = [
-                                f"dist/{p.relative_to(dist_dir).as_posix()}"
-                                for p in sorted(dist_dir.glob("**/*"))
-                                if p.is_file()
-                                and "syndication" not in p.relative_to(dist_dir).parts
-                                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-                            ]
-                            untracked_dist = [p for p in all_dist_files if p not in tracked_dist_set]
-                            if untracked_dist:
-                                reasons.append(
-                                    f"{pid}: {len(untracked_dist)} untracked asset(s) in dist/ (first: {untracked_dist[0]})"
-                                )
-                except Exception:
-                    pass
-            try:
-                rem_res = subprocess.run(
-                    ["git", "-C", str(t_repo), "remote", "get-url", "origin"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=5,
-                )
-                if rem_res.returncode == 0 and rem_res.stdout.strip():
-                    ref_res = subprocess.run(
-                        ["git", "-C", str(t_repo), "rev-parse", "--verify", "origin/main"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=5,
-                    )
-                    if ref_res.returncode == 0:
-                        ahead_res = subprocess.run(
-                            ["git", "-C", str(t_repo), "rev-list", "--count", "origin/main..HEAD"],
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=5,
-                        )
-                        if ahead_res.returncode == 0 and int(ahead_res.stdout.strip() or "0") > 0:
-                            reasons.append(
-                                f"{pid}: {ahead_res.stdout.strip()} unpushed commit(s) on main ahead of origin/main"
-                            )
-            except Exception:
-                pass
+    for pid, repo_dir_name in canonical_tenants:
+        reasons.extend(
+            _verify_single_tenant_for_latch(
+                str(ws),
+                pid,
+                repo_dir_name,
+                target_hash,
+                is_prod_ws,
+                require_git_clean_and_pushed,
+                allow_tenant_scoped_hash,
+            )
+        )
 
     return len(reasons) == 0, reasons
 
@@ -738,6 +829,7 @@ def detect_engine_drift(
     verify_tenants: Optional[bool] = None,
     workspace_root: Optional[Union[str, Path]] = None,
     allow_tenant_scoped_hash: bool = False,
+    also_state_files: Optional[List[Union[str, Path]]] = None,
 ) -> Dict[str, Any]:
     """
     Audits the current engine hash against recorded state in state_file (.agy/engine_hash.json).
@@ -825,12 +917,16 @@ def detect_engine_drift(
 
     s_resolved = s_path.resolve()
     eff_ws = Path(workspace_root).resolve() if workspace_root is not None else Path("/home/ubuntuadmin/projects").resolve()
+    extra_paths = [Path(p) for p in (also_state_files or []) if p]
     is_workspace_engine_hash = bool(
         verify_tenants
         if verify_tenants is not None
-        else s_resolved in (
-            eff_ws / ".agy" / "engine_hash.json",
-            eff_ws / "pseofactory" / ".agy" / "engine_hash.json",
+        else any(
+            cand_res in (
+                eff_ws / ".agy" / "engine_hash.json",
+                eff_ws / "pseofactory" / ".agy" / "engine_hash.json",
+            )
+            for cand_res in [s_resolved, *[ep.resolve() for ep in extra_paths]]
         )
     )
     if (
@@ -884,11 +980,18 @@ def detect_engine_drift(
         if not all_ok:
             drift_detected = True
 
+    recorded_state_files: List[str] = []
     if auto_record:
         if is_workspace_engine_hash and unaligned_reasons:
             latch_blocked = True
-        elif drift_detected or not s_path.exists():
-            record_engine_hash(s_path, hash_value=current_hash, include_paths=include_paths, base_dirs=effective_base_dirs)
+        else:
+            if drift_detected or not s_path.exists():
+                record_engine_hash(s_path, hash_value=current_hash, include_paths=include_paths, base_dirs=effective_base_dirs)
+                recorded_state_files.append(str(s_path))
+            for ep in extra_paths:
+                if ep.resolve() != s_resolved:
+                    record_engine_hash(ep, hash_value=current_hash, include_paths=include_paths, base_dirs=effective_base_dirs)
+                    recorded_state_files.append(str(ep))
 
     res_out: Dict[str, Any] = {
         "status": "TENANT_DRIFT_UNLATCHED" if latch_blocked else ("DRIFT" if drift_detected else "ALIGNED"),
@@ -899,6 +1002,9 @@ def detect_engine_drift(
         "requires_recompile": drift_detected,
         "state_file": str(s_path),
     }
+    if extra_paths:
+        res_out["also_state_files"] = [str(ep) for ep in extra_paths]
+        res_out["recorded_state_files"] = recorded_state_files
     if unaligned_reasons:
         res_out["unaligned_reasons"] = unaligned_reasons
         res_out["reason"] = "TENANT_SUBSTRATE_OR_GIT_DRIFT"

@@ -603,6 +603,7 @@ def test_edge_lead_capture_js_runtime_playbook_and_checkout_readiness(tmp_path):
         assert out["coData"]["offer_sku"] == out["pbData"]["offer_sku"]
 
 
+@pytest.mark.host_estate
 def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path):
     import subprocess
     import json
@@ -887,15 +888,27 @@ def test_edge_workers_synthetic_probe_isolation_zero_crm_billing_kv_spam(tmp_pat
         assert out["redirPartner"] == partner_key
 
 
-@pytest.mark.xdist_group("cdp_9222")
+@pytest.mark.host_estate
 def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_path):
-    from pseofactory.browser_verifier import UnifiedBrowserAuditor
+    from contextlib import nullcontext
+    from pseofactory.browser_verifier import (
+        UnifiedBrowserAuditor,
+        _HeadlessChromiumInstance,
+        discover_headless_chrome_binary,
+    )
     from pseofactory.server import EphemeralDistServer
 
     auditor = UnifiedBrowserAuditor(dist_dir=tmp_path)
     reachable, msg = auditor.check_cdp_reachability()
     if not reachable:
         pytest.skip(f"Chrome CDP unreachable: {msg}")
+
+    chrome_bin, is_shell = discover_headless_chrome_binary()
+    chrome_ctx = (
+        _HeadlessChromiumInstance(chrome_bin, is_headless_shell=is_shell)
+        if chrome_bin
+        else nullcontext(None)
+    )
 
     specs = [
         {
@@ -939,143 +952,160 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
         },
     ]
 
-    for spec in specs:
-        prop_id = spec["property_id"]
-        slug = spec["slug"]
-        dist_dir = tmp_path / prop_id / "dist"
-        tool_dir = dist_dir / "tools" / slug
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        compiled = compile_high_effort_page(spec)
-        html_str = compiled["html"]
-        if 'id="lead-capture-form"' not in html_str:
-            footer_form = (
-                '<form id="lead-capture-form" class="lead-capture-form">'
-                '<input type="email" name="email" placeholder="Enter work email" required>'
-                '<button type="submit">Send Playbook</button>'
-                '</form></body>'
-            )
-            html_str = html_str.replace("</body>", footer_form)
-        (tool_dir / "index.html").write_text(html_str, encoding="utf-8")
-        (dist_dir / "index.html").write_text(html_str, encoding="utf-8")
+    with chrome_ctx as shared_chrome:
+        shared_cdp_port = shared_chrome.port if shared_chrome is not None else None
 
-        with EphemeralDistServer(dist_dir) as server:
-            prop_auditor = UnifiedBrowserAuditor(dist_dir=dist_dir)
-            route = f"/tools/{slug}/"
-            report = prop_auditor.audit_interactive_surface(server.base_url, route)
-            assert report["passed"] is True, f"Interactive audit failed for {prop_id}: {report}"
-            assert report["console_errors"] == []
-            assert report["page_errors"] == []
-            assert report["links_audit"]["invalid_links"] == []
-            assert report["links_audit"]["unrouted_affiliate_links"] == []
-            assert report["deep_link_hydration"]["tested"] is True
-            assert report["deep_link_hydration"]["passed"] is True
-            assert report["calculator_and_presets"]["tested"] is True
-            assert report["calculator_and_presets"]["passed"] is True
-            assert report["cliff_visualizer"]["present"] is True
-            assert report["cliff_visualizer"]["passed"] is True
-            assert report["scenario_comparator"]["present"] is True
-            assert report["scenario_comparator"]["passed"] is True
-            assert report["blueprint_actions"]["present"] is True
-            assert report["blueprint_actions"]["passed"] is True
-            assert report["post_calc_upgrade_drawer"]["present"] is True
-            assert report["post_calc_upgrade_drawer"]["passed"] is True
-            assert report["post_calc_upgrade_drawer"]["preview_rendered"] is True
-            assert report["post_calc_upgrade_drawer"]["datapack_download_triggered"] is True
-            assert report["playbook_lead_capture_and_checkout"]["present"] is True
-            assert report["playbook_lead_capture_and_checkout"]["passed"] is True
-            assert report["partner_quote_intake_and_checkout"]["present"] is True
-            assert report["partner_quote_intake_and_checkout"]["passed"] is True
-            assert report["partner_registration_and_slot_checkout"]["present"] is True
-            assert report["partner_registration_and_slot_checkout"]["passed"] is True
-            assert report["partner_registration_and_slot_checkout"]["slot_price_usd"] == 299
-            from pseofactory.contracts import is_state_jurisdiction_tool
+        for spec in specs:
+            prop_id = spec["property_id"]
+            slug = spec["slug"]
+            dist_dir = tmp_path / prop_id / "dist"
+            tool_dir = dist_dir / "tools" / slug
+            tool_dir.mkdir(parents=True, exist_ok=True)
+            compiled = compile_high_effort_page(spec)
+            html_str = compiled["html"]
+            if 'id="lead-capture-form"' not in html_str:
+                footer_form = (
+                    '<form id="lead-capture-form" class="lead-capture-form">'
+                    '<input type="email" name="email" placeholder="Enter work email" required>'
+                    '<button type="submit">Send Playbook</button>'
+                    '</form></body>'
+                )
+                html_str = html_str.replace("</body>", footer_form)
+            (tool_dir / "index.html").write_text(html_str, encoding="utf-8")
+            (dist_dir / "index.html").write_text(html_str, encoding="utf-8")
 
-            assert report["hash_navigation_and_focus"]["links_tested_count"] >= 1
-            assert report["hash_navigation_and_focus"]["passed"] is True
-            assert report["hero_state_and_range_anchor"]["range_anchor_present"] is True
-            assert report["hero_state_and_range_anchor"]["present"] is is_state_jurisdiction_tool(slug, prop_id)
-            assert report["hero_state_and_range_anchor"]["passed"] is True
-            assert report["validation_focus_and_error_states"]["present"] is True
-            assert report["validation_focus_and_error_states"]["passed"] is True
-            assert report["sellable_assets_and_fulfillment_gate"]["present"] is True
-            assert report["sellable_assets_and_fulfillment_gate"]["passed"] is True
-            assert report["sellable_assets_and_fulfillment_gate"]["unpaid_402_enforced"] is True
-            assert report["sellable_assets_and_fulfillment_gate"]["free_playbook_verified"] is True
-            assert report["sellable_assets_and_fulfillment_gate"]["paid_datapack_verified"] is True
-            assert report["sellable_assets_and_fulfillment_gate"]["email_dispatch_verified"] is True
-            assert report["focus_and_keyboard_navigation"]["passed"] is True
-            assert report["focus_and_keyboard_navigation"]["skip_link_valid"] is True
-            assert report["focus_and_keyboard_navigation"]["zero_outline_failures"] == []
-            assert report["affiliate_redirect_and_telemetry"]["tested"] is True
-            assert report["affiliate_redirect_and_telemetry"]["passed"] is True
-            assert report["affiliate_redirect_and_telemetry"]["dom_click_handled"] is True
-            assert report["affiliate_redirect_and_telemetry"]["partners_verified_count"] >= 1
+            with EphemeralDistServer(dist_dir) as server:
+                prop_auditor = (
+                    UnifiedBrowserAuditor(dist_dir=dist_dir, cdp_port=shared_cdp_port, isolated_browser=False)
+                    if shared_cdp_port is not None
+                    else UnifiedBrowserAuditor(dist_dir=dist_dir)
+                )
+                route = f"/tools/{slug}/"
+                report = prop_auditor.audit_interactive_surface(server.base_url, route)
+                assert report["passed"] is True, f"Interactive audit failed for {prop_id}: {report}"
+                assert report["console_errors"] == []
+                assert report["page_errors"] == []
+                assert report["links_audit"]["invalid_links"] == []
+                assert report["links_audit"]["unrouted_affiliate_links"] == []
+                assert report["deep_link_hydration"]["tested"] is True
+                assert report["deep_link_hydration"]["passed"] is True
+                assert report["calculator_and_presets"]["tested"] is True
+                assert report["calculator_and_presets"]["passed"] is True
+                assert report["cliff_visualizer"]["present"] is True
+                assert report["cliff_visualizer"]["passed"] is True
+                assert report["scenario_comparator"]["present"] is True
+                assert report["scenario_comparator"]["passed"] is True
+                assert report["blueprint_actions"]["present"] is True
+                assert report["blueprint_actions"]["passed"] is True
+                assert report["post_calc_upgrade_drawer"]["present"] is True
+                assert report["post_calc_upgrade_drawer"]["passed"] is True
+                assert report["post_calc_upgrade_drawer"]["preview_rendered"] is True
+                assert report["post_calc_upgrade_drawer"]["datapack_download_triggered"] is True
+                assert report["playbook_lead_capture_and_checkout"]["present"] is True
+                assert report["playbook_lead_capture_and_checkout"]["passed"] is True
+                assert report["partner_quote_intake_and_checkout"]["present"] is True
+                assert report["partner_quote_intake_and_checkout"]["passed"] is True
+                assert report["partner_registration_and_slot_checkout"]["present"] is True
+                assert report["partner_registration_and_slot_checkout"]["passed"] is True
+                assert report["partner_registration_and_slot_checkout"]["slot_price_usd"] == 299
+                from pseofactory.contracts import is_state_jurisdiction_tool
 
-            assert len(server.captured_leads) >= 2
-            assert len(server.checkout_sessions) >= 2
-            assert len(server.telemetry_events) >= 1
-            assert len(server.redirect_events) >= 1
+                assert report["hash_navigation_and_focus"]["links_tested_count"] >= 1
+                assert report["hash_navigation_and_focus"]["passed"] is True
+                assert report["hero_state_and_range_anchor"]["range_anchor_present"] is True
+                assert report["hero_state_and_range_anchor"]["present"] is is_state_jurisdiction_tool(slug, prop_id)
+                assert report["hero_state_and_range_anchor"]["passed"] is True
+                assert report["validation_focus_and_error_states"]["present"] is True
+                assert report["validation_focus_and_error_states"]["passed"] is True
+                assert report["sellable_assets_and_fulfillment_gate"]["present"] is True
+                assert report["sellable_assets_and_fulfillment_gate"]["passed"] is True
+                assert report["sellable_assets_and_fulfillment_gate"]["unpaid_402_enforced"] is True
+                assert report["sellable_assets_and_fulfillment_gate"]["free_playbook_verified"] is True
+                assert report["sellable_assets_and_fulfillment_gate"]["paid_datapack_verified"] is True
+                assert report["sellable_assets_and_fulfillment_gate"]["email_dispatch_verified"] is True
+                assert report["focus_and_keyboard_navigation"]["passed"] is True
+                assert report["focus_and_keyboard_navigation"]["skip_link_valid"] is True
+                assert report["focus_and_keyboard_navigation"]["zero_outline_failures"] == []
+                assert report["affiliate_redirect_and_telemetry"]["tested"] is True
+                assert report["affiliate_redirect_and_telemetry"]["passed"] is True
+                assert report["affiliate_redirect_and_telemetry"]["dom_click_handled"] is True
+                assert report["affiliate_redirect_and_telemetry"]["partners_verified_count"] >= 1
 
-    # Also verify real compiled tenant routes across profithelm-platform (156), prexvo (25), and gainhelm (15)
-    from pathlib import Path
-    import shutil
-    from pseofactory.browser_verifier import RouteManifestExtractor
-    from pseofactory.visual_primitives import normalize_html_visual_primitives
+                assert len(server.captured_leads) >= 2
+                assert len(server.checkout_sessions) >= 2
+                assert len(server.telemetry_events) >= 1
+                assert len(server.redirect_events) >= 1
 
-    tenant_Matrix = [
-        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist"), 156, [
-            "index.html",
-            "tools/section-179-calculator/index.html",
-            "tools/crypto-tax-calculator/index.html",
-        ]),
-        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist"), 25, [
-            "index.html",
-            "tools/student-loan-repayment-calculator/index.html",
-        ]),
-        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist"), 15, [
-            "index.html",
-            "tools/soc-2-audit-cost-calculator/index.html",
-            "tools/cmmc-2-0-compliance-cost-calculator/index.html",
-        ]),
-        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond/dist"), 18, [
-            "index.html",
-            "tools/contractor-license-bond-cost-calculator-by-credit-score/index.html",
-        ]),
-    ]
-    for prop_id, real_dist, expected_min_routes, sample_rel_files in tenant_Matrix:
-        if not real_dist.is_dir():
-            continue
-        real_routes = RouteManifestExtractor(real_dist).extract_routes()
-        assert len(real_routes) >= expected_min_routes, f"{prop_id} expected >={expected_min_routes} routes, got {len(real_routes)}"
-        smart_sample = RouteManifestExtractor(real_dist).select_smart_routes(real_routes, 5)
-        assert len(smart_sample) == min(5, len(real_routes))
-        assert "/" in smart_sample
-        assert any(r.startswith("/tools/") and r != "/tools/" for r in smart_sample)
-        real_sample_dist = tmp_path / f"real_{prop_id}" / "dist"
-        real_sample_dist.mkdir(parents=True, exist_ok=True)
-        for asset_dir_name in ("css", "static", "js"):
-            src_asset_dir = real_dist / asset_dir_name
-            if src_asset_dir.is_dir():
-                shutil.copytree(src_asset_dir, real_sample_dist / asset_dir_name, dirs_exist_ok=True)
-        for rel_f in sample_rel_files:
-            src_f = real_dist / rel_f
-            if src_f.is_file():
-                dst_f = real_sample_dist / rel_f
-                dst_f.parent.mkdir(parents=True, exist_ok=True)
-                norm_h, _ = normalize_html_visual_primitives(src_f.read_text(encoding="utf-8"), is_tenant_porcelain=True)
-                dst_f.write_text(norm_h, encoding="utf-8")
-        real_auditor = UnifiedBrowserAuditor(dist_dir=real_dist, property_id=prop_id, fail_closed=True)
-        with EphemeralDistServer(real_sample_dist, property_id=prop_id) as real_srv:
+        # Also verify real compiled tenant routes across profithelm-platform (156), prexvo (25), and gainhelm (15)
+        from pathlib import Path
+        import shutil
+        from pseofactory.browser_verifier import RouteManifestExtractor
+        from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+        tenant_Matrix = [
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist"), 156, [
+                "index.html",
+                "tools/section-179-calculator/index.html",
+                "tools/crypto-tax-calculator/index.html",
+            ]),
+            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist"), 25, [
+                "index.html",
+                "tools/student-loan-repayment-calculator/index.html",
+            ]),
+            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist"), 15, [
+                "index.html",
+                "tools/soc-2-audit-cost-calculator/index.html",
+                "tools/cmmc-2-0-compliance-cost-calculator/index.html",
+            ]),
+            ("lienbond", Path("/home/ubuntuadmin/projects/lienbond/dist"), 18, [
+                "index.html",
+                "tools/contractor-license-bond-cost-calculator-by-credit-score/index.html",
+            ]),
+        ]
+        for prop_id, real_dist, expected_min_routes, sample_rel_files in tenant_Matrix:
+            if not real_dist.is_dir():
+                continue
+            real_routes = RouteManifestExtractor(real_dist).extract_routes()
+            assert len(real_routes) >= expected_min_routes, f"{prop_id} expected >={expected_min_routes} routes, got {len(real_routes)}"
+            smart_sample = RouteManifestExtractor(real_dist).select_smart_routes(real_routes, 5)
+            assert len(smart_sample) == min(5, len(real_routes))
+            assert "/" in smart_sample
+            assert any(r.startswith("/tools/") and r != "/tools/" for r in smart_sample)
+            real_sample_dist = tmp_path / f"real_{prop_id}" / "dist"
+            real_sample_dist.mkdir(parents=True, exist_ok=True)
+            for asset_dir_name in ("css", "static", "js"):
+                src_asset_dir = real_dist / asset_dir_name
+                if src_asset_dir.is_dir():
+                    shutil.copytree(src_asset_dir, real_sample_dist / asset_dir_name, dirs_exist_ok=True)
             for rel_f in sample_rel_files:
-                route_path = "/" if rel_f == "index.html" else "/" + rel_f[: -len("index.html")]
-                finding = real_auditor.audit_route(real_srv.base_url, route_path)
-                assert finding["cls_value"] == 0.0
-                assert finding["widget_failures"] == [], f"Widget failures on {prop_id} {route_path}: {finding['widget_failures']}"
-                assert finding["interactive_surface"]["passed"] is True, f"Interactive surface failed on {prop_id} {route_path}: {finding['interactive_surface']}"
-                assert finding["interactive_surface"]["focus_and_keyboard_navigation"]["passed"] is True
-                assert finding["interactive_surface"]["calculator_and_presets"]["button_failures"] == []
-                assert finding["interactive_surface"]["calculator_and_presets"]["input_failures"] == []
-                assert finding["interactive_surface"]["links_audit"]["invalid_links"] == []
+                src_f = real_dist / rel_f
+                if src_f.is_file():
+                    dst_f = real_sample_dist / rel_f
+                    dst_f.parent.mkdir(parents=True, exist_ok=True)
+                    norm_h, _ = normalize_html_visual_primitives(src_f.read_text(encoding="utf-8"), is_tenant_porcelain=True)
+                    dst_f.write_text(norm_h, encoding="utf-8")
+            real_auditor = (
+                UnifiedBrowserAuditor(
+                    dist_dir=real_dist,
+                    property_id=prop_id,
+                    fail_closed=True,
+                    cdp_port=shared_cdp_port,
+                    isolated_browser=False,
+                )
+                if shared_cdp_port is not None
+                else UnifiedBrowserAuditor(dist_dir=real_dist, property_id=prop_id, fail_closed=True)
+            )
+            with EphemeralDistServer(real_sample_dist, property_id=prop_id) as real_srv:
+                for rel_f in sample_rel_files:
+                    route_path = "/" if rel_f == "index.html" else "/" + rel_f[: -len("index.html")]
+                    finding = real_auditor.audit_route(real_srv.base_url, route_path)
+                    assert finding["cls_value"] == 0.0
+                    assert finding["widget_failures"] == [], f"Widget failures on {prop_id} {route_path}: {finding['widget_failures']}"
+                    assert finding["interactive_surface"]["passed"] is True, f"Interactive surface failed on {prop_id} {route_path}: {finding['interactive_surface']}"
+                    assert finding["interactive_surface"]["focus_and_keyboard_navigation"]["passed"] is True
+                    assert finding["interactive_surface"]["calculator_and_presets"]["button_failures"] == []
+                    assert finding["interactive_surface"]["calculator_and_presets"]["input_failures"] == []
+                    assert finding["interactive_surface"]["links_audit"]["invalid_links"] == []
 
 
 def test_personalized_audit_workpaper_synthesis_across_all_skus():
@@ -1259,6 +1289,7 @@ console.log(JSON.stringify({{
         assert out["fulfillCsvHasHeader"] is True
 
 
+@pytest.mark.host_estate
 def test_trend_mined_statutory_timeseries_and_three_rail_monetization(tmp_path):
     import json
     import subprocess
@@ -1556,7 +1587,7 @@ console.log(JSON.stringify({{ status: data.zeptomail_status, provider: data.emai
         assert out["zeptoCalls"] == 0
 
 
-@pytest.mark.xdist_group("cdp_9222")
+@pytest.mark.host_estate
 def test_ui_ux_e2e_repro_gate(tmp_path):
     """
     Deterministic reproduction gate for the 4 UI/UX verification and runtime defects:

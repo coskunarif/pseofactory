@@ -5,6 +5,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 from __future__ import annotations
+import pytest
 
 import concurrent.futures
 import hashlib
@@ -276,6 +277,7 @@ def test_porcelain_shell_content_hashed_js_versioning_headers_and_missing_asset_
     assert not stale_f.exists()
 
 
+@pytest.mark.host_estate
 def test_release_pipeline_concurrency_caps_cloud_parallel_and_fail_closed(tmp_path: Path):
     """
     Verifies release_pipeline.sh run_parallel_tenant_cascades runs cloud-hosted lienbond in parallel
@@ -545,6 +547,7 @@ def test_audit_monetization_surfaces_checks_raw_on_disk_runtime_sync_fail_closed
     )
 
 
+@pytest.mark.host_estate
 def test_release_pipeline_wait_n_error_safe_under_set_u(tmp_path: Path):
     """Blocker #4 regression: wait -n -p done_pid error (unsetting done_pid) must not crash under set -euo pipefail."""
     pipeline_path = Path("/home/ubuntuadmin/projects/.agy/release_pipeline.sh")

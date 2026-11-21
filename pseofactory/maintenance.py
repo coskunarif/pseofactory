@@ -16702,6 +16702,243 @@ def _sync_post_retrofit_reconciliation_and_porcelain(
     }
 
 
+_GAINHELM_EXPANSION_TOOL_SLUGS: Tuple[str, ...] = (
+    "dora-ict-third-party-risk-compliance-cost-calculator",
+    "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
+    "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",
+)
+
+
+def is_foreign_tenant_tool_slug(
+    slug: str,
+    property_id: str,
+    dist_dir: Optional[Union[str, Path]] = None,
+    workspace_root: Optional[Union[str, Path]] = None,
+) -> bool:
+    """
+    Returns True if slug belongs exclusively to a different tenant's tool catalog or
+    live compiled dist/tools/<slug>/index.html (and is not present as a compiled tool
+    page under dist_dir/tools/<slug>/index.html for property_id).
+    Dynamically discovers sibling tenant repos under workspace_root (inferred from
+    dist_dir.parent.parent when available) via CANONICAL_TENANT_DECLARATIONS and
+    .pseofactory.json manifests so all live/P2/expansion/future tenant tools are covered.
+    Zero em-dashes. Zero en-dashes.
+    """
+    norm_slug = str(slug or "").strip().strip("/").split("/")[0].lower()
+    norm_pid = str(property_id or "").strip().lower()
+    if not norm_slug or not norm_pid:
+        return False
+    if dist_dir is not None:
+        d_path = Path(dist_dir)
+        if (d_path / "tools" / norm_slug / "index.html").is_file():
+            return False
+
+    gainhelm_extra: Set[str] = set(_GAINHELM_EXPANSION_TOOL_SLUGS)
+    lienbond_extra: Set[str] = set()
+    try:
+        from pseofactory.gainhelm_estate import GAINHELM_TOOLS
+
+        gainhelm_extra.update(
+            str(t.get("slug", "")).strip().lower()
+            for t in GAINHELM_TOOLS
+            if isinstance(t, dict) and t.get("slug")
+        )
+    except Exception:
+        pass
+    try:
+        from pseofactory.compiler import LIENBOND_EXPANSION_SPECS
+
+        lienbond_extra.update(
+            str(t.get("slug", "")).strip().lower()
+            for t in LIENBOND_EXPANSION_SPECS
+            if isinstance(t, dict) and t.get("slug")
+        )
+    except Exception:
+        pass
+
+    catalog_by_tenant: Dict[str, Set[str]] = {
+        "profithelm": {
+            str(t.get("slug", "")).strip().lower()
+            for t in (list(PROFITHELM_DEFAULT_TOOLS) + list(PROFITHELM_EXTENDED_TOOLS))
+            if isinstance(t, dict) and t.get("slug")
+        },
+        "prexvo": {
+            str(t.get("slug", "")).strip().lower()
+            for t in (list(PREXVO_DEFAULT_TOOLS) + list(PREXVO_EXTENDED_TOOLS))
+            if isinstance(t, dict) and t.get("slug")
+        },
+        "gainhelm": {
+            str(t.get("slug", "")).strip().lower()
+            for t in GAINHELM_DEFAULT_TOOLS
+            if isinstance(t, dict) and t.get("slug")
+        }
+        | gainhelm_extra,
+        "lienbond": {
+            str(t.get("slug", "")).strip().lower()
+            for t in LIENBOND_DEFAULT_TOOLS
+            if isinstance(t, dict) and t.get("slug")
+        }
+        | lienbond_extra,
+    }
+    own_slugs = catalog_by_tenant.get(norm_pid, set())
+    if norm_slug in own_slugs:
+        return False
+    for other_pid, other_slugs in catalog_by_tenant.items():
+        if other_pid != norm_pid and norm_slug in other_slugs:
+            return True
+
+    # Dynamically inspect sibling tenant repos' dist/tools/<norm_slug>/index.html
+    ws_candidates: List[Path] = []
+    if workspace_root is not None:
+        ws_candidates.append(Path(workspace_root).resolve())
+    else:
+        if dist_dir is not None:
+            ws_from_dist = Path(dist_dir).resolve().parent.parent
+            if ws_from_dist.is_dir():
+                ws_candidates.append(ws_from_dist)
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            env_ws = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+            if env_ws.is_dir() and env_ws not in ws_candidates:
+                ws_candidates.append(env_ws)
+
+    all_decls = {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}
+    own_repo_names: Set[str] = {norm_pid}
+    if norm_pid in all_decls and all_decls[norm_pid].repo_dir_name:
+        own_repo_names.add(all_decls[norm_pid].repo_dir_name.lower())
+
+    for ws in ws_candidates:
+        checked_dirs: Set[Path] = set()
+        for other_pid, contract in all_decls.items():
+            if other_pid.lower() == norm_pid or not contract.repo_dir_name:
+                continue
+            sib_repo = (ws / contract.repo_dir_name).resolve()
+            checked_dirs.add(sib_repo)
+            if (sib_repo / "dist" / "tools" / norm_slug / "index.html").is_file():
+                return True
+        # Also discover any unregistered/future sibling tenant via .pseofactory.json
+        try:
+            for child in ws.iterdir():
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                child_res = child.resolve()
+                if child_res in checked_dirs or child.name.lower() in own_repo_names:
+                    continue
+                cfg_file = child_res / ".pseofactory.json"
+                if not cfg_file.is_file():
+                    continue
+                try:
+                    cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
+                    c_pid = str(cfg.get("property_id") or cfg.get("id") or "").strip().lower()
+                except Exception:
+                    c_pid = ""
+                if c_pid == norm_pid:
+                    continue
+                if (child_res / "dist" / "tools" / norm_slug / "index.html").is_file():
+                    return True
+        except OSError:
+            pass
+
+    return False
+
+
+def clean_cross_property_contaminated_syndication_and_overlays(
+    repo_root: Union[str, Path],
+    property_id: str,
+    dist_dir: Optional[Union[str, Path]] = None,
+    workspace_root: Optional[Union[str, Path]] = None,
+) -> Dict[str, List[str]]:
+    """
+    Automatically self-heals cross-property contamination in a tenant's syndication/
+    and overlay directories (.agy/overlays and content/overlays):
+    - Removes any generated syndication file flagged by CrossPropertyContaminationScanner
+      (plus sibling -linkedin.md / -newsletter.md / -Substack Notes-post.txt variants for
+      the same foreign slug) and any syndication file/overlay belonging to a foreign tenant slug.
+    Zero em-dashes. Zero en-dashes.
+    """
+    root = Path(repo_root)
+    d_dir = Path(dist_dir) if dist_dir is not None else (root / "dist")
+    scanner = CrossPropertyContaminationScanner()
+    removed_syndication: List[str] = []
+    removed_overlays: List[str] = []
+    contaminated_slugs: Set[str] = set()
+
+    generated_suffixes = ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt")
+
+    def _extract_synd_slug(filename: str) -> str:
+        for suf in generated_suffixes:
+            if filename.endswith(suf):
+                return filename[: -len(suf)]
+        return ""
+
+    synd_dir = root / "syndication"
+    if synd_dir.is_dir():
+        for fp in sorted(synd_dir.rglob("*")):
+            if not fp.is_file():
+                continue
+            if fp.suffix.lower() not in (".txt", ".md", ".json", ".html"):
+                continue
+            rel = fp.relative_to(root).as_posix()
+            f_slug = _extract_synd_slug(fp.name)
+            is_foreign_slug = bool(
+                f_slug
+                and is_foreign_tenant_tool_slug(
+                    f_slug,
+                    property_id,
+                    dist_dir=d_dir,
+                    workspace_root=workspace_root,
+                )
+            )
+            has_contam = False
+            if not is_foreign_slug:
+                try:
+                    txt = fp.read_text(encoding="utf-8", errors="ignore")
+                    has_contam = bool(scanner.scan_text(txt, property_id, context=rel))
+                except Exception:
+                    has_contam = False
+            if is_foreign_slug or has_contam:
+                fp.unlink(missing_ok=True)
+                removed_syndication.append(rel)
+                if f_slug:
+                    contaminated_slugs.add(f_slug)
+
+        # Clean any sibling generated files for slugs already identified as contaminated/foreign
+        for c_slug in sorted(contaminated_slugs):
+            for suf in generated_suffixes:
+                sib = synd_dir / f"{c_slug}{suf}"
+                if sib.is_file():
+                    sib.unlink(missing_ok=True)
+                    removed_syndication.append(sib.relative_to(root).as_posix())
+
+    for ov_dir in (root / ".agy" / "overlays", root / "content" / "overlays"):
+        if not ov_dir.is_dir():
+            continue
+        for ov_f in sorted(ov_dir.rglob("*.json")):
+            if not ov_f.is_file():
+                continue
+            rel = ov_f.relative_to(root).as_posix()
+            stem = ov_f.stem
+            is_foreign_ov = stem in contaminated_slugs or is_foreign_tenant_tool_slug(
+                stem,
+                property_id,
+                dist_dir=d_dir,
+                workspace_root=workspace_root,
+            )
+            if not is_foreign_ov:
+                try:
+                    txt = ov_f.read_text(encoding="utf-8", errors="ignore")
+                    is_foreign_ov = bool(scanner.scan_text(txt, property_id, context=rel))
+                except Exception:
+                    is_foreign_ov = False
+            if is_foreign_ov:
+                ov_f.unlink(missing_ok=True)
+                removed_overlays.append(rel)
+
+    return {
+        "removed_syndication": removed_syndication,
+        "removed_overlays": removed_overlays,
+    }
+
+
 def reflect_and_recompile_all_assets(
     properties: Optional[List[str]] = None,
     force: bool = False,
@@ -18177,6 +18414,13 @@ def reflect_and_recompile_all_assets(
                             if ov_f.stem in legacy_invalid_stems:
                                 ov_f.unlink(missing_ok=True)
                                 source_sync_changed = True
+                contam_cleanup = clean_cross_property_contaminated_syndication_and_overlays(
+                    repo_root=repo_root_clean,
+                    property_id=adapter.property_id,
+                    dist_dir=adapter.dist_dir,
+                )
+                if contam_cleanup["removed_syndication"] or contam_cleanup["removed_overlays"]:
+                    source_sync_changed = True
             except Exception:
                 pass
 

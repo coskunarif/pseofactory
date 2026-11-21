@@ -1682,6 +1682,7 @@ def test_simpsons_paradox_query_expansion_rank_jump_and_midlock_click_protection
     ).read_text(encoding="utf-8")
 
 
+@pytest.mark.host_estate
 def test_trend_db_empty_window_cleanup_url_inspection_survival_and_cli_error_vs_zero_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

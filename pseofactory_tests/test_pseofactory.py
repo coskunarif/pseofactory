@@ -688,6 +688,7 @@ def test_headers_x_robots_tag_nosnippet_detection(tmp_path):
     assert any("_headers applies 'nosnippet' to public route '/tools/*'" in issue for issue in res["issues"])
 
 
+@pytest.mark.host_estate
 def test_indexer_dispatch_automated_indexing_quarantined_all_no_outbound(tmp_path):
     """Verifies calling dispatch_automated_indexing with quarantined URLs executes no outbound actions and returns QUARANTINED_ALL."""
     ledger_path = tmp_path / "ledger.json"

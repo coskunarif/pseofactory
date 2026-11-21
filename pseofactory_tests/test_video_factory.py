@@ -193,6 +193,7 @@ def test_youtube_daily_10000_unit_quota_governor(tmp_path: Path) -> None:
     assert "DAILY_QUOTA_CEILING_REACHED" in st2.reason
 
 
+@pytest.mark.host_estate
 def test_end_to_end_video_synthesis_and_idempotent_youtube_upload(tmp_path: Path) -> None:
     """
     Verifies end-to-end video asset synthesis (.mp4 > 1024 bytes, .vtt, -thumb.png,
@@ -350,6 +351,7 @@ def test_end_to_end_video_synthesis_and_idempotent_youtube_upload(tmp_path: Path
         assert dist_res["youtube_video_factory"]["per_slug_dispatch_status"][slug] == "ALREADY_UPLOADED_IDEMPOTENT"
 
 
+@pytest.mark.host_estate
 def test_broadcast_quality_verification_and_keyframe_contact_sheet(tmp_path: Path) -> None:
     """
     Verifies that rendered MP4 streams pass strict EBU R128 broadcast loudness (-14.0 +/- 2.2 LUFS),

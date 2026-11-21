@@ -100,6 +100,7 @@ def test_cls_sources_summary_formatting() -> None:
     assert any("CLS 0.042" in r and "div.hero-banner" in r for r in reasons), reasons
 
 
+@pytest.mark.host_estate
 @pytest.mark.xdist_group("ephemeral_chrome_workers")
 def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Path) -> None:
     chrome_bin, _ = discover_headless_chrome_binary()
@@ -205,6 +206,7 @@ def test_parallel_workers_and_four_mandatory_negative_invalidations(tmp_path: Pa
     assert rep_verifier_flip["cached_receipt_routes"] == 0
 
 
+@pytest.mark.host_estate
 def test_isolated_chrome_detects_all_defects_and_never_caches_failures(tmp_path: Path) -> None:
     chrome_bin, _ = discover_headless_chrome_binary()
     if not chrome_bin:
@@ -304,6 +306,7 @@ def _make_solid_png(width: int, height: int, textured: bool = False) -> bytes:
     )
 
 
+@pytest.mark.host_estate
 def test_cold_load_unsized_image_cls_not_silenced_by_reload_or_shared_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -365,6 +368,7 @@ def test_cold_load_unsized_image_cls_not_silenced_by_reload_or_shared_worker(
     assert by_route["/page2/"]["cls_value"] > 0.0, f"Route /page2/ silenced unsized image CLS: {by_route['/page2/']}"
 
 
+@pytest.mark.host_estate
 @pytest.mark.xdist_group("ephemeral_chrome_workers")
 def test_receipt_invalidation_same_size_corrupt_png_and_deleted_llms_txt(tmp_path: Path) -> None:
     """
@@ -450,6 +454,7 @@ def test_receipt_invalidation_same_size_corrupt_png_and_deleted_llms_txt(tmp_pat
     assert "/custom-llms.txt" in (home_f2.get("interactive_surface") or {}).get("links_audit", {}).get("invalid_links", [])
 
 
+@pytest.mark.host_estate
 def test_hidden_output_cannot_mask_frozen_visible_calculator(tmp_path: Path) -> None:
     """
     Blocker #3 reproducer: a display:none .output-value that updates must NOT mask a frozen visible output.
@@ -489,6 +494,7 @@ def test_hidden_output_cannot_mask_frozen_visible_calculator(tmp_path: Path) -> 
     assert "field-amount" in calc["input_failures"]
 
 
+@pytest.mark.host_estate
 def test_preset_restore_syncs_select_and_missing_href_partner_link_fails(tmp_path: Path) -> None:
     """
     Blocker #4 & Minor #7 reproducers:

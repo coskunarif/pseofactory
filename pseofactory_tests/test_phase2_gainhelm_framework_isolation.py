@@ -85,6 +85,7 @@ def _assert_container_framework_clean(node, slug: str, container_name: str) -> N
         )
 
 
+@pytest.mark.host_estate
 def test_gainhelm_full_compile_retrofit_porcelain_framework_isolation(tmp_path: Path) -> None:
     repo = tmp_path / "gainhelm_repo"
     (repo / "content").mkdir(parents=True, exist_ok=True)
@@ -544,6 +545,7 @@ def _inject_legacy_gainhelm_drift(html_txt: str, slug: str) -> str:
     return mutated
 
 
+@pytest.mark.host_estate
 def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_estate(tmp_path: Path) -> None:
     engine = RetroReflectionEngine()
 
@@ -1156,6 +1158,7 @@ def test_gainhelm_generic_slugs_preserve_vertical_in_workpaper_and_email() -> No
             assert not _blob_has_forbidden_tokens(em.get("html_body", ""), prof["forbidden"])
 
 
+@pytest.mark.host_estate
 def test_gainhelm_estate_convergence_strict_and_core_containers(tmp_path: Path) -> None:
     """Verifies Pass 1->2->3 tool convergence, strict container isolation, FedRAMP separation, and privacy branches."""
     from pseofactory.competitor import render_serp_incumbent_depth_upgrade_block
@@ -2023,6 +2026,7 @@ run().catch((err) => {{ console.error(err); process.exit(1); }});
             assert bad not in em_py_body_clean
 
 
+@pytest.mark.host_estate
 def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspace() -> None:
     """
     Verifies:

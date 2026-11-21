@@ -5,6 +5,7 @@ verifier, outbound /r/ commercial link rel='noopener sponsored' normalization, a
 multi-tenant GainHelm parameterization across pseofactory.
 Zero em-dashes. Zero en-dashes.
 """
+import pytest
 
 from pathlib import Path
 
@@ -228,6 +229,7 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
     assert slop_rep["passed"] is True, slop_rep
 
 
+@pytest.mark.host_estate
 def test_retro_reflection_detects_unqualified_commercial_links_in_dist(tmp_path):
     """
     Verifies RetroReflectionEngine.audit_estate flags calculator pages whose /r/ links

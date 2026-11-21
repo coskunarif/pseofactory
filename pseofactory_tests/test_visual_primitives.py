@@ -4,6 +4,7 @@ Verifies token bridging across Porcelain Light and Obsidian Dark themes, typogra
 card geometry, table overflow containment, 44px touch targets, and retro-reflection idempotency.
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
+import pytest
 
 from pseofactory.visual_primitives import (
     SCREEN_ARCHETYPE_CONTRACTS,
@@ -385,6 +386,7 @@ def test_above_fold_preset_salience_and_ssr_latency_optimization():
     assert parser.h1_list == ["Silverado 2500HD Section 179 Calculator"]
 
 
+@pytest.mark.host_estate
 def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
     """
     Verifies audit_monetization_and_datapack_ui_ux_surfaces across all 50 compiled

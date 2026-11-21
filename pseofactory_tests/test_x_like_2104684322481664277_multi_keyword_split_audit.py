@@ -23,6 +23,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 from __future__ import annotations
+import pytest
 
 import pseofactory.audit as audit_mod
 from pseofactory.contracts import assert_no_forbidden_dashes
@@ -270,6 +271,7 @@ def test_adversarial_falsification_of_naive_40k_revenue_extrapolation() -> None:
     assert sim_cannibal["net_90d_revenue_delta_usd"] < 0.0
 
 
+@pytest.mark.host_estate
 def test_quantitative_revenue_forecast_eliminates_phantom_and_retired_routes_across_tenants() -> None:
     from pathlib import Path
 

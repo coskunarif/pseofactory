@@ -60,6 +60,7 @@ def _init_git_repo(repo_path: Path, branch: str = "main") -> None:
     )
 
 
+@pytest.mark.host_estate
 def test_a1_worktree_create_preserves_uncommitted_and_unmerged_work(tmp_path):
     """Prove worktree_harness.sh create never loses uncommitted edits or unmerged commits when reusing a run_id."""
     repo = tmp_path / "repo_create_safe"
@@ -151,6 +152,7 @@ def test_a1_worktree_create_preserves_uncommitted_and_unmerged_work(tmp_path):
         )
 
 
+@pytest.mark.host_estate
 def test_a2_worktree_sweep_and_abort_preserve_uncommitted_and_unmerged_work(tmp_path):
     """Prove worktree_harness.sh sweep and abort never destroy uncommitted edits or unmerged commits without preserving them."""
     repo = tmp_path / "repo_sweep_safe"
@@ -224,6 +226,7 @@ def test_a2_worktree_sweep_and_abort_preserve_uncommitted_and_unmerged_work(tmp_
         )
 
 
+@pytest.mark.host_estate
 def test_b_staging_queue_process_until_and_direct_merge_registration(tmp_path):
     """Prove staging_queue.py process-until drains earlier items until target run_id lands on HEAD, and worktree_harness.sh merge registers COMPLETED."""
     repo = tmp_path / "repo_fifo_target"
@@ -346,6 +349,7 @@ def test_b_staging_queue_process_until_and_direct_merge_registration(tmp_path):
             )
 
 
+@pytest.mark.host_estate
 def test_c_autonomous_lock_protocol_and_worktree_sync_guards(tmp_path):
     """Prove tenant run_factory.sh, supervisor, maintenance, and indexing_inspector enforce strict mutual exclusion and branch sync."""
     # 1. Inspect synced run_factory.sh via sync_tenant_test_isolation_guards in an isolated tenant directory
@@ -434,6 +438,7 @@ python3 -m profithelm.factory "$@"
             os.environ["PSEUFACTORY_LOCK_DIR"] = old_lock_dir
 
 
+@pytest.mark.host_estate
 def test_d_ahead_diverged_origin_main_reconciles_and_recomputes_substrate_lock(tmp_path):
     """Prove push_with_backoff recomputes substrate_lock.json and .agy/asset_ledger.json when rebasing onto an ahead origin/main."""
     remote_bare = tmp_path / "origin_prexvo.git"

@@ -858,10 +858,12 @@ def cmd_drift(args: argparse.Namespace) -> int:
     allow_scoped = not getattr(args, "strict_global_hash", False)
     if getattr(args, "allow_tenant_scoped_hash", False):
         allow_scoped = True
+    also_state_files = list(getattr(args, "also_state_file", None) or [])
     drift_res = detect_engine_drift(
         state_file=state_file,
         auto_record=args.record,
         allow_tenant_scoped_hash=allow_scoped,
+        also_state_files=also_state_files or None,
     )
     if args.json:
         print(json.dumps(drift_res, indent=2))
@@ -2406,6 +2408,12 @@ def build_parser() -> argparse.ArgumentParser:
     # drift
     p_drift = subparsers.add_parser("drift", help="Audit engine hash drift")
     p_drift.add_argument("--state-file", type=str, default=None, help="Path to engine_hash.json")
+    p_drift.add_argument(
+        "--also-state-file",
+        action="append",
+        default=[],
+        help="Additional engine_hash.json path(s) to record atomically after a single verification pass",
+    )
     p_drift.add_argument("--record", action="store_true", help="Persist current engine hash into state file")
     p_drift.add_argument("--allow-tenant-scoped-hash", action="store_true", help="Accept matching per-tenant tenant_substrate_hash for unaffected tenants")
     p_drift.add_argument("--json", action="store_true", help="Output result as JSON")

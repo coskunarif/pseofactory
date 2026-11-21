@@ -405,6 +405,7 @@ def test_retro_reflection_heals_title_howto_and_acronyms(tmp_path: Path) -> None
     assert detect_zero_signup_instant_result_issues(healed, require_ssr_output=True) == []
 
 
+@pytest.mark.host_estate
 def test_live_capability_matrix_and_tenant_readiness() -> None:
     """Verify evaluate_x_like_2108272246804648049_capability_matrix passes across live compiled tenants with normalized schema parity."""
     parser = ZeroSignupInstantResultHTMLParser()

@@ -19,6 +19,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 from __future__ import annotations
+import pytest
 
 import copy
 
@@ -39,6 +40,7 @@ from pseofactory.distributor import generate_all_distribution_assets
 from pseofactory.seo_growth_loops import compile_search_opportunity_briefs
 
 
+@pytest.mark.host_estate
 def test_x_like_2102328294410461564_capability_matrix_and_live_estate() -> None:
     assert len(X_LIKE_2102328294410461564_CAPABILITY_MATRIX) == 8
     valid_dispositions = {
@@ -213,6 +215,7 @@ def test_anti_parasite_link_wheel_gate_and_gainhelm_youtube_titles() -> None:
     assert any("PARASITE_LINK_WHEEL_INTERMEDIARY_DETECTED" in v for v in yacss_audit["violations"])
 
 
+@pytest.mark.host_estate
 def test_workflow_4_briefs_include_commercial_question_mix_and_slop_ratchet() -> None:
     briefs_rep = compile_search_opportunity_briefs(
         property_id="profithelm",

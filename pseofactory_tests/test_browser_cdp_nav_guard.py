@@ -378,7 +378,7 @@ def test_cdp_eval_error_and_exception_details_fail_closed(tmp_path: Path) -> Non
     assert exc_finding["interactive_surface"]["passed"] is False
 
 
-@pytest.mark.xdist_group("cdp_9222")
+@pytest.mark.host_estate
 def test_real_chrome_sequential_shared_tab_audit_with_deferred_script(tmp_path: Path) -> None:
     """
     Real Chrome CDP E2E check across multiple routes in a single shared tab, verifying
@@ -453,6 +453,7 @@ def test_real_chrome_sequential_shared_tab_audit_with_deferred_script(tmp_path: 
     assert report["routes_audited"] >= 5
 
 
+@pytest.mark.host_estate
 def test_cli_cmd_audit_prints_per_route_failure_details_across_all_modes(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

@@ -609,6 +609,7 @@ def test_tenant_registry_dynamic_discovery(tmp_path):
     TenantRegistry.reset_default()
 
 
+@pytest.mark.host_estate
 def test_tenant_registry_default_isolates_workspace_and_pytest_env(tmp_path, monkeypatch):
     """Verifies TenantRegistry.default isolates workspace_root scans, PYTEST_CURRENT_TEST toggles, and singleton tools."""
     from unittest.mock import patch

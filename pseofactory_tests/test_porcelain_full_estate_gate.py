@@ -415,6 +415,7 @@ def test_compiled_lienbond_stylesheet_covers_all_rendered_ui_classes(compiled_li
     )
 
 
+@pytest.mark.host_estate
 @pytest.mark.parametrize("tenant_id", ["profithelm", "prexvo", "gainhelm", "lienbond"])
 def test_real_dist_stylesheets_cover_all_rendered_ui_classes(tenant_id: str) -> None:
     """
@@ -523,6 +524,7 @@ def test_compiled_lienbond_estate_zero_raw_python_dup_calcs_dup_faqs_or_legacy_c
     assert not issues, f"Compiled LienBond HTML hygiene failures ({len(issues)}): {issues[:12]}"
 
 
+@pytest.mark.host_estate
 @pytest.mark.parametrize("tenant_id", ["profithelm", "prexvo", "gainhelm", "lienbond"])
 def test_real_dist_zero_duplicate_calcs_faqs_raw_python_and_legacy_clutter(tenant_id: str) -> None:
     """
@@ -535,6 +537,7 @@ def test_real_dist_zero_duplicate_calcs_faqs_raw_python_and_legacy_clutter(tenan
     assert not issues, f"[{tenant_id}] HTML hygiene failures ({len(issues)}): {issues[:15]}"
 
 
+@pytest.mark.host_estate
 def test_no_wrong_jurisdiction_state_first_hero_bar_on_non_state_tools() -> None:
     """
     Federal, international, and non-state tools must NOT inject US-state #state-first-hero-bar.
@@ -638,6 +641,7 @@ def test_edge_headers_override_robots_txt_stale_s_maxage(tmp_path: Path) -> None
     assert not failures, f"/robots.txt edge cache policy failures: {failures}"
 
 
+@pytest.mark.host_estate
 def test_profithelm_app_js_versioned_query_string() -> None:
     """
     ProfitHelm HTML referencing /static/js/app.js must carry a ?v= version query string
@@ -677,6 +681,7 @@ def test_profithelm_app_js_versioned_query_string() -> None:
     assert not failures, f"ProfitHelm app.js versioning failures: {failures}"
 
 
+@pytest.mark.host_estate
 def test_favicon_and_og_image_assets_present_and_non_placeholder() -> None:
     """
     Central normalization and real dist/ HTML/JSON-LD must never emit placeholder href='data:,'
@@ -750,6 +755,7 @@ def test_favicon_and_og_image_assets_present_and_non_placeholder() -> None:
     assert not failures, f"Favicon/OG image asset failures ({len(failures)}): {failures[:15]}"
 
 
+@pytest.mark.host_estate
 def test_ai_benchmarks_json_zero_404_urls() -> None:
     """
     Every tenant-domain URL inside dist/ai-benchmarks/*.json and central distributor
@@ -841,6 +847,7 @@ def test_lienbond_cli_inspects_drifted_assets_count_not_drifted(
     assert not failures, "; ".join(failures)
 
 
+@pytest.mark.host_estate
 def test_pseofactory_cli_pipeline_audit_does_not_silently_cap_to_8(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

@@ -287,6 +287,7 @@ def test_stub_video_artifacts_detected_and_purged_by_reflection_and_audit(tmp_pa
     assert cleaned_cat[0]["slug"] == "real-rendered-tool"
 
 
+@pytest.mark.host_estate
 def test_concurrent_multi_tenant_cycle_manifest_and_draft_atomicity(tmp_path):
     """
     Replays the cycle_1791956856_26bd85 concurrent multi-tenant write overlap:
@@ -348,6 +349,7 @@ def test_concurrent_multi_tenant_cycle_manifest_and_draft_atomicity(tmp_path):
     assert not Path(f"/home/ubuntuadmin/projects/.agy/runs/{shared_cycle_id}").exists()
 
 
+@pytest.mark.host_estate
 def test_automatic_workspace_tracking_reconciliation_without_manual_scripts(tmp_path):
     """
     Replays all historical tracking state corruption patterns:
@@ -635,6 +637,7 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
     assert tool_html_file.read_text(encoding="utf-8") == original_html
 
 
+@pytest.mark.host_estate
 def test_tenant_tracked_test_repair_records_and_test_isolation_self_healing(tmp_path):
     """
     Replays the exact failure mode where Stage 5 pytest runs in profithelm-platform
@@ -790,6 +793,7 @@ def test_tenant_tracked_test_repair_records_and_test_isolation_self_healing(tmp_
     assert final_status == ""
 
 
+@pytest.mark.host_estate
 def test_midnight_factory_build_dist_stash_and_redirect_rollup_self_healing(tmp_path, monkeypatch):
     """
     Replays the exact midnight 2026-10-18 failure chain in profithelm-platform:
@@ -1005,6 +1009,7 @@ def test_midnight_factory_build_dist_stash_and_redirect_rollup_self_healing(tmp_
     assert "rollup_redirected_gsc_rows" in prexvo_obs.read_text(encoding="utf-8")
 
 
+@pytest.mark.host_estate
 def test_unattended_timer_concurrency_and_distribution_verification(tmp_path):
     """
     Verifies unattended timer concurrency and downstream distribution gates:
@@ -1336,6 +1341,7 @@ def test_spoke_quick_answer_word_bounds_commercial_context_and_equipment_healing
     assert RetroReflectionEngine.audit_html_mechanics(final_veh) == []
 
 
+@pytest.mark.host_estate
 def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
     """
     Verifies:
@@ -1491,6 +1497,7 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
         )
 
 
+@pytest.mark.host_estate
 def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path):
     """
     Verifies orchestration ordering and drift gate invariants:
@@ -2029,6 +2036,7 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
     assert "ASC 842" in equip_spec["quick_answer"]
 
 
+@pytest.mark.host_estate
 def test_mid_rebuild_dom_parity_git_archive_fallback_and_aborted_run_manifest_synthesis(tmp_path):
     """
     Verifies:
@@ -2500,13 +2508,14 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
     assert gh_recon["counts_by_state"]["PENDING_ADVERTISER_REVIEW"] == 6
 
 
-def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_path):
+@pytest.mark.host_estate
+@pytest.mark.parametrize("property_id", ["profithelm", "prexvo", "gainhelm", "lienbond"])
+def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_path, property_id):
     """
     Verifies the direct 6-department handoff chain:
       DISCOVERY -> MONETIZATION -> ENGINEERING -> VERIFICATION -> SYNDICATION -> DEPLOYMENT
-    across all 3 canonical live tenants (profithelm, prexvo, gainhelm).
-    Confirms every department validates its upstream inputs, executes its full responsibility
-    for all three tenants without divergence, and emits its guaranteed output contract.
+    across all 4 canonical live tenants (profithelm, prexvo, gainhelm, lienbond), parametrized
+    by property_id so xdist executes all 4 tenants concurrently.
     """
     from pseofactory.supervisor import (
         CANONICAL_DEPARTMENT_CONTRACTS,
@@ -2520,17 +2529,17 @@ def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_pa
 
     report = verify_department_handoff_chain(
         workspace_root="/home/ubuntuadmin/projects",
-        property_ids=["profithelm", "prexvo", "gainhelm", "lienbond"],
+        property_ids=[property_id],
         persist=False,
         heal_markers=False,
         strict_current_engine_hash=False,
     )
-    assert report["overall_status"] == "PASS", f"Handoff chain failed: {report.get('failures')}"
+    assert report["overall_status"] == "PASS", f"Handoff chain failed for {property_id}: {report.get('failures')}"
     assert report["stages_total"] == 6
     assert report["stages_passed"] == 6
     assert report["failing_stages_count"] == 0
-    assert report["target_tenants"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
-    assert report["discovered_tenants"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
+    assert report["target_tenants"] == [property_id]
+    assert report["discovered_tenants"] == [property_id]
 
     expected_order = (
         "DISCOVERY",
@@ -2543,24 +2552,23 @@ def test_end_to_end_six_department_handoff_chain_across_all_three_tenants(tmp_pa
     for idx, stage_name in enumerate(expected_order, start=1):
         s_rep = report["stages"][stage_name]
         assert s_rep["order"] == idx
-        assert s_rep["status"] == "PASS", f"Stage {stage_name} failed: {s_rep.get('errors')}"
+        assert s_rep["status"] == "PASS", f"Stage {stage_name} failed for {property_id}: {s_rep.get('errors')}"
         assert s_rep["inputs_validated"] is True
         assert s_rep["outputs_validated"] is True
         assert s_rep["missing_inputs"] == []
         assert s_rep["missing_outputs"] == []
         per_tenant = s_rep["summary"].get("per_tenant") or {}
-        for pid in CANONICAL_TENANTS:
-            assert pid in per_tenant, f"Stage {stage_name} missing tenant summary for {pid}"
-            assert per_tenant[pid]["status"] == "PASS", (
-                f"Stage {stage_name} tenant {pid} failed: {per_tenant[pid]}"
-            )
+        assert property_id in per_tenant, f"Stage {stage_name} missing tenant summary for {property_id}"
+        assert per_tenant[property_id]["status"] == "PASS", (
+            f"Stage {stage_name} tenant {property_id} failed: {per_tenant[property_id]}"
+        )
 
     # Verify isolated state persistence via DepartmentPipelineStateMachine
-    state_file = tmp_path / "department_pipeline.json"
+    state_file = tmp_path / f"department_pipeline_{property_id}.json"
     sm = DepartmentPipelineStateMachine(state_path=state_file)
     for stage_name in expected_order:
         sm.record_stage(stage_name, "PASS", report["stages"][stage_name]["summary"])
-    persisted = sm.finalize_and_persist(cycle_id="test_e2e_handoff_chain", overall_status="PASS")
+    persisted = sm.finalize_and_persist(cycle_id=f"test_e2e_handoff_chain_{property_id}", overall_status="PASS")
     assert state_file.is_file()
     assert persisted["overall_status"] == "PASS"
     assert persisted["tenants_managed"] == ["profithelm", "prexvo", "gainhelm", "lienbond"]
@@ -2732,6 +2740,7 @@ def test_multi_tenant_engine_hash_latch_and_isolated_builder_offline_jev(tmp_pat
     assert drift_clean["status"] == "ALIGNED"
 
 
+@pytest.mark.host_estate
 def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
     """
     Verifies root-cause fixes for unattended tenant factory runs and CI runner dist isolation:
@@ -3034,6 +3043,7 @@ def test_unattended_factory_drift_and_runner_dist_isolation_gates(tmp_path):
         assert "runner test suite mutated runner dist/" not in rel_txt
 
 
+@pytest.mark.host_estate
 def test_worktree_harness_and_pipeline_audit_guardrails(tmp_path):
     """
     Verifies root-cause audit fixes:
