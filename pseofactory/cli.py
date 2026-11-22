@@ -2082,6 +2082,19 @@ def cmd_gsc_ceiling(args: argparse.Namespace) -> int:
         updates = db.get_google_update_events() or DEFAULT_GOOGLE_UPDATES
         reports = {}
         for p_id in CANONICAL_TENANT_IDS:
+            if "PYTEST_CURRENT_TEST" not in os.environ:
+                try:
+                    from pseofactory.maintenance import _is_live_repo_mutation_blocked
+                    from pseofactory.seo_growth_loops import harvest_and_sync_gsc_daily_timeline
+                    if not _is_live_repo_mutation_blocked(db.db_path):
+                        harvest_and_sync_gsc_daily_timeline(
+                            property_id=p_id,
+                            days=days,
+                            persist=True,
+                            db_path=db.db_path,
+                        )
+                except Exception:
+                    pass
             recs = db.get_gsc_daily_metrics(p_id, days=days)
             analysis = detect_algorithmic_ceiling(recs, updates=updates, threshold=threshold)
             try:

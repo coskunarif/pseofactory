@@ -16,12 +16,19 @@ import os
 from pathlib import Path
 import random
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, Union
 import uuid
+
+
+class SupervisorTimeoutError(Exception):
+    """Raised when the supervisor receives SIGTERM (e.g. systemd timeout grace window)."""
+    pass
 
 MAX_CONSECUTIVE_FAILURES: int = 5
 DEFAULT_TICK_BUDGET: float = float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0"))
@@ -2271,6 +2278,103 @@ class SupervisorFailureStreak:
         return escalations
 
 
+class RollbackCircuitBreaker:
+    """
+    Persists per-tenant ROLLBACK_CI_FAILED circuit-breaker state keyed by
+    (tenant_id, engine_hash). Stops re-trying the exact same (tenant_id, engine_hash)
+    after 1 ROLLBACK_CI_FAILED until engine_hash changes.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(self, path: Union[str, Path]):
+        self.path = Path(path)
+
+    def load(self) -> Dict[str, Any]:
+        data = AtomicStateLedger.load_json(self.path) if self.path.exists() else {}
+        if not isinstance(data, dict):
+            data = {}
+        if not isinstance(data.get("tripped"), dict):
+            data["tripped"] = {}
+        return data
+
+    def is_open(self, tenant_id: str, engine_hash: Optional[str]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        tid = str(tenant_id or "").strip().lower()
+        eh = str(engine_hash or "").strip()
+        if not tid or not eh:
+            return False, None
+        state = self.load()
+        entry = state["tripped"].get(tid)
+        if not isinstance(entry, dict):
+            return False, None
+        if str(entry.get("engine_hash") or "").strip() == eh and str(entry.get("status") or "") == "ROLLBACK_CI_FAILED":
+            return True, entry
+        return False, None
+
+    def clear_if_hash_changed(self, tenant_id: str, engine_hash: Optional[str]) -> bool:
+        tid = str(tenant_id or "").strip().lower()
+        eh = str(engine_hash or "").strip()
+        if not tid or not eh or not self.path.exists():
+            return False
+        with AtomicStateLedger.acquire_lock(str(self.path) + ".txn"):
+            state = self.load()
+            entry = state["tripped"].get(tid)
+            if isinstance(entry, dict) and str(entry.get("engine_hash") or "").strip() != eh:
+                state["tripped"].pop(tid, None)
+                AtomicStateLedger.save_json(self.path, state)
+                return True
+        return False
+
+    def record_rollback_ci_failed(
+        self,
+        tenant_id: str,
+        engine_hash: Optional[str],
+        cycle_id: str = "",
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        tid = str(tenant_id or "").strip().lower()
+        eh = str(engine_hash or "").strip()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        entry = {
+            "tenant_id": tid,
+            "engine_hash": eh,
+            "status": "ROLLBACK_CI_FAILED",
+            "cycle_id": cycle_id,
+            "reason": str(reason or "ROLLBACK_CI_FAILED")[:400],
+            "tripped_at": now_iso,
+        }
+        if not tid or not eh:
+            return entry
+        with AtomicStateLedger.acquire_lock(str(self.path) + ".txn"):
+            state = self.load()
+            state["tripped"][tid] = entry
+            AtomicStateLedger.save_json(self.path, state)
+        return entry
+
+    @staticmethod
+    def result_has_rollback_ci_failed(res_obj: Any) -> Tuple[bool, str]:
+        """Detects whether a MaintenanceResult or dict contains a ROLLBACK_CI_FAILED signal."""
+        res_dict = res_obj.to_dict() if hasattr(res_obj, "to_dict") else (res_obj if isinstance(res_obj, dict) else {})
+        if not isinstance(res_dict, dict):
+            return False, ""
+        st = str(res_dict.get("status") or "").upper()
+        if "ROLLBACK_CI_FAILED" in st:
+            return True, st
+        gitops = res_dict.get("gitops_result") or res_dict.get("gitops") or {}
+        if isinstance(gitops, dict):
+            for k in ("status", "rollback_status"):
+                v = str(gitops.get(k) or "").upper()
+                if "ROLLBACK_CI_FAILED" in v:
+                    return True, v
+            rb = gitops.get("rollback") or gitops.get("auto_rollback") or {}
+            if isinstance(rb, dict) and "ROLLBACK_CI_FAILED" in str(rb.get("status") or "").upper():
+                return True, str(rb.get("reason") or rb.get("status") or "ROLLBACK_CI_FAILED")
+        for rec in (res_dict.get("failed_records") or []):
+            blob = json.dumps(rec, default=str) if isinstance(rec, dict) else str(rec)
+            if "ROLLBACK_CI_FAILED" in blob.upper():
+                return True, blob[:300]
+        return False, ""
+
+
 class AsyncFleetCoordinator:
     """
     Coordinates multi-tenant maintenance asynchronously with bounded concurrency ceiling
@@ -2747,11 +2851,37 @@ class AutonomousLifecycleSupervisor:
         )
 
         streak_path = self.workspace_root / ".agy" / "supervisor_failure_streak.json"
+        breaker_path = self.workspace_root / ".agy" / "supervisor_rollback_breaker.json"
         if os.environ.get("PYTEST_CURRENT_TEST") and str(self.workspace_root) == "/home/ubuntuadmin/projects":
             streak_path = Path(tempfile.gettempdir()) / f"pseofactory_pytest_failure_streak_{os.getpid()}.json"
+            breaker_path = Path(tempfile.gettempdir()) / f"pseofactory_pytest_rollback_breaker_{os.getpid()}.json"
         self.failure_streak = SupervisorFailureStreak(streak_path)
+        self.rollback_breaker = RollbackCircuitBreaker(breaker_path)
         self.consecutive_failures: int = int(self.failure_streak.load().get("consecutive_failures", 0))
         self._stop_requested: bool = False
+
+    @contextmanager
+    def _sigterm_timeout_guard(self) -> Generator[None, None, None]:
+        """Installs a SIGTERM handler raising SupervisorTimeoutError on the main thread."""
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
+
+        def _handle_sigterm(signum: int, frame: Any) -> None:
+            self._stop_requested = True
+            raise SupervisorTimeoutError(
+                f"Supervisor received signal {signum} (SIGTERM timeout grace window)"
+            )
+
+        prev_handler = signal.getsignal(signal.SIGTERM)
+        try:
+            signal.signal(signal.SIGTERM, _handle_sigterm)
+            yield
+        finally:
+            try:
+                signal.signal(signal.SIGTERM, prev_handler)
+            except Exception:
+                pass
 
     def _record_failure_streak(
         self,
@@ -3223,7 +3353,10 @@ class AutonomousLifecycleSupervisor:
                     "daily_trend_page_build": daily_trend_build_summary,
                 }
 
+        current_tenant_box: List[Optional[str]] = [None]
+
         def on_tenant_start(tid: str) -> None:
+            current_tenant_box[0] = tid
             self.heartbeat_tracker.emit(
                 status="RUNNING",
                 cycle_id=cycle_id,
@@ -3234,17 +3367,65 @@ class AutonomousLifecycleSupervisor:
             )
 
         try:
-            target_prop_list = list(adapters.keys()) if property_ids else None
-            fleet_results = self.coordinator.run_fleet(
-                property_ids=target_prop_list,
-                force=force or drift_detected,
-                dry_run=dry_run,
-                enable_gitops=enable_gitops,
-                run_id=cycle_id,
-                skip_ci=skip_ci,
-                on_tenant_start=on_tenant_start,
-                enable_distribution=enable_distribution,
-            )
+            with self._sigterm_timeout_guard():
+                # Check rollback circuit-breaker per (tenant_id, current_engine_hash)
+                breaker_skipped: Dict[str, MaintenanceResult] = {}
+                eligible_prop_ids: List[str] = []
+                for pid in adapters.keys():
+                    self.rollback_breaker.clear_if_hash_changed(pid, current_engine_hash)
+                    is_open, b_entry = self.rollback_breaker.is_open(pid, current_engine_hash)
+                    if is_open and not dry_run:
+                        b_reason = (
+                            f"ROLLBACK_CI_FAILED circuit-breaker open for ({pid}, "
+                            f"{str(current_engine_hash or '')[:12]}); skipping retry until engine_hash changes"
+                        )
+                        breaker_skipped[pid] = MaintenanceResult(
+                            property_id=pid,
+                            status="CIRCUIT_BREAKER_OPEN",
+                            assets_audited=0,
+                            assets_drifted=0,
+                            assets_refactored=0,
+                            assets_failed=0,
+                            failed_records=[
+                                {
+                                    "type": "RollbackCircuitBreakerOpen",
+                                    "error": b_reason,
+                                    "engine_hash": current_engine_hash,
+                                    "prior_tripped_at": (b_entry or {}).get("tripped_at"),
+                                }
+                            ],
+                        )
+                    else:
+                        eligible_prop_ids.append(pid)
+
+                fleet_results: Dict[str, MaintenanceResult] = {}
+                if eligible_prop_ids:
+                    target_prop_list = eligible_prop_ids if (property_ids or breaker_skipped) else None
+                    fleet_results = self.coordinator.run_fleet(
+                        property_ids=target_prop_list,
+                        force=force or drift_detected,
+                        dry_run=dry_run,
+                        enable_gitops=enable_gitops,
+                        run_id=cycle_id,
+                        skip_ci=skip_ci,
+                        on_tenant_start=on_tenant_start,
+                        enable_distribution=enable_distribution,
+                    )
+
+                # Inspect run_fleet outcomes for ROLLBACK_CI_FAILED and trip circuit-breaker
+                if not dry_run:
+                    for pid, res_obj in fleet_results.items():
+                        hit_rb_ci, rb_reason = RollbackCircuitBreaker.result_has_rollback_ci_failed(res_obj)
+                        if hit_rb_ci:
+                            self.rollback_breaker.record_rollback_ci_failed(
+                                tenant_id=pid,
+                                engine_hash=current_engine_hash,
+                                cycle_id=cycle_id,
+                                reason=rb_reason,
+                            )
+
+                for pid, skip_res in breaker_skipped.items():
+                    fleet_results[pid] = skip_res
 
             all_passed = (len(fleet_results) > 0) and all(
                 res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED", "DEFERRED")
@@ -3437,16 +3618,24 @@ class AutonomousLifecycleSupervisor:
         except Exception as exc:
             duration = time.time() - start_time
             self.consecutive_failures += 1
+            is_sigterm_timeout = isinstance(exc, SupervisorTimeoutError)
             cycle_status = (
                 "DEGRADED"
                 if self.consecutive_failures >= self.max_consecutive_failures
-                else "ERROR"
+                else ("TIMEOUT" if is_sigterm_timeout else "ERROR")
             )
-            self._record_failure_streak(False, {}, cycle_id, dry_run, scoped=bool(property_ids))
+            err_properties: Dict[str, Any] = {}
+            if is_sigterm_timeout:
+                active_tid = current_tenant_box[0] or (list(adapters.keys())[0] if len(adapters) == 1 else "fleet")
+                err_properties[active_tid] = {
+                    "status": "TIMEOUT",
+                    "failed_records": [{"error": str(exc), "type": "SupervisorTimeoutError"}],
+                }
+            self._record_failure_streak(False, err_properties, cycle_id, dry_run, scoped=bool(property_ids))
             try:
                 AtomicTelemetryLogger().record(
-                    event_type="SUPERVISOR_CYCLE_ERROR",
-                    tenant_id="fleet",
+                    event_type="SUPERVISOR_SIGTERM_TIMEOUT" if is_sigterm_timeout else "SUPERVISOR_CYCLE_ERROR",
+                    tenant_id=current_tenant_box[0] or "fleet",
                     error_type=type(exc).__name__,
                     error_message=str(exc),
                     action_taken=cycle_status,
@@ -3467,6 +3656,7 @@ class AutonomousLifecycleSupervisor:
                 "cycle_id": cycle_id,
                 "drift_detected": drift_detected,
                 "error": str(exc),
+                "sigterm_interrupted": is_sigterm_timeout,
                 "duration_seconds": duration,
                 "consecutive_failures": self.consecutive_failures,
             }
@@ -3579,7 +3769,9 @@ __all__ = [
     "DepartmentContract",
     "DepartmentPipelineStateMachine",
     "DepartmentHandoffChainVerifier",
+    "SupervisorTimeoutError",
     "SupervisorFailureStreak",
+    "RollbackCircuitBreaker",
     "AsyncFleetCoordinator",
     "AutonomousLifecycleSupervisor",
     "SupervisorDaemon",

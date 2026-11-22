@@ -1893,6 +1893,21 @@ class GitOpsCoordinator:
             return _record(result)
         result["revert_sha"] = revert_sha
 
+        # Mark any daily-built slugs introduced by failed_sha as ROLLED_BACK in void_candidates.jsonl
+        try:
+            rolled_back_slugs = self._mark_rolled_back_void_candidates(
+                rp=rp,
+                failed_sha=failed_sha,
+                known_good_sha=known_good_sha,
+                property_id=property_id,
+                reason=reason,
+                env=env,
+            )
+            if rolled_back_slugs:
+                result["rolled_back_slugs"] = rolled_back_slugs
+        except Exception:
+            pass
+
         push_res = self.push_with_backoff(target_branch=self.branch)
         result["push"] = push_res
         if push_res.get("status") == "FAIL":
@@ -1925,6 +1940,93 @@ class GitOpsCoordinator:
 
         result["status"] = "ROLLED_BACK"
         return _record(result)
+
+    def _mark_rolled_back_void_candidates(
+        self,
+        rp: Path,
+        failed_sha: str,
+        known_good_sha: str,
+        property_id: str,
+        reason: str,
+        env: Dict[str, str],
+        void_candidates_path: Optional[Union[str, Path]] = None,
+    ) -> List[str]:
+        """
+        Inspects files added in `failed_sha` (relative to `known_good_sha`) for newly
+        compiled `dist/tools/<slug>/index.html` pages and marks matching entries in
+        `void_candidates.jsonl` as `ROLLED_BACK` with `rollback_reason` and `failed_sha`.
+        Zero em-dashes. Zero en-dashes.
+        """
+        diff_proc = subprocess.run(
+            ["git", "-C", str(rp), "diff", "--name-only", "--diff-filter=A", known_good_sha, failed_sha],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if diff_proc.returncode != 0:
+            return []
+        reverted_slugs: List[str] = []
+        for line in (diff_proc.stdout or "").splitlines():
+            rel_p = line.strip().replace("\\", "/")
+            if rel_p.startswith("dist/tools/") and rel_p.endswith("/index.html"):
+                slug_part = rel_p[len("dist/tools/") : -len("/index.html")].strip("/").lower()
+                if slug_part and slug_part not in reverted_slugs:
+                    reverted_slugs.append(slug_part)
+        if not reverted_slugs:
+            return []
+
+        norm_prop = _normalize_property_id(property_id) or str(property_id or "").strip().lower()
+        cand_paths: List[Path] = []
+        if void_candidates_path:
+            cand_paths.append(Path(void_candidates_path))
+        else:
+            cand_paths.append(self.runs_base.parent / "void_candidates.jsonl")
+            if not _is_test_context(repo_path=rp, property_id=norm_prop):
+                default_vc = Path("/home/ubuntuadmin/projects/.agy/void_candidates.jsonl")
+                if default_vc not in cand_paths:
+                    cand_paths.append(default_vc)
+
+        marked_slugs: List[str] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean_reason = str(reason or "auto_rollback").replace("\u2014", "-").replace("\u2013", "-")[:500]
+        for vc_path in cand_paths:
+            if not vc_path.is_file():
+                continue
+            try:
+                raw_lines = vc_path.read_text(encoding="utf-8").splitlines()
+                items: List[Dict[str, Any]] = []
+                mutated = False
+                for raw_l in raw_lines:
+                    ls = raw_l.strip()
+                    if not ls:
+                        continue
+                    obj = json.loads(ls)
+                    if isinstance(obj, dict):
+                        o_prop = _normalize_property_id(str(obj.get("property_id") or obj.get("tenant") or "")) or str(
+                            obj.get("property_id") or obj.get("tenant") or ""
+                        ).strip().lower()
+                        o_slug = str(obj.get("slug") or "").strip().lower()
+                        if o_slug in reverted_slugs and (not norm_prop or o_prop == norm_prop):
+                            obj["status"] = "ROLLED_BACK"
+                            obj["rollback_reason"] = clean_reason
+                            obj["failed_sha"] = str(failed_sha)
+                            obj["rolled_back_at"] = now_iso
+                            obj["rollback_count"] = int(obj.get("rollback_count", 0) or 0) + 1
+                            mutated = True
+                            if o_slug not in marked_slugs:
+                                marked_slugs.append(o_slug)
+                        items.append(obj)
+                if mutated:
+                    tmp_vc = vc_path.with_suffix(f".jsonl.tmp.{os.getpid()}")
+                    tmp_vc.write_text(
+                        "\n".join(json.dumps(it, ensure_ascii=False) for it in items) + "\n",
+                        encoding="utf-8",
+                    )
+                    os.replace(tmp_vc, vc_path)
+            except Exception:
+                continue
+        return marked_slugs
 
     def dispatch_to_shipper(
         self,

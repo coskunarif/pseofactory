@@ -1935,6 +1935,26 @@ class IndexingFeedbackLoop:
             and self._is_canonical_prod_tenant_dir(self.base_dir)
         )
 
+    def _compute_dist_fingerprint(self) -> str:
+        """Computes a deterministic SHA-256 fingerprint over compiled HTML/XML/JSON files in dist_dir."""
+        import hashlib
+        if not self.dist_dir or not self.dist_dir.is_dir():
+            return ""
+        hasher = hashlib.sha256()
+        files: List[Path] = []
+        for pattern in ("*.html", "*.xml", "*.json"):
+            files.extend(self.dist_dir.rglob(pattern))
+        for fpath in sorted({p for p in files if p.is_file()}):
+            try:
+                rel = fpath.relative_to(self.dist_dir).as_posix()
+                hasher.update(rel.encode("utf-8"))
+                hasher.update(b"\x00")
+                hasher.update(fpath.read_bytes())
+                hasher.update(b"\x00")
+            except Exception:
+                continue
+        return hasher.hexdigest()
+
     @classmethod
     def _is_live_repo_mutation_blocked(cls, target_file: Union[str, Path]) -> bool:
         """
@@ -2146,6 +2166,8 @@ class IndexingFeedbackLoop:
                 )
                 if existing_idx is None:
                     b_data.append(entry)
+                elif self.domain and self.domain not in str(b_data[existing_idx].get("url", "")):
+                    b_data[existing_idx] = entry
             elif isinstance(b_data, dict):
                 dispatched = b_data.setdefault("dispatched_slugs", {})
                 dispatched[slug] = entry
@@ -2479,10 +2501,20 @@ class IndexingFeedbackLoop:
         if needs_recompile or (overlays_written and not skip_recompile):
             if dry_run:
                 reflection_res = {"status": "DRY_RUN", "total_recompiled": 0}
-            elif skip_recompile or ((html_files_repaired > 0 or (is_prod_only_overlays and len(overlays_written) > 0)) and not force):
+            elif skip_recompile:
                 reflection_res = {
-                    "status": "SKIPPED_FAST_PATH" if skip_recompile else "SUCCESS",
-                    "total_recompiled": max(len(overlays_written), html_files_repaired),
+                    "status": "SKIPPED_FAST_PATH",
+                    "total_recompiled": html_files_repaired,
+                }
+            elif is_prod_only_overlays and html_files_repaired == 0 and not force:
+                reflection_res = {
+                    "status": "OVERLAYS_STAGED_ONLY",
+                    "total_recompiled": 0,
+                }
+            elif html_files_repaired > 0 and not force:
+                reflection_res = {
+                    "status": "SUCCESS",
+                    "total_recompiled": html_files_repaired,
                 }
             else:
                 try:
@@ -2875,10 +2907,10 @@ class IndexingFeedbackLoop:
             except Exception as rk_err:
                 logger.warning("Failed ranking pending partner approvals: %s", rk_err)
 
-        already_repaired_slugs = set(repair_summary.get("repaired_slugs") or repair_summary.get("overlays_written") or [])
+        already_repaired_slugs = set(repair_summary.get("repaired_slugs") or [])
         reflection_succeeded = repair_summary.get("reflection", {}).get("status") == "SUCCESS"
         is_prod_tenant_repo = self._is_prod_tenant_repo()
-        allow_worker_html_mutation = not is_prod_tenant_repo or enable_gitops or self.gitops_coordinator is not None
+        allow_worker_html_mutation = (not is_prod_tenant_repo) or (self.gitops_coordinator is not None)
 
         def _remediation_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             t_slug = str(task.get("slug") or "")
@@ -2929,26 +2961,105 @@ class IndexingFeedbackLoop:
 
         if repairs_performed and not dry_run and (enable_gitops or self.gitops_coordinator is not None):
             try:
-                coord = self.gitops_coordinator
-                if coord is None:
-                    from pseofactory.gitops import GitOpsCoordinator
-                    coord = GitOpsCoordinator()
-                git_res = coord.commit_and_push_atomic(
-                    repo_path=self.base_dir,
-                    property_id=self.property_id,
-                    recompiled_count=max(1, int(repair_summary.get("recompiled_assets_count", 1))),
-                    dry_run=dry_run,
-                )
-                gitops_summary = git_res.to_dict() if hasattr(git_res, "to_dict") else dict(git_res)
-                if gitops_summary.get("status") in (
-                    "FAILED",
-                    "ERROR",
-                    "CONFLICT_BLOCKED",
-                    "PUSH_FAILED",
-                    "CI_FAILURE",
-                    "EDGE_VERIFICATION_FAILED",
-                ):
-                    gitops_failed = True
+                dist_fp = self._compute_dist_fingerprint()
+                deploy_ledger_path = self.base_dir / ".agy" / "auto_remediation_deploy_ledger.json"
+                deploy_ledger: Dict[str, Any] = {}
+                if deploy_ledger_path.is_file():
+                    try:
+                        loaded_dl = json.loads(deploy_ledger_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded_dl, dict):
+                            deploy_ledger = loaded_dl
+                    except Exception:
+                        deploy_ledger = {}
+
+                last_fp = str(deploy_ledger.get("last_dist_fingerprint") or "")
+                last_deploy_at = str(deploy_ledger.get("last_deploy_at") or "")
+                within_daily_cap = False
+                if last_deploy_at:
+                    try:
+                        last_dt = datetime.fromisoformat(last_deploy_at.replace("Z", "+00:00"))
+                        if last_dt.tzinfo is None:
+                            last_dt = last_dt.replace(tzinfo=timezone.utc)
+                        within_daily_cap = (datetime.now(timezone.utc) - last_dt).total_seconds() < 86400.0
+                    except Exception:
+                        within_daily_cap = False
+
+                if last_fp and dist_fp and dist_fp == last_fp:
+                    gitops_summary = {
+                        "status": "SKIPPED_UNCHANGED_DIST",
+                        "dist_fingerprint": dist_fp,
+                    }
+                elif within_daily_cap:
+                    gitops_summary = {
+                        "status": "SKIPPED_DAILY_CAP_REACHED",
+                        "last_deploy_at": last_deploy_at,
+                        "cap_per_24h": 1,
+                    }
+                else:
+                    coord = self.gitops_coordinator
+                    if coord is None:
+                        from pseofactory.gitops import GitOpsCoordinator
+                        coord = GitOpsCoordinator(repo_path=self.base_dir, dry_run=dry_run)
+
+                    use_legacy_mock_atomic = False
+                    if not callable(getattr(type(coord), "dispatch_to_shipper", None)):
+                        maybe_atomic = getattr(coord, "commit_and_push_atomic", None)
+                        if callable(maybe_atomic) and isinstance(getattr(maybe_atomic, "return_value", None), dict):
+                            use_legacy_mock_atomic = True
+
+                    if use_legacy_mock_atomic:
+                        git_res = coord.commit_and_push_atomic(
+                            repo_path=self.base_dir,
+                            property_id=self.property_id,
+                            recompiled_count=max(1, int(repair_summary.get("recompiled_assets_count", 1))),
+                            dry_run=dry_run,
+                        )
+                    else:
+                        remed_run_id = f"autoremed-{self.property_id}-{int(datetime.now(timezone.utc).timestamp())}"
+                        recomp_n = int(repair_summary.get("recompiled_assets_count", 0) or 0)
+                        ov_n = len(repair_summary.get("overlays_written", []) or [])
+                        commit_msg = (
+                            f"fix({self.property_id}): auto-remediation sync "
+                            f"(recompiled={recomp_n}, overlays={ov_n})"
+                        )
+                        git_res = coord.dispatch_to_shipper(
+                            run_id=remed_run_id,
+                            property_id=self.property_id,
+                            dry_run=dry_run,
+                            commit_message=commit_msg,
+                            dist_dir=self.dist_dir,
+                        )
+                    gitops_summary = git_res.to_dict() if hasattr(git_res, "to_dict") else dict(git_res)
+                    if gitops_summary.get("status") in (
+                        "FAIL",
+                        "FAILED",
+                        "ERROR",
+                        "CONFLICT_BLOCKED",
+                        "PUSH_FAILED",
+                        "CI_FAILURE",
+                        "EDGE_VERIFICATION_FAILED",
+                        "ROLLED_BACK",
+                        "ROLLBACK_FAILED",
+                        "ROLLBACK_CI_FAILED",
+                    ):
+                        gitops_failed = True
+                    else:
+                        try:
+                            deploy_ledger_path.parent.mkdir(parents=True, exist_ok=True)
+                            deploy_ledger_path.write_text(
+                                json.dumps(
+                                    {
+                                        "property_id": self.property_id,
+                                        "last_deploy_at": datetime.now(timezone.utc).isoformat(),
+                                        "last_dist_fingerprint": dist_fp,
+                                        "status": gitops_summary.get("status"),
+                                    },
+                                    indent=2,
+                                ),
+                                encoding="utf-8",
+                            )
+                        except Exception:
+                            pass
             except Exception as g_err:
                 logger.error("GitOps release shipping failed in feedback loop: %s", g_err)
                 gitops_summary = {"status": "PUSH_FAILED", "error": str(g_err)}

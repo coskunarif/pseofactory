@@ -81,6 +81,9 @@ class TrendHistoryDB:
                 conn.row_factory = sqlite3.Row
                 conn.execute(f"PRAGMA busy_timeout = {busy_ms};")
                 conn.execute("PRAGMA query_only = ON;")
+                conn.execute("PRAGMA cache_size = -65536;")
+                conn.execute("PRAGMA mmap_size = 268435456;")
+                conn.execute("PRAGMA temp_store = MEMORY;")
             else:
                 conn = sqlite3.connect(
                     str(self.db_path),
@@ -92,6 +95,10 @@ class TrendHistoryDB:
                 conn.execute(f"PRAGMA busy_timeout = {busy_ms};")
                 conn.execute("PRAGMA synchronous = NORMAL;")
                 conn.execute("PRAGMA foreign_keys = ON;")
+                conn.execute("PRAGMA cache_size = -65536;")
+                conn.execute("PRAGMA mmap_size = 268435456;")
+                conn.execute("PRAGMA temp_store = MEMORY;")
+                conn.execute("PRAGMA wal_autocheckpoint = 1000;")
             self._conn = conn
         return self._conn
 
@@ -200,9 +207,19 @@ class TrendHistoryDB:
             "statutory_economic_timeseries",
         )
     )
+    _REQUIRED_SCHEMA_INDEXES = frozenset(
+        (
+            "idx_observations_norm_query_obs_cov",
+            "idx_jev_eval_prop_action_eval",
+            "idx_jev_eval_evaluated_at",
+            "idx_crawl_cycles_status_executed",
+            "idx_property_assignments_cycle",
+            "idx_treg_snapshots_cycle",
+        )
+    )
 
     def _schema_already_initialized(self) -> bool:
-        """Fast read-only check verifying all required tables and migrations already exist."""
+        """Fast read-only check verifying all required tables, indexes, and migrations already exist."""
         if not self.db_path.is_file() or self.db_path.stat().st_size == 0:
             return False
         try:
@@ -212,6 +229,12 @@ class TrendHistoryDB:
             ).fetchall()
             tables_sql = {str(r[0]): str(r[1] or "") for r in rows}
             if not self._REQUIRED_SCHEMA_TABLES.issubset(tables_sql.keys()):
+                return False
+            idx_rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            ).fetchall()
+            existing_indexes = {str(r[0]) for r in idx_rows}
+            if not self._REQUIRED_SCHEMA_INDEXES.issubset(existing_indexes):
                 return False
             treg_cols = {
                 str(r[1])
@@ -793,6 +816,23 @@ class TrendHistoryDB:
                     for idx_sql in idx_ddls:
                         conn.execute(idx_sql)
 
+            # Covering and composite performance indexes (idempotent, zero row deletion)
+            for perf_idx_sql in (
+                "CREATE INDEX IF NOT EXISTS idx_observations_norm_query_obs_cov "
+                "ON raw_crawl_observations(normalized_query, observed_at DESC, cycle_id, observed_velocity);",
+                "CREATE INDEX IF NOT EXISTS idx_jev_eval_prop_action_eval "
+                "ON jev_evaluations(property_id, action, evaluated_at DESC);",
+                "CREATE INDEX IF NOT EXISTS idx_jev_eval_evaluated_at "
+                "ON jev_evaluations(evaluated_at DESC);",
+                "CREATE INDEX IF NOT EXISTS idx_crawl_cycles_status_executed "
+                "ON crawl_cycles(status, executed_at DESC);",
+                "CREATE INDEX IF NOT EXISTS idx_property_assignments_cycle "
+                "ON property_assignments(cycle_id);",
+                "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_cycle "
+                "ON treg_metric_snapshots(cycle_id);",
+            ):
+                conn.execute(perf_idx_sql)
+
     # -------------------------------------------------------------------------
     # Crawl Cycle Operations
     # -------------------------------------------------------------------------
@@ -966,19 +1006,27 @@ class TrendHistoryDB:
         )
 
     def get_past_velocities(self, normalized_query: str, current_cycle_id: str) -> List[float]:
-        """Returns past observed velocities for query ordered by most recent first."""
+        """Returns past observed velocities for query ordered by most recent first via covering index."""
         conn = self.get_connection()
-        rows = conn.execute(
+        cursor = conn.execute(
             """
-            SELECT observed_velocity FROM raw_crawl_observations
-            WHERE normalized_query = ? AND cycle_id != ?
-            GROUP BY cycle_id
-            ORDER BY observed_at DESC
-            LIMIT 2;
+            SELECT cycle_id, observed_velocity FROM raw_crawl_observations
+            WHERE normalized_query = ?
+            ORDER BY observed_at DESC;
             """,
-            (normalized_query, current_cycle_id),
-        ).fetchall()
-        return [float(r["observed_velocity"]) for r in rows]
+            (normalized_query,),
+        )
+        seen_cycles: set = set()
+        velocities: List[float] = []
+        for row in cursor:
+            cid = row["cycle_id"]
+            if cid == current_cycle_id or cid in seen_cycles:
+                continue
+            seen_cycles.add(cid)
+            velocities.append(float(row["observed_velocity"]))
+            if len(velocities) >= 2:
+                break
+        return velocities
 
     # -------------------------------------------------------------------------
     # Keyword History Rollups

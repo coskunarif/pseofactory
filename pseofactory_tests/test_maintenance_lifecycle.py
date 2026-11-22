@@ -514,7 +514,13 @@ def test_workspace_property_scanner_conventions(tmp_path):
     )
     (p4 / "dist").mkdir()
 
-    scanner = WorkspacePropertyScanner(workspace_root=tmp_path)
+    # Default require_manifest=True only discovers manifest-backed properties (prop1, prop2)
+    strict_scanner = WorkspacePropertyScanner(workspace_root=tmp_path)
+    strict_ids = {a.property_id for a in strict_scanner.discover_properties()}
+    assert strict_ids == {"prop1", "prop2"}
+
+    # Explicit require_manifest=False enables legacy sitemap/pyproject fallback conventions
+    scanner = WorkspacePropertyScanner(workspace_root=tmp_path, require_manifest=False)
     discovered = scanner.discover_properties()
     prop_ids = {a.property_id for a in discovered}
 

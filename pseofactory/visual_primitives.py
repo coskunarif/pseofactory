@@ -7165,7 +7165,7 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
     ).strip().lower()
     default_state = resolve_state_code_from_slug(tool_slug, prop_id)
 
-    if has_quote_intake and 'href="/r/' not in updated and "href='/r/" not in updated:
+    if has_quote_intake and not is_restricted_ps and 'href="/r/' not in updated and "href='/r/" not in updated:
         pk_fallback = (
             _extract_attr(q_tag, "data-partner-key")
             or (

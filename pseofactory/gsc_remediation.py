@@ -592,11 +592,16 @@ def _resolve_partner_offer_and_manual_gate(
     cand_dict = candidate if isinstance(candidate, dict) else {}
 
     # 1. Enforce Prexvo YMYL public-service commercial offer suppression
+    # Classification is strictly slug-authoritative for concrete tool slugs so an
+    # incidental GSC query (e.g. "public service loan forgiveness calculator") mapped
+    # onto a commercial IDR tax-bomb / insolvency calculator never strips its monetization.
+    is_concrete_slug = bool(s_norm and s_norm not in ("tool", "index"))
+    ymyl_check_text = s_norm if is_concrete_slug else combined
     if eff_tenant == "prexvo" and (
         is_restricted_public_service_slug(s_norm)
         or s_norm in ("disclaimers", "methodology")
         or any(
-            ymyl_tok in combined
+            ymyl_tok in ymyl_check_text
             for ymyl_tok in (
                 "pslf",
                 "public service loan forgiveness",
@@ -11060,16 +11065,43 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         injected_sections.append(hub_links_markup)
 
     # 4e. Injected Partner Offer Placement or YMYL Public-Service Guardrail
+    from pseofactory.affiliates import (
+        _strip_balanced_html_blocks,
+        is_restricted_public_service_slug,
+        strip_commercial_affiliate_blocks_for_restricted_ymyl,
+    )
     partner_section_markup = ""
     ov_slug_norm = str(overlay_data.get("slug") or "").strip().lower()
-    restricted_ps = bool(overlay_data.get("restricted_public_service")) or ov_slug_norm in (
-        "disclaimers",
-        "methodology",
-        "pslf-qualifying-payment-simulator",
-        "ibr-hardship-cap-calculator",
-        "save-plan-litigation-transition",
+    is_concrete_ov_slug = bool(ov_slug_norm and ov_slug_norm not in ("tool", "index"))
+    slug_is_restricted_ps = (
+        is_restricted_public_service_slug(ov_slug_norm)
+        or ov_slug_norm in (
+            "disclaimers",
+            "methodology",
+            "pslf-qualifying-payment-simulator",
+            "pslf-buyback-months-reconsideration-student-loan-calculator",
+            "ibr-hardship-cap-calculator",
+            "save-plan-litigation-transition",
+        )
     )
+    restricted_ps = slug_is_restricted_ps if is_concrete_ov_slug else bool(overlay_data.get("restricted_public_service"))
     p_offer = overlay_data.get("partner_offer")
+    if not restricted_ps and is_concrete_ov_slug and (
+        "overlay-partner-guardrail" in html or 'data-restricted-public-service="true"' in html
+    ):
+        # Self-heal any stale guardrail section that leaked onto a non-restricted commercial slug
+        html = _strip_balanced_html_blocks(
+            html,
+            "section",
+            r'<section\b[^>]*class=["\'][^"\']*\boverlay-partner-guardrail\b[^"\']*["\'][^>]*>',
+            replacement="",
+        )
+        html = _strip_balanced_html_blocks(
+            html,
+            "section",
+            r'<section\b[^>]*data-restricted-public-service=["\']true["\'][^>]*>',
+            replacement="",
+        )
     if restricted_ps:
         guardrail_markup = (
             '<section class="overlay-section overlay-partner-guardrail ymyl-public-service-guardrail card" '
@@ -11081,6 +11113,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             '  </div>\n'
             '</section>'
         )
+        html = strip_commercial_affiliate_blocks_for_restricted_ymyl(html)
         if 'class="overlay-section overlay-partner-offer' in html:
             html = re.sub(
                 r'<section\s+class=["\']overlay-section\s+overlay-partner-offer[^>]*>.*?</section>',

@@ -212,11 +212,7 @@ def harvest_and_sync_gsc_daily_timeline(
             if main_repo_db.is_file():
                 target_db_path = main_repo_db
 
-        persist = _resolve_safe_persist_flag(
-            persist,
-            target_db_path,
-            root if (repo_root is not None or db_path is None) else None,
-        )
+        persist = _resolve_safe_persist_flag(persist, target_db_path)
 
         if not fixture_records and target_db_path.is_file() and len(records) < 14:
             with TrendHistoryDB(target_db_path, read_only=True) as tdb:
@@ -1677,6 +1673,46 @@ def harvest_and_sync_gsc_multidimensional_telemetry(
                                     page_daily_records,
                                     replace_property=bool(live_gsc and not fixture_payload),
                                 )
+                                # Roll up daily property totals into gsc_daily_metrics so all 4 tenants
+                                # (including lienbond) stay continuously populated in TrendHistoryDB.
+                                daily_agg: Dict[str, Dict[str, float]] = {}
+                                for pdr in page_daily_records:
+                                    d_str = str(getattr(pdr, "metric_date", "") or "").strip()
+                                    if not d_str:
+                                        continue
+                                    slot = daily_agg.setdefault(
+                                        d_str,
+                                        {"clicks": 0.0, "impressions": 0.0, "weighted_pos": 0.0},
+                                    )
+                                    impr_v = int(getattr(pdr, "impressions", 0) or 0)
+                                    clks_v = int(getattr(pdr, "clicks", 0) or 0)
+                                    pos_v = float(getattr(pdr, "position", 0.0) or 0.0)
+                                    slot["clicks"] += clks_v
+                                    slot["impressions"] += impr_v
+                                    if impr_v > 0 and pos_v > 0.0:
+                                        slot["weighted_pos"] += pos_v * impr_v
+                                if daily_agg:
+                                    from pseofactory.trends.models import GSCDailyMetricRecord
+                                    rolled_daily_records: List[GSCDailyMetricRecord] = []
+                                    now_rollup_iso = datetime.now(timezone.utc).isoformat()
+                                    for d_str in sorted(daily_agg.keys()):
+                                        agg = daily_agg[d_str]
+                                        tot_i = int(agg["impressions"])
+                                        tot_c = int(agg["clicks"])
+                                        avg_ctr = round(tot_c / float(tot_i), 4) if tot_i > 0 else 0.0
+                                        avg_pos = round(agg["weighted_pos"] / float(tot_i), 2) if tot_i > 0 else 0.0
+                                        rolled_daily_records.append(
+                                            GSCDailyMetricRecord(
+                                                property_id=prop,
+                                                date=d_str,
+                                                clicks=tot_c,
+                                                impressions=tot_i,
+                                                ctr=avg_ctr,
+                                                position=avg_pos,
+                                                recorded_at=now_rollup_iso,
+                                            )
+                                        )
+                                    tdb.upsert_gsc_daily_metrics(rolled_daily_records)
                             elif live_gsc and not fixture_payload and cli_ok_page_daily:
                                 tdb.delete_gsc_page_daily(prop)
                         except Exception:

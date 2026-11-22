@@ -1431,6 +1431,8 @@ def execute_autonomous_daily_trend_page_build(
     dry_run: bool = False,
     enable_gitops: bool = False,
     dispatch_push_indexing: bool = True,
+    max_rollback_retries: int = 3,
+    cooldown_hours: float = 24.0,
 ) -> Dict[str, Any]:
     """
     Executes the P2 autonomous trend-to-page builder:
@@ -1524,36 +1526,97 @@ def execute_autonomous_daily_trend_page_build(
     reconciled_already_built_count = 0
     reconciled_cannibalizing_count = 0
     reconciled_stale_ledger_count = 0
+    reconciled_stranded_built_count = 0
+    rollback_exhausted_count = 0
     queue_mutated = False
+    now_dt = datetime.now(timezone.utc)
+    now_iso_reconcile = now_dt.isoformat()
 
-    # Reconcile any ledger records for today whose compiled HTML file was wiped or missing
-    for t_id in target_props:
-        t_records = day_bucket.get(t_id)
-        if not isinstance(t_records, list) or not t_records:
-            continue
-        surviving_records: List[Dict[str, Any]] = []
-        wiped_slugs: Set[str] = set()
-        for rec in t_records:
-            if not isinstance(rec, dict):
+    def _is_slug_live_on_disk(t_id_chk: str, slug_chk: str) -> bool:
+        adp_chk = adapters_by_tenant.get(t_id_chk)
+        d_dir_chk = getattr(adp_chk, "dist_dir", None) if adp_chk is not None else None
+        if not d_dir_chk or not slug_chk:
+            return False
+        return (Path(d_dir_chk) / "tools" / slug_chk / "index.html").is_file()
+
+    def _within_rollback_cooldown(item: Dict[str, Any]) -> bool:
+        if cooldown_hours <= 0:
+            return False
+        for ts_key in ("last_rollback_retry_at", "rolled_back_at"):
+            raw_ts = str(item.get(ts_key) or "").strip()
+            if not raw_ts:
                 continue
-            out_f = str(rec.get("output_file") or "").strip()
-            r_slug = str(rec.get("slug") or "").strip().lower()
-            if out_f and Path(out_f).is_file():
-                surviving_records.append(rec)
-            else:
-                if r_slug:
-                    wiped_slugs.add(r_slug)
-                reconciled_stale_ledger_count += 1
-        if len(surviving_records) != len(t_records):
-            day_bucket[t_id] = surviving_records
-            for q_item in queue_items:
-                q_tid = str(q_item.get("property_id") or q_item.get("tenant") or "").strip().lower()
-                q_slug = str(q_item.get("slug") or "").strip().lower()
-                if q_tid == t_id and q_slug in wiped_slugs and str(q_item.get("status") or "").upper() == "BUILT":
-                    q_item["status"] = "PENDING"
-                    q_item.pop("built_at", None)
-                    q_item.pop("reconciled_reason", None)
-                    queue_mutated = True
+            try:
+                parsed = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                elapsed_hours = (now_dt - parsed).total_seconds() / 3600.0
+                if elapsed_hours < float(cooldown_hours):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    # 1. Reconcile ALL dates in daily_page_build_ledger.json (not just today's UTC date)
+    wiped_slugs_by_tenant: Dict[str, Set[str]] = {t_id: set() for t_id in target_props}
+    for d_key, d_bucket in list(days_map.items()):
+        if not isinstance(d_bucket, dict):
+            continue
+        for t_id in target_props:
+            t_records = d_bucket.get(t_id)
+            if not isinstance(t_records, list) or not t_records:
+                continue
+            surviving_records: List[Dict[str, Any]] = []
+            for rec in t_records:
+                if not isinstance(rec, dict):
+                    continue
+                out_f = str(rec.get("output_file") or "").strip()
+                r_slug = str(rec.get("slug") or "").strip().lower()
+                live_ok = (bool(out_f) and Path(out_f).is_file()) or (
+                    bool(r_slug) and _is_slug_live_on_disk(t_id, r_slug)
+                )
+                if live_ok:
+                    surviving_records.append(rec)
+                else:
+                    if r_slug:
+                        wiped_slugs_by_tenant[t_id].add(r_slug)
+                    reconciled_stale_ledger_count += 1
+            if len(surviving_records) != len(t_records):
+                d_bucket[t_id] = surviving_records
+
+    # 2. Reconcile ALL status == BUILT (and ROLLED_BACK) entries in void_candidates.jsonl
+    # against live dist/tools/<slug>/index.html with bounded retry + cooldown guards.
+    target_props_set = set(target_props)
+    eff_max_retries = max(1, int(max_rollback_retries))
+    for q_item in queue_items:
+        q_tid = str(q_item.get("property_id") or q_item.get("tenant") or "").strip().lower()
+        q_slug = str(q_item.get("slug") or "").strip().lower()
+        q_status = str(q_item.get("status") or "").strip().upper()
+        if not q_tid or q_tid not in target_props_set or not q_slug:
+            continue
+        if q_status not in ("BUILT", "ROLLED_BACK"):
+            continue
+        if _is_slug_live_on_disk(q_tid, q_slug):
+            continue
+        retries_used = int(q_item.get("rollback_retry_count", 0) or 0)
+        if retries_used >= eff_max_retries:
+            if q_status != "ROLLBACK_EXHAUSTED":
+                q_item["status"] = "ROLLBACK_EXHAUSTED"
+                q_item["reconciled_reason"] = (
+                    f"Exceeded max_rollback_retries ({eff_max_retries}) with missing dist/tools/{q_slug}/index.html"
+                )
+                rollback_exhausted_count += 1
+                queue_mutated = True
+            continue
+        if _within_rollback_cooldown(q_item):
+            continue
+        q_item["status"] = "PENDING"
+        q_item["rollback_retry_count"] = retries_used + 1
+        q_item["last_rollback_retry_at"] = now_iso_reconcile
+        q_item.pop("built_at", None)
+        q_item.pop("reconciled_reason", None)
+        reconciled_stranded_built_count += 1
+        queue_mutated = True
 
     # Auto-seed canonical non-cannibalizing breakout candidate when using default queue and tenant has 0 pending items
     is_default_queue = (
@@ -2262,9 +2325,73 @@ def execute_autonomous_daily_trend_page_build(
                     dist_dir=dist_dir,
                     edge_url=f"https://{adp.domain}",
                 )
-                gitops_results[t_id] = g_res.to_dict()
+                gitops_results[t_id] = g_res.to_dict() if hasattr(g_res, "to_dict") else dict(g_res)
             except Exception as g_exc:
                 gitops_results[t_id] = {"status": "FAILED", "error": str(g_exc)}
+
+            g_dict = gitops_results.get(t_id) if isinstance(gitops_results.get(t_id), dict) else {}
+            g_status = str(g_dict.get("status") or "").strip().upper()
+            g_details = g_dict.get("details") if isinstance(g_dict.get("details"), dict) else {}
+            rb_info = (
+                g_details.get("rollback")
+                or g_details.get("auto_rollback")
+                or g_dict.get("rollback")
+                or {}
+            )
+            rb_status = str(rb_info.get("status") or "").strip().upper() if isinstance(rb_info, dict) else ""
+            was_rolled_back = (
+                g_status in ("ROLLED_BACK", "ROLLBACK_FAILED", "ROLLBACK_CI_FAILED", "ROLLED_BACK_EDGE_STILL_FAILING")
+                or rb_status in ("ROLLED_BACK", "ROLLBACK_FAILED", "ROLLBACK_CI_FAILED", "ROLLED_BACK_EDGE_STILL_FAILING")
+            )
+            if was_rolled_back:
+                # Preserve any disk rollback metadata written by _mark_rolled_back_void_candidates
+                disk_rb_fields: Dict[str, Any] = {}
+                if queue_file.is_file():
+                    try:
+                        for raw_dl in queue_file.read_text(encoding="utf-8").splitlines():
+                            dl_s = raw_dl.strip()
+                            if not dl_s:
+                                continue
+                            d_obj = json.loads(dl_s)
+                            if (
+                                isinstance(d_obj, dict)
+                                and str(d_obj.get("property_id") or d_obj.get("tenant") or "").strip().lower() == t_id
+                                and str(d_obj.get("slug") or "").strip().lower() == c_slug
+                                and str(d_obj.get("status") or "").strip().upper() == "ROLLED_BACK"
+                            ):
+                                disk_rb_fields = d_obj
+                                break
+                    except Exception:
+                        pass
+                item["status"] = "ROLLED_BACK"
+                item.pop("built_at", None)
+                item["rolled_back_at"] = (
+                    disk_rb_fields.get("rolled_back_at")
+                    or (rb_info.get("timestamp") if isinstance(rb_info, dict) else None)
+                    or datetime.now(timezone.utc).isoformat()
+                )
+                item["failed_sha"] = (
+                    disk_rb_fields.get("failed_sha")
+                    or (rb_info.get("failed_sha") if isinstance(rb_info, dict) else None)
+                    or str(g_dict.get("head_sha") or "")
+                )
+                item["rollback_reason"] = (
+                    disk_rb_fields.get("rollback_reason")
+                    or (rb_info.get("reason") if isinstance(rb_info, dict) else None)
+                    or str(g_dict.get("error") or g_status or rb_status or "auto_rollback")
+                )
+                if "rollback_count" in disk_rb_fields:
+                    item["rollback_count"] = disk_rb_fields["rollback_count"]
+                else:
+                    item["rollback_count"] = int(item.get("rollback_count", 0) or 0) + 1
+                queue_mutated = True
+
+                # Remove rolled-back record from today's build ledger & built_pages so it is NOT push-indexed
+                if build_rec in built_today_list:
+                    built_today_list.remove(build_rec)
+                if build_rec in built_pages:
+                    built_pages.remove(build_rec)
+                existing_slugs_by_tenant.get(t_id, set()).discard(c_slug)
 
     push_indexing_results: Dict[str, Any] = {}
     if dispatch_push_indexing and not dry_run and "PYTEST_CURRENT_TEST" not in os.environ:
@@ -2317,6 +2444,8 @@ def execute_autonomous_daily_trend_page_build(
         "reconciled_already_built_count": reconciled_already_built_count,
         "reconciled_cannibalizing_count": reconciled_cannibalizing_count,
         "reconciled_stale_ledger_count": reconciled_stale_ledger_count,
+        "reconciled_stranded_built_count": reconciled_stranded_built_count,
+        "rollback_exhausted_count": rollback_exhausted_count,
         "aborted_candidates": aborted_candidates,
         "gitops_results": gitops_results,
         "push_indexing_results": push_indexing_results,

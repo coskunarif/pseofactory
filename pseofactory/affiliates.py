@@ -3771,6 +3771,135 @@ def is_restricted_public_service_slug(slug: str, query: str = "") -> bool:
     return any(tok in combined for tok in PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS)
 
 
+def _strip_balanced_html_blocks(
+    html_text: str,
+    tag_name: str,
+    open_tag_regex: str,
+    replacement: str = "",
+    replace_first_only: bool = False,
+) -> str:
+    """
+    Removes or replaces balanced `<tag_name ...>...</tag_name>` blocks matching `open_tag_regex`
+    without altering any bytes outside the matched elements (preserving HTML byte convergence).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not html_text:
+        return html_text
+    open_pat = re.compile(open_tag_regex, flags=re.IGNORECASE | re.DOTALL)
+    any_tag_pat = re.compile(
+        rf"<(/?){re.escape(tag_name)}\b[^>]*>",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    out: List[str] = []
+    pos = 0
+    replaced_count = 0
+    while pos < len(html_text):
+        m_open = open_pat.search(html_text, pos)
+        if m_open is None:
+            out.append(html_text[pos:])
+            break
+        start_idx = m_open.start()
+        out.append(html_text[pos:start_idx])
+        depth = 1
+        scan_pos = m_open.end()
+        end_idx = m_open.end()
+        for m_tok in any_tag_pat.finditer(html_text, scan_pos):
+            is_close = bool(m_tok.group(1))
+            if is_close:
+                depth -= 1
+                if depth == 0:
+                    end_idx = m_tok.end()
+                    break
+            else:
+                if not m_tok.group(0).rstrip().endswith("/>"):
+                    depth += 1
+        if replacement and (not replace_first_only or replaced_count == 0):
+            out.append(replacement)
+            replaced_count += 1
+        pos = end_idx
+    return "".join(out)
+
+
+def strip_commercial_affiliate_blocks_for_restricted_ymyl(html_content: str) -> str:
+    """
+    Deterministically strips all commercial affiliate /r/ links, inline CTAs, comparison
+    table CTA bars, overlay partner offers, and commercial partner card sections from a
+    restricted public-service YMYL page while preserving or inserting the compliant
+    Title IV Public Service Protection guardrail section.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(html_content, str) or not html_content:
+        return html_content
+
+    guardrail_section = (
+        '<section class="refinance-partner-section ymyl-public-service-guardrail" '
+        'data-commercial-offers="none" data-restricted-public-service="true" '
+        'data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+        '      <div class="partner-card" style="border: 1px solid var(--border-subtle);">\n'
+        '        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Title IV Public Service Protection</span>\n'
+        '        <h3 class="partner-title" style="margin-top: 0.25rem;">Title IV Loan Preservation</h3>\n'
+        '        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">Direct consolidation and federal repayment plans maintain statutory interest subsidies and public service debt relief eligibility under 34 CFR Part 685.</p>\n'
+        '        <span class="partner-status-note" style="display: inline-block; font-size: 0.8125rem; color: var(--text-muted);">\n'
+        '          Commercial private lender offers are strictly suppressed on restricted public-service and statutory hardship pages.\n'
+        '        </span>\n'
+        '      </div>\n'
+        '    </section>'
+    )
+
+    updated = html_content
+    # 1. Remove commercial inline calculator CTAs and comparison table CTA bars
+    updated = _strip_balanced_html_blocks(
+        updated,
+        "div",
+        r'<div\b[^>]*class=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>',
+        replacement="",
+    )
+    updated = _strip_balanced_html_blocks(
+        updated,
+        "div",
+        r'<div\b[^>]*class=["\'][^"\']*\bcomparison-table-cta-bar\b[^"\']*["\'][^>]*>',
+        replacement="",
+    )
+    # 2. Remove commercial overlay partner offers
+    updated = _strip_balanced_html_blocks(
+        updated,
+        "section",
+        r'<section\b[^>]*class=["\'][^"\']*\boverlay-partner-offer\b[^"\']*["\'][^>]*>',
+        replacement="",
+    )
+    # 3. Replace commercial partner sections with the durable non-overlay guardrail section
+    has_durable_guardrail = bool(
+        re.search(
+            r'<section\b[^>]*class=["\'][^"\']*\brefinance-partner-section\b[^"\']*\bymyl-public-service-guardrail\b[^"\']*["\']',
+            updated,
+            flags=re.IGNORECASE,
+        )
+    )
+    updated = _strip_balanced_html_blocks(
+        updated,
+        "section",
+        r'<section\b(?![^>]*ymyl-public-service-guardrail)[^>]*class=["\'][^"\']*\b(?:refinance-partner-section|partners-section|affiliates-section|affiliate-section)\b[^"\']*["\'][^>]*>',
+        replacement="" if has_durable_guardrail else guardrail_section,
+        replace_first_only=True,
+    )
+    if (
+        not has_durable_guardrail
+        and 'class="refinance-partner-section ymyl-public-service-guardrail"' not in updated
+        and 'data-restricted-public-service="true"' not in updated
+        and "</main>" in updated
+    ):
+        updated = updated.replace("</main>", f"\n    {guardrail_section}\n</main>", 1)
+    # 4. Final fail-closed safety net: strip any stray <a href="/r/...">...</a> links
+    if "/r/" in updated:
+        updated = re.sub(
+            r'<a\s+[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*>.*?</a>',
+            "",
+            updated,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    return updated
+
+
 def _extract_partner_vault_status(
     partner_key: str,
     vault_overrides: Optional[Dict[str, Any]],
@@ -8662,7 +8791,8 @@ def classify_asset_archetype_and_intent(
 
     restricted_ps = False
     if prop == "prexvo":
-        restricted_ps = is_restricted_public_service_slug(s_norm, q_norm)
+        is_concrete_slug = bool(s_norm and s_norm not in ("tool", "index"))
+        restricted_ps = is_restricted_public_service_slug(s_norm, "" if is_concrete_slug else q_norm)
 
     if prop == "prexvo":
         vertical_family = "public_service_title_iv_ymyl" if restricted_ps else "student_loan_refinancing"
@@ -9965,12 +10095,27 @@ def reposition_affiliate_placements_from_gsc_signals(
         html_content=html_content,
     )
 
-    if roster["restricted_public_service"]:
-        return html_content, {
+    is_concrete_page_slug = bool(page_slug and page_slug not in ("tool", "index"))
+    is_restricted_page = bool(
+        roster["restricted_public_service"]
+        or (
+            prop == "prexvo"
+            and (not is_concrete_page_slug or is_restricted_public_service_slug(page_slug))
+            and (
+                'data-restricted-public-service="true"' in html_content
+                or 'data-commercial-offers="none"' in html_content
+                or 'data-commercial-offers="suppressed-default"' in html_content
+            )
+        )
+    )
+    if is_restricted_page:
+        cleaned_html = strip_commercial_affiliate_blocks_for_restricted_ymyl(html_content)
+        return cleaned_html, {
             "slug": page_slug,
             "property_id": prop,
             "restricted_public_service": True,
-            "repositioned": False,
+            "callout_normalized": True,
+            "repositioned": cleaned_html != html_content,
             "before_primary_partner": before_primary,
             "after_primary_partner": "",
             "before_slots": before_slots,
@@ -10451,10 +10596,15 @@ def run_gsc_affiliate_placement_feedback_pass(
         )
     d_dir = Path(dist_dir).resolve() if dist_dir is not None else (r_root / "dist")
 
+    multidim_telemetry: Dict[str, Any] = {}
+    existing_persisted_gsc: Dict[str, Dict[str, Any]] = {}
     if gsc_rows is None:
+        existing_persisted_gsc = load_persisted_gsc_placement_metrics_by_slug(r_root / ".agy", prop)
         try:
             from pseofactory.seo_growth_loops import load_consolidated_gsc_query_rows
             gsc_bundle = load_consolidated_gsc_query_rows(prop, repo_root=r_root, live_gsc=False)
+            if isinstance(gsc_bundle.get("multidimensional_telemetry"), dict):
+                multidim_telemetry = dict(gsc_bundle.get("multidimensional_telemetry") or {})
             raw_rows = list(
                 gsc_bundle.get("current_rows")
                 or gsc_bundle.get("snapshot_latest_rows")
@@ -10464,6 +10614,8 @@ def run_gsc_affiliate_placement_feedback_pass(
             )
             if not raw_rows:
                 gsc_bundle_default = load_consolidated_gsc_query_rows(prop, live_gsc=False)
+                if not multidim_telemetry and isinstance(gsc_bundle_default.get("multidimensional_telemetry"), dict):
+                    multidim_telemetry = dict(gsc_bundle_default.get("multidimensional_telemetry") or {})
                 raw_rows = list(
                     gsc_bundle_default.get("current_rows")
                     or gsc_bundle_default.get("snapshot_latest_rows")
@@ -10553,6 +10705,104 @@ def run_gsc_affiliate_placement_feedback_pass(
         b.pop("_top_query_impr", None)
         b.pop("_mob_weighted_ctr", None)
         b.pop("_desk_weighted_ctr", None)
+
+    if gsc_rows is None:
+        # Hydrate slugs missing from query rows using locally persisted GSC multidimensional
+        # telemetry (.agy/gsc_lifecycle_telemetry.json) so offline/worktree passes preserve real
+        # page-level impressions, device splits, and top queries without requiring statutory.db.
+        if multidim_telemetry:
+            top_query_by_slug: Dict[str, Tuple[int, str]] = {}
+            qpds = multidim_telemetry.get("query_page_device_splits")
+            if isinstance(qpds, dict):
+                for qp_key, dev_map in qpds.items():
+                    if "::" not in str(qp_key) or not isinstance(dev_map, dict):
+                        continue
+                    p_part, q_part = str(qp_key).split("::", 1)
+                    if "/tools/" not in p_part:
+                        continue
+                    q_slug = p_part.split("/tools/", 1)[1].split("?")[0].strip("/").lower()
+                    if not q_slug:
+                        continue
+                    q_impr = sum(
+                        int(float((dv or {}).get("impressions", 0) or 0))
+                        for dv in dev_map.values()
+                        if isinstance(dv, dict)
+                    )
+                    prev_best = top_query_by_slug.get(q_slug)
+                    if q_part.strip() and (prev_best is None or q_impr > prev_best[0]):
+                        top_query_by_slug[q_slug] = (q_impr, q_part.strip())
+
+            p_windows = multidim_telemetry.get("page_windows_by_path")
+            if isinstance(p_windows, dict):
+                for p_path, w_map in p_windows.items():
+                    if "/tools/" not in str(p_path) or not isinstance(w_map, dict):
+                        continue
+                    w_slug = str(p_path).split("/tools/", 1)[1].split("?")[0].strip("/").lower()
+                    if not w_slug:
+                        continue
+                    win_block = w_map.get("recent_90d") or w_map.get("recent_28d") or {}
+                    rolled = (
+                        win_block.get("rolled_up")
+                        or win_block.get("direct")
+                        or (win_block if isinstance(win_block, dict) else {})
+                    )
+                    if not isinstance(rolled, dict):
+                        continue
+                    w_impr = int(float(rolled.get("impressions", 0) or 0))
+                    w_clks = int(float(rolled.get("clicks", 0) or 0))
+                    w_ctr = float(rolled.get("ctr", 0.0) or 0.0)
+                    w_pos = float(rolled.get("position", 0.0) or 0.0)
+                    if w_impr <= 0:
+                        continue
+                    cur = gsc_by_slug.get(w_slug)
+                    if cur is None or int(cur.get("impressions", 0) or 0) < w_impr:
+                        best_q = (cur or {}).get("query") or (top_query_by_slug.get(w_slug) or (0, ""))[1]
+                        gsc_by_slug[w_slug] = {
+                            "slug": w_slug,
+                            "impressions": w_impr,
+                            "clicks": max(w_clks, int((cur or {}).get("clicks", 0) or 0)),
+                            "ctr": w_ctr if w_impr > 0 else float((cur or {}).get("ctr", 0.0) or 0.0),
+                            "position": w_pos if w_pos > 0.0 else float((cur or {}).get("position", 0.0) or 0.0),
+                            "query": best_q,
+                            "mobile_impressions": int((cur or {}).get("mobile_impressions", 0) or 0),
+                            "desktop_impressions": int((cur or {}).get("desktop_impressions", 0) or 0),
+                            "mobile_ctr": float((cur or {}).get("mobile_ctr", 0.0) or 0.0),
+                            "desktop_ctr": float((cur or {}).get("desktop_ctr", 0.0) or 0.0),
+                            "mobile_ctr_gap": float((cur or {}).get("mobile_ctr_gap", 0.0) or 0.0),
+                            "device_focus": str((cur or {}).get("device_focus") or "BALANCED"),
+                            "search_appearances": list((cur or {}).get("search_appearances") or []),
+                        }
+
+            p_dev = multidim_telemetry.get("page_device_diagnostics")
+            if isinstance(p_dev, dict):
+                for p_path, d_info in p_dev.items():
+                    if "/tools/" not in str(p_path) or not isinstance(d_info, dict):
+                        continue
+                    d_slug = str(p_path).split("/tools/", 1)[1].split("?")[0].strip("/").lower()
+                    if not d_slug or d_slug not in gsc_by_slug:
+                        continue
+                    cur = gsc_by_slug[d_slug]
+                    if int(cur.get("mobile_impressions", 0) or 0) == 0 and int(cur.get("desktop_impressions", 0) or 0) == 0:
+                        m_im = int(float(d_info.get("mobile_impressions", 0) or 0))
+                        d_im = int(float(d_info.get("desktop_impressions", 0) or 0))
+                        cur["mobile_impressions"] = m_im
+                        cur["desktop_impressions"] = d_im
+                        cur["mobile_ctr"] = float(d_info.get("mobile_ctr", 0.0) or 0.0)
+                        cur["desktop_ctr"] = float(d_info.get("desktop_ctr", 0.0) or 0.0)
+                        cur["mobile_ctr_gap"] = float(d_info.get("mobile_ctr_gap", 0.0) or 0.0)
+                        if d_info.get("device_focus"):
+                            cur["device_focus"] = str(d_info["device_focus"])
+
+        # Preserve prior persisted slug metrics for any slug still absent after offline hydration
+        for p_slug, p_metrics in existing_persisted_gsc.items():
+            if not isinstance(p_metrics, dict):
+                continue
+            p_impr = int(p_metrics.get("impressions", 0) or 0)
+            if p_impr <= 0:
+                continue
+            cur = gsc_by_slug.get(p_slug)
+            if cur is None or int(cur.get("impressions", 0) or 0) == 0:
+                gsc_by_slug[p_slug] = dict(p_metrics)
 
     tools_dir = d_dir / "tools"
     page_reports: List[Dict[str, Any]] = []

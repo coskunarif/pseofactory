@@ -1379,7 +1379,7 @@ class PushIndexer:
         base_dir: Optional[Path] = None,
         dist_dir: Optional[Path] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        indexmysite_project_id: str = DEFAULT_INDEXMYSITE_PROJECT_ID,
+        indexmysite_project_id: Optional[str] = None,
         ledger_path: Optional[Path] = None,
         audit_log_path: Optional[Path] = None,
         rollover_queue_path: Optional[Path] = None,
@@ -1441,15 +1441,29 @@ class PushIndexer:
             and not os.environ.get("PYTEST_CURRENT_TEST")
             and "/home/ubuntuadmin/projects/" in str(self.dist_dir)
         ):
+            profithelm_v2_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
             if "profithelm" in self.domain.lower():
-                self.indexnow_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+                self.indexnow_key = profithelm_v2_key
             elif self.dist_dir.is_dir():
                 for cand_txt in sorted(self.dist_dir.glob("*.txt")):
-                    if len(cand_txt.stem) == 32 and cand_txt.stem != DEFAULT_INDEXNOW_KEY:
-                        self.indexnow_key = cand_txt.stem
+                    stem = cand_txt.stem.strip()
+                    if (
+                        len(stem) == 32
+                        and stem != DEFAULT_INDEXNOW_KEY
+                        and stem != profithelm_v2_key
+                        and re.fullmatch(r"[0-9a-fA-F]{32}", stem)
+                    ):
+                        self.indexnow_key = stem
                         break
         self.tools = list(tools) if tools else []
-        self.indexmysite_project_id = indexmysite_project_id
+        inferred_tenant = (tenant_id or (self.domain.split(".")[0] if self.domain else "profithelm")).lower()
+        self.tenant_id = inferred_tenant
+        if indexmysite_project_id is not None:
+            self.indexmysite_project_id = indexmysite_project_id
+        elif inferred_tenant == "profithelm":
+            self.indexmysite_project_id = DEFAULT_INDEXMYSITE_PROJECT_ID
+        else:
+            self.indexmysite_project_id = inferred_tenant
         self.ledger_path = Path(ledger_path) if ledger_path else (self.base_dir / ".agy" / "index_push_ledger.json")
         self.audit_log_path = Path(audit_log_path) if audit_log_path else (self.base_dir / ".agy" / "indexing_audit_log.json")
         self.rollover_queue_path = Path(rollover_queue_path) if rollover_queue_path else (self.base_dir / ".agy" / "gsc_rollover_queue.json")
@@ -1467,8 +1481,6 @@ class PushIndexer:
         )
         self.child_sitemap_ledger = ChildSitemapPushLedger(ledger_path=self.child_sitemap_ledger_path)
         self.section_rules = dict(section_rules) if isinstance(section_rules, dict) else None
-        inferred_tenant = (tenant_id or (self.domain.split(".")[0] if self.domain else "profithelm")).lower()
-        self.tenant_id = inferred_tenant
         self.gsc_site = f"sc-domain:{self.domain}"
 
     def preflight_airlock(
@@ -2438,8 +2450,58 @@ class PushIndexer:
         except Exception as e:
             return {"status": "ERROR", "success": False, "note": str(e)}
 
+    def _resolve_deployed_indexnow_key(self) -> str:
+        """
+        Resolves the tenant's actual deployed dist/<32-hex>.txt IndexNow key so
+        fast-index / indexnow never falls back to a stale global ~/.indexnow key.
+        Zero em-dashes. Zero en-dashes.
+        """
+        profithelm_v2_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+        is_profithelm = "profithelm" in (self.tenant_id or self.domain or "").lower()
+        if self.dist_dir and self.dist_dir.is_dir():
+            if (
+                self.indexnow_key
+                and self.indexnow_key != DEFAULT_INDEXNOW_KEY
+                and (is_profithelm or self.indexnow_key != profithelm_v2_key)
+                and re.fullmatch(r"[0-9a-fA-F]{32}", self.indexnow_key)
+            ):
+                own_file = self.dist_dir / f"{self.indexnow_key}.txt"
+                if own_file.is_file():
+                    try:
+                        if own_file.read_text(encoding="utf-8", errors="ignore").strip() == self.indexnow_key:
+                            return self.indexnow_key
+                    except Exception:
+                        pass
+            tenant_keys: List[Tuple[float, str]] = []
+            fallback_keys: List[Tuple[float, str]] = []
+            for cand_txt in sorted(self.dist_dir.glob("*.txt")):
+                stem = cand_txt.stem.strip()
+                if not re.fullmatch(r"[0-9a-fA-F]{32}", stem):
+                    continue
+                try:
+                    content = cand_txt.read_text(encoding="utf-8", errors="ignore").strip()
+                    mtime = cand_txt.stat().st_mtime
+                except Exception:
+                    continue
+                if content != stem:
+                    continue
+                if stem == DEFAULT_INDEXNOW_KEY or (not is_profithelm and stem == profithelm_v2_key):
+                    fallback_keys.append((mtime, stem))
+                else:
+                    tenant_keys.append((mtime, stem))
+            if tenant_keys:
+                tenant_keys.sort(key=lambda x: x[0], reverse=True)
+                return tenant_keys[0][1]
+            if fallback_keys:
+                fallback_keys.sort(key=lambda x: x[0], reverse=True)
+                return fallback_keys[0][1]
+        return self.indexnow_key
+
     def submit_fast_index(self, urls: Optional[List[str]] = None, dry_run: bool = True) -> Dict[str, Any]:
         self.ensure_indexnow_key_file()
+        resolved_indexnow_key = self._resolve_deployed_indexnow_key()
+        if resolved_indexnow_key:
+            self.indexnow_key = resolved_indexnow_key
         if not urls:
             urls = [f"{self.canonical_base}/"] + [f"{self.canonical_base}/tools/{t['slug']}/" for t in self.tools]
 
@@ -2450,6 +2512,7 @@ class PushIndexer:
                 return {
                     "engine": "fast-index",
                     "domain": self.domain,
+                    "indexnow_key": resolved_indexnow_key,
                     "command": "",
                     "status": "QUARANTINED_ALL",
                     "actions": [],
@@ -2484,7 +2547,11 @@ class PushIndexer:
 
         if Path(fast_index_bin).exists() or shutil.which(fast_index_bin):
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+                run_env = os.environ.copy()
+                if resolved_indexnow_key:
+                    run_env["INDEXNOW_KEY"] = resolved_indexnow_key
+                    run_env["SEO_INDEXNOW_KEY"] = resolved_indexnow_key
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12, env=run_env)
                 if proc.stdout:
                     try:
                         s_idx = proc.stdout.find("{")
@@ -2503,6 +2570,7 @@ class PushIndexer:
         return {
             "engine": "fast-index",
             "domain": self.domain,
+            "indexnow_key": resolved_indexnow_key,
             "command": command_str,
             "status": status,
             "actions": parsed_actions if parsed_actions else ("Dry-run verified" if dry_run else "Dispatched"),
@@ -2603,6 +2671,54 @@ class PushIndexer:
             }
 
     GSC_DAILY_INSPECTION_QUOTA = 180
+    GSC_PER_TENANT_INDEXING_FLOOR = 40
+
+    def _discover_active_quota_tenants(self) -> set:
+        """
+        Dynamically discovers active tenants from CANONICAL_TENANT_DECLARATIONS /
+        SPAWNED_TENANT_DECLARATIONS (plus .pseofactory.json manifests under workspace_root
+        when operating in the live workspace) without hardcoding a fixed 4-tenant tuple.
+        Zero em-dashes. Zero en-dashes.
+        """
+        tenants: set = set()
+        try:
+            from pseofactory.tenant_facts import (
+                CANONICAL_TENANT_DECLARATIONS,
+                SPAWNED_TENANT_DECLARATIONS,
+            )
+            for pid in (*CANONICAL_TENANT_DECLARATIONS.keys(), *SPAWNED_TENANT_DECLARATIONS.keys()):
+                p_clean = str(pid or "").strip().lower()
+                if p_clean:
+                    tenants.add(p_clean)
+        except Exception:
+            pass
+        try:
+            repo_root = Path(getattr(self, "repo_root", self.dist_dir.parent)).resolve()
+            ws_root = Path("/home/ubuntuadmin/projects").resolve()
+            if (
+                "PYTEST_CURRENT_TEST" not in os.environ
+                and (repo_root == ws_root or ws_root in repo_root.parents)
+                and ws_root.is_dir()
+            ):
+                for entry in sorted(ws_root.iterdir()):
+                    if not entry.is_dir() or entry.name.startswith("."):
+                        continue
+                    for cfg_name in (".pseofactory.json", "factory.json"):
+                        cfg = entry / cfg_name
+                        if cfg.is_file():
+                            try:
+                                cfg_data = json.loads(cfg.read_text(encoding="utf-8"))
+                                pid_m = str(cfg_data.get("property_id") or entry.name).strip().lower()
+                                if pid_m == "profithelm-platform":
+                                    pid_m = "profithelm"
+                                if pid_m:
+                                    tenants.add(pid_m)
+                            except Exception:
+                                pass
+                            break
+        except Exception:
+            pass
+        return tenants
 
     def _get_gsc_quota_governor_path(self) -> Path:
         explicit_gov = getattr(self, "quota_governor_path", None)
@@ -2629,6 +2745,9 @@ class PushIndexer:
             "indexing_used": 0,
             "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
             "indexing_quota_limit": GOOGLE_INDEXING_DAILY_QUOTA,
+            "indexing_by_tenant": {},
+            "inspection_by_tenant": {},
+            "per_tenant_indexing_floor": self.GSC_PER_TENANT_INDEXING_FLOOR,
         }
         try:
             if gov_path.is_file():
@@ -2653,19 +2772,35 @@ class PushIndexer:
             pass
         return state
 
-    def check_and_consume_gsc_quota(self, units: int = 1, bucket: str = "inspection") -> Dict[str, Any]:
+    def check_and_consume_gsc_quota(
+        self,
+        units: int = 1,
+        bucket: str = "inspection",
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Token-bucket daily GSC quota governor preventing HTTP 429 exhaustion
-        across URL Inspection and Indexing API dispatches.
+        Fair per-tenant token-bucket daily GSC quota governor preventing HTTP 429
+        exhaustion and cross-tenant starvation across URL Inspection and Indexing API dispatches.
+        For the 200/day indexing bucket, guarantees each active tenant a daily floor
+        (default 40/tenant/day) plus access to the shared spillover pool so earlier tenants
+        cannot starve later tenants (such as lienbond) to 0.
         """
         gov_path = self._get_gsc_quota_governor_path()
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        eff_tenant = (
+            str(tenant_id or getattr(self, "tenant_id", "") or (self.domain.split(".")[0] if getattr(self, "domain", "") else "profithelm"))
+            .strip()
+            .lower()
+        )
         state: Dict[str, Any] = {
             "date": today_str,
             "inspection_used": 0,
             "indexing_used": 0,
             "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
             "indexing_quota_limit": GOOGLE_INDEXING_DAILY_QUOTA,
+            "indexing_by_tenant": {},
+            "inspection_by_tenant": {},
+            "per_tenant_indexing_floor": self.GSC_PER_TENANT_INDEXING_FLOOR,
         }
         try:
             if gov_path.is_file():
@@ -2675,15 +2810,58 @@ class PushIndexer:
         except Exception:
             pass
 
+        if not isinstance(state.get("indexing_by_tenant"), dict):
+            state["indexing_by_tenant"] = {}
+        if not isinstance(state.get("inspection_by_tenant"), dict):
+            state["inspection_by_tenant"] = {}
+
         key = "inspection_used" if bucket == "inspection" else "indexing_used"
+        by_tenant_key = "inspection_by_tenant" if bucket == "inspection" else "indexing_by_tenant"
+        by_tenant: Dict[str, int] = {
+            str(k).strip().lower(): int(v or 0)
+            for k, v in state[by_tenant_key].items()
+        }
         limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
         used = int(state.get(key, 0) or 0)
         if state.get("quota_exhausted") and state.get("exhausted_bucket") == bucket:
             used = max(used, limit)
             state[key] = used
-        allowed = (used + max(0, units)) <= limit
-        if allowed and units > 0:
-            state[key] = used + units
+
+        req_units = max(0, int(units))
+        global_remaining = max(0, limit - used)
+        tenant_used = int(by_tenant.get(eff_tenant, 0))
+        tenant_floor = 0
+        reserved_for_others = 0
+        if bucket == "indexing":
+            active_tenants = self._discover_active_quota_tenants() | set(by_tenant.keys())
+            if eff_tenant:
+                active_tenants.add(eff_tenant)
+            tenant_floor = min(
+                int(state.get("per_tenant_indexing_floor") or self.GSC_PER_TENANT_INDEXING_FLOOR),
+                limit // max(1, len(active_tenants)),
+            )
+            reserved_for_others = sum(
+                max(0, tenant_floor - int(by_tenant.get(other_t, 0)))
+                for other_t in active_tenants
+                if other_t != eff_tenant
+            )
+            effective_remaining = max(0, global_remaining - reserved_for_others)
+            allowed = req_units <= effective_remaining
+        else:
+            effective_remaining = global_remaining
+            allowed = (used + req_units) <= limit
+
+        if allowed and req_units > 0:
+            state[key] = used + req_units
+            by_tenant[eff_tenant] = tenant_used + req_units
+            state[by_tenant_key] = by_tenant
+            tenant_used = by_tenant[eff_tenant]
+            global_remaining = max(0, limit - int(state[key]))
+            effective_remaining = (
+                max(0, global_remaining - reserved_for_others)
+                if bucket == "indexing"
+                else global_remaining
+            )
             try:
                 gov_path.parent.mkdir(parents=True, exist_ok=True)
                 gov_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -2693,8 +2871,13 @@ class PushIndexer:
             "allowed": allowed,
             "date": today_str,
             "bucket": bucket,
+            "tenant_id": eff_tenant,
             "used": int(state.get(key, 0) or 0),
-            "remaining": max(0, limit - int(state.get(key, 0) or 0)),
+            "tenant_used": tenant_used,
+            "tenant_floor": tenant_floor,
+            "reserved_for_others": reserved_for_others,
+            "global_remaining": global_remaining,
+            "remaining": effective_remaining,
             "limit": limit,
         }
 
@@ -2850,21 +3033,11 @@ class PushIndexer:
         unindexed_count = len(unindexed_urls)
         indexed_ratio = round(indexed_count / float(inspected_count), 4) if inspected_count > 0 else 1.0
 
-        # 3. Check quota governor state without consuming tokens
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        indexing_used = 0
-        inspection_used = 0
-        try:
-            gov_path = self._get_gsc_quota_governor_path()
-            if gov_path.is_file():
-                loaded_gov = json.loads(gov_path.read_text(encoding="utf-8"))
-                if isinstance(loaded_gov, dict) and loaded_gov.get("date") == today_str:
-                    indexing_used = int(loaded_gov.get("indexing_used", 0) or 0)
-                    inspection_used = int(loaded_gov.get("inspection_used", 0) or 0)
-        except Exception:
-            pass
-        remaining_indexing_quota = max(0, GOOGLE_INDEXING_DAILY_QUOTA - indexing_used)
-        remaining_inspection_quota = max(0, self.GSC_DAILY_INSPECTION_QUOTA - inspection_used)
+        # 3. Check fair per-tenant quota governor state without consuming tokens
+        idx_q = self.check_and_consume_gsc_quota(units=0, bucket="indexing", tenant_id=eff_tenant)
+        insp_q = self.check_and_consume_gsc_quota(units=0, bucket="inspection", tenant_id=eff_tenant)
+        remaining_indexing_quota = int(idx_q.get("remaining", 0) or 0)
+        remaining_inspection_quota = int(insp_q.get("remaining", 0) or 0)
 
         # 4. Check algorithmic ceiling dampening status when outside pytest
         ceiling_dampened = False
@@ -3041,30 +3214,55 @@ class PushIndexer:
             pass
         boost_set = {str(b).strip().rstrip("/") for b in effective_boosts if b}
 
+        governance_paths = frozenset(
+            {
+                "/methodology",
+                "/disclaimers",
+                "/privacy",
+                "/privacy-policy",
+                "/about",
+                "/terms",
+                "/terms-of-service",
+                "/contact",
+                "/editorial-policy",
+            }
+        )
+
         def _priority_tier(u: str) -> int:
             raw = str(u or "").strip()
             path = urllib.parse.urlparse(raw).path.rstrip("/")
+            path_low = path.lower()
             if not path or path == "":
                 return 0
-            if unindexed_gsc_paths and (raw.rstrip("/") in unindexed_gsc_paths or path in unindexed_gsc_paths):
-                return 1
-            if path in ("/tools", "/guides", "/comparisons", "/glossary"):
-                return 1
-            if boost_set and (raw.rstrip("/") in boost_set or path in boost_set):
-                return 1
-            if striking_rescue_paths and (raw.rstrip("/") in striking_rescue_paths or path in striking_rescue_paths):
-                return 1
             if demoted_bleeder_paths and (raw.rstrip("/") in demoted_bleeder_paths or path in demoted_bleeder_paths):
-                return 7
-            if path.startswith("/tools/"):
-                return 2 if len(path.strip("/").split("/")) <= 2 else 3
-            if path.startswith("/comparisons/") or "-vs-" in path:
-                return 3
-            if path.startswith("/guides/"):
+                return 9
+            is_governance = path_low in governance_paths or any(
+                path_low.startswith(f"{gp}/") for gp in governance_paths
+            )
+            is_unindexed = bool(
+                unindexed_gsc_paths and (raw.rstrip("/") in unindexed_gsc_paths or path in unindexed_gsc_paths)
+            )
+            if is_governance:
+                return 8
+            if is_unindexed and path_low.startswith("/tools/"):
+                return 1
+            if path_low in ("/tools", "/guides", "/comparisons", "/glossary"):
+                return 2
+            if boost_set and (raw.rstrip("/") in boost_set or path in boost_set):
+                return 2
+            if striking_rescue_paths and (raw.rstrip("/") in striking_rescue_paths or path in striking_rescue_paths):
+                return 2
+            if is_unindexed:
+                return 2
+            if path_low.startswith("/tools/"):
+                return 3 if len(path.strip("/").split("/")) <= 2 else 4
+            if path_low.startswith("/comparisons/") or "-vs-" in path_low:
                 return 4
-            if path.startswith("/scenarios/"):
+            if path_low.startswith("/guides/"):
                 return 5
-            return 6
+            if path_low.startswith("/scenarios/"):
+                return 6
+            return 7
 
         return sorted(list(urls or []), key=_priority_tier)
 
@@ -4229,7 +4427,11 @@ class PushIndexer:
         hubs_only: bool = True,
         commercial: bool = False,
     ) -> Dict[str, Any]:
-        target_project_id = project_id or self.indexmysite_project_id
+        target_project_id = (
+            project_id
+            or self.indexmysite_project_id
+            or (DEFAULT_INDEXMYSITE_PROJECT_ID if self.tenant_id == "profithelm" else self.tenant_id)
+        )
         if not urls:
             urls = [f"{self.canonical_base}/"] + [f"{self.canonical_base}/tools/{t['slug']}/" for t in self.tools]
 

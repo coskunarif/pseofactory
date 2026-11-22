@@ -423,6 +423,7 @@ class DailyIndexingInspector:
         drop_threshold: float = 0.15,
         min_impressions_floor: float = 20.0,
         daily_series: Optional[List[Union[GSCDailyMetricRecord, Dict[str, Any]]]] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         """
         Audits search traffic drops by computing 7-day and 28-day rolling averages (RMA_7 / RMA_28)
@@ -433,11 +434,14 @@ class DailyIndexingInspector:
             gsc_records = daily_series
         if not gsc_records and "PYTEST_CURRENT_TEST" not in os.environ:
             try:
+                from pseofactory.maintenance import _is_live_repo_mutation_blocked
                 from pseofactory.seo_growth_loops import harvest_and_sync_gsc_daily_timeline
+                from pseofactory.trends.db import DEFAULT_DB_PATH
+                allow_persist = (not dry_run) and not _is_live_repo_mutation_blocked(DEFAULT_DB_PATH)
                 gsc_records = harvest_and_sync_gsc_daily_timeline(
                     property_id=self.tenant_id,
                     repo_root=self.base_dir,
-                    persist=False,
+                    persist=allow_persist,
                 )
             except Exception as exc:
                 harvest_error = str(exc)
@@ -1154,7 +1158,7 @@ class DailyIndexingInspector:
         rollover_report = self.audit_gsc_rollover_queue()
         quarantine_report = self.audit_airlock_quarantine()
         velocity_report = self.audit_velocity_stagnation()
-        traffic_report = self.audit_search_traffic(gsc_records=gsc_records)
+        traffic_report = self.audit_search_traffic(gsc_records=gsc_records, dry_run=dry_run)
         child_sitemaps_report = self.audit_child_sitemaps_and_section_coverage(coverage_records=coverage_records)
 
         # Overall status determination
@@ -1289,7 +1293,8 @@ class DailyIndexingInspector:
                             skip_recompile=only_rollover,
                         )
 
-                # If child sitemaps and feedback loop pass in live mode, reconcile rollover URLs covered by child sitemaps
+                # Only drain rollover URLs that were actually ACCEPTED in push_summary;
+                # NEVER wipe the rollover queue when urls_pushed == 0 or spillover URLs remain.
                 if (
                     not dry_run
                     and (has_pending_rollover or rollover_report.get("quota_exhausted"))
@@ -1298,42 +1303,128 @@ class DailyIndexingInspector:
                     and auto_rem_res.get("status") in ("SUCCESS", "NO_ACTION_REQUIRED", "IDEMPOTENT_NO_OP")
                 ):
                     try:
-                        drained_count = int(rollover_report.get("queue_size", 0) or 0)
-                        loop.indexer.save_gsc_rollover_queue([])
-                        for qp_str in (rollover_report.get("queue_path"), str(self.base_dir / ".agy" / "gsc_rollover_queue.json")):
-                            if qp_str:
-                                qp_obj = Path(qp_str)
-                                if qp_obj.exists():
-                                    try:
-                                        raw_q = json.loads(qp_obj.read_text(encoding="utf-8"))
-                                        if isinstance(raw_q, list):
-                                            rem_q = [u for u in raw_q if not self._url_belongs_to_tenant(str(u))]
-                                            qp_obj.write_text(json.dumps(rem_q, indent=2), encoding="utf-8")
-                                    except Exception:
-                                        pass
-                        self.telemetry_logger.log_event(
-                            TelemetryEvent(
-                                event_type="INDEXING_ROLLOVER_RECONCILED",
-                                tenant_id=self.tenant_id,
-                                error_type="NONE",
-                                error_message=f"Reconciled {drained_count} rollover URLs via verified GSC child sitemaps and multi-engine push",
-                                action_taken="AUTO_REMEDIATED",
+                        push_sum = auto_rem_res.get("push_summary") if isinstance(auto_rem_res.get("push_summary"), dict) else {}
+                        urls_pushed = int(push_sum.get("urls_pushed", 0) or 0)
+                        accepted_norm: set = set()
+                        for direct_u in (push_sum.get("accepted_urls") or []):
+                            if direct_u:
+                                accepted_norm.add(str(direct_u).strip().rstrip("/"))
+                        push_res_blk = push_sum.get("push_results") if isinstance(push_sum.get("push_results"), dict) else {}
+                        candidate_gsc_blocks = [
+                            blk
+                            for blk in (
+                                push_res_blk.get("gsc_indexing"),
+                                push_res_blk.get("google_indexing_api"),
+                                push_sum.get("gsc_indexing"),
+                                push_sum.get("google_indexing_api"),
                             )
-                        )
-                        rollover_report["reconciled_urls_count"] = drained_count
-                        rollover_report["queue_size"] = 0
-                        rollover_report["backlog_exceeded"] = False
-                        rollover_report["quota_exhausted"] = False
-                        rollover_report["status"] = "PASS"
-                        auto_rem_res["rollover_reconciled_count"] = drained_count
-                        if (
-                            quarantine_report.get("status") == "PASS"
-                            and velocity_report.get("status") == "PASS"
-                            and traffic_report.get("status") == "PASS"
-                            and not has_unindexed_gsc
-                        ):
-                            overall_status = "PASS"
-                            report["audit_status"] = "PASS"
+                            if isinstance(blk, dict)
+                        ]
+                        accepted_statuses = ("ACCEPTED", "OK", "SUCCESS", "SUBMITTED")
+                        for gsc_idx_blk in candidate_gsc_blocks:
+                            gsc_res_list = gsc_idx_blk.get("results") or []
+                            saw_notification_entries = False
+                            if gsc_res_list:
+                                for r_item in gsc_res_list:
+                                    if not isinstance(r_item, dict):
+                                        continue
+                                    # 1. Check real dispatch_automated_indexing() nested notifications schema
+                                    notifs = r_item.get("notifications")
+                                    if isinstance(notifs, list) and notifs:
+                                        saw_notification_entries = True
+                                        for n_item in notifs:
+                                            if isinstance(n_item, dict):
+                                                n_st = str(n_item.get("status") or "").strip().upper()
+                                                n_u = str(n_item.get("url") or "").strip().rstrip("/")
+                                                if n_u and n_st in accepted_statuses:
+                                                    accepted_norm.add(n_u)
+                                    # 2. Also support flat {"url": ..., "status": ...} result rows
+                                    r_st = str(r_item.get("status") or "").strip().upper()
+                                    r_u = str(r_item.get("url") or "").strip().rstrip("/")
+                                    if r_u and r_st in accepted_statuses:
+                                        accepted_norm.add(r_u)
+                            if (
+                                not gsc_res_list
+                                or (not saw_notification_entries and not any(isinstance(x, dict) and x.get("url") for x in gsc_res_list))
+                            ) and str(gsc_idx_blk.get("status") or "").strip().upper() in ("ACCEPTED", "OK", "SUCCESS", "DISPATCHED"):
+                                for sub_u in (gsc_idx_blk.get("submitted_urls") or []):
+                                    if sub_u:
+                                        accepted_norm.add(str(sub_u).strip().rstrip("/"))
+
+                        if urls_pushed > 0 and accepted_norm:
+                            current_q = list(loop.indexer.load_gsc_rollover_queue() or [])
+                            remaining_q = [
+                                u for u in current_q
+                                if str(u).strip().rstrip("/") not in accepted_norm
+                            ]
+                            drained_count = max(0, len(current_q) - len(remaining_q))
+                            if drained_count > 0:
+                                loop.indexer.save_gsc_rollover_queue(remaining_q)
+
+                            report_qp_str = rollover_report.get("queue_path")
+                            seen_qps: set = set()
+                            file_remaining_tenant: Optional[int] = None
+                            for qp_str in (report_qp_str, str(self.base_dir / ".agy" / "gsc_rollover_queue.json")):
+                                if not qp_str:
+                                    continue
+                                qp_obj = Path(qp_str).resolve()
+                                if str(qp_obj) in seen_qps or not qp_obj.exists():
+                                    continue
+                                seen_qps.add(str(qp_obj))
+                                try:
+                                    raw_q = json.loads(qp_obj.read_text(encoding="utf-8"))
+                                    if isinstance(raw_q, list):
+                                        tenant_before = [u for u in raw_q if self._url_belongs_to_tenant(str(u))]
+                                        rem_file_q = [
+                                            u for u in raw_q
+                                            if not (
+                                                self._url_belongs_to_tenant(str(u))
+                                                and str(u).strip().rstrip("/") in accepted_norm
+                                            )
+                                        ]
+                                        tenant_after = [u for u in rem_file_q if self._url_belongs_to_tenant(str(u))]
+                                        file_drained = max(0, len(tenant_before) - len(tenant_after))
+                                        drained_count = max(drained_count, file_drained)
+                                        if report_qp_str and qp_obj == Path(report_qp_str).resolve():
+                                            file_remaining_tenant = len(tenant_after)
+                                        if len(rem_file_q) != len(raw_q):
+                                            qp_obj.write_text(json.dumps(rem_file_q, indent=2), encoding="utf-8")
+                                except Exception:
+                                    pass
+                            effective_remaining_count = (
+                                file_remaining_tenant
+                                if file_remaining_tenant is not None
+                                else len(remaining_q)
+                            )
+                            self.telemetry_logger.log_event(
+                                TelemetryEvent(
+                                    event_type="INDEXING_ROLLOVER_RECONCILED",
+                                    tenant_id=self.tenant_id,
+                                    error_type="NONE",
+                                    error_message=(
+                                        f"Drained {drained_count} ACCEPTED rollover URLs; "
+                                        f"{effective_remaining_count} unpushed spillover URLs preserved"
+                                    ),
+                                    action_taken="AUTO_REMEDIATED",
+                                )
+                            )
+                            rollover_report["reconciled_urls_count"] = drained_count
+                            rollover_report["queue_size"] = effective_remaining_count
+                            rollover_report["backlog_exceeded"] = effective_remaining_count > int(
+                                rollover_report.get("backlog_threshold", 50) or 50
+                            )
+                            auto_rem_res["rollover_reconciled_count"] = drained_count
+                            if effective_remaining_count == 0:
+                                rollover_report["quota_exhausted"] = False
+                                rollover_report["status"] = "PASS"
+                                if (
+                                    quarantine_report.get("status") == "PASS"
+                                    and velocity_report.get("status") == "PASS"
+                                    and traffic_report.get("status") == "PASS"
+                                    and not has_unindexed_gsc
+                                ):
+                                    overall_status = "PASS"
+                                    report["audit_status"] = "PASS"
                     except Exception:
                         pass
 

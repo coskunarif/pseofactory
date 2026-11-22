@@ -1585,15 +1585,12 @@ class WorkspacePropertyScanner:
     def __init__(
         self,
         workspace_root: Optional[Union[str, Path]] = None,
-        require_manifest: Optional[bool] = None,
+        require_manifest: bool = True,
     ):
         self.workspace_root = Path(
             workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
         ).resolve()
-        if require_manifest is None:
-            self.require_manifest = (self.workspace_root == Path("/home/ubuntuadmin/projects").resolve())
-        else:
-            self.require_manifest = bool(require_manifest)
+        self.require_manifest = bool(require_manifest)
 
     def _parse_pseofactory_json(self, config_file: Path) -> Optional[PropertyAdapter]:
         try:
@@ -3877,6 +3874,45 @@ class RefactorCascadeEngine:
                 seen_paths.add(rp)
         return deps
 
+    @staticmethod
+    def _is_temp_asset_path(asset_path: Any) -> bool:
+        """Returns True if asset_path points inside /tmp/ or tempfile.gettempdir()."""
+        raw = str(asset_path or "").strip()
+        if not raw:
+            return False
+        tmp_dir = str(Path(tempfile.gettempdir()).resolve())
+        if raw.startswith("/tmp/") or raw == "/tmp" or raw.startswith(tmp_dir + "/") or raw == tmp_dir:
+            return True
+        try:
+            resolved = str(Path(raw).resolve())
+            return (
+                resolved.startswith("/tmp/")
+                or resolved == "/tmp"
+                or resolved.startswith(tmp_dir + "/")
+                or resolved == tmp_dir
+            )
+        except Exception:
+            return False
+
+    def _is_live_dlq_path(self) -> bool:
+        """Returns True when self.dlq_path targets a non-temp live DLQ file."""
+        return not self._is_temp_asset_path(self.dlq_path)
+
+    def _prune_temp_entries_if_live(self, entries: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], bool]:
+        if not self._is_live_dlq_path():
+            return entries, False
+        cleaned = [
+            e for e in entries
+            if not (isinstance(e, dict) and self._is_temp_asset_path(e.get("asset_path")))
+        ]
+        return cleaned, len(cleaned) != len(entries)
+
+    def _write_dlq_entries(self, entries: List[Dict[str, Any]]) -> None:
+        self.dlq_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_dlq = self.dlq_path.with_name(f"{self.dlq_path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:6]}")
+        tmp_dlq.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        os.replace(tmp_dlq, self.dlq_path)
+
     def route_to_dlq(
         self,
         property_id: str,
@@ -3886,9 +3922,10 @@ class RefactorCascadeEngine:
         """
         Routes persistent refactor failures to Dead Letter Queue (DLQ).
         Deduplicates by asset id so repeat drift runs do not append duplicates.
+        Never persists /tmp/ or tempfile.gettempdir() asset paths into a live DLQ,
+        and auto-prunes any existing temp entries on load/save.
         Zero em-dashes. Zero en-dashes.
         """
-        self.dlq_path.parent.mkdir(parents=True, exist_ok=True)
         entries: List[Dict[str, Any]] = []
         if self.dlq_path.is_file():
             try:
@@ -3897,6 +3934,12 @@ class RefactorCascadeEngine:
                     entries = data
             except Exception:
                 entries = []
+
+        entries, pruned = self._prune_temp_entries_if_live(entries)
+        if self._is_live_dlq_path() and self._is_temp_asset_path(record.asset_path):
+            if pruned and self.dlq_path.is_file():
+                self._write_dlq_entries(entries)
+            return
 
         now_iso = datetime.now(timezone.utc).isoformat()
         entry = {
@@ -3932,9 +3975,7 @@ class RefactorCascadeEngine:
             entries.append(entry)
 
         # Atomic DLQ write via .tmp and os.replace
-        tmp_dlq = self.dlq_path.with_name(f"{self.dlq_path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:6]}")
-        tmp_dlq.write_text(json.dumps(entries, indent=2), encoding="utf-8")
-        os.replace(tmp_dlq, self.dlq_path)
+        self._write_dlq_entries(entries)
 
     def get_quarantine_entry(
         self,
@@ -4000,6 +4041,7 @@ class RefactorCascadeEngine:
     def list_dlq(self, property_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Lists entries currently quarantined in the DLQ.
+        Auto-prunes any /tmp/ entries when reading a live DLQ file.
         Zero em-dashes. Zero en-dashes.
         """
         if not self.dlq_path.is_file():
@@ -4008,6 +4050,12 @@ class RefactorCascadeEngine:
             data = json.loads(self.dlq_path.read_text(encoding="utf-8"))
             if not isinstance(data, list):
                 return []
+            data, pruned = self._prune_temp_entries_if_live(data)
+            if pruned:
+                try:
+                    self._write_dlq_entries(data)
+                except Exception:
+                    pass
             if property_id:
                 return [e for e in data if e.get("property_id") == property_id]
             return data
@@ -12135,7 +12183,27 @@ class RetroReflectionEngine:
             return True
         ov_meta_low = str(raw_ov.get("meta_description") or "").lower()
         if ("insolvency" in ov_s_low or "tax-bomb" in ov_s_low) and (
-            "pslf 120 qualifying" in ov_meta_low or "34 cfr 685.219" in ov_meta_low
+            "pslf 120 qualifying" in ov_meta_low
+            or "34 cfr 685.219" in ov_meta_low
+            or bool(raw_ov.get("restricted_public_service"))
+            or "public service loan forgiveness" in q_str
+            or "public service loan forgiveness" in str(raw_ov.get("title_rewrite") or "").lower()
+        ):
+            return True
+        from pseofactory.affiliates import is_restricted_public_service_slug
+        if (
+            str(raw_ov.get("property_id") or raw_ov.get("tenant_id") or "").strip().lower() == "prexvo"
+            and ov_s_low
+            and ov_s_low not in (
+                "disclaimers",
+                "methodology",
+                "pslf-qualifying-payment-simulator",
+                "pslf-buyback-months-reconsideration-student-loan-calculator",
+                "ibr-hardship-cap-calculator",
+                "save-plan-litigation-transition",
+            )
+            and not is_restricted_public_service_slug(ov_s_low)
+            and bool(raw_ov.get("restricted_public_service"))
         ):
             return True
         if "and audit-ready." in ov_body_dump or not qa_str.strip() or not qa_str.strip().endswith(".") or qa_str.strip().endswith(". Verified"):
@@ -12543,15 +12611,27 @@ class RetroReflectionEngine:
                         if ov_reconciled:
                             ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                         if cls._overlay_spec_needs_heal(ov_s, raw_ov):
+                            from pseofactory.affiliates import is_restricted_public_service_slug as _is_restr_slug
+                            heal_query = str(raw_ov.get("query") or ov_s.replace("-", " "))
+                            if (
+                                property_id.lower() == "prexvo"
+                                and not _is_restr_slug(ov_s)
+                                and _is_restr_slug("", heal_query)
+                            ):
+                                heal_query = ov_s.replace("-", " ")
                             healed_ov = compile_remediation_overlay_spec(
                                 {
                                     "slug": ov_s,
                                     "target_url": raw_ov.get("target_url") or f"{canon}/tools/{ov_s}/",
-                                    "query": raw_ov.get("query") or ov_s.replace("-", " "),
+                                    "query": heal_query,
                                     "position": raw_ov.get("baseline_position", 12.0),
                                     "impressions": raw_ov.get("baseline_impressions", 50),
                                 },
                                 tenant_id=property_id,
+                            )
+                            skip_stale_restricted_keys = bool(
+                                raw_ov.get("restricted_public_service")
+                                and not healed_ov.get("restricted_public_service")
                             )
                             for preserve_key in (
                                 "partner_offer",
@@ -12578,6 +12658,13 @@ class RetroReflectionEngine:
                                 "current_impressions",
                                 "impressions_pct_delta",
                             ):
+                                if skip_stale_restricted_keys and preserve_key in (
+                                    "partner_offer",
+                                    "restricted_public_service",
+                                    "commercial_offers_allowed",
+                                    "secondary_title_modifier",
+                                ):
+                                    continue
                                 if preserve_key in raw_ov:
                                     healed_ov[preserve_key] = raw_ov[preserve_key]
                             raw_ov, _ = TruthReconciliationEngine.reconcile_overlay_spec_truth(
@@ -15409,6 +15496,62 @@ class RetroReflectionEngine:
                         reposition_changed = True
                         if "conversion_slots_repositioned" not in repaired:
                             repaired.append("conversion_slots_repositioned")
+                except Exception:
+                    pass
+            if (
+                property_id.lower() == "prexvo"
+                and (
+                    'data-restricted-public-service="true"' in updated_html
+                    or 'data-commercial-offers="none"' in updated_html
+                    or 'data-commercial-offers="suppressed-default"' in updated_html
+                    or "overlay-partner-guardrail" in updated_html
+                )
+            ):
+                try:
+                    from pseofactory.affiliates import (
+                        _strip_balanced_html_blocks,
+                        is_restricted_public_service_slug,
+                        strip_commercial_affiliate_blocks_for_restricted_ymyl,
+                    )
+                    from pseofactory.visual_primitives import RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+                    eff_t_slug = (
+                        "/".join(rel.split("/")[1:-1]).strip().lower()
+                        if is_tool_rel
+                        else ""
+                    )
+                    slug_is_restricted_ymyl = bool(
+                        not eff_t_slug
+                        or is_restricted_public_service_slug(eff_t_slug)
+                        or eff_t_slug in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+                    )
+                    if slug_is_restricted_ymyl:
+                        if "/r/" in updated_html:
+                            stripped_ymyl = strip_commercial_affiliate_blocks_for_restricted_ymyl(updated_html)
+                            if stripped_ymyl != updated_html:
+                                updated_html = stripped_ymyl
+                                reposition_changed = True
+                                if "restricted_ymyl_commercial_links_stripped" not in repaired:
+                                    repaired.append("restricted_ymyl_commercial_links_stripped")
+                    else:
+                        # Non-restricted commercial tool page carrying stale guardrail overlay:
+                        # strip the stale guardrail block so Plane 3 and UI/UX surface audits agree.
+                        healed_comm = _strip_balanced_html_blocks(
+                            updated_html,
+                            "section",
+                            r'<section\b[^>]*class=["\'][^"\']*\boverlay-partner-guardrail\b[^"\']*["\'][^>]*>',
+                            replacement="",
+                        )
+                        healed_comm = _strip_balanced_html_blocks(
+                            healed_comm,
+                            "section",
+                            r'<section\b[^>]*data-restricted-public-service=["\']true["\'][^>]*>',
+                            replacement="",
+                        )
+                        if healed_comm != updated_html:
+                            updated_html = healed_comm
+                            reposition_changed = True
+                            if "stale_ymyl_guardrail_removed" not in repaired:
+                                repaired.append("stale_ymyl_guardrail_removed")
                 except Exception:
                     pass
             needs_callout_check = (
