@@ -2415,9 +2415,19 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
         ["thoropass_audit", "www.thoropass.com", "thoro_hitrust_hero", "hero_callout", "hitrust-certification-cost-calculator"],
       ];
       for (const [partner, host, subid, slot, tool] of grc) {{
-        const res = await ghRedirect.onRequest({{
+        const defaultRes = await ghRedirect.onRequest({{
           request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=" + tool + "&cta_slot=" + slot + "&subid=" + subid),
           env: {{}},
+          params: {{ partner }}
+        }});
+        if (defaultRes.status !== 302) process.exit(10);
+        const defaultLoc = new URL(defaultRes.headers.get("Location"));
+        if (defaultLoc.hostname !== "gainhelm.com") process.exit(11);
+        if (defaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(14);
+
+        const res = await ghRedirect.onRequest({{
+          request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=" + tool + "&cta_slot=" + slot + "&subid=" + subid),
+          env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
           params: {{ partner }}
         }});
         if (res.status !== 302) process.exit(10);

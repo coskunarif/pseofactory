@@ -460,10 +460,17 @@ def test_edge_redirect_workers_preserve_status_block_declined_and_isolate_tenant
       waitUntil: (p) => p,
     }});
 
-    const lbSurety = await lb.onRequest({{
+    const lbSuretyDefault = await lb.onRequest({{
       request: new Request("https://lienbond.com/r/suretybonds-direct?tool=surety-bond"),
       params: {{ partner: "suretybonds-direct" }},
       env: {{ LIENBOND_LEADS: leadsKv, LIENBOND_TELEMETRY_KV: telKv }},
+      waitUntil: (p) => p,
+    }});
+
+    const lbSurety = await lb.onRequest({{
+      request: new Request("https://lienbond.com/r/suretybonds-direct?tool=surety-bond"),
+      params: {{ partner: "suretybonds-direct" }},
+      env: {{ LIENBOND_LEADS: leadsKv, LIENBOND_TELEMETRY_KV: telKv, ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
       waitUntil: (p) => p,
     }});
 
@@ -477,6 +484,8 @@ def test_edge_redirect_workers_preserve_status_block_declined_and_isolate_tenant
       lbNextStatus: lbNext.status,
       lbNextLoc: lbNext.headers.get("Location"),
       lbNextTier: lbNext.headers.get("X-Edge-Contract-Tier"),
+      lbSuretyDefaultLoc: lbSuretyDefault.headers.get("Location"),
+      lbSuretyDefaultTier: lbSuretyDefault.headers.get("X-Edge-Contract-Tier"),
       lbSuretyLoc: lbSurety.headers.get("Location"),
       lbSuretyTier: lbSurety.headers.get("X-Edge-Contract-Tier"),
       leadsKvPuts: leadsKv.puts.length,
@@ -496,9 +505,13 @@ def test_edge_redirect_workers_preserve_status_block_declined_and_isolate_tenant
     assert "nextinsurance.com" not in out["lbNextLoc"]
     assert out["lbNextTier"] == "declined_partner_blocked"
 
-    # Pending LienBond partner goes to real SuretyBondsDirect (NOT LawDepot) and is never marked live/upgraded
+    # Pending LienBond partner holds on-site by default (blocked_unapproved_partner)
+    assert out["lbSuretyDefaultLoc"].startswith("https://lienbond.com/tools/")
+    assert out["lbSuretyDefaultTier"] == "blocked_unapproved_partner"
+
+    # With explicit ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS=true, goes to real SuretyBondsDirect (NOT LawDepot)
     assert out["lbSuretyLoc"].startswith("https://www.suretybondsdirect.com/")
-    assert out["lbSuretyTier"] != "direct_contract_upgraded"
+    assert out["lbSuretyTier"] == "native_unmonetized_destination"
 
     # Redirect click logging NEVER pollutes *_LEADS KV
     assert out["leadsKvPuts"] == 0
@@ -1401,18 +1414,28 @@ def test_redteam_bug_3_1_and_3_2_brand_honesty_and_callout_normalizer(tmp_path: 
     out = _run_node_esm(
         f"""
         import * as ph from {json.dumps(ph_r.as_uri())};
-        const res = await ph.onRequest({{
+        const defRes = await ph.onRequest({{
           request: new Request("https://profithelm.com/r/equipment_macrs?source=macrs-calc"),
           params: {{ partner: "equipment_macrs" }},
           env: {{}},
           waitUntil: (p) => p,
         }});
+        const res = await ph.onRequest({{
+          request: new Request("https://profithelm.com/r/equipment_macrs?source=macrs-calc"),
+          params: {{ partner: "equipment_macrs" }},
+          env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
+          waitUntil: (p) => p,
+        }});
         console.log(JSON.stringify({{
+          defaultLocation: defRes.headers.get("Location"),
+          defaultTier: defRes.headers.get("X-Edge-Contract-Tier"),
           location: res.headers.get("Location"),
           tier: res.headers.get("X-Edge-Contract-Tier"),
         }}));
         """
     )
+    assert out["defaultTier"] == "blocked_unapproved_partner"
+    assert out["defaultLocation"] == "https://profithelm.com/tools/"
     assert out["tier"] == "native_unmonetized_destination"
     assert (out["location"] or "").startswith("https://www.crestcapital.com")
     assert "xendoo" not in (out["location"] or "").lower()

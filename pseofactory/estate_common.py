@@ -331,7 +331,10 @@ def build_edge_checkout_wrapper_js(query_flag: str) -> str:
 
 def write_tenant_edge_functions(root: Path, dist: Path, property_id: str) -> Dict[str, Any]:
     """Syncs Cloudflare Pages Functions to root/functions and ensures dist/functions never leaks."""
-    from pseofactory.edge import sync_tenant_edge_redirect_function
+    from pseofactory.edge import (
+        generate_edge_stripe_webhook_function,
+        sync_tenant_edge_redirect_function,
+    )
 
     dist_functions = dist / "functions"
     if dist_functions.exists():
@@ -343,6 +346,9 @@ def write_tenant_edge_functions(root: Path, dist: Path, property_id: str) -> Dic
     sync_res = sync_tenant_edge_redirect_function(root, property_id=property_id)
     (api_dir / "checkout.js").write_text(build_edge_checkout_wrapper_js("checkout"), encoding="utf-8")
     (api_dir / "lead-fulfillment.js").write_text(build_edge_checkout_wrapper_js("fulfill"), encoding="utf-8")
+    (api_dir / "stripe-webhook.js").write_text(
+        generate_edge_stripe_webhook_function(property_id=property_id), encoding="utf-8"
+    )
     return sync_res
 
 

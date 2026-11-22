@@ -5823,8 +5823,9 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
 
     # Scrub cross-legal 301s from dist/_redirects while preserving all legitimate non-legal 301s
     reds_path = dist_dir / "_redirects"
-    if reds_path.is_file():
-        orig_r_txt = reds_path.read_text(encoding="utf-8")
+    prop_id_clean = str(profile.get("property_id") or "").strip().lower()
+    if reds_path.is_file() or prop_id_clean == "lienbond":
+        orig_r_txt = reds_path.read_text(encoding="utf-8") if reds_path.is_file() else ""
         kept_lines: List[str] = []
         for line in orig_r_txt.splitlines():
             s = line.strip()
@@ -5833,8 +5834,12 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 if parts and parts[0] in CROSS_LEGAL_REDIRECT_SOURCES:
                     continue
             kept_lines.append(line)
-        new_r_txt = "\n".join(kept_lines).rstrip() + "\n"
-        if new_r_txt != orig_r_txt:
+        new_r_txt = ("\n".join(kept_lines).rstrip() + "\n") if kept_lines else ""
+        if prop_id_clean == "lienbond":
+            from pseofactory.compiler import build_lienbond_canonical_redirects_content
+
+            new_r_txt = build_lienbond_canonical_redirects_content(dist_dir, existing_content=new_r_txt)
+        if not reds_path.is_file() or new_r_txt != orig_r_txt:
             reds_path.write_text(new_r_txt, encoding="utf-8")
             mutated.append("_redirects")
 

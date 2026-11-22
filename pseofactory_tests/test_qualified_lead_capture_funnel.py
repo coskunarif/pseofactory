@@ -1533,8 +1533,10 @@ console.log(JSON.stringify({{ capChk, taxChk, capFf, pxChk }}));
     assert res["pxChk"]["success_url"].startswith("https://prexvo.com/tools/")
 
     from pseofactory.partner_tracker import audit_end_to_end_monetization_and_fulfillment
-    audit_rep = audit_end_to_end_monetization_and_fulfillment(execute_live=False)
-    assert audit_rep["status"] == "PASS"
+    audit_rep = audit_end_to_end_monetization_and_fulfillment(execute_live=False, repo_roots={})
+    assert audit_rep["status"] == "PARTIAL_STATIC_ONLY"
+    assert audit_rep["ui_ux_button_surface_audit"]["dom_action_simulation"]["skipped"] is True
+    assert audit_rep["ui_ux_button_surface_audit"]["dom_action_simulation"]["verified"] is False
     assert audit_rep["stripe_and_mercury_settlement"]["bank_routing_number"] == "091311229"
     assert audit_rep["stripe_and_mercury_settlement"]["bank_account_last4"] == "1395"
     assert len(audit_rep["catalog_skus"]) == 6
@@ -1642,7 +1644,7 @@ def test_ui_ux_e2e_repro_gate(tmp_path):
 
         # 1c. Verify canonical partner redirects match affiliates.py / edge.py (zero hardcoded drift)
         expected_partner_prefixes = {
-            "ipx1031": "https://www.ipx1031.com/",
+            "ipx1031": "https://profithelm.com/tools/",
             "mercury": "https://mercury.com/r/profithelm-llc",
             "kalshi": "https://kalshi.pxf.io/",
             "coinledger": "https://coinledger.io/?fpr=arif-554004",

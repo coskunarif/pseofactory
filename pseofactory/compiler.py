@@ -21,7 +21,8 @@ import json
 import re
 import ast
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Tuple
 
 from pseofactory.affiliates import (
     GAINHELM_DISCLOSURES,
@@ -3292,6 +3293,120 @@ def _build_lienbond_support_page_html(
 """
 
 
+LIENBOND_CANONICAL_SHORT_LINK_REDIRECTS: Tuple[Tuple[str, str], ...] = (
+    ("/calculator", "/tools/"),
+    ("/calculators", "/tools/"),
+    ("/bid-bond", "/tools/bid-bond-calculator/"),
+    ("/preliminary-notice", "/tools/california-texas-florida-preliminary-notice-deadline-calculator/"),
+    ("/retainage", "/tools/commercial-construction-retainage-interest-penalty-calculator-by-state/"),
+    ("/license-bond", "/tools/contractor-license-bond-cost-calculator-by-credit-score/"),
+    ("/contractor-bond", "/tools/contractor-license-bond-cost-calculator-by-credit-score/"),
+    ("/lien-waiver", "/tools/contractor-lien-release-statutory-matrix-by-state/"),
+    ("/lien-release", "/tools/contractor-lien-release-statutory-matrix-by-state/"),
+    ("/markup-vs-margin", "/tools/contractor-overhead-and-profit-markup-vs-margin-calculator/"),
+    ("/davis-bacon", "/tools/davis-bacon-prevailing-wage-fringe-benefit-rate-calculator/"),
+    ("/wh-347", "/tools/davis-bacon-prevailing-wage-fringe-benefit-rate-calculator/"),
+    ("/erisa-bond", "/tools/erisa-fidelity-bond-coverage-amount-calculator/"),
+    ("/emr", "/tools/experience-modification-rate-emr-workers-comp-penalty-calculator/"),
+    ("/miller-act", "/tools/miller-act-performance-and-payment-bond-premium-calculator/"),
+    ("/performance-bond", "/tools/miller-act-performance-and-payment-bond-premium-calculator/"),
+    ("/sdi", "/tools/subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator/"),
+    ("/surety-bond-philippines", "/tools/surety-bond-cost-calculator-philippines/"),
+    ("/texas-chapter-53", "/tools/texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator/"),
+    ("/workers-comp", "/tools/workers-compensation-class-code-rate-calculator-by-state/"),
+    ("/how-it-works", "/methodology/"),
+    ("/how-it-works/", "/methodology/"),
+)
+
+
+def build_lienbond_canonical_redirects_content(
+    dist_dir: Any,
+    existing_content: str = "",
+) -> str:
+    """
+    Merges the 22 canonical LienBond 301 short-link redirect rules with any existing
+    _redirects content, emitting only rules whose target HTML exists on disk,
+    eliminating dead targets and redirect chains, and respecting the <=95 Cloudflare cap.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.edge import compact_edge_redirects_to_cloudflare_cap
+
+    dist_path = Path(dist_dir)
+
+    def _target_exists_on_disk(target_path: str) -> bool:
+        clean = str(target_path or "").strip()
+        if not clean.startswith("/"):
+            return False
+        rel = clean.strip("/")
+        if not rel:
+            return (dist_path / "index.html").is_file()
+        return (dist_path / rel / "index.html").is_file() or (dist_path / rel).is_file()
+
+    def _source_exists_on_disk(src_path: str) -> bool:
+        rel = str(src_path or "").strip().strip("/")
+        if not rel:
+            return True
+        return (dist_path / rel / "index.html").is_file()
+
+    preserved_lines: List[str] = []
+    existing_sources: set = set()
+    for raw_line in (existing_content or "").splitlines():
+        s = raw_line.strip()
+        if not s:
+            continue
+        if s.startswith("#"):
+            preserved_lines.append(raw_line)
+            continue
+        parts = s.split()
+        if len(parts) >= 2:
+            src, dst = parts[0], parts[1]
+            if src in existing_sources:
+                continue
+            if dst.startswith("/") and not _target_exists_on_disk(dst):
+                continue
+            existing_sources.add(src)
+            preserved_lines.append(raw_line)
+
+    canonical_lines: List[str] = []
+    for src, dst in LIENBOND_CANONICAL_SHORT_LINK_REDIRECTS:
+        if src in existing_sources:
+            continue
+        if _source_exists_on_disk(src):
+            continue
+        if not _target_exists_on_disk(dst):
+            continue
+        existing_sources.add(src)
+        canonical_lines.append(f"{src}  {dst}  301")
+
+    combined_lines = preserved_lines + canonical_lines
+
+    # Eliminate any redirect chains where a rule's destination is itself a rule's source
+    active_sources = {
+        ln.strip().split()[0]
+        for ln in combined_lines
+        if ln.strip() and not ln.strip().startswith("#") and len(ln.strip().split()) >= 2
+    }
+    chain_free_lines: List[str] = []
+    for ln in combined_lines:
+        s = ln.strip()
+        if s and not s.startswith("#"):
+            parts = s.split()
+            if len(parts) >= 2 and parts[1] in active_sources:
+                continue
+        chain_free_lines.append(ln)
+
+    merged_raw = ("\n".join(chain_free_lines).rstrip() + "\n") if chain_free_lines else ""
+    existing_gov_routes = {
+        g
+        for g in ("about", "methodology", "privacy", "terms", "disclaimers", "contact")
+        if (dist_path / g / "index.html").is_file()
+    }
+    return compact_edge_redirects_to_cloudflare_cap(
+        merged_raw,
+        existing_governance_routes=existing_gov_routes,
+    )
+
+
 def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[str, Any]:
     """
     Compiles the complete LienBond (lienbond.com) tenant estate into `output_dir`:
@@ -3920,6 +4035,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         },
         header_routes=["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"]
         + [f'/tools/{p["slug"]}/' for p in compiled_pages],
+        redirects_content=build_lienbond_canonical_redirects_content(dist),
     )
 
     pseo_meta = {

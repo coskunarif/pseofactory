@@ -5130,6 +5130,8 @@ class PartnerTrackingEngine:
         self,
         execute_live: bool = False,
         persist_path: Optional[str] = None,
+        repo_roots: Optional[Dict[str, Any]] = None,
+        edge_redirect_sources: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Executes a falsification-grade audit of pseofactory's claimed revenue, partner integrations,
@@ -5410,6 +5412,41 @@ class PartnerTrackingEngine:
             if k == p.key and p.status == "live" and self._is_network_tracked_affiliate_url(p.default_url)
         )
 
+        vault_data_fals = getattr(self.hub, "_vault", {}) if hasattr(self, "hub") else {}
+        routing_truth_by_prop: Dict[str, Dict[str, Any]] = {}
+        for p_id, reg_map in (
+            ("profithelm", PROFITHELM_AFFILIATES),
+            ("prexvo", PREXVO_AFFILIATES),
+            ("gainhelm", GAINHELM_AFFILIATES),
+            ("lienbond", LIENBOND_AFFILIATES),
+        ):
+            r_override = repo_roots.get(p_id) if isinstance(repo_roots, dict) else None
+            e_override = edge_redirect_sources.get(p_id) if isinstance(edge_redirect_sources, dict) else None
+            routing_truth_by_prop[p_id] = _audit_tenant_outbound_routing_truth(
+                prop_id=p_id,
+                reg_map=reg_map,
+                vault_data=vault_data_fals,
+                repo_root=r_override,
+                edge_redirect_source=e_override,
+                use_default_workspace=(repo_roots is None),
+            )
+
+        total_unapproved_leaks = sum(
+            int(v.get("unapproved_external_leaks_count", 0)) for v in routing_truth_by_prop.values()
+        )
+        total_dead_end_404s = sum(
+            int(v.get("dead_end_404_routes_count", 0)) for v in routing_truth_by_prop.values()
+        )
+        routing_enforcement_status = (
+            "ENFORCED_ZERO_UNAPPROVED_CLICKS"
+            if (total_unapproved_leaks == 0 and total_dead_end_404s == 0)
+            else "UNAPPROVED_EXTERNAL_LEAKS_DETECTED"
+        )
+        ph_rt = routing_truth_by_prop["profithelm"]
+        px_rt = routing_truth_by_prop["prexvo"]
+        gh_rt = routing_truth_by_prop["gainhelm"]
+        lb_rt = routing_truth_by_prop["lienbond"]
+
         falsification_report: Dict[str, Any] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "execute_live": eff_live,
@@ -5453,27 +5490,41 @@ class PartnerTrackingEngine:
             },
             "correspondence_anomalies": correspondence_audit,
             "yield_gated_routing_enforcement": {
-                "status": "ENFORCED_ZERO_UNAPPROVED_CLICKS",
+                "status": routing_enforcement_status,
+                "total_unapproved_external_leaks_count": total_unapproved_leaks,
+                "total_dead_end_404_routes_count": total_dead_end_404s,
                 "profithelm_verified_active_contracts_count": len(live_ph_keys),
                 "profithelm_total_catalog_routes": len(PROFITHELM_AFFILIATES),
-                "profithelm_unapproved_external_leaks_count": 0,
-                "profithelm_dead_end_404_routes_count": 0,
+                "profithelm_html_pending_cta_count": ph_rt["html_pending_cta_count"],
+                "profithelm_edge_blocked_pending_cta_count": ph_rt["edge_blocked_pending_cta_count"],
+                "profithelm_edge_blocks_unapproved_by_default": ph_rt["blocks_unapproved_by_default"],
+                "profithelm_unapproved_external_leaks_count": ph_rt["unapproved_external_leaks_count"],
+                "profithelm_dead_end_404_routes_count": ph_rt["dead_end_404_routes_count"],
                 "prexvo_verified_active_contracts_count": len(live_px_keys),
                 "prexvo_total_catalog_routes": len(PREXVO_AFFILIATES),
                 "prexvo_yield_gated_to_direct_checkout_count": len(PREXVO_AFFILIATES) - len(live_px_keys),
-                "prexvo_unapproved_external_leaks_count": 0,
-                "prexvo_dead_end_404_routes_count": 0,
+                "prexvo_html_pending_cta_count": px_rt["html_pending_cta_count"],
+                "prexvo_edge_blocked_pending_cta_count": px_rt["edge_blocked_pending_cta_count"],
+                "prexvo_edge_blocks_unapproved_by_default": px_rt["blocks_unapproved_by_default"],
+                "prexvo_unapproved_external_leaks_count": px_rt["unapproved_external_leaks_count"],
+                "prexvo_dead_end_404_routes_count": px_rt["dead_end_404_routes_count"],
                 "gainhelm_verified_active_contracts_count": len(live_gh_keys),
                 "gainhelm_total_catalog_routes": len(GAINHELM_AFFILIATES),
                 "gainhelm_alias_routes_count": 8,
                 "gainhelm_yield_gated_to_direct_checkout_count": len(GAINHELM_AFFILIATES) - len(live_gh_keys),
-                "gainhelm_unapproved_external_leaks_count": 0,
-                "gainhelm_dead_end_404_routes_count": 0,
+                "gainhelm_html_pending_cta_count": gh_rt["html_pending_cta_count"],
+                "gainhelm_edge_blocked_pending_cta_count": gh_rt["edge_blocked_pending_cta_count"],
+                "gainhelm_edge_blocks_unapproved_by_default": gh_rt["blocks_unapproved_by_default"],
+                "gainhelm_unapproved_external_leaks_count": gh_rt["unapproved_external_leaks_count"],
+                "gainhelm_dead_end_404_routes_count": gh_rt["dead_end_404_routes_count"],
                 "lienbond_verified_active_contracts_count": len(live_lb_keys),
                 "lienbond_total_catalog_routes": len(LIENBOND_AFFILIATES),
                 "lienbond_yield_gated_to_direct_checkout_count": len(LIENBOND_AFFILIATES) - len(live_lb_keys),
-                "lienbond_unapproved_external_leaks_count": 0,
-                "lienbond_dead_end_404_routes_count": 0,
+                "lienbond_html_pending_cta_count": lb_rt["html_pending_cta_count"],
+                "lienbond_edge_blocked_pending_cta_count": lb_rt["edge_blocked_pending_cta_count"],
+                "lienbond_edge_blocks_unapproved_by_default": lb_rt["blocks_unapproved_by_default"],
+                "lienbond_unapproved_external_leaks_count": lb_rt["unapproved_external_leaks_count"],
+                "lienbond_dead_end_404_routes_count": lb_rt["dead_end_404_routes_count"],
                 "direct_checkout_browser_redirect_enabled": True,
                 "remediated_gaps": [],
             },
@@ -11186,9 +11237,163 @@ def ingest_playbook_subscription(
     )
 
 
+def _edge_redirect_blocks_unapproved_by_default(js_source: str) -> bool:
+    """
+    Inspects a Cloudflare Pages edge redirect handler (functions/r/[partner].js)
+    and returns True only when unapproved/pending partners are held on-site by default
+    (X-Edge-Contract-Tier: blocked_unapproved_partner) unless explicitly opted out.
+    Zero em-dashes. Zero en-dashes.
+    """
+    src = str(js_source or "")
+    if "blocked_unapproved_partner" not in src:
+        return False
+    if re.search(
+        r'BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS\s*\|\|\s*["\']["\']\s*\)\s*\.toLowerCase\(\)\s*===\s*["\']true["\']',
+        src,
+    ):
+        return False
+    return bool(
+        re.search(
+            r'BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS\s*\)?\s*\|\|\s*["\']true["\']\s*\)\s*\.toLowerCase\(\)\s*!==\s*["\']false["\']',
+            src,
+        )
+    )
+
+
+def _audit_tenant_outbound_routing_truth(
+    prop_id: str,
+    reg_map: Dict[str, Any],
+    vault_data: Optional[Dict[str, Any]] = None,
+    dist_dir: Optional[Any] = None,
+    repo_root: Optional[Any] = None,
+    edge_redirect_source: Optional[str] = None,
+    use_default_workspace: bool = True,
+) -> Dict[str, Any]:
+    """
+    Audits actual outbound /r/<partner> routing truth for a tenant by:
+    1. Scanning compiled dist/**/*.html for href=["']/r/([a-zA-Z0-9_-]+) links.
+    2. Inspecting the tenant's actual edge redirect handler (functions/r/[partner].js
+       on disk when present, or generate_edge_redirect_function fallback) for
+       blocks_unapproved_by_default.
+    3. Computing REAL unapproved_external_leaks_count, dead_end_404_routes_count,
+       html_pending_cta_count, and edge_blocked_pending_cta_count with zero hardcoded zeros.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+    from pseofactory.edge import (
+        build_canonical_partner_catalog,
+        generate_edge_redirect_function,
+    )
+
+    prop_clean = (prop_id or "").strip().lower()
+    prop_vault = vault_data.get(prop_clean, {}) if isinstance(vault_data, dict) else {}
+    canonical_keys = [k for k, p_obj in reg_map.items() if k == p_obj.key]
+    live_direct: List[str] = []
+    fail_closed_fallback: List[str] = []
+    for k in canonical_keys:
+        p_obj = reg_map[k]
+        v_entry = prop_vault.get(k, {}) if isinstance(prop_vault, dict) else {}
+        v_status = str(v_entry.get("status") or "").strip().lower()
+        if p_obj.status == "live" or v_status in ("live", "active_direct"):
+            live_direct.append(k)
+        else:
+            fail_closed_fallback.append(k)
+    live_direct_set = set(live_direct)
+
+    resolved_repo: Optional[Path] = None
+    if repo_root is not None:
+        resolved_repo = Path(repo_root)
+    elif use_default_workspace:
+        folder = "profithelm-platform" if prop_clean == "profithelm" else prop_clean
+        resolved_repo = Path("/home/ubuntuadmin/projects") / folder
+
+    resolved_dist: Optional[Path] = None
+    if dist_dir is not None:
+        resolved_dist = Path(dist_dir)
+    elif resolved_repo is not None:
+        resolved_dist = resolved_repo / "dist"
+
+    if edge_redirect_source is not None:
+        edge_src = str(edge_redirect_source)
+        edge_source_origin = "explicit"
+    elif resolved_repo is not None and (resolved_repo / "functions" / "r" / "[partner].js").is_file():
+        edge_src = (resolved_repo / "functions" / "r" / "[partner].js").read_text(
+            encoding="utf-8", errors="ignore"
+        )
+        edge_source_origin = "disk"
+    else:
+        edge_src = generate_edge_redirect_function(property_id=prop_clean)
+        edge_source_origin = "generated"
+
+    blocks_unapproved_by_default = _edge_redirect_blocks_unapproved_by_default(edge_src)
+    catalog = build_canonical_partner_catalog(prop_clean)
+
+    html_r_links_scanned = 0
+    html_pending_cta_count = 0
+    dead_end_404_routes_count = 0
+    html_pending_cta_slugs: set = set()
+    dead_end_404_slugs: set = set()
+
+    if resolved_dist is not None and resolved_dist.is_dir():
+        r_link_re = re.compile(r'href\s*=\s*["\']/r/([a-zA-Z0-9_-]+)')
+        for html_file in sorted(resolved_dist.rglob("*.html")):
+            try:
+                raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            for m in r_link_re.finditer(raw_html):
+                html_r_links_scanned += 1
+                raw_slug = m.group(1).strip().lower()
+                norm_slug = raw_slug.replace("-", "_")
+                entry = catalog.get(raw_slug) or catalog.get(norm_slug)
+                if entry is None:
+                    dead_end_404_routes_count += 1
+                    dead_end_404_slugs.add(raw_slug)
+                    continue
+                entry_status = str(entry.get("status") or "").strip().lower()
+                is_live = (
+                    entry_status == "live"
+                    or bool(str(entry.get("directContractUrl") or "").strip())
+                    or raw_slug in live_direct_set
+                    or norm_slug in live_direct_set
+                )
+                is_declined = entry_status in ("declined", "rejected", "pending_p2")
+                if not is_live and not is_declined:
+                    html_pending_cta_count += 1
+                    html_pending_cta_slugs.add(raw_slug)
+
+    edge_blocked_pending_cta_count = (
+        html_pending_cta_count if blocks_unapproved_by_default else 0
+    )
+    unapproved_external_leaks_count = (
+        0 if blocks_unapproved_by_default else html_pending_cta_count
+    )
+
+    return {
+        "total_routes": len(canonical_keys),
+        "live_direct_count": len(live_direct),
+        "live_direct_keys": sorted(live_direct),
+        "fail_closed_fallback_count": len(fail_closed_fallback),
+        "fail_closed_fallback_keys": sorted(fail_closed_fallback),
+        "verified_approved_contracts_count": len(live_direct),
+        "yield_gated_checkout_or_contract_fallback_count": len(fail_closed_fallback),
+        "blocks_unapproved_by_default": blocks_unapproved_by_default,
+        "edge_handler_source": edge_source_origin,
+        "html_r_links_scanned": html_r_links_scanned,
+        "html_pending_cta_count": html_pending_cta_count,
+        "html_pending_cta_slugs": sorted(html_pending_cta_slugs),
+        "edge_blocked_pending_cta_count": edge_blocked_pending_cta_count,
+        "unapproved_external_leaks_count": unapproved_external_leaks_count,
+        "dead_end_404_routes_count": dead_end_404_routes_count,
+        "dead_end_404_slugs": sorted(dead_end_404_slugs),
+    }
+
+
 def audit_end_to_end_monetization_and_fulfillment(
     execute_live: bool = False,
     persist_path: Optional[Any] = None,
+    repo_roots: Optional[Dict[str, Any]] = None,
+    edge_redirect_sources: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Executes an autonomous end-to-end self-audit across:
@@ -11418,55 +11623,92 @@ def audit_end_to_end_monetization_and_fulfillment(
         ("gainhelm", GAINHELM_AFFILIATES),
         ("lienbond", LIENBOND_AFFILIATES),
     ):
-        prop_vault = vault_data.get(prop_id, {}) if isinstance(vault_data, dict) else {}
-        canonical_keys = [k for k, p_obj in reg_map.items() if k == p_obj.key]
-        live_direct: List[str] = []
-        fail_closed_fallback: List[str] = []
-        for k in canonical_keys:
-            p_obj = reg_map[k]
-            v_entry = prop_vault.get(k, {}) if isinstance(prop_vault, dict) else {}
-            v_status = str(v_entry.get("status") or "").strip().lower()
-            if p_obj.status == "live" or v_status in ("live", "active_direct"):
-                live_direct.append(k)
-            else:
-                fail_closed_fallback.append(k)
-        outbound_summary[prop_id] = {
-            "total_routes": len(canonical_keys),
-            "live_direct_count": len(live_direct),
-            "live_direct_keys": sorted(live_direct),
-            "fail_closed_fallback_count": len(fail_closed_fallback),
-            "fail_closed_fallback_keys": sorted(fail_closed_fallback),
-            "verified_approved_contracts_count": len(live_direct),
-            "yield_gated_checkout_or_contract_fallback_count": len(fail_closed_fallback),
-            "unapproved_external_leaks_count": 0,
-            "dead_end_404_routes_count": 0,
-        }
+        r_override = repo_roots.get(prop_id) if isinstance(repo_roots, dict) else None
+        e_override = edge_redirect_sources.get(prop_id) if isinstance(edge_redirect_sources, dict) else None
+        outbound_summary[prop_id] = _audit_tenant_outbound_routing_truth(
+            prop_id=prop_id,
+            reg_map=reg_map,
+            vault_data=vault_data,
+            repo_root=r_override,
+            edge_redirect_source=e_override,
+            use_default_workspace=(repo_roots is None),
+        )
+
+    total_unapproved_leaks = sum(
+        int(v.get("unapproved_external_leaks_count", 0)) for v in outbound_summary.values()
+    )
+    total_dead_ends = sum(
+        int(v.get("dead_end_404_routes_count", 0)) for v in outbound_summary.values()
+    )
 
     try:
+        from pathlib import Path
         from pseofactory.visual_primitives import audit_monetization_and_datapack_ui_ux_surfaces
-        ui_surface_audit = audit_monetization_and_datapack_ui_ux_surfaces(execute_dom_simulation=execute_live)
-    except Exception as exc:
-        ui_surface_audit = {"all_surfaces_and_handlers_passed": False, "error": str(exc)}
 
-    overall_ok = (
+        ui_dist_dirs: Optional[Dict[str, Any]] = None
+        if isinstance(repo_roots, dict):
+            ui_dist_dirs = {
+                pid: Path(rpath) / "dist" / "tools"
+                for pid, rpath in repo_roots.items()
+                if rpath is not None
+            }
+        ui_surface_audit = audit_monetization_and_datapack_ui_ux_surfaces(
+            dist_dirs=ui_dist_dirs,
+            execute_dom_simulation=execute_live,
+        )
+    except Exception as exc:
+        ui_surface_audit = {
+            "static_surfaces_passed": False,
+            "all_surfaces_and_handlers_passed": False,
+            "dom_action_simulation": {"all_passed": False, "verified": False, "skipped": not execute_live, "tenants": []},
+            "error": str(exc),
+        }
+
+    dom_sim = ui_surface_audit.get("dom_action_simulation") or {}
+    dom_skipped = bool(dom_sim.get("skipped"))
+    dom_verified = bool(dom_sim.get("verified")) and bool(dom_sim.get("all_passed"))
+    static_surfaces_ok = (
+        "error" not in ui_surface_audit
+        and bool(
+            ui_surface_audit.get(
+                "static_surfaces_passed",
+                len(ui_surface_audit.get("coexistence_and_surface_violations") or []) == 0,
+            )
+        )
+    )
+    routing_clean = total_unapproved_leaks == 0 and total_dead_ends == 0
+    static_core_ok = (
         all_skus_ok
         and ymyl_isolated
         and bool(settlement.get("charges_enabled"))
         and bool(settlement.get("payouts_enabled"))
-        and bool(ui_surface_audit.get("all_surfaces_and_handlers_passed"))
+        and static_surfaces_ok
+        and routing_clean
     )
+    if not static_core_ok:
+        audit_status = "FAIL"
+    elif dom_skipped:
+        audit_status = "PARTIAL_STATIC_ONLY"
+    elif dom_verified:
+        audit_status = "PASS"
+    else:
+        audit_status = "FAIL"
+
     report: Dict[str, Any] = {
-        "status": "PASS" if overall_ok else "FAIL",
+        "status": audit_status,
         "audited_at": datetime.now(timezone.utc).isoformat(),
         "execute_live": execute_live,
+        "total_unapproved_external_leaks_count": total_unapproved_leaks,
+        "total_dead_end_404_routes_count": total_dead_ends,
         "ui_ux_button_surface_audit": {
+            "static_surfaces_passed": static_surfaces_ok,
             "all_surfaces_and_handlers_passed": bool(ui_surface_audit.get("all_surfaces_and_handlers_passed")),
             "total_pages_audited": ui_surface_audit.get("total_pages_audited", 0),
             "commercial_pages_audited": ui_surface_audit.get("commercial_pages_audited", 0),
             "restricted_ymyl_pages_audited": ui_surface_audit.get("restricted_ymyl_pages_audited", 0),
             "button_inventory_totals": ui_surface_audit.get("button_inventory_totals", {}),
             "violations_count": len(ui_surface_audit.get("coexistence_and_surface_violations") or []),
-            "dom_action_simulation": ui_surface_audit.get("dom_action_simulation", {}),
+            "dom_action_simulation": dom_sim,
         },
         "stripe_and_mercury_settlement": {
             "stripe_account_id": diag.get("stripe_account_id"),
@@ -11583,11 +11825,15 @@ def dispatch_autonomous_partner_followups(
 def falsify_monetization_and_partner_health(
     execute_live: bool = False,
     persist_path: Optional[str] = None,
+    repo_roots: Optional[Dict[str, Any]] = None,
+    edge_redirect_sources: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Module-level convenience wrapper for PartnerTrackingEngine.falsify_monetization_and_partner_health."""
     return PartnerTrackingEngine().falsify_monetization_and_partner_health(
         execute_live=execute_live,
         persist_path=persist_path,
+        repo_roots=repo_roots,
+        edge_redirect_sources=edge_redirect_sources,
     )
 
 

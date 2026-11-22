@@ -10431,10 +10431,16 @@ def run_gsc_affiliate_placement_feedback_pass(
     Zero em-dashes. Zero en-dashes.
     """
     import json
+    import os
     from datetime import datetime, timezone
     from pathlib import Path
 
-    prop = (property_id or "profithelm").strip().lower()
+    raw_prop = "profithelm" if property_id is None else str(property_id)
+    prop = raw_prop.strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", prop):
+        raise ValueError(
+            f"Invalid property_id '{property_id}': must match ^[a-z0-9][a-z0-9_-]*$"
+        )
     if repo_root is not None:
         r_root = Path(repo_root).resolve()
     elif dist_dir is not None:
@@ -10602,7 +10608,23 @@ def run_gsc_affiliate_placement_feedback_pass(
     }
 
     if not dry_run and r_root.is_dir():
-        ledger_path = r_root / ".agy" / "gsc_affiliate_placement_ledger.json"
+        workspace_root = Path("/home/ubuntuadmin/projects").resolve()
+        resolved_root = r_root.resolve()
+        in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        is_workspace_root = resolved_root == workspace_root
+        is_under_workspace = (
+            resolved_root == workspace_root
+            or workspace_root in resolved_root.parents
+        )
+        if is_workspace_root:
+            raise ValueError(
+                f"Refusing to write gsc_affiliate_placement_ledger.json to workspace root: {resolved_root}"
+            )
+        if in_pytest and is_under_workspace:
+            raise ValueError(
+                f"Refusing to write gsc_affiliate_placement_ledger.json inside workspace during pytest: {resolved_root}"
+            )
+        ledger_path = resolved_root / ".agy" / "gsc_affiliate_placement_ledger.json"
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
         ledger_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

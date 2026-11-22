@@ -3033,17 +3033,32 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
             process.exit(11);
           }}
         }} else {{
-          // Uncontracted or declined partners stay on their native brand destination (zero bait-and-switch).
+          // Default policy: pending partners are held on-site (blocked_unapproved_partner); declined stay declined_partner_blocked.
           if (crossVerticalHosts.has(finalHost)) {{
             console.error("Cross-vertical or competitor swap for non-live key", k, loc.toString());
             process.exit(11);
           }}
           const expectedNonLiveTier = declinedProfitHelmKeys.has(k)
             ? "declined_partner_blocked"
-            : "native_unmonetized_destination";
+            : "blocked_unapproved_partner";
           if (res.headers.get("X-Edge-Contract-Tier") !== expectedNonLiveTier) {{
             console.error("Unexpected contract tier for non-live key", k, res.headers.get("X-Edge-Contract-Tier"));
             process.exit(11);
+          }}
+          if (loc.hostname !== "profithelm.com" || loc.pathname.includes("lead-capture")) {{
+            console.error("Non-live ProfitHelm partner not held safely on-site:", k, loc.toString());
+            process.exit(11);
+          }}
+          if (!declinedProfitHelmKeys.has(k)) {{
+            const optInRes = await phRedirect.onRequest({{
+              request: new Request(`https://profithelm.com/r/${{k}}?source_tool=section-179-calculator&cta_slot=card_1&synthetic_test=1`),
+              env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
+              params: {{ partner: k }}
+            }});
+            if (optInRes.status !== 302 || optInRes.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") {{
+              console.error("Opt-in ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS failed for ProfitHelm", k, optInRes.headers.get("X-Edge-Contract-Tier"));
+              process.exit(11);
+            }}
           }}
         }}
         if (k === "koinly" && loc.searchParams.get("fpr") !== "arif-4c0b88") {{
@@ -3080,12 +3095,22 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
             process.exit(22);
           }}
         }} else {{
-          if (loc.hostname === "prexvo.com") {{
-            console.error("Pending Prexvo lender redirected internally for", k, loc.toString());
+          if (loc.hostname !== "prexvo.com") {{
+            console.error("Pending Prexvo lender leaked externally by default for", k, loc.toString());
             process.exit(21);
           }}
-          if (res.headers.get("X-Edge-Contract-Tier") !== "unapproved_native_unmonetized") {{
-            console.error("Unexpected Prexvo contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+          if (res.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") {{
+            console.error("Unexpected Prexvo default blocked contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+            process.exit(22);
+          }}
+          const optInPxRes = await pxRedirect.onRequest({{
+            request: new Request(`https://prexvo.com/r/${{k}}?source_tool=student-loan-refinance-break-even-calculator&cta_slot=card_1&synthetic_test=1`),
+            env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
+            params: {{ partner: k }}
+          }});
+          const optInPxLoc = new URL(optInPxRes.headers.get("Location"));
+          if (optInPxLoc.hostname === "prexvo.com" || optInPxRes.headers.get("X-Edge-Contract-Tier") !== "unapproved_native_unmonetized") {{
+            console.error("Opt-in ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS failed for Prexvo", k, optInPxLoc.toString(), optInPxRes.headers.get("X-Edge-Contract-Tier"));
             process.exit(22);
           }}
         }}
@@ -3119,13 +3144,23 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
           process.exit(25);
         }}
         const loc = new URL(res.headers.get("Location"));
-        // GRC vendors have no approved contract: never swapped to Ramp/LawDepot/Xendoo/CJ links.
-        if (approvedProfitHelmHosts.has(loc.hostname)) {{
-          console.error("GRC click swapped into unrelated approved link for", k, loc.toString());
+        // GRC vendors have no approved contract: held on-site by default, never swapped to Ramp/LawDepot/Xendoo/CJ links.
+        if (approvedProfitHelmHosts.has(loc.hostname) || loc.hostname !== "gainhelm.com") {{
+          console.error("GRC click not held on-site by default for", k, loc.toString());
           process.exit(26);
         }}
-        if (res.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") {{
-          console.error("Unexpected GainHelm contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+        if (res.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") {{
+          console.error("Unexpected GainHelm default contract tier for", k, res.headers.get("X-Edge-Contract-Tier"));
+          process.exit(27);
+        }}
+        const optInGhRes = await ghRedirect.onRequest({{
+          request: new Request(`https://gainhelm.com/r/${{k}}?source_tool=soc-2-audit-cost-calculator&cta_slot=card_1&synthetic_test=1`),
+          env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
+          params: {{ partner: k }}
+        }});
+        const optInGhLoc = new URL(optInGhRes.headers.get("Location"));
+        if (approvedProfitHelmHosts.has(optInGhLoc.hostname) || optInGhRes.headers.get("X-Edge-Contract-Tier") !== "native_unmonetized_destination") {{
+          console.error("Unexpected GainHelm opt-in contract tier for", k, optInGhRes.headers.get("X-Edge-Contract-Tier"));
           process.exit(27);
         }}
       }}
@@ -3221,7 +3256,15 @@ def test_gainhelm_three_tenant_parity_and_retired_legacy_decoupling(tmp_path):
     assert pub_audit["status"] == "PASS"
     assert set(pub_audit["properties"].keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
 
-    fals_rep = engine.falsify_monetization_and_partner_health(execute_live=False)
+    from pseofactory.edge import generate_edge_redirect_function
+
+    fals_rep = engine.falsify_monetization_and_partner_health(
+        execute_live=False,
+        edge_redirect_sources={
+            p: generate_edge_redirect_function(p)
+            for p in ("profithelm", "prexvo", "gainhelm", "lienbond")
+        },
+    )
     yg = fals_rep["yield_gated_routing_enforcement"]
     assert yg["status"] == "ENFORCED_ZERO_UNAPPROVED_CLICKS"
     assert yg["gainhelm_total_catalog_routes"] == 6
@@ -3331,8 +3374,10 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
         assert "Download Statutory Data Pack (JSON)" in wp["html_report"]
         assert_no_forbidden_dashes(json.dumps(dp), context=f"datapack_{prop_id}")
 
-    e2e_audit = audit_end_to_end_monetization_and_fulfillment(execute_live=False)
-    assert e2e_audit["status"] == "PASS"
+    e2e_audit = audit_end_to_end_monetization_and_fulfillment(execute_live=False, repo_roots={})
+    assert e2e_audit["status"] == "PARTIAL_STATIC_ONLY"
+    assert e2e_audit["ui_ux_button_surface_audit"]["dom_action_simulation"]["skipped"] is True
+    assert e2e_audit["ui_ux_button_surface_audit"]["dom_action_simulation"]["verified"] is False
     assert len(e2e_audit["catalog_skus"]) == 6
 
     # 3. Verify workbench HTML rendering, zero-signup compliance, and RetroReflection retrofit
@@ -3607,8 +3652,10 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
     assert "scenario_demand_attribution" in mon_summary
     assert len(mon_summary["per_calculator_metrics"]) >= 3
 
-    audit_rep = audit_end_to_end_monetization_and_fulfillment(execute_live=False)
-    assert audit_rep["status"] == "PASS"
+    audit_rep = audit_end_to_end_monetization_and_fulfillment(execute_live=False, repo_roots={})
+    assert audit_rep["status"] == "PARTIAL_STATIC_ONLY"
+    assert audit_rep["ui_ux_button_surface_audit"]["dom_action_simulation"]["skipped"] is True
+    assert audit_rep["ui_ux_button_surface_audit"]["dom_action_simulation"]["verified"] is False
     assert "scenario_demand_attribution" in audit_rep
     for sku_k, sku_v in audit_rep["catalog_skus"].items():
         assert sku_v["settlement_ready"] is True

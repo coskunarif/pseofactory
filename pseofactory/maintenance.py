@@ -11551,7 +11551,7 @@ class RetroReflectionEngine:
         slug_id = slug.replace("/", "-")
         if "range_slider" in missing:
             range_input_html = (
-                '<div class="range-slider-retro-wrap" style="margin-top: 8px;">'
+                '<div class="calc-slider-wrap" style="margin-top: 8px;">'
                 f'<label for="retro-range-{slug_id}" style="font-size: 13px; display: block; margin-bottom: 4px;">'
                 'Interactive Parameter Sensitivity Slider</label>'
                 f'<input type="range" id="retro-range-{slug_id}" class="form-range range-slider touch-target" '
@@ -11679,7 +11679,7 @@ class RetroReflectionEngine:
                 range_fallback_str = ""
                 if "range_slider" in missing and "range_slider" not in repaired:
                     range_fallback_str = (
-                        f'\n      <div class="range-slider-retro-wrap" style="margin-top: 12px;">\n'
+                        f'\n      <div class="calc-slider-wrap" style="margin-top: 12px;">\n'
                         f'        <label for="retro-range-{slug_id}" style="font-size: 13px; display: block; margin-bottom: 4px;">Interactive Parameter Sensitivity Slider</label>\n'
                         f'        <input type="range" id="retro-range-{slug_id}" class="form-range range-slider touch-target" min="0" max="200" step="1" value="100" aria-label="Interactive Parameter Sensitivity Slider" style="min-height: 44px; min-width: 44px; width: 100%;" />\n'
                         f'      </div>'
@@ -13770,6 +13770,10 @@ class RetroReflectionEngine:
                     new_red = "\n".join(top_lines + remaining_lines) + "\n"
                 else:
                     new_red = orig_red
+                if is_lienbond:
+                    from pseofactory.compiler import build_lienbond_canonical_redirects_content
+
+                    new_red = build_lienbond_canonical_redirects_content(d, existing_content=new_red)
                 from pseofactory.edge import (
                     compact_edge_redirects_to_cloudflare_cap,
                     sync_tenant_edge_redirect_function,

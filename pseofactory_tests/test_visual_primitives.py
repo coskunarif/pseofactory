@@ -434,6 +434,8 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
 
     sim = audit["dom_action_simulation"]
     assert sim["all_passed"] is True
+    assert sim["verified"] is True
+    assert sim["skipped"] is False
     assert len(sim["tenants"]) == 4
     for t_sim in sim["tenants"]:
         assert t_sim["passed"] is True

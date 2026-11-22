@@ -2830,8 +2830,63 @@ def _render_runtime_sync_events_js() -> str:
     function hydrateCheckoutFulfillmentFromUrl() {
       try {
         var rawSearch = (window.location && window.location.search) ? window.location.search : "";
-        if (!rawSearch || rawSearch.indexOf("checkout_status=success") === -1) return;
+        if (!rawSearch) return;
         var qs = new URLSearchParams(rawSearch);
+        var checkoutStatus = String(qs.get("checkout_status") || "").trim().toLowerCase();
+        if (checkoutStatus === "unavailable" || checkoutStatus === "cancelled") {
+          var statusLeadId = qs.get("lead_id") || "";
+          var statusSku = qs.get("sku") || "";
+          var statusSlug = resolveCurrentToolSlug();
+          var upgTarget = document.getElementById("post-calculation-upgrade-drawer");
+          var noticeHost = upgTarget || document.getElementById("partner-quote-intake-step") || document.getElementById("lead-capture-form") || document.querySelector("main");
+          if (!noticeHost) return;
+          if (upgTarget) {
+            upgTarget.setAttribute("data-checkout-status", checkoutStatus);
+          }
+          var existingNotice = document.getElementById("checkout-status-notice");
+          if (existingNotice && existingNotice.parentNode) {
+            existingNotice.parentNode.removeChild(existingNotice);
+          }
+          var notice = document.createElement("div");
+          notice.id = "checkout-status-notice";
+          notice.setAttribute("data-checkout-status", checkoutStatus);
+          notice.setAttribute("role", checkoutStatus === "unavailable" ? "alert" : "status");
+          notice.setAttribute("aria-live", "polite");
+          notice.style.cssText = "margin-top:12px;padding:12px 14px;border-radius:8px;background:var(--status-warning-bg);border:1px solid var(--status-warning-border);color:var(--text-primary);font-size:14px;line-height:1.5;";
+          var msg = document.createElement("p");
+          msg.style.cssText = "margin:0 0 10px 0;color:var(--text-primary);font-weight:600;";
+          msg.textContent = checkoutStatus === "unavailable"
+            ? "Paid checkout is temporarily unavailable. You can retry checkout or open the free calculation playbook pack below."
+            : "Checkout was cancelled and no payment was charged. You can resume checkout or open the free calculation playbook pack below.";
+          notice.appendChild(msg);
+          var actionRow = document.createElement("div");
+          actionRow.style.cssText = "display:flex;gap:10px;flex-wrap:wrap;align-items:center;";
+          var commonQs = (statusLeadId ? "&lead_id=" + encodeURIComponent(statusLeadId) : "")
+            + (statusSku ? "&sku=" + encodeURIComponent(statusSku) : "")
+            + (statusSlug ? "&tool_slug=" + encodeURIComponent(statusSlug) : "");
+          var retryLink = document.createElement("a");
+          retryLink.id = "checkout-status-retry-link";
+          retryLink.className = "touch-target";
+          retryLink.href = "/api/lead-capture?checkout=1" + commonQs + "&redirect=1";
+          retryLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:8px 14px;border-radius:6px;border:1px solid var(--status-warning-border);color:var(--text-primary);font-weight:700;text-decoration:none;";
+          retryLink.textContent = checkoutStatus === "unavailable" ? "Retry Paid Checkout" : "Resume Paid Checkout";
+          actionRow.appendChild(retryLink);
+          var freePackLink = document.createElement("a");
+          freePackLink.id = "checkout-status-free-pack-link";
+          freePackLink.className = "touch-target";
+          freePackLink.href = "/api/lead-capture?playbook=1" + commonQs + "&format=html";
+          freePackLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:8px 14px;border-radius:6px;border:1px solid var(--border);color:var(--accent);font-weight:700;text-decoration:none;";
+          freePackLink.textContent = "Open Free Playbook Pack";
+          actionRow.appendChild(freePackLink);
+          notice.appendChild(actionRow);
+          noticeHost.appendChild(notice);
+          emitWorkbenchEngagementBeacon("checkout_status_" + checkoutStatus, "post_calculation_upgrade_drawer", {
+            offer_sku: statusSku,
+            lead_id: statusLeadId
+          });
+          return;
+        }
+        if (checkoutStatus !== "success") return;
         var leadId = qs.get("lead_id") || "lead_verified";
         var sku = qs.get("sku") || "";
         var sessionId = qs.get("session_id") || "";
@@ -2897,7 +2952,8 @@ def _render_runtime_sync_events_js() -> str:
         var ignoreParams = {
           "utm_source": 1, "utm_medium": 1, "utm_campaign": 1, "utm_content": 1, "utm_term": 1,
           "fbclid": 1, "gclid": 1, "li_fat_id": 1, "twclid": 1, "ref": 1, "source_tool": 1,
-          "subid": 1, "cta_slot": 1, "traffic_source": 1, "ph_tier": 1, "wb_state": 1, "ai_mode": 1
+          "subid": 1, "cta_slot": 1, "traffic_source": 1, "ph_tier": 1, "wb_state": 1, "ai_mode": 1,
+          "checkout_status": 1, "checkout_fulfilled": 1, "lead_id": 1, "sku": 1, "session_id": 1
         };
         var hydratedCount = 0;
         qs.forEach(function(rawVal, rawKey) {
@@ -8761,12 +8817,19 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
             "pages": t_page_records,
         }
 
-    dom_simulation = (
-        _run_node_vm_button_action_simulation()
-        if execute_dom_simulation
-        else {"all_passed": True, "skipped": True, "tenants": []}
-    )
+    if execute_dom_simulation:
+        dom_simulation = _run_node_vm_button_action_simulation()
+        dom_simulation["skipped"] = False
+        dom_simulation["verified"] = bool(dom_simulation.get("all_passed"))
+    else:
+        dom_simulation = {
+            "all_passed": False,
+            "verified": False,
+            "skipped": True,
+            "tenants": [],
+        }
 
+    static_surfaces_passed = len(violations) == 0
     return {
         "version": VISUAL_PRIMITIVES_VERSION,
         "total_pages_audited": total_pages,
@@ -8784,7 +8847,12 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
         "coexistence_and_surface_violations": violations,
         "dom_action_simulation": dom_simulation,
         "tenants": tenant_summaries,
-        "all_surfaces_and_handlers_passed": len(violations) == 0 and bool(dom_simulation.get("all_passed")),
+        "static_surfaces_passed": static_surfaces_passed,
+        "all_surfaces_and_handlers_passed": (
+            static_surfaces_passed
+            and bool(dom_simulation.get("verified"))
+            and bool(dom_simulation.get("all_passed"))
+        ),
     }
 
 

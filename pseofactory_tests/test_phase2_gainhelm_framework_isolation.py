@@ -43,6 +43,14 @@ from pseofactory.porcelain_shell import (
 )
 
 LIVE_GAINHELM_REPO = Path("/home/ubuntuadmin/projects/gainhelm")
+
+
+def _strip_esm_exports(js_src: str) -> str:
+    """Strips ESM export keywords and trailing export { ... } blocks for non-module node:vm execution."""
+    stripped = re.sub(r"\bexport\s+(?=async\s+function\b|function\b)", "", js_src)
+    stripped = stripped.replace("export default ", "const __default_export = ")
+    stripped = re.sub(r"\bexport\s*\{[\s\S]*?\};?", "", stripped)
+    return stripped
 FORBIDDEN_NON_AUDIT_TOKENS = ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa")
 SKU_IDS = (
     "gh_hipaa_iso27001_governance_kit",
@@ -332,7 +340,7 @@ def test_gainhelm_stale_html_self_heals_and_edge_fulfillment_parity() -> None:
         "",
         generate_edge_redirect_function(property_id="gainhelm"),
     ).replace("onRequest(", "onRedirectRequest(")
-    edge_js = re.sub(r"\bexport\s+(?=async\s+function\s+onRequest)", "", generate_edge_lead_capture_function(property_id="gainhelm"))
+    edge_js = _strip_esm_exports(generate_edge_lead_capture_function(property_id="gainhelm"))
     node_script = f"""
 {edge_js}
 const REDIRECT_MOD = (() => {{
@@ -376,11 +384,26 @@ async function run() {{
     const baseQs = "fulfill=1&tool_slug=" + slug + "&amount=112100&lead_id=" + lid + "&session_id=cs_live_PAIDFOR_" + lid + "&synthetic_test=1";
     const hdrs = {{ headers: {{ "x-pseofactory-test": "1" }} }};
 
-    // 0. /r/vanta_security & /r/vanta redirect parity
+    // 0. /r/vanta_security & /r/vanta redirect parity: fail-closed on-site hold by default,
+    // and framework-isolated native destination under explicit ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS=true
     for (const pAlias of ["vanta_security", "vanta"]) {{
-      const redirRes = await REDIRECT_MOD.onRedirectRequest({{
+      const defaultRes = await REDIRECT_MOD.onRedirectRequest({{
         request: new Request("https://gainhelm.com/r/" + pAlias + "?source_tool=" + slug + "&synthetic_test=1"),
         env: stripeEnv,
+        params: {{ partner: pAlias }},
+      }});
+      if (defaultRes.status !== 302) throw new Error("Bad default /r status for " + slug + ": " + defaultRes.status);
+      const defaultLoc = defaultRes.headers.get("Location") || "";
+      if (!defaultLoc.startsWith("https://gainhelm.com/tools/")) {{
+        throw new Error("Expected default on-site hold for /r/" + pAlias + ", got: " + defaultLoc);
+      }}
+      if (defaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") {{
+        throw new Error("Expected blocked_unapproved_partner for /r/" + pAlias + ", got: " + defaultRes.headers.get("X-Edge-Contract-Tier"));
+      }}
+
+      const redirRes = await REDIRECT_MOD.onRedirectRequest({{
+        request: new Request("https://gainhelm.com/r/" + pAlias + "?source_tool=" + slug + "&synthetic_test=1"),
+        env: {{ ...stripeEnv, ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: pAlias }},
       }});
       if (redirRes.status !== 302) throw new Error("Bad /r status for " + slug + ": " + redirRes.status);
@@ -973,10 +996,8 @@ def test_edge_cmmc_bundle_and_post_partner_key_desk_parity(tmp_path: Path) -> No
     """Verifies Edge Worker CMMC fulfillment isolation and POST omitted/alias partner_key parity."""
     from pseofactory.edge import generate_edge_lead_capture_function
 
-    edge_js = re.sub(
-        r"\bexport\s+(?=async\s+function\s+onRequest)",
-        "",
-        generate_edge_lead_capture_function(property_id="gainhelm"),
+    edge_js = _strip_esm_exports(
+        generate_edge_lead_capture_function(property_id="gainhelm")
     )
     fw_expectations = json.dumps(
         {
@@ -1339,10 +1360,8 @@ def test_phase2_edge_generic_slugs_propagate_vertical_across_all_15_frameworks(
     from pseofactory.affiliates import GAINHELM_FRAMEWORK_PROFILES
     from pseofactory.edge import generate_edge_lead_capture_function
 
-    edge_js = re.sub(
-        r"\bexport\s+(?=async\s+function\s+onRequest)",
-        "",
-        generate_edge_lead_capture_function(property_id="gainhelm"),
+    edge_js = _strip_esm_exports(
+        generate_edge_lead_capture_function(property_id="gainhelm")
     )
     fw_specs = {
         fw_k: {
@@ -1715,10 +1734,8 @@ def test_phase2_python_tracker_generic_slugs_propagate_vertical(tmp_path: Path) 
                 }
             )
 
-    edge_js = re.sub(
-        r"\bexport\s+(?=async\s+function\s+onRequest)",
-        "",
-        generate_edge_lead_capture_function(property_id="gainhelm"),
+    edge_js = _strip_esm_exports(
+        generate_edge_lead_capture_function(property_id="gainhelm")
     )
     vm_runner = f"""
 import vm from "node:vm";
@@ -1880,10 +1897,8 @@ def test_phase2_non_primary_partner_key_and_zeptomail_parity(
         for fw, req_pk, canon_pk, exp_dest_base in cases
     ]
 
-    edge_js = re.sub(
-        r"\bexport\s+(?=async\s+function\s+onRequest)",
-        "",
-        generate_edge_lead_capture_function(property_id="gainhelm"),
+    edge_js = _strip_esm_exports(
+        generate_edge_lead_capture_function(property_id="gainhelm")
     )
     node_script = tmp_path / "edge_non_primary_partner.mjs"
     node_script.write_text(
@@ -2293,10 +2308,8 @@ def test_phase2_bare_generic_sku_soc2_short_and_cmmc_isolation(tmp_path: Path) -
         assert urlparse(q_offer["success_url"]).path == exp_q_path, (q_slug, q_vert, q_offer["success_url"])
         assert urlparse(q_offer["cancel_url"]).path == exp_q_path, (q_slug, q_vert, q_offer["cancel_url"])
 
-    edge_js = re.sub(
-        r"\bexport\s+(?=async\s+function\s+onRequest)",
-        "",
-        generate_edge_lead_capture_function(property_id="gainhelm"),
+    edge_js = _strip_esm_exports(
+        generate_edge_lead_capture_function(property_id="gainhelm")
     )
     vm_runner = f"""
 import vm from "node:vm";
@@ -2481,12 +2494,7 @@ def test_edge_lead_id_only_lookup_no_stripe_email_and_bare_generic_parity(tmp_pa
         assert "iso/iec 27001" not in cmmc_blob and "iso_27006" not in cmmc_blob
 
     lead_js = generate_edge_lead_capture_function(property_id="gainhelm")
-    vm_code = (
-        lead_js
-        .replace("export async function ", "async function ")
-        .replace("export function ", "function ")
-        .replace("export default ", "const __default_export = ")
-    )
+    vm_code = _strip_esm_exports(lead_js)
     vm_driver = """
 const kvStore = new Map();
 const envWithStripe = {
@@ -2983,10 +2991,8 @@ def test_phase2_sku_and_vertical_propagation_across_email_datapack_and_edge_sync
         assert "vertical=dora_eu_ict_resilience" in wp_dora_19[wp_url_key], (wp_url_key, wp_dora_19[wp_url_key])
 
     tenant_scripts = {
-        prop: re.sub(
-            r"\bexport\s+(?=async\s+function\s+onRequest)",
-            "",
-            generate_edge_lead_capture_function(property_id=prop),
+        prop: _strip_esm_exports(
+            generate_edge_lead_capture_function(property_id=prop)
         )
         for prop in ("gainhelm", "profithelm", "prexvo", "lienbond")
     }

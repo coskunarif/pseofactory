@@ -2033,6 +2033,11 @@ export async function onRequest(context) {{
       ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
       : null;
   const effectiveStatus = envStatus || partnerConfig.status || "pending";
+  const earlyReqUrl = new URL(request.url);
+  const isEarlySynth =
+    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
+    earlyReqUrl.searchParams.get("synthetic_test") === "1";
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||
@@ -2046,10 +2051,11 @@ export async function onRequest(context) {{
         "X-Robots-Tag": "noindex, nofollow",
         "X-Edge-Partner": rawPartner,
         "X-Edge-Contract-Tier": "declined_partner_blocked",
+        ...earlySynthHdrs,
       }},
     }});
   }}
-  const reqUrl = new URL(request.url);
+  const reqUrl = earlyReqUrl;
   const normParams = extractNormalizedParams(reqUrl);
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
@@ -2060,9 +2066,12 @@ export async function onRequest(context) {{
       partnerConfig.directContractUrl &&
       partnerConfig.directContractUrl.trim().length > 0
   );
-  const blockUnapproved = Boolean(
-    env && String(env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  const allowUnapproved = Boolean(
+    env && String(env.ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
   );
+  const blockUnapproved =
+    !allowUnapproved &&
+    String((env && env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS) || "true").toLowerCase() !== "false";
   if (!hasDirectConfig && !hasDirectContract && effectiveStatus !== "live" && blockUnapproved) {{
     return new Response(null, {{
       status: 302,
@@ -2072,6 +2081,7 @@ export async function onRequest(context) {{
         "X-Robots-Tag": "noindex, nofollow",
         "X-Edge-Partner": rawPartner,
         "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+        ...earlySynthHdrs,
       }},
     }});
   }}
@@ -2484,6 +2494,11 @@ export async function onRequest(context) {{
       ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
       : null;
   const effectiveStatus = envStatus || partnerConfig.status || "pending";
+  const earlyReqUrl = new URL(request.url);
+  const isEarlySynth =
+    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
+    earlyReqUrl.searchParams.get("synthetic_test") === "1";
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||
@@ -2497,10 +2512,11 @@ export async function onRequest(context) {{
         "X-Robots-Tag": "noindex, nofollow",
         "X-Edge-Partner": rawPartner,
         "X-Edge-Contract-Tier": "declined_partner_blocked",
+        ...earlySynthHdrs,
       }},
     }});
   }}
-  const reqUrl = new URL(request.url);
+  const reqUrl = earlyReqUrl;
   const normParams = extractNormalizedParams(reqUrl);
   const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
   const hasDirectConfig = Boolean(envUrl && envUrl.trim().length > 0);
@@ -2511,9 +2527,12 @@ export async function onRequest(context) {{
       partnerConfig.directContractUrl &&
       partnerConfig.directContractUrl.trim().length > 0
   );
-  const blockUnapproved = Boolean(
-    env && String(env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  const allowUnapproved = Boolean(
+    env && String(env.ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
   );
+  const blockUnapproved =
+    !allowUnapproved &&
+    String((env && env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS) || "true").toLowerCase() !== "false";
   if (!hasDirectConfig && !hasDirectContract && effectiveStatus !== "live" && blockUnapproved) {{
     return new Response(null, {{
       status: 302,
@@ -2523,6 +2542,7 @@ export async function onRequest(context) {{
         "X-Robots-Tag": "noindex, nofollow",
         "X-Edge-Partner": rawPartner,
         "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+        ...earlySynthHdrs,
       }},
     }});
   }}
@@ -3003,6 +3023,12 @@ export async function onRequest(context) {{
       : null;
   const effectiveStatus = envStatus || partnerConfig.status || "pending";
 
+  const earlyReqUrl = new URL(request.url);
+  const isEarlySynth =
+    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
+    earlyReqUrl.searchParams.get("synthetic_test") === "1";
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
+
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||
@@ -3011,6 +3037,7 @@ export async function onRequest(context) {{
     return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL, {{
       "X-Edge-Partner": rawPartner,
       "X-Edge-Contract-Tier": "declined_partner_blocked",
+      ...earlySynthHdrs,
     }});
   }}
 
@@ -3019,13 +3046,17 @@ export async function onRequest(context) {{
   const hasApprovedContract = Boolean(
     partnerConfig.directContractUrl && partnerConfig.directContractUrl.trim().length > 0
   );
-  const blockUnapproved = Boolean(
-    env && String(env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  const allowUnapproved = Boolean(
+    env && String(env.ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
   );
-  if (!hasDirectConfig && !hasApprovedContract && blockUnapproved) {{
+  const blockUnapproved =
+    !allowUnapproved &&
+    String((env && env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS) || "true").toLowerCase() !== "false";
+  if (!hasDirectConfig && !hasApprovedContract && effectiveStatus !== "live" && blockUnapproved) {{
     return makeRedirectResponse(EDUCATIONAL_CALCULATOR_URL, {{
       "X-Edge-Partner": rawPartner,
       "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+      ...earlySynthHdrs,
     }});
   }}
   const rawTargetUrl = (
@@ -3636,6 +3667,11 @@ export async function onRequest(context) {{
       : null;
   const effectiveStatus =
     envStatus || partnerConfig.status || (partnerConfig.isDirect ? "live" : "pending");
+  const earlyReqUrl = new URL(request.url);
+  const isEarlySynth =
+    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
+    earlyReqUrl.searchParams.get("synthetic_test") === "1";
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||
@@ -3649,6 +3685,7 @@ export async function onRequest(context) {{
         "X-Robots-Tag": "noindex, nofollow",
         "X-Edge-Partner": rawPartner,
         "X-Edge-Contract-Tier": "declined_partner_blocked",
+        ...earlySynthHdrs,
       }},
     }});
   }}
@@ -3663,6 +3700,28 @@ export async function onRequest(context) {{
       partnerConfig.directContractUrl.trim().length > 0
   );
   const isDirect = partnerConfig.isDirect || hasDirectConfig || hasDirectContract;
+  const allowUnapproved = Boolean(
+    env && String(env.ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS || "").toLowerCase() === "true"
+  );
+  const blockUnapproved =
+    !allowUnapproved &&
+    String((env && env.BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS) || "true").toLowerCase() !== "false";
+  const hasApprovedContract = Boolean(
+    hasDirectConfig || hasDirectContract || effectiveStatus === "live" || sovrnApproved
+  );
+  if (!hasApprovedContract && blockUnapproved) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: "https://profithelm.com/tools/",
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "blocked_unapproved_partner",
+        ...earlySynthHdrs,
+      }},
+    }});
+  }}
   const rawTargetUrl = (
     hasDirectConfig
       ? envUrl
@@ -3897,13 +3956,19 @@ def resolve_canonical_partner_redirect(
 
     catalog = build_canonical_partner_catalog(property_id=property_id, hub=hub)
     partner_config = catalog.get(raw_partner)
+    fell_back_to_global = False
     if not partner_config and property_id:
         catalog = build_canonical_partner_catalog(property_id=None, hub=hub)
         partner_config = catalog.get(raw_partner)
+        fell_back_to_global = True
     if not partner_config:
         return None
 
-    resolved_prop = str(property_id or partner_config.get("property_id") or "profithelm").strip().lower()
+    resolved_prop = str(
+        (partner_config.get("property_id") if fell_back_to_global else property_id)
+        or partner_config.get("property_id")
+        or "profithelm"
+    ).strip().lower()
     env_map = env or {}
     norm_params: Dict[str, str] = {}
     for raw_k, raw_v in (query_params or {}).items():
@@ -3915,12 +3980,12 @@ def resolve_canonical_partner_redirect(
     status_env_var = str(partner_config.get("statusEnvVar") or "")
     env_status = str(env_map.get(status_env_var) or "").strip().lower() if status_env_var else ""
     effective_status = env_status or str(partner_config.get("status") or "").strip().lower()
+    edu_fallback = {
+        "prexvo": "https://prexvo.com/tools/student-loan-repayment-calculator/",
+        "gainhelm": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+        "lienbond": "https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/",
+    }.get(resolved_prop, "https://profithelm.com/tools/")
     if effective_status in ("declined", "rejected", "pending_p2"):
-        edu_fallback = {
-            "prexvo": "https://prexvo.com/tools/student-loan-repayment-calculator/",
-            "gainhelm": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
-            "lienbond": "https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/",
-        }.get(resolved_prop, "https://profithelm.com/tools/")
         return {
             "partner": raw_partner,
             "location": edu_fallback,
@@ -3941,9 +4006,28 @@ def resolve_canonical_partner_redirect(
     direct_contract_url = str(partner_config.get("directContractUrl") or "").strip()
     sovrn_fallback_url = str(partner_config.get("sovrnFallbackUrl") or "").strip()
     default_url = str(partner_config.get("defaultUrl") or "").strip()
+    allow_unapproved = (
+        str(env_map.get("ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS") or "").strip().lower() == "true"
+    )
+    block_unapproved = (
+        not allow_unapproved
+        and str(env_map.get("BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS") or "true").strip().lower() != "false"
+    )
 
     if resolved_prop in ("prexvo", "gainhelm", "lienbond"):
         has_direct_contract = bool(not has_direct_config and not force_native and direct_contract_url)
+        if not has_direct_config and not has_direct_contract and effective_status != "live" and block_unapproved:
+            return {
+                "partner": raw_partner,
+                "location": edu_fallback,
+                "native_destination": default_url or edu_fallback,
+                "effective_base_url": edu_fallback,
+                "contract_tier": "blocked_unapproved_partner",
+                "subid": norm_params.get("subid") or "default",
+                "source_tool": norm_params.get("source_tool") or norm_params.get("source") or "direct",
+                "cta_slot": norm_params.get("cta_slot") or norm_params.get("slot") or "default",
+                "property_id": resolved_prop,
+            }
         raw_target_url = (
             env_url
             if has_direct_config
@@ -3955,7 +4039,7 @@ def resolve_canonical_partner_redirect(
             else (
                 "direct_contract_upgraded"
                 if has_direct_contract
-                else "native_unmonetized_destination"
+                else ("unapproved_native_unmonetized" if resolved_prop == "prexvo" else "native_unmonetized_destination")
             )
         )
         is_direct = True
@@ -3966,6 +4050,24 @@ def resolve_canonical_partner_redirect(
         is_direct = bool(
             partner_config.get("isDirect", False) or has_direct_config or has_direct_contract
         )
+        has_approved_contract = bool(
+            has_direct_config
+            or has_direct_contract
+            or effective_status == "live"
+            or sovrn_approved
+        )
+        if not has_approved_contract and block_unapproved:
+            return {
+                "partner": raw_partner,
+                "location": edu_fallback,
+                "native_destination": default_url or edu_fallback,
+                "effective_base_url": edu_fallback,
+                "contract_tier": "blocked_unapproved_partner",
+                "subid": norm_params.get("subid") or "default",
+                "source_tool": norm_params.get("source_tool") or norm_params.get("source") or "direct",
+                "cta_slot": norm_params.get("cta_slot") or norm_params.get("slot") or "default",
+                "property_id": resolved_prop,
+            }
         raw_target_url = (
             env_url
             if has_direct_config
@@ -3981,7 +4083,11 @@ def resolve_canonical_partner_redirect(
             else (
                 "direct_contract_upgraded"
                 if has_direct_contract
-                else ("direct_default" if is_direct else "sovrn_fallback")
+                else (
+                    "direct_default"
+                    if is_direct
+                    else ("sovrn_fallback" if sovrn_approved else "native_unmonetized_destination")
+                )
             )
         )
 
@@ -4581,6 +4687,288 @@ export async function onRequestGet(context) {{
 """
     assert_no_forbidden_dashes(telemetry_js, "generate_edge_telemetry_function")
     return telemetry_js
+
+
+def _render_edge_paid_fulfillment_and_exports_js(property_id: str) -> str:
+    """
+    Renders the tenant-isolated paid-fulfillment email helper and ES-module exports
+    appended to each tenant's functions/api/lead-capture.js so functions/api/stripe-webhook.js
+    shares the exact same KV schema, settlement writer, and zero-double-email idempotency.
+    Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
+    """
+    prop_clean = (property_id or "").strip().lower()
+    tenant_cfg = {
+        "profithelm": (
+            "ProfitHelm",
+            "profithelm.com",
+            "ProfitHelm Advisory Desk",
+            "section-1031-calculator",
+        ),
+        "prexvo": (
+            "Prexvo",
+            "prexvo.com",
+            "Prexvo Education Desk",
+            "student-loan-refinance-break-even-calculator",
+        ),
+        "gainhelm": (
+            "GainHelm",
+            "gainhelm.com",
+            "GainHelm Compliance Desk",
+            "soc-2-audit-cost-calculator",
+        ),
+        "lienbond": (
+            "LienBond",
+            "lienbond.com",
+            "LienBond Underwriting Desk",
+            "contractor-license-bond-cost-calculator-by-credit-score",
+        ),
+    }
+    if prop_clean not in tenant_cfg:
+        raise ValueError(f"Unsupported property_id for paid fulfillment exports: {property_id!r}")
+    brand_name, domain, default_from_name, default_slug = tenant_cfg[prop_clean]
+    js_block = f"""
+async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSyntheticProbe = false) {{
+  const sid = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
+  if (isSyntheticProbe) {{
+    return {{
+      dispatched: false,
+      status: "synthetic_test_suppressed",
+      duplicate_suppressed: false,
+      provider: null,
+      message_id: null,
+    }};
+  }}
+  const targetEmail = String((record && record.email) || "").trim().toLowerCase();
+  if (!targetEmail || isPlaceholderCheckoutEmail(targetEmail) || isSyntheticTestEmail(targetEmail)) {{
+    return {{
+      dispatched: false,
+      status: "skipped_placeholder_or_internal_recipient",
+      duplicate_suppressed: false,
+      provider: null,
+      message_id: null,
+    }};
+  }}
+  if (sid && record && record.paid_fulfillment_email_session_id === sid) {{
+    return {{
+      dispatched: false,
+      status: "already_dispatched_for_session",
+      duplicate_suppressed: true,
+      provider: null,
+      message_id: null,
+    }};
+  }}
+  const kv = getLeadsKv(env);
+  if (sid && kv && typeof kv.get === "function") {{
+    try {{
+      const lockRaw = await kv.get("stripe_session_fulfilled:" + sid);
+      if (lockRaw) {{
+        const lockObj = typeof lockRaw === "string" ? JSON.parse(lockRaw) : lockRaw;
+        if (lockObj && (lockObj.email_dispatched === true || lockObj.email_attempted === true)) {{
+          return {{
+            dispatched: false,
+            status: "already_dispatched_kv_lock",
+            duplicate_suppressed: true,
+            provider: null,
+            message_id: null,
+          }};
+        }}
+      }}
+    }} catch (_) {{}}
+  }}
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+    : "";
+  const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
+  const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
+  if ((!zeptoToken && (!nangoSecretKey || !nangoConnId)) || typeof fetch !== "function") {{
+    return {{
+      dispatched: false,
+      status: "queued_central_responder",
+      duplicate_suppressed: false,
+      provider: null,
+      message_id: null,
+    }};
+  }}
+  const leadId = String((record && record.lead_id) || "lead_{prop_clean}_direct");
+  const toolSlug = String((record && record.tool_slug) || "{default_slug}").trim().toLowerCase() || "{default_slug}";
+  const sku = String((record && record.offer_sku) || "").trim().toLowerCase();
+  const skuQs = sku ? `&sku=${{encodeURIComponent(sku)}}` : "";
+  const fulfillBaseUrl = `https://{domain}/api/lead-capture?fulfill=1&lead_id=${{encodeURIComponent(leadId)}}${{skuQs}}&tool_slug=${{encodeURIComponent(toolSlug)}}&session_id=${{encodeURIComponent(sid)}}`;
+  const fulfillHtmlUrl = `${{fulfillBaseUrl}}&format=html`;
+  const fulfillCsvUrl = `${{fulfillBaseUrl}}&format=csv`;
+  const fulfillDatapackUrl = `${{fulfillBaseUrl}}&format=datapack`;
+  const fromEmail = normalizeCanonicalSenderEmail(env && (env.ZOHO_FROM_EMAIL || env.ZEPTOMAIL_FROM_EMAIL));
+  const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "{default_from_name}";
+  const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
+  const escapeHtml = (val) =>
+    String(val || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  const safeSid = escapeHtml(sid);
+  const safeLeadId = escapeHtml(leadId);
+  const safeToolSlug = escapeHtml(toolSlug);
+  const safeFulfillBaseUrl = escapeHtml(fulfillBaseUrl);
+  const safeFulfillHtmlUrl = escapeHtml(fulfillHtmlUrl);
+  const safeFulfillCsvUrl = escapeHtml(fulfillCsvUrl);
+  const safeFulfillDatapackUrl = escapeHtml(fulfillDatapackUrl);
+  const subject = `[{brand_name} Paid Toolkit Ready] Your Verified Workpaper & Statutory Data Pack (${{toolSlug.replace(/[\\r\\n]+/g, " ").slice(0, 120)}})`;
+  const htmlBody =
+    `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+    `<h2>Your {brand_name} Paid Audit Workpaper &amp; Statutory Data Pack Is Ready</h2>` +
+    `<p>Payment Reference: <strong>${{safeSid}}</strong> | Lead Reference: <strong>${{safeLeadId}}</strong></p>` +
+    `<p>Calculator Scenario: <strong>${{safeToolSlug}}</strong></p>` +
+    `<p><a href="${{safeFulfillHtmlUrl}}">Open Verified Paid Workpaper (HTML / Print PDF)</a></p>` +
+    `<p><a href="${{safeFulfillCsvUrl}}">Download Reconciliation Schedule (CSV)</a> | <a href="${{safeFulfillDatapackUrl}}">Download Statutory Data Pack (JSON)</a></p>` +
+    `<p>Direct Fulfillment Link: <a href="${{safeFulfillBaseUrl}}">${{safeFulfillBaseUrl}}</a></p>` +
+    `</div>`;
+
+  let dispatched = false;
+  let status = "queued_central_responder";
+  let provider = null;
+  let messageId = null;
+  const zohoPrimary = Boolean(nangoSecretKey && nangoConnId) && String((env && env.EMAIL_PRIMARY_RAIL) || "zoho").toLowerCase() !== "zeptomail";
+
+  async function trySendZepto() {{
+    if (!zeptoToken) return false;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${{zeptoToken}}`;
+    try {{
+      const resp = await fetch(`${{apiBase}}/email`, {{
+        method: "POST",
+        headers: {{
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        }},
+        body: JSON.stringify({{
+          from: {{ address: fromEmail, name: fromName }},
+          to: [{{ email_address: {{ address: targetEmail, name: targetEmail.split("@")[0] }} }}],
+          subject,
+          htmlbody: htmlBody,
+        }}),
+      }});
+      const data = await resp.json().catch(() => ({{}}));
+      if (resp.ok) {{
+        dispatched = true;
+        status = "sent_edge_zeptomail_paid_fulfillment";
+        provider = "zeptomail_v1";
+        messageId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        return true;
+      }}
+    }} catch (_) {{}}
+    return false;
+  }}
+
+  async function trySendZoho() {{
+    if (!nangoSecretKey || !nangoConnId) return false;
+    try {{
+      const nangoBase = (env && env.NANGO_BASE_URL ? String(env.NANGO_BASE_URL).trim() : "https://api.nango.dev").replace(/\\/+$/, "");
+      const nangoIntegration = env && env.NANGO_INTEGRATION_ID ? String(env.NANGO_INTEGRATION_ID).trim() : "zoho-mail";
+      const nangoResp = await fetch(
+        `${{nangoBase}}/connection/${{encodeURIComponent(nangoConnId)}}?provider_config_key=${{encodeURIComponent(nangoIntegration)}}&refresh_token=true`,
+        {{ headers: {{ Authorization: `Bearer ${{nangoSecretKey}}`, Accept: "application/json" }} }}
+      );
+      const nangoData = await nangoResp.json().catch(() => ({{}}));
+      const accessToken = nangoData && nangoData.credentials && nangoData.credentials.access_token;
+      if (!accessToken) return false;
+      const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
+      const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+      const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${{encodeURIComponent(zohoAccountId)}}/messages`, {{
+        method: "POST",
+        headers: {{
+          Authorization: `Zoho-oauthtoken ${{accessToken}}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        }},
+        body: JSON.stringify({{
+          fromAddress: zohoFromEmail,
+          toAddress: targetEmail,
+          subject,
+          content: htmlBody,
+          mailFormat: "html",
+          askReceipt: "no",
+          encoding: "UTF-8",
+        }}),
+      }});
+      const zohoJson = await zohoResp.json().catch(() => ({{}}));
+      const zohoMsg = (zohoJson && zohoJson.data) || {{}};
+      if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {{
+        dispatched = true;
+        status = "sent_edge_zoho_paid_fulfillment";
+        provider = "zoho_mail_oauth";
+        messageId = String(zohoMsg.messageId || zohoMsg.mailId);
+        return true;
+      }}
+    }} catch (_) {{}}
+    return false;
+  }}
+
+  if (zohoPrimary) {{
+    const okZoho = await trySendZoho();
+    if (!okZoho) {{
+      await trySendZepto();
+    }}
+  }} else {{
+    const okZepto = await trySendZepto();
+    if (!okZepto) {{
+      await trySendZoho();
+    }}
+  }}
+
+  if (record && record.lead_id) {{
+    const updatedRecord = {{
+      ...record,
+      paid_fulfillment_email_session_id: sid || record.paid_fulfillment_email_session_id || null,
+      paid_fulfillment_email_dispatched: Boolean(dispatched),
+      paid_fulfillment_email_status: status,
+      paid_fulfillment_email_sent_at: dispatched ? new Date().toISOString() : (record.paid_fulfillment_email_sent_at || null),
+    }};
+    const mem = getMemoryBuffer();
+    let updatedMem = false;
+    for (let i = 0; i < mem.length; i++) {{
+      if (mem[i] && mem[i].lead_id === updatedRecord.lead_id) {{
+        mem[i] = updatedRecord;
+        updatedMem = true;
+        break;
+      }}
+    }}
+    if (!updatedMem) {{
+      mem.unshift(updatedRecord);
+    }}
+    if (kv && typeof kv.put === "function") {{
+      try {{
+        await kv.put(updatedRecord.lead_id, JSON.stringify(updatedRecord), {{
+          expirationTtl: 60 * 60 * 24 * 90,
+          metadata: buildEdgeLeadKvMetadata(updatedRecord),
+        }});
+      }} catch (_) {{}}
+    }}
+  }}
+
+  return {{
+    dispatched,
+    status,
+    duplicate_suppressed: false,
+    provider,
+    message_id: messageId,
+  }};
+}}
+
+export {{
+  getLeadsKv,
+  lookupEdgeLeadRecord,
+  persistSettledEdgeLeadRecord,
+  dispatchEdgeZeptoMailPlaybook,
+  dispatchEdgePaidFulfillmentEmail,
+  isPlaceholderCheckoutEmail,
+  isSyntheticTestEmail,
+  buildEdgeLeadKvMetadata,
+}};
+"""
+    assert_no_forbidden_dashes(js_block, f"_render_edge_paid_fulfillment_and_exports_js({prop_clean})")
+    return js_block
 
 
 def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
@@ -5492,41 +5880,89 @@ function exposeEdgeLeads(request, env, leads) {
 async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
   if (!payment || payment.verified !== true) return record;
+  const kv = getLeadsKv(env);
+  let existingRecord = null;
+  if (kv && typeof kv.get === "function") {
+    try {
+      const rawExisting = await kv.get(record.lead_id);
+      if (rawExisting) {
+        existingRecord = typeof rawExisting === "string" ? JSON.parse(rawExisting) : rawExisting;
+      }
+    } catch (_) {}
+  }
+  const baseRec =
+    existingRecord && typeof existingRecord === "object"
+      ? { ...existingRecord, ...record }
+      : record;
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const resolvedEmail =
-    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+    payment.customer_email && (isPlaceholderCheckoutEmail(baseRec.email) || !baseRec.email)
       ? String(payment.customer_email).trim().toLowerCase()
-      : record.email;
+      : baseRec.email;
   const resolvedAmount =
-    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+    Number(payment.calculated_amount) > 0 && (!baseRec.calculated_amount || Number(baseRec.calculated_amount) <= 0)
       ? Number(payment.calculated_amount)
-      : record.calculated_amount;
+      : baseRec.calculated_amount;
   const resolvedState =
-    payment.state && (!record.state || record.state === "US")
+    payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
-      : record.state;
+      : baseRec.state;
+  const resolvedSku =
+    payment.offer_sku && !baseRec.offer_sku
+      ? String(payment.offer_sku).trim().toLowerCase()
+      : baseRec.offer_sku;
+  const preservedSettledAt =
+    (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
+    (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
+    new Date().toISOString();
+  const preservedEmailSessionId =
+    (existingRecord && existingRecord.paid_fulfillment_email_session_id) ||
+    record.paid_fulfillment_email_session_id ||
+    null;
+  const preservedEmailDispatched = Boolean(
+    (existingRecord && existingRecord.paid_fulfillment_email_dispatched) ||
+      record.paid_fulfillment_email_dispatched
+  );
+  const preservedEmailStatus =
+    (existingRecord && existingRecord.paid_fulfillment_email_status) ||
+    record.paid_fulfillment_email_status ||
+    null;
+  const preservedEmailSentAt =
+    (existingRecord && existingRecord.paid_fulfillment_email_sent_at) ||
+    record.paid_fulfillment_email_sent_at ||
+    null;
   const settledRecord = {
-    ...record,
+    ...baseRec,
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: "stripe_checkout_verified",
+    settlement_rail:
+      payment.settlement_rail ||
+      (existingRecord && existingRecord.settlement_rail) ||
+      "stripe_checkout_verified",
     stripe_payment_verified: true,
     stripe_payment_status: "paid",
     stripe_checkout_session_id: payment.session_id,
-    stripe_verified_at: new Date().toISOString(),
+    stripe_verified_at:
+      (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.stripe_verified_at) ||
+      new Date().toISOString(),
     attributed_revenue_usd: grossUsd,
     net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
     datapack_pack_id: "dp_" + record.lead_id,
-    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
+    settled_at: preservedSettledAt,
+    ...(preservedEmailSessionId ? { paid_fulfillment_email_session_id: preservedEmailSessionId } : {}),
+    ...(preservedEmailDispatched ? { paid_fulfillment_email_dispatched: true } : {}),
+    ...(preservedEmailStatus ? { paid_fulfillment_email_status: preservedEmailStatus } : {}),
+    ...(preservedEmailSentAt ? { paid_fulfillment_email_sent_at: preservedEmailSentAt } : {}),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -5540,7 +5976,6 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   if (!updatedMem) {
     mem.unshift(settledRecord);
   }
-  const kv = getLeadsKv(env);
   if (kv && typeof kv.put === "function") {
     try {
       await kv.put(settledRecord.lead_id, JSON.stringify(settledRecord), {
@@ -5902,6 +6337,48 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
         }
       }
     } catch (_) {}
+  }
+  if (zeptoToken && zohoPrimary && !isSyntheticTestEmail(record && record.email)) {
+    zeptoAttempted = true;
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${zeptoToken}`;
+    try {
+      const resp = await fetch(`${apiBase}/email`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          from: { address: fromEmail, name: fromName },
+          to: [{ email_address: { address: record.email, name: record.email.split("@")[0] } }],
+          subject: emailSubject,
+          htmlbody: htmlBody,
+        }),
+      });
+      zeptoHttpStatus = resp.status;
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        return {
+          zeptomail_dispatched: true,
+          zeptomail_status: "sent_edge_zeptomail",
+          zeptomail_http_status: resp.status,
+          zeptomail_error_code: null,
+          zeptomail_request_id: reqId,
+          email_provider: "zeptomail_v1",
+          email_message_id: reqId,
+          fulfillment_status: "dispatched",
+          lifecycle_stage: "fulfilled",
+        };
+      }
+      const errObj = (data && data.error) || {};
+      zeptoRequestId = errObj.request_id || null;
+      const details = Array.isArray(errObj.details) ? errObj.details : [];
+      zeptoErrorCode = (details[0] && details[0].code) || errObj.code || `http_${resp.status}`;
+    } catch (_) {
+      zeptoErrorCode = "network_error";
+    }
   }
   return {
     zeptomail_dispatched: false,
@@ -6471,6 +6948,7 @@ export async function onRequestPost(context) {
 }
 """
         lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json("lienbond"))
+        lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js("lienbond")
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(lienbond)")
         return lead_js
 
@@ -7951,41 +8429,89 @@ function exposeEdgeLeads(request, env, leads) {
 async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
   if (!payment || payment.verified !== true) return record;
+  const kv = getLeadsKv(env);
+  let existingRecord = null;
+  if (kv && typeof kv.get === "function") {
+    try {
+      const rawExisting = await kv.get(record.lead_id);
+      if (rawExisting) {
+        existingRecord = typeof rawExisting === "string" ? JSON.parse(rawExisting) : rawExisting;
+      }
+    } catch (_) {}
+  }
+  const baseRec =
+    existingRecord && typeof existingRecord === "object"
+      ? { ...existingRecord, ...record }
+      : record;
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const resolvedEmail =
-    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+    payment.customer_email && (isPlaceholderCheckoutEmail(baseRec.email) || !baseRec.email)
       ? String(payment.customer_email).trim().toLowerCase()
-      : record.email;
+      : baseRec.email;
   const resolvedAmount =
-    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+    Number(payment.calculated_amount) > 0 && (!baseRec.calculated_amount || Number(baseRec.calculated_amount) <= 0)
       ? Number(payment.calculated_amount)
-      : record.calculated_amount;
+      : baseRec.calculated_amount;
   const resolvedState =
-    payment.state && (!record.state || record.state === "US")
+    payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
-      : record.state;
+      : baseRec.state;
+  const resolvedSku =
+    payment.offer_sku && !baseRec.offer_sku
+      ? String(payment.offer_sku).trim().toLowerCase()
+      : baseRec.offer_sku;
+  const preservedSettledAt =
+    (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
+    (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
+    new Date().toISOString();
+  const preservedEmailSessionId =
+    (existingRecord && existingRecord.paid_fulfillment_email_session_id) ||
+    record.paid_fulfillment_email_session_id ||
+    null;
+  const preservedEmailDispatched = Boolean(
+    (existingRecord && existingRecord.paid_fulfillment_email_dispatched) ||
+      record.paid_fulfillment_email_dispatched
+  );
+  const preservedEmailStatus =
+    (existingRecord && existingRecord.paid_fulfillment_email_status) ||
+    record.paid_fulfillment_email_status ||
+    null;
+  const preservedEmailSentAt =
+    (existingRecord && existingRecord.paid_fulfillment_email_sent_at) ||
+    record.paid_fulfillment_email_sent_at ||
+    null;
   const settledRecord = {
-    ...record,
+    ...baseRec,
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: "stripe_checkout_verified",
+    settlement_rail:
+      payment.settlement_rail ||
+      (existingRecord && existingRecord.settlement_rail) ||
+      "stripe_checkout_verified",
     stripe_payment_verified: true,
     stripe_payment_status: "paid",
     stripe_checkout_session_id: payment.session_id,
-    stripe_verified_at: new Date().toISOString(),
+    stripe_verified_at:
+      (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.stripe_verified_at) ||
+      new Date().toISOString(),
     attributed_revenue_usd: grossUsd,
     net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
     datapack_pack_id: "dp_" + record.lead_id,
-    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
+    settled_at: preservedSettledAt,
+    ...(preservedEmailSessionId ? { paid_fulfillment_email_session_id: preservedEmailSessionId } : {}),
+    ...(preservedEmailDispatched ? { paid_fulfillment_email_dispatched: true } : {}),
+    ...(preservedEmailStatus ? { paid_fulfillment_email_status: preservedEmailStatus } : {}),
+    ...(preservedEmailSentAt ? { paid_fulfillment_email_sent_at: preservedEmailSentAt } : {}),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -7999,7 +8525,6 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   if (!updatedMem) {
     mem.unshift(settledRecord);
   }
-  const kv = getLeadsKv(env);
   if (kv && typeof kv.put === "function") {
     try {
       await kv.put(settledRecord.lead_id, JSON.stringify(settledRecord), {
@@ -9055,6 +9580,7 @@ export async function onRequestPost(context) {
             "__GAINHELM_FRAMEWORK_ROUTING_JS__",
             _render_gainhelm_framework_routing_js(include_deliverables=True),
         )
+        lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js("gainhelm")
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(gainhelm)")
         return lead_js
 
@@ -9805,41 +10331,89 @@ function exposeEdgeLeads(request, env, leads) {
 async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
   if (!payment || payment.verified !== true) return record;
+  const kv = getLeadsKv(env);
+  let existingRecord = null;
+  if (kv && typeof kv.get === "function") {
+    try {
+      const rawExisting = await kv.get(record.lead_id);
+      if (rawExisting) {
+        existingRecord = typeof rawExisting === "string" ? JSON.parse(rawExisting) : rawExisting;
+      }
+    } catch (_) {}
+  }
+  const baseRec =
+    existingRecord && typeof existingRecord === "object"
+      ? { ...existingRecord, ...record }
+      : record;
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const resolvedEmail =
-    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+    payment.customer_email && (isPlaceholderCheckoutEmail(baseRec.email) || !baseRec.email)
       ? String(payment.customer_email).trim().toLowerCase()
-      : record.email;
+      : baseRec.email;
   const resolvedAmount =
-    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+    Number(payment.calculated_amount) > 0 && (!baseRec.calculated_amount || Number(baseRec.calculated_amount) <= 0)
       ? Number(payment.calculated_amount)
-      : record.calculated_amount;
+      : baseRec.calculated_amount;
   const resolvedState =
-    payment.state && (!record.state || record.state === "US")
+    payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
-      : record.state;
+      : baseRec.state;
+  const resolvedSku =
+    payment.offer_sku && !baseRec.offer_sku
+      ? String(payment.offer_sku).trim().toLowerCase()
+      : baseRec.offer_sku;
+  const preservedSettledAt =
+    (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
+    (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
+    new Date().toISOString();
+  const preservedEmailSessionId =
+    (existingRecord && existingRecord.paid_fulfillment_email_session_id) ||
+    record.paid_fulfillment_email_session_id ||
+    null;
+  const preservedEmailDispatched = Boolean(
+    (existingRecord && existingRecord.paid_fulfillment_email_dispatched) ||
+      record.paid_fulfillment_email_dispatched
+  );
+  const preservedEmailStatus =
+    (existingRecord && existingRecord.paid_fulfillment_email_status) ||
+    record.paid_fulfillment_email_status ||
+    null;
+  const preservedEmailSentAt =
+    (existingRecord && existingRecord.paid_fulfillment_email_sent_at) ||
+    record.paid_fulfillment_email_sent_at ||
+    null;
   const settledRecord = {
-    ...record,
+    ...baseRec,
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: "stripe_checkout_verified",
+    settlement_rail:
+      payment.settlement_rail ||
+      (existingRecord && existingRecord.settlement_rail) ||
+      "stripe_checkout_verified",
     stripe_payment_verified: true,
     stripe_payment_status: "paid",
     stripe_checkout_session_id: payment.session_id,
-    stripe_verified_at: new Date().toISOString(),
+    stripe_verified_at:
+      (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.stripe_verified_at) ||
+      new Date().toISOString(),
     attributed_revenue_usd: grossUsd,
     net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
     datapack_pack_id: "dp_" + record.lead_id,
-    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
+    settled_at: preservedSettledAt,
+    ...(preservedEmailSessionId ? { paid_fulfillment_email_session_id: preservedEmailSessionId } : {}),
+    ...(preservedEmailDispatched ? { paid_fulfillment_email_dispatched: true } : {}),
+    ...(preservedEmailStatus ? { paid_fulfillment_email_status: preservedEmailStatus } : {}),
+    ...(preservedEmailSentAt ? { paid_fulfillment_email_sent_at: preservedEmailSentAt } : {}),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -9853,7 +10427,6 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   if (!updatedMem) {
     mem.unshift(settledRecord);
   }
-  const kv = getLeadsKv(env);
   if (kv && typeof kv.put === "function") {
     try {
       await kv.put(settledRecord.lead_id, JSON.stringify(settledRecord), {
@@ -12208,41 +12781,89 @@ function exposeEdgeLeads(request, env, leads) {
 async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {
   if (isSynth || !record || !record.lead_id) return record;
   if (!payment || payment.verified !== true) return record;
+  const kv = getLeadsKv(env);
+  let existingRecord = null;
+  if (kv && typeof kv.get === "function") {
+    try {
+      const rawExisting = await kv.get(record.lead_id);
+      if (rawExisting) {
+        existingRecord = typeof rawExisting === "string" ? JSON.parse(rawExisting) : rawExisting;
+      }
+    } catch (_) {}
+  }
+  const baseRec =
+    existingRecord && typeof existingRecord === "object"
+      ? { ...existingRecord, ...record }
+      : record;
   const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
   const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
   const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
   const resolvedEmail =
-    payment.customer_email && (isPlaceholderCheckoutEmail(record.email) || !record.email)
+    payment.customer_email && (isPlaceholderCheckoutEmail(baseRec.email) || !baseRec.email)
       ? String(payment.customer_email).trim().toLowerCase()
-      : record.email;
+      : baseRec.email;
   const resolvedAmount =
-    Number(payment.calculated_amount) > 0 && (!record.calculated_amount || Number(record.calculated_amount) <= 0)
+    Number(payment.calculated_amount) > 0 && (!baseRec.calculated_amount || Number(baseRec.calculated_amount) <= 0)
       ? Number(payment.calculated_amount)
-      : record.calculated_amount;
+      : baseRec.calculated_amount;
   const resolvedState =
-    payment.state && (!record.state || record.state === "US")
+    payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
-      : record.state;
+      : baseRec.state;
+  const resolvedSku =
+    payment.offer_sku && !baseRec.offer_sku
+      ? String(payment.offer_sku).trim().toLowerCase()
+      : baseRec.offer_sku;
+  const preservedSettledAt =
+    (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
+    (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
+    new Date().toISOString();
+  const preservedEmailSessionId =
+    (existingRecord && existingRecord.paid_fulfillment_email_session_id) ||
+    record.paid_fulfillment_email_session_id ||
+    null;
+  const preservedEmailDispatched = Boolean(
+    (existingRecord && existingRecord.paid_fulfillment_email_dispatched) ||
+      record.paid_fulfillment_email_dispatched
+  );
+  const preservedEmailStatus =
+    (existingRecord && existingRecord.paid_fulfillment_email_status) ||
+    record.paid_fulfillment_email_status ||
+    null;
+  const preservedEmailSentAt =
+    (existingRecord && existingRecord.paid_fulfillment_email_sent_at) ||
+    record.paid_fulfillment_email_sent_at ||
+    null;
   const settledRecord = {
-    ...record,
+    ...baseRec,
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
     settlement_status: "settled",
-    settlement_rail: "stripe_checkout_verified",
+    settlement_rail:
+      payment.settlement_rail ||
+      (existingRecord && existingRecord.settlement_rail) ||
+      "stripe_checkout_verified",
     stripe_payment_verified: true,
     stripe_payment_status: "paid",
     stripe_checkout_session_id: payment.session_id,
-    stripe_verified_at: new Date().toISOString(),
+    stripe_verified_at:
+      (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.stripe_verified_at) ||
+      new Date().toISOString(),
     attributed_revenue_usd: grossUsd,
     net_settled_revenue_usd: netUsd,
     datapack_delivered: true,
     datapack_pack_id: "dp_" + record.lead_id,
-    settled_at: (record.stripe_checkout_session_id === payment.session_id && record.settled_at) || new Date().toISOString(),
+    settled_at: preservedSettledAt,
+    ...(preservedEmailSessionId ? { paid_fulfillment_email_session_id: preservedEmailSessionId } : {}),
+    ...(preservedEmailDispatched ? { paid_fulfillment_email_dispatched: true } : {}),
+    ...(preservedEmailStatus ? { paid_fulfillment_email_status: preservedEmailStatus } : {}),
+    ...(preservedEmailSentAt ? { paid_fulfillment_email_sent_at: preservedEmailSentAt } : {}),
   };
   const mem = getMemoryBuffer();
   let updatedMem = false;
@@ -12256,7 +12877,6 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   if (!updatedMem) {
     mem.unshift(settledRecord);
   }
-  const kv = getLeadsKv(env);
   if (kv && typeof kv.put === "function") {
     try {
       await kv.put(settledRecord.lead_id, JSON.stringify(settledRecord), {
@@ -13449,8 +14069,380 @@ export async function onRequestPost(context) {
 """
 
     lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json(prop_clean))
+    lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js(prop_clean)
     assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function")
     return lead_js
+
+
+def generate_edge_stripe_webhook_function(property_id: str = "profithelm") -> str:
+    """
+    Generates the deterministic, fail-closed Cloudflare Pages Function
+    (functions/api/stripe-webhook.js) verifying Stripe-Signature HMAC-SHA256
+    over the raw request body, enforcing 5-minute replay protection, live paid
+    checkout.session.completed sessions, strict tenant isolation, shared KV
+    settlement persistence, and zero-double-email idempotency.
+    Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
+    """
+    prop_clean = (property_id or "").strip().lower()
+    tenant_cfg = {
+        "profithelm": ("profithelm.com", "section-1031-calculator"),
+        "prexvo": ("prexvo.com", "student-loan-refinance-break-even-calculator"),
+        "gainhelm": ("gainhelm.com", "soc-2-audit-cost-calculator"),
+        "lienbond": ("lienbond.com", "contractor-license-bond-cost-calculator-by-credit-score"),
+    }
+    if prop_clean not in tenant_cfg:
+        raise ValueError(
+            f"Unsupported property_id for Stripe webhook function: {property_id!r}"
+        )
+    domain, default_slug = tenant_cfg[prop_clean]
+    webhook_js = f"""/**
+ * Cloudflare Pages Function: /api/stripe-webhook ({domain})
+ * Verifies Stripe-Signature HMAC-SHA256 over the raw body using Web Crypto,
+ * enforces 5-minute replay protection, livemode paid checkout.session.completed,
+ * strict tenant isolation, shared KV settlement, and zero-double-email idempotency.
+ * Zero em-dashes. Zero en-dashes.
+ */
+
+import {{
+  getLeadsKv,
+  lookupEdgeLeadRecord,
+  persistSettledEdgeLeadRecord,
+  dispatchEdgePaidFulfillmentEmail,
+  isPlaceholderCheckoutEmail,
+  isSyntheticTestEmail,
+}} from "./lead-capture.js";
+
+const EDGE_PROPERTY_ID = "{prop_clean}";
+const DEFAULT_TOOL_SLUG = "{default_slug}";
+const REPLAY_WINDOW_SECONDS = 300;
+const LOCK_TTL_SECONDS = 60 * 60 * 24 * 90;
+
+const CORS_HEADERS = {{
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Stripe-Signature",
+  "Access-Control-Max-Age": "86400",
+}};
+
+function jsonResponse(payload, status = 200, extraHeaders = {{}}) {{
+  return new Response(JSON.stringify(payload), {{
+    status,
+    headers: {{
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      ...CORS_HEADERS,
+      ...extraHeaders,
+    }},
+  }});
+}}
+
+function timingSafeHexEqual(a, b) {{
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const len = Math.max(a.length, b.length);
+  let mismatch = a.length ^ b.length;
+  for (let i = 0; i < len; i += 1) {{
+    const ca = i < a.length ? a.charCodeAt(i) : 0;
+    const cb = i < b.length ? b.charCodeAt(i) : 0;
+    mismatch |= ca ^ cb;
+  }}
+  return mismatch === 0 && a.length > 0;
+}}
+
+function parseStripeSignatureHeader(headerValue) {{
+  const raw = String(headerValue || "").trim();
+  if (!raw) return null;
+  let timestampStr = "";
+  const v1List = [];
+  for (const part of raw.split(",")) {{
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k === "t" && /^\\d+$/.test(v)) {{
+      timestampStr = v;
+    }} else if (k === "v1" && /^[0-9a-fA-F]{{64}}$/.test(v)) {{
+      v1List.push(v.toLowerCase());
+    }}
+  }}
+  if (!timestampStr || v1List.length === 0) return null;
+  const timestampSec = Number(timestampStr);
+  if (!Number.isSafeInteger(timestampSec) || timestampSec <= 0) return null;
+  return {{ timestampStr, timestampSec, v1List }};
+}}
+
+async function computeStripeHmacHex(secret, signedPayload) {{
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    {{ name: "HMAC", hash: "SHA-256" }},
+    false,
+    ["sign"]
+  );
+  const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(signedPayload));
+  return Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}}
+
+function getFallbackLockMap() {{
+  if (!globalThis.__PSEOFACTORY_STRIPE_WEBHOOK_LOCKS__) {{
+    globalThis.__PSEOFACTORY_STRIPE_WEBHOOK_LOCKS__ = new Map();
+  }}
+  return globalThis.__PSEOFACTORY_STRIPE_WEBHOOK_LOCKS__;
+}}
+
+async function readSessionFulfillmentLock(kv, sessionId) {{
+  const lockKey = "stripe_session_fulfilled:" + sessionId;
+  if (kv && typeof kv.get === "function") {{
+    try {{
+      const raw = await kv.get(lockKey);
+      if (raw) {{
+        return typeof raw === "string" ? JSON.parse(raw) : raw;
+      }}
+    }} catch (_) {{}}
+    return null;
+  }}
+  const memMap = getFallbackLockMap();
+  return memMap.get(EDGE_PROPERTY_ID + ":" + sessionId) || null;
+}}
+
+async function writeSessionFulfillmentLock(kv, sessionId, payload) {{
+  const lockKey = "stripe_session_fulfilled:" + sessionId;
+  if (kv && typeof kv.put === "function") {{
+    try {{
+      await kv.put(lockKey, JSON.stringify(payload), {{
+        expirationTtl: LOCK_TTL_SECONDS,
+      }});
+    }} catch (_) {{}}
+    return;
+  }}
+  const memMap = getFallbackLockMap();
+  memMap.set(EDGE_PROPERTY_ID + ":" + sessionId, payload);
+}}
+
+export async function onRequestOptions() {{
+  return new Response(null, {{ status: 204, headers: CORS_HEADERS }});
+}}
+
+export async function onRequestGet() {{
+  return jsonResponse({{ ok: false, error: "method_not_allowed" }}, 405, {{ Allow: "POST, OPTIONS" }});
+}}
+
+export async function onRequest(context) {{
+  const method = String((context && context.request && context.request.method) || "GET").toUpperCase();
+  if (method === "OPTIONS") return onRequestOptions();
+  if (method === "POST") return onRequestPost(context);
+  return jsonResponse({{ ok: false, error: "method_not_allowed" }}, 405, {{ Allow: "POST, OPTIONS" }});
+}}
+
+export async function onRequestPost(context) {{
+  try {{
+    const {{ request, env }} = context;
+    const webhookSecret =
+      env && env.STRIPE_WEBHOOK_SECRET ? String(env.STRIPE_WEBHOOK_SECRET).trim() : "";
+    if (!webhookSecret) {{
+      return jsonResponse({{ ok: false, error: "stripe_webhook_secret_unconfigured" }}, 503);
+    }}
+
+    const sigHeader =
+      (request && request.headers && (request.headers.get("stripe-signature") || request.headers.get("Stripe-Signature"))) || "";
+    const parsedSig = parseStripeSignatureHeader(sigHeader);
+    if (!parsedSig) {{
+      return jsonResponse({{ ok: false, error: "invalid_stripe_signature_header" }}, 400);
+    }}
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - parsedSig.timestampSec) > REPLAY_WINDOW_SECONDS) {{
+      return jsonResponse({{ ok: false, error: "stripe_signature_timestamp_expired" }}, 400);
+    }}
+
+    const rawBody = await request.text();
+    const expectedHex = await computeStripeHmacHex(
+      webhookSecret,
+      `${{parsedSig.timestampStr}}.${{rawBody}}`
+    );
+    let sigMatched = false;
+    for (const candidate of parsedSig.v1List) {{
+      if (timingSafeHexEqual(candidate, expectedHex)) {{
+        sigMatched = true;
+      }}
+    }}
+    if (!sigMatched) {{
+      return jsonResponse({{ ok: false, error: "stripe_signature_mismatch" }}, 400);
+    }}
+
+    let event;
+    try {{
+      event = JSON.parse(rawBody);
+    }} catch (_) {{
+      return jsonResponse({{ ok: false, error: "invalid_json_payload" }}, 400);
+    }}
+    if (!event || typeof event !== "object") {{
+      return jsonResponse({{ ok: false, error: "invalid_json_payload" }}, 400);
+    }}
+
+    if (event.type !== "checkout.session.completed") {{
+      return jsonResponse({{
+        ok: true,
+        ignored: true,
+        reason: "unhandled_event_type",
+        event_type: event.type || null,
+      }}, 200);
+    }}
+
+    const session = (event.data && event.data.object && typeof event.data.object === "object")
+      ? event.data.object
+      : {{}};
+    const sessionId = String(session.id || "").trim();
+    if (
+      session.livemode !== true ||
+      session.payment_status !== "paid" ||
+      !/^cs_live_[A-Za-z0-9_]+$/.test(sessionId)
+    ) {{
+      return jsonResponse({{
+        ok: true,
+        ignored: true,
+        reason: "non_live_or_unpaid_session",
+        session_id: sessionId || null,
+      }}, 200);
+    }}
+
+    const meta = (session.metadata && typeof session.metadata === "object") ? session.metadata : {{}};
+    const metaProp = String(meta.property_id || "").trim().toLowerCase();
+    if (!metaProp || metaProp !== EDGE_PROPERTY_ID) {{
+      return jsonResponse({{
+        ok: true,
+        ignored: true,
+        reason: metaProp ? "property_mismatch" : "missing_property_id",
+        expected_property: EDGE_PROPERTY_ID,
+        received_property: metaProp || null,
+      }}, 200);
+    }}
+
+    const leadId = String(
+      session.client_reference_id || meta.lead_id || ("lead_" + EDGE_PROPERTY_ID + "_" + sessionId)
+    ).trim();
+    const custDetails =
+      session.customer_details && typeof session.customer_details === "object"
+        ? session.customer_details
+        : {{}};
+    const customerEmail = String(custDetails.email || session.customer_email || "").trim().toLowerCase();
+    const toolSlug = String(meta.tool_slug || DEFAULT_TOOL_SLUG).trim().toLowerCase() || DEFAULT_TOOL_SLUG;
+    const offerSku = String(meta.offer_sku || meta.sku || "").trim().toLowerCase();
+    const calcAmountStr = meta.calculated_amount !== undefined && meta.calculated_amount !== null
+      ? String(meta.calculated_amount)
+      : "";
+    const stateCode = String(meta.state || "").trim();
+
+    const kv = getLeadsKv(env);
+    const existingLock = await readSessionFulfillmentLock(kv, sessionId);
+    const baseRecord = await lookupEdgeLeadRecord(
+      env,
+      leadId,
+      toolSlug,
+      calcAmountStr,
+      stateCode,
+      customerEmail
+    );
+    const hydratedRecord = {{
+      ...baseRecord,
+      lead_id: leadId,
+      property_id: EDGE_PROPERTY_ID,
+      tool_slug: (baseRecord && baseRecord.tool_slug && baseRecord.tool_slug !== "general") ? baseRecord.tool_slug : toolSlug,
+      ...(offerSku && !(baseRecord && baseRecord.offer_sku) ? {{ offer_sku: offerSku }} : {{}}),
+      email:
+        customerEmail && (!baseRecord || !baseRecord.email || isPlaceholderCheckoutEmail(baseRecord.email))
+          ? customerEmail
+          : (baseRecord && baseRecord.email) || customerEmail || "",
+    }};
+
+    if (
+      existingLock ||
+      (hydratedRecord && hydratedRecord.paid_fulfillment_email_session_id === sessionId)
+    ) {{
+      return jsonResponse({{
+        ok: true,
+        already_fulfilled: true,
+        lead_id: leadId,
+        session_id: sessionId,
+        property_id: EDGE_PROPERTY_ID,
+        settled_at: (hydratedRecord && hydratedRecord.settled_at) || (existingLock && existingLock.settled_at) || null,
+        email_dispatched: false,
+      }}, 200);
+    }}
+
+    const amountTotalCents = Number.isFinite(Number(session.amount_total))
+      ? Number(session.amount_total)
+      : 0;
+    const payment = {{
+      verified: true,
+      reason: "stripe_webhook_checkout_session_completed",
+      session_id: sessionId,
+      payment_status: "paid",
+      amount_total_cents: amountTotalCents,
+      currency: session.currency || "usd",
+      livemode: true,
+      customer_email: customerEmail || null,
+      calculated_amount:
+        Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0
+          ? Number(meta.calculated_amount)
+          : null,
+      state: stateCode || null,
+      offer_sku: offerSku || null,
+      settlement_rail: "stripe_webhook_verified",
+    }};
+
+    const settledRecord = await persistSettledEdgeLeadRecord(env, hydratedRecord, payment, false);
+    const hasRealEmail =
+      Boolean(settledRecord && settledRecord.email) &&
+      !isPlaceholderCheckoutEmail(settledRecord.email) &&
+      !isSyntheticTestEmail(settledRecord.email);
+
+    let emailResult = {{
+      dispatched: false,
+      status: hasRealEmail ? "skipped_already_sent" : "skipped_placeholder_or_internal_recipient",
+      duplicate_suppressed: false,
+      provider: null,
+      message_id: null,
+    }};
+    if (hasRealEmail) {{
+      emailResult = await dispatchEdgePaidFulfillmentEmail(env, settledRecord, sessionId, false);
+    }}
+
+    await writeSessionFulfillmentLock(kv, sessionId, {{
+      session_id: sessionId,
+      lead_id: leadId,
+      property_id: EDGE_PROPERTY_ID,
+      settled_at: settledRecord.settled_at,
+      email_attempted: hasRealEmail,
+      email_dispatched: Boolean(emailResult.dispatched),
+      email_status: emailResult.status,
+      fulfilled_at: new Date().toISOString(),
+    }});
+
+    return jsonResponse({{
+      ok: true,
+      fulfilled: true,
+      already_fulfilled: false,
+      lead_id: leadId,
+      session_id: sessionId,
+      property_id: EDGE_PROPERTY_ID,
+      settlement_status: settledRecord.settlement_status,
+      settled_at: settledRecord.settled_at,
+      email_dispatched: Boolean(emailResult.dispatched),
+      email_status: emailResult.status,
+    }}, 200);
+  }} catch (err) {{
+    return jsonResponse(
+      {{ ok: false, error: (err && err.message) || "stripe_webhook_internal_error" }},
+      500
+    );
+  }}
+}}
+"""
+    assert_no_forbidden_dashes(webhook_js, f"generate_edge_stripe_webhook_function({prop_clean})")
+    return webhook_js
 
 
 def generate_edge_signal_function() -> str:
@@ -13649,6 +14641,7 @@ def sync_tenant_edge_redirect_function(
     js_code = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
     telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
     lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
+    stripe_webhook_js = generate_edge_stripe_webhook_function(property_id=prop_clean)
 
     prop_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {})
     registry_map = (
@@ -13720,6 +14713,7 @@ def sync_tenant_edge_redirect_function(
     lead_capture_file = api_dir / "lead-capture.js"
     checkout_file = api_dir / "checkout.js"
     fulfillment_file = api_dir / "lead-fulfillment.js"
+    stripe_webhook_file = api_dir / "stripe-webhook.js"
     telemetry_updated = False
     lead_capture_updated = False
     try:
@@ -13735,6 +14729,9 @@ def sync_tenant_edge_redirect_function(
             lead_capture_updated = True
         if not fulfillment_file.is_file() or fulfillment_file.read_text(encoding="utf-8") != fulfillment_js:
             fulfillment_file.write_text(fulfillment_js, encoding="utf-8")
+            lead_capture_updated = True
+        if not stripe_webhook_file.is_file() or stripe_webhook_file.read_text(encoding="utf-8") != stripe_webhook_js:
+            stripe_webhook_file.write_text(stripe_webhook_js, encoding="utf-8")
             lead_capture_updated = True
         signal_file = api_dir / "signal.js"
         if signal_file.is_file():
@@ -14135,6 +15132,7 @@ def sync_tenant_edge_redirect_function(
                     "path": str(target_file),
                     "telemetry_path": str(telemetry_file),
                     "lead_capture_path": str(lead_capture_file),
+                    "stripe_webhook_path": str(stripe_webhook_file),
                     "wrangler_path": str(wrangler_file),
                     "live_direct_partners": live_direct_partners,
                 }
@@ -14147,6 +15145,7 @@ def sync_tenant_edge_redirect_function(
         "path": str(target_file),
         "telemetry_path": str(telemetry_file),
         "lead_capture_path": str(lead_capture_file),
+        "stripe_webhook_path": str(stripe_webhook_file),
         "wrangler_path": str(wrangler_file),
         "live_direct_partners": live_direct_partners,
     }
@@ -14168,6 +15167,7 @@ def get_expected_edge_functions_map(
     redirect_js = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
     telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
     lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
+    stripe_webhook_js = generate_edge_stripe_webhook_function(property_id=prop_clean)
     checkout_js = (
         'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n\n'
         "function withCheckoutFlag(context) {\n"
@@ -14210,6 +15210,7 @@ def get_expected_edge_functions_map(
         "functions/api/lead-capture.js": lead_capture_js,
         "functions/api/checkout.js": checkout_js,
         "functions/api/lead-fulfillment.js": fulfillment_js,
+        "functions/api/stripe-webhook.js": stripe_webhook_js,
     }
 
 
@@ -14219,7 +15220,7 @@ def verify_tenant_edge_functions_parity(
     hub: Optional[Any] = None,
 ) -> Tuple[bool, List[str]]:
     """
-    Verifies that all 5 edge function files in repo_path/functions/ (and repo_path/dist/functions/
+    Verifies that all 6 edge function files in repo_path/functions/ (and repo_path/dist/functions/
     when present) match pseofactory.edge byte-for-byte. Returns (is_aligned, reasons).
     Zero em-dashes. Zero en-dashes.
     """

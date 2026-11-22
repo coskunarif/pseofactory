@@ -508,12 +508,16 @@ def test_audit_monetization_surfaces_checks_raw_on_disk_runtime_sync_fail_closed
     tool_file = tool_dir / "index.html"
     tool_file.write_text(base_html, encoding="utf-8")
 
-    # 1. Valid external tag + valid on-disk JS -> passes runtime sync check
+    # 1. Valid external tag + valid on-disk JS -> passes static runtime sync check while DOM simulation stays truthfully unverified
     rep_ok = audit_monetization_and_datapack_ui_ux_surfaces(
         dist_dirs={"profithelm": dist_dir / "tools"},
         execute_dom_simulation=False,
     )
-    assert rep_ok["all_surfaces_and_handlers_passed"] is True
+    assert rep_ok["static_surfaces_passed"] is True
+    assert rep_ok["coexistence_and_surface_violations"] == []
+    assert rep_ok["dom_action_simulation"]["skipped"] is True
+    assert rep_ok["dom_action_simulation"]["verified"] is False
+    assert rep_ok["all_surfaces_and_handlers_passed"] is False
 
     # 2. Stale hash in on-disk HTML + deleted .js -> MUST fail with missing_upgraded_runtime_synchronizer
     stale_html = base_html.replace(f"pseo-runtime-sync.{sha10}.js", "pseo-runtime-sync.deadbeef00.js")
@@ -523,6 +527,7 @@ def test_audit_monetization_surfaces_checks_raw_on_disk_runtime_sync_fail_closed
         dist_dirs={"profithelm": dist_dir / "tools"},
         execute_dom_simulation=False,
     )
+    assert rep_stale["static_surfaces_passed"] is False
     assert rep_stale["all_surfaces_and_handlers_passed"] is False
     assert any(
         "missing_upgraded_runtime_synchronizer" in v["issues"]
@@ -540,6 +545,7 @@ def test_audit_monetization_surfaces_checks_raw_on_disk_runtime_sync_fail_closed
         dist_dirs={"profithelm": dist_dir / "tools"},
         execute_dom_simulation=False,
     )
+    assert rep_commented["static_surfaces_passed"] is False
     assert rep_commented["all_surfaces_and_handlers_passed"] is False
     assert any(
         "missing_upgraded_runtime_synchronizer" in v["issues"]
