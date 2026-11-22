@@ -1738,6 +1738,7 @@ def _check_parasite_link_wheel_and_hub_spoke_gate(
     asset_pack: Dict[str, Any],
     resolved_prop: str,
     slug: str,
+    raw_property_id: Optional[str] = None,
 ) -> List[str]:
     """
     Enforces direct hub-and-spoke canonical attribution (Gate S5 extension):
@@ -1747,9 +1748,14 @@ def _check_parasite_link_wheel_and_hub_spoke_gate(
     2. Rejects raw hyphenated tool slugs leaked as YouTube video titles.
     """
     from urllib.parse import urlparse
+    from pseofactory.distributor import resolve_tenant_distribution_config
 
     violations: List[str] = []
-    expected_host = TENANT_CANONICAL_HOSTS.get(resolved_prop, "profithelm.com")
+    eff_prop = str(raw_property_id or asset_pack.get("property_id") or resolved_prop or "profithelm").strip().lower()
+    if eff_prop == "profithelm-platform":
+        eff_prop = "profithelm"
+    cfg_domain = str(resolve_tenant_distribution_config(eff_prop).get("domain") or "").strip().lower().removeprefix("www.")
+    expected_host = cfg_domain or TENANT_CANONICAL_HOSTS.get(resolved_prop, "profithelm.com")
 
     def _inspect_target_url(label: str, raw_u: Any) -> None:
         if not isinstance(raw_u, str) or not raw_u.strip():
@@ -1974,8 +1980,9 @@ def audit_syndication_asset_against_truth_store(
 
     store = fact_store or TenantFactStore.get_instance()
     slug = str(asset_pack.get("slug") or asset_pack.get("tool_slug") or "unknown-slug")
+    raw_prop = str(asset_pack.get("property_id") or property_id or "profithelm").strip().lower()
     resolved_prop = _resolve_canonical_tenant_id(
-        str(asset_pack.get("property_id") or property_id or "profithelm"),
+        raw_prop,
         default="profithelm",
     )
 
@@ -2082,7 +2089,14 @@ def audit_syndication_asset_against_truth_store(
         if not has_url:
             violations.append(f"UNPARAMETERIZED_CANONICAL_URL:{ch}")
 
-    violations.extend(_check_parasite_link_wheel_and_hub_spoke_gate(asset_pack, resolved_prop, slug))
+    violations.extend(
+        _check_parasite_link_wheel_and_hub_spoke_gate(
+            asset_pack,
+            resolved_prop,
+            slug,
+            raw_property_id=raw_prop,
+        )
+    )
 
     # Gate S6: Anti-Slop / Thin Stub Rejection
     for phrase in GENERIC_SYNDICATION_FILLER_PHRASES:

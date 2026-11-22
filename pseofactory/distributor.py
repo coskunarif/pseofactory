@@ -9561,7 +9561,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             out = re.sub(r"https?://profithelm\.com", eff_canon_base, obj, flags=re.IGNORECASE)
             out = re.sub(r"profithelm\.com", eff_canon_domain, out, flags=re.IGNORECASE)
             out = out.replace("ProfitHelm", eff_brand_name)
-            out = re.sub(r"\bprofithelm\b", eff_prop_norm, out, flags=re.IGNORECASE)
+            out = re.sub(r"\bprofithelm\b(?!\.com)", eff_prop_norm, out, flags=re.IGNORECASE)
             out = re.sub(r"tcja", "statutory", out, flags=re.IGNORECASE)
             out = re.sub(r"\bSection\s+1031\b", "statutory deferral", out, flags=re.IGNORECASE)
             out = re.sub(r"\bSection\s+179\b", "statutory capital", out, flags=re.IGNORECASE)
@@ -9571,6 +9571,45 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
         if isinstance(obj, dict):
             return {k: _rewrite_generic_tenant_obj(v) for k, v in obj.items()}
         return obj
+
+    def _cap_linkedin_text(text: str, max_chars: int = 2800, preserve_url: str = "") -> str:
+        if len(text) <= max_chars:
+            return text
+        paragraphs = text.split("\n\n")
+        while len(paragraphs) > 1 and len("\n\n".join(paragraphs)) > max_chars:
+            drop_idx = None
+            for idx in range(len(paragraphs) - 1, 0, -1):
+                if not preserve_url or preserve_url not in paragraphs[idx]:
+                    drop_idx = idx
+                    break
+            if drop_idx is None:
+                break
+            paragraphs.pop(drop_idx)
+        candidate = "\n\n".join(paragraphs).strip()
+        if len(candidate) <= max_chars:
+            return candidate
+        if preserve_url and preserve_url in candidate:
+            tail = f"\n\n{preserve_url}"
+            head_budget = max(20, max_chars - len(tail))
+            head = candidate.replace(preserve_url, "").strip()
+            if len(head) > head_budget:
+                cut = head[:head_budget]
+                nl_pos = cut.rfind("\n")
+                if nl_pos > head_budget - 200:
+                    cut = cut[:nl_pos]
+                elif " " in cut:
+                    cut = cut[:cut.rfind(" ")]
+                head = cut.rstrip(".,;:- ")
+            candidate = f"{head}{tail}"
+        if len(candidate) > max_chars:
+            cut = candidate[:max_chars]
+            nl_pos = cut.rfind("\n")
+            if nl_pos > max_chars - 200:
+                cut = cut[:nl_pos]
+            elif " " in cut:
+                cut = cut[:cut.rfind(" ")]
+            candidate = cut.rstrip(".,;:- ")
+        return candidate
 
     for t in target_tools:
         slug = t["slug"]
@@ -9616,12 +9655,39 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
                 tool_pack["calculation_proof"]["property_id"] = eff_prop_norm
             if isinstance(tool_pack.get("linkedin"), dict):
                 tool_pack["linkedin"]["company_id"] = eff_li_cid
+                li_url = str(tool_pack["linkedin"].get("target_url") or "")
+                for li_field in ("content", "teaser_content", "body", "post_text"):
+                    raw_li = tool_pack["linkedin"].get(li_field)
+                    if isinstance(raw_li, str) and len(raw_li) > 2800:
+                        tool_pack["linkedin"][li_field] = _cap_linkedin_text(
+                            raw_li,
+                            max_chars=2800,
+                            preserve_url=li_url if li_url and li_url in raw_li else "",
+                        )
+                li_body = str(tool_pack["linkedin"].get("content") or "")
+                if "char_count" in tool_pack["linkedin"]:
+                    tool_pack["linkedin"]["char_count"] = len(li_body)
+                if "character_count" in tool_pack["linkedin"]:
+                    tool_pack["linkedin"]["character_count"] = len(li_body)
                 teaser_preview = str(tool_pack["linkedin"].get("teaser_content") or "")[:80]
                 tool_pack["linkedin"]["command_hint"] = (
                     f'linkedin-cli post "{teaser_preview}..." --company-id {eff_li_cid}'
                     if eff_li_cid
                     else f"# LinkedIn company_id unconfigured for {eff_prop_norm}"
                 )
+            if isinstance(tool_pack.get("linkedin_pulse"), dict):
+                pulse_url = str(
+                    tool_pack["linkedin_pulse"].get("target_url")
+                    or tool_pack.get("parameterized_url")
+                    or ""
+                )
+                pulse_md = str(tool_pack["linkedin_pulse"].get("article_markdown") or "")
+                if len(pulse_md) > 2800:
+                    capped_md = _cap_linkedin_text(pulse_md, max_chars=2800, preserve_url=pulse_url)
+                    tool_pack["linkedin_pulse"]["article_markdown"] = capped_md
+                    tool_pack["linkedin_pulse"]["content"] = capped_md
+                    tool_pack["linkedin_pulse"]["char_count"] = len(capped_md)
+                    tool_pack["linkedin_pulse"]["word_count"] = len(capped_md.split())
             if isinstance(tool_pack.get("x"), dict):
                 x_txt = str(tool_pack["x"].get("content") or "")
                 x_url = str(tool_pack["x"].get("target_url") or "")

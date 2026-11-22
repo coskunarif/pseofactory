@@ -579,6 +579,7 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
        or mutate existing dist/tools/*/index.html canonical tags in place.
     """
     from unittest.mock import patch
+    from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
     from pseofactory.indexing_inspector import DailyIndexingInspector
     from pseofactory.telemetry import AtomicTelemetryLogger
 
@@ -596,12 +597,13 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
     tool_html_file = dist_tool_dir / "index.html"
     tool_html_file.write_text(original_html, encoding="utf-8")
 
+    rollover_urls = [
+        "https://profithelm.com/",
+        "https://profithelm.com/tools/saas-runway-calculator",
+    ]
     rollover_path = agy_dir / "gsc_rollover_queue.json"
     rollover_path.write_text(
-        json.dumps([
-            "https://profithelm.com/",
-            "https://profithelm.com/tools/saas-runway-calculator",
-        ]),
+        json.dumps(rollover_urls),
         encoding="utf-8",
     )
     quarantine_path = agy_dir / "indexing_quarantine_ledger.json"
@@ -622,10 +624,42 @@ def test_daily_indexing_inspector_auto_remediate_drains_rollover_queue(tmp_path)
         telemetry_logger=AtomicTelemetryLogger(log_path=telemetry_path),
     )
 
-    with patch.object(
-        inspector,
-        "audit_child_sitemaps_and_section_coverage",
-        return_value={"status": "PASS", "section_coverage": {}},
+    mock_push_summary = {
+        "status": "SUCCESS",
+        "urls_targeted": len(rollover_urls),
+        "urls_pushed": len(rollover_urls),
+        "urls_skipped": 0,
+        "child_sitemap_submissions": [],
+        "sitemap_registration": {"status": "DISPATCHED", "submissions": []},
+        "domain_health_pacing": {},
+        "push_results": {
+            "google_indexing_api": {
+                "status": "DISPATCHED",
+                "results": [
+                    {
+                        "engine": "google_indexing_api",
+                        "status": "DISPATCHED",
+                        "notifications": [
+                            {"url": u, "status": "ACCEPTED"}
+                            for u in rollover_urls
+                        ],
+                    }
+                ],
+            }
+        },
+    }
+
+    with (
+        patch.object(
+            inspector,
+            "audit_child_sitemaps_and_section_coverage",
+            return_value={"status": "PASS", "section_coverage": {}},
+        ),
+        patch.object(
+            IndexingFeedbackLoop,
+            "dispatch_multi_engine_push",
+            return_value=mock_push_summary,
+        ),
     ):
         rep = inspector.run_inspection(dry_run=False, auto_remediate=True)
 

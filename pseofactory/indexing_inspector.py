@@ -52,13 +52,38 @@ class DailyIndexingInspector:
         telemetry_logger: Optional[AtomicTelemetryLogger] = None,
     ):
         self.tenant_id = tenant_id.lower()
-        self.base_dir = Path(base_dir).resolve() if base_dir else Path(f"/home/ubuntuadmin/projects/{self.tenant_id}-platform")
-        if not self.base_dir.exists():
-            alt_base = Path(f"/home/ubuntuadmin/projects/{self.tenant_id}")
-            if alt_base.exists():
-                self.base_dir = alt_base
+        if base_dir:
+            self.base_dir = Path(base_dir).resolve()
+        else:
+            self.base_dir = Path(f"/home/ubuntuadmin/projects/{self.tenant_id}-platform")
+            if not self.base_dir.exists():
+                alt_base = Path(f"/home/ubuntuadmin/projects/{self.tenant_id}")
+                if alt_base.exists():
+                    self.base_dir = alt_base
 
-        self.agy_dir = Path(agy_dir).resolve() if agy_dir else DEFAULT_AGY_DIR
+        if agy_dir is not None:
+            self.agy_dir = Path(agy_dir).resolve()
+        else:
+            projects_root = Path("/home/ubuntuadmin/projects").resolve()
+            try:
+                is_under_projects = self.base_dir.is_relative_to(projects_root)
+            except Exception:
+                is_under_projects = str(self.base_dir).startswith(str(projects_root) + os.sep)
+            if (
+                (not is_under_projects)
+                or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+                or (not DEFAULT_AGY_DIR.parent.exists())
+            ):
+                if base_dir is not None:
+                    self.agy_dir = (self.base_dir / ".agy").resolve()
+                else:
+                    import tempfile
+
+                    self.agy_dir = (
+                        Path(tempfile.gettempdir()) / f"pseofactory_pytest_agy_{os.getpid()}"
+                    ).resolve()
+            else:
+                self.agy_dir = DEFAULT_AGY_DIR
         self._custom_recovery_path = recovery_ledger_path is not None
         self._custom_quarantine_path = quarantine_ledger_path is not None
         self._custom_velocity_path = velocity_ledger_path is not None
