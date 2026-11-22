@@ -3071,11 +3071,17 @@ def _render_runtime_sync_events_js() -> str:
           if (numEl) {
             if (/^retro-range-/.test(target.id || "") && rVal <= 200) {
               var baseV = parseFloat(numEl.getAttribute("data-pseo-base-val") || numEl.value || "100");
-              if (!isNaN(baseV) && baseV > 200) {
-                numEl.value = String(Math.round(baseV * (rVal / 100)));
+              var nextV;
+              if (!isNaN(baseV) && baseV > 0) {
+                nextV = baseV > 200 ? Math.round(baseV * (rVal / 100)) : Math.round(baseV * (rVal / 100) * 100) / 100;
               } else {
-                numEl.value = target.value;
+                nextV = rVal;
               }
+              var minAttr = parseFloat(numEl.getAttribute("min") || "");
+              var maxAttr = parseFloat(numEl.getAttribute("max") || "");
+              if (!isNaN(minAttr) && nextV < minAttr) nextV = minAttr;
+              if (!isNaN(maxAttr) && nextV > maxAttr) nextV = maxAttr;
+              numEl.value = String(nextV);
             } else {
               numEl.value = target.value;
             }

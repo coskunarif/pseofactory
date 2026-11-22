@@ -1081,3 +1081,123 @@ def test_wave2_prexvo_overlay_guardrail_css_and_insolvency_meta_uniqueness() -> 
     assert m_meta.group(1) == insolvency_meta
     assert m_meta.group(1) != pslf_meta
 
+
+def test_wave2_retro_range_slider_scales_and_clamps_sub_200_inputs(tmp_path: Path) -> None:
+    """
+    Regression test for Stage 3b.1 Chrome CDP failure on /tools/prediction-market-odds/:
+    #retro-range-* sliders (min=0, max=200, value=100) are percentage sensitivity multipliers.
+    For paired number inputs with baseV <= 200 (like #arb-yes-cents value=48.5 min=1 max=99),
+    dragging the slider must scale baseV * (rVal / 100), clamp to [min, max], and restore exact
+    baseV (48.5, NOT 100) when reset to 100 so downstream #arb-capital spread stays intact.
+    """
+    from pseofactory.visual_primitives import render_runtime_synchronizer_js
+
+    rt_js = render_runtime_synchronizer_js()
+    assert_no_forbidden_dashes(rt_js, context="render_runtime_synchronizer_js_retro_range")
+
+    runner = tmp_path / "test_retro_range_scaling.mjs"
+    runner.write_text(
+        f"""
+import vm from "node:vm";
+
+const runtimeJs = {json.dumps(rt_js)};
+const docListeners = {{}};
+const elementsById = new Map();
+
+function makeInput(id, type, value, min = "", max = "") {{
+  const attrs = {{}};
+  if (min !== "") attrs.min = String(min);
+  if (max !== "") attrs.max = String(max);
+  const el = {{
+    tagName: "INPUT",
+    id,
+    name: id,
+    type,
+    value: String(value),
+    style: {{ cssText: "" }},
+    setAttribute(k, v) {{ attrs[k] = String(v); }},
+    getAttribute(k) {{ return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; }},
+    hasAttribute(k) {{ return Object.prototype.hasOwnProperty.call(attrs, k); }},
+    closest() {{ return null; }},
+    addEventListener() {{}},
+    dispatchEvent() {{}},
+  }};
+  elementsById.set(id, el);
+  return el;
+}}
+
+const yesInput = makeInput("arb-yes-cents", "number", "48.5", "1", "99");
+const retroSlider = makeInput("retro-range-prediction-market-odds", "range", "100", "0", "200");
+
+const doc = {{
+  readyState: "complete",
+  body: {{ appendChild() {{}} }},
+  getElementById(id) {{ return elementsById.get(id) || null; }},
+  querySelector(sel) {{
+    if (sel === 'input[type="number"]') return yesInput;
+    return null;
+  }},
+  querySelectorAll(sel) {{
+    if (sel.includes('input[type="number"]') && sel.includes('input[type="range"]')) {{
+      return [yesInput, retroSlider];
+    }}
+    if (sel.includes('input[type="number"]')) return [yesInput];
+    if (sel.includes('input[type="range"]')) return [retroSlider];
+    return [];
+  }},
+  createElement() {{ return makeInput("", "div", ""); }},
+  addEventListener(ev, fn) {{
+    if (!docListeners[ev]) docListeners[ev] = [];
+    docListeners[ev].push(fn);
+  }},
+}};
+
+const sandbox = {{
+  console,
+  Event: class Event {{ constructor(type) {{ this.type = type; }} }},
+  URL,
+  URLSearchParams,
+  setTimeout,
+  clearTimeout,
+  addEventListener() {{}},
+  removeEventListener() {{}},
+  history: {{ replaceState() {{}}, pushState() {{}} }},
+  document: doc,
+  navigator: {{ sendBeacon() {{ return true; }} }},
+  location: {{
+    href: "https://profithelm.com/tools/prediction-market-odds/",
+    pathname: "/tools/prediction-market-odds/",
+    search: "",
+    origin: "https://profithelm.com",
+  }},
+}};
+sandbox.window = sandbox;
+
+vm.runInNewContext(runtimeJs, sandbox);
+
+function fireSlider(val) {{
+  retroSlider.value = String(val);
+  for (const fn of docListeners.input || []) {{
+    fn({{ target: retroSlider }});
+  }}
+  return yesInput.value;
+}}
+
+const at150 = fireSlider(150);
+const at100Reset = fireSlider(100);
+const at0Clamped = fireSlider(0);
+yesInput.setAttribute("data-pseo-base-val", "60");
+const at200Clamped = fireSlider(200);
+console.log(JSON.stringify({{ at150, at100Reset, at0Clamped, at200Clamped }}));
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(["node", str(runner)], cwd=str(tmp_path), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["at150"] == "72.75"
+    assert out["at100Reset"] == "48.5"
+    assert out["at0Clamped"] == "1"
+    assert out["at200Clamped"] == "99"
+
+
