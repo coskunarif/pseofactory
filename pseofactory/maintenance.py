@@ -12133,6 +12133,11 @@ class RetroReflectionEngine:
             return True
         if (ov_s_low == "student-loan-repayment-calculator" and "Tiered Standard" in ov_body_dump) or (ov_s_low == "parent-plus-loan-payment-calculator" and "Double Consolidation repayment options" in ov_body_dump):
             return True
+        ov_meta_low = str(raw_ov.get("meta_description") or "").lower()
+        if ("insolvency" in ov_s_low or "tax-bomb" in ov_s_low) and (
+            "pslf 120 qualifying" in ov_meta_low or "34 cfr 685.219" in ov_meta_low
+        ):
+            return True
         if "and audit-ready." in ov_body_dump or not qa_str.strip() or not qa_str.strip().endswith(".") or qa_str.strip().endswith(". Verified"):
             return True
         if " (1)" in qa_str or "Audit-Ready-S-Corp" in qa_str:

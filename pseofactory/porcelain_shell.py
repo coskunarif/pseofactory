@@ -1825,6 +1825,7 @@ details.faq-accordion > summary::-webkit-details-marker {{
 .baseline-output-summary,
 .commentary-box,
 .statutory-edge-case-trap,
+.overlay-partner-guardrail,
 .ymyl-public-service-guardrail {{
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -1838,6 +1839,7 @@ details.faq-accordion > summary::-webkit-details-marker {{
   border-left-color: var(--status-warning);
 }}
 
+.overlay-partner-guardrail,
 .ymyl-public-service-guardrail {{
   border-left-color: var(--status-positive);
   background-color: var(--bg-subtle);

@@ -1000,3 +1000,84 @@ def test_wave2_gsc_affiliate_placement_ledger_guards(tmp_path: Path) -> None:
     )
     assert res["property_id"] == "profithelm"
     assert (clean_repo / ".agy" / "gsc_affiliate_placement_ledger.json").is_file()
+
+
+def test_wave2_prexvo_overlay_guardrail_css_and_insolvency_meta_uniqueness() -> None:
+    """
+    Regression test for Prexvo Stage 3b violations:
+    1. .overlay-partner-guardrail is defined in Porcelain CSS for all 4 tenants and included
+       in get_porcelain_css_audit_sets() so restricted YMYL guardrail sections have zero
+       undefined CSS class violations.
+    2. student-loan-forgiveness-tax-bomb-insolvency-calculator always gets its own IRC Section
+       108(a)(1)(B) / IRS Form 982 meta description even when GSC maps a 'public service loan
+       forgiveness calculator' query onto it, and stale persisted overlays carrying the PSLF
+       120-payment meta description self-heal in both inject_overlay_into_html and
+       RetroReflectionEngine._overlay_spec_needs_heal.
+    """
+    import re
+    from pseofactory.gsc_remediation import (
+        _normalize_meta_120_155,
+        inject_overlay_into_html,
+    )
+    from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.porcelain_shell import (
+        generate_porcelain_stylesheet,
+        get_porcelain_css_audit_sets,
+        get_porcelain_tenant_profile,
+    )
+
+    for prop in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        css = generate_porcelain_stylesheet(get_porcelain_tenant_profile(prop))
+        assert ".overlay-partner-guardrail" in css
+        assert_no_forbidden_dashes(css, context=f"porcelain_css_{prop}")
+        _, defined_classes = get_porcelain_css_audit_sets(prop)
+        assert "overlay-partner-guardrail" in defined_classes
+
+    insolvency_slug = "student-loan-forgiveness-tax-bomb-insolvency-calculator"
+    pslf_slug = "pslf-qualifying-payment-simulator"
+
+    insolvency_meta = _normalize_meta_120_155(
+        "",
+        tenant_id="prexvo",
+        query_label="public service loan forgiveness calculator",
+        slug=insolvency_slug,
+    )
+    pslf_meta = _normalize_meta_120_155(
+        "",
+        tenant_id="prexvo",
+        query_label="public service loan forgiveness calculator",
+        slug=pslf_slug,
+    )
+    assert insolvency_meta != pslf_meta
+    assert "108(a)(1)(B)" in insolvency_meta
+    assert "Form 982" in insolvency_meta
+    assert "PSLF 120 qualifying" not in insolvency_meta
+    assert "PSLF 120 qualifying" in pslf_meta
+    assert_no_forbidden_dashes(insolvency_meta, context="prexvo_insolvency_meta")
+
+    stale_overlay = {
+        "slug": insolvency_slug,
+        "property_id": "prexvo",
+        "tenant_id": "prexvo",
+        "query": "public service loan forgiveness calculator",
+        "title_rewrite": "Student Loan Forgiveness Tax Bomb Calculator 2026 | Prexvo",
+        "meta_description": pslf_meta,
+        "quick_answer": "Estimate federal student loan forgiveness tax bomb liability and IRS Form 982 insolvency exclusion under IRC Section 108(a)(1)(B).",
+        "restricted_public_service": True,
+        "commercial_offers_allowed": False,
+    }
+    assert RetroReflectionEngine._overlay_spec_needs_heal(insolvency_slug, stale_overlay) is True
+
+    sample_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<title>Old Title</title>'
+        f'<link rel="canonical" href="https://prexvo.com/tools/{insolvency_slug}/" />'
+        f'<meta name="description" content="{pslf_meta}" />'
+        '</head><body><main><h1>Tax Bomb Calculator</h1></main></body></html>'
+    )
+    healed_html = inject_overlay_into_html(sample_html, stale_overlay)
+    m_meta = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', healed_html, re.IGNORECASE)
+    assert m_meta is not None
+    assert m_meta.group(1) == insolvency_meta
+    assert m_meta.group(1) != pslf_meta
+

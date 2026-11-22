@@ -2606,17 +2606,22 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "to credit eligible deferment and forbearance months toward 120.",
                     " Verified under Title IV 34 CFR 685.219(g) reconsideration rules.",
                 )
+            is_insolvency_route = (
+                ("insolvency" in slug_low or "tax-bomb" in slug_low or "tax bomb" in slug_low)
+                if slug_low
+                else ("insolvency" in q_low or "tax bomb" in q_low or "tax-bomb" in q_low or "982" in q_low)
+            )
+            if is_insolvency_route:
+                return (
+                    "Calculate IDR student loan forgiveness tax bomb liability and IRS Form 982 "
+                    "insolvency exclusion relief under IRC Section 108(a)(1)(B) in 2026.",
+                    " Verified under 26 U.S.C. 108(a)(1)(B) and Section 108(f)(5).",
+                )
             if "pslf" in q_low or "public service" in q_low:
                 return (
                     "Calculate PSLF 120 qualifying monthly payments, tax-free discharge timelines, "
                     "and ECF certification progress under Title IV 34 CFR 685.219(c).",
                     " Verified under Title IV 34 CFR 685.219 public service rules.",
-                )
-            if "insolvency" in q_low or "tax bomb" in q_low or "tax-bomb" in q_low or "982" in q_low:
-                return (
-                    "Calculate IDR student loan forgiveness tax bomb liability and IRS Form 982 "
-                    "insolvency exclusion relief under IRC Section 108(a)(1)(B) in 2026.",
-                    " Verified under 26 U.S.C. 108(a)(1)(B) and Section 108(f)(5).",
                 )
             if "forgiveness 2026" in q_low or "forgiveness-2026" in q_low:
                 return (
@@ -10736,6 +10741,10 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 and "hold harmless buyback eligibility under 34 cfr 685.219." in meta_desc.lower()
             )
             or ("pslf-qualifying" in ov_slug_q.lower() and "hold harmless buyback lump-sum" in meta_desc.lower())
+            or (
+                any(k in ov_slug_q.lower() for k in ("insolvency", "tax-bomb", "tax bomb"))
+                and ("pslf 120 qualifying" in meta_desc.lower() or "34 cfr 685.219" in meta_desc.lower())
+            )
             or (
                 "heavy-vehicle" in ov_slug_q.lower()
                 and "model combined irc section 179 expensing" in meta_desc.lower()
