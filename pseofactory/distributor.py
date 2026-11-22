@@ -120,6 +120,38 @@ def _is_test_context(
 
 TENANT_LINKEDIN_COMPANY_IDS: Dict[str, str] = DEFAULT_TENANT_LINKEDIN_IDS
 
+DEFAULT_LINKEDIN_QUEUE_PATH = Path(
+    "/home/ubuntuadmin/projects/arif-cli/social/linkedin-toolkit/data/queue.json"
+)
+
+CHANNEL_STATUS_LIVE_PUBLISHED = "LIVE_PUBLISHED"
+CHANNEL_STATUS_LOCAL_DRAFT_ONLY = "LOCAL_DRAFT_ONLY"
+CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS = "BLOCKED_ADMIN_ACCESS"
+CHANNEL_STATUS_POLICY_DISABLED = "POLICY_DISABLED"
+CHANNEL_STATUS_UPLOAD_ERROR = "UPLOAD_ERROR"
+
+_LOCAL_DRAFT_ONLY_CHANNELS = (
+    "ghost",
+    "github_gist",
+    "quora",
+    "google_sites",
+    "linkedin_pulse",
+    "substack_teardown",
+    "outreach_pitch",
+    "newsletter",
+)
+
+_YT_LIVE_UPLOAD_STATUSES = {
+    "UPLOADED",
+    "ALREADY_UPLOADED_IDEMPOTENT",
+    "LIVE_PUBLISHED",
+    "UPLOADED_PUBLIC",
+}
+_YT_ERROR_UPLOAD_STATUSES = {
+    "UPLOAD_ERROR",
+    "FAILED_INVALID_VIDEO_ASSET",
+}
+
 
 def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[str, str]:
     """
@@ -137,9 +169,25 @@ def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[
     ).strip().lower()
     eff_tenant = resolve_canonical_property_id(raw_tenant, default=raw_tenant)
 
-    contract = get_tenant_contract(eff_tenant)
+    raw_contract = get_tenant_contract(eff_tenant)
+    contract = (
+        raw_contract
+        if (
+            raw_contract is not None
+            and str(getattr(raw_contract, "property_id", "")).strip().lower() == eff_tenant
+        )
+        else None
+    )
     store = TenantFactStore.get_instance()
-    profile = store.get_profile(eff_tenant)
+    raw_profile = store.get_profile(eff_tenant)
+    profile = (
+        raw_profile
+        if (
+            raw_profile is not None
+            and str(getattr(raw_profile, "property_id", eff_tenant)).strip().lower() == eff_tenant
+        )
+        else None
+    )
 
     if profile is not None:
         brand_name = profile.brand_name
@@ -156,7 +204,8 @@ def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[
     linkedin_company_id = (
         os.environ.get(f"FACTORY_{eff_tenant.upper()}_LINKEDIN_COMPANY_ID")
         or TENANT_LINKEDIN_COMPANY_IDS.get(eff_tenant)
-        or (contract.linkedin_company_id if contract is not None else "143884102")
+        or (contract.linkedin_company_id if contract is not None else "")
+        or ""
     )
 
     return {
@@ -172,6 +221,17 @@ def resolve_tenant_distribution_config(tenant_id: Optional[str] = None) -> Dict[
         "linkedin_company_id": linkedin_company_id,
         "LINKEDIN_COMPANY_ID": linkedin_company_id,
     }
+
+
+def _resolve_tenant_linkedin_company_id(property_id: Optional[str]) -> str:
+    """
+    Single source of truth for a tenant's LinkedIn corporate company_id.
+    Returns an empty string for lienbond and any unconfigured tenant (never falls back to 143884102).
+    Zero em-dashes. Zero en-dashes.
+    """
+    norm_prop = _normalize_property_id(property_id)
+    cfg = resolve_tenant_distribution_config(norm_prop)
+    return str(cfg.get("linkedin_company_id") or "").strip()
 
 
 class DistributionIdempotencyLedger:
@@ -2198,19 +2258,21 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             )
         )
     ).lower()
-    brand_label = "Prexvo" if prop == "prexvo" else ("GainHelm" if prop == "gainhelm" else ("LienBond" if prop == "lienbond" else "ProfitHelm"))
+    norm_prop = _normalize_property_id(prop)
+    tenant_cfg = resolve_tenant_distribution_config(norm_prop)
+    brand_label = str(tenant_cfg.get("brand_name") or norm_prop.capitalize())
     first_comment = f"Model your exact scenario live on {brand_label}: {fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
     teaser_content = _build_zero_link_teaser_content(text, platform="linkedin", brand=brand_label)
 
-    cid = os.environ.get(f"FACTORY_{prop.upper()}_LINKEDIN_COMPANY_ID")
-    if not cid:
+    cid = _resolve_tenant_linkedin_company_id(norm_prop)
+    if not cid and norm_prop in ("profithelm", "prexvo", "gainhelm"):
         try:
-            adapter = TenantRegistry.default().get_adapter(prop)
-            cid = adapter.linkedin_company_id
+            adapter = TenantRegistry.default().get_adapter(norm_prop)
+            cid = str(getattr(adapter, "linkedin_company_id", "") or "").strip()
         except Exception:
-            cid = None
-    if not cid:
-        cid = DEFAULT_TENANT_LINKEDIN_IDS.get(prop) or os.environ.get("FACTORY_LINKEDIN_COMPANY_ID") or LINKEDIN_COMPANY_ID
+            cid = ""
+    if not cid and norm_prop == "profithelm":
+        cid = os.environ.get("FACTORY_LINKEDIN_COMPANY_ID") or LINKEDIN_COMPANY_ID
 
     assert_linkedin(text)
     assert_linkedin(teaser_content)
@@ -2224,7 +2286,11 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
         "content": text,
         "teaser_content": teaser_content,
         "first_comment": first_comment,
-        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {cid}',
+        "command_hint": (
+            f'linkedin-cli post "{teaser_content[:80]}..." --company-id {cid}'
+            if cid
+            else f"# LinkedIn company_id unconfigured for {norm_prop}"
+        ),
     }
 
 
@@ -9086,8 +9152,7 @@ def _generate_lienbond_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 
 def _generate_lienbond_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     from pseofactory.contracts import assert_linkedin
-    from pseofactory.maintenance import DEFAULT_TENANT_LINKEDIN_IDS
-    company_id = DEFAULT_TENANT_LINKEDIN_IDS.get("lienbond", "106482196")
+    company_id = _resolve_tenant_linkedin_company_id("lienbond")
     slug = tool["slug"]
     title = tool.get("title", slug.replace("-", " ").title())
     qa = tool.get("quick_answer", f"The {title} model computes deterministic commercial insurance and surety underwriting projections.")
@@ -9128,7 +9193,11 @@ def _generate_lienbond_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any
         "content": clean_content,
         "teaser_content": teaser_content,
         "first_comment": first_comment,
-        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}',
+        "command_hint": (
+            f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}'
+            if company_id
+            else "# LinkedIn company_id unconfigured for lienbond"
+        ),
         "char_count": len(clean_content),
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
@@ -9481,9 +9550,31 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
 
     distribution_pack = {}
     eff_prop_norm = _normalize_property_id(property_id)
+    tenant_cfg = resolve_tenant_distribution_config(eff_prop_norm)
+    eff_canon_base = str(tenant_cfg.get("canonical_base") or f"https://{eff_prop_norm}.com").rstrip("/")
+    eff_canon_domain = str(tenant_cfg.get("domain") or f"{eff_prop_norm}.com").strip().lower()
+    eff_brand_name = str(tenant_cfg.get("brand_name") or eff_prop_norm.capitalize())
+    eff_li_cid = _resolve_tenant_linkedin_company_id(eff_prop_norm)
+
+    def _rewrite_generic_tenant_obj(obj: Any) -> Any:
+        if isinstance(obj, str):
+            out = re.sub(r"https?://profithelm\.com", eff_canon_base, obj, flags=re.IGNORECASE)
+            out = re.sub(r"profithelm\.com", eff_canon_domain, out, flags=re.IGNORECASE)
+            out = out.replace("ProfitHelm", eff_brand_name)
+            out = re.sub(r"\bprofithelm\b", eff_prop_norm, out, flags=re.IGNORECASE)
+            out = re.sub(r"tcja", "statutory", out, flags=re.IGNORECASE)
+            out = re.sub(r"\bSection\s+1031\b", "statutory deferral", out, flags=re.IGNORECASE)
+            out = re.sub(r"\bSection\s+179\b", "statutory capital", out, flags=re.IGNORECASE)
+            return out
+        if isinstance(obj, list):
+            return [_rewrite_generic_tenant_obj(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: _rewrite_generic_tenant_obj(v) for k, v in obj.items()}
+        return obj
+
     for t in target_tools:
         slug = t["slug"]
-        base_url = f"https://lienbond.com/tools/{slug}/" if eff_prop_norm == "lienbond" else f"https://profithelm.com/tools/{slug}/"
+        base_url = f"{eff_canon_base}/tools/{slug}/"
         social_pack = generate_social_syndication_pack(t, property_id=eff_prop_norm)
         proof = social_pack["calculation_proof"]
         kw_matrix = expand_commercial_and_question_keywords(
@@ -9492,7 +9583,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             keyword_difficulty=float(t.get("keyword_difficulty", 45.0) or 45.0),
             total_keywords=10,
         )
-        distribution_pack[slug] = {
+        tool_pack: Dict[str, Any] = {
             "slug": slug,
             "property_id": eff_prop_norm,
             "title": t["title"],
@@ -9519,6 +9610,31 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             "newsletter_hook": _generate_lienbond_newsletter_hook(t, base_url) if eff_prop_norm == "lienbond" else generate_newsletter_growth_hook(slug),
             "regulatory_lead_magnet": _generate_lienbond_regulatory_lead_magnet(t, base_url) if eff_prop_norm == "lienbond" else generate_regulatory_lead_magnet_copy(slug),
         }
+        if eff_prop_norm not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+            tool_pack = _rewrite_generic_tenant_obj(tool_pack)
+            if isinstance(tool_pack.get("calculation_proof"), dict):
+                tool_pack["calculation_proof"]["property_id"] = eff_prop_norm
+            if isinstance(tool_pack.get("linkedin"), dict):
+                tool_pack["linkedin"]["company_id"] = eff_li_cid
+                teaser_preview = str(tool_pack["linkedin"].get("teaser_content") or "")[:80]
+                tool_pack["linkedin"]["command_hint"] = (
+                    f'linkedin-cli post "{teaser_preview}..." --company-id {eff_li_cid}'
+                    if eff_li_cid
+                    else f"# LinkedIn company_id unconfigured for {eff_prop_norm}"
+                )
+            if isinstance(tool_pack.get("x"), dict):
+                x_txt = str(tool_pack["x"].get("content") or "")
+                x_url = str(tool_pack["x"].get("target_url") or "")
+                if len(x_txt) > 280 and x_url:
+                    prefix_budget = max(20, 280 - len(x_url) - 2)
+                    head = x_txt.replace(x_url, "").strip()
+                    if len(head) > prefix_budget:
+                        head = head[:prefix_budget].rsplit(" ", 1)[0].rstrip(".,;:")
+                    x_txt = f"{head}\n{x_url}"
+                    tool_pack["x"]["content"] = x_txt
+                    tool_pack["x"]["char_count"] = len(x_txt)
+                    tool_pack["x"]["character_count"] = len(x_txt)
+        distribution_pack[slug] = tool_pack
     return distribution_pack
 
 
@@ -9653,11 +9769,10 @@ def prioritize_distribution_queue_by_referral_yield(
     from pseofactory.qualification import is_retired_or_consolidated_slug
 
     norm_prop = _normalize_property_id(property_id)
-    company_id = (
-        "106482194"
-        if norm_prop == "prexvo"
-        else ("106482195" if norm_prop == "gainhelm" else ("106482196" if norm_prop == "lienbond" else "143884102"))
-    )
+    company_id = _resolve_tenant_linkedin_company_id(norm_prop)
+    pq_tenant_cfg = resolve_tenant_distribution_config(norm_prop)
+    pq_canon_domain = str(pq_tenant_cfg.get("domain") or f"{norm_prop}.com").strip().lower()
+    pq_canon_base = str(pq_tenant_cfg.get("canonical_base") or f"https://{pq_canon_domain}").rstrip("/")
 
     resolved_root: Optional[Path] = Path(repo_root).resolve() if repo_root else None
     if resolved_root is None:
@@ -9900,6 +10015,15 @@ def prioritize_distribution_queue_by_referral_yield(
         settled_upgs = int(rev_sig.get("settled_upgrades_count") or 0)
         total_score = round(baseline_score + realized_rev_boost, 2)
 
+        raw_param_url = str(proof.get("parameterized_url") or "")
+        if _url_matches_domain(raw_param_url, pq_canon_domain):
+            safe_param_url = raw_param_url
+        elif raw_param_url and "?" in raw_param_url:
+            qs_part = raw_param_url.split("?", 1)[1]
+            safe_param_url = f"{pq_canon_base}/tools/{slug}/?{qs_part}"
+        else:
+            safe_param_url = f"{pq_canon_base}/tools/{slug}/"
+
         ranked.append({
             "slug": slug,
             "title": t_obj.get("title", slug),
@@ -9918,8 +10042,8 @@ def prioritize_distribution_queue_by_referral_yield(
             "gsc_position": round(position, 2),
             "striking_distance": is_striking_distance,
             "partner_clicks": partner_clicks,
-            "parameterized_url": proof["parameterized_url"],
-            "first_comment_url": _with_first_comment_utm(proof["parameterized_url"], "linkedin"),
+            "parameterized_url": safe_param_url,
+            "first_comment_url": _with_first_comment_utm(safe_param_url, "linkedin"),
         })
 
     baseline_sorted = sorted(ranked, key=lambda item: (-item["baseline_priority_score"], item["slug"]))
@@ -10242,10 +10366,9 @@ def export_all_syndication_files(
             assert_youtube_transcript,
             assert_no_forbidden_dashes,
         )
-        brand_to_check = (
-            "Prexvo"
-            if property_id == "prexvo"
-            else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
+        brand_to_check = str(
+            resolve_tenant_distribution_config(property_id).get("brand_name")
+            or _normalize_property_id(property_id).capitalize()
         )
         assert_youtube_title(yt_pack["title"], context=f"{slug} youtube title")
         assert_youtube_description(yt_pack["description"])
@@ -10350,20 +10473,13 @@ def export_all_syndication_files(
             pass
 
     # Write Master GitHub Seed Discovery Node Matrix (DR 96+)
+    export_tenant_cfg = resolve_tenant_distribution_config(property_id)
     eff_base = (
-        "https://prexvo.com"
-        if property_id == "prexvo"
-        else (
-            "https://gainhelm.com"
-            if property_id == "gainhelm"
-            else ("https://lienbond.com" if property_id == "lienbond" else CANONICAL_BASE)
-        )
+        CANONICAL_BASE
+        if _normalize_property_id(property_id) == "profithelm"
+        else str(export_tenant_cfg.get("canonical_base") or f"https://{_normalize_property_id(property_id)}.com").rstrip("/")
     )
-    eff_brand = (
-        "Prexvo"
-        if property_id == "prexvo"
-        else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
-    )
+    eff_brand = str(export_tenant_cfg.get("brand_name") or _normalize_property_id(property_id).capitalize())
     badge_items = [
         f"[![{eff_brand} Research](https://img.shields.io/badge/{eff_brand}-Statutory_Models-090d16?style=flat-square)]({eff_base}/)"
     ]
@@ -10481,7 +10597,7 @@ Calculations and statutory rules derived from:
             )
             cats = ["Construction Compliance", "Surety Bonds", "Commercial Insurance", "Mechanics Liens", "B2B Finance", "LegalTech"]
             li_cid = "106482196"
-        else:
+        elif _normalize_property_id(property_id) == "profithelm":
             tagline = "Autonomous Gross Profit & Unit Economics Radar for SaaS"
             desc_short = (
                 "ProfitHelm unifies multi-cloud gross profit telemetry, real-time merchant fee auditing, "
@@ -10489,11 +10605,18 @@ Calculations and statutory rules derived from:
             )
             cats = ["Financial Modeling", "SaaS Analytics", "Developer Tools", "AI Tools", "Finance", "Productivity"]
             li_cid = "143884102"
-        from pseofactory.tenant_facts import get_tenant_contract as _get_tc
-        try:
-            li_cid = _get_tc(property_id).linkedin_company_id or li_cid
-        except Exception:
-            pass
+        else:
+            tagline = f"Deterministic Calculators and Quantitative Decision Models by {eff_brand}"
+            desc_short = (
+                f"{eff_brand} provides deterministic financial, regulatory, and operational calculators "
+                "backed by verifiable formulas and primary datasets."
+            )
+            cats = ["Financial Modeling", "Analytics", "Developer Tools", "Compliance", "Productivity"]
+            li_cid = _resolve_tenant_linkedin_company_id(property_id)
+        if _normalize_property_id(property_id) != "lienbond":
+            resolved_cid = _resolve_tenant_linkedin_company_id(property_id)
+            if resolved_cid or _normalize_property_id(property_id) not in ("profithelm", "prexvo", "gainhelm"):
+                li_cid = resolved_cid
         social_payload: Dict[str, str] = {
             "twitter": f"@{_normalize_property_id(property_id)}",
             "twitter_url": f"https://x.com/{_normalize_property_id(property_id)}",
@@ -10686,6 +10809,179 @@ Calculations and statutory rules derived from:
     return output_dir
 
 
+def _url_matches_domain(url_val: Any, domain: str) -> bool:
+    if not url_val or not domain:
+        return False
+    raw = str(url_val).strip()
+    if not raw:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(raw)
+        host = (parsed.hostname or "").lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    target = domain.lower().strip()
+    return host == target or host.endswith(f".{target}")
+
+
+def _ledger_entry_matches_domain(entry: Dict[str, Any], domain: str) -> bool:
+    post_url = entry.get("post_url")
+    legacy_url = entry.get("url")
+    urls = [u for u in (post_url, legacy_url) if u is not None and str(u).strip()]
+    if not urls:
+        return False
+    return all(_url_matches_domain(u, domain) for u in urls)
+
+
+def _is_live_workspace_path(p: Path) -> bool:
+    try:
+        resolved = str(p.resolve())
+    except Exception:
+        resolved = str(p)
+    return resolved.startswith("/home/ubuntuadmin/projects/") and not (
+        resolved.startswith(tempfile.gettempdir()) or "/pytest-" in resolved
+    )
+
+
+def _map_youtube_dispatch_status(
+    slug: str,
+    yt_pub_by_slug: Dict[str, Dict[str, Any]],
+    yt_status_by_slug: Dict[str, str],
+    yt_upload_results: Optional[Dict[str, Any]],
+) -> str:
+    if slug in yt_pub_by_slug and str(yt_pub_by_slug[slug].get("video_id") or "").strip():
+        return CHANNEL_STATUS_LIVE_PUBLISHED
+    u_info = yt_upload_results.get(slug) if isinstance(yt_upload_results, dict) else None
+    raw_st = str(
+        (u_info.get("status") if isinstance(u_info, dict) else None)
+        or yt_status_by_slug.get(slug)
+        or ""
+    ).strip().upper()
+    vid = str(
+        (u_info.get("video_id") if isinstance(u_info, dict) else None) or ""
+    ).strip()
+    if raw_st in _YT_LIVE_UPLOAD_STATUSES and vid and vid != "unknown":
+        return CHANNEL_STATUS_LIVE_PUBLISHED
+    if raw_st in _YT_ERROR_UPLOAD_STATUSES:
+        return CHANNEL_STATUS_UPLOAD_ERROR
+    return CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+
+
+def _sync_linkedin_company_queue(
+    *,
+    li_queue_path: Path,
+    norm_prop: str,
+    corp_company_id: str,
+    li_admin_status: str,
+    prioritized_queue: List[Dict[str, Any]],
+    all_assets: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Safely updates the shared LinkedIn company queue file for a single tenant.
+    - Filters strictly by property_id (never by company_id).
+    - Skips enqueueing when corp_company_id is empty or admin access is not VERIFIED_COMPANY_ADMIN,
+      leaving all other tenants' items 100% untouched.
+    - Enforces an in-memory invariant before writing that every other tenant's item count is >= its pre-read count.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not corp_company_id or li_admin_status != "VERIFIED_COMPANY_ADMIN":
+        return {
+            "updated": False,
+            "skipped_reason": (
+                "UNCONFIGURED_COMPANY_ID"
+                if not corp_company_id
+                else f"ADMIN_ACCESS_{li_admin_status or 'UNVERIFIED'}"
+            ),
+        }
+
+    lock_path = li_queue_path.with_name(f"{li_queue_path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        tmp_path: Optional[Path] = None
+        try:
+            pre_other_counts: Dict[str, int] = {}
+            existing_li_queue: List[Dict[str, Any]] = []
+            if li_queue_path.is_file():
+                raw_li = json.loads(li_queue_path.read_text(encoding="utf-8"))
+                if isinstance(raw_li, list):
+                    for li_item in raw_li:
+                        if not isinstance(li_item, dict):
+                            continue
+                        item_cid = str(li_item.get("company_id", "")).strip()
+                        if item_cid in ("", "112710753"):
+                            continue
+                        raw_item_prop = li_item.get("property_id")
+                        item_prop = _normalize_property_id(raw_item_prop) if raw_item_prop else ""
+                        if item_prop != norm_prop:
+                            pre_other_counts[item_prop] = pre_other_counts.get(item_prop, 0) + 1
+                            existing_li_queue.append(li_item)
+
+            added_count = 0
+            for p_item in prioritized_queue:
+                s_key = p_item["slug"]
+                if s_key in all_assets and isinstance(all_assets[s_key].get("linkedin"), dict):
+                    li_pack = all_assets[s_key]["linkedin"]
+                    existing_li_queue.append(
+                        {
+                            "slug": s_key,
+                            "property_id": norm_prop,
+                            "company_id": corp_company_id,
+                            "priority_score": p_item["priority_score"],
+                            "text": li_pack["content"],
+                            "teaser_content": li_pack.get("teaser_content", ""),
+                            "first_comment": li_pack.get("first_comment", ""),
+                            "target_url": li_pack.get("first_comment_url") or li_pack.get("target_url", ""),
+                        }
+                    )
+                    added_count += 1
+
+            post_other_counts: Dict[str, int] = {}
+            for li_item in existing_li_queue:
+                if not isinstance(li_item, dict):
+                    continue
+                raw_item_prop = li_item.get("property_id")
+                item_prop = _normalize_property_id(raw_item_prop) if raw_item_prop else ""
+                if item_prop != norm_prop:
+                    post_other_counts[item_prop] = post_other_counts.get(item_prop, 0) + 1
+
+            for other_prop, pre_cnt in pre_other_counts.items():
+                post_cnt = post_other_counts.get(other_prop, 0)
+                if post_cnt < pre_cnt:
+                    raise RuntimeError(
+                        f"LinkedIn queue cross-tenant invariant violated during {norm_prop} sync: "
+                        f"{other_prop} count dropped from {pre_cnt} to {post_cnt}"
+                    )
+
+            existing_li_queue.sort(
+                key=lambda x: (-float(x.get("priority_score", 0.0) or 0.0), str(x.get("slug", "")))
+            )
+            payload_text = json.dumps(existing_li_queue, indent=2, ensure_ascii=False) + "\n"
+            tmp_path = li_queue_path.with_name(
+                f".{li_queue_path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.tmp"
+            )
+            with open(tmp_path, "w", encoding="utf-8") as tmp_f:
+                tmp_f.write(payload_text)
+                tmp_f.flush()
+                os.fsync(tmp_f.fileno())
+            os.replace(tmp_path, li_queue_path)
+            tmp_path = None
+            return {
+                "updated": True,
+                "added_count": added_count,
+                "preserved_other_counts": post_other_counts,
+            }
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+
+
 def verify_cross_platform_public_visibility(
     property_id: str = "profithelm",
     repo_dir: Optional[Union[str, Path]] = None,
@@ -10693,177 +10989,179 @@ def verify_cross_platform_public_visibility(
     yt_upload_results: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Executes cross-platform public-visibility verification across LinkedIn, Facebook, and YouTube
-    anchored in live public channel records, explicitly surfacing any credential/admin-access gaps
-    or group moderation blocks rather than assuming parity.
+    Executes truthful cross-platform public-visibility verification across LinkedIn, Facebook, and YouTube
+    by reading real live tenant telemetry and ledger files from eff_repo without hardcoded IDs or links.
+    Explicitly surfaces credential/admin-access gaps, upload errors, and local-draft-only states.
     Zero em-dashes. Zero en-dashes.
     """
     norm_prop = _normalize_property_id(property_id)
-    corp_company_id = (
-        "106482194"
-        if norm_prop == "prexvo"
-        else ("106482195" if norm_prop == "gainhelm" else "143884102")
-    )
+    cfg = resolve_tenant_distribution_config(norm_prop)
+    brand_name = str(cfg.get("brand_name") or norm_prop.capitalize())
+    canon_domain = str(cfg.get("domain") or f"{norm_prop}.com").strip().lower()
+    corp_company_id = _resolve_tenant_linkedin_company_id(norm_prop)
 
-    # 1. LinkedIn Official Company Page Public Visibility Telemetry
-    if norm_prop == "profithelm":
-        li_posts = [
-            {
-                "slug": "section-179-vehicle-equipment-deduction",
-                "urn": "urn:li:activity:7521289560610385921",
-                "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:7521289560610385921",
-                "visibility": "PUBLIC",
-                "first_comment_verified": True,
-            },
-            {
-                "slug": "saas-runway-calculator",
-                "urn": "urn:li:activity:7520927474453643265",
-                "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:7520927474453643265",
-                "visibility": "PUBLIC",
-                "first_comment_verified": True,
-            },
-            {
-                "slug": "what-is-implied-probability-in-prediction-markets-calculator",
-                "urn": "urn:li:activity:7520747441504051200",
-                "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:7520747441504051200",
-                "visibility": "PUBLIC",
-                "first_comment_verified": True,
-            },
-            {
-                "slug": "1031-like-kind-exchange-st-louis-mo-calculator",
-                "urn": "urn:li:activity:7519839662044266497",
-                "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:7519839662044266497",
-                "visibility": "PUBLIC",
-                "first_comment_verified": True,
-            },
-            {
-                "slug": "irs-2027-tax-brackets",
-                "urn": "urn:li:activity:7518942436178464768",
-                "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:7518942436178464768",
-                "visibility": "PUBLIC",
-                "first_comment_verified": True,
-            },
-        ]
-        linkedin_telemetry: Dict[str, Any] = {
-            "platform": "linkedin",
-            "company_id": corp_company_id,
-            "company_name": "ProfitHelm LLC",
-            "admin_access_status": "VERIFIED_COMPANY_ADMIN",
-            "verification_status": "PUBLIC_FEED_VERIFIED",
-            "verified_public_posts_count": len(li_posts),
-            "verified_public_permalinks": li_posts,
-            "credential_gap": None,
-        }
-    else:
-        linkedin_telemetry = {
-            "platform": "linkedin",
-            "company_id": corp_company_id,
-            "company_name": "Prexvo" if norm_prop == "prexvo" else "GainHelm",
-            "admin_access_status": "ADMIN_ACCESS_DENIED",
-            "verification_status": "BLOCKED_COMPANY_PAGE_ADMIN_GRANT_REQUIRED",
-            "verified_public_posts_count": 0,
-            "verified_public_permalinks": [],
-            "credential_gap": (
-                f"LinkedIn session (corporate page admin) redirects to /company/no-access/ for company_id {corp_company_id}; "
-                "grant Super Admin or Content Admin on the official company page to enable autonomous company dispatches."
-            ),
-        }
+    eff_repo: Optional[Path] = None
+    if repo_dir is not None:
+        eff_repo = Path(repo_dir).resolve()
+    elif not _is_test_context(property_id=norm_prop):
+        try:
+            from pseofactory.maintenance import TenantRegistry
 
-    # 2. Facebook Community Group Public Permalink & First-Comment Telemetry
-    if norm_prop == "profithelm":
-        fb_verified = [
-            {
-                "slug": "saas-runway-calculator",
-                "group_id": "331399459887663",
-                "group_name": "SaaS Startups and Founders Network",
-                "permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092639183763683/",
-                "visibility_state": "public_permalink_verified",
-                "post_mode": "zero_link_teaser_plus_first_comment",
-                "outbound_urls_in_body": 0,
-                "first_comment_verified": True,
-                "first_comment_utm": "utm_content=first_comment",
-            },
-            {
-                "slug": "saas-runway-calculator",
-                "group_id": "904747768574532",
-                "group_name": "SaaS Growth & Scale",
-                "permalink": "https://www.facebook.com/groups/904747768574532/permalink/1156156453433661/",
-                "visibility_state": "public_permalink_verified",
-                "post_mode": "zero_link_teaser_plus_first_comment",
-                "outbound_urls_in_body": 0,
-                "first_comment_verified": True,
-                "first_comment_utm": "utm_content=first_comment",
-            },
-            {
-                "slug": "prediction-market-odds",
-                "group_id": "377056858987010",
-                "group_name": "POLYMARKET",
-                "permalink": "https://www.facebook.com/groups/377056858987010/permalink/39650664137866127/",
-                "visibility_state": "public_permalink_verified",
-                "post_mode": "zero_link_teaser_plus_first_comment",
-                "outbound_urls_in_body": 0,
-                "first_comment_verified": True,
-                "first_comment_utm": "utm_content=first_comment",
-            },
-        ]
-        fb_moderation = [
-            {
-                "slug": "section-179-calculator",
-                "group_id": "2344722262507201",
-                "group_name": "Tax Pro Support",
-                "permalink": "https://www.facebook.com/groups/2344722262507201/permalink/4334430016869739/",
-                "visibility_state": "pending_admin_approval",
-            },
-            {
-                "slug": "irs-2027-tax-brackets",
-                "group_id": "2344722262507201",
-                "group_name": "Tax Pro Support",
-                "permalink": "https://www.facebook.com/groups/2344722262507201/permalink/4333234500322624/",
-                "visibility_state": "pending_admin_approval",
-            },
-            {
-                "slug": "irs-2027-tax-brackets",
-                "group_id": "1332262893636652",
-                "group_name": "IRS AND TAX INFO",
-                "permalink": "https://www.facebook.com/groups/1332262893636652/permalink/3281313738731548/",
-                "visibility_state": "pending_admin_approval",
-            },
-        ]
-    elif norm_prop == "prexvo":
-        fb_verified = [
-            {
-                "slug": "student-loan-repayment-calculator",
-                "group_id": "331399459887663",
-                "group_name": "SaaS Startups and Founders Network",
-                "permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092642197096715/",
-                "visibility_state": "public_permalink_verified",
-                "post_mode": "zero_link_teaser_plus_first_comment",
-                "outbound_urls_in_body": 0,
-                "first_comment_verified": True,
-                "first_comment_utm": "utm_content=first_comment",
-            }
-        ]
-        fb_moderation = []
+            adapter = TenantRegistry.default().get_adapter(norm_prop)
+            if adapter and getattr(adapter, "repo_path", None):
+                eff_repo = Path(adapter.repo_path).resolve()
+            elif adapter and getattr(adapter, "dist_dir", None):
+                eff_repo = Path(adapter.dist_dir).resolve().parent
+        except Exception:
+            eff_repo = None
+
+    ledger_entries: List[Dict[str, Any]] = []
+    if eff_repo is not None:
+        b_ledger_path = eff_repo / ".agy" / "broadcast_ledger.json"
+        if b_ledger_path.is_file():
+            try:
+                raw_ledger = json.loads(b_ledger_path.read_text(encoding="utf-8"))
+                if isinstance(raw_ledger, list):
+                    ledger_entries = [e for e in raw_ledger if isinstance(e, dict)]
+            except Exception:
+                ledger_entries = []
+
+    domain_entries = [
+        e for e in ledger_entries if _ledger_entry_matches_domain(e, canon_domain)
+    ]
+
+    # 1. LinkedIn Official Company Page Public Visibility Telemetry (strictly ledger-backed)
+    li_posts: List[Dict[str, Any]] = []
+    seen_li_urns: set[str] = set()
+    observed_li_access: set[str] = set()
+    has_denied_li_dispatch = False
+    for e in domain_entries:
+        metrics = e.get("metrics") if isinstance(e.get("metrics"), dict) else {}
+        dispatches = e.get("dispatches") if isinstance(e.get("dispatches"), dict) else {}
+        acc_st = str(metrics.get("linkedin_access_status") or "").strip()
+        if acc_st:
+            observed_li_access.add(acc_st)
+        li_disp_val = str(dispatches.get("linkedin") or "").strip().upper()
+        if li_disp_val in ("BLOCKED_ADMIN_ACCESS_DENIED", CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS):
+            has_denied_li_dispatch = True
+        if not corp_company_id:
+            continue
+        entry_cid = str(e.get("company_id") or "").strip()
+        li_urn = str(metrics.get("linkedin_urn") or "").strip()
+        if entry_cid == corp_company_id and li_urn.startswith("urn:li:") and li_urn not in seen_li_urns:
+            seen_li_urns.add(li_urn)
+            li_posts.append(
+                {
+                    "slug": str(e.get("slug") or ""),
+                    "urn": li_urn,
+                    "permalink": f"https://www.linkedin.com/feed/update/{li_urn}",
+                    "visibility": "PUBLIC",
+                    "first_comment_verified": bool(e.get("first_comment")),
+                }
+            )
+
+    if not corp_company_id:
+        li_admin_status = "UNCONFIGURED_COMPANY_ID"
+        li_channel_status = CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS
+        li_verification_status = "BLOCKED_COMPANY_PAGE_UNCONFIGURED"
+        li_credential_gap: Optional[str] = (
+            f"No LinkedIn corporate company_id configured for tenant {norm_prop}; "
+            f"configure FACTORY_{norm_prop.upper()}_LINKEDIN_COMPANY_ID and grant company page admin access "
+            "before autonomous company dispatches."
+        )
+    elif li_posts:
+        li_admin_status = "VERIFIED_COMPANY_ADMIN"
+        li_channel_status = CHANNEL_STATUS_LIVE_PUBLISHED
+        li_verification_status = "PUBLIC_FEED_VERIFIED"
+        li_credential_gap = None
+    elif "ADMIN_ACCESS_DENIED" in observed_li_access or has_denied_li_dispatch:
+        li_admin_status = "ADMIN_ACCESS_DENIED"
+        li_channel_status = CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS
+        li_verification_status = "BLOCKED_COMPANY_PAGE_ADMIN_GRANT_REQUIRED"
+        li_credential_gap = (
+            f"LinkedIn session (corporate page admin) redirects to /company/no-access/ for company_id {corp_company_id}; "
+            "grant Super Admin or Content Admin on the official company page to enable autonomous company dispatches."
+        )
+    elif "VERIFIED_COMPANY_ADMIN" in observed_li_access:
+        li_admin_status = "VERIFIED_COMPANY_ADMIN"
+        li_channel_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        li_verification_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        li_credential_gap = None
     else:
-        fb_verified = [
-            {
-                "slug": "soc-2-audit-cost-calculator",
-                "group_id": "331399459887663",
-                "group_name": "SaaS Startups and Founders Network",
-                "permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092641363763465/",
-                "visibility_state": "public_permalink_verified",
-                "post_mode": "zero_link_teaser_plus_first_comment",
-                "outbound_urls_in_body": 0,
-                "first_comment_verified": True,
-                "first_comment_utm": "utm_content=first_comment",
-            }
-        ]
-        fb_moderation = []
+        li_admin_status = "UNVERIFIED_ADMIN_ACCESS"
+        li_channel_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        li_verification_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        li_credential_gap = (
+            f"No verified LinkedIn company admin telemetry recorded for company_id {corp_company_id}."
+        )
+
+    linkedin_telemetry: Dict[str, Any] = {
+        "platform": "linkedin",
+        "company_id": corp_company_id,
+        "company_name": brand_name,
+        "admin_access_status": li_admin_status,
+        "channel_status": li_channel_status,
+        "verification_status": li_verification_status,
+        "verified_public_posts_count": len(li_posts),
+        "verified_public_permalinks": li_posts,
+        "credential_gap": li_credential_gap,
+    }
+
+    # 2. Facebook Community Group Public Permalink & First-Comment Telemetry (strictly ledger-backed)
+    fb_verified: List[Dict[str, Any]] = []
+    fb_moderation: List[Dict[str, Any]] = []
+    seen_fb_keys: set[tuple[str, str]] = set()
+    for e in domain_entries:
+        fb_perm = str(e.get("facebook_permalink") or "").strip()
+        if not fb_perm:
+            continue
+        e_slug = str(e.get("slug") or "")
+        fb_key = (e_slug, fb_perm)
+        if fb_key in seen_fb_keys:
+            continue
+        metrics = e.get("metrics") if isinstance(e.get("metrics"), dict) else {}
+        dispatches = e.get("dispatches") if isinstance(e.get("dispatches"), dict) else {}
+        fb_vis = str(metrics.get("facebook_visibility") or "").strip().lower()
+        fb_disp = str(dispatches.get("facebook") or "").strip().upper()
+        if fb_disp == "ERROR":
+            continue
+        if fb_vis == "pending_admin_approval" or fb_disp == "PENDING_ADMIN_MODERATION":
+            seen_fb_keys.add(fb_key)
+            fb_moderation.append(
+                {
+                    "slug": e_slug,
+                    "permalink": fb_perm,
+                    "visibility_state": "pending_admin_approval",
+                }
+            )
+        elif fb_vis == "public_permalink_verified" or fb_disp in ("PUBLIC_VERIFIED", CHANNEL_STATUS_LIVE_PUBLISHED):
+            seen_fb_keys.add(fb_key)
+            fb_verified.append(
+                {
+                    "slug": e_slug,
+                    "permalink": fb_perm,
+                    "visibility_state": "public_permalink_verified",
+                    "post_mode": "zero_link_teaser_plus_first_comment",
+                    "outbound_urls_in_body": 0,
+                    "first_comment_verified": bool(metrics.get("facebook_first_comment_verified", True)),
+                    "first_comment_utm": "utm_content=first_comment",
+                }
+            )
+
+    if fb_verified:
+        fb_channel_status = CHANNEL_STATUS_LIVE_PUBLISHED
+        fb_verification_status = "PUBLIC_PERMALINK_VERIFIED"
+    else:
+        fb_channel_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        fb_verification_status = (
+            "PENDING_ADMIN_MODERATION" if fb_moderation else CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        )
 
     facebook_telemetry: Dict[str, Any] = {
         "platform": "facebook",
         "post_mode": "zero_link_teaser_plus_first_comment",
-        "verification_status": "PUBLIC_PERMALINK_VERIFIED",
+        "channel_status": fb_channel_status,
+        "verification_status": fb_verification_status,
         "verified_public_posts_count": len(fb_verified),
         "verified_public_permalinks": fb_verified,
         "moderation_blocked_count": len(fb_moderation),
@@ -10871,110 +11169,201 @@ def verify_cross_platform_public_visibility(
     }
 
     # 3. YouTube Native Video, WebVTT Captions, and Top-Level Canonical Comment Telemetry
-    default_yt_videos: Dict[str, List[Dict[str, Any]]] = {
-        "profithelm": [
-            {
-                "slug": "irs-2027-tax-brackets",
-                "video_id": "FdqR1G6GOUE",
-                "video_url": "https://www.youtube.com/watch?v=FdqR1G6GOUE",
-                "privacy_status": "public",
-                "has_captions": True,
-                "has_pinned_comment": True,
-                "pinned_comment_id": "UgzIEyURkSTssNgNQTx4AaABAg",
-                "view_count": 2,
-                "comment_count": 2,
-            },
-            {
-                "slug": "irs-2027-tax-brackets",
-                "video_id": "B1aF4D6Rv-c",
-                "video_url": "https://www.youtube.com/watch?v=B1aF4D6Rv-c",
-                "privacy_status": "public",
-                "has_captions": True,
-                "has_pinned_comment": True,
-                "view_count": 25,
-                "comment_count": 1,
-            },
-            {
-                "slug": "section-1031-calculator",
-                "video_id": "w-Kx_w7Yz7o",
-                "video_url": "https://www.youtube.com/watch?v=w-Kx_w7Yz7o",
-                "privacy_status": "public",
-                "has_captions": True,
-                "has_pinned_comment": True,
-                "pinned_comment_id": "Ugxu6YOTNe6YAeR4Zt54AaABAg",
-                "view_count": 1,
-                "comment_count": 2,
-            },
-            {
-                "slug": "section-179-calculator",
-                "video_id": "yPh5xkN1NTc",
-                "video_url": "https://www.youtube.com/watch?v=yPh5xkN1NTc",
-                "privacy_status": "public",
-                "has_captions": True,
-                "has_pinned_comment": True,
-                "pinned_comment_id": "UgzOOSYoK5PVfNG5Upl4AaABAg",
-                "view_count": 0,
-                "comment_count": 2,
-            },
-        ],
-        "prexvo": [
-            {
-                "slug": "pslf-qualifying-payment-simulator",
-                "video_id": "-1nxTZHMNTg",
-                "video_url": "https://www.youtube.com/watch?v=-1nxTZHMNTg",
-                "privacy_status": "public",
-                "has_captions": True,
-                "has_pinned_comment": True,
-                "pinned_comment_id": "UgznLIWBh6NtMIVjFiZ4AaABAg",
-                "view_count": 0,
-                "comment_count": 2,
-            }
-        ],
-        "gainhelm": [
-            {
-                "slug": "cmmc-2-0-compliance-cost-calculator",
-                "video_id": "5zH1GcBqr-E",
-                "video_url": "https://www.youtube.com/watch?v=5zH1GcBqr-E",
-                "privacy_status": "public",
-                "has_captions": True,
-                "has_pinned_comment": True,
-                "pinned_comment_id": "Ugwn2g-jPI-JrKgXvRV4AaABAg",
-                "view_count": 1,
-                "comment_count": 2,
-            }
-        ],
-    }
-    yt_videos = list(default_yt_videos.get(norm_prop, []))
-    seen_vids = {v["video_id"] for v in yt_videos}
+    yt_videos_by_id: Dict[str, Dict[str, Any]] = {}
+    yt_video_order: List[str] = []
+    yt_upload_errors = 0
+    yt_channel_id = ""
+    yt_channel_title = f"{brand_name} Video Channel"
+
+    def _record_yt_candidate(slug_val: str, rec: Dict[str, Any]) -> None:
+        nonlocal yt_upload_errors
+        rec_prop = rec.get("property_id")
+        if rec_prop is not None and str(rec_prop).strip():
+            if _normalize_property_id(str(rec_prop)) != norm_prop:
+                return
+        raw_status = str(rec.get("status") or "").strip().upper()
+        if raw_status in _YT_ERROR_UPLOAD_STATUSES:
+            yt_upload_errors += 1
+            return
+        vid = str(rec.get("video_id") or "").strip()
+        if not vid or vid.lower() == "unknown":
+            return
+        if raw_status not in _YT_LIVE_UPLOAD_STATUSES:
+            return
+        has_cap = bool(rec.get("has_captions") or rec.get("caption_id"))
+        has_pin = bool(rec.get("has_pinned_comment") or rec.get("pinned_comment_id"))
+        pin_id = str(rec.get("pinned_comment_id") or "").strip() or None
+        if vid in yt_videos_by_id:
+            existing = yt_videos_by_id[vid]
+            existing["has_captions"] = bool(existing["has_captions"] or has_cap)
+            existing["has_pinned_comment"] = bool(existing["has_pinned_comment"] or has_pin)
+            if pin_id and not existing.get("pinned_comment_id"):
+                existing["pinned_comment_id"] = pin_id
+            existing["view_count"] = max(
+                int(existing.get("view_count", 0) or 0),
+                int(rec.get("view_count", 0) or 0),
+            )
+            existing["comment_count"] = max(
+                int(existing.get("comment_count", 0) or 0),
+                int(rec.get("comment_count", 0) or 0),
+            )
+            return
+        entry_obj: Dict[str, Any] = {
+            "slug": slug_val or str(rec.get("slug") or ""),
+            "video_id": vid,
+            "video_url": str(
+                rec.get("video_url") or rec.get("url") or f"https://www.youtube.com/watch?v={vid}"
+            ),
+            "privacy_status": str(rec.get("privacy_status") or rec.get("privacy") or "public"),
+            "has_captions": has_cap,
+            "has_pinned_comment": has_pin,
+            "view_count": int(rec.get("view_count", 0) or 0),
+            "comment_count": int(rec.get("comment_count", 0) or 0),
+        }
+        if pin_id:
+            entry_obj["pinned_comment_id"] = pin_id
+        yt_videos_by_id[vid] = entry_obj
+        yt_video_order.append(vid)
+
     if isinstance(yt_upload_results, dict):
         for s_key, u_rec in yt_upload_results.items():
-            if isinstance(u_rec, dict) and u_rec.get("video_id") and u_rec["video_id"] not in seen_vids:
-                yt_videos.append(
-                    {
-                        "slug": s_key,
-                        "video_id": str(u_rec["video_id"]),
-                        "video_url": str(u_rec.get("video_url") or f"https://www.youtube.com/watch?v={u_rec['video_id']}"),
-                        "privacy_status": str(u_rec.get("privacy_status") or "public"),
-                        "has_captions": bool(u_rec.get("has_captions", True)),
-                        "has_pinned_comment": bool(u_rec.get("has_pinned_comment", True)),
-                        "view_count": int(u_rec.get("view_count", 0) or 0),
-                        "comment_count": int(u_rec.get("comment_count", 1) or 1),
-                    }
-                )
-                seen_vids.add(str(u_rec["video_id"]))
+            if isinstance(u_rec, dict):
+                _record_yt_candidate(str(s_key), u_rec)
+
+    if eff_repo is not None:
+        yt_tel_path = eff_repo / ".agy" / "youtube_pipeline_telemetry.json"
+        if yt_tel_path.is_file():
+            try:
+                raw_yt_tel = json.loads(yt_tel_path.read_text(encoding="utf-8"))
+                if isinstance(raw_yt_tel, dict):
+                    tel_prop = raw_yt_tel.get("property_id")
+                    if not tel_prop or _normalize_property_id(str(tel_prop)) == norm_prop:
+                        if raw_yt_tel.get("channel_id"):
+                            yt_channel_id = str(raw_yt_tel["channel_id"])
+                        if raw_yt_tel.get("channel_title"):
+                            yt_channel_title = str(raw_yt_tel["channel_title"])
+                        tel_err_cnt = int(raw_yt_tel.get("upload_error_count", 0) or 0)
+                        if (
+                            tel_err_cnt > 0
+                            or bool(raw_yt_tel.get("upload_blackout_detected"))
+                            or str(raw_yt_tel.get("status") or "").upper() in ("UPLOAD_BLACKOUT", "ERROR")
+                        ):
+                            yt_upload_errors = max(yt_upload_errors, max(1, tel_err_cnt))
+                        stage4 = (
+                            (raw_yt_tel.get("stages") or {})
+                            .get("4_youtube_distribution", {})
+                            .get("results", {})
+                            if isinstance(raw_yt_tel.get("stages"), dict)
+                            else {}
+                        )
+                        if isinstance(stage4, dict):
+                            for s_key, u_rec in stage4.items():
+                                if isinstance(u_rec, dict):
+                                    _record_yt_candidate(str(s_key), u_rec)
+            except Exception:
+                pass
+
+        uploaded_log_path = eff_repo / "dist" / "videos" / "uploaded_log.json"
+        if uploaded_log_path.is_file():
+            try:
+                raw_up_log = json.loads(uploaded_log_path.read_text(encoding="utf-8"))
+                if isinstance(raw_up_log, list):
+                    for u_item in raw_up_log:
+                        if isinstance(u_item, dict):
+                            _record_yt_candidate(str(u_item.get("slug") or ""), u_item)
+                elif isinstance(raw_up_log, dict):
+                    for s_key, u_item in raw_up_log.items():
+                        if isinstance(u_item, dict):
+                            _record_yt_candidate(str(u_item.get("slug") or s_key), u_item)
+            except Exception:
+                pass
+
+    # Preserve verified caption/comment metadata from existing broadcast_ledger.json for verified video_ids
+    ledger_yt_meta_by_vid: Dict[str, Dict[str, Any]] = {}
+    for e in domain_entries:
+        metrics = e.get("metrics") if isinstance(e.get("metrics"), dict) else {}
+        l_vid = str(metrics.get("youtube_video_id") or e.get("youtube_video_id") or "").strip()
+        if not l_vid or l_vid.lower() == "unknown":
+            continue
+        prev_meta = ledger_yt_meta_by_vid.get(l_vid) or {
+            "has_captions": False,
+            "has_pinned_comment": False,
+            "view_count": 0,
+            "comment_count": 0,
+        }
+        prev_meta["has_captions"] = bool(prev_meta["has_captions"] or metrics.get("youtube_has_captions"))
+        prev_meta["has_pinned_comment"] = bool(
+            prev_meta["has_pinned_comment"] or metrics.get("youtube_has_pinned_comment")
+        )
+        prev_meta["view_count"] = max(
+            int(prev_meta["view_count"]),
+            int(metrics.get("youtube_view_count", 0) or 0),
+        )
+        prev_meta["comment_count"] = max(
+            int(prev_meta["comment_count"]),
+            int(metrics.get("youtube_comment_count", 0) or 0),
+        )
+        ledger_yt_meta_by_vid[l_vid] = prev_meta
+
+    yt_videos = []
+    for vid in yt_video_order:
+        v_obj = yt_videos_by_id[vid]
+        if vid in ledger_yt_meta_by_vid:
+            l_meta = ledger_yt_meta_by_vid[vid]
+            v_obj["has_captions"] = bool(v_obj["has_captions"] or l_meta["has_captions"])
+            v_obj["has_pinned_comment"] = bool(v_obj["has_pinned_comment"] or l_meta["has_pinned_comment"])
+            v_obj["view_count"] = max(int(v_obj.get("view_count", 0) or 0), int(l_meta["view_count"]))
+            v_obj["comment_count"] = max(int(v_obj.get("comment_count", 0) or 0), int(l_meta["comment_count"]))
+        yt_videos.append(v_obj)
+
+    if yt_videos:
+        yt_channel_status = CHANNEL_STATUS_LIVE_PUBLISHED
+        all_captions_and_comments_verified = all(
+            bool(v.get("has_captions")) and bool(v.get("has_pinned_comment"))
+            for v in yt_videos
+        )
+        yt_verification_status = (
+            "PUBLIC_VIDEOS_CAPTIONS_AND_COMMENTS_VERIFIED"
+            if all_captions_and_comments_verified
+            else CHANNEL_STATUS_LIVE_PUBLISHED
+        )
+    elif yt_upload_errors > 0:
+        yt_channel_status = CHANNEL_STATUS_UPLOAD_ERROR
+        yt_verification_status = CHANNEL_STATUS_UPLOAD_ERROR
+    else:
+        yt_channel_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        yt_verification_status = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
 
     youtube_telemetry: Dict[str, Any] = {
         "platform": "youtube",
-        "channel_id": "UCyq8gE7s0Vhh1xVL43X9Z1w",
-        "channel_title": "ProfitHelm | Financial Decision Engines",
-        "verification_status": "PUBLIC_VIDEOS_CAPTIONS_AND_COMMENTS_VERIFIED",
+        "channel_id": yt_channel_id,
+        "channel_title": yt_channel_title,
+        "channel_status": yt_channel_status,
+        "verification_status": yt_verification_status,
         "verified_public_videos_count": len(yt_videos),
         "verified_public_videos": yt_videos,
+        "upload_error_count": yt_upload_errors,
+    }
+
+    li_live = li_channel_status == CHANNEL_STATUS_LIVE_PUBLISHED
+    fb_live = fb_channel_status == CHANNEL_STATUS_LIVE_PUBLISHED
+    yt_live = yt_channel_status == CHANNEL_STATUS_LIVE_PUBLISHED
+    verified_live_platforms = [
+        p_name
+        for p_name, is_live in (("linkedin", li_live), ("facebook", fb_live), ("youtube", yt_live))
+        if is_live
+    ]
+    channel_statuses = {
+        "linkedin": li_channel_status,
+        "facebook": fb_channel_status,
+        "youtube": yt_channel_status,
     }
 
     return {
         "property_id": norm_prop,
-        "all_three_platforms_publicly_verifiable": True,
+        "all_three_platforms_publicly_verifiable": bool(li_live and fb_live and yt_live),
+        "verified_live_platforms": verified_live_platforms,
+        "channel_statuses": channel_statuses,
         "platforms": {
             "linkedin": linkedin_telemetry,
             "facebook": facebook_telemetry,
@@ -10993,6 +11382,7 @@ def dispatch_to_distribution_lead(
     live_video_upload: Optional[bool] = None,
     max_video_renders: int = 2,
     video_privacy: str = "public",
+    linkedin_queue_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Standard framework dispatch to distribution_lead specialist:
@@ -11120,10 +11510,9 @@ def dispatch_to_distribution_lead(
         )
 
         # Phase 2: Anti-slop content contract & outside truth-store assertion
-        brand_to_check = (
-            "Prexvo"
-            if property_id == "prexvo"
-            else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
+        brand_to_check = str(
+            resolve_tenant_distribution_config(property_id).get("brand_name")
+            or _normalize_property_id(property_id).capitalize()
         )
         for slug, pack in all_assets.items():
             if "reddit" in pack or "reddit_teardown" in pack:
@@ -11259,11 +11648,11 @@ def dispatch_to_distribution_lead(
             repo_root=repo_dir,
         )
         priority_by_slug = {item["slug"]: item["priority_score"] for item in prioritized_queue}
-        corp_company_id = (
-            "106482194"
-            if _normalize_property_id(property_id) == "prexvo"
-            else ("106482195" if _normalize_property_id(property_id) == "gainhelm" else "143884102")
-        )
+        norm_prop_eff = _normalize_property_id(property_id)
+        tenant_dist_cfg = resolve_tenant_distribution_config(norm_prop_eff)
+        canon_domain = str(tenant_dist_cfg.get("domain") or f"{norm_prop_eff}.com").strip().lower()
+        canon_base = str(tenant_dist_cfg.get("canonical_base") or f"https://{canon_domain}").rstrip("/")
+        corp_company_id = _resolve_tenant_linkedin_company_id(norm_prop_eff)
 
         in_pytest_ctx = bool("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)
         eff_synth_videos = (
@@ -11300,7 +11689,7 @@ def dispatch_to_distribution_lead(
         except Exception as vf_exc:
             video_telemetry = {
                 "status": "ERROR",
-                "property_id": _normalize_property_id(property_id),
+                "property_id": norm_prop_eff,
                 "error": str(vf_exc),
                 "per_slug_dispatch_status": {},
             }
@@ -11321,6 +11710,9 @@ def dispatch_to_distribution_lead(
             all_assets=all_assets,
             yt_upload_results=yt_upload_results,
         )
+        li_admin_status = str(
+            public_visibility_report["platforms"]["linkedin"].get("admin_access_status") or ""
+        )
         li_by_slug = {
             item["slug"]: item
             for item in public_visibility_report["platforms"]["linkedin"].get("verified_public_permalinks", [])
@@ -11338,13 +11730,20 @@ def dispatch_to_distribution_lead(
             for item in public_visibility_report["platforms"]["youtube"].get("verified_public_videos", [])
         }
 
+        def _compute_li_status(slug_key: str) -> str:
+            if slug_key in li_by_slug:
+                return CHANNEL_STATUS_LIVE_PUBLISHED
+            if not corp_company_id or li_admin_status in ("ADMIN_ACCESS_DENIED", "UNCONFIGURED_COMPANY_ID"):
+                return CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS
+            return CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+
         # Sync tenant broadcast_ledger.json and corporate LinkedIn schedule queue when not dry_run
         now_iso = datetime.now(timezone.utc).isoformat()
         if not dry_run:
             is_foreign_pytest = bool(
-                ("PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules)
+                in_pytest_ctx
                 and repo_dir is not None
-                and str(repo_dir).startswith("/home/ubuntuadmin/projects/")
+                and _is_live_workspace_path(repo_dir)
             )
             if repo_dir is not None and repo_dir.is_dir() and not is_foreign_pytest:
                 from pseofactory.qualification import is_retired_or_consolidated_slug
@@ -11373,39 +11772,86 @@ def dispatch_to_distribution_lead(
                                     dispatches_map = {}
                                     e["dispatches"] = dispatches_map
                                 dispatches_map.pop("reddit", None)
-                                dispatches_map.setdefault("ghost", "STAGED")
-                                dispatches_map.setdefault("github_gist", "STAGED")
-                                if e_slug in li_by_slug:
-                                    dispatches_map["linkedin"] = "PUBLIC_VERIFIED"
-                                elif public_visibility_report["platforms"]["linkedin"]["admin_access_status"] == "ADMIN_ACCESS_DENIED":
-                                    dispatches_map["linkedin"] = "BLOCKED_ADMIN_ACCESS_DENIED"
+                                dispatches_map["x"] = CHANNEL_STATUS_POLICY_DISABLED
+                                dispatches_map["linkedin"] = _compute_li_status(e_slug)
                                 if e_slug in fb_pub_by_slug:
-                                    dispatches_map["facebook"] = "PUBLIC_VERIFIED"
+                                    dispatches_map["facebook"] = CHANNEL_STATUS_LIVE_PUBLISHED
                                     e["facebook_permalink"] = fb_pub_by_slug[e_slug]["permalink"]
                                 elif e_slug in fb_mod_by_slug:
-                                    dispatches_map["facebook"] = "PENDING_ADMIN_MODERATION"
+                                    dispatches_map["facebook"] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
                                     e["facebook_permalink"] = fb_mod_by_slug[e_slug]["permalink"]
-                                elif dispatches_map.get("facebook") == "SUCCESS":
-                                    dispatches_map["facebook"] = "STAGED"
+                                else:
+                                    dispatches_map["facebook"] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+                                    e.pop("facebook_permalink", None)
+
+                                yt_entry_st = _map_youtube_dispatch_status(
+                                    e_slug,
+                                    yt_pub_by_slug,
+                                    yt_status_by_slug,
+                                    yt_upload_results,
+                                )
+                                dispatches_map["youtube"] = yt_entry_st
+                                u_info = yt_upload_results.get(e_slug) if isinstance(yt_upload_results, dict) else None
                                 if e_slug in yt_pub_by_slug:
-                                    dispatches_map["youtube"] = "PUBLIC_VERIFIED"
                                     e["youtube_video_id"] = yt_pub_by_slug[e_slug]["video_id"]
                                     e["youtube_url"] = yt_pub_by_slug[e_slug]["video_url"]
-                                elif e_slug in yt_status_by_slug:
-                                    dispatches_map["youtube"] = yt_status_by_slug[e_slug]
-                                else:
-                                    dispatches_map.setdefault("youtube", "STAGED")
-                                u_info = yt_upload_results.get(e_slug)
-                                if isinstance(u_info, dict) and u_info.get("video_id"):
+                                elif (
+                                    isinstance(u_info, dict)
+                                    and u_info.get("video_id")
+                                    and str(u_info.get("status") or "").strip().upper() in _YT_LIVE_UPLOAD_STATUSES
+                                ):
                                     e["youtube_video_id"] = u_info["video_id"]
                                     e["youtube_url"] = u_info.get("video_url")
+
+                                for local_ch in (
+                                    "ghost",
+                                    "github_gist",
+                                    "quora",
+                                    "google_sites",
+                                    "linkedin_pulse",
+                                    "substack_teardown",
+                                    "outreach_pitch",
+                                ):
+                                    dispatches_map[local_ch] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+                                if "newsletter" in dispatches_map:
+                                    dispatches_map["newsletter"] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+
                                 if e_slug in all_assets:
-                                    e["post_url"] = all_assets[e_slug].get("parameterized_url") or all_assets[e_slug].get("url") or e.get("post_url")
+                                    cand_url = str(
+                                        all_assets[e_slug].get("parameterized_url")
+                                        or all_assets[e_slug].get("url")
+                                        or ""
+                                    ).strip()
+                                    fresh_url = (
+                                        cand_url
+                                        if _url_matches_domain(cand_url, canon_domain)
+                                        else f"{canon_base}/tools/{e_slug}/"
+                                    )
                                     e["first_comment"] = all_assets[e_slug].get("first_comment")
-                                    e["company_id"] = corp_company_id
                                     e["priority_score"] = priority_by_slug.get(e_slug, 45.0)
+                                else:
+                                    existing_pu = str(e.get("post_url") or "")
+                                    fresh_url = (
+                                        existing_pu
+                                        if _url_matches_domain(existing_pu, canon_domain)
+                                        else f"{canon_base}/tools/{e_slug}/"
+                                    )
+                                e["post_url"] = fresh_url
+                                if "url" in e:
+                                    raw_u = str(e.get("url") or "")
+                                    if (
+                                        canon_domain not in raw_u.lower()
+                                        or not _url_matches_domain(raw_u, canon_domain)
+                                        or f"/tools/{e_slug}" not in raw_u
+                                    ):
+                                        e["url"] = fresh_url
+                                e["company_id"] = corp_company_id or None
+                                has_live_channel = any(
+                                    v == CHANNEL_STATUS_LIVE_PUBLISHED for v in dispatches_map.values()
+                                )
+                                e["mode"] = "SYNDICATED_VERIFIED" if has_live_channel else "SYNDICATED_STAGED"
                                 e["metrics"] = {
-                                    "linkedin_access_status": public_visibility_report["platforms"]["linkedin"]["admin_access_status"],
+                                    "linkedin_access_status": li_admin_status,
                                     "linkedin_urn": li_by_slug[e_slug]["urn"] if e_slug in li_by_slug else None,
                                     "facebook_visibility": (
                                         "public_permalink_verified"
@@ -11424,57 +11870,60 @@ def dispatch_to_distribution_lead(
                     except Exception:
                         existing_entries = []
                         seen_slugs = set()
-                canon_base = (
-                    "https://prexvo.com"
-                    if property_id == "prexvo"
-                    else (
-                        "https://gainhelm.com"
-                        if property_id == "gainhelm"
-                        else ("https://lienbond.com" if property_id == "lienbond" else "https://profithelm.com")
-                    )
-                )
+
                 for slug, pack_obj in all_assets.items():
                     if slug not in seen_slugs:
-                        yt_st = "PUBLIC_VERIFIED" if slug in yt_pub_by_slug else yt_status_by_slug.get(slug, "STAGED")
-                        li_st = (
-                            "PUBLIC_VERIFIED"
-                            if slug in li_by_slug
-                            else (
-                                "BLOCKED_ADMIN_ACCESS_DENIED"
-                                if public_visibility_report["platforms"]["linkedin"]["admin_access_status"] == "ADMIN_ACCESS_DENIED"
-                                else "STAGED"
-                            )
+                        yt_st = _map_youtube_dispatch_status(
+                            slug,
+                            yt_pub_by_slug,
+                            yt_status_by_slug,
+                            yt_upload_results,
                         )
+                        li_st = _compute_li_status(slug)
                         fb_st = (
-                            "PUBLIC_VERIFIED"
+                            CHANNEL_STATUS_LIVE_PUBLISHED
                             if slug in fb_pub_by_slug
-                            else ("PENDING_ADMIN_MODERATION" if slug in fb_mod_by_slug else "STAGED")
+                            else CHANNEL_STATUS_LOCAL_DRAFT_ONLY
                         )
                         u_info = yt_upload_results.get(slug) if isinstance(yt_upload_results, dict) else None
+                        new_dispatches = {
+                            "x": CHANNEL_STATUS_POLICY_DISABLED,
+                            "linkedin": li_st,
+                            "facebook": fb_st,
+                            "youtube": yt_st,
+                            "ghost": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "github_gist": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "quora": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "google_sites": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "linkedin_pulse": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "substack_teardown": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "outreach_pitch": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                        }
+                        has_live_ch = any(
+                            v == CHANNEL_STATUS_LIVE_PUBLISHED for v in new_dispatches.values()
+                        )
+                        cand_new_url = str(
+                            pack_obj.get("parameterized_url")
+                            or pack_obj.get("url")
+                            or ""
+                        ).strip()
+                        safe_new_post_url = (
+                            cand_new_url
+                            if _url_matches_domain(cand_new_url, canon_domain)
+                            else f"{canon_base}/tools/{slug}/"
+                        )
                         new_entry: Dict[str, Any] = {
                             "slug": slug,
                             "timestamp": now_iso,
-                            "mode": "SYNDICATED_VERIFIED" if (slug in li_by_slug or slug in fb_pub_by_slug or slug in yt_pub_by_slug) else "SYNDICATED_STAGED",
+                            "mode": "SYNDICATED_VERIFIED" if has_live_ch else "SYNDICATED_STAGED",
                             "run_id": eff_run_id,
-                            "company_id": corp_company_id,
+                            "company_id": corp_company_id or None,
                             "priority_score": priority_by_slug.get(slug, 45.0),
-                            "post_url": pack_obj.get("parameterized_url") or f"{canon_base}/tools/{slug}/",
+                            "post_url": safe_new_post_url,
                             "first_comment": pack_obj.get("first_comment"),
-                            "dispatches": {
-                                "x": "STAGED",
-                                "linkedin": li_st,
-                                "facebook": fb_st,
-                                "youtube": yt_st,
-                                "ghost": "STAGED",
-                                "github_gist": "STAGED",
-                                "quora": "STAGED",
-                                "google_sites": "STAGED",
-                                "linkedin_pulse": "STAGED",
-                                "substack_teardown": "STAGED",
-                                "outreach_pitch": "STAGED",
-                            },
+                            "dispatches": new_dispatches,
                             "metrics": {
-                                "linkedin_access_status": public_visibility_report["platforms"]["linkedin"]["admin_access_status"],
+                                "linkedin_access_status": li_admin_status,
                                 "linkedin_urn": li_by_slug[slug]["urn"] if slug in li_by_slug else None,
                                 "facebook_visibility": (
                                     "public_permalink_verified"
@@ -11482,7 +11931,18 @@ def dispatch_to_distribution_lead(
                                     else ("pending_admin_approval" if slug in fb_mod_by_slug else "staged")
                                 ),
                                 "facebook_first_comment_verified": bool(slug in fb_pub_by_slug),
-                                "youtube_video_id": yt_pub_by_slug[slug]["video_id"] if slug in yt_pub_by_slug else (u_info.get("video_id") if isinstance(u_info, dict) else None),
+                                "youtube_video_id": (
+                                    yt_pub_by_slug[slug]["video_id"]
+                                    if slug in yt_pub_by_slug
+                                    else (
+                                        u_info.get("video_id")
+                                        if (
+                                            isinstance(u_info, dict)
+                                            and str(u_info.get("status") or "").strip().upper() in _YT_LIVE_UPLOAD_STATUSES
+                                        )
+                                        else None
+                                    )
+                                ),
                                 "youtube_has_captions": bool(yt_pub_by_slug[slug]["has_captions"]) if slug in yt_pub_by_slug else False,
                                 "youtube_has_pinned_comment": bool(yt_pub_by_slug[slug]["has_pinned_comment"]) if slug in yt_pub_by_slug else False,
                                 "youtube_view_count": int(yt_pub_by_slug[slug].get("view_count", 0)) if slug in yt_pub_by_slug else 0,
@@ -11496,7 +11956,11 @@ def dispatch_to_distribution_lead(
                         if slug in yt_pub_by_slug:
                             new_entry["youtube_video_id"] = yt_pub_by_slug[slug]["video_id"]
                             new_entry["youtube_url"] = yt_pub_by_slug[slug]["video_url"]
-                        elif isinstance(u_info, dict) and u_info.get("video_id"):
+                        elif (
+                            isinstance(u_info, dict)
+                            and u_info.get("video_id")
+                            and str(u_info.get("status") or "").strip().upper() in _YT_LIVE_UPLOAD_STATUSES
+                        ):
                             new_entry["youtube_video_id"] = u_info["video_id"]
                             new_entry["youtube_url"] = u_info.get("video_url")
                         existing_entries.append(new_entry)
@@ -11504,35 +11968,27 @@ def dispatch_to_distribution_lead(
                 existing_entries.sort(key=lambda item: (-float(item.get("priority_score", 0.0) or 0.0), str(item.get("slug", ""))))
                 b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
 
-                # Sync corporate LinkedIn schedule queue (strictly non-personal company_id broadcasts)
-                li_queue_path = Path("/home/ubuntuadmin/projects/arif-cli/social/linkedin-toolkit/data/queue.json")
-                if li_queue_path.parent.is_dir() and not _is_test_context(dist_dir, property_id):
-                    try:
-                        existing_li_queue: List[Dict[str, Any]] = []
-                        if li_queue_path.is_file():
-                            raw_li = json.loads(li_queue_path.read_text(encoding="utf-8"))
-                            if isinstance(raw_li, list):
-                                for li_item in raw_li:
-                                    if isinstance(li_item, dict) and str(li_item.get("company_id", "")) not in ("", corp_company_id, "112710753"):
-                                        existing_li_queue.append(li_item)
-                        for p_item in prioritized_queue:
-                            s_key = p_item["slug"]
-                            if s_key in all_assets and isinstance(all_assets[s_key].get("linkedin"), dict):
-                                li_pack = all_assets[s_key]["linkedin"]
-                                existing_li_queue.append({
-                                    "slug": s_key,
-                                    "property_id": _normalize_property_id(property_id),
-                                    "company_id": corp_company_id,
-                                    "priority_score": p_item["priority_score"],
-                                    "text": li_pack["content"],
-                                    "teaser_content": li_pack.get("teaser_content", ""),
-                                    "first_comment": li_pack.get("first_comment", ""),
-                                    "target_url": li_pack.get("first_comment_url") or li_pack.get("target_url", ""),
-                                })
-                        existing_li_queue.sort(key=lambda x: (-float(x.get("priority_score", 0.0) or 0.0), str(x.get("slug", ""))))
-                        li_queue_path.write_text(json.dumps(existing_li_queue, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-                    except Exception:
-                        pass
+                # Sync corporate LinkedIn schedule queue (strictly property_id-scoped, verified admins only)
+                li_queue_path = (
+                    Path(linkedin_queue_path)
+                    if linkedin_queue_path is not None
+                    else DEFAULT_LINKEDIN_QUEUE_PATH
+                )
+                allow_li_queue_sync = False
+                if li_queue_path.parent.is_dir():
+                    if in_pytest_ctx:
+                        allow_li_queue_sync = not _is_live_workspace_path(li_queue_path)
+                    else:
+                        allow_li_queue_sync = not _is_test_context(dist_dir, property_id)
+                if allow_li_queue_sync:
+                    _sync_linkedin_company_queue(
+                        li_queue_path=li_queue_path,
+                        norm_prop=norm_prop_eff,
+                        corp_company_id=corp_company_id,
+                        li_admin_status=li_admin_status,
+                        prioritized_queue=prioritized_queue,
+                        all_assets=all_assets,
+                    )
 
         ledger.record_token(dist_token, {"property_id": property_id, "run_id": eff_run_id, "tools_count": len(target_tools)})
     except Exception as exc:
@@ -11557,6 +12013,53 @@ def dispatch_to_distribution_lead(
     top_slug = prioritized_queue[0]["slug"] if prioritized_queue else (next(iter(all_assets.keys()), ""))
     top_li_pack = all_assets.get(top_slug, {}).get("linkedin", {}) if top_slug else {}
     sample_li_teaser = top_li_pack.get("teaser_content") or top_li_pack.get("content", "")
+
+    channel_status_map: Dict[str, str] = {}
+    for ch in active_channels:
+        if ch == "x":
+            channel_status_map[ch] = CHANNEL_STATUS_POLICY_DISABLED
+        elif ch in ("linkedin", "facebook", "youtube"):
+            ch_st = str(
+                public_visibility_report.get("channel_statuses", {}).get(ch)
+                or CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+            )
+            if ch == "youtube" and ch_st == CHANNEL_STATUS_LOCAL_DRAFT_ONLY:
+                if (
+                    int(video_telemetry.get("upload_error_count", 0) or 0) > 0
+                    or str(video_telemetry.get("status") or "").upper() in ("UPLOAD_BLACKOUT", "ERROR")
+                    or any(
+                        str(v).strip().upper() in _YT_ERROR_UPLOAD_STATUSES
+                        for v in yt_status_by_slug.values()
+                    )
+                ):
+                    ch_st = CHANNEL_STATUS_UPLOAD_ERROR
+            channel_status_map[ch] = ch_st
+        else:
+            channel_status_map[ch] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+
+    live_published_chs = [c for c in active_channels if channel_status_map[c] == CHANNEL_STATUS_LIVE_PUBLISHED]
+    local_draft_only_chs = [c for c in active_channels if channel_status_map[c] == CHANNEL_STATUS_LOCAL_DRAFT_ONLY]
+    blocked_admin_access_chs = [c for c in active_channels if channel_status_map[c] == CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS]
+    policy_disabled_chs = [c for c in active_channels if channel_status_map[c] == CHANNEL_STATUS_POLICY_DISABLED]
+    upload_error_chs = [c for c in active_channels if channel_status_map[c] == CHANNEL_STATUS_UPLOAD_ERROR]
+
+    channel_delivery_summary: Dict[str, Any] = {
+        "total_channels": len(active_channels),
+        "by_channel": channel_status_map,
+        "live_published": live_published_chs,
+        "local_draft_only": local_draft_only_chs,
+        "blocked_admin_access": blocked_admin_access_chs,
+        "policy_disabled": policy_disabled_chs,
+        "upload_error": upload_error_chs,
+        "counts": {
+            "live_published": len(live_published_chs),
+            "local_draft_only": len(local_draft_only_chs),
+            "blocked_admin_access": len(blocked_admin_access_chs),
+            "policy_disabled": len(policy_disabled_chs),
+            "upload_error": len(upload_error_chs),
+        },
+    }
+
     result: Dict[str, Any] = {
         "status": "STAGED" if dry_run else "SUCCESS",
         "property_id": property_id,
@@ -11567,6 +12070,7 @@ def dispatch_to_distribution_lead(
         "prioritized_queue": prioritized_queue,
         "all_assets": all_assets,
         "channels": active_channels,
+        "channel_delivery_summary": channel_delivery_summary,
         "omitted_channels": ["reddit"],
         "budget_before": budget_before,
         "budget_after": budget_after,
@@ -11575,11 +12079,19 @@ def dispatch_to_distribution_lead(
         "public_visibility_verification": public_visibility_report,
         "release_commands": [
             f'x-cli post "{sample_draft}"',
-            f'linkedin-cli post "{sample_li_teaser}" --company-id {corp_company_id}',
+            (
+                f'linkedin-cli post "{sample_li_teaser}" --company-id {corp_company_id}'
+                if corp_company_id
+                else f"# LinkedIn company_id unconfigured for {norm_prop}"
+            ),
         ],
         "owner_calls": [
             "Approve live X post release (x-cli post / x-cli thread)",
-            f"Approve live corporate LinkedIn broadcast (--company-id {corp_company_id}) & Facebook community distribution",
+            (
+                f"Approve live corporate LinkedIn broadcast (--company-id {corp_company_id}) & Facebook community distribution"
+                if corp_company_id
+                else f"Configure LinkedIn company_id and admin grant for {norm_prop} before corporate LinkedIn broadcast"
+            ),
             "Approve Ghost article & exact-match GitHub Gist publication",
             "Approve YouTube video uploads or channel modifications",
         ],

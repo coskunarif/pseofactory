@@ -3342,6 +3342,46 @@ def _clean_syndication_directories_and_ledgers(
     b_ledger = root / ".agy" / "broadcast_ledger.json"
     if b_ledger.is_file():
         try:
+            import urllib.parse
+
+            eff_prop = resolve_canonical_property_id(prop, default=prop)
+            raw_tc = get_tenant_contract(eff_prop)
+            t_contract = (
+                raw_tc
+                if (
+                    raw_tc is not None
+                    and str(getattr(raw_tc, "property_id", "")).strip().lower() == eff_prop
+                )
+                else None
+            )
+            raw_dom = (
+                str(t_contract.domain).strip()
+                if (t_contract is not None and getattr(t_contract, "domain", None))
+                else f"{eff_prop}.com"
+            )
+            canon_domain = re.sub(r"^https?://", "", raw_dom, flags=re.IGNORECASE).rstrip("/").lower()
+            canon_base = f"https://{canon_domain}"
+            expected_cid = (
+                os.environ.get(f"FACTORY_{eff_prop.upper()}_LINKEDIN_COMPANY_ID")
+                or (
+                    str(t_contract.linkedin_company_id).strip()
+                    if (t_contract is not None and getattr(t_contract, "linkedin_company_id", None))
+                    else ""
+                )
+            ) or None
+
+            def _url_host_matches_tenant(url_str: str) -> bool:
+                if not url_str:
+                    return False
+                try:
+                    parsed = urllib.parse.urlparse(url_str)
+                    host = (parsed.hostname or "").lower()
+                except Exception:
+                    return False
+                if not host:
+                    return False
+                return host == canon_domain or host.endswith(f".{canon_domain}")
+
             b_data = json.loads(b_ledger.read_text(encoding="utf-8"))
             if isinstance(b_data, list):
                 dedup_by_slug: Dict[str, Dict[str, Any]] = {}
@@ -3359,9 +3399,27 @@ def _clean_syndication_directories_and_ledgers(
                         or (active_built_slugs and eslug not in active_built_slugs)
                     ):
                         continue
+                    cleaned_entry = dict(entry)
+                    canonical_tool_url = f"{canon_base}/tools/{eslug}/"
+                    post_u = str(cleaned_entry.get("post_url") or "").strip()
+                    if post_u and not _url_host_matches_tenant(post_u):
+                        cleaned_entry["post_url"] = canonical_tool_url
+                    if "url" in cleaned_entry:
+                        raw_u = str(cleaned_entry.get("url") or "").strip()
+                        if not raw_u or not _url_host_matches_tenant(raw_u):
+                            eff_post_u = str(cleaned_entry.get("post_url") or "").strip()
+                            cleaned_entry["url"] = (
+                                eff_post_u
+                                if (eff_post_u and _url_host_matches_tenant(eff_post_u))
+                                else canonical_tool_url
+                            )
+                    if "company_id" in cleaned_entry:
+                        cur_cid = str(cleaned_entry.get("company_id") or "").strip() or None
+                        if cur_cid != expected_cid:
+                            cleaned_entry["company_id"] = expected_cid
                     if eslug not in dedup_by_slug:
                         ordered_b_slugs.append(eslug)
-                    dedup_by_slug[eslug] = entry
+                    dedup_by_slug[eslug] = cleaned_entry
                 filtered_b = [dedup_by_slug[s] for s in ordered_b_slugs]
                 if len(filtered_b) != len(b_data) or filtered_b != b_data:
                     b_ledger.write_text(json.dumps(filtered_b, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

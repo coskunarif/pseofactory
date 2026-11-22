@@ -549,31 +549,268 @@ def test_cross_platform_syndication_parity_and_public_visibility_verification(tm
     assert exch_proof["published_output"] == 292500.0
     assert "4,349" not in exch_proof["published_output_formatted"]
 
-    # 3. Cross-platform public visibility verification across profithelm, prexvo, and gainhelm
-    for prop in ("profithelm", "prexvo", "gainhelm"):
-        vis = dist_mod.verify_cross_platform_public_visibility(property_id=prop)
+    # 3. Cross-platform public visibility verification across profithelm, prexvo, gainhelm, and lienbond
+    # Seed isolated tmp_path tenant fixtures with realistic live-shaped ledgers (zero hardcoded theater)
+    ph_repo = tmp_path / "profithelm-platform"
+    (ph_repo / ".agy").mkdir(parents=True)
+    (ph_repo / "dist" / "videos").mkdir(parents=True)
+    (ph_repo / ".agy" / "broadcast_ledger.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "saas-runway-calculator",
+                    "company_id": "143884102",
+                    "post_url": "https://profithelm.com/tools/saas-runway-calculator/",
+                    "first_comment": "https://profithelm.com/tools/saas-runway-calculator/?utm_source=linkedin&utm_content=first_comment",
+                    "facebook_permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092639183763683/",
+                    "dispatches": {"linkedin": "LIVE_PUBLISHED", "facebook": "LIVE_PUBLISHED"},
+                    "metrics": {
+                        "linkedin_access_status": "VERIFIED_COMPANY_ADMIN",
+                        "linkedin_urn": "urn:li:activity:7520927474453643265",
+                        "facebook_visibility": "public_permalink_verified",
+                        "facebook_first_comment_verified": True,
+                    },
+                },
+                {
+                    "slug": "irs-2027-tax-brackets",
+                    "company_id": "143884102",
+                    "post_url": "https://profithelm.com/tools/irs-2027-tax-brackets/",
+                    "first_comment": "https://profithelm.com/tools/irs-2027-tax-brackets/?utm_source=linkedin&utm_content=first_comment",
+                    "facebook_permalink": "https://www.facebook.com/groups/1332262893636652/permalink/3281313738731548/",
+                    "dispatches": {"linkedin": "LIVE_PUBLISHED", "facebook": "PENDING_ADMIN_MODERATION"},
+                    "metrics": {
+                        "linkedin_access_status": "VERIFIED_COMPANY_ADMIN",
+                        "linkedin_urn": "urn:li:activity:7518942436178464768",
+                        "facebook_visibility": "pending_admin_approval",
+                        "facebook_first_comment_verified": False,
+                    },
+                },
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (ph_repo / "dist" / "videos" / "uploaded_log.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "irs-2027-tax-brackets",
+                    "video_id": "kvUXwNgPxWQ",
+                    "status": "uploaded",
+                    "url": "https://www.youtube.com/watch?v=kvUXwNgPxWQ",
+                    "caption_id": "cap-ph-1",
+                    "pinned_comment_id": "pin-ph-1",
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    px_repo = tmp_path / "prexvo"
+    (px_repo / ".agy").mkdir(parents=True)
+    (px_repo / ".agy" / "broadcast_ledger.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "student-loan-repayment-calculator",
+                    "company_id": "106482194",
+                    "post_url": "https://prexvo.com/tools/student-loan-repayment-calculator/",
+                    "facebook_permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092642197096715/",
+                    "dispatches": {"linkedin": "BLOCKED_ADMIN_ACCESS", "facebook": "LIVE_PUBLISHED"},
+                    "metrics": {
+                        "linkedin_access_status": "ADMIN_ACCESS_DENIED",
+                        "linkedin_urn": None,
+                        "facebook_visibility": "public_permalink_verified",
+                        "facebook_first_comment_verified": True,
+                    },
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (px_repo / ".agy" / "youtube_pipeline_telemetry.json").write_text(
+        json.dumps(
+            {
+                "property_id": "prexvo",
+                "status": "PASS",
+                "upload_error_count": 0,
+                "stages": {
+                    "4_youtube_distribution": {
+                        "results": {
+                            "student-loan-repayment-calculator": {
+                                "property_id": "prexvo",
+                                "slug": "student-loan-repayment-calculator",
+                                "status": "ALREADY_UPLOADED_IDEMPOTENT",
+                                "video_id": "Q3PK4LtwfrM",
+                                "video_url": "https://www.youtube.com/watch?v=Q3PK4LtwfrM",
+                                "has_captions": True,
+                                "has_pinned_comment": True,
+                            }
+                        }
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    gh_repo = tmp_path / "gainhelm"
+    (gh_repo / ".agy").mkdir(parents=True)
+    (gh_repo / ".agy" / "broadcast_ledger.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "soc-2-audit-cost-calculator",
+                    "company_id": "106482195",
+                    "post_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
+                    "facebook_permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092641363763465/",
+                    "dispatches": {"linkedin": "BLOCKED_ADMIN_ACCESS", "facebook": "LIVE_PUBLISHED"},
+                    "metrics": {
+                        "linkedin_access_status": "ADMIN_ACCESS_DENIED",
+                        "linkedin_urn": None,
+                        "facebook_visibility": "public_permalink_verified",
+                        "facebook_first_comment_verified": True,
+                    },
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (gh_repo / ".agy" / "youtube_pipeline_telemetry.json").write_text(
+        json.dumps(
+            {
+                "property_id": "gainhelm",
+                "status": "PASS",
+                "upload_error_count": 0,
+                "stages": {
+                    "4_youtube_distribution": {
+                        "results": {
+                            "cmmc-2-0-compliance-cost-calculator": {
+                                "property_id": "gainhelm",
+                                "slug": "cmmc-2-0-compliance-cost-calculator",
+                                "status": "ALREADY_UPLOADED_IDEMPOTENT",
+                                "video_id": "5zH1GcBqr-E",
+                                "video_url": "https://www.youtube.com/watch?v=5zH1GcBqr-E",
+                                "has_captions": True,
+                                "has_pinned_comment": True,
+                            }
+                        }
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    lb_repo = tmp_path / "lienbond"
+    (lb_repo / ".agy").mkdir(parents=True)
+    # Seed poisoned cross-tenant entries inside lienbond to prove strict domain & company_id filtering
+    (lb_repo / ".agy" / "broadcast_ledger.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "bid-bond-calculator",
+                    "company_id": "143884102",
+                    "url": "https://profithelm.com/tools/bid-bond-calculator/",
+                    "post_url": "https://lienbond.com/tools/bid-bond-calculator/",
+                    "facebook_permalink": "https://www.facebook.com/groups/331399459887663/permalink/1092641363763465/",
+                    "dispatches": {"linkedin": "BLOCKED_ADMIN_ACCESS", "facebook": "LOCAL_DRAFT_ONLY"},
+                    "metrics": {
+                        "linkedin_access_status": "ADMIN_ACCESS_DENIED",
+                        "linkedin_urn": "urn:li:activity:9999999999999999999",
+                        "facebook_visibility": "public_permalink_verified",
+                    },
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (lb_repo / ".agy" / "youtube_pipeline_telemetry.json").write_text(
+        json.dumps(
+            {
+                "property_id": "lienbond",
+                "status": "PASS",
+                "upload_error_count": 0,
+                "stages": {
+                    "4_youtube_distribution": {
+                        "results": {
+                            "bid-bond-calculator": {
+                                "property_id": "lienbond",
+                                "slug": "bid-bond-calculator",
+                                "status": "QUOTA_DEFERRED_STAGED",
+                            }
+                        }
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    fixture_repos = {
+        "profithelm": ph_repo,
+        "prexvo": px_repo,
+        "gainhelm": gh_repo,
+        "lienbond": lb_repo,
+    }
+    for prop, f_repo in fixture_repos.items():
+        vis = dist_mod.verify_cross_platform_public_visibility(property_id=prop, repo_dir=f_repo)
         assert set(vis["platforms"].keys()) == {"linkedin", "facebook", "youtube"}
-        assert vis["platforms"]["facebook"]["verification_status"] == "PUBLIC_PERMALINK_VERIFIED"
-        assert vis["platforms"]["facebook"]["post_mode"] == "zero_link_teaser_plus_first_comment"
-        assert vis["platforms"]["facebook"]["verified_public_posts_count"] >= 1
-        assert all(
-            p["outbound_urls_in_body"] == 0 and p["first_comment_verified"] is True
-            for p in vis["platforms"]["facebook"]["verified_public_permalinks"]
-        )
-        assert vis["platforms"]["youtube"]["verification_status"] == "PUBLIC_VIDEOS_CAPTIONS_AND_COMMENTS_VERIFIED"
-        assert vis["platforms"]["youtube"]["verified_public_videos_count"] >= 1
-        assert all(
-            v["has_captions"] is True and v["has_pinned_comment"] is True
-            for v in vis["platforms"]["youtube"]["verified_public_videos"]
-        )
+        assert "verified_live_platforms" in vis
+        assert "channel_statuses" in vis
         if prop == "profithelm":
+            assert vis["all_three_platforms_publicly_verifiable"] is True
+            assert vis["verified_live_platforms"] == ["linkedin", "facebook", "youtube"]
+            assert vis["platforms"]["linkedin"]["company_id"] == "143884102"
             assert vis["platforms"]["linkedin"]["verification_status"] == "PUBLIC_FEED_VERIFIED"
             assert vis["platforms"]["linkedin"]["admin_access_status"] == "VERIFIED_COMPANY_ADMIN"
-            assert vis["platforms"]["linkedin"]["verified_public_posts_count"] >= 5
-        else:
+            assert vis["platforms"]["linkedin"]["channel_status"] == dist_mod.CHANNEL_STATUS_LIVE_PUBLISHED
+            assert vis["platforms"]["linkedin"]["verified_public_posts_count"] == 2
+            assert vis["platforms"]["facebook"]["verification_status"] == "PUBLIC_PERMALINK_VERIFIED"
+            assert vis["platforms"]["facebook"]["verified_public_posts_count"] == 1
+            assert vis["platforms"]["facebook"]["moderation_blocked_count"] == 1
+            assert vis["platforms"]["youtube"]["verification_status"] == "PUBLIC_VIDEOS_CAPTIONS_AND_COMMENTS_VERIFIED"
+            assert vis["platforms"]["youtube"]["verified_public_videos_count"] == 1
+            assert all(
+                v["has_captions"] is True and v["has_pinned_comment"] is True
+                for v in vis["platforms"]["youtube"]["verified_public_videos"]
+            )
+        elif prop in ("prexvo", "gainhelm"):
+            assert vis["all_three_platforms_publicly_verifiable"] is False
+            assert vis["verified_live_platforms"] == ["facebook", "youtube"]
             assert vis["platforms"]["linkedin"]["admin_access_status"] == "ADMIN_ACCESS_DENIED"
+            assert vis["platforms"]["linkedin"]["channel_status"] == dist_mod.CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS
             assert vis["platforms"]["linkedin"]["verification_status"] == "BLOCKED_COMPANY_PAGE_ADMIN_GRANT_REQUIRED"
             assert vis["platforms"]["linkedin"]["credential_gap"] is not None
+            assert vis["platforms"]["facebook"]["verification_status"] == "PUBLIC_PERMALINK_VERIFIED"
+            assert vis["platforms"]["facebook"]["verified_public_posts_count"] == 1
+            assert all(
+                p["outbound_urls_in_body"] == 0 and p["first_comment_verified"] is True
+                for p in vis["platforms"]["facebook"]["verified_public_permalinks"]
+            )
+            assert vis["platforms"]["youtube"]["verified_public_videos_count"] == 1
+            assert "ProfitHelm" not in vis["platforms"]["youtube"]["channel_title"]
+        else:
+            assert prop == "lienbond"
+            assert vis["all_three_platforms_publicly_verifiable"] is False
+            assert vis["verified_live_platforms"] == []
+            assert vis["platforms"]["linkedin"]["company_id"] == ""
+            assert vis["platforms"]["linkedin"]["company_name"] == "LienBond"
+            assert vis["platforms"]["linkedin"]["channel_status"] == dist_mod.CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS
+            assert vis["platforms"]["linkedin"]["verified_public_posts_count"] == 0
+            assert vis["platforms"]["facebook"]["channel_status"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+            assert vis["platforms"]["facebook"]["verified_public_posts_count"] == 0
+            assert vis["platforms"]["youtube"]["channel_status"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+            assert vis["platforms"]["youtube"]["verified_public_videos_count"] == 0
+            assert "GainHelm" not in vis["platforms"]["linkedin"]["company_name"]
+            assert "ProfitHelm" not in vis["platforms"]["youtube"]["channel_title"]
 
 
 def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_path: Path):
