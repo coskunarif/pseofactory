@@ -540,3 +540,59 @@ window.__complianceSyncWorkspaceOutputs = function() {{
     assert res["compBTax"] == "$125,900 Unoptimized Manual TCO"
 
 
+def test_gainhelm_url_sync_throttles_burst_and_cancels_on_popstate() -> None:
+    benchmarks = compute_gainhelm_framework_benchmarks()
+    section_html = _render_calculator_widget(
+        benchmarks=benchmarks,
+        tool_slug="soc-2-audit-cost-calculator",
+    )
+    full_html = f"""<!doctype html>
+<html><body><main>
+  <span class="output-value">78,100.40</span>
+  <strong id="hero-range-low">$62,480</strong>
+  <strong id="hero-range-baseline">$78,100</strong>
+  <strong id="hero-range-high">$93,720</strong>
+  {section_html}
+</main></body></html>"""
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.route("https://gainhelm.test/**", lambda route: route.fulfill(status=200, content_type="text/html", body=full_html))
+        page.goto("https://gainhelm.test/tools/soc-2-audit-cost-calculator/", wait_until="load")
+        res = page.evaluate("""() => {
+            let calls = 0;
+            const orig = window.history.replaceState.bind(window.history);
+            window.history.replaceState = function(...args) {
+                calls += 1;
+                return orig(...args);
+            };
+            const hc = document.getElementById("calc-input-headcount");
+            for (let i = 1; i <= 150; i++) {
+                hc.value = String(50 + i);
+                hc.dispatchEvent(new Event("input", {bubbles: true}));
+                hc.dispatchEvent(new Event("change", {bubbles: true}));
+            }
+            const immediateCalls = calls;
+            const immediateUrl = window.location.search;
+            // Fire popstate while trailing debounce is queued; stale queued write must be canceled
+            orig(null, "", window.location.pathname + "?headcount=999");
+            window.dispatchEvent(new PopStateEvent("popstate"));
+            return new Promise(resolve => setTimeout(() => {
+                resolve({
+                    immediateCalls,
+                    totalCalls: calls,
+                    immediateUrl,
+                    finalUrl: window.location.search,
+                });
+            }, 220));
+        }""")
+        browser.close()
+    assert res["immediateCalls"] <= 2, f"Expected throttled replaceState calls, got {res['immediateCalls']}"
+    assert res["totalCalls"] <= 2, f"Expected popstate to cancel trailing replaceState, got {res['totalCalls']}"
+    assert res["finalUrl"] == "?headcount=999", f"Stale queued replaceState overwrote popstate URL: {res['finalUrl']}"
+
+
+

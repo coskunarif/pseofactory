@@ -1363,6 +1363,17 @@ def _render_calculator_widget(
           if (rEl) rEl.value = String(rawV);
         }}
 
+        var _lastUrlSyncTs = 0;
+        var _urlSyncTimer = null;
+        var _pendingUrl = "";
+        function commitUrlState(targetUrl) {{
+          if (!targetUrl || typeof window === "undefined" || !window.history || typeof window.history.replaceState !== "function" || !window.location) return;
+          var curUrl = window.location.pathname + (window.location.search || "") + (window.location.hash || "");
+          if (targetUrl === curUrl) return;
+          _lastUrlSyncTs = Date.now();
+          window.history.replaceState(null, "", targetUrl);
+        }}
+
         function syncUrlState() {{
           try {{
             if (typeof window === "undefined" || !window.history || typeof window.history.replaceState !== "function" || !window.location) return;
@@ -1376,10 +1387,44 @@ def _render_calculator_widget(
               }}
             }}
             var qs = q.toString();
-            if (qs) {{
-              window.history.replaceState(null, "", window.location.pathname + "?" + qs + (window.location.hash || ""));
+            if (!qs) return;
+            var nextUrl = window.location.pathname + "?" + qs + (window.location.hash || "");
+            var curUrl = window.location.pathname + (window.location.search || "") + (window.location.hash || "");
+            if (nextUrl === curUrl) return;
+            var now = Date.now();
+            if (now - _lastUrlSyncTs >= 150) {{
+              if (_urlSyncTimer) {{
+                clearTimeout(_urlSyncTimer);
+                _urlSyncTimer = null;
+              }}
+              _pendingUrl = "";
+              commitUrlState(nextUrl);
+            }} else {{
+              _pendingUrl = nextUrl;
+              if (!_urlSyncTimer) {{
+                var delay = Math.max(25, 150 - (now - _lastUrlSyncTs));
+                _urlSyncTimer = setTimeout(function() {{
+                  _urlSyncTimer = null;
+                  var toWrite = _pendingUrl;
+                  _pendingUrl = "";
+                  commitUrlState(toWrite);
+                }}, delay);
+              }}
             }}
           }} catch (e) {{}}
+        }}
+
+        function cancelPendingUrlSync() {{
+          if (_urlSyncTimer) {{
+            clearTimeout(_urlSyncTimer);
+            _urlSyncTimer = null;
+          }}
+          _pendingUrl = "";
+        }}
+
+        if (typeof window !== "undefined" && typeof window.addEventListener === "function") {{
+          window.addEventListener("popstate", cancelPendingUrlSync);
+          window.addEventListener("pagehide", cancelPendingUrlSync);
         }}
 
         function handleUserRecompute() {{
