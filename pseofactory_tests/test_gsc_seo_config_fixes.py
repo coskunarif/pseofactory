@@ -587,3 +587,99 @@ def test_edge_gone_safe_js_quoting_and_recreated_route_removal(tmp_path: Path) -
         dist_dir=dist_dir,
     )
     assert mw_out_2 == mw_out
+
+
+def test_lienbond_legacy_poisoned_meta_healed_and_all_13_slugs_clean() -> None:
+    """maintenance.py heals legacy poisoned LienBond meta descriptions and all 13 slugs emit clean topic-accurate copy."""
+    from pseofactory.contracts import detect_sentence_truncation_issues
+
+    poisoned_erisa = (
+        "Calculate Erisa Fidelity premiums, NCCI class code rates, and statutory deadlines "
+        "under 40 U.S.C. Section 3131, NCCI manuals, and 50-state construction."
+    )
+    stale_og = (
+        "Deterministic quantitative calculator for erisa fidelity bond coverage amount calculator "
+        "under 40 U.S.C. Section 3131 (Miller."
+    )
+    html_in = (
+        "<!doctype html><html><head>"
+        "<title>ERISA Section 412 Fidelity Bond Calculator | LienBond</title>"
+        f'<meta name="description" content="{poisoned_erisa}">'
+        f'<meta property="og:description" content="{stale_og}">'
+        f'<meta name="twitter:description" content="{stale_og}">'
+        "</head><body><main><h1>ERISA Section 412 Fidelity Bond Calculator</h1></main></body></html>"
+    )
+    healed_html, changed_1 = maintenance._normalize_page_structure_and_geo_parity(
+        html_in,
+        property_id="lienbond",
+        slug="erisa-fidelity-bond-coverage-amount-calculator",
+        topic_label="ERISA Section 412 Fidelity Bond Coverage Amount Calculator",
+        canonical_url="https://lienbond.com/tools/erisa-fidelity-bond-coverage-amount-calculator/",
+        stat_auth="29 U.S.C. Section 1112",
+        econ_ds="DOL Form 5500 Series",
+    )
+    assert changed_1 is True
+    md_m = re.search(r'<meta[^>]+name="description"[^>]+content="([^"]+)"', healed_html)
+    og_m = re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]+)"', healed_html)
+    tw_m = re.search(r'<meta[^>]+name="twitter:description"[^>]+content="([^"]+)"', healed_html)
+    assert md_m and og_m and tw_m
+    assert md_m.group(1) == og_m.group(1) == tw_m.group(1)
+    assert "29 U.S.C. Section 1112" in md_m.group(1)
+    assert "3131" not in md_m.group(1)
+    assert "NCCI" not in md_m.group(1)
+    assert 120 <= len(md_m.group(1)) <= 155
+
+    # Second pass must leave the healed meta description untouched (idempotent)
+    healed_html_2, _ = maintenance._normalize_page_structure_and_geo_parity(
+        healed_html,
+        property_id="lienbond",
+        slug="erisa-fidelity-bond-coverage-amount-calculator",
+        topic_label="ERISA Section 412 Fidelity Bond Coverage Amount Calculator",
+        canonical_url="https://lienbond.com/tools/erisa-fidelity-bond-coverage-amount-calculator/",
+        stat_auth="29 U.S.C. Section 1112",
+        econ_ds="DOL Form 5500 Series",
+    )
+    md_m2 = re.search(r'<meta[^>]+name="description"[^>]+content="([^"]+)"', healed_html_2)
+    assert md_m2 and md_m2.group(1) == md_m.group(1)
+
+    # Direct _normalize_meta_120_155 call must also reject and heal the legacy poisoned string
+    direct_healed = _normalize_meta_120_155(
+        poisoned_erisa,
+        "lienbond",
+        "erisa fidelity bond coverage amount calculator",
+        slug="erisa-fidelity-bond-coverage-amount-calculator",
+    )
+    assert direct_healed == md_m.group(1)
+
+    expected_slug_tokens = {
+        "bid-bond-calculator": "FAR 28.101",
+        "california-texas-florida-preliminary-notice-deadline-calculator": "California 20-day",
+        "commercial-construction-retainage-interest-penalty-calculator-by-state": "31 U.S.C. Section 3903",
+        "contractor-license-bond-cost-calculator-by-credit-score": "31 CFR Part 223",
+        "contractor-lien-release-statutory-matrix-by-state": "50-state statutory mechanics lien waiver",
+        "contractor-overhead-and-profit-markup-vs-margin-calculator": "48 CFR Part 31",
+        "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator": "40 U.S.C. Section 3141",
+        "erisa-fidelity-bond-coverage-amount-calculator": "29 U.S.C. Section 1112",
+        "experience-modification-rate-emr-workers-comp-penalty-calculator": "EMR",
+        "miller-act-performance-and-payment-bond-premium-calculator": "40 U.S.C. Section 3131",
+        "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator": "AIA A312",
+        "texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator": "Texas Property Code Chapter 53",
+        "workers-compensation-class-code-rate-calculator-by-state": "NCCI Basic Manual",
+    }
+    workers_comp_slugs = {
+        "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "workers-compensation-class-code-rate-calculator-by-state",
+    }
+    seen_descriptions: dict[str, str] = {}
+    for slug, required_token in expected_slug_tokens.items():
+        desc = _normalize_meta_120_155("", "lienbond", slug.replace("-", " "), slug=slug)
+        assert 120 <= len(desc) <= 155, f"{slug} len={len(desc)}: {desc}"
+        assert not detect_sentence_truncation_issues(desc), f"{slug} truncated: {desc}"
+        assert "\u2014" not in desc and "\u2013" not in desc, f"{slug} forbidden dash: {desc}"
+        assert required_token in desc, f"{slug} missing '{required_token}': {desc}"
+        if slug not in workers_comp_slugs:
+            assert "ncci" not in desc.lower(), f"{slug} leaked NCCI: {desc}"
+        if slug != "miller-act-performance-and-payment-bond-premium-calculator":
+            assert "3131" not in desc.lower(), f"{slug} leaked 3131: {desc}"
+        assert desc not in seen_descriptions, f"Duplicate meta for {slug} and {seen_descriptions[desc]}: {desc}"
+        seen_descriptions[desc] = slug

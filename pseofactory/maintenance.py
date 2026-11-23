@@ -7955,17 +7955,64 @@ def _normalize_page_structure_and_geo_parity(
                     "loophole" in slug.lower()
                     and "repayment options comparing 10% idr" in old_md_raw.lower()
                 )
+                or (
+                    property_id.lower() == "lienbond"
+                    and (
+                        "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131"
+                        in old_md_raw.lower()
+                        or (
+                            not is_non_tool_slug
+                            and slug.lower() not in ("", "index")
+                            and not re.fullmatch(r"https?://[^/]+/?", (canonical_url or "").strip())
+                            and (
+                                (
+                                    not any(
+                                        k in slug.lower()
+                                        for k in ("workers-comp", "class-code", "emr", "experience-modification")
+                                    )
+                                    and "ncci" in old_md_raw.lower()
+                                )
+                                or (
+                                    "miller-act" not in slug.lower()
+                                    and "40 u.s.c. section 3131" in old_md_raw.lower()
+                                )
+                            )
+                        )
+                    )
+                )
             )
         ):
+            is_root_homepage_meta = slug.lower() in ("", "index") or bool(
+                re.fullmatch(r"https?://[^/]+/?", (canonical_url or "").strip())
+            )
             meta_seed_label = (
                 f"{topic_label} Section 179"
                 if spoke_generic_meta and topic_label
-                else slug.replace("/", " ").replace("-", " ")
+                else ("index" if is_root_homepage_meta else slug.replace("/", " ").replace("-", " "))
             )
-            healed_md = _normalize_meta_120_155("", property_id, meta_seed_label, slug=slug)
+            healed_md = _normalize_meta_120_155(
+                "",
+                property_id,
+                meta_seed_label,
+                slug="index" if is_root_homepage_meta else slug,
+            )
             if healed_md and healed_md != old_md_raw:
                 updated = updated.replace(f'content="{old_md_raw}"', f'content="{healed_md}"')
+                updated = updated.replace(f"content='{old_md_raw}'", f"content='{healed_md}'")
                 updated = updated.replace(f'"{old_md_raw}"', f'"{healed_md}"')
+                for og_prop in ("og:description", "twitter:description"):
+                    updated = re.sub(
+                        rf'(<meta\b[^>]*(?:property|name)=["\']{og_prop}["\'][^>]*content=["\'])([^"\']*)(["\'][^>]*>)',
+                        lambda m, _val=healed_md: f"{m.group(1)}{_val}{m.group(3)}",
+                        updated,
+                        flags=re.IGNORECASE,
+                    )
+                    updated = re.sub(
+                        rf'(<meta\b[^>]*content=["\'])([^"\']*)(["\'][^>]*(?:property|name)=["\']{og_prop}["\'][^>]*>)',
+                        lambda m, _val=healed_md: f"{m.group(1)}{_val}{m.group(3)}",
+                        updated,
+                        flags=re.IGNORECASE,
+                    )
                 changed = True
 
     if 'class="touch-target scenario-preset-link"' in updated:

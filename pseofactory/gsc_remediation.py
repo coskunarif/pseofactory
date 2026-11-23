@@ -2556,6 +2556,30 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
             )
         )
         or (
+            tenant_id == "lienbond"
+            and (
+                "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131"
+                in clean.lower()
+                or (
+                    bool(slug_low)
+                    and slug_low not in ("index", "tools", "tools-directory", "about", "methodology", "disclaimers", "privacy", "terms", "contact")
+                    and (
+                        (
+                            not any(
+                                k in slug_low
+                                for k in ("workers-comp", "class-code", "emr", "experience-modification")
+                            )
+                            and "ncci" in clean.lower()
+                        )
+                        or (
+                            "miller-act" not in slug_low
+                            and "40 u.s.c. section 3131" in clean.lower()
+                        )
+                    )
+                )
+            )
+        )
+        or (
             ("surety" in q_low or ("bond" in q_low and "280g" not in slug_low))
             and any(
                 bad_irc in clean.lower()
@@ -2860,6 +2884,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Verified against statutory compliance benchmarks.",
             )
         if tenant_id == "lienbond":
+            if slug_low == "index":
+                return (
+                    "Calculate contractor surety bond premiums, NCCI workers comp class code and EMR "
+                    "rates, 50-state mechanics lien deadlines, and WH-347 payroll.",
+                    " Grounded in U.S. Treasury Circular 570 and NCCI manuals.",
+                )
             if "disclaimer" in q_low:
                 return (
                     "Review LienBond contractor surety bond, workers compensation, and 50-state mechanics "
@@ -2890,6 +2920,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "burdens under 40 U.S.C. Section 3141 and 29 CFR Section 5.5 Form WH-347.",
                     " Verified under DOL Wage Determinations and IRC Section 3111.",
                 )
+            if any(k in q_low for k in ("texas-chapter-53", "texas chapter 53", "chapter-53", "chapter 53", "fund-trapping", "fund trapping")):
+                return (
+                    "Calculate Texas Property Code Chapter 53 10% statutory retainage reserves, "
+                    "Section 53.056 fund-trapping notices, and commercial lien recovery limits.",
+                    " Verified under Texas Property Code Sections 53.101 and 53.056.",
+                )
             if any(k in q_low for k in ("retainage", "prompt-payment", "prompt payment", "3903")):
                 return (
                     "Calculate commercial construction retainage caps and statutory late-payment "
@@ -2902,28 +2938,70 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "under 48 CFR Part 31 FAR cost principles and IRC Section 460 rules.",
                     " Verified under AIA A102 and BLS construction PPI.",
                 )
-            if any(k in q_low for k in ("workers-comp", "workers comp", "class-code", "class code", "emr", "experience-modification", "experience modification")):
+            if any(k in q_low for k in ("emr", "experience-modification", "experience modification")):
                 return (
-                    f"Calculate {lbl} using NCCI Basic Manual class code rates, experience modification "
-                    f"rate (EMR) multipliers, and payroll exposure per $100.",
+                    "Calculate Experience Modification Rate (EMR) workers comp premium penalties and "
+                    "credits using NCCI split-point loss ratios and expected loss factors.",
                     " Verified under NCCI Experience Rating Plan manuals.",
                 )
-            if any(k in q_low for k in ("preliminary-notice", "preliminary notice", "lien-release", "lien release", "lien-waiver", "lien waiver", "mechanics-lien", "mechanics lien")):
+            if any(k in q_low for k in ("workers-comp", "workers comp", "class-code", "class code")):
                 return (
-                    f"Calculate {lbl} statutory filing deadlines, preliminary notice windows, and "
-                    f"lien waiver rules under 50-state civil and property lien codes.",
+                    "Calculate state contractor workers compensation premiums using NCCI Basic Manual "
+                    "class code rates per $100 of payroll, EMR multipliers, and credits.",
+                    " Verified under NCCI Basic Manual state rate filings.",
+                )
+            if any(k in q_low for k in ("preliminary-notice", "preliminary notice")):
+                if all(st in q_low for st in ("california", "texas", "florida")):
+                    return (
+                        "Calculate California 20-day, Texas Chapter 53 15th-day, and Florida 45-day "
+                        "preliminary notice deadlines to preserve commercial mechanics lien rights.",
+                        " Verified under state mechanics lien statutory timelines.",
+                    )
+                return (
+                    "Calculate statutory construction preliminary notice deadlines, first-furnishing "
+                    "lookback windows, and state mechanics lien preservation filing rules.",
                     " Verified under state mechanics lien statutory timelines.",
                 )
-            if any(k in q_low for k in ("miller-act", "miller act", "performance-bond", "performance bond", "payment-bond", "payment bond", "bid-bond", "bid bond")):
+            if any(k in q_low for k in ("lien-release", "lien release", "lien-waiver", "lien waiver", "mechanics-lien", "mechanics lien")):
                 return (
-                    f"Calculate {lbl} using SFAA sliding-scale contract bond rate tiers under "
-                    f"40 U.S.C. Section 3131 Federal Miller Act and FAR 28.102-2.",
+                    "Compare 50-state statutory mechanics lien waiver forms, conditional versus "
+                    "unconditional progress and final releases, and notarization requirements.",
+                    " Verified under 50-state mechanics lien waiver statutes.",
+                )
+            if any(k in q_low for k in ("subcontractor-default", "subcontractor default")) or re.search(r"\bsdi\b", q_low):
+                return (
+                    "Compare Subcontractor Default Insurance (SDI) base rates and self-insured "
+                    "retentions against AIA A312 performance bond premiums on subcontract volume.",
+                    " Verified under AIA A312 and SFAA commercial surety benchmarks.",
+                )
+            if any(k in q_low for k in ("bid-bond", "bid bond")):
+                return (
+                    "Calculate construction bid bond penal sums (5% to 20% of bid), forfeiture spread "
+                    "exposure, and surety underwriting tiers under FAR 28.101 bid rules.",
+                    " Verified under FAR 28.101 and U.S. Treasury Circular 570.",
+                )
+            if any(k in q_low for k in ("miller-act", "miller act")):
+                return (
+                    "Calculate Miller Act performance and payment bond premiums using SFAA sliding-scale "
+                    "contract rate tiers under 40 U.S.C. Section 3131 and FAR 28.102-2.",
                     " Verified under U.S. Treasury Circular 570.",
                 )
-            if any(k in q_low for k in ("license-bond", "license bond", "surety-bond", "surety bond", "commercial-bond", "commercial bond", "bond")):
+            if any(k in q_low for k in ("performance-bond", "performance bond", "payment-bond", "payment bond")):
+                return (
+                    "Calculate construction performance and payment bond premiums using SFAA sliding-scale "
+                    "contract rate tiers, penal sum limits, and FAR 28.102-2 rules.",
+                    " Verified under U.S. Treasury Circular 570.",
+                )
+            if any(k in q_low for k in ("license-bond", "license bond")):
+                return (
+                    "Calculate contractor license bond premiums by FICO credit score tier, state "
+                    "statutory penal sum limits, and 31 CFR Part 223 Treasury Circular 570 rules.",
+                    " Verified under 31 CFR Part 223 surety schedules.",
+                )
+            if any(k in q_low for k in ("surety-bond", "surety bond", "commercial-bond", "commercial bond", "bond")):
                 return (
                     f"Calculate {lbl} penal sum coverage and credit-tier surety bond premiums under "
-                    f"U.S. Treasury Circular 570 and applicable statutory bonding rules.",
+                    f"U.S. Treasury Circular 570 and 31 CFR Part 223 rules.",
                     " Verified under 31 CFR Part 223 surety schedules.",
                 )
             return (
