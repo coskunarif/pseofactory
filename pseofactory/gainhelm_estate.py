@@ -1363,6 +1363,30 @@ def _render_calculator_widget(
           if (rEl) rEl.value = String(rawV);
         }}
 
+        function syncUrlState() {{
+          try {{
+            if (typeof window === "undefined" || !window.history || typeof window.history.replaceState !== "function" || !window.location) return;
+            var q = new URLSearchParams(window.location.search || "");
+            var keys = ["headcount", "extra_criteria", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt", "compromised_records"];
+            for (var ki = 0; ki < keys.length; ki++) {{
+              var k = keys[ki];
+              var el = document.getElementById("calc-input-" + k);
+              if (el && el.value !== "") {{
+                q.set(k, String(el.value));
+              }}
+            }}
+            var qs = q.toString();
+            if (qs) {{
+              window.history.replaceState(null, "", window.location.pathname + "?" + qs + (window.location.hash || ""));
+            }}
+          }} catch (e) {{}}
+        }}
+
+        function handleUserRecompute() {{
+          recompute();
+          syncUrlState();
+        }}
+
         var params = new URLSearchParams((typeof window !== "undefined" && window.location && window.location.search) || "");
         ["headcount", "extra_criteria", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt", "compromised_records"].forEach(function(k) {{
           if (params.has(k)) {{
@@ -1370,8 +1394,8 @@ def _render_calculator_widget(
           }}
         }});
 
-        form.addEventListener("input", recompute);
-        form.addEventListener("change", recompute);
+        form.addEventListener("input", handleUserRecompute);
+        form.addEventListener("change", handleUserRecompute);
         var btns = document.querySelectorAll(".calc-switcher-btn");
         for (var i = 0; i < btns.length; i++) {{
           btns[i].addEventListener("click", function() {{
@@ -1384,6 +1408,7 @@ def _render_calculator_widget(
             setCalcInputVal("calc-input-unimplemented_1pt", this.getAttribute("data-preset-u1") || "2");
             setCalcInputVal("calc-input-compromised_records", this.getAttribute("data-preset-rec") || "1500");
             recompute();
+            syncUrlState();
           }});
         }}
         recompute();

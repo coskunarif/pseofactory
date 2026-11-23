@@ -1615,17 +1615,26 @@ def _render_runtime_sync_workbench_js() -> str:
       return Math.round(ltcg + niit);
     }
 
-    function updateInteractiveCliffAndComparator(retainedVal, taxVal) {
+    function updateInteractiveCliffAndComparator(retainedVal, taxVal, workbenchMode, counterfactualVal) {
       try {
+        var wbEl = document.getElementById("serp-incumbent-depth-workbench");
+        var activeMode = String(workbenchMode || (wbEl ? wbEl.getAttribute("data-workbench-mode") : "") || "").toLowerCase();
+        var isIncomeTaxMode = activeMode === "tax_brackets";
         var total = Math.max(1, retainedVal + taxVal);
         var cliffYears = [2024, 2025, 2026, 2027, 2028, 2030];
         var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];
         var epochBase = taxVal > 0 ? taxVal : Math.max(100, Math.round(retainedVal * 0.15));
+        var hasSvgCliffVals = Boolean(document.getElementById("serp-cliff-val-0"));
         for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {
           var barEl = document.getElementById("serp-cliff-bar-" + String(cIdx));
           var valEl = document.getElementById("serp-cliff-val-" + String(cIdx));
-          var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;
-          var yrVal = Math.max(100, Math.round(epochBase - stdShift));
+          var yrVal;
+          if (isIncomeTaxMode) {
+            var stdShift = (stdDedsByEpoch[cIdx] - 16100) * 0.22;
+            yrVal = Math.max(100, Math.round(epochBase - stdShift));
+          } else {
+            yrVal = Math.max(100, Math.round(epochBase * (1 + ((cIdx - 2) * 0.025))));
+          }
           var barH = Math.max(18, Math.min(72, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 70)));
           var barY = 90-barH;
           if (barEl) {
@@ -1646,7 +1655,9 @@ def _render_runtime_sync_workbench_js() -> str:
               domBar.setAttribute("data-exposure-usd", String(yrVal));
             }
             if (domExp && _userInteracted) {
-              domExp.textContent = fmtUsd(yrVal);
+              if (isIncomeTaxMode || (!hasSvgCliffVals && /^\\$?[\\d,]+(?:\\.\\d+)?$/.test((domExp.textContent || "").trim()))) {
+                domExp.textContent = fmtUsd(yrVal);
+              }
             }
           }
         }
@@ -1661,9 +1672,16 @@ def _render_runtime_sync_workbench_js() -> str:
           var a1 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-primary") || "0") || retainedVal) : retainedVal;
           var a2 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-secondary") || "0") || taxVal) : taxVal;
           var bInput = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-input") || "0") || total) : total;
-          var unshieldedTax = evalProgressiveFederalTax(Math.max(0, total - 16100), "2026_active");
-          var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || Math.max(taxVal, unshieldedTax)) : Math.max(taxVal, unshieldedTax);
-          var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || Math.max(0, bInput - b2)) : Math.max(0, bInput - b2);
+          var defaultB2;
+          if (isIncomeTaxMode) {
+            var unshieldedTax = evalProgressiveFederalTax(Math.max(0, total - 16100), "2026_active");
+            defaultB2 = Math.max(taxVal, unshieldedTax);
+          } else {
+            defaultB2 = (typeof counterfactualVal === "number" && isFinite(counterfactualVal) && counterfactualVal >= 0) ? counterfactualVal : taxVal;
+          }
+          var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || defaultB2) : defaultB2;
+          var defaultB1 = isIncomeTaxMode ? Math.max(0, bInput - b2) : retainedVal;
+          var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || defaultB1) : defaultB1;
           var elA1 = document.getElementById("serp-scn-a-primary");
           var elA2 = document.getElementById("serp-scn-a-secondary");
           var elB1 = document.getElementById("serp-scn-b-primary");
@@ -1692,7 +1710,14 @@ def _render_runtime_sync_workbench_js() -> str:
           var cLRet = document.getElementById("comp-live-retained");
           var cLTax = document.getElementById("comp-live-tax");
           var cLDel = document.getElementById("comp-live-delta");
-          if (_userInteracted || pinnedA || pinnedB) {
+          var compCells = [cAIn, cARet, cATax, cADel, cBIn, cBRet, cBTax, cBDel, cLIn, cLRet, cLTax, cLDel];
+          for (var ccIdx = 0; ccIdx < compCells.length; ccIdx++) {
+            var ccNode = compCells[ccIdx];
+            if (ccNode && !ccNode.hasAttribute("data-ssr-text")) {
+              ccNode.setAttribute("data-ssr-text", ccNode.textContent || "");
+            }
+          }
+          if ((isIncomeTaxMode && (_userInteracted || pinnedA || pinnedB)) || (!isIncomeTaxMode && (pinnedA || pinnedB))) {
             if (cAIn) cAIn.textContent = fmtUsd(aInput);
             if (cARet) cARet.textContent = fmtUsd(a1);
             if (cATax) cATax.textContent = fmtUsd(a2);
@@ -1705,12 +1730,19 @@ def _render_runtime_sync_workbench_js() -> str:
             if (cLRet) cLRet.textContent = (d1 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d1));
             if (cLTax) cLTax.textContent = (dTax >= 0 ? "+" : "-") + fmtUsd(Math.abs(dTax));
             if (cLDel) cLDel.textContent = (d2 >= 0 ? "+" : "-") + fmtUsd(Math.abs(d2)) + " Advantage";
+          } else if (!isIncomeTaxMode && !pinnedA && !pinnedB) {
+            for (var rIdx = 0; rIdx < compCells.length; rIdx++) {
+              var rNode = compCells[rIdx];
+              if (rNode && rNode.hasAttribute("data-ssr-text")) {
+                rNode.textContent = rNode.getAttribute("data-ssr-text") || "";
+              }
+            }
           }
         }
       } catch (err) {}
     }
 
-    function updateSerpSvgChart(retainedVal, taxVal, leftPrefix, rightPrefix) {
+    function updateSerpSvgChart(retainedVal, taxVal, leftPrefix, rightPrefix, workbenchMode, counterfactualVal) {
       var total = Math.max(1, retainedVal + taxVal);
       var retPct = Math.max(4, Math.min(96, Math.round((retainedVal / total) * 1000) / 10));
       var taxPct = Math.round((100-retPct) * 10) / 10;
@@ -1727,7 +1759,7 @@ def _render_runtime_sync_workbench_js() -> str:
       }
       if (lblRet) lblRet.textContent = leftPrefix + ": " + fmtUsd(retainedVal) + " (" + retPct.toFixed(1) + "%)";
       if (lblTax) lblTax.textContent = rightPrefix + ": " + fmtUsd(taxVal) + " (" + taxPct.toFixed(1) + "%)";
-      updateInteractiveCliffAndComparator(retainedVal, taxVal);
+      updateInteractiveCliffAndComparator(retainedVal, taxVal, workbenchMode, counterfactualVal);
     }
 
     function updateSerpWorkbenchSynchronously() {
@@ -1764,7 +1796,7 @@ def _render_runtime_sync_workbench_js() -> str:
           if (out4) out4.textContent = fmtUsd(netRetained);
           if (ban1) ban1.textContent = fmtUsd(adjGain);
           if (ban2) ban2.textContent = fmtUsd(lotAlpha);
-          updateSerpSvgChart(netRetained, estTax, "Net Retained Proceeds", "Estimated Tax Exposure");
+          updateSerpSvgChart(netRetained, estTax, "Net Retained Proceeds", "Estimated Tax Exposure", mode, fifoTax);
         } else if (mode === "tax_brackets") {
           var gross = parseFloat((document.getElementById("serp-tax-gross") || {}).value || "185000") || 0;
           var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {}).value || "32500") || 0;
@@ -1786,7 +1818,7 @@ def _render_runtime_sync_workbench_js() -> str:
             if (out4) out4.textContent = fmtUsd(takeHome);
             if (ban1) ban1.textContent = fmtUsd(adjTaxable);
             if (ban2) ban2.textContent = fmtUsd(shieldSaved);
-            updateSerpSvgChart(takeHome, combTax, "Net Take-Home Cash Flow", "Combined Tax Liability");
+            updateSerpSvgChart(takeHome, combTax, "Net Take-Home Cash Flow", "Combined Tax Liability", mode);
           }
         } else if (mode === "sec179") {
           var cost = parseFloat((document.getElementById("serp-179-cost") || {}).value || "145000") || 0;
@@ -1821,7 +1853,7 @@ def _render_runtime_sync_workbench_js() -> str:
           if (out4) out4.textContent = (netSurplus >= 0 ? "+" : "-") + fmtUsd(Math.abs(netSurplus));
           if (ban1) ban1.textContent = fmtUsd(writeOff);
           if (ban2) ban2.textContent = fmtUsd(taxSaved);
-          updateSerpSvgChart(netAfterTaxCost, taxSaved, "Net After-Tax Equipment Cost", "Year-1 Tax Shield Recovered");
+          updateSerpSvgChart(netAfterTaxCost, taxSaved, "Net After-Tax Equipment Cost", "Year-1 Tax Shield Recovered", mode, taxSaved);
         } else if (mode === "sec1031") {
           var relDebt = parseFloat((document.getElementById("serp-1031-rel-debt") || {}).value || "950000") || 0;
           var repDebt = parseFloat((document.getElementById("serp-1031-rep-debt") || {}).value || "1150000") || 0;
@@ -1839,7 +1871,7 @@ def _render_runtime_sync_workbench_js() -> str:
           if (out4) out4.textContent = remId + "d ID / " + remClose + "d Close";
           if (ban1) ban1.textContent = fmtUsd(netBoot);
           if (ban2) ban2.textContent = fmtUsd(defTax);
-          updateSerpSvgChart(carryBasis, defTax, "Reinvested Exchange Equity", "Deferred Tax Preserved");
+          updateSerpSvgChart(carryBasis, defTax, "Reinvested Exchange Equity", "Deferred Tax Preserved", mode, defTax);
         } else if (mode === "repayment_loan") {
           var bAgi = parseFloat((document.getElementById("serp-loan-agi") || {}).value || "78000") || 0;
           var sAgi = parseFloat((document.getElementById("serp-loan-spouse-agi") || {}).value || "64000") || 0;
@@ -1862,9 +1894,10 @@ def _render_runtime_sync_workbench_js() -> str:
           if (ban2) ban2.textContent = fmtUsd(mfsSaveYr) + " annual";
           var annRap = rapMo * 12;
           var annRet = Math.max(0, bAgi-annRap);
-          updateSerpSvgChart(annRet, annRap, "Annual Retained Income", "Annual RAP Obligation");
+          var annIbr = ibrMo * 12;
+          updateSerpSvgChart(annRet, annRap, "Annual Retained Income", "Annual RAP Obligation", mode, annIbr);
           if (lBal > 0 || sAgi > 0) {
-            updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1) + mfsSaveYr, Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12) + Math.round(mfsSaveYr * 0.25)));
+            updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1) + mfsSaveYr, Math.max(100, annRap + Math.round((std10Mo-refiMo) * 12) + Math.round(mfsSaveYr * 0.25)), mode, Math.max(100, annIbr));
           }
         } else if (mode === "b2b" || mode === "cyber_grc" || mode === "surety_lien" || mode === "construction_surety_lien" || mode) {
           var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || (mode === "cyber_grc" ? "84000" : "450000")) || 0;
@@ -1885,7 +1918,7 @@ def _render_runtime_sync_workbench_js() -> str:
             if (out4) out4.textContent = fmtUsd(revProtected);
             if (ban1) ban1.textContent = fmtUsd(netTco);
             if (ban2) ban2.textContent = fmtUsd(grcSaved);
-            updateSerpSvgChart(unautoTco, netTco, "Unautomated Audit TCO", "Net Automated TCO");
+            updateSerpSvgChart(unautoTco, netTco, "Unautomated Audit TCO", "Net Automated TCO", mode, unautoTco);
           } else {
             var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
             var cappedDed = Math.min(bDed, Math.round(bGross * 0.85));
@@ -1902,7 +1935,7 @@ def _render_runtime_sync_workbench_js() -> str:
             if (out4) out4.textContent = fmtUsd(netCap);
             if (ban1) ban1.textContent = fmtUsd(netExp);
             if (ban2) ban2.textContent = fmtUsd(alphaSaved);
-            updateSerpSvgChart(netCap, netExp, "Net Retained Capital", "Net Statutory Exposure");
+            updateSerpSvgChart(netCap, netExp, "Net Retained Capital", "Net Statutory Exposure", mode, unoptExp);
           }
         }
       } catch (wbErr) {}
@@ -2164,21 +2197,78 @@ def _render_runtime_sync_workbench_js() -> str:
       );
 
       if (hasNativeCalc || _lastInteractionScope === "serp") {
-        var primaryOutEl = outNodes[0];
-        if (primaryOutEl && !(primaryOutEl.classList && primaryOutEl.classList.contains("overlay-preset-readout"))) {
-          var rawLiveTxt = (primaryOutEl.textContent || "").trim();
-          var liveNum = parseFloat(rawLiveTxt.replace(/[^0-9.-]/g, ""));
+        var staticOutEl = null;
+        for (var oIdx = 0; oIdx < outNodes.length; oIdx++) {
+          if (outNodes[oIdx] && !(outNodes[oIdx].classList && outNodes[oIdx].classList.contains("overlay-preset-readout"))) {
+            staticOutEl = outNodes[oIdx];
+            break;
+          }
+        }
+        var liveSourceEl = staticOutEl;
+        if (_userInteracted) {
+          var nativeOutSelectors = [
+            "[data-primary-output='true']",
+            "#val-total_federal_tax",
+            "#sec179-res-writeoff",
+            "#res-crypto-tax",
+            "#res-total-tax",
+            "#res-runway-months",
+            "#res-arb-profit",
+            "#res-pm-tax-savings",
+            "#metric-rap_payment",
+            "[id^='val-']",
+            "[id^='sec179-res-']",
+            "[id^='res-']",
+            "[id^='metric-']:not([id^='metric-card-'])"
+          ];
+          for (var nsIdx = 0; nsIdx < nativeOutSelectors.length; nsIdx++) {
+            var candEl = document.querySelector(nativeOutSelectors[nsIdx]);
+            if (candEl && !(candEl.classList && candEl.classList.contains("overlay-preset-readout"))) {
+              var candTxt = (candEl.textContent || "").trim();
+              var candMatch = candTxt.match(/-?[\\d,]+(?:\\.\\d+)?/);
+              if (candMatch) {
+                var candNum = parseFloat(candMatch[0].replace(/,/g, ""));
+                if (!isNaN(candNum) && isFinite(candNum)) {
+                  liveSourceEl = candEl;
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (liveSourceEl && !(liveSourceEl.classList && liveSourceEl.classList.contains("overlay-preset-readout"))) {
+          var rawLiveTxt = (liveSourceEl.textContent || "").trim();
+          var liveNumMatch = rawLiveTxt.match(/-?[\\d,]+(?:\\.\\d+)?/);
+          var liveNum = liveNumMatch ? parseFloat(liveNumMatch[0].replace(/,/g, "")) : NaN;
           if (!isNaN(liveNum) && isFinite(liveNum)) {
             var hrBaseLive = document.getElementById("hero-range-baseline");
             var hrLowLive = document.getElementById("hero-range-low");
             var hrHighLive = document.getElementById("hero-range-high");
-            var wantsUsd = rawLiveTxt.indexOf("$") !== -1 || (hrLowLive && (hrLowLive.textContent || "").indexOf("$") !== -1);
+            var hasDecimals = /\\.\\d{1,2}\\b/.test(rawLiveTxt);
+            var isPct = rawLiveTxt.indexOf("%") !== -1 && rawLiveTxt.indexOf("$") === -1;
+            var isMonths = /months?/i.test(rawLiveTxt) && rawLiveTxt.indexOf("$") === -1;
+            var wantsUsd = !isPct && !isMonths && (rawLiveTxt.indexOf("$") !== -1 || (hrLowLive && (hrLowLive.textContent || "").indexOf("$") !== -1));
             var fmtRange = function(v) {
-              return wantsUsd ? fmtUsd(v) : formatOutNum(v);
+              if (isPct) return v.toFixed(1) + "%";
+              if (isMonths) return String(Math.round(v)) + " Months";
+              if (wantsUsd) return hasDecimals ? fmtUsd2(v) : fmtUsd(v);
+              return hasDecimals ? fmtNum2(v) : formatOutNum(v);
             };
             if (hrBaseLive) hrBaseLive.textContent = fmtRange(liveNum);
             if (hrLowLive) hrLowLive.textContent = fmtRange(liveNum * 0.8);
             if (hrHighLive) hrHighLive.textContent = fmtRange(liveNum * 1.2);
+            if (_userInteracted && staticOutEl && staticOutEl !== liveSourceEl) {
+              var staticHasUsd = (staticOutEl.textContent || "").indexOf("$") !== -1;
+              if (isPct) {
+                staticOutEl.textContent = liveNum.toFixed(1) + "%";
+              } else if (isMonths) {
+                staticOutEl.textContent = String(Math.round(liveNum));
+              } else if (staticHasUsd) {
+                staticOutEl.textContent = hasDecimals ? fmtUsd2(liveNum) : fmtUsd(liveNum);
+              } else {
+                staticOutEl.textContent = hasDecimals ? fmtNum2(liveNum) : formatOutNum(liveNum);
+              }
+            }
           }
         }
         syncOutboundAffiliateLinks();
@@ -7136,7 +7226,11 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
 
     from pseofactory.competitor import US_51_JURISDICTIONS, resolve_state_code_from_slug
 
-    is_restricted_ps = 'data-restricted-public-service="true"' in updated
+    is_restricted_ps = (
+        'data-restricted-public-service="true"' in updated
+        or 'data-commercial-offers="none"' in updated
+        or 'data-commercial-offers="suppressed-default"' in updated
+    )
     has_quote_intake = 'id="partner-quote-intake-step"' in updated and not is_restricted_ps
     q_match = re.search(r'<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*>', updated, re.IGNORECASE)
     q_tag = q_match.group(0) if q_match else ""

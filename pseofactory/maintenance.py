@@ -10520,11 +10520,15 @@ class RetroReflectionEngine:
             or (
                 'id="partner-quote-intake-step"' in html_content
                 and 'data-restricted-public-service="true"' not in html_content
+                and 'data-commercial-offers="none"' not in html_content
+                and 'data-commercial-offers="suppressed-default"' not in html_content
                 and 'id="partner-registration-drawer"' not in html_content
             )
             or (
                 'id="partner-quote-intake-step"' in html_content
                 and 'data-restricted-public-service="true"' not in html_content
+                and 'data-commercial-offers="none"' not in html_content
+                and 'data-commercial-offers="suppressed-default"' not in html_content
                 and 'id="post-calculation-upgrade-drawer"' in html_content
                 and (
                     'id="calc-result-quick-unlock-bar"' not in html_content
@@ -14120,6 +14124,19 @@ class RetroReflectionEngine:
                     if sm_main_txt and f"<loc>{loc_target}</loc>" not in sm_main_txt:
                         missing_root_tool_slugs.append(td_sm.name)
 
+            leaf_locs_existing: set[str] = set()
+            leaves_sm_file = d / "sitemap-leaves.xml"
+            if leaves_sm_file.is_file():
+                try:
+                    leaf_locs_existing = set(
+                        re.findall(
+                            r"<loc>\s*([^<\s]+)\s*</loc>",
+                            leaves_sm_file.read_text(encoding="utf-8", errors="ignore"),
+                        )
+                    )
+                except Exception:
+                    leaf_locs_existing = set()
+
             if missing_root_tool_slugs:
                 today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 for target_sm_name in ("sitemap.xml", "sitemap-hubs.xml"):
@@ -14132,6 +14149,8 @@ class RetroReflectionEngine:
                     appended_blocks: List[str] = []
                     for m_slug in missing_root_tool_slugs:
                         loc_u = f"{canon}/tools/{m_slug}/"
+                        if target_sm_name == "sitemap-hubs.xml" and loc_u in leaf_locs_existing:
+                            continue
                         if f"<loc>{loc_u}</loc>" not in cur_sm_txt:
                             appended_blocks.append(
                                 f"  <url>\n"
@@ -14168,9 +14187,28 @@ class RetroReflectionEngine:
                 if not sm_file.is_file():
                     continue
                 orig_sm = sm_file.read_text(encoding="utf-8")
+                if sm_name == "sitemap-hubs.xml" and leaf_locs_existing and "<url>" in orig_sm:
+                    pruned_sm = re.sub(
+                        r"[ \t]*<url>.*?</url>\n?",
+                        lambda m: ""
+                        if (
+                            (lm := re.search(r"<loc>\s*([^<\s]+)\s*</loc>", m.group(0)))
+                            and lm.group(1) in leaf_locs_existing
+                        )
+                        else m.group(0),
+                        orig_sm,
+                        flags=re.DOTALL,
+                    )
+                    if pruned_sm != orig_sm:
+                        sm_file.write_text(pruned_sm, encoding="utf-8")
+                        orig_sm = pruned_sm
+                        if sm_name not in updated_files:
+                            updated_files.append(sm_name)
                 if indexable_tool_urls and "</urlset>" in orig_sm and sm_name in ("sitemap.xml", "sitemap-hubs.xml"):
                     sm_mod = orig_sm
                     for t_url in indexable_tool_urls:
+                        if sm_name == "sitemap-hubs.xml" and t_url in leaf_locs_existing:
+                            continue
                         if f"<loc>{t_url}</loc>" not in sm_mod:
                             entry_xml = (
                                 f"  <url>\n"
@@ -14367,6 +14405,8 @@ class RetroReflectionEngine:
                     property_id.lower() == "gainhelm"
                     and 'href="/r/' in content
                     and 'data-restricted-public-service="true"' not in content
+                    and 'data-commercial-offers="none"' not in content
+                    and 'data-commercial-offers="suppressed-default"' not in content
                     and (
                         'data-partner-roster=' not in content
                         or 'data-cta-slot="calculator_result_inline"' not in content
@@ -14378,6 +14418,8 @@ class RetroReflectionEngine:
                 or (
                     'href="/r/' in content
                     and 'data-restricted-public-service="true"' not in content
+                    and 'data-commercial-offers="none"' not in content
+                    and 'data-commercial-offers="suppressed-default"' not in content
                     and rel.startswith("tools/")
                     and rel.endswith("/index.html")
                     and rel.count("/") == 2

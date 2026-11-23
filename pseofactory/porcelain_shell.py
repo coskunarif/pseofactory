@@ -5137,7 +5137,7 @@ def build_governance_pages(
               <tr><td>Quantitative Research Group</td><td>{html_lib.escape(research)}</td></tr>
               <tr><td>Primary Statutory Authorities</td><td>{html_lib.escape(auth)}</td></tr>
               <tr><td>Empirical Benchmark Datasets</td><td>{html_lib.escape(ds)}</td></tr>
-              <tr><td>Editorial Verification Contact</td><td><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a></td></tr>
+              <tr><td>Editorial Verification Contact</td><td><!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off--></td></tr>
             </tbody>
           </table>
         </div>
@@ -5217,12 +5217,12 @@ def build_governance_pages(
             </thead>
             <tbody>
               <tr><td>Calculator Numeric Inputs</td><td>100% client-side browser evaluation</td><td>Never persisted on origin servers</td></tr>
-              <tr><td>Workpaper &amp; Briefing Email Opt-In</td><td>Transactional delivery via {html_lib.escape(legal)}</td><td>Deleted upon request to {html_lib.escape(email)}</td></tr>
+              <tr><td>Workpaper &amp; Briefing Email Opt-In</td><td>Transactional delivery via {html_lib.escape(legal)}</td><td>Deleted upon request to <!--email_off-->{html_lib.escape(email)}<!--/email_off--></td></tr>
               <tr><td>Edge Security &amp; Outbound Attribution</td><td>Aggregate status and <code>/r/</code> partner routing</td><td>Zero cross-site behavioral resale</td></tr>
             </tbody>
           </table>
         </div>
-        <p>Under CCPA/CPRA, GDPR, and state privacy statutes, you may request access to, correction of, or deletion of any submitted contact record by emailing <a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a>.</p>
+        <p>Under CCPA/CPRA, GDPR, and state privacy statutes, you may request access to, correction of, or deletion of any submitted contact record by emailing <!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off-->.</p>
       </section>""",
         active_tools=tools,
         gsc_token=token,
@@ -5296,8 +5296,8 @@ def build_governance_pages(
               <tr><th scope="col">Inquiry Type</th><th scope="col">Responsible Desk</th><th scope="col">Direct Contact</th></tr>
             </thead>
             <tbody>
-              <tr><td>Statutory Formula &amp; Dataset Verification</td><td>{html_lib.escape(research)}</td><td><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a></td></tr>
-              <tr><td>Privacy, GDPR/CCPA &amp; Terms Requests</td><td>{html_lib.escape(legal)} Governance</td><td><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a></td></tr>
+              <tr><td>Statutory Formula &amp; Dataset Verification</td><td>{html_lib.escape(research)}</td><td><!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off--></td></tr>
+              <tr><td>Privacy, GDPR/CCPA &amp; Terms Requests</td><td>{html_lib.escape(legal)} Governance</td><td><!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off--></td></tr>
               <tr><td>Methodology &amp; Disclosure Documentation</td><td>Published Standards</td><td><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></td></tr>
             </tbody>
           </table>
@@ -5681,7 +5681,7 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 hdr_body = s_line.lstrip("#").strip()
                 if hdr_body.startswith("[edge-middleware-header]"):
                     hdr_body = hdr_body[len("[edge-middleware-header]") :].strip()
-                if ":" in hdr_body:
+                if ":" in hdr_body or hdr_body.startswith("!"):
                     cur_h.append(hdr_body)
             elif s_line.startswith("#"):
                 continue
@@ -5719,6 +5719,27 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 hdrs_changed = True
             hdr_list: List[str] = blk[1]
             for req in required_hdrs:
+                if req.startswith("!"):
+                    detach_target = req[1:].strip().lower()
+                    existing_detach_idx = next(
+                        (i for i, h in enumerate(hdr_list) if h.strip().startswith("!") and h.strip()[1:].strip().lower() == detach_target),
+                        None,
+                    )
+                    target_hdr_idx = next(
+                        (i for i, h in enumerate(hdr_list) if ":" in h and h.split(":", 1)[0].strip().lower() == detach_target),
+                        None,
+                    )
+                    if existing_detach_idx is None:
+                        if target_hdr_idx is not None:
+                            hdr_list.insert(target_hdr_idx, req)
+                        else:
+                            hdr_list.append(req)
+                        hdrs_changed = True
+                    elif target_hdr_idx is not None and existing_detach_idx > target_hdr_idx:
+                        hdr_list.pop(existing_detach_idx)
+                        hdr_list.insert(target_hdr_idx, req)
+                        hdrs_changed = True
+                    continue
                 req_key = req.split(":", 1)[0].strip().lower()
                 existing_idx = next(
                     (i for i, h in enumerate(hdr_list) if ":" in h and h.split(":", 1)[0].strip().lower() == req_key),
@@ -5731,6 +5752,7 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                     hdr_list[existing_idx] = req
                     hdrs_changed = True
 
+        detach_cc = "! Cache-Control"
         fresh_cc = "Cache-Control: public, max-age=0, s-maxage=60, must-revalidate"
         for ep, ct_val in (
             ("/robots.txt", "text/plain; charset=utf-8"),
@@ -5743,14 +5765,25 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         ):
             _ensure_block(
                 ep,
-                [f'Link: <{base}{ep}>; rel="canonical"', f"Content-Type: {ct_val}", fresh_cc],
+                [f'Link: <{base}{ep}>; rel="canonical"', f"Content-Type: {ct_val}", detach_cc, fresh_cc],
                 replace_cc=True,
                 force_active=True,
             )
-        _ensure_block("/ai-benchmarks/*", [fresh_cc], replace_cc=True, force_active=True)
+        _ensure_block(
+            "/catalog.json",
+            [
+                f'Link: <{base}/catalog.json>; rel="canonical"',
+                "Content-Type: application/json; charset=utf-8",
+                detach_cc,
+                "Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+            ],
+            replace_cc=True,
+            force_active=True,
+        )
+        _ensure_block("/ai-benchmarks/*", [detach_cc, fresh_cc], replace_cc=True, force_active=True)
         _ensure_block(
             "/static/js/*",
-            ["Cache-Control: public, max-age=31536000, immutable"],
+            [detach_cc, "Cache-Control: public, max-age=31536000, immutable"],
             replace_cc=True,
             force_active=True,
         )

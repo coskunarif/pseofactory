@@ -1424,7 +1424,7 @@ def _render_compiler_monetization_and_guardrail_html(
         "affiliate_route": None,
         "partner_roster": roster_info,
         "slot_plan": slot_plan,
-        "commercial_offers_allowed": True,
+        "commercial_offers_allowed": False,
         "restricted_public_service": False,
     }
 

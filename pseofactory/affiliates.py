@@ -7450,6 +7450,7 @@ def normalize_html_callout_message_match(
                 if (
                     'data-restricted-public-service="true"' not in sec_html
                     and 'data-commercial-offers="none"' not in sec_html
+                    and 'data-commercial-offers="suppressed-default"' not in sec_html
                     and pk in ("sofi_refi", "sofi", "earnest", "credible", "lendkey")
                 ):
                     pk = "splash_financial"
@@ -7753,6 +7754,7 @@ def normalize_html_callout_message_match(
             if (
                 'data-restricted-public-service="true"' in sec_html
                 or 'data-commercial-offers="none"' in sec_html
+                or 'data-commercial-offers="suppressed-default"' in sec_html
                 or "ymyl-public-service-guardrail" in sec_html
                 or not has_any_px_route
                 or is_already_valid
@@ -7793,6 +7795,8 @@ def normalize_html_callout_message_match(
         if (
             "ymyl-public-service-guardrail" not in updated
             and 'data-restricted-public-service="true"' not in updated
+            and 'data-commercial-offers="none"' not in updated
+            and 'data-commercial-offers="suppressed-default"' not in updated
             and any(f"/r/{k}" in updated for k in ("splash_financial", "credible", "lendkey"))
         ):
             primary_inline_pk = eff_px_pk
@@ -7904,6 +7908,7 @@ def normalize_html_callout_message_match(
             if (
                 'data-restricted-public-service="true"' in sec_html
                 or 'data-commercial-offers="none"' in sec_html
+                or 'data-commercial-offers="suppressed-default"' in sec_html
                 or (
                     "partners-section" in sec_html
                     and "/r/" not in sec_html
@@ -7996,11 +8001,21 @@ def normalize_html_callout_message_match(
             count=1,
             flags=re.I,
         )
-        if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
+        if (
+            'data-restricted-public-service="true"' not in updated
+            and 'data-commercial-offers="none"' not in updated
+            and 'data-commercial-offers="suppressed-default"' not in updated
+            and "/r/" in updated
+        ):
             primary_inline_pk = eff_gh_pk
 
     elif prop == "lienbond":
-        if 'data-restricted-public-service="true"' not in updated and "/r/" in updated:
+        if (
+            'data-restricted-public-service="true"' not in updated
+            and 'data-commercial-offers="none"' not in updated
+            and 'data-commercial-offers="suppressed-default"' not in updated
+            and "/r/" in updated
+        ):
             m_prim_lb = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', updated, re.I)
             cand_lb = m_prim_lb.group(1).lower() if m_prim_lb else ""
             if (
@@ -8224,9 +8239,15 @@ def normalize_html_callout_message_match(
                 updated = updated[:df_match_2.start()] + aff_block + "\n\n      " + updated[df_match_2.start():]
 
     # Inject above-the-fold inline calculator result CTA into the calculator output panel
+    is_suppressed_ymyl_page = (
+        'data-restricted-public-service="true"' in updated
+        or 'data-commercial-offers="none"' in updated
+        or 'data-commercial-offers="suppressed-default"' in updated
+    )
     gsc_cand_pk = str(gsc_inline_meta.get("data-partner") or "").strip().lower()
     if (
-        gsc_cand_pk in registry
+        not is_suppressed_ymyl_page
+        and gsc_cand_pk in registry
         and registry[gsc_cand_pk].status not in ("declined", "rejected")
         and (prop not in ("profithelm", "exchange1031") or gsc_cand_pk in SOVRN_VERIFIED_PAYING_MERCHANTS)
         and (prop != "gainhelm" or not eff_gh_pk or gsc_cand_pk == eff_gh_pk)
@@ -8234,7 +8255,8 @@ def normalize_html_callout_message_match(
     ):
         primary_inline_pk = gsc_cand_pk
     if (
-        primary_inline_pk
+        not is_suppressed_ymyl_page
+        and primary_inline_pk
         and primary_inline_pk in registry
         and registry[primary_inline_pk].status not in ("declined", "rejected")
     ):
@@ -10455,6 +10477,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             if (
                 'data-restricted-public-service="true"' in raw_sec
                 or 'data-commercial-offers="none"' in raw_sec
+                or 'data-commercial-offers="suppressed-default"' in raw_sec
                 or "ymyl-public-service-guardrail" in raw_sec
             ):
                 return raw_sec
