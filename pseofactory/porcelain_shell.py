@@ -6270,34 +6270,16 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         leaked_meta.unlink(missing_ok=True)
         mutated.append(".pseofactory.json")
 
-    # Ensure robots.txt blocks crawler execution of /api/ and /cdn-cgi/
+    # Ensure robots.txt blocks crawler execution of /api/ and /cdn-cgi/ for EVERY User-agent group
     robots_path = dist_dir / "robots.txt"
     if robots_path.is_file():
+        from pseofactory.estate_common import ensure_robots_txt_mandatory_disallows
+
         orig_rob = robots_path.read_text(encoding="utf-8", errors="ignore")
-        rob_lines = orig_rob.splitlines()
-        has_api = any(l.strip().lower() == "disallow: /api/" for l in rob_lines)
-        has_cf = any(l.strip().lower() == "disallow: /cdn-cgi/" for l in rob_lines)
-        if not has_api or not has_cf:
-            out_rob: List[str] = []
-            inserted_rules = False
-            for rl in rob_lines:
-                out_rob.append(rl)
-                if not inserted_rules and rl.strip().lower().startswith("user-agent: *"):
-                    if not has_api:
-                        out_rob.append("Disallow: /api/")
-                    if not has_cf:
-                        out_rob.append("Disallow: /cdn-cgi/")
-                    inserted_rules = True
-            if not inserted_rules:
-                out_rob.insert(0, "User-agent: *")
-                if not has_api:
-                    out_rob.insert(1, "Disallow: /api/")
-                if not has_cf:
-                    out_rob.insert(2, "Disallow: /cdn-cgi/")
-            new_rob = "\n".join(out_rob).rstrip() + "\n"
-            if new_rob != orig_rob:
-                robots_path.write_text(new_rob, encoding="utf-8")
-                mutated.append("robots.txt")
+        new_rob = ensure_robots_txt_mandatory_disallows(orig_rob)
+        if new_rob != orig_rob:
+            robots_path.write_text(new_rob, encoding="utf-8")
+            mutated.append("robots.txt")
 
     # Ensure favicon.svg, favicon.ico, branded og:image PNG, and site.webmanifest exist so browsers never hit 404
     fav_path = dist_dir / "favicon.svg"

@@ -18,10 +18,11 @@ import time
 import uuid
 import posixpath
 import urllib.parse
+import urllib.robotparser
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Set, FrozenSet, Callable, Union
+from typing import Dict, Any, List, Optional, Sequence, Tuple, Set, FrozenSet, Callable, Union
 
 
 from pseofactory.contracts import (
@@ -2295,24 +2296,35 @@ class MasterSEOVerifier:
         """Parses robots.txt content into normalized user-agent sections."""
         sections: Dict[str, Dict[str, List[str]]] = {}
         current_agents: List[str] = []
-        for raw_line in content.splitlines():
-            line = raw_line.split("#")[0].strip()
-            if not line:
+        seen_rule_in_group = False
+        for raw_line in content.lstrip("\ufeff").splitlines():
+            stripped = raw_line.strip()
+            if not stripped:
                 current_agents = []
+                seen_rule_in_group = False
                 continue
-            if ":" not in line:
+            if stripped.startswith("#"):
+                continue
+            line = stripped.split("#", 1)[0].strip()
+            if not line or ":" not in line:
                 continue
             key, val = [x.strip() for x in line.split(":", 1)]
             key_lower = key.lower()
             if key_lower == "user-agent":
+                if seen_rule_in_group:
+                    current_agents = []
+                    seen_rule_in_group = False
                 agent = val.lower()
-                current_agents.append(agent)
+                if agent not in current_agents:
+                    current_agents.append(agent)
                 if agent not in sections:
                     sections[agent] = {"allow": [], "disallow": []}
             elif key_lower == "allow" and current_agents:
+                seen_rule_in_group = True
                 for agent in current_agents:
                     sections[agent]["allow"].append(val)
             elif key_lower == "disallow" and current_agents:
+                seen_rule_in_group = True
                 for agent in current_agents:
                     sections[agent]["disallow"].append(val)
         return sections
@@ -2356,6 +2368,72 @@ class MasterSEOVerifier:
             return cls.is_path_disallowed(path, sections["*"]["allow"], sections["*"]["disallow"])
         return False
 
+    @classmethod
+    def find_robots_txt_mandatory_disallow_violations(
+        cls,
+        content: str,
+        mandatory_disallows: Sequence[str] = ("/api/", "/cdn-cgi/"),
+        require_present: bool = False,
+    ) -> List[str]:
+        """
+        Validates that mandatory disallow prefixes (default: /api/ and /cdn-cgi/) are
+        enforced in EVERY User-agent group (not just User-agent: *) and take effect in
+        both RFC 9309 longest-match parsing and urllib.robotparser.RobotFileParser.
+        """
+        issues: List[str] = []
+        clean_content = content.lstrip("\ufeff")
+        sections = cls.parse_robots_txt_sections(clean_content)
+        rp = urllib.robotparser.RobotFileParser()
+        rp.parse(clean_content.splitlines())
+
+        for raw_prefix in mandatory_disallows:
+            p_clean = str(raw_prefix or "").strip()
+            if not p_clean:
+                continue
+            norm_prefix = p_clean if p_clean.startswith("/") else f"/{p_clean}"
+            probe_path = norm_prefix.rstrip("/") + "/probe"
+            probe_url = f"https://example.com{probe_path}"
+
+            explicitly_declared = any(
+                d.strip().lower() == norm_prefix.lower()
+                for sec in sections.values()
+                for d in sec["disallow"]
+            )
+            enforce = require_present or explicitly_declared
+            if not enforce:
+                continue
+
+            if not sections:
+                issues.append(f"robots.txt missing User-agent block disallowing '{norm_prefix}'")
+                continue
+
+            if require_present and "*" not in sections:
+                issues.append(f"robots.txt missing 'User-agent: *' block disallowing '{norm_prefix}'")
+
+            for agent, sec in sections.items():
+                if not cls.is_path_disallowed(probe_path, sec["allow"], sec["disallow"]):
+                    issues.append(
+                        f"robots.txt User-agent '{agent}' missing 'Disallow: {norm_prefix}' "
+                        f"(named User-agent overrides wildcard per RFC 9309)"
+                    )
+                elif rp.can_fetch(agent, probe_url):
+                    issues.append(
+                        f"robots.txt User-agent '{agent}' allows '{probe_path}' in RobotFileParser "
+                        f"(place 'Disallow: {norm_prefix}' before 'Allow: /')"
+                    )
+
+            if require_present:
+                for probe_ua in ("Googlebot", "Googlebot-Mobile", "Bingbot", "*"):
+                    if rp.can_fetch(probe_ua, probe_url):
+                        msg = (
+                            f"robots.txt allows '{probe_ua}' to fetch '{probe_path}' "
+                            f"(must disallow '{norm_prefix}')"
+                        )
+                        if msg not in issues:
+                            issues.append(msg)
+
+        return issues
+
     # 10. Robots.txt Gate
     def check_robots_txt_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
         target = Path(dist_dir) if dist_dir else self.dist_dir
@@ -2386,6 +2464,17 @@ class MasterSEOVerifier:
                     issues.append(f"robots.txt disallows AI search/user bot '{bot}' on root '/'")
                 if self.is_bot_blocked(bot, "/tools/", sections):
                     issues.append(f"robots.txt disallows AI search/user bot '{bot}' on '/tools/'")
+
+            # RFC 9309 named-bot override guard for /api/ and /cdn-cgi/
+            has_api_surface = (target / "functions" / "api").is_dir() or (
+                self.repo_root is not None and (Path(self.repo_root) / "functions" / "api").is_dir()
+            )
+            issues.extend(
+                self.find_robots_txt_mandatory_disallow_violations(
+                    content,
+                    require_present=has_api_surface,
+                )
+            )
 
             if self.strict_robots:
                 if (self.tools or (target / "tools").is_dir()) and "allow: /tools/" not in content_lower:

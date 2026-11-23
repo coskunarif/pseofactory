@@ -24,7 +24,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Set, Optional, Tuple, Callable, Union, Iterable
+from typing import List, Dict, Any, Set, Optional, Sequence, Tuple, Callable, Union, Iterable
 
 FORBIDDEN_JARGON: List[str] = [
     "synergistic alignment 1791603786",
@@ -1285,12 +1285,16 @@ def assert_robots_txt_crawler_policy(
     robots_content: str,
     protected_routes: Optional[List[str]] = None,
     context: str = "",
+    required_disallow_paths: Optional[Sequence[str]] = None,
 ) -> bool:
     """
     Mechanical contract validating robots.txt crawler access policy:
     1. AI search crawlers (googlebot, bingbot, perplexitybot, claudebot, oai-searchbot)
        and user-triggered bots (chatgpt-user) must NOT be blocked on protected routes.
     2. Model training bots (gptbot, ccbot, google-extended, etc.) may be blocked.
+    3. RFC 9309 override guard: whenever /api/ or /cdn-cgi/ (or any explicit
+       required_disallow_paths) is disallowed, EVERY User-agent group (including
+       Googlebot and all named crawlers) must disallow it before any Allow: / rule.
     Zero em-dashes. Zero en-dashes.
     """
     ctx = f" in {context}" if context else ""
@@ -1316,6 +1320,46 @@ def assert_robots_txt_crawler_policy(
                     f"revoking AI crawl access and snippet eligibility"
                 )
 
+    disallow_violations = MasterSEOVerifier.find_robots_txt_mandatory_disallow_violations(
+        robots_content,
+        mandatory_disallows=required_disallow_paths if required_disallow_paths is not None else ("/api/", "/cdn-cgi/"),
+        require_present=required_disallow_paths is not None,
+    )
+    if disallow_violations:
+        raise ValueError(
+            f"robots.txt mandatory disallow policy violation{ctx}: {'; '.join(disallow_violations)}"
+        )
+
+    return True
+
+
+def assert_robots_txt_mandatory_disallows(
+    robots_content: str,
+    mandatory_disallows: Sequence[str] = ("/api/", "/cdn-cgi/"),
+    context: str = "",
+) -> bool:
+    """
+    Mechanical contract verifying that EVERY User-agent group in robots.txt (including
+    User-agent: *, Googlebot, Googlebot-Mobile, Bingbot, and all named crawlers)
+    explicitly disallows every mandatory path (default: /api/ and /cdn-cgi/) in both
+    RFC 9309 section parsing and urllib.robotparser.RobotFileParser.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" in {context}" if context else ""
+    if not isinstance(robots_content, str):
+        raise ValueError(f"robots.txt content must be a string{ctx}")
+
+    from pseofactory.verifier import MasterSEOVerifier
+
+    violations = MasterSEOVerifier.find_robots_txt_mandatory_disallow_violations(
+        robots_content,
+        mandatory_disallows=mandatory_disallows,
+        require_present=True,
+    )
+    if violations:
+        raise ValueError(
+            f"robots.txt mandatory disallow violation{ctx}: {'; '.join(violations)}"
+        )
     return True
 
 
@@ -10257,6 +10301,7 @@ __all__ = [
     "assert_ai_crawl_access",
     "assert_snippet_eligibility",
     "assert_robots_txt_crawler_policy",
+    "assert_robots_txt_mandatory_disallows",
     "assert_headers_snippet_policy",
     "assert_quick_answer_passage_relevance",
     "assert_viewport_ordering",

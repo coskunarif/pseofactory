@@ -141,6 +141,118 @@ def load_and_enrich_deployed_voids(
     return enriched_voids
 
 
+MANDATORY_ROBOTS_DISALLOW_PATHS: Tuple[str, ...] = ("/api/", "/cdn-cgi/")
+
+
+def _parse_robots_directive(raw_line: str) -> Tuple[str, str]:
+    """Extracts normalized (directive_key_lower, value) from a robots.txt line, stripping comments."""
+    code = raw_line.split("#", 1)[0].strip()
+    if ":" not in code:
+        return ("", "")
+    key, val = code.split(":", 1)
+    return (key.strip().lower(), val.strip())
+
+
+def ensure_robots_txt_mandatory_disallows(
+    robots_content: str,
+    mandatory_disallows: Sequence[str] = MANDATORY_ROBOTS_DISALLOW_PATHS,
+) -> str:
+    """
+    Ensures every User-agent group in robots.txt (including User-agent: * and every
+    named crawler such as Googlebot, Bingbot, PerplexityBot, ClaudeBot, GPTBot,
+    OAI-SearchBot, etc.) explicitly disallows every mandatory path before any Allow
+    directive in that group.
+
+    Per RFC 9309, a named User-agent group completely overrides User-agent: * instead
+    of inheriting wildcard disallows. Placing mandatory Disallow directives ahead of
+    Allow directives also ensures consistent blocking in both RFC 9309 longest-match
+    crawlers (Googlebot, Bingbot) and first-match parsers (urllib.robotparser).
+    """
+    mandatory_list: List[str] = []
+    seen_mandatory: Set[str] = set()
+    for p in mandatory_disallows:
+        p_clean = str(p or "").strip()
+        if p_clean and p_clean.lower() not in seen_mandatory:
+            seen_mandatory.add(p_clean.lower())
+            mandatory_list.append(p_clean)
+    clean_content = robots_content.lstrip("\ufeff")
+    if not mandatory_list:
+        return clean_content
+
+    lines = clean_content.splitlines()
+    out_lines: List[str] = []
+    has_wildcard_group = False
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        raw = lines[i]
+        key, _val = _parse_robots_directive(raw)
+        if key != "user-agent":
+            out_lines.append(raw)
+            i += 1
+            continue
+
+        header_lines: List[str] = []
+        body_lines: List[str] = []
+        seen_rule = False
+
+        while i < n:
+            cur = lines[i]
+            cur_stripped = cur.strip()
+            if not cur_stripped:
+                break
+            ck, cv = _parse_robots_directive(cur)
+            if ck == "sitemap":
+                break
+            if ck == "user-agent":
+                if seen_rule:
+                    break
+                header_lines.append(cur)
+                if cv.lower() == "*":
+                    has_wildcard_group = True
+                i += 1
+                continue
+            if cur_stripped.startswith("#") and not seen_rule:
+                # Attach comment between consecutive User-agent lines to header; otherwise body.
+                j = i + 1
+                while j < n and lines[j].strip().startswith("#"):
+                    j += 1
+                next_k = _parse_robots_directive(lines[j])[0] if j < n else ""
+                if next_k == "user-agent":
+                    header_lines.append(cur)
+                else:
+                    body_lines.append(cur)
+                i += 1
+                continue
+            seen_rule = True
+            body_lines.append(cur)
+            i += 1
+
+        remaining_body: List[str] = []
+        for bl in body_lines:
+            bk, bv = _parse_robots_directive(bl)
+            if bk == "disallow" and bv.lower() in seen_mandatory:
+                continue
+            remaining_body.append(bl)
+
+        out_lines.extend(header_lines)
+        for m_path in mandatory_list:
+            out_lines.append(f"Disallow: {m_path}")
+        out_lines.extend(remaining_body)
+
+    if not has_wildcard_group:
+        prefix_block = ["User-agent: *"] + [f"Disallow: {m_path}" for m_path in mandatory_list]
+        if any(l.strip() for l in out_lines):
+            out_lines = prefix_block + [""] + out_lines
+        else:
+            out_lines = prefix_block
+
+    result = "\n".join(out_lines).rstrip() + "\n"
+    assert_no_forbidden_dashes(result, context="robots.txt")
+    return result
+
+
 def write_sitemaps_and_robots(
     dist: Path,
     canonical_base: str,
@@ -225,18 +337,41 @@ def write_sitemaps_and_robots(
     (dist / "sitemap-hubs.xml").write_text(sitemap_hubs_xml, encoding="utf-8")
     (dist / "sitemap-leaves.xml").write_text(sitemap_leaves_xml, encoding="utf-8")
 
-    allow_lines = "\n".join(f"Allow: {p}" for p in allow_paths)
-    disallow_lines = "\n".join(f"Disallow: {p}" for p in disallow_paths)
-    bot_blocks = [
-        f"User-agent: {bot}\n{allow_lines}\n{disallow_lines}\n"
-        for bot in ai_bots
-    ]
+    effective_bots: List[str] = []
+    seen_bots: Set[str] = set()
+    for bot in ai_bots:
+        b_clean = str(bot or "").strip()
+        if b_clean and b_clean.lower() not in seen_bots:
+            seen_bots.add(b_clean.lower())
+            effective_bots.append(b_clean)
+    if "*" not in seen_bots:
+        effective_bots.insert(0, "*")
+
+    effective_disallows: List[str] = []
+    seen_disallows: Set[str] = set()
+    for p in list(MANDATORY_ROBOTS_DISALLOW_PATHS) + list(disallow_paths):
+        p_clean = str(p or "").strip()
+        if p_clean and p_clean.lower() not in seen_disallows:
+            seen_disallows.add(p_clean.lower())
+            effective_disallows.append(p_clean)
+
+    disallow_lines = "\n".join(f"Disallow: {p}" for p in effective_disallows)
+    allow_lines = "\n".join(f"Allow: {p}" for p in allow_paths if str(p or "").strip())
+    bot_blocks: List[str] = []
+    for bot in effective_bots:
+        block_lines = [f"User-agent: {bot}"]
+        if disallow_lines:
+            block_lines.append(disallow_lines)
+        if allow_lines:
+            block_lines.append(allow_lines)
+        bot_blocks.append("\n".join(block_lines) + "\n")
     sitemap_footer = (
         f"Sitemap: {base}/sitemap.xml\n"
         f"Sitemap: {base}/sitemap-hubs.xml\n"
         f"Sitemap: {base}/sitemap-leaves.xml\n"
     )
-    robots_txt = "\n".join(bot_blocks) + sitemap_footer
+    robots_txt = "\n".join(bot_blocks) + "\n" + sitemap_footer
+    robots_txt = ensure_robots_txt_mandatory_disallows(robots_txt)
     assert_no_forbidden_dashes(robots_txt, context="robots.txt")
     (dist / "robots.txt").write_text(robots_txt, encoding="utf-8")
 
