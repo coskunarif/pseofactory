@@ -118,12 +118,17 @@ def test_jsonld_aeo_geo_graph_normalization_across_three_tenants() -> None:
     assert _needs_page_structure_geo_normalization(norm_root) is False
 
 
-def test_gainhelm_partner_roster_and_inline_slot_normalization() -> None:
+def test_gainhelm_partner_roster_and_inline_slot_normalization(tmp_path: Path) -> None:
     """
-    Verifies that normalize_html_callout_message_match expands GainHelm partner sections
-    to 6 distinct companies and injects the above-the-fold calculator_result_inline slot
-    into <div class="calc-results-column" aria-live="polite">.
+    Verifies that normalize_html_callout_message_match:
+    1. In the default zero-contract state (all 6 GainHelm partners pending), hides unapproved /r/ CTAs
+       in favor of 1st-party Stripe checkout while passing verify_html_partner_roster_and_slot_contract.
+    2. When all 6 GainHelm partners are live in monetization_vault.json, expands partner sections
+       to 6 distinct companies and injects the above-the-fold calculator_result_inline slot
+       into <div class="calc-results-column" aria-live="polite">.
     """
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
+
     raw_gainhelm = (
         '<!doctype html><html lang="en"><head>'
         '<title>SOC 2 Audit Cost Calculator 2026 | GainHelm</title>'
@@ -149,16 +154,40 @@ def test_gainhelm_partner_roster_and_inline_slot_normalization() -> None:
         '</td></tr></tbody></table>'
         '</main></body></html>'
     )
-    norm_gh = normalize_html_callout_message_match(raw_gainhelm, property_id="gainhelm")
-    res = verify_html_partner_roster_and_slot_contract(
-        norm_gh,
+
+    # 1. Default real vault (all 6 GainHelm partners pending)
+    norm_gh_default = normalize_html_callout_message_match(raw_gainhelm, property_id="gainhelm")
+    assert "/r/" not in norm_gh_default
+    assert 'data-first-party-checkout="true"' in norm_gh_default
+    res_default = verify_html_partner_roster_and_slot_contract(
+        norm_gh_default,
         property_id="gainhelm",
         slug="soc-2-audit-cost-calculator",
         rel_path="tools/soc-2-audit-cost-calculator/index.html",
     )
-    assert res["status"] == "PASS", res["issues"]
-    assert len(res["partner_keys"]) >= 6
-    assert "calculator_result_inline" in res["slots_found"]
+    assert res_default["status"] == "PASS", res_default["issues"]
+    assert res_default["partner_keys"] == []
+
+    # 2. Explicit 6-live-partner GainHelm vault fixture
+    six_gh_partners = [
+        "vanta_security",
+        "drata_compliance",
+        "sprinto_compliance",
+        "thoropass_audit",
+        "coalition_cyber_insurance",
+        "cobalt_pentest",
+    ]
+    with live_partners_in_temp_vault(tmp_path, {"gainhelm": six_gh_partners}):
+        norm_gh = normalize_html_callout_message_match(raw_gainhelm, property_id="gainhelm")
+        res = verify_html_partner_roster_and_slot_contract(
+            norm_gh,
+            property_id="gainhelm",
+            slug="soc-2-audit-cost-calculator",
+            rel_path="tools/soc-2-audit-cost-calculator/index.html",
+        )
+        assert res["status"] == "PASS", res["issues"]
+        assert len(res["partner_keys"]) >= 6
+        assert "calculator_result_inline" in res["slots_found"]
 
 
 def test_plane_2_catalog_json_and_three_plane_readiness_audit(tmp_path: Path) -> None:
@@ -271,6 +300,7 @@ def test_gainhelm_gsc_reposition_retains_six_company_roster_and_quick_answer_bou
         bind_asset_partner_roster,
         reposition_affiliate_placements_from_gsc_signals,
     )
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
 
     roster = bind_asset_partner_roster(
         property_id="gainhelm",
@@ -310,21 +340,51 @@ def test_gainhelm_gsc_reposition_retains_six_company_roster_and_quick_answer_bou
         '<div class="partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>'
         '</section></main></body></html>'
     )
-    repositioned_gh, rep = reposition_affiliate_placements_from_gsc_signals(
+
+    # 1. Default real vault (all 6 GainHelm partners pending): unapproved /r/ links stay hidden
+    # and 1st-party Stripe checkout renders cleanly while passing contract verification.
+    repositioned_default, _ = reposition_affiliate_placements_from_gsc_signals(
         stale_3_partner_gh,
         property_id="gainhelm",
         slug="soc-2-audit-cost-calculator",
     )
-    healed_gh = normalize_html_callout_message_match(repositioned_gh, property_id="gainhelm")
-    assert rep["distinct_companies_count"] == 6
-    res = verify_html_partner_roster_and_slot_contract(
-        healed_gh,
+    healed_default = normalize_html_callout_message_match(repositioned_default, property_id="gainhelm")
+    assert "/r/" not in healed_default
+    assert 'data-first-party-checkout="true"' in healed_default
+    res_default = verify_html_partner_roster_and_slot_contract(
+        healed_default,
         property_id="gainhelm",
         slug="soc-2-audit-cost-calculator",
         rel_path="tools/soc-2-audit-cost-calculator/index.html",
     )
-    assert res["status"] == "PASS", res["issues"]
-    assert len(res["partner_keys"]) == 6
+    assert res_default["status"] == "PASS", res_default["issues"]
+    assert res_default["partner_keys"] == []
+
+    # 2. Explicit 6-live-partner GainHelm vault fixture: retains full 6-company roster
+    six_gh_partners = [
+        "vanta_security",
+        "drata_compliance",
+        "sprinto_compliance",
+        "thoropass_audit",
+        "coalition_cyber_insurance",
+        "cobalt_pentest",
+    ]
+    with live_partners_in_temp_vault(tmp_path, {"gainhelm": six_gh_partners}):
+        repositioned_gh, rep = reposition_affiliate_placements_from_gsc_signals(
+            stale_3_partner_gh,
+            property_id="gainhelm",
+            slug="soc-2-audit-cost-calculator",
+        )
+        healed_gh = normalize_html_callout_message_match(repositioned_gh, property_id="gainhelm")
+        assert rep["distinct_companies_count"] == 6
+        res = verify_html_partner_roster_and_slot_contract(
+            healed_gh,
+            property_id="gainhelm",
+            slug="soc-2-audit-cost-calculator",
+            rel_path="tools/soc-2-audit-cost-calculator/index.html",
+        )
+        assert res["status"] == "PASS", res["issues"]
+        assert len(res["partner_keys"]) == 6
 
     dist = tmp_path / "dist"
     t_dir = dist / "tools" / "soc-2-audit-cost-calculator"

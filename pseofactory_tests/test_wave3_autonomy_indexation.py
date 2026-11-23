@@ -52,8 +52,11 @@ def test_restricted_ymyl_page_strips_commercial_r_links_in_overlay_and_retrofit(
     from pseofactory.contracts import detect_asset_partner_roster_and_slot_issues
     from pseofactory.gsc_remediation import inject_overlay_into_html
     from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
 
-    # Part A: Genuinely restricted public-service YMYL slug
+    # Part A & B under explicit live Prexvo partners fixture:
+    # Proves the restricted-YMYL guardrail (not pending vault status) strips live /r/ links on PSLF,
+    # while commercial insolvency self-heals stale restricted overlays and preserves live /r/ links.
     pslf_slug = "pslf-qualifying-payment-simulator"
     mixed_pslf_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
@@ -85,96 +88,114 @@ def test_restricted_ymyl_page_strips_commercial_r_links_in_overlay_and_retrofit(
 </section>
 </main></body></html>"""
 
-    before_issues = detect_asset_partner_roster_and_slot_issues(
-        mixed_pslf_html,
-        property_id="prexvo",
-        slug=pslf_slug,
-        rel_path=f"tools/{pslf_slug}/index.html",
-    )
-    assert any("Restricted public-service YMYL page contains forbidden commercial /r/ links" in x for x in before_issues)
-
-    stripped = strip_commercial_affiliate_blocks_for_restricted_ymyl(mixed_pslf_html)
-    assert "/r/" not in stripped
-    assert "calc-inline-cta" not in stripped
-    assert "comparison-table-cta-bar" not in stripped
-    assert detect_asset_partner_roster_and_slot_issues(
-        stripped, property_id="prexvo", slug=pslf_slug, rel_path=f"tools/{pslf_slug}/index.html"
-    ) == []
-
-    overlay_injected = inject_overlay_into_html(
-        mixed_pslf_html.replace('data-restricted-public-service="true"', ""),
-        {
-            "slug": pslf_slug,
-            "property_id": "prexvo",
-            "tenant_id": "prexvo",
-            "query": "public service loan forgiveness calculator",
-            "restricted_public_service": True,
-            "commercial_offers_allowed": False,
-        },
-    )
-    assert "/r/" not in overlay_injected
-    assert detect_asset_partner_roster_and_slot_issues(
-        overlay_injected, property_id="prexvo", slug=pslf_slug, rel_path=f"tools/{pslf_slug}/index.html"
-    ) == []
-
-    repositioned, rep_meta = reposition_affiliate_placements_from_gsc_signals(
-        mixed_pslf_html, property_id="prexvo", slug=pslf_slug
-    )
-    assert rep_meta["restricted_public_service"] is True
-    assert "/r/" not in repositioned
-
-    dist_dir = tmp_path / "prexvo" / "dist"
-    page_path = dist_dir / "tools" / pslf_slug / "index.html"
-    page_path.parent.mkdir(parents=True, exist_ok=True)
-    page_path.write_text(mixed_pslf_html, encoding="utf-8")
-
-    RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
-    after_p1 = page_path.read_text(encoding="utf-8")
-    assert "/r/" not in after_p1
-    assert detect_asset_partner_roster_and_slot_issues(
-        after_p1, property_id="prexvo", slug=pslf_slug, rel_path=f"tools/{pslf_slug}/index.html"
-    ) == []
-
-    RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
-    after_p2 = page_path.read_text(encoding="utf-8")
-    assert "/r/" not in after_p2
-    RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
-    assert page_path.read_text(encoding="utf-8") == after_p2
-
-    # Part B: Commercial insolvency calculator carrying stale restricted overlay self-heals
     insolv_slug = "student-loan-forgiveness-tax-bomb-insolvency-calculator"
     stale_insolv_html = mixed_pslf_html.replace(pslf_slug, insolv_slug).replace(
         "PSLF Qualifying Payment Simulator", "Student Loan Forgiveness Tax Bomb Calculator"
     )
-    insolv_path = dist_dir / "tools" / insolv_slug / "index.html"
-    insolv_path.parent.mkdir(parents=True, exist_ok=True)
-    insolv_path.write_text(stale_insolv_html, encoding="utf-8")
-    ov_dir = tmp_path / "prexvo" / ".agy" / "overlays"
-    ov_dir.mkdir(parents=True, exist_ok=True)
-    (ov_dir / f"{insolv_slug}.json").write_text(
-        json.dumps(
+    stale_insolv_ov_payload = {
+        "slug": insolv_slug,
+        "property_id": "prexvo",
+        "tenant_id": "prexvo",
+        "query": "public service loan forgiveness calculator",
+        "title_rewrite": "Public Service Loan Forgiveness Calculator 2026 | Prexvo",
+        "meta_description": "Calculate IDR student loan forgiveness tax bomb liability and IRS Form 982 insolvency exclusion relief under IRC Section 108(a)(1)(B) in 2026.",
+        "restricted_public_service": True,
+        "commercial_offers_allowed": False,
+        "partner_offer": None,
+    }
+
+    # First verify Part B under the default real vault (all Prexvo partners pending):
+    # stale restricted overlay self-heals while unapproved /r/ links stay hidden in favor of 1st-party checkout.
+    default_dist = tmp_path / "prexvo_default" / "dist"
+    default_insolv_path = default_dist / "tools" / insolv_slug / "index.html"
+    default_insolv_path.parent.mkdir(parents=True, exist_ok=True)
+    default_insolv_path.write_text(stale_insolv_html, encoding="utf-8")
+    default_ov_dir = tmp_path / "prexvo_default" / ".agy" / "overlays"
+    default_ov_dir.mkdir(parents=True, exist_ok=True)
+    (default_ov_dir / f"{insolv_slug}.json").write_text(json.dumps(stale_insolv_ov_payload), encoding="utf-8")
+    RetroReflectionEngine.retrofit_estate(dist_dir=default_dist, property_id="prexvo")
+    healed_default_insolv = default_insolv_path.read_text(encoding="utf-8")
+    assert 'data-restricted-public-service="true"' not in healed_default_insolv
+    assert "/r/" not in healed_default_insolv
+    assert 'data-first-party-checkout="true"' in healed_default_insolv
+    healed_default_ov = json.loads((default_ov_dir / f"{insolv_slug}.json").read_text(encoding="utf-8"))
+    assert healed_default_ov.get("restricted_public_service") is False
+    assert healed_default_ov.get("commercial_offers_allowed") is True
+    assert isinstance(healed_default_ov.get("partner_offer"), dict)
+
+    # Next verify both Part A and Part B with live Prexvo partners in temp vault
+    with live_partners_in_temp_vault(tmp_path, {"prexvo": ["splash_financial", "credible", "lendkey"]}):
+        before_issues = detect_asset_partner_roster_and_slot_issues(
+            mixed_pslf_html,
+            property_id="prexvo",
+            slug=pslf_slug,
+            rel_path=f"tools/{pslf_slug}/index.html",
+        )
+        assert any("Restricted public-service YMYL page contains forbidden commercial /r/ links" in x for x in before_issues)
+
+        stripped = strip_commercial_affiliate_blocks_for_restricted_ymyl(mixed_pslf_html)
+        assert "/r/" not in stripped
+        assert "calc-inline-cta" not in stripped
+        assert "comparison-table-cta-bar" not in stripped
+        assert detect_asset_partner_roster_and_slot_issues(
+            stripped, property_id="prexvo", slug=pslf_slug, rel_path=f"tools/{pslf_slug}/index.html"
+        ) == []
+
+        overlay_injected = inject_overlay_into_html(
+            mixed_pslf_html.replace('data-restricted-public-service="true"', ""),
             {
-                "slug": insolv_slug,
+                "slug": pslf_slug,
                 "property_id": "prexvo",
                 "tenant_id": "prexvo",
                 "query": "public service loan forgiveness calculator",
-                "title_rewrite": "Public Service Loan Forgiveness Calculator 2026 | Prexvo",
-                "meta_description": "Calculate IDR student loan forgiveness tax bomb liability and IRS Form 982 insolvency exclusion relief under IRC Section 108(a)(1)(B) in 2026.",
                 "restricted_public_service": True,
                 "commercial_offers_allowed": False,
-                "partner_offer": None,
-            }
-        ),
-        encoding="utf-8",
-    )
-    RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
-    healed_insolv = insolv_path.read_text(encoding="utf-8")
-    assert 'data-restricted-public-service="true"' not in healed_insolv
-    assert "/r/" in healed_insolv
-    healed_ov = json.loads((ov_dir / f"{insolv_slug}.json").read_text(encoding="utf-8"))
-    assert healed_ov.get("restricted_public_service") is False
-    assert healed_ov.get("commercial_offers_allowed") is True
-    assert isinstance(healed_ov.get("partner_offer"), dict)
+            },
+        )
+        assert "/r/" not in overlay_injected
+        assert detect_asset_partner_roster_and_slot_issues(
+            overlay_injected, property_id="prexvo", slug=pslf_slug, rel_path=f"tools/{pslf_slug}/index.html"
+        ) == []
+
+        repositioned, rep_meta = reposition_affiliate_placements_from_gsc_signals(
+            mixed_pslf_html, property_id="prexvo", slug=pslf_slug
+        )
+        assert rep_meta["restricted_public_service"] is True
+        assert "/r/" not in repositioned
+
+        dist_dir = tmp_path / "prexvo" / "dist"
+        page_path = dist_dir / "tools" / pslf_slug / "index.html"
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(mixed_pslf_html, encoding="utf-8")
+
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
+        after_p1 = page_path.read_text(encoding="utf-8")
+        assert "/r/" not in after_p1
+        assert detect_asset_partner_roster_and_slot_issues(
+            after_p1, property_id="prexvo", slug=pslf_slug, rel_path=f"tools/{pslf_slug}/index.html"
+        ) == []
+
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
+        after_p2 = page_path.read_text(encoding="utf-8")
+        assert "/r/" not in after_p2
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
+        assert page_path.read_text(encoding="utf-8") == after_p2
+
+        # Part B: Commercial insolvency calculator carrying stale restricted overlay self-heals and preserves live /r/
+        insolv_path = dist_dir / "tools" / insolv_slug / "index.html"
+        insolv_path.parent.mkdir(parents=True, exist_ok=True)
+        insolv_path.write_text(stale_insolv_html, encoding="utf-8")
+        ov_dir = tmp_path / "prexvo" / ".agy" / "overlays"
+        ov_dir.mkdir(parents=True, exist_ok=True)
+        (ov_dir / f"{insolv_slug}.json").write_text(json.dumps(stale_insolv_ov_payload), encoding="utf-8")
+        RetroReflectionEngine.retrofit_estate(dist_dir=dist_dir, property_id="prexvo")
+        healed_insolv = insolv_path.read_text(encoding="utf-8")
+        assert 'data-restricted-public-service="true"' not in healed_insolv
+        assert "/r/" in healed_insolv
+        healed_ov = json.loads((ov_dir / f"{insolv_slug}.json").read_text(encoding="utf-8"))
+        assert healed_ov.get("restricted_public_service") is False
+        assert healed_ov.get("commercial_offers_allowed") is True
+        assert isinstance(healed_ov.get("partner_offer"), dict)
 
 
 def test_profithelm_feedback_pass_preserves_gsc_metrics_from_lifecycle_telemetry(tmp_path: Path) -> None:

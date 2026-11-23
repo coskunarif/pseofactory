@@ -563,6 +563,67 @@ def _resolve_contextual_internal_links(
     return selected
 
 
+def _select_vault_live_partner_candidate(
+    eff_tenant: str,
+    default_chosen_key: str,
+    ranked_candidates: List[Dict[str, Any]],
+    any_empirical_signal: bool,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Selects the winning partner offer from ranked_candidates while honoring live vault approval.
+    When at least one vertical candidate is live in monetization_vault.json, only live partners
+    may win default selection or empirical yield promotion (preventing dead/unapproved partners
+    from overriding live CTAs or causing infinite conversion_gap loops). When zero vertical
+    candidates are live, preserves canonical candidate metadata for approval routing and
+    1st-party workpaper fallback.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import is_partner_live_in_vault
+
+    for cand in ranked_candidates:
+        cand["is_live_in_vault"] = is_partner_live_in_vault(
+            eff_tenant, str(cand.get("partner_key") or "")
+        )
+
+    live_candidates = [c for c in ranked_candidates if c.get("is_live_in_vault")]
+    eff_default = default_chosen_key
+    pool = live_candidates if live_candidates else ranked_candidates
+    if live_candidates and not is_partner_live_in_vault(eff_tenant, eff_default):
+        eff_default = str(live_candidates[0]["partner_key"])
+
+    pool_has_empirical = any(
+        int(c.get("outbound_clicks", 0) or 0) > 0
+        or float(c.get("empirical_erpm_usd", 0.0) or 0.0) > 0.0
+        or float(c.get("estimated_revenue_yield_usd", 0.0) or 0.0) > 0.0
+        or float(c.get("cta_ctr", 0.0) or 0.0) > 0.0
+        for c in pool
+    )
+
+    if any_empirical_signal and pool_has_empirical and pool:
+        pool_sorted = sorted(
+            pool,
+            key=lambda x: (
+                -float(x["estimated_revenue_yield_usd"]),
+                -float(x["empirical_erpm_usd"]),
+                -int(x["outbound_clicks"]),
+                -float(x["yield_score"]),
+            ),
+        )
+        return eff_default, str(pool_sorted[0]["partner_key"]), pool_sorted[0]
+
+    chosen_metrics = next(
+        (c for c in pool if str(c.get("partner_key") or "") == eff_default),
+        pool[0] if pool else {
+            "yield_score": round(get_partner_bounty_midpoint(eff_default) * 0.5, 2),
+            "empirical_erpm_usd": 0.0,
+            "cta_ctr": 0.0,
+            "outbound_clicks": 0,
+            "estimated_revenue_yield_usd": 0.0,
+        },
+    )
+    return eff_default, eff_default, chosen_metrics
+
+
 def _resolve_partner_offer_and_manual_gate(
     tenant_id: str,
     slug: str,
@@ -704,17 +765,17 @@ def _resolve_partner_offer_and_manual_gate(
             }
 
         if any(k in combined for k in ("medical", "physician", "resident", "dental", "healthcare")):
-            default_chosen_key = "laurel_road"
-            vertical_candidates = ["laurel_road", "sofi_refi", "earnest", "credible", "juno"]
+            default_chosen_key = "splash_financial"
+            vertical_candidates = ["splash_financial", "laurel_road", "credible", "lendkey", "sofi_refi", "earnest", "juno"]
         elif any(k in combined for k in ("group", "collective", "negotiation", "rate-drop", "juno")):
-            default_chosen_key = "juno"
-            vertical_candidates = ["juno", "sofi_refi", "earnest", "credible", "laurel_road"]
+            default_chosen_key = "splash_financial"
+            vertical_candidates = ["splash_financial", "juno", "credible", "lendkey", "sofi_refi", "earnest", "laurel_road"]
         elif any(k in combined for k in ("custom", "precision", "earnest", "skip-payment", "biweekly")):
-            default_chosen_key = "earnest"
-            vertical_candidates = ["earnest", "sofi_refi", "credible", "laurel_road", "juno"]
+            default_chosen_key = "splash_financial"
+            vertical_candidates = ["splash_financial", "credible", "lendkey", "earnest", "sofi_refi", "laurel_road", "juno"]
         else:
-            default_chosen_key = "sofi_refi"
-            vertical_candidates = ["sofi_refi", "earnest", "laurel_road", "juno", "credible"]
+            default_chosen_key = "splash_financial"
+            vertical_candidates = ["splash_financial", "credible", "lendkey", "sofi_refi", "earnest", "laurel_road", "juno"]
     elif eff_tenant == "gainhelm":
         registry = GAINHELM_AFFILIATES
         if any(k in combined for k in ("cmmc", "800-171", "sprs", "fedramp")):
@@ -1062,27 +1123,12 @@ def _resolve_partner_offer_and_manual_gate(
             "is_default": (c_key == default_chosen_key),
         })
 
-    if any_empirical_signal and ranked_candidates:
-        # Rank strictly by empirical performance + composite yield when engagement data exists
-        ranked_candidates.sort(
-            key=lambda x: (
-                -float(x["estimated_revenue_yield_usd"]),
-                -float(x["empirical_erpm_usd"]),
-                -int(x["outbound_clicks"]),
-                -float(x["yield_score"]),
-            )
-        )
-        chosen_key = str(ranked_candidates[0]["partner_key"])
-        chosen_metrics = ranked_candidates[0]
-    else:
-        chosen_key = default_chosen_key
-        chosen_metrics = ranked_candidates[0] if ranked_candidates else {
-            "yield_score": round(get_partner_bounty_midpoint(chosen_key) * 0.5, 2),
-            "empirical_erpm_usd": 0.0,
-            "cta_ctr": 0.0,
-            "outbound_clicks": 0,
-            "estimated_revenue_yield_usd": 0.0,
-        }
+    default_chosen_key, chosen_key, chosen_metrics = _select_vault_live_partner_candidate(
+        eff_tenant=eff_tenant,
+        default_chosen_key=default_chosen_key,
+        ranked_candidates=ranked_candidates,
+        any_empirical_signal=any_empirical_signal,
+    )
 
     if eff_tenant == "prexvo":
         p_data = registry.get(chosen_key) or _remediation_partner_fallbacks.get(chosen_key) or registry.get("sofi_refi") or {}
@@ -1283,6 +1329,15 @@ def evaluate_asset_conversion_and_distribution_readiness(
                     raw_html = ""
                 break
 
+    p_offer = mon_info.get("partner_offer") or {}
+    optimal_partner_key = str(p_offer.get("partner_key") or "").strip().lower()
+    from pseofactory.affiliates import is_partner_live_in_vault, load_live_partner_keys_from_vault
+
+    live_tenant_keys = load_live_partner_keys_from_vault(eff_tenant)
+    optimal_is_live = bool(
+        optimal_partner_key and is_partner_live_in_vault(eff_tenant, optimal_partner_key)
+    )
+
     has_partner_cta = False
     has_preset_scenarios = False
     has_internal_links = False
@@ -1294,9 +1349,6 @@ def evaluate_asset_conversion_and_distribution_readiness(
                 or 'data-commercial-offers="none"' in raw_html
             )
         else:
-            from pseofactory.affiliates import load_live_partner_keys_from_vault
-
-            live_tenant_keys = load_live_partner_keys_from_vault(eff_tenant)
             has_affiliate_cta = (
                 'rel="noopener sponsored nofollow"' in raw_html
                 and (
@@ -1309,7 +1361,11 @@ def evaluate_asset_conversion_and_distribution_readiness(
                 'data-first-party-checkout="true"' in raw_html
                 or 'id="btn-post-calc-upgrade-checkout"' in raw_html
             )
-            has_partner_cta = has_affiliate_cta if live_tenant_keys else (has_first_party_cta or has_affiliate_cta)
+            has_partner_cta = (
+                has_affiliate_cta
+                if (live_tenant_keys and optimal_is_live)
+                else (has_first_party_cta or has_affiliate_cta)
+            )
             p_matches = re.findall(r'data-partner=["\']([^"\']+)["\']', raw_html, flags=re.IGNORECASE)
             if p_matches:
                 # Prefer the overlay-partner-offer partner if present
@@ -1335,12 +1391,11 @@ def evaluate_asset_conversion_and_distribution_readiness(
     if cand_dict.get("has_conversion_path") is False or cand_dict.get("conversion_gap") is True:
         has_partner_cta = False
 
-    p_offer = mon_info.get("partner_offer") or {}
-    optimal_partner_key = str(p_offer.get("partner_key") or "").strip().lower()
     yield_optimization_needed = bool(cand_dict.get("yield_optimization_needed", False))
     if (
         not mon_info["restricted_public_service"]
         and optimal_partner_key
+        and optimal_is_live
         and p_offer.get("optimization_status") == "YIELD_OPTIMIZED_PROMOTED"
     ):
         if current_html_partner and current_html_partner != optimal_partner_key:

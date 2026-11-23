@@ -1403,62 +1403,80 @@ def test_post_retrofit_governance_renormalization_and_no_redundant_porcelain_com
 
 def test_prexvo_tools_index_ymyl_audit_estate_passes_while_broken_ctas_fail(tmp_path):
     """
-    Verifies compliant Prexvo Porcelain tools/index.html with appended YMYL forfeiture disclaimer
-    passes RetroReflectionEngine.audit_estate cleanly while cramped CTAs, missing attribution/rel,
-    and bloated calculator quick-answers still fail.
+    Verifies compliant Prexvo Porcelain tools/index.html passes RetroReflectionEngine.audit_estate
+    both in the default zero-contract state (unapproved /r/ stripped in favor of 1st-party Stripe
+    checkout + Title IV warning) and in the live-partner state (YMYL forfeiture disclaimer present
+    while cramped CTAs, missing attribution/rel, and bloated calculator quick-answers still fail).
     Zero em-dashes. Zero en-dashes.
     """
     import re
     from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
 
-    repo = tmp_path / "prexvo"
-    dist = _write_porcelain_seed_estate(repo)
-    RetroReflectionEngine.retrofit_estate(dist, "prexvo", "https://prexvo.com")
+    # 1. Default real vault (all Prexvo partners pending/declined):
+    # unapproved /r/splash_financial is stripped, 1st-party Stripe checkout + YMYL warning renders, audit passes.
+    repo_default = tmp_path / "prexvo_default"
+    dist_default = _write_porcelain_seed_estate(repo_default)
+    RetroReflectionEngine.retrofit_estate(dist_default, "prexvo", "https://prexvo.com")
+    default_tools_html = (dist_default / "tools" / "index.html").read_text(encoding="utf-8")
+    assert "/r/splash_financial" not in default_tools_html
+    assert 'data-first-party-checkout="true"' in default_tools_html
+    assert "pslf" in default_tools_html.lower()
+    audit_default_ok = RetroReflectionEngine.audit_estate(dist_default, "prexvo")
+    assert audit_default_ok["status"] == "PASS", audit_default_ok
+    assert audit_default_ok["stale_count"] == 0, audit_default_ok
 
-    tools_index = dist / "tools" / "index.html"
-    compliant_tools_html = tools_index.read_text(encoding="utf-8")
-    assert "waives federal protections" in compliant_tools_html.lower()
+    # 2. Explicit live splash_financial partner fixture:
+    # YMYL forfeiture disclaimer renders alongside live CTA, audit passes cleanly, and broken CTAs still fail.
+    with live_partners_in_temp_vault(tmp_path, {"prexvo": ["splash_financial"]}):
+        repo = tmp_path / "prexvo"
+        dist = _write_porcelain_seed_estate(repo)
+        RetroReflectionEngine.retrofit_estate(dist, "prexvo", "https://prexvo.com")
 
-    audit_ok = RetroReflectionEngine.audit_estate(dist, "prexvo")
-    assert audit_ok["status"] == "PASS", audit_ok
-    assert audit_ok["stale_count"] == 0, audit_ok
+        tools_index = dist / "tools" / "index.html"
+        compliant_tools_html = tools_index.read_text(encoding="utf-8")
+        assert "waives federal protections" in compliant_tools_html.lower()
 
-    tools_index.write_text(
-        compliant_tools_html.replace(
-            'class="partner-btn btn-cta touch-target"',
-            'style="display:inline; min-height:24px;" class="partner-btn"',
-        ),
-        encoding="utf-8",
-    )
-    cramped_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
-    assert cramped_audit["status"] == "STALE"
-    assert "deterministic_visual_primitives" in cramped_audit["stale_pages"].get("tools/index.html", [])
+        audit_ok = RetroReflectionEngine.audit_estate(dist, "prexvo")
+        assert audit_ok["status"] == "PASS", audit_ok
+        assert audit_ok["stale_count"] == 0, audit_ok
 
-    broken_cta_html = re.sub(r"source_tool=[^&\"']+", "src=none", compliant_tools_html)
-    broken_cta_html = re.sub(r'\s*rel="[^"]*"', "", broken_cta_html)
-    tools_index.write_text(broken_cta_html, encoding="utf-8")
-    bad_cta_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
-    assert bad_cta_audit["status"] == "STALE"
-    assert bad_cta_audit["stale_pages"].get("tools/index.html")
+        tools_index.write_text(
+            compliant_tools_html.replace(
+                'class="partner-btn btn-cta touch-target"',
+                'style="display:inline; min-height:24px;" class="partner-btn"',
+            ),
+            encoding="utf-8",
+        )
+        cramped_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
+        assert cramped_audit["status"] == "STALE"
+        assert "deterministic_visual_primitives" in cramped_audit["stale_pages"].get("tools/index.html", [])
 
-    tools_index.write_text(compliant_tools_html, encoding="utf-8")
-    calc_page = dist / "tools" / "rap-payment-calculator" / "index.html"
-    orig_calc = calc_page.read_text(encoding="utf-8")
-    bloated_qa = " ".join(["word"] * 68) + "."
-    updated_calc = re.sub(
-        r'(<aside\b[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)',
-        rf"\1<p>{bloated_qa}</p>",
-        orig_calc,
-        count=1,
-        flags=re.IGNORECASE,
-    )
-    assert updated_calc != orig_calc
-    calc_page.write_text(updated_calc, encoding="utf-8")
-    bloated_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
-    assert bloated_audit["status"] == "STALE"
-    assert "deterministic_visual_primitives" in bloated_audit["stale_pages"].get(
-        "tools/rap-payment-calculator/index.html", []
-    )
+        broken_cta_html = re.sub(r"source_tool=[^&\"']+", "src=none", compliant_tools_html)
+        broken_cta_html = re.sub(r'\s*rel="[^"]*"', "", broken_cta_html)
+        tools_index.write_text(broken_cta_html, encoding="utf-8")
+        bad_cta_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
+        assert bad_cta_audit["status"] == "STALE"
+        assert bad_cta_audit["stale_pages"].get("tools/index.html")
+
+        tools_index.write_text(compliant_tools_html, encoding="utf-8")
+        calc_page = dist / "tools" / "rap-payment-calculator" / "index.html"
+        orig_calc = calc_page.read_text(encoding="utf-8")
+        bloated_qa = " ".join(["word"] * 68) + "."
+        updated_calc = re.sub(
+            r'(<aside\b[^>]*class=["\'][^"\']*quick-answer[^"\']*["\'][^>]*>)',
+            rf"\1<p>{bloated_qa}</p>",
+            orig_calc,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        assert updated_calc != orig_calc
+        calc_page.write_text(updated_calc, encoding="utf-8")
+        bloated_audit = RetroReflectionEngine.audit_estate(dist, "prexvo")
+        assert bloated_audit["status"] == "STALE"
+        assert "deterministic_visual_primitives" in bloated_audit["stale_pages"].get(
+            "tools/rap-payment-calculator/index.html", []
+        )
 
 
 def test_overlay_spec_needs_heal_allows_irc_section_162_163_on_surety_bond() -> None:

@@ -97,10 +97,21 @@ def test_gainhelm_commercial_r_link_rel_sponsored_normalization_and_audit(tmp_pa
     assert DriftReason.STRUCTURAL_CONTRACT_VIOLATION in drift_rec.reasons
     assert any("rel='noopener sponsored'" in d for d in drift_rec.details)
 
-    healed_html = normalize_html_callout_message_match(raw_html, property_id="gainhelm")
-    assert 'rel="noopener sponsored nofollow"' in healed_html
-    assert 'target="_blank"' in healed_html
-    assert normalize_html_callout_message_match(healed_html, property_id="gainhelm") == healed_html
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
+
+    # 1. Default real vault (vanta_security is pending):
+    # unapproved /r/vanta_security is stripped cleanly and normalization is idempotent.
+    stripped_html = normalize_html_callout_message_match(raw_html, property_id="gainhelm")
+    assert "/r/vanta_security" not in stripped_html
+    assert normalize_html_callout_message_match(stripped_html, property_id="gainhelm") == stripped_html
+
+    # 2. Explicit live vanta_security partner fixture:
+    # AssetIntegrityEvaluator flags missing rel='noopener sponsored' and normalization heals it deterministically.
+    with live_partners_in_temp_vault(tmp_path, {"gainhelm": ["vanta_security"]}):
+        healed_html = normalize_html_callout_message_match(raw_html, property_id="gainhelm")
+        assert 'rel="noopener sponsored nofollow"' in healed_html
+        assert 'target="_blank"' in healed_html
+        assert normalize_html_callout_message_match(healed_html, property_id="gainhelm") == healed_html
 
 
 def test_gainhelm_multi_tenant_parameterization_no_profithelm_leak():
@@ -233,28 +244,46 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
 def test_retro_reflection_detects_unqualified_commercial_links_in_dist(tmp_path):
     """
     Verifies RetroReflectionEngine.audit_estate flags calculator pages whose /r/ links
-    already have source_tool= query params but lack rel='noopener sponsored'.
+    already have source_tool= query params but lack rel='noopener sponsored' (when live),
+    as well as unapproved /r/ links (when pending in the default vault).
     """
+    import pathlib
+    import re
     from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
 
     dist_dir = tmp_path / "dist"
     tool_dir = dist_dir / "tools" / "soc-2-audit-cost-calculator"
     tool_dir.mkdir(parents=True, exist_ok=True)
-    # Build a synthetic tool page that satisfies all mechanics in audit_html_mechanics
-    # except that its /r/ link with source_tool= lacks rel="noopener sponsored".
+    # Build a degraded tool page from the live compiled dist asset that carries a /r/ link
+    # with source_tool= query params but lacks rel="noopener sponsored".
     base_html = "/home/ubuntuadmin/projects/gainhelm/dist/tools/soc-2-audit-cost-calculator/index.html"
-    import pathlib, re
-
     raw = pathlib.Path(base_html).read_text(encoding="utf-8")
-    degraded = re.sub(
-        r'(<a\b[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)\s+rel=["\'][^"\']*["\']',
-        r"\1",
-        raw,
-        flags=re.I,
-    )
+    if re.search(r'href=["\']/r/[a-z0-9_]+', raw, flags=re.I):
+        degraded = re.sub(
+            r'(<a\b[^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)\s+rel=["\'][^"\']*["\']',
+            r"\1",
+            raw,
+            flags=re.I,
+        )
+    else:
+        unqualified_link = (
+            '<div class="partner-card" data-partner="vanta_security">'
+            '<a href="/r/vanta_security?source_tool=soc-2-audit-cost-calculator&amp;subid=soc-2-audit-cost-calculator_card_1&amp;cta_slot=calculator_primary_cta" '
+            'data-partner="vanta_security" target="_blank">Request Vanta Demo</a></div>'
+        )
+        degraded = raw.replace("</main>", f"{unqualified_link}</main>", 1)
+    assert re.search(r'href=["\']/r/vanta_security\?source_tool=', degraded, flags=re.I)
     (tool_dir / "index.html").write_text(degraded, encoding="utf-8")
 
-    rep = RetroReflectionEngine.audit_estate(dist_dir, "gainhelm")
-    assert "tools/soc-2-audit-cost-calculator/index.html" in rep["stale_pages"]
-    assert "callout_message_match" in rep["stale_pages"]["tools/soc-2-audit-cost-calculator/index.html"]
+    # 1. Explicit live vanta_security fixture: flagged specifically because rel='noopener sponsored' is missing.
+    with live_partners_in_temp_vault(tmp_path, {"gainhelm": ["vanta_security"]}):
+        rep_live = RetroReflectionEngine.audit_estate(dist_dir, "gainhelm")
+        assert "tools/soc-2-audit-cost-calculator/index.html" in rep_live["stale_pages"]
+        assert "callout_message_match" in rep_live["stale_pages"]["tools/soc-2-audit-cost-calculator/index.html"]
+
+    # 2. Default real vault (vanta_security pending): ALSO flagged for unapproved /r/ link.
+    rep_default = RetroReflectionEngine.audit_estate(dist_dir, "gainhelm")
+    assert "tools/soc-2-audit-cost-calculator/index.html" in rep_default["stale_pages"]
+    assert "callout_message_match" in rep_default["stale_pages"]["tools/soc-2-audit-cost-calculator/index.html"]
 

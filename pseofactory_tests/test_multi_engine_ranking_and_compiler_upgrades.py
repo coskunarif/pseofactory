@@ -231,8 +231,10 @@ def test_upgraded_compiler_profithelm_b2b_and_tax_pages():
         assert audit_rep.passed is True, f"Audit failed for {spec['slug']}: {audit_rep.violations}"
 
 
-def test_upgraded_compiler_prexvo_public_service_vs_refinance_isolation():
-    """Verifies Prexvo public-service pages have zero commercial offers while refinance pages include compliant CTAs."""
+def test_upgraded_compiler_prexvo_public_service_vs_refinance_isolation(tmp_path):
+    """Verifies Prexvo public-service pages have zero commercial offers while refinance pages emit 1st-party checkout when partners are pending and compliant /r/ CTAs when partners are live."""
+    from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
+
     pslf_spec = {
         "query": "pslf qualifying payment simulator",
         "slug": "pslf-qualifying-payment-simulator",
@@ -255,6 +257,7 @@ def test_upgraded_compiler_prexvo_public_service_vs_refinance_isolation():
     assert 'data-commercial-offers="none"' in html_pslf
     assert 'data-restricted-public-service="true"' in html_pslf
     assert "affiliate-cta-link" not in html_pslf
+    assert 'data-first-party-checkout="true"' not in html_pslf
     for domain in ("splashfinancial.com", "sofi.com", "credible.com", "earnest.com", "lendkey.com"):
         assert domain not in html_pslf
 
@@ -274,21 +277,46 @@ def test_upgraded_compiler_prexvo_public_service_vs_refinance_isolation():
         "sample_calculation": "Balance 60,000 with 2 percent rate reduction yields 1,200 annual interest reduction",
         "canonical_base": "https://prexvo.com",
     }
-    res_refi = compile_high_effort_page(refi_spec)
-    html_refi = res_refi["html"]
-    assert res_refi["tenant"] == "prexvo"
-    assert res_refi["restricted_public_service"] is False
-    assert res_refi["commercial_offers_allowed"] is True
-    assert res_refi["affiliate_route"] is not None
-    assert res_refi["affiliate_route"]["partner_key"] in STUDENT_LOAN_PARTNER_KEYS
-    assert 'data-commercial-offers="compliant-refinance"' in html_refi
-    assert "affiliate-cta-link" in html_refi
-    assert "waives federal protections" in html_refi.lower()
-    for b2b_partner in B2B_PARTNER_KEYS:
-        assert f'data-partner="{b2b_partner}"' not in html_refi
 
-    audit_refi = audit_rendered_asset(html_refi, refi_spec, tenant="prexvo")
-    assert audit_refi.passed is True, f"Refi audit failed: {audit_refi.violations}"
+    # 1. Default real vault (all Prexvo partners pending/declined):
+    # refinance page hides unapproved /r/ links, renders 1st-party Stripe checkout + YMYL warning, and passes audit.
+    res_refi_default = compile_high_effort_page(refi_spec)
+    html_refi_default = res_refi_default["html"]
+    assert res_refi_default["tenant"] == "prexvo"
+    assert res_refi_default["restricted_public_service"] is False
+    assert res_refi_default["commercial_offers_allowed"] is True
+    assert 'href="/r/' not in html_refi_default
+    assert "href='/r/" not in html_refi_default
+    assert 'data-first-party-checkout="true"' in html_refi_default
+    assert "/api/lead-capture?checkout=1" in html_refi_default
+    assert "permanently eliminates" in html_refi_default.lower()
+    assert "pslf" in html_refi_default.lower()
+    audit_refi_default = audit_rendered_asset(html_refi_default, refi_spec, tenant="prexvo")
+    assert audit_refi_default.passed is True, f"Default refi audit failed: {audit_refi_default.violations}"
+
+    # 2. Explicit live Prexvo partners fixture:
+    # PSLF STILL has zero commercial offers, while refi page renders compliant /r/ CTAs and passes audit.
+    with live_partners_in_temp_vault(tmp_path, {"prexvo": ["splash_financial", "credible", "lendkey"]}):
+        res_pslf_live = compile_high_effort_page(pslf_spec)
+        assert 'href="/r/' not in res_pslf_live["html"]
+        assert "href='/r/" not in res_pslf_live["html"]
+        assert "affiliate-cta-link" not in res_pslf_live["html"]
+
+        res_refi = compile_high_effort_page(refi_spec)
+        html_refi = res_refi["html"]
+        assert res_refi["tenant"] == "prexvo"
+        assert res_refi["restricted_public_service"] is False
+        assert res_refi["commercial_offers_allowed"] is True
+        assert res_refi["affiliate_route"] is not None
+        assert res_refi["affiliate_route"]["partner_key"] in STUDENT_LOAN_PARTNER_KEYS
+        assert 'data-commercial-offers="compliant-refinance"' in html_refi
+        assert "affiliate-cta-link" in html_refi
+        assert "waives federal protections" in html_refi.lower()
+        for b2b_partner in B2B_PARTNER_KEYS:
+            assert f'data-partner="{b2b_partner}"' not in html_refi
+
+        audit_refi = audit_rendered_asset(html_refi, refi_spec, tenant="prexvo")
+        assert audit_refi.passed is True, f"Refi audit failed: {audit_refi.violations}"
 
 
 def test_slop_ratchet_passes_after_compiler_and_competitor_upgrades():

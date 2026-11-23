@@ -30,6 +30,7 @@ from pseofactory.indexer import PushIndexer
 from pseofactory.indexing.milestones import MilestoneTracker
 from pseofactory.maintenance import MaintenanceLifecycle, ConfigurablePropertyAdapter, SubprocessPropertyAdapter
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
+from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
 
 
 def test_feedback_loop_defect_diagnosis_and_root_cause_classification():
@@ -711,11 +712,58 @@ def test_telemetry_monetization_loop_spots_conversion_and_distribution_gaps_and_
         },
     ]
 
-    res = loop.run_feedback_cycle(
+    # Default real vault (isolated directory): flexport is not live in monetization_vault.json,
+    # so ProfitHelm falls back to a real live vertical partner (ramp) and closes conversion_gap_detected.
+    from pseofactory.gsc_remediation import evaluate_asset_conversion_and_distribution_readiness
+
+    default_base = tmp_path / "default_vault"
+    default_dist = default_base / "dist"
+    default_calc = default_dist / "tools" / "landed-cost-calculator"
+    default_calc.mkdir(parents=True, exist_ok=True)
+    (default_calc / "index.html").write_text(
+        bare_html_tpl.format(title="Landed Cost Calculator"), encoding="utf-8"
+    )
+    default_loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=default_base,
+        dist_dir=default_dist,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=HumanActionBus(ledger_path=default_base / ".agy" / "human_action_bus.json"),
+    )
+    res_default = default_loop.run_feedback_cycle(
         unindexed_urls=[],
-        query_records=query_records,
+        query_records=[query_records[2]],
         skip_recompile=True,
     )
+    assert res_default["status"] == "SUCCESS"
+    default_calc_html = (default_calc / "index.html").read_text(encoding="utf-8")
+    assert 'class="overlay-section overlay-partner-offer affiliate-cta-section card"' in default_calc_html
+    assert 'data-partner="ramp"' in default_calc_html
+    assert 'data-partner="flexport"' not in default_calc_html
+    recheck_default = evaluate_asset_conversion_and_distribution_readiness(
+        slug="landed-cost-calculator",
+        tenant_id="profithelm",
+        impressions=300,
+        position=8.0,
+        dist_dir=default_dist,
+        base_dir=default_base,
+    )
+    assert recheck_default["conversion_gap_detected"] is False
+
+    # Explicit live flexport partner fixture on fresh primary loop
+    synd_dir = tmp_path / "syndication"
+    with live_partners_in_temp_vault(tmp_path, {"profithelm": ["flexport"]}):
+        res = loop.run_feedback_cycle(
+            unindexed_urls=[],
+            query_records=query_records,
+            skip_recompile=True,
+        )
 
     assert res["status"] == "SUCCESS"
     prioritized = res["prioritized_candidates"]
@@ -755,7 +803,6 @@ def test_telemetry_monetization_loop_spots_conversion_and_distribution_gaps_and_
     assert "\u2013" not in calc_html
 
     # Inspect generated external syndication files
-    synd_dir = tmp_path / "syndication"
     assert (synd_dir / "landed-cost-calculator-linkedin.md").is_file()
     assert (synd_dir / "landed-cost-calculator-newsletter.md").is_file()
     assert (synd_dir / "landed-cost-calculator-Substack Notes-post.txt").is_file()
@@ -812,30 +859,60 @@ def test_prexvo_feedback_loop_enforces_ymyl_guardrail_and_places_commercial_refi
         telemetry_logger=MagicMock(),
     )
 
-    res = loop.run_feedback_cycle(
+    px_records = [
+        {
+            "slug": "pslf-qualifying-payment-simulator",
+            "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+            "query": "pslf qualifying payment buyback simulator",
+            "impressions": 420,
+            "clicks": 9,
+            "ctr": 0.021,
+            "position": 6.5,
+        },
+        {
+            "slug": "student-loan-refinance-break-even-calculator",
+            "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
+            "query": "student loan refinance rate break even calculator",
+            "impressions": 380,
+            "clicks": 8,
+            "ctr": 0.021,
+            "position": 7.2,
+        },
+    ]
+
+    # 1. Default real vault (all Prexvo partners pending/declined):
+    # PSLF stays strictly guardrail-only; commercial refi hides unapproved /r/ CTAs in favor of 1st-party Stripe checkout.
+    res_default = loop.run_feedback_cycle(
         unindexed_urls=[],
-        query_records=[
-            {
-                "slug": "pslf-qualifying-payment-simulator",
-                "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
-                "query": "pslf qualifying payment buyback simulator",
-                "impressions": 420,
-                "clicks": 9,
-                "ctr": 0.021,
-                "position": 6.5,
-            },
-            {
-                "slug": "student-loan-refinance-break-even-calculator",
-                "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
-                "query": "student loan refinance rate break even calculator",
-                "impressions": 380,
-                "clicks": 8,
-                "ctr": 0.021,
-                "position": 7.2,
-            },
-        ],
+        query_records=px_records,
         skip_recompile=True,
     )
+    assert res_default["status"] == "SUCCESS"
+    pslf_default_html = (pslf_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-restricted-public-service="true"' in pslf_default_html
+    assert 'data-commercial-offers="none"' in pslf_default_html
+    assert "affiliate-cta-link" not in pslf_default_html
+    assert "/api/lead-capture?checkout=1" not in pslf_default_html
+
+    refi_default_html = (refi_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-first-party-checkout="true"' in refi_default_html
+    assert "/r/" not in refi_default_html
+    assert "sofi.com" not in refi_default_html
+
+    # 2. Explicit live splash_financial partner fixture:
+    # PSLF STILL strictly suppresses commercial offers; commercial refi renders live splash_financial offer.
+    (pslf_dir / "index.html").write_text(bare_html, encoding="utf-8")
+    (refi_dir / "index.html").write_text(bare_html, encoding="utf-8")
+    px_ov_dir = tmp_path / ".agy" / "overlays"
+    if px_ov_dir.is_dir():
+        for ovf in px_ov_dir.iterdir():
+            ovf.unlink()
+    with live_partners_in_temp_vault(tmp_path, {"prexvo": ["splash_financial"]}):
+        res = loop.run_feedback_cycle(
+            unindexed_urls=[],
+            query_records=px_records,
+            skip_recompile=True,
+        )
 
     assert res["status"] == "SUCCESS"
     pslf_html = (pslf_dir / "index.html").read_text(encoding="utf-8")
@@ -904,40 +981,75 @@ def test_manual_partner_or_platform_dependency_routes_single_clean_alert_without
         action_bus=bus,
     )
 
-    # Both customs bond calculators hit the suretybonds_direct manual partner gate
-    res = loop.run_feedback_cycle(
+    # Both customs bond calculators hit the suretybonds_direct manual partner gate.
+    # Default real vault: falls back to live ramp on customs bond calculators while routing 1 alert.
+    alert_records = [
+        {
+            "slug": "customs-bond-sufficiency-calculator",
+            "target_url": "https://profithelm.com/tools/customs-bond-sufficiency-calculator/",
+            "query": "customs bond sufficiency calculator",
+            "impressions": 510,
+            "clicks": 11,
+            "ctr": 0.021,
+            "position": 5.8,
+        },
+        {
+            "slug": "continuous-customs-bond-cost-estimator",
+            "target_url": "https://profithelm.com/tools/continuous-customs-bond-cost-estimator/",
+            "query": "continuous customs bond cost estimator",
+            "impressions": 440,
+            "clicks": 9,
+            "ctr": 0.020,
+            "position": 6.4,
+        },
+        {
+            "slug": "saas-burn-multiple-runway-calculator",
+            "target_url": "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
+            "query": "saas burn multiple cash runway calculator",
+            "impressions": 390,
+            "clicks": 8,
+            "ctr": 0.020,
+            "position": 7.1,
+        },
+    ]
+    # Default real vault (isolated directory): falls back to live ramp on customs bond calculators
+    default_base = tmp_path / "default_vault"
+    default_dist = default_base / "dist"
+    default_bond1 = default_dist / "tools" / "customs-bond-sufficiency-calculator"
+    default_bond1.mkdir(parents=True, exist_ok=True)
+    (default_bond1 / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>Tool</title></head><body><main><h1>Tool</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    default_loop = IndexingFeedbackLoop(
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=default_base,
+        dist_dir=default_dist,
+        indexer=mock_indexer,
+        inspector=MagicMock(),
+        preflight_engine=mock_preflight,
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+        action_bus=HumanActionBus(ledger_path=default_base / ".agy" / "human_action_bus.json"),
+    )
+    res_default = default_loop.run_feedback_cycle(
         unindexed_urls=[],
-        query_records=[
-            {
-                "slug": "customs-bond-sufficiency-calculator",
-                "target_url": "https://profithelm.com/tools/customs-bond-sufficiency-calculator/",
-                "query": "customs bond sufficiency calculator",
-                "impressions": 510,
-                "clicks": 11,
-                "ctr": 0.021,
-                "position": 5.8,
-            },
-            {
-                "slug": "continuous-customs-bond-cost-estimator",
-                "target_url": "https://profithelm.com/tools/continuous-customs-bond-cost-estimator/",
-                "query": "continuous customs bond cost estimator",
-                "impressions": 440,
-                "clicks": 9,
-                "ctr": 0.020,
-                "position": 6.4,
-            },
-            {
-                "slug": "saas-burn-multiple-runway-calculator",
-                "target_url": "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
-                "query": "saas burn multiple cash runway calculator",
-                "impressions": 390,
-                "clicks": 8,
-                "ctr": 0.020,
-                "position": 7.1,
-            },
-        ],
+        query_records=[alert_records[0]],
         skip_recompile=True,
     )
+    assert res_default["status"] == "SUCCESS"
+    assert (default_bond1 / "index.html").read_text(encoding="utf-8").count('data-partner="ramp"') >= 1
+    assert (default_bond1 / "index.html").read_text(encoding="utf-8").count('data-partner="flexport"') == 0
+
+    # Explicit live flexport partner fixture on fresh primary loop
+    with live_partners_in_temp_vault(tmp_path, {"profithelm": ["flexport"]}):
+        res = loop.run_feedback_cycle(
+            unindexed_urls=[],
+            query_records=alert_records,
+            skip_recompile=True,
+        )
 
     assert res["status"] == "SUCCESS"
     # Exactly ONE clean deduplicated alert routed for suretybonds_direct across both customs bond calculators
@@ -1097,31 +1209,55 @@ def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers
         },
     ]
 
-    ph_res = ph_loop.run_feedback_cycle(
+    ph_query_records = [
+        {
+            "slug": "saas-burn-multiple-runway-calculator",
+            "target_url": "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
+            "query": "saas burn multiple cash runway calculator",
+            "impressions": 680,
+            "clicks": 22,
+            "ctr": 0.032,
+            "position": 5.4,
+        },
+        {
+            "slug": "crypto-tax-liability-calculator-2027",
+            "target_url": "https://profithelm.com/tools/crypto-tax-liability-calculator-2027/",
+            "query": "crypto tax form 1099 da capital gains calculator",
+            "impressions": 540,
+            "clicks": 18,
+            "ctr": 0.033,
+            "position": 6.1,
+        },
+    ]
+
+    # Default real vault: unapproved brex must NOT overwrite live ramp on saas-burn-multiple,
+    # while live koinly IS promoted over live coinledger on crypto-tax-liability-calculator-2027.
+    ph_default_res = ph_loop.run_feedback_cycle(
         unindexed_urls=[],
-        query_records=[
-            {
-                "slug": "saas-burn-multiple-runway-calculator",
-                "target_url": "https://profithelm.com/tools/saas-burn-multiple-runway-calculator/",
-                "query": "saas burn multiple cash runway calculator",
-                "impressions": 680,
-                "clicks": 22,
-                "ctr": 0.032,
-                "position": 5.4,
-            },
-            {
-                "slug": "crypto-tax-liability-calculator-2027",
-                "target_url": "https://profithelm.com/tools/crypto-tax-liability-calculator-2027/",
-                "query": "crypto tax form 1099 da capital gains calculator",
-                "impressions": 540,
-                "clicks": 18,
-                "ctr": 0.033,
-                "position": 6.1,
-            },
-        ],
+        query_records=ph_query_records,
         outbound_engagement_events=ph_engagement_events,
         skip_recompile=True,
     )
+    assert ph_default_res["status"] == "SUCCESS"
+    assert "saas-burn-multiple-runway-calculator" not in ph_default_res["yield_optimized_slugs"]
+    assert 'data-partner="ramp"' in (saas_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-partner="brex"' not in (saas_dir / "index.html").read_text(encoding="utf-8")
+    assert "crypto-tax-liability-calculator-2027" in ph_default_res["yield_optimized_slugs"]
+
+    # Reset HTML and overlays, then run with explicit live brex partner fixture
+    (saas_dir / "index.html").write_text(initial_saas_html, encoding="utf-8")
+    (crypto_dir / "index.html").write_text(initial_crypto_html, encoding="utf-8")
+    ph_ov_dir = ph_base / ".agy" / "overlays"
+    if ph_ov_dir.is_dir():
+        for ovf in ph_ov_dir.iterdir():
+            ovf.unlink()
+    with live_partners_in_temp_vault(tmp_path, {"profithelm": ["brex"]}):
+        ph_res = ph_loop.run_feedback_cycle(
+            unindexed_urls=[],
+            query_records=ph_query_records,
+            outbound_engagement_events=ph_engagement_events,
+            skip_recompile=True,
+        )
 
     assert ph_res["status"] == "SUCCESS"
     assert "saas-burn-multiple-runway-calculator" in ph_res["yield_optimized_slugs"]
@@ -1216,31 +1352,34 @@ def test_outbound_engagement_telemetry_promotes_higher_converting_partner_offers
         },
     ]
 
-    px_res = px_loop.run_feedback_cycle(
-        unindexed_urls=[],
-        query_records=[
-            {
-                "slug": "student-loan-refinance-break-even-calculator",
-                "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
-                "query": "student loan refinance rate break even calculator",
-                "impressions": 490,
-                "clicks": 16,
-                "ctr": 0.032,
-                "position": 5.9,
-            },
-            {
-                "slug": "pslf-qualifying-payment-simulator",
-                "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
-                "query": "pslf qualifying payment simulator",
-                "impressions": 520,
-                "clicks": 19,
-                "ctr": 0.036,
-                "position": 5.2,
-            },
-        ],
-        outbound_engagement_events=px_engagement_events,
-        skip_recompile=True,
-    )
+    px_query_records = [
+        {
+            "slug": "student-loan-refinance-break-even-calculator",
+            "target_url": "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/",
+            "query": "student loan refinance rate break even calculator",
+            "impressions": 490,
+            "clicks": 16,
+            "ctr": 0.032,
+            "position": 5.9,
+        },
+        {
+            "slug": "pslf-qualifying-payment-simulator",
+            "target_url": "https://prexvo.com/tools/pslf-qualifying-payment-simulator/",
+            "query": "pslf qualifying payment simulator",
+            "impressions": 520,
+            "clicks": 19,
+            "ctr": 0.036,
+            "position": 5.2,
+        },
+    ]
+
+    with live_partners_in_temp_vault(tmp_path, {"prexvo": ["splash_financial", "credible"]}):
+        px_res = px_loop.run_feedback_cycle(
+            unindexed_urls=[],
+            query_records=px_query_records,
+            outbound_engagement_events=px_engagement_events,
+            skip_recompile=True,
+        )
 
     assert px_res["status"] == "SUCCESS"
     assert "student-loan-refinance-break-even-calculator" in px_res["yield_optimized_slugs"]
