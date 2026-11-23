@@ -53,6 +53,7 @@ def test_runtime_sync_js_syntax_valid_and_zero_dashes() -> None:
         tmp_path.unlink(missing_ok=True)
 
 
+@pytest.mark.host_estate
 def test_comparator_and_cliff_not_overwritten_with_irs_tax_on_non_income_tax_pages() -> None:
     rt_js = render_runtime_synchronizer_js()
     html = f"""<!doctype html>
@@ -177,6 +178,7 @@ window.updateSection179Calculator = function() {{
     assert res["afterReset"]["compBTax"] == "$122,500 Cash Tax Saved (at 35%)"
 
 
+@pytest.mark.host_estate
 def test_hero_range_syncs_live_on_prexvo_and_profithelm_native_outputs() -> None:
     rt_js = render_runtime_synchronizer_js()
     html = f"""<!doctype html>
@@ -264,6 +266,7 @@ def test_prexvo_suppressed_default_ymyl_never_gets_commercial_r_links() -> None:
     assert issues == []
 
 
+@pytest.mark.host_estate
 def test_gainhelm_calculator_syncs_url_state_on_input_and_preset() -> None:
     benchmarks = compute_gainhelm_framework_benchmarks()
     section_html = _render_calculator_widget(
@@ -442,6 +445,30 @@ def test_porcelain_replaces_legacy_article_class_governance_pages(tmp_path: Path
         undef_issues = [i for i in issues if "Undefined CSS class" in i]
         assert undef_issues == [], f"{slug} still has undefined CSS classes: {undef_issues}"
 
+    # Valid defined <article class="article-content"> governance page (e.g. GainHelm) must be preserved
+    gh_dist = tmp_path / "gh_dist"
+    (gh_dist / "methodology").mkdir(parents=True)
+    (gh_dist / "index.html").write_text(
+        "<!doctype html><html><head><title>GainHelm</title></head><body><main><h1>GainHelm</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    gh_filler = " ".join(["AICPA SSAE 18 SOC 2 Type II and NIST SP 800-171 deterministic audit methodology."] * 35)
+    gh_gov_html = (
+        "<!doctype html><html><head><title>GainHelm Custom Methodology</title></head><body>"
+        '<header><nav class="nav-bar"><a href="/">GainHelm</a></nav></header><main>'
+        '<article class="article-content">'
+        "<h1>GainHelm Deterministic Audit Cost Methodology</h1>"
+        f"<p>{gh_filler}</p>"
+        "<table><thead><tr><th>Framework</th><th>Authority</th></tr></thead>"
+        "<tbody><tr><td>SOC 2 Type II</td><td>AICPA AT-C 205</td></tr></tbody></table>"
+        "</article></main></body></html>"
+    )
+    (gh_dist / "methodology" / "index.html").write_text(gh_gov_html, encoding="utf-8")
+    compile_tenant_porcelain_estate_with_profile(gh_dist, get_porcelain_tenant_profile("gainhelm"))
+    gh_out = (gh_dist / "methodology" / "index.html").read_text(encoding="utf-8")
+    assert "GainHelm Deterministic Audit Cost Methodology" in gh_out
+    assert "AICPA AT-C 205" in gh_out
+
 
 def test_compile_lienbond_estate_prunes_stale_off_jurisdiction_tool_dir(tmp_path: Path) -> None:
     from pseofactory.compiler import compile_lienbond_estate
@@ -467,6 +494,7 @@ def test_compile_lienbond_estate_prunes_stale_off_jurisdiction_tool_dir(tmp_path
     ).is_file()
 
 
+@pytest.mark.host_estate
 def test_non_income_tax_cliff_scales_domain_suffix_without_svg_cliff_nodes() -> None:
     rt_js = render_runtime_synchronizer_js()
     html = f"""<!doctype html>
@@ -540,6 +568,7 @@ window.__complianceSyncWorkspaceOutputs = function() {{
     assert res["compBTax"] == "$125,900 Unoptimized Manual TCO"
 
 
+@pytest.mark.host_estate
 def test_gainhelm_url_sync_throttles_burst_and_cancels_on_popstate() -> None:
     benchmarks = compute_gainhelm_framework_benchmarks()
     section_html = _render_calculator_widget(
