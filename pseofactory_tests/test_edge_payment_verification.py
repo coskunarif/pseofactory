@@ -256,6 +256,7 @@ def test_gainhelm_post_lead_capture_dispatches_zoho_email_and_honest_partner_rou
             }})
           }}),
           env: {{
+            PLAYBOOK_FREE_EMAIL_ENABLED: "1",
             STRIPE_SECRET_KEY: "sk_live_mock",
             NANGO_SECRET_KEY: "nango_sec",
             NANGO_CONNECTION_ID: "nango_conn"

@@ -661,6 +661,7 @@ def test_edge_lead_capture_subsecond_zoho_failover_and_stripe_telemetry(tmp_path
 
           const mockEnv = {{
             TELEMETRY_EXPORT_SECRET: "funnel_sec_123",
+            PLAYBOOK_FREE_EMAIL_ENABLED: "1",
             EMAIL_PRIMARY_RAIL: "zeptomail",
             ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_token",
             NANGO_SECRET_KEY: "mock_nango_secret",
@@ -1577,7 +1578,7 @@ globalThis.fetch = async (url) => {{
   if (u.includes("mail.zoho.com/api/accounts")) return new Response(JSON.stringify({{ data: {{ messageId: "m1" }} }}), {{ status: 200 }});
   return new Response("{{}}", {{ status: 500 }});
 }};
-const env = {{ ZEPTOMAIL_TOKEN: "t", NANGO_SECRET_KEY: "s", NANGO_CONNECTION_ID: "c" }};
+const env = {{ PLAYBOOK_FREE_EMAIL_ENABLED: "1", ZEPTOMAIL_TOKEN: "t", NANGO_SECRET_KEY: "s", NANGO_CONNECTION_ID: "c" }};
 const res = await onRequestPost({{ request: new Request("https://{prop_id}.com/api/lead-capture", {{
   method: "POST", headers: {{ "Content-Type": "application/json" }},
   body: JSON.stringify({{ email: "jane.doe@acme-llc.com", tool_slug: {json.dumps(slug)} }}) }}), env }});
@@ -1816,6 +1817,7 @@ def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_e
 
           const mockEnv = {{
             TELEMETRY_EXPORT_SECRET: "funnel_sec_123",
+            PLAYBOOK_FREE_EMAIL_ENABLED: "1",
             NANGO_SECRET_KEY: "mock_nango_secret",
             NANGO_CONNECTION_ID: "mock_nango_conn",
             ZOHO_MAIL_ACCOUNT_ID: "676891000000008002",

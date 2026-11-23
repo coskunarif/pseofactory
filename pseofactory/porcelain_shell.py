@@ -1412,6 +1412,15 @@ template {{
   min-height: 1.25rem;
 }}
 
+.cf-turnstile-slot {{
+  flex-basis: 100%;
+  min-height: 0;
+}}
+
+.cf-turnstile-slot:empty {{
+  display: none;
+}}
+
 .footer-grid {{
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3295,6 +3304,8 @@ def render_porcelain_footer(
           <label for="footer-lead-email" class="sr-only">Work email address</label>
           <input type="email" id="footer-lead-email" name="email" required autocomplete="email" placeholder="you@company.com">
           <input type="hidden" name="tool_slug" value="{safe_slug}">
+          <input type="text" name="company_website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;">
+          <div class="cf-turnstile-slot" data-turnstile-slot="1"></div>
           <button type="submit" class="btn btn-cta touch-target">Subscribe to Updates</button>
           <div id="footer-lead-status" class="footer-lead-status" aria-live="polite"></div>
         </form>
@@ -3346,31 +3357,266 @@ def render_porcelain_footer(
     var form = document.getElementById('{form_id}');
     if (!form || form.dataset.porcelainBound === '1') return;
     form.dataset.porcelainBound = '1';
+    var renderedAt = Date.now();
+
+    function getFormTsState(f) {{
+      if (!f.__pseoTsState) {{
+        f.__pseoTsState = {{ booting: false, mounted: false, enabled: false, siteKey: '', token: '', widgetId: null }};
+      }}
+      return f.__pseoTsState;
+    }}
+
+    function loadLeadConfig() {{
+      if (window.__PSEO_SYNTHETIC_TEST__ || typeof fetch !== 'function') {{
+        return Promise.resolve({{ turnstile_enabled: false, turnstile_site_key: '' }});
+      }}
+      if (!window.__pseoLeadConfigPromise) {{
+        window.__pseoLeadConfigPromise = fetch('/api/lead-capture?config=1', {{
+          method: 'GET',
+          headers: {{ 'Accept': 'application/json' }}
+        }})
+          .then(function(r) {{ return r && r.ok ? r.json() : {{}}; }})
+          .then(function(cfg) {{
+            return {{
+              turnstile_enabled: Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key),
+              turnstile_site_key: String((cfg && cfg.turnstile_site_key) || '')
+            }};
+          }})
+          .catch(function() {{
+            return {{ turnstile_enabled: false, turnstile_site_key: '' }};
+          }});
+      }}
+      return window.__pseoLeadConfigPromise;
+    }}
+
+    function ensureTurnstileScript() {{
+      if (window.turnstile && typeof window.turnstile.render === 'function') {{
+        return Promise.resolve(window.turnstile);
+      }}
+      if (!window.__pseoTurnstileScriptPromise) {{
+        window.__pseoTurnstileScriptPromise = new Promise(function(resolve) {{
+          var existing = document.querySelector('script[src*="challenges.cloudflare.com/turnstile/v0/api.js"]');
+          if (existing) {{
+            var waited = 0;
+            var poll = setInterval(function() {{
+              waited += 50;
+              if (window.turnstile && typeof window.turnstile.render === 'function') {{
+                clearInterval(poll);
+                resolve(window.turnstile);
+              }} else if (waited >= 6000) {{
+                clearInterval(poll);
+                resolve(null);
+              }}
+            }}, 50);
+            return;
+          }}
+          var s = document.createElement('script');
+          s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+          s.async = true;
+          s.defer = true;
+          s.onload = function() {{ resolve(window.turnstile || null); }};
+          s.onerror = function() {{ resolve(null); }};
+          (document.head || document.body || document.documentElement).appendChild(s);
+        }});
+      }}
+      return window.__pseoTurnstileScriptPromise;
+    }}
+
+    function mountTurnstileIfEnabled() {{
+      var slot = form.querySelector('.cf-turnstile-slot');
+      if (!slot) return;
+      var st = getFormTsState(form);
+      if (st.booting || st.mounted || slot.getAttribute('data-turnstile-mounted') === '1') return;
+      st.booting = true;
+      loadLeadConfig().then(function(cfg) {{
+        st.enabled = Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key);
+        st.siteKey = String((cfg && cfg.turnstile_site_key) || '');
+        if (!st.enabled || !st.siteKey) {{
+          st.booting = false;
+          return;
+        }}
+        ensureTurnstileScript().then(function(tsApi) {{
+          if (!tsApi || typeof tsApi.render !== 'function' || st.mounted || slot.getAttribute('data-turnstile-mounted') === '1') {{
+            st.booting = false;
+            return;
+          }}
+          try {{
+            slot.setAttribute('data-turnstile-mounted', '1');
+            st.mounted = true;
+            st.widgetId = tsApi.render(slot, {{
+              sitekey: st.siteKey,
+              callback: function(tok) {{ st.token = String(tok || ''); }},
+              'expired-callback': function() {{ st.token = ''; }},
+              'error-callback': function() {{ st.token = ''; }}
+            }});
+          }} catch (e) {{
+            st.mounted = false;
+            slot.removeAttribute('data-turnstile-mounted');
+          }}
+          st.booting = false;
+        }});
+      }});
+    }}
+
+    function buildSafeHtmlWorksheetUrl(rawUrl) {{
+      var u = String(rawUrl || '').trim();
+      if (!u || u.charAt(0) !== '/' || u.indexOf('//') === 0) return '';
+      if (u.indexOf('format=') === -1) {{
+        u += (u.indexOf('?') === -1 ? '?format=html' : '&format=html');
+      }}
+      return u;
+    }}
+
+    function readCurrentToken() {{
+      var st = getFormTsState(form);
+      var tsInput = form.querySelector('input[name="cf-turnstile-response"]');
+      return String(st.token || (tsInput ? tsInput.value || '' : '')).trim();
+    }}
+
+    function waitForTurnstileReady(statusEl, onReady) {{
+      if (window.__PSEO_SYNTHETIC_TEST__) {{
+        onReady('');
+        return;
+      }}
+      loadLeadConfig().then(function(cfg) {{
+        if (!cfg || !cfg.turnstile_enabled || !cfg.turnstile_site_key) {{
+          onReady('');
+          return;
+        }}
+        mountTurnstileIfEnabled();
+        var tokNow = readCurrentToken();
+        if (tokNow) {{
+          onReady(tokNow);
+          return;
+        }}
+        if (statusEl) statusEl.textContent = 'Verifying browser security check...';
+        var elapsed = 0;
+        var timer = setInterval(function() {{
+          elapsed += 100;
+          var tok = readCurrentToken();
+          if (tok) {{
+            clearInterval(timer);
+            onReady(tok);
+          }} else if (elapsed >= 2500) {{
+            clearInterval(timer);
+            form.setAttribute('data-submission-state', 'verification_required');
+            if (statusEl) statusEl.textContent = 'Please complete the security verification check before submitting.';
+          }}
+        }}, 100);
+      }});
+    }}
+
+    // Eagerly fetch config and warm up Turnstile on page load
+    if (!window.__PSEO_SYNTHETIC_TEST__) {{
+      mountTurnstileIfEnabled();
+    }}
+    form.addEventListener('focusin', mountTurnstileIfEnabled);
+    form.addEventListener('mouseenter', mountTurnstileIfEnabled);
+
+    function formatLeadError(data, httpStatus) {{
+      var code = String((data && (data.error || data.status)) || '').toLowerCase();
+      if (httpStatus === 429 || code === 'rate_limited') {{
+        return 'Too many requests from this network. Please try again in an hour.';
+      }}
+      if (code === 'bot_verification_failed') {{
+        return 'Verification check failed. Please complete the security widget and try again.';
+      }}
+      if (code === 'submitted_too_fast') {{
+        return 'Please wait a second before submitting the form.';
+      }}
+      if (code === 'bot_detected' || code === 'origin_not_allowed') {{
+        return 'Submission could not be verified. Please refresh the page and try again.';
+      }}
+      return (data && data.error) ? String(data.error) : 'Unable to submit right now. Please try again.';
+    }}
+
     form.addEventListener('submit', function(ev) {{
+      if (form.id === 'lead-capture-form' && window.__PSEO_RUNTIME_LEAD_HANDLER__) {{
+        return;
+      }}
       ev.preventDefault();
       var emailEl = form.querySelector('input[type="email"]');
-      var statusEl = document.getElementById('footer-lead-status');
+      var statusEl = form.querySelector('#footer-lead-status, .footer-lead-status') || document.getElementById('footer-lead-status');
       var emailVal = emailEl ? String(emailEl.value || '').trim() : '';
       if (!emailVal || emailVal.indexOf('@') === -1) {{
         if (statusEl) statusEl.textContent = 'Enter a valid email address.';
         if (emailEl) emailEl.focus();
         return;
       }}
+      var hpEl = form.querySelector('input[name="company_website"]');
+      var hpVal = hpEl ? String(hpEl.value || '') : '';
       var slugEl = form.querySelector('input[name="tool_slug"]');
-      var payload = {{
-        email: emailVal,
-        tool_slug: slugEl ? slugEl.value : 'homepage',
-        source: window.location.pathname || '/'
-      }};
-      if (typeof fetch === 'function') {{
+      if (typeof fetch !== 'function') {{
+        if (statusEl) statusEl.textContent = 'Unable to submit in this browser environment.';
+        return;
+      }}
+      waitForTurnstileReady(statusEl, function(tokenVal) {{
+        var payload = {{
+          email: emailVal,
+          tool_slug: slugEl ? slugEl.value : 'homepage',
+          source: window.location.pathname || '/',
+          company_website: hpVal,
+          form_rendered_at: renderedAt,
+          cf_turnstile_response: tokenVal
+        }};
+        if (window.__PSEO_SYNTHETIC_TEST__) {{
+          payload.synthetic_test = true;
+        }}
+        if (statusEl) statusEl.textContent = 'Preparing your worksheet...';
+        var reqHeaders = {{ 'Content-Type': 'application/json' }};
+        if (window.__PSEO_SYNTHETIC_TEST__) {{
+          reqHeaders['X-Pseofactory-Test'] = '1';
+        }}
         fetch('/api/lead-capture', {{
           method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
+          headers: reqHeaders,
           body: JSON.stringify(payload)
-        }}).catch(function() {{}});
-      }}
-      if (statusEl) statusEl.textContent = 'Subscription confirmed for statutory rate updates.';
-      emailEl.value = '';
+        }})
+          .then(function(resp) {{
+            return resp.json().catch(function() {{ return {{}}; }}).then(function(data) {{
+              return {{ ok: Boolean(resp && resp.ok), status: resp ? resp.status : 0, data: data || {{}} }};
+            }});
+          }})
+          .then(function(res) {{
+            var st = getFormTsState(form);
+            if (res.ok && res.data && res.data.ok) {{
+              form.setAttribute('data-submission-state', 'success');
+              form.setAttribute('data-lead-captured', 'true');
+              if (statusEl) {{
+                statusEl.textContent = '';
+                var msgSpan = document.createElement('span');
+                msgSpan.textContent = res.data.deduplicated
+                  ? 'Already registered. Your worksheet is ready: '
+                  : 'Subscription confirmed. Your worksheet is ready: ';
+                statusEl.appendChild(msgSpan);
+                var safeWsUrl = buildSafeHtmlWorksheetUrl(res.data.playbook_url);
+                if (safeWsUrl) {{
+                  var link = document.createElement('a');
+                  link.href = safeWsUrl;
+                  link.target = '_blank';
+                  link.rel = 'noopener noreferrer';
+                  link.textContent = 'Open Free Worksheet';
+                  link.className = 'touch-target';
+                  link.style.fontWeight = '600';
+                  link.style.textDecoration = 'underline';
+                  statusEl.appendChild(link);
+                }}
+              }}
+              emailEl.value = '';
+            }} else {{
+              form.setAttribute('data-submission-state', 'error');
+              if (statusEl) statusEl.textContent = formatLeadError(res.data, res.status);
+            }}
+            if (window.turnstile && st.widgetId !== null && typeof window.turnstile.reset === 'function') {{
+              try {{ window.turnstile.reset(st.widgetId); }} catch (e) {{}}
+              st.token = '';
+            }}
+          }})
+          .catch(function() {{
+            form.setAttribute('data-submission-state', 'error');
+            if (statusEl) statusEl.textContent = 'Network error while submitting. Please try again.';
+          }});
+      }});
     }});
   }})();
   </script>"""
@@ -4812,7 +5058,7 @@ def normalize_html_to_porcelain_shell(
             kept_body_attrs.append(f'{attr_k}={dm.group(2)}{dm.group(3)}{dm.group(2)}')
     body_attr_str = " " + " ".join(kept_body_attrs)
 
-    rel_clean = rel_path.strip("/").replace("/index.html", "")
+    rel_clean = re.sub(r"(?:^|/)index\.html$", "", rel_path.strip("/"))
     page_slug = rel_clean.split("/")[-1] if rel_clean else "homepage"
 
     header_html = render_porcelain_header(profile)

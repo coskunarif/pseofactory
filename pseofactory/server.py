@@ -285,6 +285,18 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 synthesize_personalized_audit_workpaper,
             )
             qs = urllib.parse.parse_qs(parsed_url.query)
+            if qs.get("config", [""])[0] == "1":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "success": True,
+                        "turnstile_enabled": False,
+                        "turnstile_site_key": "",
+                    },
+                    extra_headers={"Cache-Control": "public, max-age=300"},
+                )
+                return
             if clean_path == "/api/checkout" and "checkout" not in qs:
                 qs["checkout"] = ["1"]
             elif clean_path == "/api/lead-fulfillment" and "fulfill" not in qs:
@@ -588,7 +600,9 @@ class QuietHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "success": False, "error": "Please enter a valid email address."})
                 return
             raw_slug = str(body.get("tool_slug") or body.get("source") or "calculator").strip().strip("/")
-            if raw_slug.startswith("tools/"):
+            if raw_slug.lower() == "index.html":
+                raw_slug = "homepage"
+            elif raw_slug.startswith("tools/"):
                 raw_slug = raw_slug[6:]
             tool_slug = raw_slug.replace("/", "-") or "calculator"
             is_synth = bool(

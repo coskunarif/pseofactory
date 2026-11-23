@@ -4689,6 +4689,671 @@ export async function onRequestGet(context) {{
     return telemetry_js
 
 
+def _render_edge_lead_abuse_guard_js(property_id: str) -> str:
+    """
+    Renders the shared, tenant-isolated anti-abuse and CORS defense-in-depth helpers
+    appended to each tenant's functions/api/lead-capture.js:
+    - Free-form outbound email opt-in gate (PLAYBOOK_FREE_EMAIL_ENABLED)
+    - GET /api/lead-capture?config=1 Turnstile public configuration endpoint
+    - Strict dynamic CORS and Same-Origin enforcement when DOMAIN/CANONICAL_BASE is set
+    - JSON / form-urlencoded POST body parser (never reads email from URL query params)
+    - Honeypot field detection and form_rendered_at minimum timing check
+    - Cloudflare Turnstile siteverify fail-closed verification with hostname matching
+    - KV-backed (with in-memory fallback) per-IP hourly rate limit (max 3/hr)
+    - KV-backed per-email 24h deduplication
+    - KV-backed global daily outbound email cap (max 25/day/site)
+    - Slug sanitization (including index.html -> homepage) and HTML escaping
+    Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
+    """
+    prop_clean = (property_id or "").strip().lower()
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        raise ValueError(f"Unsupported property_id for lead abuse guard: {property_id!r}")
+    prop_upper = prop_clean.upper()
+    js_block = f"""
+const __EDGE_ABUSE_MEM_KEY = "__PSEO_EDGE_ABUSE_STORE_{prop_upper}__";
+
+function getEdgeAbuseMemStore() {{
+  if (!globalThis[__EDGE_ABUSE_MEM_KEY]) {{
+    globalThis[__EDGE_ABUSE_MEM_KEY] = new Map();
+  }}
+  return globalThis[__EDGE_ABUSE_MEM_KEY];
+}}
+
+function isFreeFormPlaybookEmailEnabled(env) {{
+  const raw = String((env && env.PLAYBOOK_FREE_EMAIL_ENABLED) || "").trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}}
+
+function escapeEdgeHtml(val) {{
+  return String(val === undefined || val === null ? "" : val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}}
+
+function sanitizeEdgeToolSlug(rawSlug, fallbackSlug = "") {{
+  const rawStr = String(rawSlug === undefined || rawSlug === null ? "" : rawSlug);
+  let cleaned = rawStr
+    .replace(/[\\u0000-\\u001F\\u007F<>'"`\\\\]/g, "")
+    .trim()
+    .toLowerCase();
+  if (cleaned === "index.html" || cleaned === "/index.html") {{
+    cleaned = "homepage";
+  }} else {{
+    const hadIndexSuffix = /(?:^|\\/)index\\.html$/i.test(cleaned);
+    cleaned = cleaned.replace(/(?:^|\\/)index\\.html$/i, "");
+    cleaned = cleaned.replace(/^\\/+|\\/+$/g, "").replace(/^tools(?:\\/|$)/, "");
+    if (!cleaned && hadIndexSuffix) {{
+      cleaned = "homepage";
+    }}
+  }}
+  cleaned = cleaned.replace(/[\\r\\n<>'"`]/g, "").trim().slice(0, 100);
+  return cleaned || fallbackSlug;
+}}
+
+function extractConfiguredEdgeDomain(env) {{
+  if (!env || typeof env !== "object") return "";
+  const canonicalBase = String(env.CANONICAL_BASE || "").trim();
+  if (canonicalBase) {{
+    try {{
+      const u = new URL(canonicalBase);
+      const host = String(u.hostname || "").trim().toLowerCase().replace(/^www\\./, "");
+      if (host) return host;
+    }} catch (_) {{}}
+  }}
+  const rawDomain = String(env.DOMAIN || "").trim().toLowerCase();
+  if (!rawDomain) return "";
+  const stripped = rawDomain
+    .replace(/^https?:\\/\\//, "")
+    .replace(/\\/.*$/, "")
+    .replace(/:\\d+$/, "")
+    .replace(/^www\\./, "")
+    .trim();
+  return stripped;
+}}
+
+function extractConfiguredCanonicalOrigin(env) {{
+  if (!env || typeof env !== "object") return "";
+  const canonicalBase = String(env.CANONICAL_BASE || "").trim();
+  if (canonicalBase) {{
+    try {{
+      return new URL(canonicalBase).origin;
+    }} catch (_) {{}}
+  }}
+  const dom = extractConfiguredEdgeDomain(env);
+  return dom ? `https://${{dom}}` : "";
+}}
+
+function extractConfiguredPagesProjectSlug(env, configuredDomain) {{
+  const explicitSlug = String((env && env.CF_PAGES_PROJECT) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "");
+  if (explicitSlug) return explicitSlug;
+  if (configuredDomain) {{
+    const firstLabel = String(configuredDomain).split(".")[0].trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+    if (firstLabel) return firstLabel;
+  }}
+  return "{prop_clean}";
+}}
+
+function isAllowedEdgePagesHost(hostname, projectSlug) {{
+  const h = String(hostname || "").trim().toLowerCase();
+  const slug = String(projectSlug || "").trim().toLowerCase();
+  if (!h || !slug) return false;
+  return h === `${{slug}}.pages.dev` || h.endsWith(`.${{slug}}.pages.dev`);
+}}
+
+function isAllowedEdgeOriginHost(hostname, configuredDomain, projectSlug, allowLocalhost = true) {{
+  const h = String(hostname || "").trim().toLowerCase();
+  if (!h) return false;
+  if (allowLocalhost && (h === "localhost" || h === "127.0.0.1")) return true;
+  if (isAllowedEdgePagesHost(h, projectSlug)) return true;
+  if (configuredDomain && (h === configuredDomain || h === `www.${{configuredDomain}}`)) return true;
+  return false;
+}}
+
+function isAllowedEdgeOriginUrl(urlStr, configuredDomain, projectSlug, allowLocalhost = true) {{
+  if (!urlStr || typeof urlStr !== "string") return false;
+  try {{
+    const parsed = new URL(urlStr.trim());
+    const proto = String(parsed.protocol || "").toLowerCase();
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    if (!host) return false;
+    if (allowLocalhost && (host === "localhost" || host === "127.0.0.1")) {{
+      return proto === "http:" || proto === "https:";
+    }}
+    if (proto !== "https:") return false;
+    return isAllowedEdgeOriginHost(host, configuredDomain, projectSlug, false);
+  }} catch (_) {{
+    return false;
+  }}
+}}
+
+function buildEdgeCorsHeaders(request, env, options = {{}}) {{
+  const configuredDomain = extractConfiguredEdgeDomain(env);
+  const projectSlug = extractConfiguredPagesProjectSlug(env, configuredDomain);
+  const canonicalOrigin = extractConfiguredCanonicalOrigin(env);
+  const reqOrigin =
+    request && request.headers && typeof request.headers.get === "function"
+      ? String(request.headers.get("origin") || "").trim()
+      : "";
+  let allowOrigin = "*";
+  let varyOrigin = false;
+
+  if (configuredDomain) {{
+    varyOrigin = true;
+    allowOrigin = canonicalOrigin || `https://${{configuredDomain}}`;
+    if (reqOrigin && isAllowedEdgeOriginUrl(reqOrigin, configuredDomain, projectSlug, true)) {{
+      try {{
+        allowOrigin = new URL(reqOrigin).origin;
+      }} catch (_) {{}}
+    }}
+  }} else if (reqOrigin && isAllowedEdgeOriginUrl(reqOrigin, "", projectSlug, true)) {{
+    try {{
+      allowOrigin = new URL(reqOrigin).origin;
+      varyOrigin = true;
+    }} catch (_) {{}}
+  }}
+
+  const hdrs = {{
+    ...CORS_HEADERS,
+    "Access-Control-Allow-Origin": allowOrigin,
+  }};
+  if (varyOrigin) {{
+    hdrs["Vary"] = "Origin";
+  }}
+  if (options && options.cacheControl) {{
+    hdrs["Cache-Control"] = options.cacheControl;
+  }}
+  return hdrs;
+}}
+
+function buildEdgeConfigResponse(request, env) {{
+  const siteKey = String((env && env.TURNSTILE_SITE_KEY) || "").trim();
+  const secretKey = String((env && env.TURNSTILE_SECRET_KEY) || "").trim();
+  const turnstileEnabled = Boolean(siteKey && secretKey);
+  return new Response(
+    JSON.stringify({{
+      ok: true,
+      success: true,
+      turnstile_enabled: turnstileEnabled,
+      turnstile_site_key: siteKey,
+    }}),
+    {{
+      status: 200,
+      headers: {{
+        "Content-Type": "application/json",
+        ...buildEdgeCorsHeaders(request, env, {{ forPost: false, cacheControl: "public, max-age=300" }}),
+      }},
+    }}
+  );
+}}
+
+async function parseLeadCapturePostBody(request) {{
+  if (!request) return {{}};
+  const ct = String(
+    (request.headers && typeof request.headers.get === "function" && request.headers.get("content-type")) || ""
+  ).toLowerCase();
+  if (ct.includes("application/x-www-form-urlencoded") && typeof request.text === "function") {{
+    try {{
+      const rawText = await request.text();
+      const params = new URLSearchParams(rawText);
+      const out = {{}};
+      for (const [k, v] of params.entries()) {{
+        out[k] = v;
+      }}
+      return out;
+    }} catch (_) {{
+      return {{}};
+    }}
+  }}
+  if (typeof request.json === "function") {{
+    try {{
+      const parsed = await request.json();
+      if (parsed && typeof parsed === "object") return parsed;
+    }} catch (_) {{}}
+  }}
+  if (typeof request.text === "function") {{
+    try {{
+      const rawText = await request.text();
+      if (!rawText) return {{}};
+      try {{
+        const parsed = JSON.parse(rawText);
+        if (parsed && typeof parsed === "object") return parsed;
+      }} catch (_) {{
+        const params = new URLSearchParams(rawText);
+        const out = {{}};
+        for (const [k, v] of params.entries()) {{
+          out[k] = v;
+        }}
+        return out;
+      }}
+    }} catch (_) {{}}
+  }}
+  return {{}};
+}}
+
+function extractClientIpHeader(request) {{
+  if (!request || !request.headers || typeof request.headers.get !== "function") return "unknown";
+  const cfIp = request.headers.get("cf-connecting-ip");
+  if (cfIp && String(cfIp).trim()) return String(cfIp).trim();
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff && String(xff).trim()) {{
+    return String(xff).split(",")[0].trim() || "unknown";
+  }}
+  return "unknown";
+}}
+
+async function hashClientIp(rawIp) {{
+  const normalized = String(rawIp || "").trim();
+  if (!normalized) return "";
+  try {{
+    if (globalThis.crypto && globalThis.crypto.subtle && typeof TextEncoder !== "undefined") {{
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized));
+      const bytes = new Uint8Array(digest);
+      let hex = "";
+      for (let i = 0; i < 12; i++) {{
+        hex += bytes[i].toString(16).padStart(2, "0");
+      }}
+      return hex;
+    }}
+  }} catch (_) {{}}
+  let h = 2166136261;
+  for (let i = 0; i < normalized.length; i++) {{
+    h ^= normalized.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }}
+  return (h >>> 0).toString(16).padStart(8, "0");
+}}
+
+async function readEdgeGuardState(env, key) {{
+  const kv = getLeadsKv(env);
+  if (kv && typeof kv.get === "function") {{
+    try {{
+      const raw = await kv.get(key);
+      if (raw === null || raw === undefined) return null;
+      if (typeof raw === "string") {{
+        try {{
+          return JSON.parse(raw);
+        }} catch (_) {{
+          return {{ count: Number(raw) || 0, raw }};
+        }}
+      }}
+      if (typeof raw === "object") return raw;
+      return {{ count: Number(raw) || 0 }};
+    }} catch (_) {{
+      return null;
+    }}
+  }}
+  const store = getEdgeAbuseMemStore();
+  const entry = store.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt && entry.expiresAt <= Date.now()) {{
+    store.delete(key);
+    return null;
+  }}
+  return entry.value;
+}}
+
+async function writeEdgeGuardState(env, key, valueObj, ttlSeconds) {{
+  const kv = getLeadsKv(env);
+  if (kv && typeof kv.put === "function") {{
+    try {{
+      await kv.put(key, JSON.stringify(valueObj), {{ expirationTtl: ttlSeconds }});
+      return;
+    }} catch (_) {{}}
+  }}
+  const store = getEdgeAbuseMemStore();
+  store.set(key, {{
+    value: valueObj,
+    expiresAt: Date.now() + Number(ttlSeconds || 3600) * 1000,
+  }});
+}}
+
+async function enforceEdgeIpRateLimit(request, env, corsHeaders) {{
+  const clientIp = extractClientIpHeader(request) || "unknown";
+  const ipHash = await hashClientIp(clientIp);
+  const hourBucket = new Date().toISOString().slice(0, 13);
+  const rlKey = `rl:ip:${{ipHash}}:${{hourBucket}}`;
+  const curState = await readEdgeGuardState(env, rlKey);
+  const curCount = Number((curState && curState.count) || 0);
+  if (curCount >= 3) {{
+    return new Response(
+      JSON.stringify({{
+        ok: false,
+        success: false,
+        error: "rate_limited",
+        status: "rate_limited",
+        retry_after_seconds: 3600,
+      }}),
+      {{
+        status: 429,
+        headers: {{
+          "Content-Type": "application/json",
+          "Retry-After": "3600",
+          ...corsHeaders,
+        }},
+      }}
+    );
+  }}
+  await writeEdgeGuardState(env, rlKey, {{ count: curCount + 1, bucket: hourBucket }}, 3600);
+  return null;
+}}
+
+async function enforceEdgeFulfillPostGuard(request, env, isSyntheticProbe, leadId, corsHeaders) {{
+  if (isSyntheticProbe) {{
+    return {{
+      allowed: false,
+      response: new Response(
+        JSON.stringify({{
+          ok: false,
+          success: false,
+          settled: false,
+          synthetic_test: true,
+          status: "payment_required",
+          lead_id: leadId || null,
+          error: "Synthetic probe suppressed before Stripe payment verification.",
+        }}),
+        {{
+          status: 402,
+          headers: {{
+            "Content-Type": "application/json",
+            "X-Edge-Synthetic-Test": "1",
+            ...corsHeaders,
+          }},
+        }}
+      ),
+    }};
+  }}
+  const configuredDomain = extractConfiguredEdgeDomain(env);
+  const projectSlug = extractConfiguredPagesProjectSlug(env, configuredDomain);
+  if (configuredDomain) {{
+    const originHdr =
+      request && request.headers && typeof request.headers.get === "function"
+        ? String(request.headers.get("origin") || "").trim()
+        : "";
+    const refererHdr =
+      request && request.headers && typeof request.headers.get === "function"
+        ? String(request.headers.get("referer") || "").trim()
+        : "";
+    const candidate = originHdr || refererHdr;
+    if (!isAllowedEdgeOriginUrl(candidate, configuredDomain, projectSlug, false)) {{
+      return {{
+        allowed: false,
+        response: new Response(
+          JSON.stringify({{
+            ok: false,
+            success: false,
+            error: "origin_not_allowed",
+            status: "origin_not_allowed",
+          }}),
+          {{ status: 403, headers: {{ "Content-Type": "application/json", ...corsHeaders }} }}
+        ),
+      }};
+    }}
+  }}
+  const rlResp = await enforceEdgeIpRateLimit(request, env, corsHeaders);
+  if (rlResp) {{
+    return {{ allowed: false, response: rlResp }};
+  }}
+  return {{ allowed: true }};
+}}
+
+async function enforceEdgePostAbuseGuards(request, env, body, isSyntheticProbe, corsHeaders) {{
+  if (isSyntheticProbe) {{
+    return {{ allowed: true }};
+  }}
+  const safeBody = body && typeof body === "object" ? body : {{}};
+  const configuredDomain = extractConfiguredEdgeDomain(env);
+  const projectSlug = extractConfiguredPagesProjectSlug(env, configuredDomain);
+
+  // 1. Same-Origin / Referer check when DOMAIN or CANONICAL_BASE is configured
+  if (configuredDomain) {{
+    const originHdr =
+      request && request.headers && typeof request.headers.get === "function"
+        ? String(request.headers.get("origin") || "").trim()
+        : "";
+    const refererHdr =
+      request && request.headers && typeof request.headers.get === "function"
+        ? String(request.headers.get("referer") || "").trim()
+        : "";
+    const candidate = originHdr || refererHdr;
+    if (!isAllowedEdgeOriginUrl(candidate, configuredDomain, projectSlug, false)) {{
+      return {{
+        allowed: false,
+        response: new Response(
+          JSON.stringify({{
+            ok: false,
+            success: false,
+            error: "origin_not_allowed",
+            status: "origin_not_allowed",
+          }}),
+          {{ status: 403, headers: {{ "Content-Type": "application/json", ...corsHeaders }} }}
+        ),
+      }};
+    }}
+  }}
+
+  // 2. Honeypot field check
+  const hpFields = ["company_website", "hp_website", "_hp", "website_url_hp"];
+  for (const hpKey of hpFields) {{
+    const val = safeBody[hpKey];
+    if (typeof val === "string" && val.trim().length > 0) {{
+      return {{
+        allowed: false,
+        response: new Response(
+          JSON.stringify({{
+            ok: false,
+            success: false,
+            error: "bot_detected",
+            status: "bot_detected",
+          }}),
+          {{ status: 403, headers: {{ "Content-Type": "application/json", ...corsHeaders }} }}
+        ),
+      }};
+    }}
+  }}
+
+  // 3. Minimum form interaction timing check (< 1200ms)
+  if (
+    safeBody.form_rendered_at !== undefined &&
+    safeBody.form_rendered_at !== null &&
+    String(safeBody.form_rendered_at).trim() !== ""
+  ) {{
+    const renderedAt = Number(safeBody.form_rendered_at);
+    if (Number.isFinite(renderedAt) && Date.now() - renderedAt < 1200) {{
+      return {{
+        allowed: false,
+        response: new Response(
+          JSON.stringify({{
+            ok: false,
+            success: false,
+            error: "submitted_too_fast",
+            status: "submitted_too_fast",
+          }}),
+          {{ status: 403, headers: {{ "Content-Type": "application/json", ...corsHeaders }} }}
+        ),
+      }};
+    }}
+  }}
+
+  // 4. Cloudflare Turnstile fail-closed siteverify when TURNSTILE_SECRET_KEY is set
+  const clientIp = extractClientIpHeader(request);
+  const turnstileSecret = String((env && env.TURNSTILE_SECRET_KEY) || "").trim();
+  if (turnstileSecret) {{
+    const rawTokenCandidate =
+      safeBody.cf_turnstile_response !== undefined && safeBody.cf_turnstile_response !== null
+        ? safeBody.cf_turnstile_response
+        : safeBody["cf-turnstile-response"] !== undefined && safeBody["cf-turnstile-response"] !== null
+        ? safeBody["cf-turnstile-response"]
+        : safeBody.turnstile_token;
+    const token = typeof rawTokenCandidate === "string" ? rawTokenCandidate.trim() : "";
+    if (!token || typeof fetch !== "function") {{
+      return {{
+        allowed: false,
+        response: new Response(
+          JSON.stringify({{
+            ok: false,
+            success: false,
+            error: "bot_verification_failed",
+            status: "bot_verification_failed",
+          }}),
+          {{ status: 403, headers: {{ "Content-Type": "application/json", ...corsHeaders }} }}
+        ),
+      }};
+    }}
+    let verifyOk = false;
+    try {{
+      const formBody = new URLSearchParams({{
+        secret: turnstileSecret,
+        response: token,
+        remoteip: clientIp === "unknown" ? "" : clientIp,
+      }}).toString();
+      const verifyResp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }},
+        body: formBody,
+      }});
+      if (verifyResp && verifyResp.ok) {{
+        const verifyJson = await verifyResp.json().catch(() => null);
+        if (verifyJson && verifyJson.success === true) {{
+          if (configuredDomain) {{
+            const verifiedHost = String(verifyJson.hostname || "").trim().toLowerCase();
+            verifyOk = Boolean(verifiedHost) && isAllowedEdgeOriginHost(verifiedHost, configuredDomain, projectSlug, false);
+          }} else {{
+            verifyOk = true;
+          }}
+        }}
+      }}
+    }} catch (_) {{
+      verifyOk = false;
+    }}
+    if (!verifyOk) {{
+      return {{
+        allowed: false,
+        response: new Response(
+          JSON.stringify({{
+            ok: false,
+            success: false,
+            error: "bot_verification_failed",
+            status: "bot_verification_failed",
+          }}),
+          {{ status: 403, headers: {{ "Content-Type": "application/json", ...corsHeaders }} }}
+        ),
+      }};
+    }}
+  }}
+
+  // 5. Per-IP hourly rate limit (max 3 real POST submissions per hour)
+  const rlResp = await enforceEdgeIpRateLimit(request, env, corsHeaders);
+  if (rlResp) {{
+    return {{ allowed: false, response: rlResp }};
+  }}
+
+  return {{ allowed: true }};
+}}
+
+async function checkEdgeEmailDedupResponse(env, normalizedEmail, isSyntheticProbe, fallbackMeta, corsHeaders) {{
+  if (isSyntheticProbe || !normalizedEmail) return null;
+  const dedupKey = `dedup:email:${{normalizedEmail}}`;
+  const existing = await readEdgeGuardState(env, dedupKey);
+  if (!existing) return null;
+  const meta = fallbackMeta && typeof fallbackMeta === "object" ? fallbackMeta : {{}};
+  const playbookUrl = existing.playbook_url || meta.playbook_url || null;
+  const fulfillUrl = existing.fulfill_url || existing.fulfillment_url || meta.fulfill_url || meta.fulfillment_url || null;
+  const checkoutUrl = existing.checkout_url !== undefined ? existing.checkout_url : (meta.checkout_url || null);
+  return new Response(
+    JSON.stringify({{
+      ok: true,
+      success: true,
+      status: "already_subscribed",
+      deduplicated: true,
+      persisted: false,
+      synthetic_test: false,
+      zeptomail_dispatched: false,
+      zeptomail_status: "deduplicated_suppressed",
+      email_provider: "none",
+      lead_id: existing.lead_id || meta.lead_id || null,
+      tool_slug: meta.tool_slug || existing.tool_slug || "homepage",
+      playbook_url: playbookUrl,
+      fulfill_url: fulfillUrl,
+      fulfillment_url: fulfillUrl,
+      checkout_url: checkoutUrl,
+    }}),
+    {{
+      status: 200,
+      headers: {{ "Content-Type": "application/json", ...corsHeaders }},
+    }}
+  );
+}}
+
+async function recordEdgeEmailDedup(env, normalizedEmail, record, isSyntheticProbe) {{
+  if (isSyntheticProbe || !normalizedEmail) return;
+  const dedupKey = `dedup:email:${{normalizedEmail}}`;
+  const rec = record && typeof record === "object" ? record : {{}};
+  const fulfillUrl = rec.fulfill_url || rec.fulfillment_url || null;
+  await writeEdgeGuardState(
+    env,
+    dedupKey,
+    {{
+      lead_id: rec.lead_id || null,
+      tool_slug: rec.tool_slug || "homepage",
+      playbook_url: rec.playbook_url || null,
+      fulfill_url: fulfillUrl,
+      fulfillment_url: fulfillUrl,
+      checkout_url: rec.checkout_url !== undefined ? rec.checkout_url : null,
+      recorded_at: new Date().toISOString(),
+    }},
+    86400
+  );
+}}
+
+async function checkEdgeDailyEmailCap(env, dailyLimit = 25) {{
+  const dayBucket = new Date().toISOString().slice(0, 10);
+  const capKey = `mailcap:day:${{dayBucket}}`;
+  const curState = await readEdgeGuardState(env, capKey);
+  const curCount = Number((curState && curState.count) || 0);
+  return {{
+    allowed: curCount < dailyLimit,
+    count: curCount,
+    key: capKey,
+    day: dayBucket,
+  }};
+}}
+
+async function incrementEdgeDailyEmailCap(env, capCheck) {{
+  if (!capCheck || !capCheck.key) return;
+  await writeEdgeGuardState(
+    env,
+    capCheck.key,
+    {{ count: Number(capCheck.count || 0) + 1, day: capCheck.day }},
+    86400
+  );
+}}
+
+async function dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSyntheticProbe = false) {{
+  if (isSyntheticProbe) {{
+    return await dispatchEdgeZeptoMailPlaybook(env, record, true);
+  }}
+  if (!isFreeFormPlaybookEmailEnabled(env)) {{
+    return {{
+      zeptomail_dispatched: false,
+      zeptomail_status: "free_form_email_disabled",
+      zeptomail_request_id: null,
+      email_provider: "none",
+      fulfillment_status: "on_screen_ready",
+    }};
+  }}
+  return await dispatchEdgeZeptoMailPlaybook(env, record, false);
+}}
+"""
+    assert_no_forbidden_dashes(js_block, f"_render_edge_lead_abuse_guard_js({prop_clean})")
+    return js_block
+
+
 def _render_edge_paid_fulfillment_and_exports_js(property_id: str) -> str:
     """
     Renders the tenant-isolated paid-fulfillment email helper and ES-module exports
@@ -6191,6 +6856,16 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "suppressed_probe_email",
     };
   }
+  const dailyCap = await checkEdgeDailyEmailCap(env, 25);
+  if (!dailyCap.allowed) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "daily_cap_suppressed",
+      zeptomail_request_id: null,
+      email_provider: "none",
+      fulfillment_status: "daily_cap_suppressed",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -6207,14 +6882,15 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "LienBond Underwriting & Statutory Desk";
-  const emailSubject = `[LienBond Playbook] Your Construction Surety, Lien & Audit Worksheet (${record.tool_slug})`;
+  const cleanLbSlug = sanitizeEdgeToolSlug(record && record.tool_slug, "contractor-license-bond-cost-calculator-by-credit-score");
+  const emailSubject = `[LienBond Playbook] Your Construction Surety, Lien & Audit Worksheet (${cleanLbSlug})`.replace(/[\\r\\n]+/g, " ");
   const lbSkuQs = record && record.offer_sku ? `&sku=${encodeURIComponent(record.offer_sku)}` : "";
-  const fallbackLbCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}&redirect=1`;
+  const fallbackLbCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(cleanLbSlug)}&redirect=1`;
   const rawLbCheckout = String(record.checkout_url || fallbackLbCheckoutPath);
   const fullLbCheckoutUrl = rawLbCheckout.startsWith("http")
     ? rawLbCheckout
     : `https://lienbond.com${rawLbCheckout}${rawLbCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const lbPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "contractor-license-bond-cost-calculator-by-credit-score")}`);
+  const lbPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(cleanLbSlug)}`);
   const lbPlaybookHtmlUrl = `https://lienbond.com${lbPlaybookPath}${lbPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const lbPlaybookCsvUrl = `https://lienbond.com${record.playbook_csv_url || (lbPlaybookPath + "&format=csv")}`;
   const lbSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -6222,17 +6898,26 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
       `<tbody>` +
-      lbSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      lbSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_code || "LINE")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_item || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.baseline_value || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${escapeEdgeHtml(r.optimized_value || "")}</td></tr>`).join("") +
       `</tbody></table>`
     : "";
+  const safeLbLeadId = escapeEdgeHtml(record.lead_id || "");
+  const safeLbSlug = escapeEdgeHtml(cleanLbSlug);
+  const safeLbState = escapeEdgeHtml(record.state || "CA");
+  const safeLbPlaybookHtmlUrl = escapeEdgeHtml(lbPlaybookHtmlUrl);
+  const safeLbPlaybookCsvUrl = escapeEdgeHtml(lbPlaybookCsvUrl);
+  const safeLbRedirectUrl = escapeEdgeHtml(`https://lienbond.com${record.redirect_url || ""}`);
+  const safeLbRepDesk = escapeEdgeHtml(record.partner_rep_desk || "Commercial Surety & Contractor Underwriting Desk");
+  const safeLbCheckoutUrl = escapeEdgeHtml(fullLbCheckoutUrl);
+  const safeLbOfferTitle = escapeEdgeHtml(record.offer_title || "");
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your LienBond Commercial Surety, Lien &amp; Workers' Comp Worksheet</h2>` +
-    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
-    `<p>Modeled Exposure: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | State: <strong>${record.state || "CA"}</strong></p>` +
+    `<p>Lead Reference: <strong>${safeLbLeadId}</strong> | Scenario Tool: <strong>${safeLbSlug}</strong></p>` +
+    `<p>Modeled Exposure: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | State: <strong>${safeLbState}</strong></p>` +
     lbTableHtml +
-    `<p><a href="${lbPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${lbPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
-    `<p><a href="https://lienbond.com${record.redirect_url}">Review Matched Surety &amp; Contractor Insurance Desk (${record.partner_rep_desk || "Commercial Surety & Contractor Underwriting Desk"})</a></p>` +
-    `<p><a href="${fullLbCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `<p><a href="${safeLbPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${safeLbPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
+    `<p><a href="${safeLbRedirectUrl}">Review Matched Surety &amp; Contractor Insurance Desk (${safeLbRepDesk})</a></p>` +
+    `<p><a href="${safeLbCheckoutUrl}">Unlock ${safeLbOfferTitle} ($${escapeEdgeHtml(record.offer_price_usd)})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
   let zeptoHttpStatus = null;
@@ -6261,6 +6946,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -6319,6 +7005,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
         const zohoMsg = (zohoJson && zohoJson.data) || {};
         if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
           const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          await incrementEdgeDailyEmailCap(env, dailyCap);
           return {
             zeptomail_dispatched: true,
             zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
@@ -6356,6 +7043,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -6386,8 +7074,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   };
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export async function onRequestOptions(context = {}) {
+  return new Response(null, {
+    status: 204,
+    headers: buildEdgeCorsHeaders(context && context.request, context && context.env, { forPost: true }),
+  });
 }
 
 async function resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email) {
@@ -6419,6 +7110,9 @@ async function resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSk
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://lienbond.com/api/lead-capture");
+  if (reqUrl.searchParams.get("config") === "1") {
+    return buildEdgeConfigResponse(request, env);
+  }
   const isSynth =
     (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
     reqUrl.searchParams.get("synthetic_test") === "1";
@@ -6683,13 +7377,15 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 export async function onRequestPost(context) {
+  let postCorsHeaders = CORS_HEADERS;
   try {
     const { request, env } = context;
+    postCorsHeaders = buildEdgeCorsHeaders(request, env, { forPost: true });
     const reqUrl = new URL((request && request.url) || "https://lienbond.com/api/lead-capture");
-    const body = await request.json().catch(() => ({}));
-    const rawEmail = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
+    const body = await parseLeadCapturePostBody(request);
+    const rawEmail = String(body.email || "").trim().toLowerCase();
     const state = String(body.state || reqUrl.searchParams.get("state") || "CA").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || "CA";
-    const toolSlug = String(
+    const toolSlug = sanitizeEdgeToolSlug(
       body.tool_slug ||
       body.slug ||
       body.source_tool ||
@@ -6697,12 +7393,9 @@ export async function onRequestPost(context) {
       reqUrl.searchParams.get("tool_slug") ||
       reqUrl.searchParams.get("tool") ||
       reqUrl.searchParams.get("slug") ||
+      "",
       "contractor-license-bond-cost-calculator-by-credit-score"
-    )
-      .trim()
-      .toLowerCase()
-      .replace(/^\\/+|\\/+$/g, "")
-      .replace(/^tools\\//, "");
+    );
     const partnerKey = selectPartnerForSlug(toolSlug, body.partner_key);
     const isSynth = isSyntheticProbeRequest(request, body, rawEmail);
     const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
@@ -6721,6 +7414,8 @@ export async function onRequestPost(context) {
     const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_lienbond_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
     if (isFulfillMode) {
+      const fulfillGuard = await enforceEdgeFulfillPostGuard(request, env, isSynth, leadId, postCorsHeaders);
+      if (!fulfillGuard.allowed) return fulfillGuard.response;
       const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
       const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
@@ -6751,11 +7446,14 @@ export async function onRequestPost(context) {
           headers: {
             "Content-Type": "application/json",
             ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
-            ...CORS_HEADERS,
+            ...postCorsHeaders,
           },
         }
       );
     }
+
+    const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSynth, postCorsHeaders);
+    if (!abuseGuard.allowed) return abuseGuard.response;
 
     if (!isCheckoutMode && body.calculated_amount !== undefined && calculatedAmount < thresholdUsd) {
       return new Response(
@@ -6774,7 +7472,7 @@ export async function onRequestPost(context) {
           redirect_url: `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=frictionless_direct`,
           action_bus_dispatched: false,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -6786,7 +7484,7 @@ export async function onRequestPost(context) {
     ) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid contractor or business email address." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -6835,7 +7533,7 @@ export async function onRequestPost(context) {
           status: "partner_registered",
           ...partnerRecord,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -6851,9 +7549,28 @@ export async function onRequestPost(context) {
           success: false,
           error: "Explicit TCPA partner_sharing_consent is required to dispatch your commercial surety or insurance quote.",
         }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
+
+    const dedupFallbackPlaybook = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+    const dedupFallbackFulfill = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+    const dedupFallbackCheckout = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+    const dedupResp = await checkEdgeEmailDedupResponse(
+      env,
+      email,
+      isSynth,
+      {
+        lead_id: leadId,
+        tool_slug: toolSlug,
+        playbook_url: dedupFallbackPlaybook,
+        fulfill_url: dedupFallbackFulfill,
+        fulfillment_url: dedupFallbackFulfill,
+        checkout_url: dedupFallbackCheckout,
+      },
+      postCorsHeaders
+    );
+    if (dedupResp) return dedupResp;
 
     const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount));
     const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
@@ -6898,10 +7615,13 @@ export async function onRequestPost(context) {
     record.reconciliation_schedule = bundle.reconciliation_schedule;
     record.sensitivity_matrix = bundle.sensitivity_matrix;
     record.fulfillment_url = bundle.fulfillment_url;
+    record.fulfill_url = bundle.fulfillment_url;
     record.csv_fulfillment_url = bundle.csv_fulfillment_url;
     Object.assign(record, stripeOffer);
+    if (!record.playbook_url) record.playbook_url = bundle.playbook_url;
+    if (!record.fulfill_url) record.fulfill_url = record.fulfillment_url || bundle.fulfillment_url;
 
-    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSynth);
+    const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSynth);
     Object.assign(record, emailDispatch);
 
     if (!isSynth) {
@@ -6915,6 +7635,7 @@ export async function onRequestPost(context) {
           metadata: buildEdgeLeadKvMetadata(record),
         });
       }
+      await recordEdgeEmailDedup(env, email, record, isSynth);
     }
 
     return new Response(
@@ -6931,19 +7652,20 @@ export async function onRequestPost(context) {
         headers: {
           "Content-Type": "application/json",
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
-          ...CORS_HEADERS,
+          ...postCorsHeaders,
         },
       }
     );
   } catch (err) {
     return new Response(
       JSON.stringify({ ok: false, success: false, error: "Unable to process commercial surety or lien packet request." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      { status: 500, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
     );
   }
 }
 """
         lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json("lienbond"))
+        lead_js = lead_js + _render_edge_lead_abuse_guard_js("lienbond")
         lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js("lienbond")
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(lienbond)")
         return lead_js
@@ -8764,6 +9486,16 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "suppressed_probe_email",
     };
   }
+  const dailyCap = await checkEdgeDailyEmailCap(env, 25);
+  if (!dailyCap.allowed) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "daily_cap_suppressed",
+      zeptomail_request_id: null,
+      email_provider: "none",
+      fulfillment_status: "daily_cap_suppressed",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -8780,11 +9512,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "GainHelm Research Desk";
-  const labelSlug = record.tool_slug || record.vertical || "soc-2-audit-cost-calculator";
+  const labelSlug = sanitizeEdgeToolSlug(record && record.tool_slug, "") || record.vertical || "soc-2-audit-cost-calculator";
   const recFwKey = classifyGainHelmFramework(record.tool_slug, record.vertical);
   const recOfferObj = record.offer_sku ? { sku: record.offer_sku } : null;
   const resolvedDeskLabel = record.partner_rep_desk || resolveGainHelmPartnerRepDesk(record.partner_key, recFwKey);
-  const emailSubject = `[GainHelm Playbook] Your Compliance Scoping & Cost Worksheet (${labelSlug})`;
+  const emailSubject = `[GainHelm Playbook] Your Compliance Scoping & Cost Worksheet (${labelSlug})`.replace(/[\\r\\n]+/g, " ");
   const fallbackGhCheckoutPath = buildGainHelmActionUrl("checkout", record, recOfferObj, { redirect: true });
   const rawGhCheckout = String(record.checkout_url || fallbackGhCheckoutPath);
   const fullGhCheckoutUrl = rawGhCheckout.startsWith("http")
@@ -8798,17 +9530,26 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
       `<tbody>` +
-      ghSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      ghSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_code || "LINE")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_item || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.baseline_value || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${escapeEdgeHtml(r.optimized_value || "")}</td></tr>`).join("") +
       `</tbody></table>`
     : "";
+  const safeGhLeadId = escapeEdgeHtml(record.lead_id || "");
+  const safeGhSlug = escapeEdgeHtml(labelSlug);
+  const safeGhCapBand = escapeEdgeHtml(record.capital_band || "mid_market");
+  const safeGhPlaybookHtmlUrl = escapeEdgeHtml(ghPlaybookHtmlUrl);
+  const safeGhPlaybookCsvUrl = escapeEdgeHtml(ghPlaybookCsvUrl);
+  const safeGhRedirectUrl = escapeEdgeHtml(`https://gainhelm.com${record.redirect_url || ""}`);
+  const safeGhDeskLabel = escapeEdgeHtml(resolvedDeskLabel);
+  const safeGhCheckoutUrl = escapeEdgeHtml(fullGhCheckoutUrl);
+  const safeGhOfferTitle = escapeEdgeHtml(record.offer_title || "");
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your Calculation Worksheet &amp; Action Plan</h2>` +
-    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${labelSlug}</strong></p>` +
-    `<p>Modeled Scope: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "mid_market"}</strong></p>` +
+    `<p>Lead Reference: <strong>${safeGhLeadId}</strong> | Scenario Tool: <strong>${safeGhSlug}</strong></p>` +
+    `<p>Modeled Scope: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${safeGhCapBand}</strong></p>` +
     ghTableHtml +
-    `<p><a href="${ghPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${ghPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
-    `<p><a href="https://gainhelm.com${record.redirect_url}">Review Matched GRC &amp; Compliance Platform (${resolvedDeskLabel})</a></p>` +
-    `<p><a href="${fullGhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `<p><a href="${safeGhPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${safeGhPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
+    `<p><a href="${safeGhRedirectUrl}">Review Matched GRC &amp; Compliance Platform (${safeGhDeskLabel})</a></p>` +
+    `<p><a href="${safeGhCheckoutUrl}">Unlock ${safeGhOfferTitle} ($${escapeEdgeHtml(record.offer_price_usd)})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
   let zeptoHttpStatus = null;
@@ -8837,6 +9578,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -8895,6 +9637,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
         const zohoMsg = (zohoJson && zohoJson.data) || {};
         if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
           const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          await incrementEdgeDailyEmailCap(env, dailyCap);
           return {
             zeptomail_dispatched: true,
             zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
@@ -8932,6 +9675,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -8962,13 +9706,19 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   };
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export async function onRequestOptions(context = {}) {
+  return new Response(null, {
+    status: 204,
+    headers: buildEdgeCorsHeaders(context && context.request, context && context.env, { forPost: true }),
+  });
 }
 
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://gainhelm.com/api/lead-capture");
+  if (reqUrl.searchParams.get("config") === "1") {
+    return buildEdgeConfigResponse(request, env);
+  }
   const isSynth =
     (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
     reqUrl.searchParams.get("synthetic_test") === "1";
@@ -9270,11 +10020,13 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 export async function onRequestPost(context) {
+  let postCorsHeaders = CORS_HEADERS;
   try {
     const { request, env } = context;
+    postCorsHeaders = buildEdgeCorsHeaders(request, env, { forPost: true });
     const reqUrl = new URL((request && request.url) || "https://gainhelm.com/api/lead-capture");
-    const body = await request.json().catch(() => ({}));
-    const rawEmail = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
+    const body = await parseLeadCapturePostBody(request);
+    const rawEmail = String(body.email || "").trim().toLowerCase();
     const rawStateInput = String(body.state || reqUrl.searchParams.get("state") || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
     const reqVertical = String(
       body.vertical || reqUrl.searchParams.get("vertical") || ""
@@ -9290,11 +10042,7 @@ export async function onRequestPost(context) {
     const fallbackSlugVal = rawToolSlugCandidate === undefined || rawToolSlugCandidate === null
       ? ""
       : String(rawToolSlugCandidate);
-    const toolSlug = fallbackSlugVal
-      .trim()
-      .toLowerCase()
-      .replace(/^\\/+|\\/+$/g, "")
-      .replace(/^tools(?:\\/|$)/, "");
+    const toolSlug = sanitizeEdgeToolSlug(fallbackSlugVal, "");
     const reqPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const hasExplicitVertical = isExplicitGainHelmVertical(reqVertical);
     const hasExplicitSku = Boolean(reqPostSku && Object.prototype.hasOwnProperty.call(GAINHELM_TOOLKIT_OFFERS, reqPostSku));
@@ -9332,6 +10080,8 @@ export async function onRequestPost(context) {
     const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_gainhelm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
     if (isFulfillMode) {
+      const fulfillGuard = await enforceEdgeFulfillPostGuard(request, env, isSynth, leadId, postCorsHeaders);
+      if (!fulfillGuard.allowed) return fulfillGuard.response;
       const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
       const storedRecord = await lookupEdgeLeadRecord(
         env,
@@ -9362,11 +10112,14 @@ export async function onRequestPost(context) {
           headers: {
             "Content-Type": "application/json",
             ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
-            ...CORS_HEADERS,
+            ...postCorsHeaders,
           },
         }
       );
     }
+
+    const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSynth, postCorsHeaders);
+    if (!abuseGuard.allowed) return abuseGuard.response;
 
     if (!isCheckoutMode && body.calculated_amount !== undefined && calculatedAmount < thresholdUsd) {
       const subVertQs = fwVertical ? `&vertical=${encodeURIComponent(fwVertical)}` : "";
@@ -9387,7 +10140,7 @@ export async function onRequestPost(context) {
           redirect_url: `/r/${partnerKey}?source_tool=${encodeURIComponent(toolSlug)}&cta_slot=frictionless_direct${subVertQs}`,
           action_bus_dispatched: false,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -9399,7 +10152,7 @@ export async function onRequestPost(context) {
     ) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid work email address." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -9453,7 +10206,7 @@ export async function onRequestPost(context) {
           status: "partner_registered",
           ...partnerRecord,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -9469,9 +10222,26 @@ export async function onRequestPost(context) {
           success: false,
           error: "Explicit TCPA partner_sharing_consent is required to dispatch your compliance readiness quote.",
         }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
+
+    const dedupFallbackRec = { lead_id: leadId, tool_slug: toolSlug, vertical: fwVertical, has_explicit_vertical: hasExplicitVertical, has_explicit_sku: hasExplicitSku, is_bare_root: isBareRoot, offer_sku: offer.sku };
+    const dedupResp = await checkEdgeEmailDedupResponse(
+      env,
+      email,
+      isSynth,
+      {
+        lead_id: leadId,
+        tool_slug: toolSlug,
+        playbook_url: buildGainHelmActionUrl("playbook", dedupFallbackRec, offer),
+        fulfill_url: buildGainHelmActionUrl("fulfill", dedupFallbackRec, offer),
+        fulfillment_url: buildGainHelmActionUrl("fulfill", dedupFallbackRec, offer),
+        checkout_url: buildGainHelmActionUrl("checkout", dedupFallbackRec, offer, { redirect: true }),
+      },
+      postCorsHeaders
+    );
+    if (dedupResp) return dedupResp;
 
     const capitalBand = String(body.capital_band || deriveCapitalBand(calculatedAmount));
     const subidSlug = (toolSlug || fwKey || "gainhelm").slice(0, 24);
@@ -9522,10 +10292,13 @@ export async function onRequestPost(context) {
     record.reconciliation_schedule = bundle.reconciliation_schedule;
     record.sensitivity_matrix = bundle.sensitivity_matrix;
     record.fulfillment_url = bundle.fulfillment_url;
+    record.fulfill_url = bundle.fulfillment_url;
     record.csv_fulfillment_url = bundle.csv_fulfillment_url;
     Object.assign(record, stripeOffer);
+    if (!record.playbook_url) record.playbook_url = bundle.playbook_url;
+    if (!record.fulfill_url) record.fulfill_url = record.fulfillment_url || bundle.fulfillment_url;
 
-    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSynth);
+    const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSynth);
     Object.assign(record, emailDispatch);
 
     if (!isSynth) {
@@ -9539,6 +10312,7 @@ export async function onRequestPost(context) {
           metadata: buildEdgeLeadKvMetadata(record),
         });
       }
+      await recordEdgeEmailDedup(env, email, record, isSynth);
     }
 
     return new Response(
@@ -9555,14 +10329,14 @@ export async function onRequestPost(context) {
         headers: {
           "Content-Type": "application/json",
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
-          ...CORS_HEADERS,
+          ...postCorsHeaders,
         },
       }
     );
   } catch (err) {
     return new Response(
       JSON.stringify({ ok: false, success: false, error: "Unable to process GRC audit quote request." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      { status: 500, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
     );
   }
 }
@@ -9572,6 +10346,7 @@ export async function onRequestPost(context) {
             "__GAINHELM_FRAMEWORK_ROUTING_JS__",
             _render_gainhelm_framework_routing_js(include_deliverables=True),
         )
+        lead_js = lead_js + _render_edge_lead_abuse_guard_js("gainhelm")
         lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js("gainhelm")
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(gainhelm)")
         return lead_js
@@ -10786,6 +11561,16 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "suppressed_probe_email",
     };
   }
+  const dailyCap = await checkEdgeDailyEmailCap(env, 25);
+  if (!dailyCap.allowed) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "daily_cap_suppressed",
+      zeptomail_request_id: null,
+      email_provider: "none",
+      fulfillment_status: "daily_cap_suppressed",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -10802,14 +11587,15 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "Prexvo Research Desk";
-  const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${record.tool_slug})`;
+  const cleanPxSlug = sanitizeEdgeToolSlug(record && record.tool_slug, "student-loan-refinance-break-even-calculator");
+  const emailSubject = `[Prexvo Playbook] Your Student Loan Refinance Worksheet (${cleanPxSlug})`.replace(/[\\r\\n]+/g, " ");
   const pxSkuQs = record && record.offer_sku ? `&sku=${encodeURIComponent(record.offer_sku)}` : "";
-  const fallbackPxCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}&redirect=1`;
+  const fallbackPxCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(cleanPxSlug)}&redirect=1`;
   const rawPxCheckout = String(record.checkout_url || fallbackPxCheckoutPath);
   const fullPxCheckoutUrl = rawPxCheckout.startsWith("http")
     ? rawPxCheckout
     : `https://prexvo.com${rawPxCheckout}${rawPxCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const pxPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "student-loan-refinance-break-even-calculator")}`);
+  const pxPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(cleanPxSlug)}`);
   const pxPlaybookHtmlUrl = `https://prexvo.com${pxPlaybookPath}${pxPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const pxPlaybookCsvUrl = `https://prexvo.com${record.playbook_csv_url || (pxPlaybookPath + "&format=csv")}`;
   const pxSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -10817,17 +11603,26 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
       `<tbody>` +
-      pxSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      pxSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_code || "LINE")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_item || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.baseline_value || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${escapeEdgeHtml(r.optimized_value || "")}</td></tr>`).join("") +
       `</tbody></table>`
     : "";
+  const safePxLeadId = escapeEdgeHtml(record.lead_id || "");
+  const safePxSlug = escapeEdgeHtml(cleanPxSlug);
+  const safePxCapBand = escapeEdgeHtml(record.capital_band || "standard");
+  const safePxPlaybookHtmlUrl = escapeEdgeHtml(pxPlaybookHtmlUrl);
+  const safePxPlaybookCsvUrl = escapeEdgeHtml(pxPlaybookCsvUrl);
+  const safePxRedirectUrl = escapeEdgeHtml(`https://prexvo.com${record.redirect_url || ""}`);
+  const safePxRepDesk = escapeEdgeHtml(record.partner_rep_desk || "Splash Financial Partner Desk");
+  const safePxCheckoutUrl = escapeEdgeHtml(fullPxCheckoutUrl);
+  const safePxOfferTitle = escapeEdgeHtml(record.offer_title || "");
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your Prexvo Student Loan Refinance Worksheet &amp; Decision Checklist</h2>` +
-    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
-    `<p>Model Balance: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
+    `<p>Lead Reference: <strong>${safePxLeadId}</strong> | Scenario Tool: <strong>${safePxSlug}</strong></p>` +
+    `<p>Model Balance: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${safePxCapBand}</strong></p>` +
     pxTableHtml +
-    `<p><a href="${pxPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${pxPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
-    `<p><a href="https://prexvo.com${record.redirect_url}">Compare Matched Lender Rates (${record.partner_rep_desk || "Splash Financial Partner Desk"})</a></p>` +
-    `<p><a href="${fullPxCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `<p><a href="${safePxPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${safePxPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
+    `<p><a href="${safePxRedirectUrl}">Compare Matched Lender Rates (${safePxRepDesk})</a></p>` +
+    `<p><a href="${safePxCheckoutUrl}">Unlock ${safePxOfferTitle} ($${escapeEdgeHtml(record.offer_price_usd)})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
   let zeptoHttpStatus = null;
@@ -10859,6 +11654,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -10917,6 +11713,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
         const zohoMsg = (zohoJson && zohoJson.data) || {};
         if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
           const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          await incrementEdgeDailyEmailCap(env, dailyCap);
           return {
             zeptomail_dispatched: true,
             zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
@@ -10954,6 +11751,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || (data.data && data.data[0] && data.data[0].additional_info) || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -10984,8 +11782,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   };
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export async function onRequestOptions(context = {}) {
+  return new Response(null, {
+    status: 204,
+    headers: buildEdgeCorsHeaders(context && context.request, context && context.env, { forPost: true }),
+  });
 }
 
 async function resolvePrexvoGetContext(env, reqUrl, request) {
@@ -11029,6 +11830,9 @@ async function resolvePrexvoGetContext(env, reqUrl, request) {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
+  if (reqUrl.searchParams.get("config") === "1") {
+    return buildEdgeConfigResponse(request, env);
+  }
   if (reqUrl.searchParams.get("health") === "1") {
     return new Response(
       JSON.stringify({ ok: true, auth_required: true }),
@@ -11268,18 +12072,18 @@ export async function onRequestGet(context) {
 }
 
 export async function onRequestPost(context) {
+  let postCorsHeaders = CORS_HEADERS;
   try {
     const { request, env } = context;
+    postCorsHeaders = buildEdgeCorsHeaders(request, env, { forPost: true });
     const reqUrl = new URL((request && request.url) || "https://prexvo.com/api/lead-capture");
-    const body = await request.json().catch(() => ({}));
-    const email = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
+    const body = await parseLeadCapturePostBody(request);
+    const email = String(body.email || "").trim().toLowerCase();
     const state = String(body.state || reqUrl.searchParams.get("state") || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
-    const rawSlug = String(body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "student-loan-refinance-break-even-calculator")
-      .trim()
-      .toLowerCase()
-      .replace(/^\\/+|\\/+$/g, "")
-      .replace(/^tools\\//, "");
-    const toolSlug = rawSlug || "student-loan-refinance-break-even-calculator";
+    const toolSlug = sanitizeEdgeToolSlug(
+      body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
+      "student-loan-refinance-break-even-calculator"
+    );
     const reqPartner = String(body.partner_key || "splash_financial").trim().toLowerCase();
     const partnerKey = Object.prototype.hasOwnProperty.call(PARTNER_ROUTES, reqPartner)
       ? reqPartner
@@ -11291,6 +12095,8 @@ export async function onRequestPost(context) {
     const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
     if (isFulfillMode) {
       const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct");
+      const fulfillGuard = await enforceEdgeFulfillPostGuard(request, env, isSyntheticProbe, leadId, postCorsHeaders);
+      if (!fulfillGuard.allowed) return fulfillGuard.response;
       const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
       const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
@@ -11320,11 +12126,14 @@ export async function onRequestPost(context) {
           headers: {
             "Content-Type": "application/json",
             ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
-            ...CORS_HEADERS,
+            ...postCorsHeaders,
           },
         }
       );
     }
+
+    const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSyntheticProbe, postCorsHeaders);
+    if (!abuseGuard.allowed) return abuseGuard.response;
 
     if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
       return new Response(
@@ -11333,7 +12142,7 @@ export async function onRequestPost(context) {
           success: false,
           error: "Restricted public-service asset cannot capture commercial student loan refinance leads.",
         }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -11342,7 +12151,7 @@ export async function onRequestPost(context) {
       if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
-          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
         );
       }
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
@@ -11392,7 +12201,7 @@ export async function onRequestPost(context) {
           status: "partner_registered",
           ...partnerRecord,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -11421,12 +12230,31 @@ export async function onRequestPost(context) {
       if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
-          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
         );
       }
       const ts = new Date().toISOString();
       const randSuffix = Math.random().toString(36).slice(2, 10);
       const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
+      const pxDedupPlaybook = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const pxDedupFulfill = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const pxDedupCheckout = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const pbDedupResp = await checkEdgeEmailDedupResponse(
+        env,
+        email,
+        isSyntheticProbe,
+        {
+          lead_id: leadId,
+          tool_slug: toolSlug,
+          playbook_url: pxDedupPlaybook,
+          fulfill_url: pxDedupFulfill,
+          fulfillment_url: pxDedupFulfill,
+          checkout_url: pxDedupCheckout,
+        },
+        postCorsHeaders
+      );
+      if (pbDedupResp) return pbDedupResp;
+
       const redirectUrl = `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
       const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe, null, reqSku);
       const modeledAmt = extractScenarioAmount(body, scenarioInputs, blueprintState);
@@ -11457,7 +12285,8 @@ export async function onRequestPost(context) {
       playbookRecord.playbook_url = workpaperBundle.playbook_url;
       playbookRecord.playbook_csv_url = workpaperBundle.playbook_csv_url;
       playbookRecord.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
-      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord, isSyntheticProbe);
+      playbookRecord.fulfill_url = playbookRecord.fulfillment_url || workpaperBundle.fulfillment_url;
+      const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, playbookRecord, isSyntheticProbe);
       Object.assign(playbookRecord, emailDispatch);
 
       if (!isSyntheticProbe) {
@@ -11472,6 +12301,7 @@ export async function onRequestPost(context) {
             metadata: buildEdgeLeadKvMetadata(playbookRecord),
           });
         }
+        await recordEdgeEmailDedup(env, email, playbookRecord, isSyntheticProbe);
       }
       return new Response(
         JSON.stringify({
@@ -11480,7 +12310,7 @@ export async function onRequestPost(context) {
           status: "playbook_subscribed",
           persisted: !isSyntheticProbe,
           synthetic_test: isSyntheticProbe,
-          message: "Your custom student loan calculation worksheet and repayment checklist have been queued.",
+          message: "Your custom student loan calculation worksheet and repayment checklist are ready.",
           ...playbookRecord,
         }),
         {
@@ -11488,7 +12318,7 @@ export async function onRequestPost(context) {
           headers: {
             "Content-Type": "application/json",
             ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
-            ...CORS_HEADERS,
+            ...postCorsHeaders,
           },
         }
       );
@@ -11515,21 +12345,21 @@ export async function onRequestPost(context) {
           redirect_url: `/r/${partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=frictionless_direct`,
           action_bus_dispatched: false,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
     if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid email address." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
     if (state.length !== 2) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please select a valid 2-letter US state." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -11540,7 +12370,7 @@ export async function onRequestPost(context) {
           success: false,
           error: "Explicit TCPA partner_sharing_consent is required to match your refinance quote.",
         }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -11548,6 +12378,22 @@ export async function onRequestPost(context) {
     const ts = new Date().toISOString();
     const randSuffix = Math.random().toString(36).slice(2, 10);
     const leadId = `lead_prexvo_${Date.now()}_${randSuffix}`;
+    const qDedupResp = await checkEdgeEmailDedupResponse(
+      env,
+      email,
+      isSyntheticProbe,
+      {
+        lead_id: leadId,
+        tool_slug: toolSlug,
+        playbook_url: `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`,
+        fulfill_url: `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`,
+        fulfillment_url: `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`,
+        checkout_url: `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`,
+      },
+      postCorsHeaders
+    );
+    if (qDedupResp) return qDedupResp;
+
     const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
     const qs = new URLSearchParams({
       source: toolSlug,
@@ -11596,8 +12442,9 @@ export async function onRequestPost(context) {
     record.playbook_url = workpaperBundle.playbook_url;
     record.playbook_csv_url = workpaperBundle.playbook_csv_url;
     record.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
+    record.fulfill_url = record.fulfillment_url || workpaperBundle.fulfillment_url;
 
-    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
+    const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
 
     if (!isSyntheticProbe) {
@@ -11612,6 +12459,7 @@ export async function onRequestPost(context) {
           metadata: buildEdgeLeadKvMetadata(record),
         });
       }
+      await recordEdgeEmailDedup(env, email, record, isSyntheticProbe);
     }
 
     return new Response(
@@ -11628,14 +12476,14 @@ export async function onRequestPost(context) {
         headers: {
           "Content-Type": "application/json",
           ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
-          ...CORS_HEADERS,
+          ...postCorsHeaders,
         },
       }
     );
   } catch (err) {
     return new Response(
       JSON.stringify({ ok: false, success: false, error: "Unable to process refinance quote request." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      { status: 500, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
     );
   }
 }
@@ -13217,6 +14065,16 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "suppressed_probe_email",
     };
   }
+  const dailyCap = await checkEdgeDailyEmailCap(env, 25);
+  if (!dailyCap.allowed) {
+    return {
+      zeptomail_dispatched: false,
+      zeptomail_status: "daily_cap_suppressed",
+      zeptomail_request_id: null,
+      email_provider: "none",
+      fulfillment_status: "daily_cap_suppressed",
+    };
+  }
   const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
     ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
     : "";
@@ -13233,14 +14091,15 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
   const fromEmail = normalizeCanonicalSenderEmail(env && env.ZEPTOMAIL_FROM_EMAIL);
   const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : "ProfitHelm Research Desk";
-  const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${record.tool_slug})`;
+  const cleanPhSlug = sanitizeEdgeToolSlug(record && record.tool_slug, "section-1031-calculator");
+  const emailSubject = `[ProfitHelm Playbook] Your Statutory Worksheet & Compliance Checklist (${cleanPhSlug})`.replace(/[\\r\\n]+/g, " ");
   const phSkuQs = record && record.offer_sku ? `&sku=${encodeURIComponent(record.offer_sku)}` : "";
-  const fallbackPhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}&redirect=1`;
+  const fallbackPhCheckoutPath = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(cleanPhSlug)}&redirect=1`;
   const rawPhCheckout = String(record.checkout_url || fallbackPhCheckoutPath);
   const fullPhCheckoutUrl = rawPhCheckout.startsWith("http")
     ? rawPhCheckout
     : `https://profithelm.com${rawPhCheckout}${rawPhCheckout.includes("redirect=1") ? "" : "&redirect=1"}`;
-  const phPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(record.tool_slug || "section-1031-calculator")}`);
+  const phPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(cleanPhSlug)}`);
   const phPlaybookHtmlUrl = `https://profithelm.com${phPlaybookPath}${phPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const phPlaybookCsvUrl = `https://profithelm.com${record.playbook_csv_url || (phPlaybookPath + "&format=csv")}`;
   const phSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
@@ -13248,17 +14107,26 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
       `<tbody>` +
-      phSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_code || "LINE"}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.line_item || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${r.baseline_value || ""}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${r.optimized_value || ""}</td></tr>`).join("") +
+      phSchedRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_code || "LINE")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.line_item || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${escapeEdgeHtml(r.baseline_value || "")}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;">${escapeEdgeHtml(r.optimized_value || "")}</td></tr>`).join("") +
       `</tbody></table>`
     : "";
+  const safePhLeadId = escapeEdgeHtml(record.lead_id || "");
+  const safePhSlug = escapeEdgeHtml(cleanPhSlug);
+  const safePhCapBand = escapeEdgeHtml(record.capital_band || "standard");
+  const safePhPlaybookHtmlUrl = escapeEdgeHtml(phPlaybookHtmlUrl);
+  const safePhPlaybookCsvUrl = escapeEdgeHtml(phPlaybookCsvUrl);
+  const safePhRedirectUrl = escapeEdgeHtml(`https://profithelm.com${record.redirect_url || ""}`);
+  const safePhRepDesk = escapeEdgeHtml(record.partner_rep_desk || "ProfitHelm Partner Desk");
+  const safePhCheckoutUrl = escapeEdgeHtml(fullPhCheckoutUrl);
+  const safePhOfferTitle = escapeEdgeHtml(record.offer_title || "");
   const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
     `<h2>Your ProfitHelm Statutory Calculation Worksheet &amp; Compliance Briefing</h2>` +
-    `<p>Lead Reference: <strong>${record.lead_id}</strong> | Scenario Tool: <strong>${record.tool_slug}</strong></p>` +
-    `<p>Model Amount: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${record.capital_band || "standard"}</strong></p>` +
+    `<p>Lead Reference: <strong>${safePhLeadId}</strong> | Scenario Tool: <strong>${safePhSlug}</strong></p>` +
+    `<p>Model Amount: <strong>$${Number(record.calculated_amount || 0).toLocaleString()}</strong> | Capital Band: <strong>${safePhCapBand}</strong></p>` +
     phTableHtml +
-    `<p><a href="${phPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${phPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
-    `<p><a href="https://profithelm.com${record.redirect_url}">Access Matched Commercial Desk (${record.partner_rep_desk || "ProfitHelm Partner Desk"})</a></p>` +
-    `<p><a href="${fullPhCheckoutUrl}">Unlock ${record.offer_title} ($${record.offer_price_usd})</a></p>` +
+    `<p><a href="${safePhPlaybookHtmlUrl}">Open Interactive Free Playbook Worksheet (HTML)</a> | <a href="${safePhPlaybookCsvUrl}">Download Free Reconciliation Schedule (CSV)</a></p>` +
+    `<p><a href="${safePhRedirectUrl}">Access Matched Commercial Desk (${safePhRepDesk})</a></p>` +
+    `<p><a href="${safePhCheckoutUrl}">Unlock ${safePhOfferTitle} ($${escapeEdgeHtml(record.offer_price_usd)})</a></p>` +
     `</div>`;
   let zeptoAttempted = false;
   let zeptoHttpStatus = null;
@@ -13290,6 +14158,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -13348,6 +14217,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
         const zohoMsg = (zohoJson && zohoJson.data) || {};
         if (zohoResp.ok && (zohoMsg.messageId || zohoMsg.mailId)) {
           const msgId = String(zohoMsg.messageId || zohoMsg.mailId);
+          await incrementEdgeDailyEmailCap(env, dailyCap);
           return {
             zeptomail_dispatched: true,
             zeptomail_status: zeptoAttempted ? "sent_edge_zoho_verified_failover" : "sent_edge_zoho_direct",
@@ -13385,6 +14255,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       const data = await resp.json().catch(() => ({}));
       if (resp.ok) {
         const reqId = data.request_id || "ok";
+        await incrementEdgeDailyEmailCap(env, dailyCap);
         return {
           zeptomail_dispatched: true,
           zeptomail_status: "sent_edge_zeptomail",
@@ -13415,8 +14286,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   };
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export async function onRequestOptions(context = {}) {
+  return new Response(null, {
+    status: 204,
+    headers: buildEdgeCorsHeaders(context && context.request, context && context.env, { forPost: true }),
+  });
 }
 
 async function resolveProfitHelmGetContext(env, reqUrl) {
@@ -13460,6 +14334,9 @@ async function resolveProfitHelmGetContext(env, reqUrl) {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const reqUrl = new URL((request && request.url) || "https://profithelm.com/api/lead-capture");
+  if (reqUrl.searchParams.get("config") === "1") {
+    return buildEdgeConfigResponse(request, env);
+  }
   if (reqUrl.searchParams.get("health") === "1") {
     return new Response(
       JSON.stringify({ ok: true, auth_required: true }),
@@ -13685,17 +14562,17 @@ export async function onRequestGet(context) {
 }
 
 export async function onRequestPost(context) {
+  let postCorsHeaders = CORS_HEADERS;
   try {
     const { request, env } = context;
+    postCorsHeaders = buildEdgeCorsHeaders(request, env, { forPost: true });
     const reqUrl = new URL((request && request.url) || "https://profithelm.com/api/lead-capture");
-    const body = await request.json().catch(() => ({}));
-    const email = String(body.email || reqUrl.searchParams.get("email") || "").trim().toLowerCase();
-    const rawSlug = String(body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "general")
-      .trim()
-      .toLowerCase()
-      .replace(/^\\/+|\\/+$/g, "")
-      .replace(/^tools\\//, "");
-    const toolSlug = rawSlug || "general";
+    const body = await parseLeadCapturePostBody(request);
+    const email = String(body.email || "").trim().toLowerCase();
+    const toolSlug = sanitizeEdgeToolSlug(
+      body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
+      "general"
+    );
     const reqPartner = String(body.partner_key || "").trim().toLowerCase();
     const reqSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
     const spec = resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku);
@@ -13705,6 +14582,8 @@ export async function onRequestPost(context) {
     const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
     if (isFulfillMode) {
       const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct");
+      const fulfillGuard = await enforceEdgeFulfillPostGuard(request, env, isSyntheticProbe, leadId, postCorsHeaders);
+      if (!fulfillGuard.allowed) return fulfillGuard.response;
       const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
       const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
@@ -13735,17 +14614,21 @@ export async function onRequestPost(context) {
           headers: {
             "Content-Type": "application/json",
             ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
-            ...CORS_HEADERS,
+            ...postCorsHeaders,
           },
         }
       );
     }
+
+    const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSyntheticProbe, postCorsHeaders);
+    if (!abuseGuard.allowed) return abuseGuard.response;
+
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
       if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
-          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
         );
       }
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
@@ -13796,7 +14679,7 @@ export async function onRequestPost(context) {
           status: "partner_registered",
           ...partnerRecord,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -13824,12 +14707,31 @@ export async function onRequestPost(context) {
       if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
         return new Response(
           JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
-          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
         );
       }
       const ts = new Date().toISOString();
       const randSuffix = Math.random().toString(36).slice(2, 10);
       const leadId = `lead_profithelm_${Date.now()}_${randSuffix}`;
+      const phDedupPlaybook = `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const phDedupFulfill = `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`;
+      const phDedupCheckout = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const pbDedupResp = await checkEdgeEmailDedupResponse(
+        env,
+        email,
+        isSyntheticProbe,
+        {
+          lead_id: leadId,
+          tool_slug: toolSlug,
+          playbook_url: phDedupPlaybook,
+          fulfill_url: phDedupFulfill,
+          fulfillment_url: phDedupFulfill,
+          checkout_url: phDedupCheckout,
+        },
+        postCorsHeaders
+      );
+      if (pbDedupResp) return pbDedupResp;
+
       const redirectUrl = `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=playbook_subscription&lead_id=${encodeURIComponent(leadId)}`;
       const checkoutOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe);
       const modeledAmt = extractScenarioAmount(body, scenarioInputs, blueprintState);
@@ -13862,7 +14764,8 @@ export async function onRequestPost(context) {
       playbookRecord.playbook_url = workpaperBundle.playbook_url;
       playbookRecord.playbook_csv_url = workpaperBundle.playbook_csv_url;
       playbookRecord.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
-      const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, playbookRecord, isSyntheticProbe);
+      playbookRecord.fulfill_url = playbookRecord.fulfillment_url || workpaperBundle.fulfillment_url;
+      const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, playbookRecord, isSyntheticProbe);
       Object.assign(playbookRecord, emailDispatch);
 
       if (!isSyntheticProbe) {
@@ -13882,6 +14785,7 @@ export async function onRequestPost(context) {
             metadata: playbookMeta,
           });
         }
+        await recordEdgeEmailDedup(env, email, playbookRecord, isSyntheticProbe);
       }
       return new Response(
         JSON.stringify({
@@ -13890,7 +14794,7 @@ export async function onRequestPost(context) {
           status: "playbook_subscribed",
           persisted: !isSyntheticProbe,
           synthetic_test: isSyntheticProbe,
-          message: "Your custom calculation worksheet and compliance checklist have been queued.",
+          message: "Your custom calculation worksheet and compliance checklist are ready.",
           ...playbookRecord,
         }),
         {
@@ -13898,7 +14802,7 @@ export async function onRequestPost(context) {
           headers: {
             "Content-Type": "application/json",
             ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
-            ...CORS_HEADERS,
+            ...postCorsHeaders,
           },
         }
       );
@@ -13924,14 +14828,14 @@ export async function onRequestPost(context) {
           redirect_url: `/r/${spec.partnerKey}?source=${encodeURIComponent(toolSlug)}&slot=frictionless_direct`,
           action_bus_dispatched: false,
         }),
-        { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 200, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
     if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please enter a valid business email address." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -13939,7 +14843,7 @@ export async function onRequestPost(context) {
     if (state.length !== 2) {
       return new Response(
         JSON.stringify({ ok: false, success: false, error: "Please select a valid 2-letter US state." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -13950,7 +14854,7 @@ export async function onRequestPost(context) {
           success: false,
           error: "Explicit TCPA partner_sharing_consent is required to dispatch your commercial quote.",
         }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        { status: 400, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
       );
     }
 
@@ -13958,6 +14862,22 @@ export async function onRequestPost(context) {
     const ts = new Date().toISOString();
     const randSuffix = Math.random().toString(36).slice(2, 10);
     const leadId = `lead_profithelm_${Date.now()}_${randSuffix}`;
+    const qDedupResp = await checkEdgeEmailDedupResponse(
+      env,
+      email,
+      isSyntheticProbe,
+      {
+        lead_id: leadId,
+        tool_slug: toolSlug,
+        playbook_url: `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`,
+        fulfill_url: `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`,
+        fulfillment_url: `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}`,
+        checkout_url: `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`,
+      },
+      postCorsHeaders
+    );
+    if (qDedupResp) return qDedupResp;
+
     const subid = `cpl_${toolSlug.slice(0, 24)}_${state.toLowerCase()}_${Math.round(calculatedAmount)}`;
     const qs = new URLSearchParams({
       source: toolSlug,
@@ -14005,8 +14925,9 @@ export async function onRequestPost(context) {
     record.playbook_url = workpaperBundle.playbook_url;
     record.playbook_csv_url = workpaperBundle.playbook_csv_url;
     record.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
+    record.fulfill_url = record.fulfillment_url || workpaperBundle.fulfillment_url;
 
-    const emailDispatch = await dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe);
+    const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSyntheticProbe);
     Object.assign(record, emailDispatch);
 
     if (!isSyntheticProbe) {
@@ -14021,6 +14942,7 @@ export async function onRequestPost(context) {
           metadata: buildEdgeLeadKvMetadata(record),
         });
       }
+      await recordEdgeEmailDedup(env, email, record, isSyntheticProbe);
     }
 
     return new Response(
@@ -14037,20 +14959,21 @@ export async function onRequestPost(context) {
         headers: {
           "Content-Type": "application/json",
           ...(isSyntheticProbe ? { "X-Edge-Synthetic-Test": "1" } : {}),
-          ...CORS_HEADERS,
+          ...postCorsHeaders,
         },
       }
     );
   } catch (err) {
     return new Response(
       JSON.stringify({ ok: false, success: false, error: "Unable to process commercial quote request." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+      { status: 500, headers: { "Content-Type": "application/json", ...postCorsHeaders } }
     );
   }
 }
 """
 
     lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json(prop_clean))
+    lead_js = lead_js + _render_edge_lead_abuse_guard_js(prop_clean)
     lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js(prop_clean)
     assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function")
     return lead_js

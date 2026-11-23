@@ -3002,8 +3002,16 @@ def _render_runtime_sync_events_js() -> str:
         }
         var linksRow = document.createElement("div");
         linksRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;";
-        var pbUrl = data.playbook_url ? (String(data.playbook_url) + "&format=html") : "";
-        var ffUrl = data.fulfillment_url ? (String(data.fulfillment_url) + "&format=html") : "";
+        function toSafeHtmlActionUrl(rawU) {
+          var s = String(rawU || "").trim();
+          if (!s || s.charAt(0) !== "/" || s.indexOf("//") === 0) return "";
+          if (s.indexOf("format=") === -1) {
+            s += (s.indexOf("?") === -1 ? "?format=html" : "&format=html");
+          }
+          return s;
+        }
+        var pbUrl = toSafeHtmlActionUrl(data.playbook_url);
+        var ffUrl = toSafeHtmlActionUrl(data.fulfillment_url);
         var csvUrl = mode === "checkout_fulfill"
           ? (data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "")
           : (data.playbook_csv_url ? String(data.playbook_csv_url) : (data.playbook_url ? (String(data.playbook_url) + "&format=csv") : (data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "")));
@@ -3013,7 +3021,7 @@ def _render_runtime_sync_events_js() -> str:
           ffLink.className = "touch-target";
           ffLink.href = ffUrl;
           ffLink.target = "_blank";
-          ffLink.rel = "noopener";
+          ffLink.rel = "noopener noreferrer";
           ffLink.setAttribute("data-workpaper-html-download", "1");
           ffLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
           ffLink.textContent = "Open Instant Audit Workpaper (HTML/PDF)";
@@ -3031,7 +3039,7 @@ def _render_runtime_sync_events_js() -> str:
           pbLink.className = "touch-target";
           pbLink.href = pbUrl;
           pbLink.target = "_blank";
-          pbLink.rel = "noopener";
+          pbLink.rel = "noopener noreferrer";
           pbLink.setAttribute("data-workpaper-html-download", "1");
           pbLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
           pbLink.textContent = "Open Personalized Playbook Worksheet";
@@ -4378,6 +4386,255 @@ def _render_runtime_sync_events_js() -> str:
       }
     }, true);
 
+    var _leadFormRenderedAt = Date.now();
+    window.__PSEO_RUNTIME_LEAD_HANDLER__ = true;
+
+    function getRuntimeFormTsState(formEl) {
+      if (!formEl.__pseoTsState) {
+        formEl.__pseoTsState = { booting: false, mounted: false, enabled: false, siteKey: "", token: "", widgetId: null };
+      }
+      return formEl.__pseoTsState;
+    }
+
+    function ensureFormAntiAbuseFields(formEl) {
+      if (!formEl || typeof formEl.querySelector !== "function" || typeof formEl.appendChild !== "function") return;
+      try {
+        if (!formEl.querySelector('input[name="company_website"]')) {
+          var hpInp = document.createElement("input");
+          hpInp.type = "text";
+          hpInp.name = "company_website";
+          hpInp.setAttribute("tabindex", "-1");
+          hpInp.setAttribute("autocomplete", "off");
+          hpInp.setAttribute("aria-hidden", "true");
+          if (hpInp.style) {
+            hpInp.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
+          }
+          formEl.appendChild(hpInp);
+        }
+        if (!formEl.querySelector(".cf-turnstile-slot")) {
+          var tsSlot = document.createElement("div");
+          tsSlot.className = "cf-turnstile-slot";
+          tsSlot.setAttribute("data-turnstile-slot", "1");
+          formEl.appendChild(tsSlot);
+        }
+      } catch (aaErr) {}
+    }
+
+    function loadRuntimeTurnstileConfig() {
+      if (window.__PSEO_SYNTHETIC_TEST__ || typeof window.fetch !== "function") {
+        return Promise.resolve({ turnstile_enabled: false, turnstile_site_key: "" });
+      }
+      if (!window.__pseoLeadConfigPromise) {
+        window.__pseoLeadConfigPromise = window.fetch("/api/lead-capture?config=1", {
+          method: "GET",
+          headers: { Accept: "application/json" }
+        })
+          .then(function(r) { return r && r.ok ? r.json() : {}; })
+          .then(function(cfg) {
+            return {
+              turnstile_enabled: Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key),
+              turnstile_site_key: String((cfg && cfg.turnstile_site_key) || "")
+            };
+          })
+          .catch(function() {
+            return { turnstile_enabled: false, turnstile_site_key: "" };
+          });
+      }
+      return window.__pseoLeadConfigPromise;
+    }
+
+    function ensureRuntimeTurnstileScript() {
+      if (window.turnstile && typeof window.turnstile.render === "function") {
+        return Promise.resolve(window.turnstile);
+      }
+      if (!window.__pseoTurnstileScriptPromise) {
+        window.__pseoTurnstileScriptPromise = new Promise(function(resolve) {
+          try {
+            var existing = document.querySelector && document.querySelector('script[src*="challenges.cloudflare.com/turnstile/v0/api.js"]');
+            if (existing) {
+              var waited = 0;
+              var poll = setInterval(function() {
+                waited += 50;
+                if (window.turnstile && typeof window.turnstile.render === "function") {
+                  clearInterval(poll);
+                  resolve(window.turnstile);
+                } else if (waited >= 6000) {
+                  clearInterval(poll);
+                  resolve(null);
+                }
+              }, 50);
+              return;
+            }
+            var s = document.createElement("script");
+            s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+            s.async = true;
+            s.defer = true;
+            s.onload = function() { resolve(window.turnstile || null); };
+            s.onerror = function() { resolve(null); };
+            var host = document.head || document.body || document.documentElement;
+            if (host && typeof host.appendChild === "function") {
+              host.appendChild(s);
+            } else {
+              resolve(null);
+            }
+          } catch (scErr) {
+            resolve(null);
+          }
+        });
+      }
+      return window.__pseoTurnstileScriptPromise;
+    }
+
+    function mountRuntimeTurnstile(formEl) {
+      if (!formEl) return;
+      ensureFormAntiAbuseFields(formEl);
+      if (window.__PSEO_SYNTHETIC_TEST__) return;
+      var slot = formEl.querySelector && formEl.querySelector(".cf-turnstile-slot");
+      if (!slot) return;
+      var st = getRuntimeFormTsState(formEl);
+      if (st.booting || st.mounted || slot.getAttribute("data-turnstile-mounted") === "1") return;
+      st.booting = true;
+      loadRuntimeTurnstileConfig().then(function(cfg) {
+        st.enabled = Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key);
+        st.siteKey = String((cfg && cfg.turnstile_site_key) || "");
+        if (!st.enabled || !st.siteKey) {
+          st.booting = false;
+          return;
+        }
+        ensureRuntimeTurnstileScript().then(function(tsApi) {
+          if (!tsApi || typeof tsApi.render !== "function" || st.mounted || slot.getAttribute("data-turnstile-mounted") === "1") {
+            st.booting = false;
+            return;
+          }
+          try {
+            slot.setAttribute("data-turnstile-mounted", "1");
+            st.mounted = true;
+            st.widgetId = tsApi.render(slot, {
+              sitekey: st.siteKey,
+              callback: function(tok) { st.token = String(tok || ""); },
+              "expired-callback": function() { st.token = ""; },
+              "error-callback": function() { st.token = ""; }
+            });
+          } catch (rErr) {
+            st.mounted = false;
+            if (typeof slot.removeAttribute === "function") slot.removeAttribute("data-turnstile-mounted");
+          }
+          st.booting = false;
+        });
+      });
+    }
+
+    function readRuntimeTurnstileToken(formEl) {
+      var st = formEl && formEl.__pseoTsState ? formEl.__pseoTsState : null;
+      var tsInput = formEl && formEl.querySelector ? formEl.querySelector('input[name="cf-turnstile-response"]') : null;
+      return String((st && st.token) || (tsInput ? tsInput.value || "" : "")).trim();
+    }
+
+    function readFormAntiAbuseFields(formEl, tokenOverride) {
+      ensureFormAntiAbuseFields(formEl);
+      var hpEl = formEl && formEl.querySelector ? formEl.querySelector('input[name="company_website"]') : null;
+      var hpVal = hpEl ? String(hpEl.value || "") : "";
+      var tokenVal = tokenOverride !== undefined ? String(tokenOverride || "").trim() : readRuntimeTurnstileToken(formEl);
+      return {
+        company_website: hpVal,
+        form_rendered_at: _leadFormRenderedAt,
+        cf_turnstile_response: tokenVal
+      };
+    }
+
+    function waitForRuntimeTurnstileReady(formEl, statusEl, onReady) {
+      ensureFormAntiAbuseFields(formEl);
+      if (window.__PSEO_SYNTHETIC_TEST__) {
+        onReady("");
+        return;
+      }
+      loadRuntimeTurnstileConfig().then(function(cfg) {
+        if (!cfg || !cfg.turnstile_enabled || !cfg.turnstile_site_key) {
+          onReady("");
+          return;
+        }
+        mountRuntimeTurnstile(formEl);
+        var tokNow = readRuntimeTurnstileToken(formEl);
+        if (tokNow) {
+          onReady(tokNow);
+          return;
+        }
+        if (statusEl) {
+          statusEl.textContent = "Verifying browser security check...";
+          if (typeof statusEl.setAttribute === "function") statusEl.setAttribute("data-status", "verifying");
+        }
+        var elapsed = 0;
+        var timer = setInterval(function() {
+          elapsed += 100;
+          var tok = readRuntimeTurnstileToken(formEl);
+          if (tok) {
+            clearInterval(timer);
+            onReady(tok);
+          } else if (elapsed >= 2500) {
+            clearInterval(timer);
+            if (formEl && typeof formEl.setAttribute === "function") {
+              formEl.setAttribute("data-submission-state", "verification_required");
+            }
+            if (statusEl) {
+              statusEl.textContent = "Please complete the security verification check before submitting.";
+              if (typeof statusEl.setAttribute === "function") statusEl.setAttribute("data-status", "verification_required");
+            }
+          }
+        }, 100);
+      });
+    }
+
+    function resetRuntimeTurnstile(formEl) {
+      var st = formEl && formEl.__pseoTsState;
+      if (st && window.turnstile && st.widgetId !== null && typeof window.turnstile.reset === "function") {
+        try { window.turnstile.reset(st.widgetId); } catch (rsErr) {}
+        st.token = "";
+      }
+    }
+
+    function formatRuntimeLeadError(data, httpStatus) {
+      var code = String((data && (data.error || data.status)) || "").toLowerCase();
+      if (httpStatus === 429 || code === "rate_limited") {
+        return "Too many requests from this network. Please try again in an hour.";
+      }
+      if (code === "bot_verification_failed") {
+        return "Verification check failed. Please complete the security widget and try again.";
+      }
+      if (code === "submitted_too_fast") {
+        return "Please wait a second before submitting the form.";
+      }
+      if (code === "bot_detected" || code === "origin_not_allowed") {
+        return "Submission could not be verified. Please refresh the page and try again.";
+      }
+      return (data && data.error) ? String(data.error) : "Unable to submit right now. Please try again.";
+    }
+
+    function warmAllLeadFormsTurnstile() {
+      if (window.__PSEO_SYNTHETIC_TEST__ || typeof document.querySelectorAll !== "function") return;
+      try {
+        var forms = document.querySelectorAll("#lead-capture-form, .lead-capture-form, #partner-registration-form, .partner-registration-form, #partner-quote-intake-form");
+        for (var fi = 0; fi < forms.length; fi++) {
+          mountRuntimeTurnstile(forms[fi]);
+        }
+      } catch (wfErr) {}
+    }
+
+    function handleLeadFormWarmup(ev) {
+      var target = ev && ev.target;
+      if (!target || typeof target.closest !== "function") return;
+      var matchedForm = target.closest("#lead-capture-form, .lead-capture-form, #partner-registration-form, .partner-registration-form, #partner-quote-intake-form");
+      if (matchedForm) {
+        mountRuntimeTurnstile(matchedForm);
+      }
+    }
+
+    document.addEventListener("focusin", handleLeadFormWarmup, true);
+    document.addEventListener("mouseenter", handleLeadFormWarmup, true);
+    if (!window.__PSEO_SYNTHETIC_TEST__) {
+      loadRuntimeTurnstileConfig();
+      warmAllLeadFormsTurnstile();
+    }
+
     document.addEventListener("submit", function(e) {
       var pbForm = e.target && (e.target.id === "lead-capture-form" || (e.target.classList && e.target.classList.contains("lead-capture-form"))) ? e.target : null;
       if (pbForm) {
@@ -4387,7 +4644,7 @@ def _render_runtime_sync_events_js() -> str:
           var pbEmailInp = pbForm.querySelector('input[type="email"]');
           var pbBtn = pbForm.querySelector('button[type="submit"]');
           var rawEmail = pbEmailInp ? String(pbEmailInp.value || "").trim() : "";
-          var statusBox = pbForm.querySelector(".lead-capture-status-readout") || document.getElementById("lead-capture-status");
+          var statusBox = pbForm.querySelector(".lead-capture-status-readout, .footer-lead-status, #footer-lead-status") || document.getElementById("lead-capture-status");
           if (!statusBox) {
             statusBox = document.createElement("div");
             statusBox.id = "lead-capture-status";
@@ -4403,104 +4660,127 @@ def _render_runtime_sync_events_js() -> str:
             if (pbEmailInp && typeof pbEmailInp.focus === "function") pbEmailInp.focus();
             return;
           }
-          var currentPath = (window.location && window.location.pathname) ? window.location.pathname : "/";
-          var ts = new Date().toISOString();
-          var bpSnapshot = collectWorkbenchBlueprintState();
-          var qStepNode = document.getElementById("partner-quote-intake-step");
-          var upgDrawerNode = document.getElementById("post-calculation-upgrade-drawer");
-          var pbPartnerEl = document.querySelector(".calc-inline-cta[data-partner], .affiliate-cta-section[data-partner], a[href^='/r/'][data-partner]");
-          var pbPartnerKey = (qStepNode && qStepNode.getAttribute("data-partner-key")) || (pbPartnerEl && pbPartnerEl.getAttribute("data-partner")) || "";
-          var pbOfferSku = pbForm.getAttribute("data-offer-sku") || (upgDrawerNode && upgDrawerNode.getAttribute("data-offer-sku")) || "";
-          var leadPayload = {
-            email: rawEmail,
-            source: currentPath,
-            tool_slug: resolveCurrentToolSlug(),
-            partner_key: pbPartnerKey,
-            offer_sku: pbOfferSku,
-            scenario_amount: bpSnapshot.calculated_amount || 0,
-            scenario_inputs: bpSnapshot.inputs || {},
-            scenario_outputs: bpSnapshot.outputs || {},
-            blueprint_state: bpSnapshot,
-            timestamp: ts
-          };
-          window.__pseoActiveLeadEmail = rawEmail;
-          if (window.__PSEO_SYNTHETIC_TEST__) {
-            leadPayload.synthetic_test = true;
-          }
-          try {
-            if (window.localStorage) {
-              var storageKey = "pseo_captured_leads";
-              var existing = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
-              existing.push({ email: rawEmail, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0, timestamp: ts });
-              window.localStorage.setItem(storageKey, JSON.stringify(existing));
-              window.localStorage.setItem("pseo_blueprint_" + bpSnapshot.slug, JSON.stringify(bpSnapshot));
-            }
-          } catch (sErr) {}
-          if (pbBtn) {
-            pbBtn.textContent = "Playbook Confirmed";
-            pbBtn.style.backgroundColor = "var(--status-positive)";
-          }
-          if (pbEmailInp) {
-            pbEmailInp.value = "";
-            pbEmailInp.placeholder = "Check your inbox for 2027 briefing...";
-          }
-          pbForm.setAttribute("data-lead-captured", "true");
-          statusBox.textContent = "Briefing subscription confirmed. Preparing custom worksheet...";
-          statusBox.setAttribute("data-status", "submitting");
-          emitWorkbenchEngagementBeacon("playbook_subscription_submit", "lead_capture_form", { has_email: true, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0 });
-          if (typeof window.fetch === "function") {
-            var pbHeaders = { "Content-Type": "application/json" };
+          waitForRuntimeTurnstileReady(pbForm, statusBox, function(pbToken) {
+            var pbAntiAbuse = readFormAntiAbuseFields(pbForm, pbToken);
+            var currentPath = (window.location && window.location.pathname) ? window.location.pathname : "/";
+            var ts = new Date().toISOString();
+            var bpSnapshot = collectWorkbenchBlueprintState();
+            var qStepNode = document.getElementById("partner-quote-intake-step");
+            var upgDrawerNode = document.getElementById("post-calculation-upgrade-drawer");
+            var pbPartnerEl = document.querySelector(".calc-inline-cta[data-partner], .affiliate-cta-section[data-partner], a[href^='/r/'][data-partner]");
+            var pbPartnerKey = (qStepNode && qStepNode.getAttribute("data-partner-key")) || (pbPartnerEl && pbPartnerEl.getAttribute("data-partner")) || "";
+            var pbOfferSku = pbForm.getAttribute("data-offer-sku") || (upgDrawerNode && upgDrawerNode.getAttribute("data-offer-sku")) || "";
+            var pbSlugInput = pbForm.querySelector('input[name="tool_slug"]');
+            var pbToolSlug = (pbSlugInput && pbSlugInput.value) ? String(pbSlugInput.value).trim() : resolveCurrentToolSlug();
+            var leadPayload = {
+              email: rawEmail,
+              source: currentPath,
+              tool_slug: pbToolSlug,
+              partner_key: pbPartnerKey,
+              offer_sku: pbOfferSku,
+              scenario_amount: bpSnapshot.calculated_amount || 0,
+              scenario_inputs: bpSnapshot.inputs || {},
+              scenario_outputs: bpSnapshot.outputs || {},
+              blueprint_state: bpSnapshot,
+              company_website: pbAntiAbuse.company_website,
+              form_rendered_at: pbAntiAbuse.form_rendered_at,
+              cf_turnstile_response: pbAntiAbuse.cf_turnstile_response,
+              timestamp: ts
+            };
+            window.__pseoActiveLeadEmail = rawEmail;
             if (window.__PSEO_SYNTHETIC_TEST__) {
-              pbHeaders["X-Pseofactory-Test"] = "1";
+              leadPayload.synthetic_test = true;
             }
-            window.fetch("/api/lead-capture", {
-              method: "POST",
-              headers: pbHeaders,
-              body: JSON.stringify(leadPayload)
-            }).then(function(res) {
-              return res.json();
-            }).then(function(data) {
-              if (data && data.ok) {
-                window.__pseoActiveLeadId = data.lead_id || "verified";
-                var upgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
-                if (upgChkBtn) {
-                  upgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
-                  upgChkBtn.setAttribute("data-lead-email", rawEmail);
-                }
-                var qkChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
-                if (qkChkBtn1) {
-                  qkChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
-                  qkChkBtn1.setAttribute("data-lead-email", rawEmail);
-                }
-                var qkChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
-                if (qkChkBtn2) {
-                  qkChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
-                  qkChkBtn2.setAttribute("data-lead-email", rawEmail);
-                }
-                pbForm.setAttribute("data-submission-state", "success");
-                pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
-                if (data.checkout_url) pbForm.setAttribute("data-checkout-url", data.checkout_url);
-                if (data.playbook_url) pbForm.setAttribute("data-playbook-url", data.playbook_url);
-                if (data.fulfillment_url) pbForm.setAttribute("data-fulfillment-url", data.fulfillment_url);
-                if (data.redirect_url) pbForm.setAttribute("data-redirect-url", data.redirect_url);
-                statusBox.setAttribute("data-status", data.status || "playbook_subscribed");
-                statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
-                statusBox.textContent = "Playbook queued (" + (data.lead_id || "verified") + "). ";
-                if (data.checkout_url) {
-                  var defTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
-                  appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || defTierPrice) + ")", true);
-                  var pbChkNode = document.getElementById("playbook-checkout-link");
-                  if (pbChkNode && typeof pbChkNode.focus === "function") {
-                    try { pbChkNode.focus({ preventScroll: true }); } catch (fE) { pbChkNode.focus(); }
-                  }
-                }
-                if (data.redirect_url) {
-                  appendActionLink(statusBox, "playbook-partner-link", data.redirect_url, "Matched Partner Desk", false);
-                }
-                renderPlaybookAndFulfillmentDrawer(statusBox, data, "playbook");
+            try {
+              if (window.localStorage) {
+                var storageKey = "pseo_captured_leads";
+                var existing = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
+                existing.push({ email: rawEmail, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0, timestamp: ts });
+                window.localStorage.setItem(storageKey, JSON.stringify(existing));
+                window.localStorage.setItem("pseo_blueprint_" + bpSnapshot.slug, JSON.stringify(bpSnapshot));
               }
-            }).catch(function() {});
-          }
+            } catch (sErr) {}
+            var origPbBtnText = pbBtn ? pbBtn.textContent : "";
+            statusBox.textContent = "Preparing custom worksheet...";
+            statusBox.setAttribute("data-status", "submitting");
+            emitWorkbenchEngagementBeacon("playbook_subscription_submit", "lead_capture_form", { has_email: true, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0 });
+            if (typeof window.fetch === "function") {
+              var pbHeaders = { "Content-Type": "application/json" };
+              if (window.__PSEO_SYNTHETIC_TEST__) {
+                pbHeaders["X-Pseofactory-Test"] = "1";
+              }
+              window.fetch("/api/lead-capture", {
+                method: "POST",
+                headers: pbHeaders,
+                body: JSON.stringify(leadPayload)
+              }).then(function(res) {
+                return res.json().catch(function() { return {}; }).then(function(data) {
+                  return { ok: Boolean(res && res.ok), status: res ? res.status : 0, data: data || {} };
+                });
+              }).then(function(out) {
+                var data = out.data;
+                if (out.ok && data && data.ok) {
+                  if (pbBtn) {
+                    pbBtn.textContent = "Playbook Confirmed";
+                    pbBtn.style.backgroundColor = "var(--status-positive)";
+                  }
+                  if (pbEmailInp) {
+                    pbEmailInp.value = "";
+                    pbEmailInp.placeholder = "Worksheet unlocked below";
+                  }
+                  pbForm.setAttribute("data-lead-captured", "true");
+                  window.__pseoActiveLeadId = data.lead_id || "verified";
+                  var upgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
+                  if (upgChkBtn) {
+                    upgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
+                    upgChkBtn.setAttribute("data-lead-email", rawEmail);
+                  }
+                  var qkChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
+                  if (qkChkBtn1) {
+                    qkChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
+                    qkChkBtn1.setAttribute("data-lead-email", rawEmail);
+                  }
+                  var qkChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
+                  if (qkChkBtn2) {
+                    qkChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
+                    qkChkBtn2.setAttribute("data-lead-email", rawEmail);
+                  }
+                  pbForm.setAttribute("data-submission-state", "success");
+                  pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
+                  if (data.checkout_url) pbForm.setAttribute("data-checkout-url", data.checkout_url);
+                  if (data.playbook_url) pbForm.setAttribute("data-playbook-url", data.playbook_url);
+                  if (data.fulfillment_url) pbForm.setAttribute("data-fulfillment-url", data.fulfillment_url);
+                  if (data.redirect_url) pbForm.setAttribute("data-redirect-url", data.redirect_url);
+                  statusBox.setAttribute("data-status", data.status || "playbook_subscribed");
+                  statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
+                  statusBox.textContent = "Playbook ready (" + (data.lead_id || "verified") + "). ";
+                  if (data.checkout_url) {
+                    var defTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
+                    appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || defTierPrice) + ")", true);
+                    var pbChkNode = document.getElementById("playbook-checkout-link");
+                    if (pbChkNode && typeof pbChkNode.focus === "function") {
+                      try { pbChkNode.focus({ preventScroll: true }); } catch (fE) { pbChkNode.focus(); }
+                    }
+                  }
+                  if (data.redirect_url) {
+                    appendActionLink(statusBox, "playbook-partner-link", data.redirect_url, "Matched Partner Desk", false);
+                  }
+                  renderPlaybookAndFulfillmentDrawer(statusBox, data, "playbook");
+                } else {
+                  if (pbBtn && origPbBtnText) pbBtn.textContent = origPbBtnText;
+                  pbForm.setAttribute("data-submission-state", "error");
+                  statusBox.setAttribute("data-status", "error");
+                  statusBox.textContent = formatRuntimeLeadError(data, out.status);
+                }
+                resetRuntimeTurnstile(pbForm);
+              }).catch(function() {
+                if (pbBtn && origPbBtnText) pbBtn.textContent = origPbBtnText;
+                pbForm.setAttribute("data-submission-state", "error");
+                statusBox.setAttribute("data-status", "error");
+                statusBox.textContent = "Network error while submitting. Please try again.";
+              });
+            }
+          });
         } catch (pbErr) {}
         return;
       }
@@ -4532,58 +4812,77 @@ def _render_runtime_sync_events_js() -> str:
             if (prEmailInp && typeof prEmailInp.focus === "function") prEmailInp.focus();
             return;
           }
-          var prDrawer = document.getElementById("partner-registration-drawer");
-          var prPayload = {
-            intent: "partner_registration",
-            lead_type: "partner_registration",
-            email: prEmail,
-            firm_name: prFirm || "Advisory Partner Firm",
-            state: prState,
-            tool_slug: resolveCurrentToolSlug(),
-            source: (window.location && window.location.pathname) ? window.location.pathname : "/",
-            timestamp: new Date().toISOString()
-          };
-          if (window.__PSEO_SYNTHETIC_TEST__) {
-            prPayload.synthetic_test = true;
-          }
-          if (prBtn) {
-            prBtn.textContent = "Firm Registered";
-          }
-          prForm.setAttribute("data-lead-captured", "true");
-          if (prDrawer) prDrawer.setAttribute("data-lead-captured", "true");
-          prStatus.textContent = "Submitting verified partner registration...";
-          prStatus.setAttribute("data-status", "submitting");
-          emitWorkbenchEngagementBeacon("partner_registration_submit", "partner_supply_registration", { state: prState });
-          if (typeof window.fetch === "function") {
-            var prHeaders = { "Content-Type": "application/json" };
+          waitForRuntimeTurnstileReady(prForm, prStatus, function(prToken) {
+            var prAntiAbuse = readFormAntiAbuseFields(prForm, prToken);
+            var prDrawer = document.getElementById("partner-registration-drawer");
+            var prPayload = {
+              intent: "partner_registration",
+              lead_type: "partner_registration",
+              email: prEmail,
+              firm_name: prFirm || "Advisory Partner Firm",
+              state: prState,
+              tool_slug: resolveCurrentToolSlug(),
+              source: (window.location && window.location.pathname) ? window.location.pathname : "/",
+              company_website: prAntiAbuse.company_website,
+              form_rendered_at: prAntiAbuse.form_rendered_at,
+              cf_turnstile_response: prAntiAbuse.cf_turnstile_response,
+              timestamp: new Date().toISOString()
+            };
             if (window.__PSEO_SYNTHETIC_TEST__) {
-              prHeaders["X-Pseofactory-Test"] = "1";
+              prPayload.synthetic_test = true;
             }
-            window.fetch("/api/lead-capture", {
-              method: "POST",
-              headers: prHeaders,
-              body: JSON.stringify(prPayload)
-            }).then(function(res) {
-              return res.json();
-            }).then(function(data) {
-              if (data && data.ok) {
-                prForm.setAttribute("data-submission-state", "success");
-                prForm.setAttribute("data-lead-id", data.lead_id || "verified");
-                if (data.checkout_url) prForm.setAttribute("data-checkout-url", data.checkout_url);
-                prStatus.setAttribute("data-status", data.status || "partner_registered");
-                prStatus.setAttribute("data-lead-id", data.lead_id || "verified");
-                prStatus.textContent = "Partner registration confirmed for " + (data.firm_name || prPayload.firm_name) + " (" + (data.lead_id || "verified") + "). ";
-                if (data.checkout_url) {
-                  var prSlotUsd = typeof data.offer_price_usd === "number" ? data.offer_price_usd : 299;
-                  appendActionLink(prStatus, "partner-slot-checkout-link", data.checkout_url, "Activate Verified Partner Slot ($" + String(prSlotUsd) + ")", true);
-                  var prChkNode = document.getElementById("partner-slot-checkout-link");
-                  if (prChkNode && typeof prChkNode.focus === "function") {
-                    try { prChkNode.focus({ preventScroll: true }); } catch (fE) { prChkNode.focus(); }
-                  }
-                }
+            var origPrBtnText = prBtn ? prBtn.textContent : "";
+            prStatus.textContent = "Submitting verified partner registration...";
+            prStatus.setAttribute("data-status", "submitting");
+            emitWorkbenchEngagementBeacon("partner_registration_submit", "partner_supply_registration", { state: prState });
+            if (typeof window.fetch === "function") {
+              var prHeaders = { "Content-Type": "application/json" };
+              if (window.__PSEO_SYNTHETIC_TEST__) {
+                prHeaders["X-Pseofactory-Test"] = "1";
               }
-            }).catch(function() {});
-          }
+              window.fetch("/api/lead-capture", {
+                method: "POST",
+                headers: prHeaders,
+                body: JSON.stringify(prPayload)
+              }).then(function(res) {
+                return res.json().catch(function() { return {}; }).then(function(data) {
+                  return { ok: Boolean(res && res.ok), status: res ? res.status : 0, data: data || {} };
+                });
+              }).then(function(out) {
+                var data = out.data;
+                if (out.ok && data && data.ok) {
+                  if (prBtn) prBtn.textContent = "Firm Registered";
+                  prForm.setAttribute("data-lead-captured", "true");
+                  if (prDrawer) prDrawer.setAttribute("data-lead-captured", "true");
+                  prForm.setAttribute("data-submission-state", "success");
+                  prForm.setAttribute("data-lead-id", data.lead_id || "verified");
+                  if (data.checkout_url) prForm.setAttribute("data-checkout-url", data.checkout_url);
+                  prStatus.setAttribute("data-status", data.status || "partner_registered");
+                  prStatus.setAttribute("data-lead-id", data.lead_id || "verified");
+                  prStatus.textContent = "Partner registration confirmed for " + (data.firm_name || prPayload.firm_name) + " (" + (data.lead_id || "verified") + "). ";
+                  if (data.checkout_url) {
+                    var prSlotUsd = typeof data.offer_price_usd === "number" ? data.offer_price_usd : 299;
+                    appendActionLink(prStatus, "partner-slot-checkout-link", data.checkout_url, "Activate Verified Partner Slot ($" + String(prSlotUsd) + ")", true);
+                    var prChkNode = document.getElementById("partner-slot-checkout-link");
+                    if (prChkNode && typeof prChkNode.focus === "function") {
+                      try { prChkNode.focus({ preventScroll: true }); } catch (fE) { prChkNode.focus(); }
+                    }
+                  }
+                } else {
+                  if (prBtn && origPrBtnText) prBtn.textContent = origPrBtnText;
+                  prForm.setAttribute("data-submission-state", "error");
+                  prStatus.setAttribute("data-status", "error");
+                  prStatus.textContent = formatRuntimeLeadError(data, out.status);
+                }
+                resetRuntimeTurnstile(prForm);
+              }).catch(function() {
+                if (prBtn && origPrBtnText) prBtn.textContent = origPrBtnText;
+                prForm.setAttribute("data-submission-state", "error");
+                prStatus.setAttribute("data-status", "error");
+                prStatus.textContent = "Network error while submitting. Please try again.";
+              });
+            }
+          });
         } catch (prErr) {}
         return;
       }
@@ -4630,92 +4929,110 @@ def _render_runtime_sync_events_js() -> str:
           if (consentInp && typeof consentInp.focus === "function") consentInp.focus();
           return;
         }
-        var qThreshAmt = drawer ? (parseFloat(drawer.getAttribute("data-quote-threshold") || "50000") || 50000) : 50000;
-        var rawDrawerAmt = drawer ? (parseFloat(drawer.getAttribute("data-calculated-amount") || "100000") || 100000) : 100000;
-        var calcAmt = Math.max(rawDrawerAmt, qThreshAmt);
-        var toolSlug = drawer ? (drawer.getAttribute("data-tool-slug") || resolveCurrentToolSlug()) : resolveCurrentToolSlug();
-        var partnerKey = drawer ? (drawer.getAttribute("data-partner-key") || "") : "";
-        var vertical = drawer ? (drawer.getAttribute("data-vertical") || "") : "";
-        var qBpSnapshot = collectWorkbenchBlueprintState();
-        var reqPayload = {
-          email: emailVal,
-          state: stateVal,
-          capital_band: bandVal,
-          calculated_amount: calcAmt,
-          partner_sharing_consent: true,
-          tool_slug: toolSlug,
-          partner_key: partnerKey,
-          vertical: vertical,
-          scenario_inputs: qBpSnapshot.inputs || {},
-          scenario_outputs: qBpSnapshot.outputs || {},
-          blueprint_state: qBpSnapshot,
-          traffic_source: resolveTrafficSourceAttribution()
-        };
-        if (window.__PSEO_SYNTHETIC_TEST__) {
-          reqPayload.synthetic_test = true;
-        }
-        if (statusNode) statusNode.textContent = "Routing consented quote parameters to matched partner desk...";
-        if (drawer) drawer.setAttribute("data-lead-captured", "true");
-        emitWorkbenchEngagementBeacon("partner_quote_intake_submit", "partner_quote_intake_cta", {
-          state: stateVal,
-          capital_band: bandVal,
-          calculated_amount: calcAmt
-        });
-        if (typeof window.fetch === "function") {
-          var qHeaders = { "Content-Type": "application/json" };
+        waitForRuntimeTurnstileReady(qForm, statusNode, function(qToken) {
+          var qAntiAbuse = readFormAntiAbuseFields(qForm, qToken);
+          var qThreshAmt = drawer ? (parseFloat(drawer.getAttribute("data-quote-threshold") || "50000") || 50000) : 50000;
+          var rawDrawerAmt = drawer ? (parseFloat(drawer.getAttribute("data-calculated-amount") || "100000") || 100000) : 100000;
+          var calcAmt = Math.max(rawDrawerAmt, qThreshAmt);
+          var toolSlug = drawer ? (drawer.getAttribute("data-tool-slug") || resolveCurrentToolSlug()) : resolveCurrentToolSlug();
+          var partnerKey = drawer ? (drawer.getAttribute("data-partner-key") || "") : "";
+          var vertical = drawer ? (drawer.getAttribute("data-vertical") || "") : "";
+          var qBpSnapshot = collectWorkbenchBlueprintState();
+          var reqPayload = {
+            email: emailVal,
+            state: stateVal,
+            capital_band: bandVal,
+            calculated_amount: calcAmt,
+            partner_sharing_consent: true,
+            tool_slug: toolSlug,
+            partner_key: partnerKey,
+            vertical: vertical,
+            scenario_inputs: qBpSnapshot.inputs || {},
+            scenario_outputs: qBpSnapshot.outputs || {},
+            blueprint_state: qBpSnapshot,
+            company_website: qAntiAbuse.company_website,
+            form_rendered_at: qAntiAbuse.form_rendered_at,
+            cf_turnstile_response: qAntiAbuse.cf_turnstile_response,
+            traffic_source: resolveTrafficSourceAttribution()
+          };
           if (window.__PSEO_SYNTHETIC_TEST__) {
-            qHeaders["X-Pseofactory-Test"] = "1";
+            reqPayload.synthetic_test = true;
           }
-          window.fetch("/api/lead-capture", {
-            method: "POST",
-            headers: qHeaders,
-            body: JSON.stringify(reqPayload)
-          }).then(function(res) {
-            return res.json();
-          }).then(function(data) {
-            if (data && data.redirect_url) {
-              window.__pseoActiveLeadId = data.lead_id || "verified";
-              window.__pseoActiveLeadEmail = emailVal;
-              var qUpgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
-              if (qUpgChkBtn) {
-                qUpgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
-                qUpgChkBtn.setAttribute("data-lead-email", emailVal);
-              }
-              var qQuickChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
-              if (qQuickChkBtn1) {
-                qQuickChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
-                qQuickChkBtn1.setAttribute("data-lead-email", emailVal);
-              }
-              var qQuickChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
-              if (qQuickChkBtn2) {
-                qQuickChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
-                qQuickChkBtn2.setAttribute("data-lead-email", emailVal);
-              }
-              qForm.setAttribute("data-submission-state", "success");
-              if (drawer) {
-                if (data.lead_id) drawer.setAttribute("data-lead-id", data.lead_id);
-                drawer.setAttribute("data-redirect-url", data.redirect_url);
-                if (data.checkout_url) drawer.setAttribute("data-checkout-url", data.checkout_url);
-                if (data.playbook_url) drawer.setAttribute("data-playbook-url", data.playbook_url);
-                if (data.fulfillment_url) drawer.setAttribute("data-fulfillment-url", data.fulfillment_url);
-                if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
-              }
-              if (statusNode) {
-                statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). Redirecting to partner portal... ";
-                appendActionLink(statusNode, "quote-matched-partner-link", data.redirect_url, "Continue to Matched Partner Desk", false);
-                if (data.checkout_url) {
-                  var qDefTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
-                  appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || qDefTierPrice) + ")", true);
-                }
-                var qFocusNode = document.getElementById("quote-matched-checkout-link") || document.getElementById("quote-matched-partner-link");
-                if (qFocusNode && typeof qFocusNode.focus === "function") {
-                  try { qFocusNode.focus({ preventScroll: true }); } catch (fE) { qFocusNode.focus(); }
-                }
-                renderPlaybookAndFulfillmentDrawer(statusNode, data, "playbook");
-              }
+          if (statusNode) statusNode.textContent = "Routing consented quote parameters to matched partner desk...";
+          emitWorkbenchEngagementBeacon("partner_quote_intake_submit", "partner_quote_intake_cta", {
+            state: stateVal,
+            capital_band: bandVal,
+            calculated_amount: calcAmt
+          });
+          if (typeof window.fetch === "function") {
+            var qHeaders = { "Content-Type": "application/json" };
+            if (window.__PSEO_SYNTHETIC_TEST__) {
+              qHeaders["X-Pseofactory-Test"] = "1";
             }
-          }).catch(function() {});
-        }
+            window.fetch("/api/lead-capture", {
+              method: "POST",
+              headers: qHeaders,
+              body: JSON.stringify(reqPayload)
+            }).then(function(res) {
+              return res.json().catch(function() { return {}; }).then(function(data) {
+                return { ok: Boolean(res && res.ok), status: res ? res.status : 0, data: data || {} };
+              });
+            }).then(function(out) {
+              var data = out.data;
+              if (out.ok && data && data.ok && (data.redirect_url || data.playbook_url)) {
+                if (drawer) drawer.setAttribute("data-lead-captured", "true");
+                window.__pseoActiveLeadId = data.lead_id || "verified";
+                window.__pseoActiveLeadEmail = emailVal;
+                var qUpgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
+                if (qUpgChkBtn) {
+                  qUpgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
+                  qUpgChkBtn.setAttribute("data-lead-email", emailVal);
+                }
+                var qQuickChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
+                if (qQuickChkBtn1) {
+                  qQuickChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
+                  qQuickChkBtn1.setAttribute("data-lead-email", emailVal);
+                }
+                var qQuickChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
+                if (qQuickChkBtn2) {
+                  qQuickChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
+                  qQuickChkBtn2.setAttribute("data-lead-email", emailVal);
+                }
+                qForm.setAttribute("data-submission-state", "success");
+                if (drawer) {
+                  if (data.lead_id) drawer.setAttribute("data-lead-id", data.lead_id);
+                  if (data.redirect_url) drawer.setAttribute("data-redirect-url", data.redirect_url);
+                  if (data.checkout_url) drawer.setAttribute("data-checkout-url", data.checkout_url);
+                  if (data.playbook_url) drawer.setAttribute("data-playbook-url", data.playbook_url);
+                  if (data.fulfillment_url) drawer.setAttribute("data-fulfillment-url", data.fulfillment_url);
+                  if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
+                }
+                if (statusNode) {
+                  statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). ";
+                  if (data.redirect_url) {
+                    appendActionLink(statusNode, "quote-matched-partner-link", data.redirect_url, "Continue to Matched Partner Desk", false);
+                  }
+                  if (data.checkout_url) {
+                    var qDefTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
+                    appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || qDefTierPrice) + ")", true);
+                  }
+                  var qFocusNode = document.getElementById("quote-matched-checkout-link") || document.getElementById("quote-matched-partner-link");
+                  if (qFocusNode && typeof qFocusNode.focus === "function") {
+                    try { qFocusNode.focus({ preventScroll: true }); } catch (fE) { qFocusNode.focus(); }
+                  }
+                  renderPlaybookAndFulfillmentDrawer(statusNode, data, "playbook");
+                }
+              } else {
+                qForm.setAttribute("data-submission-state", "error");
+                if (statusNode) statusNode.textContent = formatRuntimeLeadError(data, out.status);
+              }
+              resetRuntimeTurnstile(qForm);
+            }).catch(function() {
+              qForm.setAttribute("data-submission-state", "error");
+              if (statusNode) statusNode.textContent = "Network error while submitting. Please try again.";
+            });
+          }
+        });
       } catch (err) {}
     }, true);
 
