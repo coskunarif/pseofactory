@@ -1062,7 +1062,8 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
         }}
       }};
 
-      const kalshiReq = new Request("https://profithelm.com/r/kalshi?source_tool=prediction-market-odds&amp;cta_slot=calculator_result_inline&amp;ph_tier=enterprise");
+      const humanHeaders = {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }};
+      const kalshiReq = new Request("https://profithelm.com/r/kalshi?source_tool=prediction-market-odds&amp;cta_slot=calculator_result_inline&amp;ph_tier=enterprise", {{ headers: humanHeaders }});
       const kalshiRes = await phRedirect.onRequest({{
         request: kalshiReq,
         env: phEnv,
@@ -1078,7 +1079,7 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       if (kalshiRes.headers.get("X-Edge-Telemetry") !== "recorded") process.exit(16);
 
       // Test B: ProfitHelm /r/efile CJ Affiliate link forwards sid parameter
-      const cjReq = new Request("https://profithelm.com/r/efile?source_tool=irs-2027-tax-brackets&cta_slot=partner_card_1");
+      const cjReq = new Request("https://profithelm.com/r/efile?source_tool=irs-2027-tax-brackets&cta_slot=partner_card_1", {{ headers: humanHeaders }});
       const cjRes = await phRedirect.onRequest({{
         request: cjReq,
         env: phEnv,
@@ -1110,7 +1111,7 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       // and passes through cleanly when ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS="true"
       globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
       const pxEnv = {{ TELEMETRY_EXPORT_SECRET: "tel_sec" }};
-      const pxReq = new Request("https://prexvo.com/r/splash_financial?source_tool=student-loan-repayment-calculator&amp;cta_slot=calculator_result_inline&amp;ph_tier=high_balance");
+      const pxReq = new Request("https://prexvo.com/r/splash_financial?source_tool=student-loan-repayment-calculator&amp;cta_slot=calculator_result_inline&amp;ph_tier=high_balance", {{ headers: humanHeaders }});
       const pxDefaultRes = await pxRedirect.onRequest({{
         request: pxReq,
         env: pxEnv,
@@ -1122,7 +1123,7 @@ def test_edge_redirect_subid_forwarding_and_telemetry_persistence(tmp_path):
       if (pxDefaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(46);
 
       const pxRes = await pxRedirect.onRequest({{
-        request: new Request("https://prexvo.com/r/splash_financial?source_tool=student-loan-repayment-calculator&amp;cta_slot=calculator_result_inline&amp;ph_tier=high_balance"),
+        request: new Request("https://prexvo.com/r/splash_financial?source_tool=student-loan-repayment-calculator&amp;cta_slot=calculator_result_inline&amp;ph_tier=high_balance", {{ headers: humanHeaders }}),
         env: {{ ...pxEnv, ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "splash_financial" }}
       }});
@@ -1214,10 +1215,11 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
     node_script = f"""
     (async () => {{
       const phRedirect = await import({json.dumps(ph_r.as_uri())});
+      const humanHeaders = {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }};
 
       // 1. xendoo -> Impact Xendoo #16354 ($500 CPA), while uncontracted crest_capital stays native
       const xendooRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/xendoo?source_tool=equipment-lease-calculator&cta_slot=calculator_result_inline&subid=equipment-lease-calculator_inline&ph_tier=enterprise"),
+        request: new Request("https://profithelm.com/r/xendoo?source_tool=equipment-lease-calculator&cta_slot=calculator_result_inline&subid=equipment-lease-calculator_inline&ph_tier=enterprise", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "xendoo" }}
       }});
@@ -1229,7 +1231,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (xendooRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(14);
 
       const crestDefaultRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=partner_card_2"),
+        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=partner_card_2", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "crest_capital" }}
       }});
@@ -1237,7 +1239,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (crestDefaultLoc.hostname !== "profithelm.com" || crestDefaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(15);
 
       const crestRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=partner_card_2"),
+        request: new Request("https://profithelm.com/r/crest_capital?source_tool=equipment-lease-calculator&cta_slot=partner_card_2", {{ headers: humanHeaders }}),
         env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "crest_capital" }}
       }});
@@ -1246,7 +1248,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 
       // 2. efile_com -> CJ E-file.com #4355234 (PID 101906407), while uncontracted turbotax holds on-site by default
       const efRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/efile_com?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_1"),
+        request: new Request("https://profithelm.com/r/efile_com?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_1", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "efile_com" }}
       }});
@@ -1256,14 +1258,14 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (efRes.headers.get("X-Edge-Contract-Tier") !== "direct_contract_upgraded") process.exit(22);
 
       const ttDefaultRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_2"),
+        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_2", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "turbotax" }}
       }});
       if (ttDefaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(23);
 
       const ttRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_2"),
+        request: new Request("https://profithelm.com/r/turbotax?source_tool=irs-2027-tax-brackets-tcja-sunset-calculator&cta_slot=partner_card_2", {{ headers: humanHeaders }}),
         env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "turbotax" }}
       }});
@@ -1272,7 +1274,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 
       // 3. eztaxreturn_com -> CJ ezTaxReturn.com #6874782 (PID 101906407), while uncontracted taxslayer holds on-site by default
       const ezRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/eztaxreturn_com?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_2"),
+        request: new Request("https://profithelm.com/r/eztaxreturn_com?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_2", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "eztaxreturn_com" }}
       }});
@@ -1281,14 +1283,14 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (ezLoc.searchParams.get("sid") !== "california-tax-brackets-calculator_partner_card_2") process.exit(31);
 
       const tsDefaultRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_3"),
+        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_3", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "taxslayer" }}
       }});
       if (tsDefaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(32);
 
       const tsRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_3"),
+        request: new Request("https://profithelm.com/r/taxslayer?source_tool=california-tax-brackets-calculator&cta_slot=partner_card_3", {{ headers: humanHeaders }}),
         env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "taxslayer" }}
       }});
@@ -1297,7 +1299,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 
       // 4. lawdepot -> CJ LawDepot #4544498 (PID 101906407), while uncontracted suretybonds_direct holds on-site by default
       const ldRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/lawdepot?source_tool=section-1031-calculator&cta_slot=partner_card_1"),
+        request: new Request("https://profithelm.com/r/lawdepot?source_tool=section-1031-calculator&cta_slot=partner_card_1", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "lawdepot" }}
       }});
@@ -1306,14 +1308,14 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
       if (ldLoc.searchParams.get("sid") !== "section-1031-calculator_partner_card_1") process.exit(41);
 
       const sbDefaultRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/suretybonds_direct?source_tool=contractor-surety-bond-cost-calculator&cta_slot=partner_card_1"),
+        request: new Request("https://profithelm.com/r/suretybonds_direct?source_tool=contractor-surety-bond-cost-calculator&cta_slot=partner_card_1", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "suretybonds_direct" }}
       }});
       if (sbDefaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(42);
 
       const sbRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/suretybonds_direct?source_tool=contractor-surety-bond-cost-calculator&cta_slot=partner_card_1"),
+        request: new Request("https://profithelm.com/r/suretybonds_direct?source_tool=contractor-surety-bond-cost-calculator&cta_slot=partner_card_1", {{ headers: humanHeaders }}),
         env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "suretybonds_direct" }}
       }});
@@ -1322,14 +1324,14 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 
       // 5. ipx1031 holds on-site by default and stays on the 1031 qualified intermediary when opted in (never Xendoo bookkeeping)
       const ipxDefaultRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
+        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "ipx1031" }}
       }});
       if (ipxDefaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(48);
 
       const ipxDirectRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
+        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline", {{ headers: humanHeaders }}),
         env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "ipx1031" }}
       }});
@@ -1339,7 +1341,7 @@ def test_direct_contract_yield_upgrades_and_b2b_fallback_realignment(tmp_path):
 
       // 6. Even with Sovrn approved, a 1031 click is not wrapped onto an unrelated lender (DLP Capital)
       const ipxRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline"),
+        request: new Request("https://profithelm.com/r/ipx1031?source_tool=1031-exchange-boot-calculator-california&cta_slot=calculator_result_inline&subid=1031-exchange-boot-calculator-california_inline", {{ headers: humanHeaders }}),
         env: {{ SOVRN_COMMERCE_APPROVED: "true", ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
         params: {{ partner: "ipx1031" }}
       }});

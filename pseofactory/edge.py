@@ -1915,6 +1915,77 @@ def _render_gainhelm_framework_routing_js(include_deliverables: bool = False) ->
     )
 
 
+def _render_edge_redirect_human_gate_js() -> str:
+    """
+    Renders the shared human-click gate JS injected into every /r/<partner> Cloudflare Pages
+    redirect function across all tenants (50+ site default).
+    Blocks non-GET methods (405), speculative prefetches (204), and missing/automated bot/crawler
+    User-Agents (403) before any 302 redirect or KV click telemetry write, while allowing explicit
+    GET synthetic verification probes (x-pseofactory-test: 1 or ?synthetic_test=1).
+    Zero em-dashes. Zero en-dashes.
+    """
+    return r"""const AUTOMATED_REDIRECT_UA_RE = /(?:(?<!cu)bot\b|crawler|spider|scraper|slurp|archiver|indexer|fetcher|mediapartners-google|adsbot|apis-google|feedfetcher|google-inspectiontool|googleother|google-extended|storebot-google|bingpreview|yandex(?:bot|images|video|media|metrika|render|accessibility|mobile|direct|favicon|webmaster)|semrush|ahrefs|majestic|screaming\s*frog|sitebulb|dataforseo|seokicks|serpstat|megaindex|turnitin|barkrowler|diffbot|omgili|img2dataset|scrapy|chatgpt-user|claude-web|claude-user|anthropic-ai|perplexity|cohere-ai|meta-externalagent|meta-externalfetcher|facebookexternalhit|whatsapp\/|skypeuripreview|embedly|quora\s*link\s*preview|headlesschrome|headless|phantomjs|playwright|puppeteer|selenium|webdriver|cypress|lighthouse|pagespeed|gtmetrix|pingdom|statuscake|datadog|newrelic|site24x7|checkly|betterstack|linkchecker|lychee|brokenlinkcheck|w3c_validator|httrack|nutch|heritrix|\b(?:curl|wget|httpie)(?:\/|\b)|python-requests|python-urllib|python-httpx|aiohttp|urllib|pycurl|go-http-client|node-fetch|\bundici\b|^node$|deno\/|bun\/|superagent|okhttp|\bjava\/|apache-httpclient|commons-httpclient|libwww-perl|lwp-trivial|lwp::simple|mechanize|\bruby\/|faraday|rest-client|guzzlehttp|\bphp\/|powershell|invoke-webrequest|winhttp|postmanruntime|apachebench|(?:^|[\s(])(?:axios|got|insomnia|k6|wrk|ab)\/)/i;
+
+function evaluateEdgeRedirectGate(request, reqUrl) {
+  const reqMethod = String((request && request.method) || "GET").trim().toUpperCase();
+  const getHdr = (name) =>
+    request && request.headers && typeof request.headers.get === "function"
+      ? String(request.headers.get(name) || "")
+      : "";
+  const isSyntheticProbe =
+    reqMethod === "GET" &&
+    (getHdr("x-pseofactory-test") === "1" ||
+      reqUrl.searchParams.get("synthetic_test") === "1");
+  if (isSyntheticProbe) {
+    return { isSyntheticProbe: true, blockedResponse: null };
+  }
+  if (reqMethod !== "GET") {
+    return {
+      isSyntheticProbe: false,
+      blockedResponse: new Response("Method Not Allowed", {
+        status: 405,
+        headers: {
+          Allow: "GET",
+          "Cache-Control": "no-store",
+          "X-Robots-Tag": "noindex, nofollow",
+          "X-Edge-Redirect-Blocked": "method",
+        },
+      }),
+    };
+  }
+  const purposeHeader = `${getHdr("sec-purpose")} ${getHdr("purpose")} ${getHdr("x-moz")}`;
+  if (/\b(?:prefetch|prerender|preview)\b/i.test(purposeHeader)) {
+    return {
+      isSyntheticProbe: false,
+      blockedResponse: new Response(null, {
+        status: 204,
+        headers: {
+          "Cache-Control": "no-store",
+          "X-Robots-Tag": "noindex, nofollow",
+          "X-Edge-Redirect-Blocked": "prefetch",
+        },
+      }),
+    };
+  }
+  const userAgent = getHdr("user-agent").trim();
+  if (!userAgent || AUTOMATED_REDIRECT_UA_RE.test(userAgent)) {
+    return {
+      isSyntheticProbe: false,
+      blockedResponse: new Response("Automated redirect requests are not permitted.", {
+        status: 403,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Robots-Tag": "noindex, nofollow",
+          "X-Edge-Redirect-Blocked": "bot",
+        },
+      }),
+    };
+  }
+  return { isSyntheticProbe: false, blockedResponse: null };
+}"""
+
+
 def generate_edge_redirect_function(
     property_id: str = "profithelm",
     hub: Optional[Any] = None,
@@ -1941,6 +2012,7 @@ def generate_edge_redirect_function(
         )
 
     active_hub = hub if hub is not None else MonetizationHub()
+    human_gate_js = _render_edge_redirect_human_gate_js()
 
     if prop_clean == "lienbond":
         lb_vault = getattr(active_hub, "_vault", {}).get("lienbond", {}) if active_hub else {}
@@ -2173,8 +2245,17 @@ function isSafeAndCompliantUrl(urlStr) {{
   }}
 }}
 
+{human_gate_js}
+
 export async function onRequest(context) {{
   const {{ request, env, params }} = context;
+  const earlyReqUrl = new URL(request.url);
+  const gate = evaluateEdgeRedirectGate(request, earlyReqUrl);
+  if (gate.blockedResponse) {{
+    return gate.blockedResponse;
+  }}
+  const isEarlySynth = gate.isSyntheticProbe;
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   const rawPartner = (params.partner || "").trim().toLowerCase();
   const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
   if (!partnerConfig) {{
@@ -2191,11 +2272,6 @@ export async function onRequest(context) {{
       ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
       : null;
   const effectiveStatus = envStatus || partnerConfig.status || "pending";
-  const earlyReqUrl = new URL(request.url);
-  const isEarlySynth =
-    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
-    earlyReqUrl.searchParams.get("synthetic_test") === "1";
-  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||
@@ -2634,8 +2710,17 @@ function isSafeAndCompliantUrl(urlStr) {{
   }}
 }}
 
+{human_gate_js}
+
 export async function onRequest(context) {{
   const {{ request, env, params }} = context;
+  const earlyReqUrl = new URL(request.url);
+  const gate = evaluateEdgeRedirectGate(request, earlyReqUrl);
+  if (gate.blockedResponse) {{
+    return gate.blockedResponse;
+  }}
+  const isEarlySynth = gate.isSyntheticProbe;
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   const rawPartner = (params.partner || "").trim().toLowerCase();
   const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
   if (!partnerConfig) {{
@@ -2652,11 +2737,6 @@ export async function onRequest(context) {{
       ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
       : null;
   const effectiveStatus = envStatus || partnerConfig.status || "pending";
-  const earlyReqUrl = new URL(request.url);
-  const isEarlySynth =
-    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
-    earlyReqUrl.searchParams.get("synthetic_test") === "1";
-  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||
@@ -3160,8 +3240,17 @@ function makeRedirectResponse(locationUrl, extraHeaders = {{}}) {{
   }});
 }}
 
+{human_gate_js}
+
 export async function onRequest(context) {{
   const {{ request, env, params }} = context;
+  const earlyReqUrl = new URL(request.url);
+  const gate = evaluateEdgeRedirectGate(request, earlyReqUrl);
+  if (gate.blockedResponse) {{
+    return gate.blockedResponse;
+  }}
+  const isEarlySynth = gate.isSyntheticProbe;
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   const rawPartner = (params.partner || "").trim().toLowerCase();
 
   const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
@@ -3180,12 +3269,6 @@ export async function onRequest(context) {{
       ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
       : null;
   const effectiveStatus = envStatus || partnerConfig.status || "pending";
-
-  const earlyReqUrl = new URL(request.url);
-  const isEarlySynth =
-    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
-    earlyReqUrl.searchParams.get("synthetic_test") === "1";
-  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
 
   if (
     effectiveStatus === "declined" ||
@@ -3802,8 +3885,17 @@ function isSsrfSafe(urlStr) {{
   }}
 }}
 
+{human_gate_js}
+
 export async function onRequest(context) {{
   const {{ request, env, params }} = context;
+  const earlyReqUrl = new URL(request.url);
+  const gate = evaluateEdgeRedirectGate(request, earlyReqUrl);
+  if (gate.blockedResponse) {{
+    return gate.blockedResponse;
+  }}
+  const isEarlySynth = gate.isSyntheticProbe;
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   const rawPartner = (params.partner || "").trim().toLowerCase();
 
   // Whitelist check
@@ -3825,11 +3917,6 @@ export async function onRequest(context) {{
       : null;
   const effectiveStatus =
     envStatus || partnerConfig.status || (partnerConfig.isDirect ? "live" : "pending");
-  const earlyReqUrl = new URL(request.url);
-  const isEarlySynth =
-    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
-    earlyReqUrl.searchParams.get("synthetic_test") === "1";
-  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
   if (
     effectiveStatus === "declined" ||
     effectiveStatus === "rejected" ||

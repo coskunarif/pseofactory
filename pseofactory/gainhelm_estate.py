@@ -2759,7 +2759,7 @@ def compile_gainhelm_estate_impl(
         hub_specs=hub_specs,
         leaf_tools=all_tools,
         ai_bots=gh_ai_bots,
-        disallow_paths=["/api/", "/cdn-cgi/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        disallow_paths=["/api/", "/cdn-cgi/", "/r/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
         allow_paths=["/", "/tools/"],
         include_changefreq_and_priority=True,
     )

@@ -2448,9 +2448,10 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
         ["sprinto_compliance", "sprinto.com", "sprinto_soc2_table", "comparison_table", "soc-2-audit-cost-calculator"],
         ["thoropass_audit", "www.thoropass.com", "thoro_hitrust_hero", "hero_callout", "hitrust-certification-cost-calculator"],
       ];
+      const humanHeaders = {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }};
       for (const [partner, host, subid, slot, tool] of grc) {{
         const defaultRes = await ghRedirect.onRequest({{
-          request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=" + tool + "&cta_slot=" + slot + "&subid=" + subid),
+          request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=" + tool + "&cta_slot=" + slot + "&subid=" + subid, {{ headers: humanHeaders }}),
           env: {{}},
           params: {{ partner }}
         }});
@@ -2460,7 +2461,7 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
         if (defaultRes.headers.get("X-Edge-Contract-Tier") !== "blocked_unapproved_partner") process.exit(14);
 
         const res = await ghRedirect.onRequest({{
-          request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=" + tool + "&cta_slot=" + slot + "&subid=" + subid),
+          request: new Request("https://gainhelm.com/r/" + partner + "?source_tool=" + tool + "&cta_slot=" + slot + "&subid=" + subid, {{ headers: humanHeaders }}),
           env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
           params: {{ partner }}
         }});
@@ -2474,7 +2475,7 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
       // Foreign ProfitHelm-only affiliate contracts are strictly blocked (HTTP 404) on GainHelm
       for (const foreignPartner of ["ramp", "xendoo", "lawdepot"]) {{
         const res = await ghRedirect.onRequest({{
-          request: new Request("https://gainhelm.com/r/" + foreignPartner + "?source_tool=soc-2-audit-cost-calculator&cta_slot=footer"),
+          request: new Request("https://gainhelm.com/r/" + foreignPartner + "?source_tool=soc-2-audit-cost-calculator&cta_slot=footer", {{ headers: humanHeaders }}),
           env: {{}},
           params: {{ partner: foreignPartner }}
         }});

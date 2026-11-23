@@ -141,7 +141,7 @@ def load_and_enrich_deployed_voids(
     return enriched_voids
 
 
-MANDATORY_ROBOTS_DISALLOW_PATHS: Tuple[str, ...] = ("/api/", "/cdn-cgi/")
+MANDATORY_ROBOTS_DISALLOW_PATHS: Tuple[str, ...] = ("/api/", "/cdn-cgi/", "/r/")
 
 
 def _parse_robots_directive(raw_line: str) -> Tuple[str, str]:

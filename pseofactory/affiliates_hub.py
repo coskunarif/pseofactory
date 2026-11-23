@@ -2015,9 +2015,9 @@ class MonetizationHub:
         prop_vault = self._vault.get(vault_prop, {})
 
         use_live = (
-            live_network
+            bool(live_network)
             if live_network is not None
-            else ("PYTEST_CURRENT_TEST" not in os.environ or os.getenv("PSEUFACTORY_LIVE_NETWORK") == "1")
+            else (os.getenv("PSEUFACTORY_LIVE_NETWORK") == "1")
         )
 
         class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):

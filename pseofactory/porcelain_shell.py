@@ -6270,7 +6270,7 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         leaked_meta.unlink(missing_ok=True)
         mutated.append(".pseofactory.json")
 
-    # Ensure robots.txt blocks crawler execution of /api/ and /cdn-cgi/ for EVERY User-agent group
+    # Ensure robots.txt blocks crawler execution of /api/, /cdn-cgi/, and /r/ for EVERY User-agent group
     robots_path = dist_dir / "robots.txt"
     if robots_path.is_file():
         from pseofactory.estate_common import ensure_robots_txt_mandatory_disallows
@@ -6357,7 +6357,7 @@ def _compute_porcelain_estate_convergence_sig(
                 continue
             if (
                 sfx in (".html", ".css", ".js", ".xml", ".ico", ".svg", ".webmanifest")
-                or fp.name in ("_headers", "_redirects")
+                or fp.name in ("_headers", "_redirects", "robots.txt")
                 or (sfx == ".png" and rel.startswith("static/img/"))
             ):
                 fh = hashlib.sha256(fp.read_bytes()).hexdigest()

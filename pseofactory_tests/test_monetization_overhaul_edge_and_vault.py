@@ -439,37 +439,38 @@ def test_edge_redirect_workers_preserve_status_block_declined_and_isolate_tenant
 
     const leadsKv = makeKv();
     const telKv = makeKv();
+    const humanHeaders = {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }};
 
     const phRamp = await ph.onRequest({{
-      request: new Request("https://profithelm.com/r/ramp?tool=saas-burn"),
+      request: new Request("https://profithelm.com/r/ramp?tool=saas-burn", {{ headers: humanHeaders }}),
       params: {{ partner: "ramp" }},
       env: {{ PROFITHELM_LEADS: leadsKv, PROFITHELM_TELEMETRY_KV: telKv }},
       waitUntil: (p) => p,
     }});
 
     const pxSofi = await px.onRequest({{
-      request: new Request("https://prexvo.com/r/sofi?tool=student-refi"),
+      request: new Request("https://prexvo.com/r/sofi?tool=student-refi", {{ headers: humanHeaders }}),
       params: {{ partner: "sofi" }},
       env: {{ PREXVO_LEADS: leadsKv, PREXVO_TELEMETRY_KV: telKv }},
       waitUntil: (p) => p,
     }});
 
     const lbNext = await lb.onRequest({{
-      request: new Request("https://lienbond.com/r/next-insurance?tool=workers-comp"),
+      request: new Request("https://lienbond.com/r/next-insurance?tool=workers-comp", {{ headers: humanHeaders }}),
       params: {{ partner: "next-insurance" }},
       env: {{ LIENBOND_LEADS: leadsKv, LIENBOND_TELEMETRY_KV: telKv }},
       waitUntil: (p) => p,
     }});
 
     const lbSuretyDefault = await lb.onRequest({{
-      request: new Request("https://lienbond.com/r/suretybonds-direct?tool=surety-bond"),
+      request: new Request("https://lienbond.com/r/suretybonds-direct?tool=surety-bond", {{ headers: humanHeaders }}),
       params: {{ partner: "suretybonds-direct" }},
       env: {{ LIENBOND_LEADS: leadsKv, LIENBOND_TELEMETRY_KV: telKv }},
       waitUntil: (p) => p,
     }});
 
     const lbSurety = await lb.onRequest({{
-      request: new Request("https://lienbond.com/r/suretybonds-direct?tool=surety-bond"),
+      request: new Request("https://lienbond.com/r/suretybonds-direct?tool=surety-bond", {{ headers: humanHeaders }}),
       params: {{ partner: "suretybonds-direct" }},
       env: {{ LIENBOND_LEADS: leadsKv, LIENBOND_TELEMETRY_KV: telKv, ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
       waitUntil: (p) => p,
@@ -1353,7 +1354,9 @@ def test_redteam_bug_2_1_to_2_3_vault_hub_edge_sync_across_all_four_tenants(tmp_
 
     async function callR(mod, host, slug) {{
       const res = await mod.onRequest({{
-        request: new Request(`${{host}}/r/${{slug}}?source=rt-probe`),
+        request: new Request(`${{host}}/r/${{slug}}?source=rt-probe`, {{
+          headers: {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }},
+        }}),
         params: {{ partner: slug }},
         env: {{}},
         waitUntil: (p) => p,
@@ -1421,14 +1424,15 @@ def test_redteam_bug_3_1_and_3_2_brand_honesty_and_callout_normalizer(tmp_path: 
     out = _run_node_esm(
         f"""
         import * as ph from {json.dumps(ph_r.as_uri())};
+        const humanHeaders = {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }};
         const defRes = await ph.onRequest({{
-          request: new Request("https://profithelm.com/r/equipment_macrs?source=macrs-calc"),
+          request: new Request("https://profithelm.com/r/equipment_macrs?source=macrs-calc", {{ headers: humanHeaders }}),
           params: {{ partner: "equipment_macrs" }},
           env: {{}},
           waitUntil: (p) => p,
         }});
         const res = await ph.onRequest({{
-          request: new Request("https://profithelm.com/r/equipment_macrs?source=macrs-calc"),
+          request: new Request("https://profithelm.com/r/equipment_macrs?source=macrs-calc", {{ headers: humanHeaders }}),
           params: {{ partner: "equipment_macrs" }},
           env: {{ ALLOW_UNAPPROVED_EXTERNAL_REDIRECTS: "true" }},
           waitUntil: (p) => p,

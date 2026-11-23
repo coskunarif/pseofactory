@@ -2465,7 +2465,7 @@ class MasterSEOVerifier:
                 if self.is_bot_blocked(bot, "/tools/", sections):
                     issues.append(f"robots.txt disallows AI search/user bot '{bot}' on '/tools/'")
 
-            # RFC 9309 named-bot override guard for /api/ and /cdn-cgi/
+            # RFC 9309 named-bot override guard for /api/, /cdn-cgi/, and /r/
             has_api_surface = (target / "functions" / "api").is_dir() or (
                 self.repo_root is not None and (Path(self.repo_root) / "functions" / "api").is_dir()
             )
@@ -2475,7 +2475,18 @@ class MasterSEOVerifier:
                     require_present=has_api_surface,
                 )
             )
-
+            has_edge_redirects = (
+                (target / "functions" / "r").is_dir()
+                or (target.parent / "functions" / "r").is_dir()
+                or (self.repo_root is not None and (Path(self.repo_root) / "functions" / "r").is_dir())
+            )
+            issues.extend(
+                self.find_robots_txt_mandatory_disallow_violations(
+                    content,
+                    mandatory_disallows=("/r/",),
+                    require_present=has_edge_redirects,
+                )
+            )
             if self.strict_robots:
                 if (self.tools or (target / "tools").is_dir()) and "allow: /tools/" not in content_lower:
                     issues.append("robots.txt missing 'Allow: /tools/' directive")

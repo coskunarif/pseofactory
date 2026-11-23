@@ -2320,9 +2320,11 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
     (async () => {{
       const phRedirect = await import({json.dumps(ph_r.as_uri())});
 
+      const humanHeaders = {{ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" }};
+
       // Factoring click must never be swapped into the Ramp corporate card contract (#51436)
       const otrDirectRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake"),
+        request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake", {{ headers: humanHeaders }}),
         env: {{}},
         params: {{ partner: "otr_solutions_factoring" }}
       }});
@@ -2333,7 +2335,7 @@ def test_zoho_notification_newsletter_body_ingestion_and_playbook_filter_and_fac
 
       // When SOVRN_COMMERCE_APPROVED=true -> falls back to Sovrn VigLink wrapper
       const otrSovrnRes = await phRedirect.onRequest({{
-        request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake"),
+        request: new Request("https://profithelm.com/r/otr_solutions_factoring?source_tool=invoice-factoring-cost-apr-calculator&cta_slot=partner_quote_intake&subid=invoice-factoring-cost-apr-calculator_quote_intake", {{ headers: humanHeaders }}),
         env: {{ SOVRN_COMMERCE_APPROVED: "true" }},
         params: {{ partner: "otr_solutions_factoring" }}
       }});
