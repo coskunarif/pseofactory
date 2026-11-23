@@ -32,20 +32,24 @@ from pseofactory.affiliates import (
 from pseofactory.contracts import assert_no_forbidden_dashes
 
 
-def test_vault_schema_loading_and_default_fallback():
-    """Verifies that the vault JSON loads properly with credentials and provides clean fallbacks."""
+def test_vault_schema_loading_and_default_fallback(monkeypatch):
+    """Verifies that the vault JSON loads properly without hardcoded API secrets and reads keys from env."""
+    monkeypatch.setenv("SOVRN_COMMERCE_API_KEY", "test_sovrn_api_key_from_env")
+    monkeypatch.setenv("PARTNERSTACK_API_KEY", "test_partnerstack_api_key_from_env")
     hub = MonetizationHub()
 
     assert hub.vault_data is not None
     assert "master_networks" in hub.vault_data
     assert "properties" in hub.vault_data
 
-    # Verify master credentials in loaded vault
+    # Verify public identifiers load from vault while secret API keys are never hardcoded in vault JSON
     master = hub.vault_data["master_networks"]
     assert master["sovrn_commerce"]["domain_key"] == "0a5ac1bfe04034bff021b394f5e71d90"
-    assert master["sovrn_commerce"]["api_key"] == "039f430e9e7cad0bd9ff3e6c8d1c54769d5847c3"
-    assert master["partnerstack"]["api_key"] == "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP"
+    assert master["sovrn_commerce"]["api_key"] == ""
+    assert master["partnerstack"]["api_key"] == ""
     assert master["stripe"]["account_id"] == "acct_1T6fSTIq0ckFsf5j"
+    assert hub.sovrn_api_key == "test_sovrn_api_key_from_env"
+    assert hub.partnerstack_api_key == "test_partnerstack_api_key_from_env"
 
     # Property-level fallback configuration
     props = hub.vault_data["properties"]
@@ -65,7 +69,9 @@ def test_vault_schema_loading_and_default_fallback():
     assert status["properties"]["profithelm"]["fallback_enabled"] is True
     assert status["properties"]["prexvo"]["fallback_enabled"] is False
 
-    # In-memory default fallback when path does not exist
+    # In-memory default fallback when path does not exist and env vars are unset
+    monkeypatch.delenv("SOVRN_COMMERCE_API_KEY", raising=False)
+    monkeypatch.delenv("PARTNERSTACK_API_KEY", raising=False)
     fallback_hub = MonetizationHub(vault_path="/nonexistent/path/monetization_vault.json")
     assert fallback_hub.sovrn_domain_key == DEFAULT_SOVRN_DOMAIN_KEY
     assert fallback_hub.sovrn_api_key == DEFAULT_SOVRN_API_KEY

@@ -1539,7 +1539,9 @@ console.log(JSON.stringify({{ capChk, taxChk, capFf, pxChk }}));
     assert audit_rep["ui_ux_button_surface_audit"]["dom_action_simulation"]["verified"] is False
     assert audit_rep["stripe_and_mercury_settlement"]["bank_routing_number"] == "091311229"
     assert audit_rep["stripe_and_mercury_settlement"]["bank_account_last4"] == "1395"
-    assert len(audit_rep["catalog_skus"]) == 6
+    assert len(audit_rep["catalog_skus"]) >= 15
+    assert "lb_surety_bond_underwriting_kit" in audit_rep["catalog_skus"]
+    assert "ph_instant_statutory_worksheet_19" in audit_rep["catalog_skus"]
     assert all(item["checkout_ready"] and item["fulfillment_ready"] for item in audit_rep["catalog_skus"].values())
     assert audit_rep["ymyl_public_service_isolation"]["isolated"] is True
     assert audit_rep["outbound_affiliate_attribution"]["profithelm"]["total_routes"] == 29

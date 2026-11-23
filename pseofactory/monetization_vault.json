@@ -9,7 +9,7 @@
       "name": "Sovrn Commerce",
       "account_id": "2987330",
       "domain_key": "0a5ac1bfe04034bff021b394f5e71d90",
-      "api_key": "039f430e9e7cad0bd9ff3e6c8d1c54769d5847c3",
+      "api_key": "",
       "site_domain": "profithelm.com",
       "site_url": "https://profithelm.com",
       "redirect_base": "https://redirect.viglink.com",
@@ -19,7 +19,7 @@
     },
     "partnerstack": {
       "name": "PartnerStack",
-      "api_key": "5ZyfW4zFohJwn2yY8fwc6atIYGIubHwPeATJTNQtqPDrJCIihDhds2dRPrHQJwMP",
+      "api_key": "",
       "account_name": "ProfitHelm LLC",
       "active_partnership_key": "part_jp9R0iYpPGriHu",
       "network_profile_completion_pct": 94,

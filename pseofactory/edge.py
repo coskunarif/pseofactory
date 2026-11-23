@@ -5405,7 +5405,7 @@ function buildLienBondWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     estimated_processor_fee_usd: estFeeUsd,
     net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
     attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: true,
+    datapack_delivered: Boolean(isPaidSettled),
     datapack_pack_id: `dp_${leadId}`,
     datapack_url: datapackUrl,
     calculated_amount: baseAmount,
@@ -6059,12 +6059,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
     calculated_amount: bundle.calculated_amount,
-    reconciliation_schedule: bundle.reconciliation_schedule,
-    sensitivity_matrix: bundle.sensitivity_matrix,
-    statutory_trend_timeseries: bundle.statutory_trend_timeseries,
-    statutory_execution_artifacts: bundle.statutory_execution_artifacts,
-    statutory_data_pack: bundle.statutory_data_pack,
     settlement_attribution: bundle.settlement_attribution,
+    statutory_trend_series_count: Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0,
   } : {};
 
   if (!isSyntheticProbe && stripeKey && typeof fetch === "function") {
@@ -6519,7 +6515,7 @@ export async function onRequestGet(context) {
 
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
     const { record, toolSlug, offer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
-    const bundle = buildLienBondWorkpaperBundle(record, offer, "paid_toolkit");
+    const bundle = buildLienBondWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email || (record && record.email) || "", toolSlug, offer, isSynth, bundle);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
@@ -6897,7 +6893,7 @@ export async function onRequestPost(context) {
       offer_price_usd: offer.price_usd,
       captured_at: new Date().toISOString(),
     };
-    const bundle = buildLienBondWorkpaperBundle(record, offer);
+    const bundle = buildLienBondWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
     record.reconciliation_schedule = bundle.reconciliation_schedule;
     record.sensitivity_matrix = bundle.sensitivity_matrix;
@@ -7910,7 +7906,7 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
     estimated_processor_fee_usd: estFeeUsd,
     net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
     attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: true,
+    datapack_delivered: Boolean(isPaidSettled),
     datapack_pack_id: `dp_${leadId}`,
     datapack_url: datapackUrl,
     calculated_amount: baseAmount,
@@ -8633,12 +8629,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
     calculated_amount: bundle.calculated_amount,
-    reconciliation_schedule: bundle.reconciliation_schedule,
-    sensitivity_matrix: bundle.sensitivity_matrix,
-    statutory_trend_timeseries: bundle.statutory_trend_timeseries,
-    statutory_execution_artifacts: bundle.statutory_execution_artifacts,
-    statutory_data_pack: bundle.statutory_data_pack,
     settlement_attribution: bundle.settlement_attribution,
+    statutory_trend_series_count: Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0,
   } : {};
 
   if (!isSyntheticProbe && stripeKey && typeof fetch === "function") {
@@ -9100,7 +9092,7 @@ export async function onRequestGet(context) {
     );
     const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
     const offer = effState.offer;
-    const bundle = buildGainHelmWorkpaperBundle(record, offer, "paid_toolkit");
+    const bundle = buildGainHelmWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(
       env,
       leadId,
@@ -9525,7 +9517,7 @@ export async function onRequestPost(context) {
       offer_price_usd: offer.price_usd,
       captured_at: new Date().toISOString(),
     };
-    const bundle = buildGainHelmWorkpaperBundle(record, offer);
+    const bundle = buildGainHelmWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle, reqVertical, reqPostSku);
     record.reconciliation_schedule = bundle.reconciliation_schedule;
     record.sensitivity_matrix = bundle.sensitivity_matrix;
@@ -10005,7 +9997,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
     estimated_processor_fee_usd: estFeeUsd,
     net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
     attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: true,
+    datapack_delivered: Boolean(isPaidSettled),
     datapack_pack_id: `dp_${leadId}`,
     datapack_url: datapackUrl,
     calculated_amount: baseAmount,
@@ -10581,7 +10573,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
           offer_title: activeOffer.title,
           offer_price_usd: activeOffer.price_usd,
         },
-        "paid_toolkit"
+        "free_playbook"
       )
     : null;
   const fallbackUrl = customBundle && !isPartnerSlotSku ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
@@ -10609,11 +10601,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     calculated_amount: customBundle.calculated_amount,
     capital_band: customBundle.capital_band,
     custom_parameter_ledger: customBundle.custom_parameter_ledger,
-    reconciliation_schedule: customBundle.reconciliation_schedule,
-    sensitivity_matrix: customBundle.sensitivity_matrix,
-    statutory_trend_timeseries: customBundle.statutory_trend_timeseries,
-    statutory_execution_artifacts: customBundle.statutory_execution_artifacts,
-    statutory_data_pack: customBundle.statutory_data_pack,
     settlement_attribution: customBundle.settlement_attribution,
     statutory_trend_series_count: Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0,
   } : {};
@@ -12455,7 +12442,7 @@ function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit
     estimated_processor_fee_usd: estFeeUsd,
     net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
     attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: true,
+    datapack_delivered: Boolean(isPaidSettled),
     datapack_pack_id: `dp_${leadId}`,
     datapack_url: datapackUrl,
     calculated_amount: baseAmount,
@@ -13024,7 +13011,7 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false, customRecord = null) {
-  const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, spec, "paid_toolkit") : null;
+  const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, spec, "free_playbook") : null;
   const fallbackUrl = customBundle ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
@@ -13045,11 +13032,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     calculated_amount: customBundle.calculated_amount,
     capital_band: customBundle.capital_band,
     custom_parameter_ledger: customBundle.custom_parameter_ledger,
-    reconciliation_schedule: customBundle.reconciliation_schedule,
-    sensitivity_matrix: customBundle.sensitivity_matrix,
-    statutory_trend_timeseries: customBundle.statutory_trend_timeseries,
-    statutory_execution_artifacts: customBundle.statutory_execution_artifacts,
-    statutory_data_pack: customBundle.statutory_data_pack,
     settlement_attribution: customBundle.settlement_attribution,
     statutory_trend_series_count: Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0,
   } : {};

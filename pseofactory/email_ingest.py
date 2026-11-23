@@ -244,7 +244,11 @@ def _extract_bounced_recipient(text: str, sender_email: str = "") -> str:
         if low.startswith(daemon_prefixes):
             continue
         candidates.append(clean_addr)
-    non_canonical = [c for c in candidates if c.lower() != "arif.coskun@profithelm.com"]
+    non_canonical = [
+        c
+        for c in candidates
+        if c.lower() not in ("arif.coskun@profithelm.com", "arif@profithelm.com")
+    ]
     if non_canonical:
         return non_canonical[0]
     if candidates:
@@ -2968,6 +2972,14 @@ class EmailIngestionEngine:
         for m in msg_list:
             snd = f"{m.sender_name or ''} {m.sender_email or ''}".lower()
             subj = (m.subject or "").lower()
+            body_low_b = (m.body_snippet or "").lower()
+            is_soft_delay = (
+                "(delay)" in subj
+                or "delivery status notification (delay)" in subj
+                or "this is a warning message only" in body_low_b
+            )
+            if is_soft_delay:
+                continue
             is_bounce = (
                 "mailer-daemon" in snd
                 or "postmaster@" in snd
@@ -2985,8 +2997,23 @@ class EmailIngestionEngine:
             bounced_recip = _extract_bounced_recipient(raw_bounce_text, sender_email=m.sender_email)
             recip_low = bounced_recip.lower()
 
-            smtp_match = re.search(r"\b(5\d\d(?:\s+5\.\d+\.\d+)?)\b", raw_bounce_text)
-            smtp_code = smtp_match.group(1) if smtp_match else "550"
+            smtp_match = (
+                re.search(
+                    r"(?:error\s+code|smtp\s+code|status)\s*[:=]\s*([45]\d\d(?:\s+[45]\.\d+\.\d+)?)\b",
+                    raw_bounce_text,
+                    re.IGNORECASE,
+                )
+                or re.search(
+                    r"(?<![(\w/:-])([45]\d\d\s+[45]\.\d+\.\d+)\b",
+                    raw_bounce_text,
+                )
+                or re.search(
+                    r"(?m)^(?:diagnostic-code:\s*smtp;\s*|status:\s*|remote\s+server\s+said:\s*)?([45][0-5]\d)(?:\s|$|:|-)",
+                    raw_bounce_text,
+                    re.IGNORECASE,
+                )
+            )
+            smtp_code = smtp_match.group(1).strip() if smtp_match else "550"
 
             if "@gainhelm.com" in recip_low:
                 b_prop = "gainhelm"
@@ -3042,7 +3069,7 @@ class EmailIngestionEngine:
 
         partner_checkin_prompts: List[Dict[str, Any]] = []
         for m in msg_list:
-            if m.mailbox == "Sent":
+            if (m.mailbox or "").strip().lower() in ("sent", "spam", "trash", "junk", "drafts"):
                 continue
             snd_low = (m.sender_email or "").strip().lower()
             subj_low = (m.subject or "").lower()

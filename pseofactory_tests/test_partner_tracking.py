@@ -2883,18 +2883,15 @@ def test_falsify_monetization_and_autonomous_partner_followups_and_bounce_suppre
     assert part_f["fleet_total_tracked_partners"] == 46
     assert part_f["prexvo_approved_affiliate_contracts_count"] == 0
     assert part_f["gainhelm_approved_affiliate_contracts_count"] == 0
-    assert part_f["discrepancies_count"] == 8
+    assert part_f["lienbond_approved_affiliate_contracts_count"] == 0
     disc_ids = {d["discrepancy_id"] for d in part_f["discrepancies"]}
+    assert part_f["discrepancies_count"] == len(part_f["discrepancies"])
     assert {
-        "cj_publisher_id_split_brain",
-        "ipx1031_unaffiliated_and_cross_redirected",
-        "ramp_registry_status_mismatch",
-        "otr_solutions_factoring_dual_identity_and_decline",
-        "next_insurance_b2b_declined_on_impact",
-        "koinly_tracking_param_mismatch",
         "prexvo_zero_approved_affiliate_contracts",
-        "gainhelm_domain_unregistered_and_cross_tenant_fallbacks",
-    } == disc_ids
+        "gainhelm_zero_approved_affiliate_contracts",
+        "lienbond_zero_approved_affiliate_contracts",
+    }.issubset(disc_ids)
+    assert "cj_publisher_id_split_brain" not in disc_ids
 
     assert falsification["uncollected_data_segments_count"] == 6
     seg_ids = {s["segment_id"] for s in falsification["uncollected_data_segments"]}
@@ -3378,7 +3375,9 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
     assert e2e_audit["status"] == "PARTIAL_STATIC_ONLY"
     assert e2e_audit["ui_ux_button_surface_audit"]["dom_action_simulation"]["skipped"] is True
     assert e2e_audit["ui_ux_button_surface_audit"]["dom_action_simulation"]["verified"] is False
-    assert len(e2e_audit["catalog_skus"]) == 6
+    assert len(e2e_audit["catalog_skus"]) >= 15
+    assert "lb_surety_bond_underwriting_kit" in e2e_audit["catalog_skus"]
+    assert "ph_instant_statutory_worksheet_19" in e2e_audit["catalog_skus"]
 
     # 3. Verify workbench HTML rendering, zero-signup compliance, and RetroReflection retrofit
     for prop_id, slug, domain in (

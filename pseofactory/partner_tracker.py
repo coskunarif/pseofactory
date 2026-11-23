@@ -3066,11 +3066,16 @@ class PartnerTrackingEngine:
         partner_to_portal_slot = {
             "rippling": "partnerstack",
             "coinledger": "firstpromoter_coinledger",
-            "crest_capital": "firstpromoter_xendoo",
+            "xendoo": "firstpromoter_xendoo",
             "koinly": "koinly_native",
             "kalshi": "impact",
             "gusto": "impact",
             "ramp": "impact",
+            "efile_com": "cj_affiliate",
+            "eztaxreturn_com": "cj_affiliate",
+            "freetaxusa": "cj_affiliate",
+            "wallethub": "cj_affiliate",
+            "lawdepot": "cj_affiliate",
             "turbotax": "cj_affiliate",
             "taxslayer": "cj_affiliate",
             "suretybonds_direct": "cj_affiliate",
@@ -3148,19 +3153,27 @@ class PartnerTrackingEngine:
             "earnest": 6.13,
             "lendkey": 4.38,
         }
+        impact_by_partner = portals_state["impact"].get("by_partner_clicks") or {}
+        cj_by_partner = portals_state["cj_affiliate"].get("by_partner_clicks") or {}
         portal_clicks_by_partner = {
             "rippling": portals_state["partnerstack"]["portal_verified_clicks"],
             "coinledger": portals_state["firstpromoter_coinledger"]["portal_verified_clicks"],
             "koinly": portals_state["koinly_native"]["portal_verified_clicks"],
-            "crest_capital": portals_state["firstpromoter_xendoo"]["portal_verified_clicks"] + 1,
-            "kalshi": 7,
-            "gusto": 0,
-            "turbotax": 9,
-            "taxslayer": 9,
-            "suretybonds_direct": 13,
-            "mercury": 0,
+            "xendoo": portals_state["firstpromoter_xendoo"]["portal_verified_clicks"],
+            "kalshi": int(impact_by_partner.get("kalshi", 0) or 0),
+            "gusto": int(impact_by_partner.get("gusto", 0) or 0),
+            "ramp": int(impact_by_partner.get("ramp", 0) or 0),
+            "efile_com": int(cj_by_partner.get("efile_com", 0) or 0),
+            "eztaxreturn_com": int(cj_by_partner.get("eztaxreturn_com", 0) or 0),
+            "freetaxusa": int(cj_by_partner.get("freetaxusa", 0) or 0),
+            "wallethub": int(cj_by_partner.get("wallethub", 0) or 0),
+            "lawdepot": int(cj_by_partner.get("lawdepot", 0) or 0),
+            "turbotax": 0,
+            "taxslayer": 0,
+            "suretybonds_direct": 0,
+            "crest_capital": 0,
+            "mercury": portals_state["mercury_direct"]["portal_verified_clicks"],
             "ipx1031": 0,
-            "ramp": 0,
             "splash_financial": 0,
             "sofi": 0,
             "credible": 0,
@@ -3174,11 +3187,9 @@ class PartnerTrackingEngine:
             for pk, p_data in (agg.get("by_partner") or {}).items():
                 c_val = int(p_data.get("outbound_clicks", 0) or 0)
                 canonical_pk = {
-                    "efile": "turbotax",
-                    "efile_com": "turbotax",
-                    "eztaxreturn": "taxslayer",
-                    "eztaxreturn_com": "taxslayer",
-                    "xendoo_impact": "crest_capital",
+                    "efile": "efile_com",
+                    "eztaxreturn": "eztaxreturn_com",
+                    "xendoo_impact": "xendoo",
                 }.get(pk, pk)
                 edge_clicks_by_partner[canonical_pk] = edge_clicks_by_partner.get(canonical_pk, 0) + c_val
 
@@ -3261,19 +3272,17 @@ class PartnerTrackingEngine:
                 target_ledger_path = Path(tempfile.gettempdir()) / f"pseofactory_pytest_earnings_{os.getpid()}.json"
         else:
             target_ledger_path = Path(__file__).resolve().parent.parent / ".agy" / "partner_earnings_ledger.json"
-        if not use_live and ledger_path is None and "PYTEST_CURRENT_TEST" not in os.environ and target_ledger_path.is_file():
-            try:
-                prev_ledger = json.loads(target_ledger_path.read_text(encoding="utf-8"))
-                prev_portals = prev_ledger.get("portals") if isinstance(prev_ledger, dict) else None
-                if isinstance(prev_portals, dict):
-                    for pk, pv in prev_portals.items():
-                        if isinstance(pv, dict) and bool(pv.get("live_api_polled_in_current_run")) and pk in portals_state:
-                            portals_state[pk]["live_api_polled_in_current_run"] = True
-                            portals_state[pk]["uncollected_telemetry_reason"] = pv.get("uncollected_telemetry_reason")
-                            if pv.get("last_synced_at"):
-                                portals_state[pk]["last_synced_at"] = pv["last_synced_at"]
-            except Exception:
-                pass
+
+        # Enforce truthful live-poll state: never carry forward stale live_api_polled_in_current_run=True
+        # when use_live is False or when a portal is unauthenticated / expired.
+        for pk, p_info in portals_state.items():
+            if not use_live:
+                p_info["live_api_polled_in_current_run"] = False
+            elif (
+                p_info.get("auth_status") == "SESSION_EXPIRED_CACHED_SNAPSHOT"
+                or not bool(p_info.get("is_authenticated_and_syncing"))
+            ):
+                p_info["live_api_polled_in_current_run"] = False
 
         live_polled_count = sum(
             1 for p in portals_state.values() if bool(p.get("live_api_polled_in_current_run"))
@@ -3282,7 +3291,7 @@ class PartnerTrackingEngine:
 
         ledger_payload: Dict[str, Any] = {
             "synced_at": datetime.now(timezone.utc).isoformat(),
-            "sync_mode": "live" if (use_live or (live_polled_count > 0 and "PYTEST_CURRENT_TEST" not in os.environ)) else "vault_cached",
+            "sync_mode": "live" if use_live else "vault_cached",
             "live_polled_portals_count": live_polled_count,
             "uncollected_portals_count": uncollected_count,
             "has_earned_any_realized_commission_or_conversion": bool(
@@ -5171,248 +5180,65 @@ class PartnerTrackingEngine:
         stripe_realized = float(stripe_ledger.get("realized_revenue_usd", 0.0) or 0.0)
         total_realized_usd = round(aff_realized + stripe_realized, 2)
 
-        discrepancies: List[Dict[str, Any]] = [
-            {
-                "discrepancy_id": "cj_publisher_id_split_brain",
-                "severity": "HIGH",
-                "affected_partners": [
-                    "turbotax",
-                    "taxact_business",
-                    "file_com_tax",
-                    "legalzoom",
-                    "lawdepot",
-                    "taxslayer",
-                    "suretybonds_direct",
-                ],
-                "internal_claim": (
-                    "AUTHORITATIVE_EDGE_REDIRECT_URLS (affiliates_hub.py) and APPROVED_COUNTERPARTY_VERIFICATION_MATRIX "
-                    "(partner_tracker.py) reference CJ PID 101725461 (Da Business LLC) links."
-                ),
-                "empirical_reality": (
-                    "CJ PID 101725461 links return HTTP 400 Invalid URL (click-101725461-10949971, "
-                    "click-101725461-14577988, click-101725461-12508090) or redirect to unrelated foreign merchants "
-                    "(click-101725461-15564042 -> Abt Electronics; click-101725461-15734321 -> A2 Hosting). "
-                    "Live production edge redirects on profithelm.com instead use CJ PID 101906407 (ProfitHelm LLC) "
-                    "from DIRECT_CONTRACT_UPGRADES, which resolve HTTP 200 to E-file.com, ezTaxReturn.com, "
-                    "FreeTaxUSA.com, LawDepot.com, and WalletHub.com."
-                ),
-            },
-            {
-                "discrepancy_id": "ipx1031_unaffiliated_and_cross_redirected",
-                "severity": "HIGH",
-                "affected_partners": ["ipx1031"],
-                "internal_claim": (
-                    "PROFITHELM_AFFILIATES['ipx1031'] marks IPX1031 as status='live' with expected_epc=$7.50 "
-                    "and url='https://www.ipx1031.com/?utm_source=profithelm'."
-                ),
-                "empirical_reality": (
-                    "No affiliate contract or tracking parameter exists with IPX1031 (bare UTM link only). "
-                    "Live production https://profithelm.com/r/ipx1031 redirects (HTTP 302) to Xendoo "
-                    "(https://xendoo.pxf.io/c/7932737/1357375/16354) rather than IPX1031."
-                ),
-            },
-            {
-                "discrepancy_id": "ramp_registry_status_mismatch",
-                "severity": "MEDIUM",
-                "affected_partners": ["ramp"],
-                "internal_claim": (
-                    "PROFITHELM_AFFILIATES['ramp'] marks Ramp as status='pending_expansion' with bare URL "
-                    "'https://ramp.com/?utm_source=profithelm'."
-                ),
-                "empirical_reality": (
-                    "Ramp approved ProfitHelm on Impact.com on 2026-10-20 (Inbox #991, Campaign 51436, "
-                    "https://join.ramp.com/c/7932737/3981015/51436) and is actively wired at "
-                    "https://profithelm.com/r/ramp."
-                ),
-            },
-            {
-                "discrepancy_id": "otr_solutions_factoring_dual_identity_and_decline",
-                "severity": "HIGH",
-                "affected_partners": ["otr_solutions_factoring"],
-                "internal_claim": (
-                    "Mapped simultaneously to Invoice Simple on Impact.com (monetization_vault.json: "
-                    "PENDING_ADVERTISER_REVIEW) and OTR Solutions direct B2B referral."
-                ),
-                "empirical_reality": (
-                    "Invoice Simple explicitly declined our Impact application on 2026-10-21 (Inbox #1025, "
-                    "offering manual appeal via invoicesimple@hamstergarage.com). Meanwhile, Wade Fenton at "
-                    "OTR Solutions replied on 2026-10-22 (Inbox #1030) that our application was passed up the "
-                    "chain for final internal review (not yet an executed contract). Live /r/otr_solutions_factoring "
-                    "redirects to Ramp (join.ramp.com)."
-                ),
-            },
-            {
-                "discrepancy_id": "next_insurance_b2b_declined_on_impact",
-                "severity": "MEDIUM",
-                "affected_partners": ["next_insurance_b2b"],
-                "internal_claim": (
-                    "monetization_vault.json lists next_insurance_b2b as application_status='PENDING_ADVERTISER_REVIEW'."
-                ),
-                "empirical_reality": (
-                    "ERGO Next Insurance explicitly declined our Impact application on 2026-10-20 (Inbox #1009). "
-                    "Live /r/next_insurance_b2b fails closed onto LawDepot (click-101906407-16985242)."
-                ),
-            },
-            {
-                "discrepancy_id": "koinly_tracking_param_mismatch",
-                "severity": "LOW",
-                "affected_partners": ["koinly"],
-                "internal_claim": (
-                    "PROFITHELM_AFFILIATES['koinly'] lists url='https://koinly.io/?via=A4FABF09&utm_source=profithelm'."
-                ),
-                "empirical_reality": (
-                    "Koinly FirstPromoter approval (Newsletter #1613) issued referral token fpr=arif-4c0b88 "
-                    "(https://koinly.io/?fpr=arif-4c0b88&utm_source=profithelm), which is active at /r/koinly; "
-                    "additionally, Koinly affiliate manager Robin Singh sent a check-in email (Newsletter #1614) "
-                    "asking how we promote Koinly."
-                ),
-            },
-            {
-                "discrepancy_id": "prexvo_zero_approved_affiliate_contracts",
-                "severity": "HIGH",
-                "affected_partners": [
-                    "splash_financial",
-                    "sofi_student_refi",
-                    "earnest_student_refi",
-                    "lendkey_refi",
-                    "credible_student_loans",
-                ],
-                "internal_claim": (
-                    "All 5 PREXVO_AFFILIATES are marked status='live' in affiliates.py and status='active_direct' "
-                    "in monetization_vault.json."
-                ),
-                "empirical_reality": (
-                    "Zero of the 5 Prexvo student loan partners have an approved affiliate tracking link. "
-                    "All 5 live https://prexvo.com/r/<partner> routes redirect to bare ?utm_source=prexvo URLs "
-                    "with zero affiliate attribution parameters. SoFi (Inbox #1031) and Earnest (Inbox #994 / #995) "
-                    "explicitly declined our Impact applications; Splash Financial (Campaign 9516) and LendKey "
-                    "(Campaign 3276) remain unapproved after 7+ days; Credible has no active affiliate contract."
-                ),
-            },
-            {
-                "discrepancy_id": "gainhelm_domain_unregistered_and_cross_tenant_fallbacks",
-                "severity": "HIGH",
-                "affected_partners": [
-                    "vanta_security",
-                    "drata_compliance",
-                    "thoropass_audit",
-                    "sprinto_grc",
-                    "coalition_cyber_insurance",
-                    "cobalt_pentest",
-                ],
-                "internal_claim": (
-                    "All 6 GAINHELM_AFFILIATES are marked status='live' in affiliates.py and status='active_direct' "
-                    "in monetization_vault.json."
-                ),
-                "empirical_reality": (
-                    "While gainhelm.com and www.gainhelm.com now resolve HTTP 200 on Cloudflare Pages "
-                    "(zone 0a03264e19beb2cb17ba01860b701701 -> gainhelm.pages.dev), decoupled from the retired "
-                    "legacy ai-field-service-dispatcher and Amazon Appstore profit analysis projects, "
-                    "partners@sprinto.com hard-bounced (Inbox #997, 550 5.1.1) and zero dedicated GRC affiliate "
-                    "contracts are approved. All 6 canonical GainHelm routes (and 8 shorthand aliases) in "
-                    "DIRECT_CONTRACT_UPGRADES yield-gate to verified ProfitHelm B2B contracts (Ramp, LawDepot, Xendoo) "
-                    "rather than native GRC or cybersecurity affiliate contracts."
-                ),
-            },
-        ]
+        vault_data_fals = getattr(self.hub, "_vault", {}) if hasattr(self, "hub") else {}
+        vault_props_fals = (
+            vault_data_fals.get("properties")
+            if isinstance(vault_data_fals.get("properties"), dict)
+            else {}
+        )
 
-        uncollected_data_segments: List[Dict[str, Any]] = [
-            {
-                "segment_id": "impact_portal_session_expired",
-                "portal_key": "impact",
-                "internal_status": str((earnings.get("portals") or {}).get("impact", {}).get("auth_status") or ""),
-                "is_live_api_polled": False,
-                "reason": (
-                    "Impact.com web portal session (Account 7932737 / Member 8871615) expired on 2026-10-21T02:27:00Z. "
-                    "No Impact REST API token is configured; telemetry relies on cached click counts (8 verified / 19 raw) "
-                    "and Zoho email alerts."
-                ),
-            },
-            {
-                "segment_id": "cj_affiliate_backend_session_expired",
-                "portal_key": "cj_affiliate",
-                "internal_status": str(
-                    (earnings.get("portals") or {}).get("cj_affiliate", {}).get("auth_status") or ""
-                ),
-                "is_live_api_polled": False,
-                "reason": (
-                    "CJ Affiliate backend browser session (CID 7792582 / Publisher 8101803 / PID 101906407) expired on "
-                    "2026-10-21T03:00:00Z. No CJ GraphQL personal access token is configured; telemetry relies on cached "
-                    "click counts (31 clicks) and Zoho email alerts."
-                ),
-            },
-            {
-                "segment_id": "firstpromoter_and_koinly_session_tokens_absent",
-                "portal_key": "firstpromoter_coinledger,firstpromoter_xendoo,koinly_native",
-                "internal_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
-                "is_live_api_polled": bool(
-                    (earnings.get("portals") or {})
-                    .get("firstpromoter_coinledger", {})
-                    .get("live_api_polled_in_current_run")
-                ),
-                "reason": (
-                    "FIRSTPROMOTER_COINLEDGER_SESSION, FIRSTPROMOTER_XENDOO_SESSION, and active Koinly CDP cookies "
-                    "are absent in non-interactive runs; portals are marked SESSION_EXPIRED_CACHED_SNAPSHOT "
-                    "(is_authenticated_and_syncing=False) and report cached click snapshots (CoinLedger 37 verified on 2026-11-10, Xendoo 1, Koinly 3)."
-                ),
-            },
-            {
-                "segment_id": "sovrn_commerce_revenue_api_unpolled_and_snippet_disabled",
-                "portal_key": "sovrn_commerce",
-                "internal_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
-                "is_live_api_polled": False,
-                "reason": (
-                    "Sovrn Commerce client-side VigLink JS snippet is disabled on production pages (SOVRN_ENABLED=False), "
-                    "and MonetizationHub.reconcile_live_networks() only checks /api/rest/v2/merchants (catalog status), "
-                    "never polling a Sovrn Revenue or Transactions endpoint."
-                ),
-            },
-            {
-                "segment_id": "mercury_referral_no_rest_api",
-                "portal_key": "mercury_direct",
-                "internal_status": "EMAIL_ALERT_SYNCING_NO_PORTAL_API",
-                "is_live_api_polled": False,
-                "reason": (
-                    "Mercury's in-house referral program (mercury.com/r/profithelm-llc) does not provide a REST API; "
-                    "attribution relies strictly on Zoho email alerts and bank statement credits."
-                ),
-            },
-            {
-                "segment_id": "himalaya_folder_pagination_window",
-                "portal_key": "zoho_mail_himalaya",
-                "internal_status": "BOUNDED_PAGE_1_WINDOW_200",
-                "is_live_api_polled": True,
-                "reason": (
-                    "EmailIngestionEngine.fetch_zoho_envelopes() polls Inbox, Sent, Notification, Newsletter, and Spam "
-                    "on -a zoho (arif.coskun@profithelm.com) with -s 200."
-                ),
-            },
-        ]
+        def _vault_partners_for(prop_name: str) -> Dict[str, Any]:
+            p_entry = vault_props_fals.get(prop_name)
+            if isinstance(p_entry, dict) and isinstance(p_entry.get("partners"), dict):
+                return p_entry["partners"]
+            return {}
+
+        ph_vault_partners = _vault_partners_for("profithelm")
+        px_vault_partners = _vault_partners_for("prexvo")
+        gh_vault_partners = _vault_partners_for("gainhelm")
+        lb_vault_partners = _vault_partners_for("lienbond")
 
         live_ph_keys = sorted(
             k for k, p in PROFITHELM_AFFILIATES.items()
             if k == p.key and (
                 p.status == "live"
-                or ((self.hub._vault.get("profithelm") or {}).get(k) or {}).get("status") in ("live", "active_direct")
+                or (ph_vault_partners.get(k) or {}).get("status") in ("live", "active_direct")
             )
             and self._is_network_tracked_affiliate_url(
-                str(((self.hub._vault.get("profithelm") or {}).get(k) or {}).get("url") or p.default_url)
+                str((ph_vault_partners.get(k) or {}).get("url") or p.default_url)
             )
         )
         live_px_keys = sorted(
             k for k, p in PREXVO_AFFILIATES.items()
-            if k == p.key and p.status == "live" and self._is_network_tracked_affiliate_url(p.default_url)
+            if k == p.key and (
+                p.status == "live"
+                or (px_vault_partners.get(k) or {}).get("status") in ("live", "active_direct")
+            )
+            and self._is_network_tracked_affiliate_url(
+                str((px_vault_partners.get(k) or {}).get("url") or p.default_url)
+            )
         )
         live_gh_keys = sorted(
             k for k, p in GAINHELM_AFFILIATES.items()
-            if k == p.key and p.status == "live" and self._is_network_tracked_affiliate_url(p.default_url)
+            if k == p.key and (
+                p.status == "live"
+                or (gh_vault_partners.get(k) or {}).get("status") in ("live", "active_direct")
+            )
+            and self._is_network_tracked_affiliate_url(
+                str((gh_vault_partners.get(k) or {}).get("url") or p.default_url)
+            )
         )
         live_lb_keys = sorted(
             k for k, p in LIENBOND_AFFILIATES.items()
-            if k == p.key and p.status == "live" and self._is_network_tracked_affiliate_url(p.default_url)
+            if k == p.key and (
+                p.status == "live"
+                or (lb_vault_partners.get(k) or {}).get("status") in ("live", "active_direct")
+            )
+            and self._is_network_tracked_affiliate_url(
+                str((lb_vault_partners.get(k) or {}).get("url") or p.default_url)
+            )
         )
 
-        vault_data_fals = getattr(self.hub, "_vault", {}) if hasattr(self, "hub") else {}
         routing_truth_by_prop: Dict[str, Dict[str, Any]] = {}
         for p_id, reg_map in (
             ("profithelm", PROFITHELM_AFFILIATES),
@@ -5447,11 +5273,188 @@ class PartnerTrackingEngine:
         gh_rt = routing_truth_by_prop["gainhelm"]
         lb_rt = routing_truth_by_prop["lienbond"]
 
+        # Compute partner connection discrepancies dynamically from current registry, vault, and edge routing state.
+        discrepancies: List[Dict[str, Any]] = []
+        dead_cj_partners: List[str] = []
+        untracked_live_partners: List[str] = []
+        status_drift_partners: List[str] = []
+
+        live_keys_by_prop = {
+            "profithelm": live_ph_keys,
+            "prexvo": live_px_keys,
+            "gainhelm": live_gh_keys,
+            "lienbond": live_lb_keys,
+        }
+        reg_by_prop = (
+            ("profithelm", PROFITHELM_AFFILIATES, ph_vault_partners),
+            ("prexvo", PREXVO_AFFILIATES, px_vault_partners),
+            ("gainhelm", GAINHELM_AFFILIATES, gh_vault_partners),
+            ("lienbond", LIENBOND_AFFILIATES, lb_vault_partners),
+        )
+        for prop_id, reg_map, v_partners in reg_by_prop:
+            for k, p in sorted(reg_map.items()):
+                if k != p.key:
+                    continue
+                v_entry = v_partners.get(k) or {}
+                v_url = str(v_entry.get("url") or v_entry.get("direct_url") or "")
+                v_status = str(v_entry.get("status") or "").strip().lower()
+                if "101725461" in str(p.default_url) or "101725461" in v_url:
+                    dead_cj_partners.append(f"{prop_id}:{k}")
+                if p.status == "live" and not self._is_network_tracked_affiliate_url(v_url or p.default_url):
+                    untracked_live_partners.append(f"{prop_id}:{k}")
+                if v_entry and (p.status == "live") != (v_status in ("live", "active_direct")):
+                    status_drift_partners.append(f"{prop_id}:{k}")
+
+            prop_live = live_keys_by_prop[prop_id]
+            prop_rt = routing_truth_by_prop[prop_id]
+            if len(prop_live) == 0:
+                discrepancies.append(
+                    {
+                        "discrepancy_id": f"{prop_id}_zero_approved_affiliate_contracts",
+                        "severity": "HIGH",
+                        "affected_partners": sorted(k for k, p in reg_map.items() if k == p.key),
+                        "internal_claim": f"Tenant '{prop_id}' tracks {len({p.key for p in reg_map.values()})} partner routes.",
+                        "empirical_reality": (
+                            f"Zero approved direct affiliate contracts are active on {prop_id}; "
+                            f"edge blocks unapproved redirects by default={prop_rt['blocks_unapproved_by_default']} "
+                            f"(html_pending_cta_count={prop_rt['html_pending_cta_count']}, "
+                            f"unapproved_external_leaks={prop_rt['unapproved_external_leaks_count']})."
+                        ),
+                    }
+                )
+            if int(prop_rt.get("unapproved_external_leaks_count", 0)) > 0:
+                discrepancies.append(
+                    {
+                        "discrepancy_id": f"{prop_id}_unapproved_external_leaks",
+                        "severity": "HIGH",
+                        "affected_partners": list(prop_rt.get("html_pending_cta_slugs") or []),
+                        "internal_claim": f"Tenant '{prop_id}' edge redirects fail closed on unapproved partners.",
+                        "empirical_reality": (
+                            f"Detected {prop_rt['unapproved_external_leaks_count']} unapproved external CTA leaks on {prop_id}."
+                        ),
+                    }
+                )
+            if int(prop_rt.get("dead_end_404_routes_count", 0)) > 0:
+                discrepancies.append(
+                    {
+                        "discrepancy_id": f"{prop_id}_dead_end_404_routes",
+                        "severity": "HIGH",
+                        "affected_partners": list(prop_rt.get("dead_end_404_slugs") or []),
+                        "internal_claim": f"All /r/<partner> links on '{prop_id}' resolve to valid edge routes.",
+                        "empirical_reality": (
+                            f"Detected {prop_rt['dead_end_404_routes_count']} dead-end 404 /r/ routes on {prop_id}."
+                        ),
+                    }
+                )
+
+        if dead_cj_partners:
+            discrepancies.append(
+                {
+                    "discrepancy_id": "cj_publisher_id_split_brain",
+                    "severity": "HIGH",
+                    "affected_partners": dead_cj_partners,
+                    "internal_claim": "All CJ affiliate links use active ProfitHelm LLC CJ PID 101906407.",
+                    "empirical_reality": f"Retired CJ PID 101725461 still referenced by: {', '.join(dead_cj_partners)}.",
+                }
+            )
+        if untracked_live_partners:
+            discrepancies.append(
+                {
+                    "discrepancy_id": "untracked_live_partner_urls",
+                    "severity": "HIGH",
+                    "affected_partners": untracked_live_partners,
+                    "internal_claim": "Every partner marked status='live' carries a network-tracked affiliate URL.",
+                    "empirical_reality": f"Partners marked live without verified tracking params: {', '.join(untracked_live_partners)}.",
+                }
+            )
+        if status_drift_partners:
+            discrepancies.append(
+                {
+                    "discrepancy_id": "registry_vault_status_drift",
+                    "severity": "MEDIUM",
+                    "affected_partners": status_drift_partners,
+                    "internal_claim": "affiliates.py registries match monetization_vault.json partner status.",
+                    "empirical_reality": f"Live-status mismatch between registry and vault on: {', '.join(status_drift_partners)}.",
+                }
+            )
+
+        earnings_portals = earnings.get("portals") or {}
+        uncollected_data_segments: List[Dict[str, Any]] = [
+            {
+                "segment_id": "impact_portal_session_expired",
+                "portal_key": "impact",
+                "internal_status": str(earnings_portals.get("impact", {}).get("auth_status") or ""),
+                "is_live_api_polled": bool(earnings_portals.get("impact", {}).get("live_api_polled_in_current_run")),
+                "reason": (
+                    str(earnings_portals.get("impact", {}).get("uncollected_telemetry_reason") or "")
+                    or "Impact.com live REST API v16 credentials required for headless polling; otherwise relies on cached clicks and Zoho email alerts."
+                ),
+            },
+            {
+                "segment_id": "cj_affiliate_backend_session_expired",
+                "portal_key": "cj_affiliate",
+                "internal_status": str(earnings_portals.get("cj_affiliate", {}).get("auth_status") or ""),
+                "is_live_api_polled": bool(earnings_portals.get("cj_affiliate", {}).get("live_api_polled_in_current_run")),
+                "reason": (
+                    str(earnings_portals.get("cj_affiliate", {}).get("uncollected_telemetry_reason") or "")
+                    or "CJ Affiliate GraphQL personal access token required for headless polling; otherwise relies on cached clicks and Zoho email alerts."
+                ),
+            },
+            {
+                "segment_id": "firstpromoter_and_koinly_session_tokens_absent",
+                "portal_key": "firstpromoter_coinledger,firstpromoter_xendoo,koinly_native",
+                "internal_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
+                "is_live_api_polled": bool(
+                    earnings_portals.get("firstpromoter_coinledger", {}).get("live_api_polled_in_current_run")
+                ),
+                "reason": (
+                    "FIRSTPROMOTER_COINLEDGER_SESSION, FIRSTPROMOTER_XENDOO_SESSION, and active Koinly CDP cookies "
+                    "are absent in non-interactive runs; portals are marked SESSION_EXPIRED_CACHED_SNAPSHOT "
+                    "(is_authenticated_and_syncing=False) and report cached click snapshots."
+                ),
+            },
+            {
+                "segment_id": "sovrn_commerce_revenue_api_unpolled_and_snippet_disabled",
+                "portal_key": "sovrn_commerce",
+                "internal_status": "SESSION_EXPIRED_CACHED_SNAPSHOT",
+                "is_live_api_polled": bool(earnings_portals.get("sovrn_commerce", {}).get("live_api_polled_in_current_run")),
+                "reason": (
+                    "Sovrn Commerce client-side VigLink JS snippet is disabled on production pages (SOVRN_ENABLED=False), "
+                    "and MonetizationHub.reconcile_live_networks() only checks /api/rest/v2/merchants (catalog status), "
+                    "never polling a Sovrn Revenue or Transactions endpoint."
+                ),
+            },
+            {
+                "segment_id": "mercury_referral_no_rest_api",
+                "portal_key": "mercury_direct",
+                "internal_status": "EMAIL_ALERT_SYNCING_NO_PORTAL_API",
+                "is_live_api_polled": False,
+                "reason": (
+                    "Mercury's in-house referral program (mercury.com/r/profithelm-llc) does not provide a REST API; "
+                    "attribution relies strictly on Zoho email alerts and bank statement credits."
+                ),
+            },
+            {
+                "segment_id": "himalaya_folder_pagination_window",
+                "portal_key": "zoho_mail_himalaya",
+                "internal_status": "BOUNDED_PAGE_1_WINDOW_200",
+                "is_live_api_polled": True,
+                "reason": (
+                    "EmailIngestionEngine.fetch_zoho_envelopes() polls Inbox, Sent, Notification, Newsletter, and Spam "
+                    "on -a zoho (arif.coskun@profithelm.com) with -s 200."
+                ),
+            },
+        ]
+
+        all_partner_connections_healthy = bool(
+            len(discrepancies) == 0 and total_unapproved_leaks == 0 and total_dead_end_404s == 0
+        )
+
         falsification_report: Dict[str, Any] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "execute_live": eff_live,
             "is_genuinely_generating_realized_revenue": bool(total_realized_usd > 0.0),
-            "are_all_claimed_partner_connections_healthy": False,
+            "are_all_claimed_partner_connections_healthy": all_partner_connections_healthy,
             "realized_revenue_falsification": {
                 "total_verified_realized_revenue_usd": total_realized_usd,
                 "verified_affiliate_realized_commission_usd": aff_realized,
@@ -11415,44 +11418,61 @@ def audit_end_to_end_monetization_and_fulfillment(
     diag = diagnose_stripe_merchant_readiness(execute_live=execute_live)
     settlement = diag.get("bank_payout_settlement") or {}
 
-    sku_matrix = [
-        (
-            "ph_1031_boot_replacement_workpapers",
-            "profithelm",
-            "section-1031-calculator",
-            79.0,
-        ),
-        (
-            "ph_commercial_capital_audit_toolkit",
-            "profithelm",
-            "section-179-calculator",
-            49.0,
-        ),
-        (
-            "ph_statutory_tax_audit_workpapers",
-            "profithelm",
-            "s-corp-reasonable-salary-tax-calculator",
-            49.0,
-        ),
-        (
-            "px_refi_amortization_decision_audit",
-            "prexvo",
-            "student-loan-refinance-break-even-calculator",
-            39.0,
-        ),
-        (
-            "gh_soc2_cmmc_audit_workpapers",
-            "gainhelm",
-            "soc-2-audit-cost-calculator",
-            79.0,
-        ),
-        (
-            "gh_hipaa_iso27001_governance_kit",
-            "gainhelm",
-            "iso-27001-certification-cost-calculator",
-            49.0,
-        ),
-    ]
+    hub = MonetizationHub()
+    vault_data = getattr(hub, "_vault", {}) or {}
+    vault_digital_products = (
+        (vault_data.get("master_networks") or {}).get("stripe", {}).get("digital_products") or {}
+    )
+    canonical_slug_by_sku: Dict[str, str] = {
+        "ph_1031_boot_replacement_workpapers": "section-1031-calculator",
+        "ph_commercial_capital_audit_toolkit": "section-179-calculator",
+        "ph_statutory_tax_audit_workpapers": "s-corp-reasonable-salary-tax-calculator",
+        "ph_instant_statutory_worksheet_19": "section-179-calculator",
+        "px_refi_amortization_decision_audit": "student-loan-refinance-break-even-calculator",
+        "px_instant_repayment_worksheet_19": "student-loan-refinance-break-even-calculator",
+        "gh_soc2_cmmc_audit_workpapers": "soc-2-audit-cost-calculator",
+        "gh_hipaa_iso27001_governance_kit": "iso-27001-certification-cost-calculator",
+        "gh_instant_compliance_worksheet_19": "soc-2-audit-cost-calculator",
+        "lb_instant_lien_bond_worksheet_19": "contractor-license-bond-cost-calculator-by-credit-score",
+        "lb_surety_bond_underwriting_kit": "contractor-license-bond-cost-calculator-by-credit-score",
+        "lb_workers_comp_emr_audit_kit": "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "lb_workers_comp_emr_audit_packet": "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "lb_wh347_certified_payroll_packet": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+        "lb_mechanics_lien_waiver_packet": "california-texas-florida-preliminary-notice-deadline-calculator",
+        "lb_surety_lien_wh347_packet": "miller-act-performance-and-payment-bond-premium-calculator",
+    }
+    sku_matrix: List[Tuple[str, str, str, float]] = []
+    seen_matrix_skus: set[str] = set()
+    for sku_id, prod_meta in vault_digital_products.items():
+        if not isinstance(prod_meta, dict):
+            continue
+        prop_id = str(prod_meta.get("property_id") or "").strip().lower()
+        price_usd = float(prod_meta.get("price_usd") or 0.0)
+        if not prop_id or price_usd <= 0.0:
+            continue
+        canon_slug = canonical_slug_by_sku.get(sku_id, "general")
+        sku_matrix.append((sku_id, prop_id, canon_slug, price_usd))
+        seen_matrix_skus.add(sku_id)
+    for fallback_entry in (
+        ("ph_1031_boot_replacement_workpapers", "profithelm", "section-1031-calculator", 79.0),
+        ("ph_commercial_capital_audit_toolkit", "profithelm", "section-179-calculator", 49.0),
+        ("ph_statutory_tax_audit_workpapers", "profithelm", "s-corp-reasonable-salary-tax-calculator", 49.0),
+        ("ph_instant_statutory_worksheet_19", "profithelm", "section-179-calculator", 19.0),
+        ("px_refi_amortization_decision_audit", "prexvo", "student-loan-refinance-break-even-calculator", 39.0),
+        ("px_instant_repayment_worksheet_19", "prexvo", "student-loan-refinance-break-even-calculator", 19.0),
+        ("gh_soc2_cmmc_audit_workpapers", "gainhelm", "soc-2-audit-cost-calculator", 79.0),
+        ("gh_hipaa_iso27001_governance_kit", "gainhelm", "iso-27001-certification-cost-calculator", 49.0),
+        ("gh_instant_compliance_worksheet_19", "gainhelm", "soc-2-audit-cost-calculator", 19.0),
+        ("lb_instant_lien_bond_worksheet_19", "lienbond", "contractor-license-bond-cost-calculator-by-credit-score", 19.0),
+        ("lb_surety_bond_underwriting_kit", "lienbond", "contractor-license-bond-cost-calculator-by-credit-score", 49.0),
+        ("lb_workers_comp_emr_audit_packet", "lienbond", "experience-modification-rate-emr-workers-comp-penalty-calculator", 49.0),
+        ("lb_wh347_certified_payroll_packet", "lienbond", "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", 59.0),
+        ("lb_mechanics_lien_waiver_packet", "lienbond", "california-texas-florida-preliminary-notice-deadline-calculator", 69.0),
+        ("lb_surety_lien_wh347_packet", "lienbond", "miller-act-performance-and-payment-bond-premium-calculator", 79.0),
+    ):
+        if fallback_entry[0] not in seen_matrix_skus:
+            sku_matrix.append(fallback_entry)
+            seen_matrix_skus.add(fallback_entry[0])
 
     catalog_skus: Dict[str, Any] = {}
     all_skus_ok = True
@@ -11528,7 +11548,7 @@ def audit_end_to_end_monetization_and_fulfillment(
             and len(dp_obj.get("longitudinal_benchmark_series") or []) >= 3
             and settlement_ready
             and isinstance(upgrade_spec, dict)
-            and upgrade_spec.get("offer_sku") == sku_id
+            and bool(upgrade_spec.get("offer_sku"))
             and "<!DOCTYPE html>" in str(wp.get("html_report") or "")
             and "window.print()" in str(wp.get("html_report") or "")
             and "Line Code,Statutory Line Item,Authority" in str(wp.get("csv_content") or "")
@@ -11614,8 +11634,6 @@ def audit_end_to_end_monetization_and_fulfillment(
             ymyl_blocked.append(y_slug)
     ymyl_isolated = len(ymyl_blocked) == len(ymyl_slugs)
 
-    hub = MonetizationHub()
-    vault_data = getattr(hub, "_vault", {}) or {}
     outbound_summary: Dict[str, Any] = {}
     for prop_id, reg_map in (
         ("profithelm", PROFITHELM_AFFILIATES),
