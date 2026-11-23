@@ -7940,14 +7940,30 @@ def audit_estate_technical_seo_and_cannibalization(
     }
 
 
+def _discover_live_audit_tenants(
+    workspace_root: Optional[Union[str, Path]] = None,
+) -> List[str]:
+    """
+    Dynamically discovers active tenant IDs via .pseofactory.json markers so estate
+    verification covers all active tenants (including lienbond and 50+ future sites)
+    instead of a hardcoded 3-tenant tuple.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.impact_planner import discover_active_tenants
+
+    ws = Path(
+        workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    ).resolve()
+    return [pid for pid, _ in discover_active_tenants(ws)]
+
+
 def evaluate_x_like_2109219955271196726_capability_matrix(
     include_live_estate_audit: bool = True,
 ) -> Dict[str, Any]:
     """
     Evaluates the 15 SEO Chrome extensions from x-like:2109219955271196726 (@seo_bint_ejamil)
     against pseofactory engine stages and vault CLI capabilities, returning the disposition
-    matrix and (optionally) live multi-tenant verification results across ProfitHelm, Prexvo,
-    and GainHelm.
+    matrix and (optionally) live multi-tenant verification results across all active tenants.
     Zero em-dashes. Zero en-dashes.
     """
     integrated = [m for m in X_LIKE_2109219955271196726_CAPABILITY_MATRIX if m["disposition"] == "INTEGRATED_DETERMINISTIC_GATE"]
@@ -7957,7 +7973,7 @@ def evaluate_x_like_2109219955271196726_capability_matrix(
     tenant_reports: Dict[str, Any] = {}
     all_passed = True
     if include_live_estate_audit:
-        for t_id in ("profithelm", "prexvo", "gainhelm"):
+        for t_id in _discover_live_audit_tenants():
             rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             if not rep.get("passed", False):
                 from pseofactory.maintenance import RetroReflectionEngine
@@ -8162,7 +8178,7 @@ def evaluate_x_like_2104700186404811010_capability_matrix(
     tenant_reports: Dict[str, Any] = {}
     all_passed = True
     if include_live_estate_audit:
-        for t_id in ("profithelm", "prexvo", "gainhelm"):
+        for t_id in _discover_live_audit_tenants():
             tech = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             chk = audit_estate_seo_fix_checklist(property_id=t_id)
             tenant_reports[t_id] = {"technical": tech, "checklist": chk}
@@ -8293,7 +8309,7 @@ def evaluate_x_like_2102358751290236980_capability_matrix(
             compile_ai_citation_digital_pr_queue,
             discover_internal_linking_opportunities,
         )
-        for t_id in ("profithelm", "prexvo", "gainhelm"):
+        for t_id in _discover_live_audit_tenants():
             link_rep = discover_internal_linking_opportunities(property_id=t_id, persist=False)
             pr_rep = compile_ai_citation_digital_pr_queue(property_id=t_id, persist=False)
             t_ok = link_rep.get("status") in ("PASS", "SKIPPED_NO_DIST") and pr_rep.get("status") == "PASS"
@@ -8459,21 +8475,23 @@ def evaluate_x_like_2102328294410461564_capability_matrix(
             "profithelm": "section 179 calculator",
             "prexvo": "rap payment calculator",
             "gainhelm": "cmmc 2.0 compliance cost calculator",
+            "lienbond": "miller act performance and payment bond premium calculator",
         }
-        for t_id in ("profithelm", "prexvo", "gainhelm"):
+        for t_id in _discover_live_audit_tenants():
             est_rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             if not est_rep.get("passed", False):
                 from pseofactory.maintenance import RetroReflectionEngine
                 RetroReflectionEngine.retrofit_estate(est_rep["dist_dir"], t_id)
                 est_rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
+            seed_q = sample_seeds.get(t_id, f"{t_id} compliance cost calculator")
             kw_std = expand_commercial_and_question_keywords(
-                seed_query=sample_seeds[t_id],
+                seed_query=seed_q,
                 property_id=t_id,
                 keyword_difficulty=40.0,
                 total_keywords=10,
             )
             kw_high_kd = expand_commercial_and_question_keywords(
-                seed_query=sample_seeds[t_id],
+                seed_query=seed_q,
                 property_id=t_id,
                 keyword_difficulty=75.0,
                 total_keywords=10,
@@ -8655,6 +8673,78 @@ X_LIKE_2110401032035709427_CAPABILITY_MATRIX: List[Dict[str, Any]] = [
     },
 ]
 
+def audit_single_page_aeo_geo_readiness(
+    html_text: str,
+    property_id: str = "profithelm",
+    slug: str = "",
+    rel_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fail-closed single-page AEO/GEO three-plane readiness gate matching
+    audit_aeo_geo_three_plane_readiness Plane 1, Plane 2 head link, and Plane 3 DOM +
+    partner roster/slot invariants. Used before publishing newly compiled tool pages
+    so defective pages never bypass Stage 4 VERIFICATION.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import detect_asset_partner_roster_and_slot_issues
+
+    prop = (property_id or "profithelm").strip().lower()
+    eff_slug = (slug or "").strip().strip("/").lower()
+    eff_rel = rel_path or (f"tools/{eff_slug}/index.html" if eff_slug else "tools/index.html")
+    raw_h = str(html_text or "")
+    issues: List[str] = []
+
+    if "\u2014" in raw_h or "\u2013" in raw_h:
+        issues.append(f"Plane 1 ({eff_rel}): Forbidden em-dash or en-dash in HTML")
+
+    ld_blocks = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        raw_h,
+        flags=re.I,
+    )
+    if not ld_blocks:
+        issues.append(f"Plane 1 ({eff_rel}): Missing application/ld+json block")
+    else:
+        joined_ld = "\n".join(ld_blocks)
+        if '"inLanguage": "en-US"' not in joined_ld and '"inLanguage":"en-US"' not in joined_ld:
+            issues.append(f"Plane 1 ({eff_rel}): Missing inLanguage='en-US' in JSON-LD")
+        if '"dateModified":' not in joined_ld and '"dateModified" :' not in joined_ld:
+            issues.append(f"Plane 1 ({eff_rel}): Missing dateModified in JSON-LD")
+        if '"SpeakableSpecification"' not in joined_ld:
+            issues.append(f"Plane 1 ({eff_rel}): Missing SpeakableSpecification in tool JSON-LD")
+        if '"isRelatedTo"' not in joined_ld:
+            issues.append(f"Plane 1 ({eff_rel}): Missing isRelatedTo complementary tool links in JSON-LD")
+        if '"https://schema.org/InStock"' not in joined_ld:
+            issues.append(f"Plane 1 ({eff_rel}): Missing Offer availability='https://schema.org/InStock'")
+
+    if 'rel="tool-catalog"' not in raw_h and "rel='tool-catalog'" not in raw_h:
+        issues.append(f"Plane 2 ({eff_rel}): Missing <link rel='tool-catalog' href='/catalog.json'> in <head>")
+    if 'class="quick-answer' not in raw_h and "class='quick-answer" not in raw_h:
+        issues.append(f"Plane 3 ({eff_rel}): Missing SSR .quick-answer block")
+    if 'id="calculation-manifest"' not in raw_h and 'class="calculation-manifest"' not in raw_h:
+        issues.append(f"Plane 3 ({eff_rel}): Missing embedded calculation-manifest JSON")
+
+    partner_issues = detect_asset_partner_roster_and_slot_issues(
+        raw_h,
+        property_id=prop,
+        slug=eff_slug,
+        rel_path=eff_rel,
+    )
+    if partner_issues:
+        issues.append(f"Plane 3 ({eff_rel}): {partner_issues}")
+
+    passed = len(issues) == 0
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "property_id": prop,
+        "slug": eff_slug,
+        "rel_path": eff_rel,
+        "issues_count": len(issues),
+        "issues": issues,
+    }
+
+
 def audit_aeo_geo_three_plane_readiness(
     dist_dir: Optional[Union[str, Path]] = None,
     property_id: str = "profithelm",
@@ -8677,13 +8767,11 @@ def audit_aeo_geo_three_plane_readiness(
     if dist_dir is not None:
         d_path = Path(dist_dir).resolve()
     else:
-        default_map = {
-            "profithelm": Path("/home/ubuntuadmin/projects/profithelm-platform/dist"),
-            "prexvo": Path("/home/ubuntuadmin/projects/prexvo/dist"),
-            "gainhelm": Path("/home/ubuntuadmin/projects/gainhelm/dist"),
-            "lienbond": Path("/home/ubuntuadmin/projects/lienbond/dist"),
-        }
-        d_path = default_map.get(prop, Path("/home/ubuntuadmin/projects/profithelm-platform/dist"))
+        from pseofactory.impact_planner import discover_active_tenants
+
+        ws = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+        dyn_map = {pid: repo_dir / "dist" for pid, repo_dir in discover_active_tenants(ws)}
+        d_path = dyn_map.get(prop, ws / ("profithelm-platform" if prop == "profithelm" else prop) / "dist")
 
     issues: List[str] = []
     if not d_path.is_dir():
@@ -10166,7 +10254,7 @@ def evaluate_x_like_2109835011772035193_capability_matrix(
     all_passed = True
 
     if include_live_estate_audit:
-        for t_id in ("profithelm", "prexvo", "gainhelm"):
+        for t_id in _discover_live_audit_tenants():
             rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             if not rep.get("passed", False):
                 from pseofactory.maintenance import RetroReflectionEngine

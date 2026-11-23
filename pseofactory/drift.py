@@ -757,17 +757,29 @@ def verify_all_tenants_aligned_for_latch(
     import concurrent.futures
     import multiprocessing
 
+    from pseofactory.impact_planner import discover_active_tenants
+
     ws = Path(workspace_root).resolve()
     target_hash = expected_hash or compute_engine_hash()
     is_prod_ws = (ws == Path("/home/ubuntuadmin/projects").resolve())
 
-    canonical_tenants = [
+    discovered_pairs = discover_active_tenants(ws)
+    canonical_tenants: List[Tuple[str, str]] = [
+        (pid, repo_path.name) for pid, repo_path in discovered_pairs
+    ]
+    seen_pids = {pid for pid, _ in canonical_tenants}
+    for fallback_pid, fallback_dir in (
         ("profithelm", "profithelm-platform"),
         ("prexvo", "prexvo"),
         ("gainhelm", "gainhelm"),
-    ]
-    if is_prod_ws or (ws / "lienbond" / "substrate_lock.json").is_file() or (ws / "lienbond" / ".git").exists():
-        canonical_tenants.append(("lienbond", "lienbond"))
+        ("lienbond", "lienbond"),
+    ):
+        if fallback_pid in seen_pids:
+            continue
+        cand_dir = ws / fallback_dir
+        if (cand_dir / "substrate_lock.json").is_file() or (cand_dir / ".git").exists():
+            canonical_tenants.append((fallback_pid, fallback_dir))
+            seen_pids.add(fallback_pid)
 
     reasons: List[str] = []
     avail_methods = multiprocessing.get_all_start_methods()
@@ -779,7 +791,7 @@ def verify_all_tenants_aligned_for_latch(
     )
     if use_process_pool:
         try:
-            max_workers = min(4, len(canonical_tenants))
+            max_workers = min(max(4, int(os.cpu_count() or 4)), len(canonical_tenants))
             mp_ctx = multiprocessing.get_context("fork")
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=max_workers,
@@ -970,6 +982,7 @@ def detect_engine_drift(
                             drift_detected = False
             except Exception:
                 pass
+    tenants_retro_verified: List[str] = []
     if is_workspace_engine_hash and base_dirs is None and include_paths is None:
         all_ok, unaligned_reasons = verify_all_tenants_aligned_for_latch(
             workspace_root=eff_ws,
@@ -979,6 +992,13 @@ def detect_engine_drift(
         )
         if not all_ok:
             drift_detected = True
+        elif not drift_detected:
+            from pseofactory.impact_planner import discover_active_tenants
+            is_prod_ws = (eff_ws == Path("/home/ubuntuadmin/projects").resolve())
+            for pid, repo_dir in discover_active_tenants(eff_ws):
+                dist_dir = repo_dir / "dist"
+                if dist_dir.is_dir() and ((dist_dir / "tools").is_dir() or is_prod_ws):
+                    tenants_retro_verified.append(pid)
 
     recorded_state_files: List[str] = []
     if auto_record:
@@ -1002,6 +1022,8 @@ def detect_engine_drift(
         "requires_recompile": drift_detected,
         "state_file": str(s_path),
     }
+    if tenants_retro_verified:
+        res_out["tenants_retro_verified"] = tenants_retro_verified
     if extra_paths:
         res_out["also_state_files"] = [str(ep) for ep in extra_paths]
         res_out["recorded_state_files"] = recorded_state_files

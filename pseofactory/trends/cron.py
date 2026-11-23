@@ -22,7 +22,11 @@ from pseofactory.contracts import (
     sanitize_url_slug,
 )
 from pseofactory.maintenance import CrossPropertyContaminationScanner, TenantRegistry
-from pseofactory.qualification import check_search_intent_cannibalization
+from pseofactory.qualification import (
+    check_search_intent_cannibalization,
+    detect_non_us_jurisdiction,
+    is_non_page_discovery_artifact,
+)
 from pseofactory.trends.models import (
     FeedSpike,
     TrendCandidate,
@@ -615,6 +619,53 @@ class TrendCronRunner:
                         keyword_rollups.append(rollup)
                     continue
 
+                # Step 4B-2: Reject off-jurisdiction non-US queries targeting US-statutory tenants
+                off_jur_match = detect_non_us_jurisdiction(clean_q, property_id=assigned_property)
+                if off_jur_match:
+                    rej_reason = (
+                        f"Off-jurisdiction non-US query detected ('{off_jur_match}') for US-statutory tenant '{assigned_property}'"
+                    )
+                    rej_eval = JevEvaluationRecord(
+                        evaluation_id=f"eval_{slug}_{cycle_id}",
+                        query_slug=slug,
+                        cycle_id=cycle_id,
+                        property_id=assigned_property,
+                        jev_score=0.10,
+                        durable_prob=0.05,
+                        composite_profit_yield=0.0,
+                        cannibalization_risk=0.0,
+                        action="REJECT",
+                        target_asset_type="none",
+                        passed_thresholds=0,
+                        decision_reason=rej_reason,
+                        spec_payload=None,
+                        evaluated_at=now_iso,
+                    )
+                    eval_records.append(rej_eval)
+                    assignment_records.append(assign_rec)
+                    rejected.append({
+                        "query": clean_q,
+                        "slug": slug,
+                        "property_id": assigned_property,
+                        "reason": rej_reason,
+                        "action": "REJECT",
+                        "composite_profit_yield": 0.0,
+                    })
+                    if not dry_run:
+                        rollup = db.upsert_keyword_history(
+                            query_slug=slug,
+                            query=clean_q,
+                            cycle_id=cycle_id,
+                            observed_velocity=spike.velocity,
+                            intent_cluster=cand.intent_cluster,
+                            property_id=assigned_property,
+                            status="rejected",
+                            observed_at=now_iso,
+                            override_acceleration=spike.acceleration,
+                        )
+                        keyword_rollups.append(rollup)
+                    continue
+
                 # Step 4C: Cannibalization check against tenant existing tools and live/persisted GSC query rankings
                 tenant_tools = existing_tools_map.get(assigned_property, [])
                 cannibal_info = check_search_intent_cannibalization(
@@ -630,7 +681,10 @@ class TrendCronRunner:
                 if cannibal_info.get("is_cannibalizing"):
                     cann_score = 0.85
                     matching_tool = cannibal_info.get("parent_slug")
-                    if str(matching_tool or "").strip().lower() in ("tools", "index", "index.html"):
+                    if (
+                        str(matching_tool or "").strip().lower() in ("tools", "index", "index.html")
+                        or is_non_page_discovery_artifact(str(matching_tool or ""))
+                    ):
                         cann_score = 0.0
                         matching_tool = None
                     else:

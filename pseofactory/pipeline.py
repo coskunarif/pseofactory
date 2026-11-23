@@ -1939,7 +1939,8 @@ def execute_autonomous_daily_trend_page_build(
         and str(item.get("action") or "BUILD_PAGE").upper() == "BUILD_PAGE"
     ]
     ranking_report = rank_revenue_weighted_expansion_queue(
-        void_candidates_path=str(queue_file) if queue_file.is_file() else None
+        void_candidates_path=str(queue_file) if queue_file.is_file() else None,
+        persist_reweighted_queue=(not dry_run and queue_file.is_file()),
     )
     ranked_pending = (
         ranking_report.get("after_queue", [])
@@ -2034,6 +2035,20 @@ def execute_autonomous_daily_trend_page_build(
         )
 
         try:
+            from pseofactory.contracts import detect_asset_partner_roster_and_slot_issues
+            from pseofactory.qualification import detect_non_us_jurisdiction
+            from pseofactory.verifier import audit_single_page_aeo_geo_readiness
+
+            off_jur = detect_non_us_jurisdiction(
+                c_query,
+                property_id=t_id,
+                spec=candidate_spec,
+            )
+            if off_jur:
+                raise ValueError(
+                    f"Off-jurisdiction non-US candidate rejected for {t_id}: matched '{off_jur}'"
+                )
+
             tenant_profile = TenantFactStore.get_instance().get_profile(t_id)
             tenant_gap_engine = CompetitorGapEngine(tenant_profile=tenant_profile)
             candidate_spec = tenant_gap_engine.enrich_candidate_spec(candidate_spec)
@@ -2071,6 +2086,28 @@ def execute_autonomous_daily_trend_page_build(
             )
             if not audit_rep.passed:
                 raise ValueError(f"ContentAccuracyAuditStage failed: {audit_rep.violations}")
+
+            partner_slot_issues = detect_asset_partner_roster_and_slot_issues(
+                html_out,
+                property_id=t_id,
+                slug=c_slug,
+                rel_path=f"tools/{c_slug}/index.html",
+            )
+            if partner_slot_issues:
+                raise ValueError(
+                    f"PartnerRosterAndSlotContract failed: {partner_slot_issues}"
+                )
+
+            aeo_page_rep = audit_single_page_aeo_geo_readiness(
+                html_out,
+                property_id=t_id,
+                slug=c_slug,
+                rel_path=f"tools/{c_slug}/index.html",
+            )
+            if not aeo_page_rep.get("passed", False):
+                raise ValueError(
+                    f"AEOGEOThreePlaneReadiness failed: {aeo_page_rep.get('issues')}"
+                )
 
             from pseofactory.jev_client import evaluate_page_prepublish_gate
             existing_pages_for_jev: List[Dict[str, str]] = []

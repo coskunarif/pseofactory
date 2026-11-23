@@ -236,6 +236,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     f"({st_info['upstream_stage']} -> {st_info['downstream_stage']}): "
                     f"inputs_verified={st_info['inputs_verified']} outputs_verified={st_info['outputs_verified']}"
                 )
+                for st_err in (st_info.get("failures") or st_info.get("errors") or []):
+                    print(f"      * {st_err}")
+            if rep.get("status") != "PASS" and rep.get("failures"):
+                print("Failures:")
+                for fail_msg in rep["failures"]:
+                    print(f"  - {fail_msg}")
         return 0 if rep.get("status") == "PASS" else 1
 
     if getattr(args, "browser", False):
@@ -1098,6 +1104,12 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
                     f"({st_info['upstream_stage']} -> {st_info['downstream_stage']}): "
                     f"inputs_verified={st_info['inputs_verified']} outputs_verified={st_info['outputs_verified']}"
                 )
+                for st_err in (st_info.get("failures") or st_info.get("errors") or []):
+                    print(f"      * {st_err}")
+            if rep.get("status") != "PASS" and rep.get("failures"):
+                print("Failures:")
+                for fail_msg in rep["failures"]:
+                    print(f"  - {fail_msg}")
         return 0 if rep.get("status") == "PASS" else 1
 
     interval = getattr(args, "interval", 3600.0)
@@ -1211,13 +1223,16 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
     obs = AIOObservatory(getattr(args, "db", None))
     window = float(getattr(args, "window_days", 7) or 7)
     action = args.action
+    effective_pairs: List[Any] = []
     if action == "sample":
         tenants = [args.tenant] if getattr(args, "tenant", None) else None
         pairs = load_watchlist(tenants=tenants)
         if getattr(args, "query", None):
             pairs = [(args.tenant or "unassigned", args.query.strip().lower())]
-        out: Any = obs.sample(pairs, max_queries=getattr(args, "max_queries", None))
-        out["watchlist_size"] = len(pairs)
+        max_q = getattr(args, "max_queries", None)
+        effective_pairs = list(pairs[: max(0, int(max_q))]) if max_q is not None else list(pairs)
+        out: Any = obs.sample(pairs, max_queries=max_q)
+        out["watchlist_size"] = len(effective_pairs)
     elif action == "watchlist":
         out = [{"tenant": t, "query": q} for t, q in load_watchlist(tenants=[args.tenant] if args.tenant else None)]
     elif action in ("analyze", "blueprint"):
@@ -1231,8 +1246,40 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
         if getattr(args, "tenant", None):
             out["tenants"] = {k: v for k, v in out["tenants"].items() if k == args.tenant}
     print(json.dumps(out, indent=2))
-    if action == "sample" and out.get("sampled", 0) == 0 and out.get("watchlist_size", 0) > 0:
-        return 1
+    if action == "sample":
+        sampled_cnt = int(out.get("sampled", 0) or 0)
+        errors_cnt = int(out.get("errors", 0) or 0)
+        watchlist_sz = int(out.get("watchlist_size", 0) or 0)
+        total_attempted = sampled_cnt + errors_cnt
+        if sampled_cnt == 0 and watchlist_sz > 0:
+            return 1
+        if total_attempted > 0 and (errors_cnt / total_attempted) >= 0.50:
+            return 1
+        # Check per-tenant 100% failure (0 sampled with >0 errors for any tenant)
+        total_by_tenant: Dict[str, int] = {}
+        query_tenants: Dict[str, List[str]] = {}
+        for t_id, q_val in effective_pairs:
+            t_norm = str(t_id or "").strip().lower()
+            q_norm = str(q_val or "").strip().lower()
+            total_by_tenant[t_norm] = total_by_tenant.get(t_norm, 0) + 1
+            query_tenants.setdefault(q_norm, []).append(t_norm)
+        errors_by_tenant: Dict[str, int] = {}
+        for err_item in out.get("error_samples") or []:
+            if not isinstance(err_item, dict):
+                continue
+            e_t = str(err_item.get("tenant") or "").strip().lower()
+            if e_t:
+                errors_by_tenant[e_t] = errors_by_tenant.get(e_t, 0) + 1
+            else:
+                e_q = str(err_item.get("query") or "").strip().lower()
+                t_list = query_tenants.get(e_q) or []
+                if t_list:
+                    matched_t = t_list.pop(0)
+                    errors_by_tenant[matched_t] = errors_by_tenant.get(matched_t, 0) + 1
+        for t_norm, t_tot in total_by_tenant.items():
+            t_err = errors_by_tenant.get(t_norm, 0)
+            if t_tot > 0 and t_err >= t_tot:
+                return 1
     return 0
 
 

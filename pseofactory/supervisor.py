@@ -689,6 +689,44 @@ class DepartmentHandoffChainVerifier:
         return missing
 
     @staticmethod
+    def _has_active_build_lock(pid: str) -> bool:
+        """
+        Returns True ONLY when a genuine live process actively holds the central
+        supervisor lock (/tmp/pseofactory_supervisor.lock) or the tenant's factory
+        lock (/tmp/<pid>_factory.lock) via advisory flock (and live PID verification
+        when a pidfile is present). Never treats a dirty git working tree alone as
+        an in-flight build.
+        Zero em-dashes. Zero en-dashes.
+        """
+        sup_lock = Path("/tmp/pseofactory_supervisor.lock")
+        tenant_lock = Path(f"/tmp/{pid}_factory.lock")
+        for cand_lock in (sup_lock, tenant_lock):
+            if not cand_lock.exists():
+                continue
+            try:
+                with open(cand_lock, "a+", encoding="utf-8") as lfd:
+                    try:
+                        fcntl.flock(lfd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        fcntl.flock(lfd.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        if cand_lock == sup_lock:
+                            pid_file = Path("/tmp/pseofactory_supervisor.pid")
+                            if pid_file.is_file():
+                                try:
+                                    holder_pid = int(pid_file.read_text(encoding="utf-8").strip())
+                                    if holder_pid > 0:
+                                        os.kill(holder_pid, 0)
+                                        return True
+                                except (ValueError, ProcessLookupError):
+                                    continue
+                                except PermissionError:
+                                    return True
+                        return True
+            except OSError:
+                continue
+        return False
+
+    @staticmethod
     def _validate_stage_outputs(
         contract: DepartmentContract,
         stage_outputs: Dict[str, Any],
@@ -1213,30 +1251,7 @@ class DepartmentHandoffChainVerifier:
             )
             in_flight_build = False
             if is_prod_canonical_tenant and not self.strict_current_engine_hash:
-                for cand_lock in (Path("/tmp/pseofactory_supervisor.lock"), Path(f"/tmp/{pid}_factory.lock")):
-                    if cand_lock.exists():
-                        try:
-                            with open(cand_lock, "a+", encoding="utf-8") as lfd:
-                                try:
-                                    fcntl.flock(lfd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                                    fcntl.flock(lfd.fileno(), fcntl.LOCK_UN)
-                                except OSError:
-                                    in_flight_build = True
-                        except OSError:
-                            pass
-                if not in_flight_build and (repo_path_cand / ".git").exists():
-                    try:
-                        st_chk = subprocess.run(
-                            ["git", "-C", str(repo_path_cand), "status", "--porcelain"],
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=5,
-                        )
-                        if st_chk.returncode == 0 and st_chk.stdout.strip():
-                            in_flight_build = True
-                    except Exception:
-                        pass
+                in_flight_build = self._has_active_build_lock(pid)
 
             rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
             retro_rep = RetroReflectionEngine.audit_estate(adapter.dist_dir, pid)
@@ -1594,32 +1609,7 @@ class DepartmentHandoffChainVerifier:
                 and repo_path.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
                 and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
             ):
-                in_flight_synd = False
-                for cand_lock in (Path("/tmp/pseofactory_supervisor.lock"), Path(f"/tmp/{pid}_factory.lock")):
-                    if cand_lock.exists():
-                        try:
-                            with open(cand_lock, "a+", encoding="utf-8") as lfd:
-                                try:
-                                    fcntl.flock(lfd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                                    fcntl.flock(lfd.fileno(), fcntl.LOCK_UN)
-                                except OSError:
-                                    in_flight_synd = True
-                        except OSError:
-                            pass
-                if not in_flight_synd and (repo_path / ".git").exists():
-                    try:
-                        st_chk = subprocess.run(
-                            ["git", "-C", str(repo_path), "status", "--porcelain"],
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=5,
-                        )
-                        if st_chk.returncode == 0 and st_chk.stdout.strip():
-                            in_flight_synd = True
-                    except Exception:
-                        pass
-                if in_flight_synd:
+                if self._has_active_build_lock(pid):
                     has_pending = False
             if (
                 self.heal_markers
@@ -1705,30 +1695,7 @@ class DepartmentHandoffChainVerifier:
                 and not self.strict_current_engine_hash
                 and (not persist or "/.agy/worktrees/" in Path(__file__).resolve().as_posix())
             ):
-                for cand_lock in (Path("/tmp/pseofactory_supervisor.lock"), Path(f"/tmp/{pid}_factory.lock")):
-                    if cand_lock.exists():
-                        try:
-                            with open(cand_lock, "a+", encoding="utf-8") as lfd:
-                                try:
-                                    fcntl.flock(lfd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                                    fcntl.flock(lfd.fileno(), fcntl.LOCK_UN)
-                                except OSError:
-                                    in_flight_build = True
-                        except OSError:
-                            pass
-                if not in_flight_build and (repo_path / ".git").exists():
-                    try:
-                        st_chk = subprocess.run(
-                            ["git", "-C", str(repo_path), "status", "--porcelain"],
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=5,
-                        )
-                        if st_chk.returncode == 0 and st_chk.stdout.strip():
-                            in_flight_build = True
-                    except Exception:
-                        pass
+                in_flight_build = self._has_active_build_lock(pid)
 
             lock_file = repo_path / "substrate_lock.json"
             lock_hash = ""
@@ -2127,7 +2094,6 @@ class DepartmentHandoffChainVerifier:
             "target_tenants": list(self.target_tenants),
             "discovered_tenants": verified_tenants,
             "tenants_verified": verified_tenants,
-            "tenants_verified": list(handoff_context.get("discovered_tenants") or self.target_tenants),
             "stage_order": list(DEPARTMENT_STAGES),
             "stages_completed": passed_cnt,
             "stages_passed": passed_cnt,
@@ -2274,6 +2240,7 @@ class SupervisorFailureStreak:
                 escalations.append({"tenant_id": pid, **tenants[pid]})
         if cycle_ok and not scoped:
             tenants.clear()
+        state["updated_at"] = now_iso
         AtomicStateLedger.save_json(self.path, state)
         return escalations
 
@@ -3234,6 +3201,7 @@ class AutonomousLifecycleSupervisor:
             evaluator = AssetIntegrityEvaluator()
             cascade_engine = RefactorCascadeEngine(evaluator=evaluator)
             any_drift = bool(monetization_requires_rebuild)
+            already_retro_verified = set(drift_report.get("tenants_retro_verified") or [])
             for pid, a in adapters.items():
                 if (
                     not dry_run
@@ -3260,7 +3228,11 @@ class AutonomousLifecycleSupervisor:
                 if rep.drifted_assets_count > 0:
                     any_drift = True
                     break
-                if getattr(a, "dist_dir", None) and Path(a.dist_dir).is_dir():
+                if (
+                    getattr(a, "dist_dir", None)
+                    and Path(a.dist_dir).is_dir()
+                    and (monetization_requires_rebuild or pid not in already_retro_verified)
+                ):
                     try:
                         retro_rep = RetroReflectionEngine.audit_estate(a.dist_dir, pid)
                         if int(retro_rep.get("stale_count", 0)) > 0:

@@ -193,11 +193,22 @@ FILING_MODIFIER_STOPWORDS = frozenset({
     "hoh",
     "mfj",
     "mfs",
+    "2015",
+    "2016",
+    "2017",
+    "2018",
+    "2019",
+    "2020",
+    "2021",
+    "2022",
+    "2023",
     "2024",
     "2025",
     "2026",
     "2027",
     "2028",
+    "2029",
+    "2030",
     "scenario",
     "comparison",
     "model",
@@ -234,6 +245,123 @@ SYNTHETIC_CANDIDATE_PATTERNS = (
     r"^dynamic-saas-benchmark-calculator$",
 )
 
+US_STATUTORY_TENANTS = frozenset({"profithelm", "prexvo", "lienbond"})
+
+NON_US_JURISDICTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
+    ("philippines", r"\b(?:philippines|philippine)\b"),
+    ("india", r"\b(?:india|indian)\b"),
+    ("united_kingdom", r"\b(?:united\s+kingdom|u\.?k\.?|hmrc|england|scotland|wales)\b"),
+    ("canada", r"\b(?:canada|canadian|ontario|alberta|quebec|british\s+columbia)\b"),
+    ("australia", r"\b(?:australia|australian|ato)\b"),
+    ("singapore", r"\bsingapore\b"),
+    ("malaysia", r"\b(?:malaysia|malaysian)\b"),
+    ("nigeria", r"\b(?:nigeria|nigerian)\b"),
+    ("kenya", r"\b(?:kenya|kenyan)\b"),
+    ("pakistan", r"\b(?:pakistan|pakistani)\b"),
+    ("bangladesh", r"\bbangladesh\b"),
+    ("south_africa", r"\b(?:south\s+africa|sars)\b"),
+    ("new_zealand", r"\bnew\s+zealand\b"),
+    ("ireland", r"\b(?:ireland|irish)\b"),
+    ("hong_kong", r"\bhong\s+kong\b"),
+    ("uae", r"\b(?:uae|dubai|united\s+arab\s+emirates)\b"),
+    ("saudi_arabia", r"\bsaudi\s+arabia\b"),
+    ("mexico", r"\b(?:mexico|mexican)\b"),
+    ("brazil", r"\b(?:brazil|brazilian)\b"),
+)
+
+NON_PAGE_DISCOVERY_ARTIFACTS = frozenset({
+    "llms.txt",
+    "llms-full.txt",
+    "robots.txt",
+    "sitemap.xml",
+    "sitemap-index.xml",
+    "sitemap-hubs.xml",
+    "sitemap-leaves.xml",
+    "sitemap-calculators.xml",
+    "feed.xml",
+    "catalog.json",
+    "media-kit.json",
+    "ai-benchmarks.json",
+    "ai_benchmarks_manifest.json",
+    "_headers",
+    "_redirects",
+    "favicon.ico",
+    "favicon.svg",
+})
+
+_NON_PAGE_ARTIFACT_EXTENSIONS = (
+    ".txt",
+    ".xml",
+    ".json",
+    ".js",
+    ".css",
+    ".ico",
+    ".svg",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".mp4",
+    ".pdf",
+    ".zip",
+)
+
+
+def is_non_page_discovery_artifact(path_or_slug: str) -> bool:
+    """
+    Returns True if a URL segment or slug refers to a non-HTML discovery/machine
+    artifact (such as llms.txt, robots.txt, sitemap*.xml, feed.xml, or *.json)
+    that must never be selected as a GSC cannibalization or REFACTOR_PAGE target.
+    Zero em-dashes. Zero en-dashes.
+    """
+    raw = str(path_or_slug or "").strip().lower().strip("/")
+    if not raw:
+        return False
+    leaf = raw.split("/")[-1]
+    if leaf in NON_PAGE_DISCOVERY_ARTIFACTS:
+        return True
+    if leaf.startswith("sitemap") and leaf.endswith(".xml"):
+        return True
+    if leaf.startswith("llms") and leaf.endswith(".txt"):
+        return True
+    return leaf.endswith(_NON_PAGE_ARTIFACT_EXTENSIONS)
+
+
+def detect_non_us_jurisdiction(
+    query_or_slug: str,
+    property_id: Optional[str] = None,
+    spec: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """
+    Detects non-US country/jurisdiction markers in candidate queries, slugs, or titles
+    for US-statutory tenants (profithelm, prexvo, lienbond) so foreign-jurisdiction
+    queries cannot compile against US federal statutes (e.g., Miller Act or IRC).
+    Returns the matched jurisdiction label or None when allowed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    eff_prop = str(
+        property_id
+        or (spec.get("property_id") if isinstance(spec, dict) else None)
+        or (spec.get("tenant") if isinstance(spec, dict) else None)
+        or ""
+    ).strip().lower()
+    if eff_prop and eff_prop not in US_STATUTORY_TENANTS:
+        return None
+    candidates: List[str] = [str(query_or_slug or "").strip().lower()]
+    if isinstance(spec, dict):
+        for k in ("slug", "query", "primary_keyword", "title"):
+            val = str(spec.get(k) or "").strip().lower()
+            if val:
+                candidates.append(val)
+    for text in candidates:
+        if not text:
+            continue
+        unslug = re.sub(r"[-_/]+", " ", text)
+        for label, pat in NON_US_JURISDICTION_PATTERNS:
+            if re.search(pat, unslug, flags=re.IGNORECASE):
+                return label
+    return None
+
 
 class SearchIntentVerdict(dict):
     """
@@ -249,7 +377,7 @@ class SearchIntentVerdict(dict):
     @property
     def status(self) -> str:
         act = str(self.get("action", "MONITOR"))
-        if act in ("PRUNE_PAGE", "PRUNE", "REJECT_SYNTHETIC", "REJECT_LISTICLE_ARCHETYPE"):
+        if act in ("PRUNE_PAGE", "PRUNE", "REJECT_SYNTHETIC", "REJECT_LISTICLE_ARCHETYPE", "REJECT_OFF_JURISDICTION"):
             return "PRUNE"
         return str(self.get("status") or act)
 
@@ -381,7 +509,9 @@ def normalize_search_intent_tokens(text: str) -> Dict[str, Any]:
 
     core_tokens = {
         t for t in expanded_tokens
-        if t not in FILING_MODIFIER_STOPWORDS and t not in state_word_tokens
+        if t not in FILING_MODIFIER_STOPWORDS
+        and t not in state_word_tokens
+        and not re.fullmatch(r"20(?:0\d|1\d|2\d|3[0-5])", t)
     }
     return {
         "raw_tokens": raw_tokens,
@@ -478,6 +608,8 @@ def _match_gsc_ranking_cannibalization(
         p_path = urllib.parse.urlsplit(r_page).path if "://" in r_page else r_page
         norm_p = "/" + p_path.strip("/") + "/" if p_path.strip("/") else "/"
         p_parts = [pt for pt in norm_p.split("/") if pt]
+        if not p_parts or any(is_non_page_discovery_artifact(pt) for pt in p_parts):
+            continue
         if len(p_parts) >= 3 and p_parts[0] == "tools" and q_state_gsc and p_parts[2].lower() == q_state_gsc:
             p_slug = f"{p_parts[1].lower()}/{p_parts[2].lower()}"
         elif len(p_parts) >= 2 and p_parts[0] == "tools":
@@ -486,7 +618,7 @@ def _match_gsc_ranking_cannibalization(
             p_slug = p_parts[-1].lower()
         else:
             continue
-        if p_slug in ("tools", "index", "index.html"):
+        if p_slug in ("tools", "index", "index.html") or is_non_page_discovery_artifact(p_slug):
             continue
         if is_retired_or_consolidated_slug(p_slug):
             res_red = resolve_redirected_gsc_target(target_url=r_page, query=r_query)
@@ -1829,6 +1961,26 @@ def qualify_search_intent(
             ),
         })
 
+    # 0c. Reject non-US foreign jurisdiction queries on US-statutory tenants
+    off_jur = detect_non_us_jurisdiction(
+        q_text,
+        property_id=query_data.get("property_id") or query_data.get("tenant"),
+        spec=query_data,
+    )
+    if off_jur:
+        return SearchIntentVerdict({
+            "action": "REJECT_OFF_JURISDICTION",
+            "status": "PRUNE",
+            "query": q_text,
+            "position": pos,
+            "impressions": impr,
+            "foreign_jurisdiction": off_jur,
+            "reason": (
+                f"Rejected off-jurisdiction non-US query '{q_text}' (matched '{off_jur}'); "
+                f"US statutory calculators cannot be compiled for foreign jurisdictions"
+            ),
+        })
+
     # 1. Check competing pages (Consolidation with 10%-80% impression-share split triage)
     competing = query_data.get("competing_pages") or query_data.get("urls") or []
     if len(competing) > 1:
@@ -2145,6 +2297,18 @@ def assert_high_effort_content_qualified(
     if syn_issues:
         raise ValueError(
             f"High-effort qualification failed{ctx}: ungrounded synthetic claims or mock markers detected: {syn_issues[0]}"
+        )
+
+    # 3b. Reject non-US foreign jurisdiction candidates targeting US-statutory tenants
+    off_jur_match = detect_non_us_jurisdiction(
+        str(candidate_spec.get("query") or candidate_spec.get("slug") or ""),
+        property_id=candidate_spec.get("property_id") or candidate_spec.get("tenant"),
+        spec=candidate_spec,
+    )
+    if off_jur_match:
+        raise ValueError(
+            f"High-effort qualification failed{ctx}: off-jurisdiction non-US candidate "
+            f"(matched '{off_jur_match}') cannot compile against US statutory frameworks"
         )
 
     # Extract manifest data if nested
