@@ -228,8 +228,7 @@ def test_linkedin_queue_sync_filters_by_property_id_not_company_id_and_uses_atom
     assert len(by_prop["prexvo"]) == 1
     assert [r["slug"] for r in by_prop["profithelm"]] == ["irs-2027-tax-brackets"]
 
-    # Non-verified tenant (ADMIN_ACCESS_DENIED) is skipped completely
-    pre_bytes = tmp_queue.read_bytes()
+    # Non-verified tenant (ADMIN_ACCESS_DENIED) prunes its stale queued items while leaving other tenants untouched
     skip_res = dist_mod._sync_linkedin_company_queue(
         li_queue_path=tmp_queue,
         norm_prop="prexvo",
@@ -238,7 +237,24 @@ def test_linkedin_queue_sync_filters_by_property_id_not_company_id_and_uses_atom
         prioritized_queue=[{"slug": "pslf-simulator", "priority_score": 75.0}],
         all_assets={},
     )
-    assert skip_res["updated"] is False
+    assert skip_res["updated"] is True
+    assert skip_res["pruned_count"] == 1
+    after_prune = json.loads(tmp_queue.read_text(encoding="utf-8"))
+    assert all(r["property_id"] != "prexvo" for r in after_prune)
+    assert {r["property_id"] for r in after_prune} == {"other_tenant", "profithelm"}
+
+    # Second call for already-pruned non-verified tenant is a strict no-op
+    pre_bytes = tmp_queue.read_bytes()
+    skip_res2 = dist_mod._sync_linkedin_company_queue(
+        li_queue_path=tmp_queue,
+        norm_prop="prexvo",
+        corp_company_id="106482194",
+        li_admin_status="ADMIN_ACCESS_DENIED",
+        prioritized_queue=[{"slug": "pslf-simulator", "priority_score": 75.0}],
+        all_assets={},
+    )
+    assert skip_res2["updated"] is False
+    assert skip_res2["pruned_count"] == 0
     assert tmp_queue.read_bytes() == pre_bytes
 
 

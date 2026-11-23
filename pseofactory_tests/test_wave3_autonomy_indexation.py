@@ -480,11 +480,12 @@ def test_fair_gsc_quota_partitioning_tool_priority_rollover_indexnow_and_project
     assert gov_json["indexing_by_tenant"] == {"profithelm": 80, "prexvo": 40, "gainhelm": 40, "lienbond": 40}
 
     # 1b. Quota floor degrades gracefully to 0 at >200 active tenants (no starvation at >=201)
+    from pseofactory.indexer import _gsc_quota_day_pt
     scale_gov = tmp_path / "gsc_quota_governor_scale.json"
     scale_gov.write_text(
         json.dumps(
             {
-                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "date": _gsc_quota_day_pt(),
                 "inspection_used": 0,
                 "indexing_used": 10,
                 "indexing_by_tenant": {f"tenant_{i}": 0 for i in range(205)},

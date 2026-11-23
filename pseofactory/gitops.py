@@ -7643,21 +7643,24 @@ def reconcile_workspace_tracking_state(
                                         if isinstance(raw_u_list, list):
                                             for u_entry in raw_u_list:
                                                 if isinstance(u_entry, dict) and u_entry.get("slug") and u_entry.get("video_id"):
+                                                    sync_rec: Dict[str, Any] = {
+                                                        "property_id": t_prop,
+                                                        "slug": str(u_entry["slug"]),
+                                                        "video_id": str(u_entry["video_id"]),
+                                                        "video_url": str(u_entry.get("url") or u_entry.get("video_url") or f"https://www.youtube.com/watch?v={u_entry['video_id']}"),
+                                                        "title": str(u_entry.get("title") or ""),
+                                                        "privacy": str(u_entry.get("privacy") or "public"),
+                                                        "timestamp": str(u_entry.get("uploaded_at") or u_entry.get("timestamp") or ""),
+                                                    }
+                                                    if u_entry.get("caption_id") or u_entry.get("has_captions"):
+                                                        sync_rec["has_captions"] = True
+                                                    if u_entry.get("pinned_comment_id") or u_entry.get("has_pinned_comment"):
+                                                        sync_rec["has_pinned_comment"] = True
                                                     _save_upload_idempotency_record(
                                                         rp,
                                                         t_prop,
                                                         str(u_entry["slug"]),
-                                                        {
-                                                            "property_id": t_prop,
-                                                            "slug": str(u_entry["slug"]),
-                                                            "video_id": str(u_entry["video_id"]),
-                                                            "video_url": str(u_entry.get("url") or u_entry.get("video_url") or f"https://www.youtube.com/watch?v={u_entry['video_id']}"),
-                                                            "title": str(u_entry.get("title") or ""),
-                                                            "privacy": str(u_entry.get("privacy") or "public"),
-                                                            "timestamp": str(u_entry.get("uploaded_at") or u_entry.get("timestamp") or ""),
-                                                            "has_captions": bool(u_entry.get("caption_id") or u_entry.get("has_captions")),
-                                                            "has_pinned_comment": bool(u_entry.get("pinned_comment_id") or u_entry.get("has_pinned_comment")),
-                                                        },
+                                                        sync_rec,
                                                     )
                                     except Exception:
                                         pass

@@ -10947,19 +10947,23 @@ def _sync_linkedin_company_queue(
     """
     Safely updates the shared LinkedIn company queue file for a single tenant.
     - Filters strictly by property_id (never by company_id).
-    - Skips enqueueing when corp_company_id is empty or admin access is not VERIFIED_COMPANY_ADMIN,
-      leaving all other tenants' items 100% untouched.
+    - When corp_company_id is empty or admin access is not VERIFIED_COMPANY_ADMIN,
+      prunes any stale queued items belonging to norm_prop while leaving all other
+      tenants' items 100% untouched, and skips enqueueing new items.
     - Enforces an in-memory invariant before writing that every other tenant's item count is >= its pre-read count.
     Zero em-dashes. Zero en-dashes.
     """
-    if not corp_company_id or li_admin_status != "VERIFIED_COMPANY_ADMIN":
+    is_blocked_or_unverified = not corp_company_id or li_admin_status != "VERIFIED_COMPANY_ADMIN"
+    skipped_reason = (
+        "UNCONFIGURED_COMPANY_ID"
+        if not corp_company_id
+        else f"ADMIN_ACCESS_{li_admin_status or 'UNVERIFIED'}"
+    )
+    if is_blocked_or_unverified and not li_queue_path.is_file():
         return {
             "updated": False,
-            "skipped_reason": (
-                "UNCONFIGURED_COMPANY_ID"
-                if not corp_company_id
-                else f"ADMIN_ACCESS_{li_admin_status or 'UNVERIFIED'}"
-            ),
+            "pruned_count": 0,
+            "skipped_reason": skipped_reason,
         }
 
     lock_path = li_queue_path.with_name(f"{li_queue_path.name}.lock")
@@ -10970,6 +10974,7 @@ def _sync_linkedin_company_queue(
         try:
             pre_other_counts: Dict[str, int] = {}
             existing_li_queue: List[Dict[str, Any]] = []
+            pruned_count = 0
             if li_queue_path.is_file():
                 raw_li = json.loads(li_queue_path.read_text(encoding="utf-8"))
                 if isinstance(raw_li, list):
@@ -10984,6 +10989,48 @@ def _sync_linkedin_company_queue(
                         if item_prop != norm_prop:
                             pre_other_counts[item_prop] = pre_other_counts.get(item_prop, 0) + 1
                             existing_li_queue.append(li_item)
+                        else:
+                            pruned_count += 1
+
+            if is_blocked_or_unverified:
+                if pruned_count == 0:
+                    return {
+                        "updated": False,
+                        "pruned_count": 0,
+                        "skipped_reason": skipped_reason,
+                        "preserved_other_counts": pre_other_counts,
+                    }
+                post_other_counts: Dict[str, int] = {}
+                for li_item in existing_li_queue:
+                    if not isinstance(li_item, dict):
+                        continue
+                    raw_item_prop = li_item.get("property_id")
+                    item_prop = _normalize_property_id(raw_item_prop) if raw_item_prop else ""
+                    if item_prop != norm_prop:
+                        post_other_counts[item_prop] = post_other_counts.get(item_prop, 0) + 1
+                for other_prop, pre_cnt in pre_other_counts.items():
+                    post_cnt = post_other_counts.get(other_prop, 0)
+                    if post_cnt < pre_cnt:
+                        raise RuntimeError(
+                            f"LinkedIn queue cross-tenant invariant violated during {norm_prop} prune: "
+                            f"{other_prop} count dropped from {pre_cnt} to {post_cnt}"
+                        )
+                payload_text = json.dumps(existing_li_queue, indent=2, ensure_ascii=False) + "\n"
+                tmp_path = li_queue_path.with_name(
+                    f".{li_queue_path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.tmp"
+                )
+                with open(tmp_path, "w", encoding="utf-8") as tmp_f:
+                    tmp_f.write(payload_text)
+                    tmp_f.flush()
+                    os.fsync(tmp_f.fileno())
+                os.replace(tmp_path, li_queue_path)
+                tmp_path = None
+                return {
+                    "updated": True,
+                    "pruned_count": pruned_count,
+                    "skipped_reason": skipped_reason,
+                    "preserved_other_counts": post_other_counts,
+                }
 
             added_count = 0
             for p_item in prioritized_queue:

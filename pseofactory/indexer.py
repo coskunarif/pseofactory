@@ -20,6 +20,21 @@ import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
+from zoneinfo import ZoneInfo
+
+GSC_QUOTA_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _gsc_quota_day_pt(now: Optional[datetime] = None) -> str:
+    """Returns current Google Search Console / Indexing API quota date in Pacific Time (America/Los_Angeles)."""
+    dt = now if now is not None else _utc_now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(GSC_QUOTA_TIMEZONE).strftime("%Y-%m-%d")
 
 def _baseline_env_get(key: str, default: str) -> str:
     maint_mod = sys.modules.get("pseofactory.maintenance")
@@ -2738,9 +2753,11 @@ class PushIndexer:
         is encountered so subsequent tenant or loop calls stop hammering the API.
         """
         gov_path = self._get_gsc_quota_governor_path()
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_utc = _utc_now()
+        today_str = _gsc_quota_day_pt(now_utc)
         state: Dict[str, Any] = {
             "date": today_str,
+            "timezone": "America/Los_Angeles",
             "inspection_used": 0,
             "indexing_used": 0,
             "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
@@ -2760,9 +2777,10 @@ class PushIndexer:
         key = "inspection_used" if bucket == "inspection" else "indexing_used"
         limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
         state[key] = max(int(state.get(key, 0) or 0), limit)
+        state["timezone"] = "America/Los_Angeles"
         state["quota_exhausted"] = True
         state["exhausted_bucket"] = bucket
-        state["last_429_at"] = datetime.now(timezone.utc).isoformat()
+        state["last_429_at"] = now_utc.isoformat()
         if reason:
             state["last_429_reason"] = str(reason)[:500]
         try:
@@ -2784,9 +2802,10 @@ class PushIndexer:
         For the 200/day indexing bucket, guarantees each active tenant a daily floor
         (default 40/tenant/day) plus access to the shared spillover pool so earlier tenants
         cannot starve later tenants (such as lienbond) to 0.
+        Quota day resets at midnight Pacific Time (America/Los_Angeles) to match Google's reset.
         """
         gov_path = self._get_gsc_quota_governor_path()
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = _gsc_quota_day_pt()
         eff_tenant = (
             str(tenant_id or getattr(self, "tenant_id", "") or (self.domain.split(".")[0] if getattr(self, "domain", "") else "profithelm"))
             .strip()
@@ -2794,6 +2813,7 @@ class PushIndexer:
         )
         state: Dict[str, Any] = {
             "date": today_str,
+            "timezone": "America/Los_Angeles",
             "inspection_used": 0,
             "indexing_used": 0,
             "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
@@ -4249,6 +4269,8 @@ class PushIndexer:
 
         to_push = []
         skipped = []
+        quota_deferred_urls: List[str] = []
+        accepted_urls: List[str] = []
         interrupted = False
         sitemap_registration: Dict[str, Any] = {"status": "SKIPPED_INTERRUPTED", "submissions": []}
         if live and gsccli_bin:
@@ -4268,6 +4290,7 @@ class PushIndexer:
                 for ov_u in overflow:
                     if ov_u.rstrip("/") not in indexed_norm_set:
                         rollover_spillover.append(ov_u)
+                        quota_deferred_urls.append(ov_u)
                     elif ov_u not in skipped:
                         skipped.append(ov_u)
             api_results = []
@@ -4279,6 +4302,7 @@ class PushIndexer:
                     for rem_u in to_push[idx:]:
                         if rem_u.rstrip("/") not in indexed_norm_set:
                             rollover_spillover.append(rem_u)
+                            quota_deferred_urls.append(rem_u)
                         elif rem_u not in skipped:
                             skipped.append(rem_u)
                     break
@@ -4366,12 +4390,24 @@ class PushIndexer:
                     remaining_rollover.append(u)
             self.save_gsc_rollover_queue(remaining_rollover)
 
+            if accepted_urls:
+                gsc_api_status = "PARTIAL_QUOTA_DEFERRED" if (quota_deferred_urls or interrupted) else "DISPATCHED"
+            elif quota_deferred_urls:
+                gsc_api_status = "QUOTA_DEFERRED"
+            elif interrupted:
+                gsc_api_status = "INTERRUPTED"
+            elif to_push:
+                gsc_api_status = "FAIL"
+            else:
+                gsc_api_status = "IDEMPOTENT_NO_OP"
+
             gsc_results.append({
                 "engine": "google_indexing_api",
-                "status": "DISPATCHED" if to_push else "IDEMPOTENT_NO_OP",
+                "status": gsc_api_status,
                 "notifications": api_results,
                 "urls_pushed": len(accepted_urls),
                 "urls_skipped": len(skipped),
+                "quota_deferred_count": len(quota_deferred_urls),
                 "rollover_queue_drained": len(rollover_loaded),
                 "rollover_queue_spillover": len(remaining_rollover),
                 "domain_health_tier": domain_health.get("domain_health_tier"),
@@ -4399,8 +4435,17 @@ class PushIndexer:
         if not interrupted:
             inspection_oracle = self.verify_gsc_indexation_loop(urls=urls, site=self.gsc_site, max_urls=5, live=live)
 
-        commit_status = "SIMULATED" if not live else ("INTERRUPTED" if interrupted else "DISPATCHED")
-        self._commit_push_result(intent_id, to_push if live else urls, status=commit_status)
+        if not live:
+            commit_status = "SIMULATED"
+        elif interrupted:
+            commit_status = "INTERRUPTED"
+        elif not accepted_urls and quota_deferred_urls:
+            commit_status = "QUOTA_DEFERRED"
+        elif not to_push and not quota_deferred_urls:
+            commit_status = "IDEMPOTENT_NO_OP"
+        else:
+            commit_status = "DISPATCHED"
+        self._commit_push_result(intent_id, accepted_urls if live else urls, status=commit_status)
 
         return {
             "site": self.gsc_site,
@@ -4682,20 +4727,40 @@ class PushIndexer:
         meta_allowed = "User-agent: Meta-ExternalAgent" in robots_text
         applebot_ext_allowed = "User-agent: Applebot-Extended" in robots_text
 
+        pushed_ledger = self.load_pushed_ledger()
+        rollover_pending_set = set(self.load_gsc_rollover_queue())
+
         entries = []
         for a in assets:
             url = a["url"]
             is_new = a.get("is_new", False)
             status = a.get("status", "NEW")
             push_count = a.get("push_count", 0)
+            led_rec = pushed_ledger.get(url) if isinstance(pushed_ledger.get(url), dict) else {}
+            led_engines = led_rec.get("engines") if isinstance(led_rec.get("engines"), dict) else {}
+            in_rollover = url in rollover_pending_set or bool(led_rec.get("google_rollover_queued"))
+            google_pushed = bool(
+                not in_rollover
+                and (
+                    isinstance(led_engines.get("google"), dict)
+                    or (not led_engines and push_count > 0)
+                )
+            )
+            indexnow_pushed = bool(
+                isinstance(led_engines.get("indexnow"), dict)
+                or (not led_engines and push_count > 0)
+            )
 
             if live:
-                if push_count > 0:
+                if google_pushed:
                     google_state = "ACCEPTED"
                     google_msg = "Dispatched via Google Indexing API / GSC"
+                elif in_rollover:
+                    google_state = "QUOTA_DEFERRED"
+                    google_msg = "Pending in GSC rollover queue; not yet accepted by Google Indexing API"
                 elif sitemap_xml_exists:
                     google_state = "QUEUED_SITEMAP"
-                    google_msg = "Included in canonical XML sitemap"
+                    google_msg = "Listed in local XML sitemap only; not yet pushed via Google Indexing API"
                 else:
                     google_state = "PENDING"
                     google_msg = "Awaiting initial Googlebot indexing sweep"
@@ -4703,15 +4768,15 @@ class PushIndexer:
                 google_state = "SIMULATED"
                 google_msg = "Dry-run verified (Googlebot crawlable and sitemap mapped)"
 
-            google_accepted = google_state in ["ACCEPTED", "SIMULATED", "QUEUED_SITEMAP", "INDEXED"]
+            google_accepted = google_state in ["ACCEPTED", "SIMULATED", "INDEXED"]
 
             if live:
-                if push_count > 0 and indexnow_key_valid:
+                if indexnow_pushed and indexnow_key_valid:
                     bing_state = "ACCEPTED"
                     bing_msg = "IndexNow protocol acknowledged by Bing endpoint"
                 elif indexnow_key_valid:
                     bing_state = "VERIFIED_KEY"
-                    bing_msg = "IndexNow authentication key confirmed in dist/"
+                    bing_msg = "IndexNow key file present in dist/ only; URL not yet pushed to IndexNow"
                 else:
                     bing_state = "PENDING"
                     bing_msg = "Awaiting IndexNow key placement"
@@ -4719,7 +4784,7 @@ class PushIndexer:
                 bing_state = "SIMULATED"
                 bing_msg = "Dry-run verified (IndexNow payload formatted for Bing)"
 
-            bing_accepted = bing_state in ["ACCEPTED", "SIMULATED", "VERIFIED_KEY"]
+            bing_accepted = bing_state in ["ACCEPTED", "SIMULATED"]
 
             if live:
                 perp_state = "ACCEPTED" if (bing_accepted and perplexity_allowed) else "PENDING"

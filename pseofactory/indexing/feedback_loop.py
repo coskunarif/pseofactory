@@ -2166,8 +2166,18 @@ class IndexingFeedbackLoop:
                 )
                 if existing_idx is None:
                     b_data.append(entry)
-                elif self.domain and self.domain not in str(b_data[existing_idx].get("url", "")):
-                    b_data[existing_idx] = entry
+                else:
+                    existing_entry = b_data[existing_idx]
+                    existing_url = str(existing_entry.get("post_url") or existing_entry.get("url") or "")
+                    if self.domain and self.domain not in existing_url:
+                        merged = dict(existing_entry)
+                        merged["url"] = param_url
+                        if "post_url" in merged:
+                            merged["post_url"] = param_url
+                        merged["dispatched_at"] = entry["dispatched_at"]
+                        if not merged.get("channels"):
+                            merged["channels"] = entry["channels"]
+                        b_data[existing_idx] = merged
             elif isinstance(b_data, dict):
                 dispatched = b_data.setdefault("dispatched_slugs", {})
                 dispatched[slug] = entry

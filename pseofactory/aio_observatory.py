@@ -27,6 +27,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import time
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -99,31 +100,85 @@ def parse_treg_aio_output(stdout: str) -> Dict[str, Any]:
     }
 
 
-def treg_sampler(query: str, timeout: float = 120.0) -> Dict[str, Any]:
-    """Live Google AI Overview sample via treg, with a hard per-call cost ceiling."""
+_TRANSIENT_HTTP_RE = re.compile(
+    r"(?:http\s*(?:429|500|502|503|504)\b|timed?\s*out|connection\s+reset|temporarily\s+unavailable|bad\s+gateway|service\s+unavailable)",
+    re.IGNORECASE,
+)
+_NON_RETRYABLE_HTTP_RE = re.compile(r"http\s*(?:400|401|403|404|422)\b", re.IGNORECASE)
+_JUNK_PROBE_QUERY_RE = re.compile(
+    r"(?:\brobots[\s._-]*txt\b|\bsitemap[\s._-]*xml\b|\bllms[\s._-]*txt\b|\bexample\.com\b|\bamazon\s+com\s+robots\b|\bprobe[\s._-]*query\b|\btest[\s._-]*query\b)",
+    re.IGNORECASE,
+)
+
+
+def is_probe_or_junk_query(query: str) -> bool:
+    """Returns True for synthetic probe/infrastructure queries that must never enter AIO snapshots or citation caches."""
+    cleaned = " ".join(str(query or "").strip().lower().split())
+    if not cleaned or len(cleaned) < 3:
+        return True
+    return bool(_JUNK_PROBE_QUERY_RE.search(cleaned))
+
+
+def _is_transient_sampler_error(err_text: str) -> bool:
+    low = str(err_text or "")
+    if _NON_RETRYABLE_HTTP_RE.search(low):
+        return False
+    return bool(_TRANSIENT_HTTP_RE.search(low))
+
+
+def treg_sampler(
+    query: str,
+    timeout: float = 120.0,
+    max_retries: int = 3,
+    base_backoff_seconds: float = 1.5,
+) -> Dict[str, Any]:
+    """
+    Live Google AI Overview sample via treg, with a hard per-call cost ceiling
+    and bounded exponential retry on transient HTTP 502/503/504/429 and timeout errors.
+    Deterministic client errors (e.g. HTTP 400/401/403/404) fail fast without retrying.
+    """
     treg_bin = shutil.which("treg")
     if not treg_bin:
         raise RuntimeError("treg binary not found on PATH")
-    proc = subprocess.run(
-        [
-            treg_bin,
-            "call",
-            ENDPOINT_AIO,
-            "--method",
-            "POST",
-            "--data",
-            json.dumps({"prompt": query}),
-            "--header",
-            f"X-Treg-Route-Max-Cost: {MAX_AIO_COST_USD}",
-        ],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    if proc.returncode != 0 or not proc.stdout.strip():
-        raise RuntimeError(f"treg exit {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}")
-    return parse_treg_aio_output(proc.stdout)
+    cmd = [
+        treg_bin,
+        "call",
+        ENDPOINT_AIO,
+        "--method",
+        "POST",
+        "--data",
+        json.dumps({"prompt": query}),
+        "--header",
+        f"X-Treg-Route-Max-Cost: {MAX_AIO_COST_USD}",
+    ]
+    attempts = max(1, int(max_retries))
+    last_exc: Optional[Exception] = None
+    for attempt in range(attempts):
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                delay = min(15.0, float(base_backoff_seconds) * (2 ** attempt))
+                time.sleep(delay)
+                continue
+            raise
+        if proc.returncode == 0 and proc.stdout.strip():
+            return parse_treg_aio_output(proc.stdout)
+        err_msg = f"treg exit {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}"
+        last_exc = RuntimeError(err_msg)
+        if _is_transient_sampler_error(err_msg) and attempt + 1 < attempts:
+            delay = min(15.0, float(base_backoff_seconds) * (2 ** attempt))
+            time.sleep(delay)
+            continue
+        raise last_exc
+    raise last_exc or RuntimeError("treg_sampler exhausted retries")
 
 
 def load_watchlist(path: Optional[Path] = None, tenants: Optional[Sequence[str]] = None) -> List[Tuple[str, str]]:
@@ -241,6 +296,8 @@ class AIOObservatory:
     # -- writes --------------------------------------------------------------
 
     def record(self, tenant: str, query: str, payload: Optional[Dict[str, Any]], error: str = "", at: Optional[datetime] = None) -> str:
+        if is_probe_or_junk_query(query):
+            raise ValueError(f"Refusing to record junk/probe query in AIO observatory: {query!r}")
         sid = uuid.uuid4().hex
         stamp = (at or _now()).isoformat()
         with self._conn() as c:
@@ -272,8 +329,11 @@ class AIOObservatory:
         if max_queries is not None:
             pairs = pairs[: max(0, int(max_queries))]
         fn = sampler or treg_sampler
-        summary = {"sampled": 0, "found": 0, "errors": 0, "cost_usd": 0.0, "error_samples": []}
+        summary = {"sampled": 0, "found": 0, "errors": 0, "skipped_junk": 0, "cost_usd": 0.0, "error_samples": []}
         for tenant, query in pairs:
+            if is_probe_or_junk_query(query):
+                summary["skipped_junk"] += 1
+                continue
             try:
                 payload = fn(query)
             except Exception as exc:  # recorded as unknown, never as a miss
@@ -449,6 +509,8 @@ class AIOObservatory:
         Measured AI Overview evidence in TregChecker.check_ai_citation's result shape,
         or None when the observatory has no valid sample for the query in the window.
         """
+        if is_probe_or_junk_query(query):
+            return None
         a = self.analyze(query, tenant_domains, window_days)
         if a["samples"] == 0:
             return None

@@ -211,14 +211,21 @@ class DailyIndexingInspector:
         queue_size = len(tenant_urls)
         backlog_exceeded = queue_size > 200
 
-        # Scan recent telemetry events newest-first for active 429 quota exhaustion within the current UTC day
+        # Scan recent telemetry events newest-first for active 429 quota exhaustion within the current PT day
         quota_exhausted = False
         quota_reasons = []
         now_utc = datetime.now(timezone.utc)
         try:
+            from zoneinfo import ZoneInfo
+            pt_tz = ZoneInfo("America/Los_Angeles")
+            today_pt = now_utc.astimezone(pt_tz).date()
+        except Exception:
+            pt_tz = timezone.utc
+            today_pt = now_utc.date()
+        try:
             recent_events = self.telemetry_logger.read_recent(limit=50, tenant_id=self.tenant_id)
             for ev in recent_events:
-                if (ev.event_type or "").upper() == "INDEXING_ANOMALY":
+                if (ev.event_type or "").upper() not in ("INDEXING_ANOMALY", "SUBPROCESS_CRASH"):
                     continue
                 act = (ev.action_taken or "").upper()
                 if act in ("AUTO_REMEDIATED", "QUOTA_GOVERNOR_DEFERRED"):
@@ -229,13 +236,14 @@ class DailyIndexingInspector:
                         ev_dt = datetime.fromisoformat(str(ev_ts_raw).replace("Z", "+00:00"))
                         if ev_dt.tzinfo is None:
                             ev_dt = ev_dt.replace(tzinfo=timezone.utc)
-                        if ev_dt.date() < now_utc.date() or (now_utc - ev_dt).total_seconds() >= 86400.0:
+                        if ev_dt.astimezone(pt_tz).date() < today_pt or (now_utc - ev_dt).total_seconds() >= 86400.0:
                             continue
                     except Exception:
                         pass
                 msg = (ev.error_message or "").lower()
                 tail = (ev.stderr_tail or "").lower()
-                if "429" in msg or "quota" in msg or "429" in tail or "quota" in tail:
+                err_t = (ev.error_type or "").lower()
+                if "429" in msg or "quota" in msg or "429" in tail or "quota" in tail or "429" in err_t or "quota" in err_t:
                     quota_exhausted = True
                     quota_reasons.append(ev.error_message or "HTTP 429 quota exceeded detected in telemetry")
                     break

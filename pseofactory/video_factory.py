@@ -36,7 +36,22 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from zoneinfo import ZoneInfo
+
+YOUTUBE_QUOTA_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _youtube_quota_day_pt(now: Optional[datetime] = None) -> str:
+    """Returns current YouTube Data API v3 quota date in Pacific Time (America/Los_Angeles)."""
+    dt = now if now is not None else _utc_now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(YOUTUBE_QUOTA_TIMEZONE).strftime("%Y-%m-%d")
 
 from pseofactory.contracts import (
     CONVERSATIONAL_FILLER_TERMS,
@@ -54,6 +69,7 @@ YOUTUBE_THUMBNAIL_SET_COST_UNITS: int = 50
 YOUTUBE_PLAYLIST_INSERT_COST_UNITS: int = 50
 YOUTUBE_CAPTION_INSERT_COST_UNITS: int = 400
 YOUTUBE_COMMENT_INSERT_COST_UNITS: int = 50
+YOUTUBE_STATUS_CHECK_COST_UNITS: int = 1
 DEFAULT_UPLOAD_PRIVACY: str = "public"
 
 MIN_VALID_MP4_BYTES: int = 1025
@@ -286,6 +302,8 @@ class YouTubeQuotaGovernor:
         include_thumbnail: bool = True,
         include_playlist: bool = False,
         include_caption: bool = False,
+        include_comment: bool = True,
+        include_status_check: bool = True,
     ) -> int:
         cost = YOUTUBE_VIDEO_INSERT_COST_UNITS
         if include_thumbnail:
@@ -294,7 +312,57 @@ class YouTubeQuotaGovernor:
             cost += YOUTUBE_PLAYLIST_INSERT_COST_UNITS
         if include_caption:
             cost += YOUTUBE_CAPTION_INSERT_COST_UNITS
+        if include_comment:
+            cost += YOUTUBE_COMMENT_INSERT_COST_UNITS
+        if include_status_check:
+            cost += YOUTUBE_STATUS_CHECK_COST_UNITS
         return cost
+
+    @staticmethod
+    def _discover_active_tenants() -> Set[str]:
+        tenants: Set[str] = set()
+        if _in_pytest():
+            return tenants
+        projects_root = Path("/home/ubuntuadmin/projects")
+        try:
+            for cfg_path in projects_root.glob("*/.pseofactory.json"):
+                try:
+                    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+                    pid = str(raw.get("property_id") or cfg_path.parent.name).strip().lower()
+                    if pid:
+                        tenants.add(_normalize_property_id(pid))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return tenants
+
+    @staticmethod
+    def _infer_tenant_from_path(file_path: str) -> Optional[str]:
+        fp = str(file_path or "").lower()
+        if "/profithelm-platform/" in fp or "/profithelm/" in fp:
+            return "profithelm"
+        if "/prexvo/" in fp:
+            return "prexvo"
+        if "/gainhelm/" in fp:
+            return "gainhelm"
+        if "/lienbond/" in fp:
+            return "lienbond"
+        return None
+
+    @staticmethod
+    def _timestamp_to_pt_date(ts_raw: str) -> str:
+        ts_str = str(ts_raw or "").strip()
+        if not ts_str:
+            return ""
+        try:
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                # CLI upload_log.json records local Pacific timestamps without tz offset
+                dt = dt.replace(tzinfo=YOUTUBE_QUOTA_TIMEZONE)
+            return dt.astimezone(YOUTUBE_QUOTA_TIMEZONE).strftime("%Y-%m-%d")
+        except Exception:
+            return ts_str[:10]
 
     def _load_ledger(self) -> Dict[str, Any]:
         if not self.ledger_path.is_file():
@@ -337,7 +405,7 @@ class YouTubeQuotaGovernor:
             if not isinstance(item, dict):
                 continue
             ts = str(item.get("timestamp") or "")
-            if ts.startswith(date_prefix):
+            if self._timestamp_to_pt_date(ts) == date_prefix:
                 matched.append(item)
         return matched
 
@@ -347,10 +415,12 @@ class YouTubeQuotaGovernor:
         include_thumbnail: bool = True,
         include_playlist: bool = False,
         include_caption: bool = False,
+        include_comment: bool = True,
         date_override: Optional[str] = None,
+        property_id: Optional[str] = None,
+        active_tenants: Optional[Sequence[str]] = None,
     ) -> QuotaBudgetStatus:
-        today_str = date_override or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        local_today_str = date_override or datetime.now().strftime("%Y-%m-%d")
+        today_str = date_override or _youtube_quota_day_pt()
         req_units = (
             int(required_units)
             if required_units is not None
@@ -358,6 +428,7 @@ class YouTubeQuotaGovernor:
                 include_thumbnail=include_thumbnail,
                 include_playlist=include_playlist,
                 include_caption=include_caption,
+                include_comment=include_comment,
             )
         )
 
@@ -366,51 +437,117 @@ class YouTubeQuotaGovernor:
         ledger_events = list(day_entry.get("events") or []) if isinstance(day_entry, dict) else []
 
         cli_uploads = self._inspect_cli_uploads_for_date(today_str)
-        if local_today_str != today_str:
-            seen_ts = {str(u.get("timestamp")) for u in cli_uploads}
-            for u in self._inspect_cli_uploads_for_date(local_today_str):
-                if str(u.get("timestamp")) not in seen_ts:
-                    cli_uploads.append(u)
 
         by_video_id: Dict[str, int] = {}
+        video_tenant: Dict[str, str] = {}
         extra_units = 0
+        extra_by_tenant: Dict[str, int] = {}
 
         for ev in ledger_events:
             if not isinstance(ev, dict):
                 continue
             vid = str(ev.get("video_id") or "").strip()
             units = int(ev.get("quota_units", 0) or 0)
+            ev_prop = _normalize_property_id(str(ev.get("property_id") or "")) if ev.get("property_id") else ""
             if vid and ":reconcile:" not in vid:
                 by_video_id[vid] = max(by_video_id.get(vid, 0), units)
+                if ev_prop:
+                    video_tenant[vid] = ev_prop
             else:
                 extra_units += units
+                if ev_prop:
+                    extra_by_tenant[ev_prop] = extra_by_tenant.get(ev_prop, 0) + units
 
         for cu in cli_uploads:
             vid = str(cu.get("video_id") or "").strip()
-            default_cost = YOUTUBE_VIDEO_INSERT_COST_UNITS + YOUTUBE_THUMBNAIL_SET_COST_UNITS
-            if cu.get("playlist_id"):
-                default_cost += YOUTUBE_PLAYLIST_INSERT_COST_UNITS
+            fpath = str(cu.get("file_path") or "")
+            if "/dist/videos/" in fpath:
+                default_cost = self.estimate_upload_cost(
+                    include_thumbnail=True,
+                    include_playlist=bool(cu.get("playlist_id")),
+                    include_caption=True,
+                    include_comment=True,
+                )
+            else:
+                default_cost = YOUTUBE_VIDEO_INSERT_COST_UNITS + YOUTUBE_THUMBNAIL_SET_COST_UNITS
+                if cu.get("playlist_id"):
+                    default_cost += YOUTUBE_PLAYLIST_INSERT_COST_UNITS
             units = int(cu.get("quota_units_used") or default_cost)
+            cu_prop = self._infer_tenant_from_path(fpath)
             if vid:
                 by_video_id[vid] = max(by_video_id.get(vid, 0), units)
+                if cu_prop and vid not in video_tenant:
+                    video_tenant[vid] = cu_prop
             else:
                 extra_units += units
+                if cu_prop:
+                    extra_by_tenant[cu_prop] = extra_by_tenant.get(cu_prop, 0) + units
+
+        used_by_tenant: Dict[str, int] = dict(extra_by_tenant)
+        for vid, units in by_video_id.items():
+            t_name = video_tenant.get(vid)
+            if t_name:
+                used_by_tenant[t_name] = used_by_tenant.get(t_name, 0) + units
 
         used_units = sum(by_video_id.values()) + extra_units
         effective_ceiling = max(0, self.daily_ceiling_units - self.safety_reserve_units)
         remaining_units = max(0, effective_ceiling - used_units)
-        can_upload = (used_units + req_units) <= effective_ceiling
+
+        fairness_blocked_reason: Optional[str] = None
+        effective_remaining = remaining_units
+        if property_id is not None and (active_tenants is not None or not _in_pytest()):
+            eff_prop = _normalize_property_id(property_id)
+            tenants_pool: Set[str] = (
+                {_normalize_property_id(t) for t in active_tenants if str(t).strip()}
+                if active_tenants is not None
+                else self._discover_active_tenants()
+            )
+            tenants_pool.add(eff_prop)
+            tenants_pool.update(used_by_tenant.keys())
+            if len(tenants_pool) > 1:
+                num_tenants = len(tenants_pool)
+                if (effective_ceiling // num_tenants) >= req_units:
+                    tenant_floor = req_units
+                    reserved_for_others = sum(
+                        max(0, tenant_floor - used_by_tenant.get(other_t, 0))
+                        for other_t in tenants_pool
+                        if other_t != eff_prop
+                    )
+                    effective_remaining = max(0, remaining_units - reserved_for_others)
+                    if remaining_units >= req_units and effective_remaining < req_units:
+                        fairness_blocked_reason = (
+                            f"PER_TENANT_FAIRNESS_RESERVED ({used_units}/{effective_ceiling} units used; "
+                            f"{reserved_for_others} reserved for other active tenants; "
+                            f"requires {req_units}, {effective_remaining} available for {eff_prop})"
+                        )
+                else:
+                    # 50+ tenant scaling: cap any tenant that already uploaded today while peers have 0
+                    other_unserved = any(
+                        used_by_tenant.get(other_t, 0) < req_units
+                        for other_t in tenants_pool
+                        if other_t != eff_prop
+                    )
+                    if used_by_tenant.get(eff_prop, 0) >= req_units and other_unserved:
+                        effective_remaining = 0
+                        fairness_blocked_reason = (
+                            f"PER_TENANT_DAILY_FAIRNESS_CAP ({eff_prop} already consumed "
+                            f"{used_by_tenant.get(eff_prop, 0)} units today while peer tenants remain unserved)"
+                        )
+
+        can_upload = (used_units + req_units) <= effective_ceiling and effective_remaining >= req_units and fairness_blocked_reason is None
         unit_per_upload = max(req_units, YOUTUBE_VIDEO_INSERT_COST_UNITS)
-        max_additional = remaining_units // unit_per_upload
+        max_additional = effective_remaining // unit_per_upload
 
         if can_upload:
             reason = (
-                f"QUOTA_AVAILABLE ({used_units}/{effective_ceiling} effective units used today; "
-                f"{remaining_units} remaining)"
+                f"QUOTA_AVAILABLE ({used_units}/{effective_ceiling} effective units used today PT; "
+                f"{effective_remaining} remaining)"
             )
+        elif fairness_blocked_reason is not None:
+            reason = fairness_blocked_reason
         else:
             reason = (
-                f"DAILY_QUOTA_CEILING_REACHED ({used_units}/{effective_ceiling} effective units used today; "
+                f"DAILY_QUOTA_CEILING_REACHED ({used_units}/{effective_ceiling} effective units used today PT; "
                 f"requires {req_units} units, only {remaining_units} remaining)"
             )
 
@@ -438,14 +575,14 @@ class YouTubeQuotaGovernor:
         title: str = "",
         date_override: Optional[str] = None,
     ) -> QuotaBudgetStatus:
-        today_str = date_override or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = date_override or _youtube_quota_day_pt()
         ledger = self._load_ledger()
         days = ledger.setdefault("days", {})
         day_rec = days.setdefault(today_str, {"events": []})
         events = day_rec.setdefault("events", [])
         events.append(
             {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": _utc_now().isoformat(),
                 "property_id": _normalize_property_id(property_id),
                 "slug": slug,
                 "video_id": video_id,
@@ -634,8 +771,30 @@ def _save_upload_idempotency_record(
                     raise RuntimeError(
                         f"Corrupt non-empty YouTube upload ledger at {l_path}: expected 'uploads' dict"
                     )
-                uploads_map[key] = dict(record)
-                data["updated_at"] = datetime.now(timezone.utc).isoformat()
+                prev = uploads_map.get(key)
+                same_video = (
+                    isinstance(prev, dict)
+                    and str(prev.get("video_id") or "").strip() != ""
+                    and str(prev.get("video_id") or "").strip() == str(record.get("video_id") or "").strip()
+                )
+                merged = dict(prev) if same_video else {}
+                merged.update(record)
+                if same_video and isinstance(prev, dict):
+                    for truth_key in (
+                        "has_captions",
+                        "has_pinned_comment",
+                        "thumbnail_confirmed",
+                        "privacy_revert_detected",
+                    ):
+                        if prev.get(truth_key) is True and not record.get(truth_key):
+                            merged[truth_key] = True
+                    if str(prev.get("privacy") or "").strip().lower() == "public" and not str(record.get("privacy") or "").strip():
+                        merged["privacy"] = "public"
+                    for sticky_key in ("last_reconcile_day_pt", "last_reconcile_at"):
+                        if prev.get(sticky_key) and not record.get(sticky_key):
+                            merged[sticky_key] = prev[sticky_key]
+                uploads_map[key] = merged
+                data["updated_at"] = _utc_now().isoformat()
                 tmp_f = l_path.with_suffix(".tmp")
                 tmp_f.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                 tmp_f.replace(l_path)
@@ -3012,40 +3171,51 @@ def upload_tool_video_to_youtube(
     gov = quota_governor or YouTubeQuotaGovernor()
     uploaded_map = _load_upload_idempotency_map(eff_repo, prop, upload_log_path=gov.upload_log_path)
     if slug in uploaded_map and uploaded_map[slug].get("video_id"):
-        existing = uploaded_map[slug]
+        existing = dict(uploaded_map[slug])
         vid = str(existing["video_id"]).strip()
         rec_privacy = str(existing.get("privacy") or "").strip().lower()
+        today_pt = _youtube_quota_day_pt()
+        already_reconciled_today = str(existing.get("last_reconcile_day_pt") or "") == today_pt
+        needs_reconcile = (
+            rec_privacy != "public"
+            or not existing.get("has_captions")
+            or not existing.get("has_pinned_comment")
+        )
         reconcile_info = None
         if (
             live_upload
             and not _in_pytest()
             and privacy == "public"
-            and (
-                rec_privacy != "public"
-                or not existing.get("has_captions")
-                or not existing.get("has_pinned_comment")
-            )
+            and needs_reconcile
+            and not already_reconciled_today
         ):
+            refresh_thumb = not bool(existing.get("thumbnail_confirmed"))
             reconcile_info = reconcile_remote_youtube_video_quality_and_visibility(
                 video_id=vid,
                 slug=slug,
                 property_id=prop,
                 desired_privacy=privacy,
-                thumbnail_path=thumb_path if thumb_path.is_file() else None,
+                thumbnail_path=thumb_path if (refresh_thumb and thumb_path.is_file()) else None,
                 vtt_path=vtt_path if vtt_path.is_file() else None,
-                refresh_thumbnail=True,
+                refresh_thumbnail=refresh_thumb,
                 upload_caption=upload_caption,
                 post_pinned_comment=post_pinned_comment,
                 quota_governor=gov,
                 youtube_bin=youtube_bin,
             )
+            before_st = reconcile_info.get("before_status") or {}
             after_st = reconcile_info.get("after_status") or {}
             if reconcile_info.get("privacyStatus") == privacy:
                 existing["privacy"] = privacy
+            if before_st.get("privacyStatus") not in (None, "", "unknown", privacy) and rec_privacy == privacy:
+                existing["privacy_revert_detected"] = True
             if after_st.get("has_captions"):
                 existing["has_captions"] = True
             if after_st.get("has_pinned_comment"):
                 existing["has_pinned_comment"] = True
+            existing["thumbnail_confirmed"] = True
+            existing["last_reconcile_day_pt"] = today_pt
+            existing["last_reconcile_at"] = _utc_now().isoformat()
             _save_upload_idempotency_record(eff_repo, prop, slug, existing)
 
         return {
@@ -3091,10 +3261,14 @@ def upload_tool_video_to_youtube(
 
     has_thumb = thumb_path.is_file()
     has_cap = bool(upload_caption and vtt_path.is_file())
+    pinned_comment = str(yt_pack.get("pinned_comment") or "").strip()
+    will_post_comment = bool(post_pinned_comment and pinned_comment)
     budget = gov.get_budget_status(
         include_thumbnail=has_thumb,
         include_playlist=False,
         include_caption=has_cap,
+        include_comment=will_post_comment,
+        property_id=prop,
     )
     if not budget.can_upload:
         sync_video_catalog_and_metadata(
@@ -3211,8 +3385,11 @@ def upload_tool_video_to_youtube(
         "size_bytes": probe["size_bytes"],
         "quota_units_used": quota_used,
         "spoken_script": script_bundle["spoken_script"],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _utc_now().isoformat(),
         "engine": parsed.get("engine", "youtube_data_api_v3"),
+        "has_captions": bool(parsed.get("caption_uploaded", parsed.get("has_captions", has_cap))),
+        "has_pinned_comment": bool(parsed.get("comment_posted", parsed.get("has_pinned_comment", will_post_comment))),
+        "thumbnail_confirmed": bool(parsed.get("thumbnail_uploaded", has_thumb)),
     }
     _save_upload_idempotency_record(eff_repo, prop, slug, upload_record)
 
@@ -3306,7 +3483,12 @@ def run_autonomous_video_pipeline(
 
     # Stage 1: CLI & Quota Preflight
     cli_diag = check_youtube_cli_diagnostics(youtube_bin=youtube_bin)
-    initial_budget = gov.get_budget_status()
+    initial_budget = gov.get_budget_status(
+        include_thumbnail=True,
+        include_caption=True,
+        include_comment=True,
+        property_id=prop,
+    )
     stage_1 = {
         "status": "PASS" if (cli_diag.get("ready") or not live_upload) else "DEGRADED_AUTH",
         "cli_diagnostics": cli_diag,
@@ -3448,12 +3630,26 @@ def run_autonomous_video_pipeline(
 
     upload_error_count = len(upload_errors)
     total_uploaded_verified = uploaded_live_count + idempotent_hits_count
-    final_budget = gov.get_budget_status()
-    stage_4_status = (
-        "PASS"
-        if upload_error_count == 0
-        else ("UPLOAD_BLACKOUT" if (live_upload and total_uploaded_verified == 0) else "PARTIAL_ERROR")
+    final_budget = gov.get_budget_status(
+        include_thumbnail=True,
+        include_caption=True,
+        include_comment=True,
+        property_id=prop,
     )
+    quota_starvation_detected = bool(
+        live_upload
+        and len(eligible_items) > 0
+        and quota_deferred_count > 0
+        and total_uploaded_verified == 0
+    )
+    if upload_error_count > 0:
+        stage_4_status = "UPLOAD_BLACKOUT" if (live_upload and total_uploaded_verified == 0) else "PARTIAL_ERROR"
+    elif quota_starvation_detected:
+        stage_4_status = "QUOTA_STARVED"
+    elif live_upload and quota_deferred_count > 0:
+        stage_4_status = "PARTIAL_QUOTA_DEFERRED"
+    else:
+        stage_4_status = "PASS"
     stage_4 = {
         "status": stage_4_status,
         "live_upload_enabled": live_upload,
@@ -3461,6 +3657,7 @@ def run_autonomous_video_pipeline(
         "uploaded_live_count": uploaded_live_count,
         "idempotent_hits_count": idempotent_hits_count,
         "quota_deferred_count": quota_deferred_count,
+        "quota_starvation_detected": quota_starvation_detected,
         "upload_error_count": upload_error_count,
         "errors": upload_errors,
         "final_quota_budget": final_budget.to_dict(),
@@ -3489,13 +3686,19 @@ def run_autonomous_video_pipeline(
     )
     upload_blackout_detected = bool(
         live_upload
-        and upload_error_count > 0
-        and uploaded_live_count == 0
+        and (
+            (upload_error_count > 0 and uploaded_live_count == 0)
+            or quota_starvation_detected
+        )
     )
     if blackout_detected:
         pipeline_status = "BLACKOUT_DETECTED"
     elif live_upload and upload_error_count > 0:
         pipeline_status = "UPLOAD_BLACKOUT" if total_uploaded_verified == 0 else "UPLOAD_DEGRADED"
+    elif quota_starvation_detected:
+        pipeline_status = "QUOTA_STARVED"
+    elif live_upload and quota_deferred_count > 0 and uploaded_live_count == 0:
+        pipeline_status = "QUOTA_DEFERRED"
     else:
         pipeline_status = "PASS"
 
