@@ -3997,8 +3997,23 @@ def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
     return value
 
 
+def _rewrite_localbusiness_id_refs(value: Any, org_id: str) -> Any:
+    """Rewrites any legacy #localbusiness JSON-LD @id reference to the canonical #organization @id."""
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            if k == "@id" and isinstance(v, str) and v.strip().lower().endswith("#localbusiness"):
+                out[k] = org_id
+            else:
+                out[k] = _rewrite_localbusiness_id_refs(v, org_id)
+        return out
+    if isinstance(value, list):
+        return [_rewrite_localbusiness_id_refs(v, org_id) for v in value]
+    return value
+
+
 def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
-    """Consolidates multiple JSON-LD blocks into exact 1 @graph block and scrubs personal attribution."""
+    """Consolidates multiple JSON-LD blocks into exact 1 @graph block, strips LocalBusiness bloat, and scrubs personal attribution."""
     ld_pattern = re.compile(
         r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
         flags=re.IGNORECASE,
@@ -4007,7 +4022,12 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
     if not matches:
         return head_html
 
+    base = str(profile.get("canonical_base") or "").rstrip("/")
+    brand = str(profile.get("brand_name") or "").strip() or "Publisher"
+    org_id = f"{base}/#organization" if base else "#organization"
+
     graph_nodes: List[Dict[str, Any]] = []
+    stripped_local_business = False
     for m in matches:
         raw = m.group(1).strip()
         if not raw:
@@ -4023,6 +4043,19 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
             cleaned_node = _scrub_jsonld_value(dict(node), profile)
             if isinstance(cleaned_node, dict):
                 cleaned_node.pop("@context", None)
+                nt = cleaned_node.get("@type")
+                nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
+                nid = str(cleaned_node.get("@id") or "").strip().lower()
+                if "LocalBusiness" in nt_list or nid.endswith("#localbusiness"):
+                    stripped_local_business = True
+                    if "Organization" in nt_list:
+                        kept_types = [t for t in nt_list if t != "LocalBusiness"]
+                        cleaned_node["@type"] = kept_types[0] if len(kept_types) == 1 else kept_types
+                        if nid.endswith("#localbusiness"):
+                            cleaned_node["@id"] = org_id
+                    else:
+                        continue
+                cleaned_node = _rewrite_localbusiness_id_refs(cleaned_node, org_id)
                 if cleaned_node.get("@type") == "FAQPage" and isinstance(cleaned_node.get("mainEntity"), list):
                     cleaned_node["mainEntity"] = [
                         q_item
@@ -4035,6 +4068,28 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
                     if not cleaned_node["mainEntity"]:
                         continue
                 graph_nodes.append(cleaned_node)
+
+    if stripped_local_business:
+        has_org = any(
+            (
+                isinstance(n.get("@type"), str) and n.get("@type") == "Organization"
+            )
+            or (
+                isinstance(n.get("@type"), list) and "Organization" in [str(x) for x in n.get("@type")]
+            )
+            or str(n.get("@id") or "").strip().lower().endswith("#organization")
+            for n in graph_nodes
+        )
+        if not has_org:
+            org_node: Dict[str, Any] = {
+                "@type": "Organization",
+                "@id": org_id,
+                "name": brand,
+                "url": base or "/",
+            }
+            if base:
+                org_node["publishingPrinciples"] = f"{base}/methodology/"
+            graph_nodes.insert(0, org_node)
 
     if not graph_nodes:
         return head_html
@@ -6092,7 +6147,13 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
 
         hdrs_changed = False
 
-        def _ensure_block(route: str, required_hdrs: List[str], replace_cc: bool = False, force_active: bool = False) -> None:
+        def _ensure_block(
+            route: str,
+            required_hdrs: List[str],
+            replace_cc: bool = False,
+            force_active: bool = False,
+            replace_x_robots: bool = False,
+        ) -> None:
             nonlocal hdrs_changed
             if route not in block_index:
                 block_index[route] = len(deduped_blocks)
@@ -6137,6 +6198,9 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 elif replace_cc and req_key == "cache-control" and hdr_list[existing_idx] != req:
                     hdr_list[existing_idx] = req
                     hdrs_changed = True
+                elif replace_x_robots and req_key == "x-robots-tag" and hdr_list[existing_idx] != req:
+                    hdr_list[existing_idx] = req
+                    hdrs_changed = True
 
         detach_cc = "! Cache-Control"
         fresh_cc = "Cache-Control: public, max-age=0, s-maxage=60, must-revalidate"
@@ -6149,11 +6213,16 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
             ("/sitemap-hubs.xml", "application/xml; charset=utf-8"),
             ("/sitemap-leaves.xml", "application/xml; charset=utf-8"),
         ):
+            req_ep_hdrs = [f'Link: <{base}{ep}>; rel="canonical"', f"Content-Type: {ct_val}", detach_cc, fresh_cc]
+            is_llms_ep = ep in ("/llms.txt", "/llms-full.txt")
+            if is_llms_ep:
+                req_ep_hdrs.append("X-Robots-Tag: noindex")
             _ensure_block(
                 ep,
-                [f'Link: <{base}{ep}>; rel="canonical"', f"Content-Type: {ct_val}", detach_cc, fresh_cc],
+                req_ep_hdrs,
                 replace_cc=True,
                 force_active=True,
+                replace_x_robots=is_llms_ep,
             )
         _ensure_block(
             "/catalog.json",

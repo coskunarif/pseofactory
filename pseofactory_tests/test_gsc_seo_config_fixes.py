@@ -853,3 +853,330 @@ def test_lienbond_poisoned_meta_detector_overlay_and_retrofit_idempotency(tmp_pa
 
     audit_after = maintenance.RetroReflectionEngine.audit_estate(dist_dir, "lienbond")
     assert audit_after["stale_count"] == 0, f"Not idempotent: {audit_after}"
+
+
+def test_schema_standardization_no_localbusiness_and_tools_collectionpage_across_tenants(tmp_path: Path) -> None:
+    """
+    Proves JSON-LD standardization across all compiled sites and 50+ future tenants:
+    1. Zero LocalBusiness nodes emitted by estate_common, gainhelm_estate, porcelain_shell, or maintenance.
+    2. Organization node preserved or synthesized when legacy LocalBusiness is stripped.
+    3. /tools/index.html enforces CollectionPage + ItemList (LienBond compiler + generic maintenance healer).
+    4. Strictly idempotent on pass 2 across temp copies of real tenant dist HTML and a synthetic 5th site.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes
+    from pseofactory.estate_common import build_local_business_schema, build_organization_schema, compile_schema_graph
+    from pseofactory.gainhelm_estate import compile_gainhelm_estate_impl
+    from pseofactory.porcelain_shell import _consolidate_jsonld_head
+
+    # 1. estate_common.compile_schema_graph strips LocalBusiness even if explicitly supplied
+    org = build_organization_schema(
+        canonical_base="https://fleetbond.com",
+        site_name="FleetBond",
+        site_description="Deterministic commercial fleet compliance calculators.",
+        same_as=["https://www.wikidata.org/wiki/Q166142"],
+    )
+    legacy_lb = build_local_business_schema(
+        canonical_base="https://fleetbond.com",
+        legal_name="FleetBond LLC",
+        contact_email="editorial@fleetbond.com",
+        telephone="+1-555-0100",
+        price_range="$0",
+        address={"street": "100 Main St", "city": "Seattle", "state": "WA", "zip": "98101", "country": "US"},
+        geo={"lat": 47.6, "lng": -122.3},
+        same_as=[],
+        catalog_name="Catalog",
+        offers=[],
+    )
+    graph = compile_schema_graph(
+        schemas=[legacy_lb],
+        canonical_url="https://fleetbond.com/",
+        canonical_base="https://fleetbond.com",
+        site_name="FleetBond",
+        org_schema=org,
+        localbiz_schema=legacy_lb,
+        title="FleetBond Home",
+        meta_description="Deterministic fleet compliance modeling.",
+    )
+    graph_str = json.dumps(graph)
+    assert "LocalBusiness" not in graph_str
+    assert "#localbusiness" not in graph_str.lower()
+    assert any(n.get("@type") == "Organization" for n in graph["@graph"])
+
+    # 2. porcelain_shell._consolidate_jsonld_head strips LocalBusiness, rewrites #localbusiness refs, ensures Organization
+    head_only_lb = (
+        '<head><script type="application/ld+json">'
+        + json.dumps(
+            {
+                "@context": "https://schema.org",
+                "@graph": [
+                    {
+                        "@type": ["LocalBusiness", "FinancialService", "ProfessionalService"],
+                        "@id": "https://prexvo.com/#localbusiness",
+                        "name": "Prexvo LLC",
+                    },
+                    {
+                        "@type": "WebPage",
+                        "@id": "https://prexvo.com/#webpage",
+                        "about": {"@id": "https://prexvo.com/#localbusiness"},
+                    },
+                ],
+            }
+        )
+        + "</script></head>"
+    )
+    consolidated_head = _consolidate_jsonld_head(head_only_lb, get_porcelain_tenant_profile("prexvo"))
+    assert "LocalBusiness" not in consolidated_head
+    assert "#localbusiness" not in consolidated_head.lower()
+    assert '"Organization"' in consolidated_head
+    assert "https://prexvo.com/#organization" in consolidated_head
+
+    # 3. Direct GainHelm compiler emits zero LocalBusiness and retains Organization + CollectionPage + ItemList
+    gh_out = compile_gainhelm_estate_impl(tmp_path / "gainhelm-compile", run_retrofit=False)
+    gh_dist = Path(gh_out["dist_dir"])
+    for hp in sorted(gh_dist.rglob("*.html")):
+        txt = hp.read_text(encoding="utf-8")
+        assert "LocalBusiness" not in txt, f"LocalBusiness leaked in {hp.name}"
+        assert '"Organization"' in txt, f"Organization missing in {hp.name}"
+    gh_tools_html = (gh_dist / "tools" / "index.html").read_text(encoding="utf-8")
+    assert '"CollectionPage"' in gh_tools_html and '"ItemList"' in gh_tools_html
+
+    # 4. Direct LienBond compiler emits CollectionPage + ItemList with all live /tools/<slug>/ items
+    lb_repo = tmp_path / "lienbond-compile"
+    compiler.compile_lienbond_estate(lb_repo, run_retrofit=True)
+    lb_tools_html = (lb_repo / "dist" / "tools" / "index.html").read_text(encoding="utf-8")
+    assert "LocalBusiness" not in lb_tools_html
+    assert '"Organization"' in lb_tools_html
+    m_lb_ld = re.search(
+        r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        lb_tools_html,
+        re.IGNORECASE,
+    )
+    assert m_lb_ld
+    lb_graph = json.loads(m_lb_ld.group(1))["@graph"]
+    cp_nodes = [n for n in lb_graph if isinstance(n, dict) and n.get("@type") == "CollectionPage"]
+    assert len(cp_nodes) == 1
+    assert cp_nodes[0]["mainEntity"]["@type"] == "ItemList"
+    live_lb_tool_dirs = sorted(
+        d.name for d in (lb_repo / "dist" / "tools").iterdir() if d.is_dir() and (d / "index.html").is_file()
+    )
+    assert len(live_lb_tool_dirs) >= 10
+    assert len(cp_nodes[0]["mainEntity"]["itemListElement"]) == len(live_lb_tool_dirs)
+    assert maintenance.RetroReflectionEngine.audit_estate(lb_repo / "dist", "lienbond")["stale_count"] == 0
+
+    # 5. Generic 50+-site normalization on synthetic 5th site /tools/index.html (pass 1 heals, pass 2 idempotent)
+    synth_tools_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>FleetBond Commercial Compliance Calculators Directory | FleetBond</title>
+  <meta name="description" content="Browse FleetBond commercial compliance calculators covering DOT hours of service, IFTA fuel tax, and FMCSA bond rates.">
+  <link rel="canonical" href="https://fleetbond.com/tools/">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {"@type": "Organization", "@id": "https://fleetbond.com/#organization", "name": "FleetBond", "url": "https://fleetbond.com"},
+      {"@type": ["LocalBusiness", "FinancialService"], "@id": "https://fleetbond.com/#localbusiness", "name": "FleetBond LLC"},
+      {"@type": "WebSite", "@id": "https://fleetbond.com/#website", "url": "https://fleetbond.com", "name": "FleetBond", "inLanguage": "en-US"},
+      {"@type": "WebPage", "@id": "https://fleetbond.com/tools/#webpage", "url": "https://fleetbond.com/tools/", "inLanguage": "en-US", "datePublished": "2026-01-15", "dateModified": "2026-10-31"},
+      {"@type": "BreadcrumbList", "@id": "https://fleetbond.com/tools/#breadcrumb", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": "https://fleetbond.com/"}, {"@type": "ListItem", "position": 2, "name": "Tools", "item": "https://fleetbond.com/tools/"}]}
+    ]
+  }
+  </script>
+</head>
+<body>
+  <main>
+    <h1>FleetBond Commercial Compliance Tools</h1>
+    <ul>
+      <li><a href="/tools/ifta-fuel-tax-calculator/">IFTA Fuel Tax Calculator</a></li>
+      <li><a href="/tools/fmcsa-broker-bond-calculator/">FMCSA Broker Bond Calculator</a></li>
+    </ul>
+  </main>
+</body>
+</html>"""
+    assert maintenance._needs_page_structure_geo_normalization(synth_tools_html) is True
+    norm1, ch1 = maintenance._normalize_page_structure_and_geo_parity(
+        synth_tools_html,
+        property_id="fleetbond",
+        slug="tools-directory",
+        topic_label="FleetBond Tools",
+        canonical_url="https://fleetbond.com/tools/",
+        stat_auth="49 CFR Part 387",
+        econ_ds="FMCSA Carrier Census",
+    )
+    assert ch1 is True
+    assert "LocalBusiness" not in norm1
+    assert '"Organization"' in norm1
+    assert '"CollectionPage"' in norm1 and '"ItemList"' in norm1
+    assert "https://fleetbond.com/tools/ifta-fuel-tax-calculator/" in norm1
+    assert "https://fleetbond.com/tools/fmcsa-broker-bond-calculator/" in norm1
+    assert_no_forbidden_dashes(norm1, context="fleetbond tools normalized")
+    assert maintenance._needs_page_structure_geo_normalization(norm1) is False
+    norm2, ch2 = maintenance._normalize_page_structure_and_geo_parity(
+        norm1,
+        property_id="fleetbond",
+        slug="tools-directory",
+        topic_label="FleetBond Tools",
+        canonical_url="https://fleetbond.com/tools/",
+        stat_auth="49 CFR Part 387",
+        econ_ds="FMCSA Carrier Census",
+    )
+    assert ch2 is False and norm2 == norm1
+
+    # 6. Temp copies of live compiled tenant dist HTML (discovered dynamically via .pseofactory.json)
+    projects_root = Path("/home/ubuntuadmin/projects")
+    for cfg_file in sorted(projects_root.glob("*/.pseofactory.json")):
+        try:
+            cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        prop_id = str(cfg.get("property_id") or cfg_file.parent.name).strip().lower()
+        if prop_id == "profithelm-platform":
+            prop_id = "profithelm"
+        canon_base = str(cfg.get("canonical_base") or f"https://{cfg.get('domain', '')}").rstrip("/")
+        dist_src = cfg_file.parent / "dist"
+        if not canon_base.startswith("https://") or not dist_src.is_dir():
+            continue
+        for rel_p, slug_p, canon_p in (
+            ("index.html", "index", f"{canon_base}/"),
+            ("tools/index.html", "tools-directory", f"{canon_base}/tools/"),
+        ):
+            src_f = dist_src / rel_p
+            if not src_f.is_file():
+                continue
+            raw_copy = src_f.read_text(encoding="utf-8")
+            p1, _ = maintenance._normalize_page_structure_and_geo_parity(
+                raw_copy,
+                property_id=prop_id,
+                slug=slug_p,
+                topic_label=prop_id,
+                canonical_url=canon_p,
+                stat_auth="Statutory Authority",
+                econ_ds="Empirical Dataset",
+            )
+            assert "LocalBusiness" not in p1, f"LocalBusiness survived on {prop_id}/{rel_p}"
+            assert "#localbusiness" not in p1.lower(), f"#localbusiness survived on {prop_id}/{rel_p}"
+            assert '"Organization"' in p1, f"Organization missing on {prop_id}/{rel_p}"
+            if rel_p == "tools/index.html":
+                assert '"CollectionPage"' in p1 and '"ItemList"' in p1, (
+                    f"CollectionPage/ItemList missing on {prop_id}/{rel_p}"
+                )
+            assert_no_forbidden_dashes(p1, context=f"{prop_id}/{rel_p}")
+            assert maintenance._needs_page_structure_geo_normalization(p1) is False, (
+                f"Drift remained after pass 1 on {prop_id}/{rel_p}"
+            )
+            p2, ch_p2 = maintenance._normalize_page_structure_and_geo_parity(
+                p1,
+                property_id=prop_id,
+                slug=slug_p,
+                topic_label=prop_id,
+                canonical_url=canon_p,
+                stat_auth="Statutory Authority",
+                econ_ds="Empirical Dataset",
+            )
+            assert ch_p2 is False and p2 == p1, f"Pass 2 not idempotent on {prop_id}/{rel_p}"
+
+
+def test_llms_txt_x_robots_tag_noindex_policy_and_reflection_sync(tmp_path: Path) -> None:
+    """
+    Proves /llms.txt and /llms-full.txt emit X-Robots-Tag: noindex across edge.py,
+    porcelain_shell.py, and maintenance.py, pass all 3 header policy validators,
+    and still fail-closed reject noindex on public HTML routes or nosnippet on /llms.txt.
+    """
+    from pseofactory.contracts import assert_headers_snippet_policy
+    from pseofactory.edge import build_edge_headers, validate_edge_headers_file
+    from pseofactory.porcelain_shell import _sync_sitemaps_headers_and_redirects
+    from pseofactory.verifier import MasterSEOVerifier
+
+    # 1. edge.build_edge_headers emits X-Robots-Tag: noindex on /llms.txt and /llms-full.txt
+    built_headers = build_edge_headers("https://fleetbond.com", routes=["/", "/tools/"])
+    assert maintenance._headers_missing_llms_noindex(built_headers) is False
+    for ep in ("/llms.txt", "/llms-full.txt"):
+        m_ep = re.search(rf"(?m)^{re.escape(ep)}\n((?:[ \t]+.+\n)*)", built_headers)
+        assert m_ep and "X-Robots-Tag: noindex" in m_ep.group(1), f"Missing noindex on {ep}"
+
+    # 2. All 3 header validators PASS for /llms.txt + /llms-full.txt noindex
+    dist_ok = tmp_path / "ok-dist"
+    dist_ok.mkdir(parents=True, exist_ok=True)
+    hdr_ok = dist_ok / "_headers"
+    hdr_ok.write_text(built_headers, encoding="utf-8")
+    assert assert_headers_snippet_policy(built_headers) is True
+    val_ok = validate_edge_headers_file(hdr_ok)
+    assert val_ok["status"] == "PASS", val_ok
+    verifier_ok = MasterSEOVerifier(dist_dir=dist_ok, domain="fleetbond.com")
+    sg_ok = verifier_ok.check_snippet_eligibility_gate(dist_ok)
+    assert sg_ok["status"] == "PASS", sg_ok
+
+    # 3. Fail-closed: noindex on real public HTML routes (/, /tools/, /*) is STILL rejected by all 3 validators!
+    for bad_route in ("/", "/tools/", "/*"):
+        bad_hdr_txt = (
+            "/*\n"
+            "  Cache-Control: public, max-age=0, s-maxage=86400, stale-while-revalidate=604800\n"
+            f"\n{bad_route}\n"
+            "  X-Robots-Tag: noindex\n"
+        )
+        with pytest.raises(ValueError, match="noindex"):
+            assert_headers_snippet_policy(bad_hdr_txt)
+        bad_dist = tmp_path / f"bad-{bad_route.strip('/').replace('*', 'star') or 'root'}"
+        bad_dist.mkdir(parents=True, exist_ok=True)
+        bad_f = bad_dist / "_headers"
+        bad_f.write_text(bad_hdr_txt, encoding="utf-8")
+        assert validate_edge_headers_file(bad_f)["status"] == "FAIL"
+        assert MasterSEOVerifier(dist_dir=bad_dist, domain="fleetbond.com").check_snippet_eligibility_gate(bad_dist)["status"] == "FAIL"
+
+    # 4. Fail-closed: nosnippet / max-snippet:0 / none on /llms.txt is STILL rejected!
+    for bad_dir in ("nosnippet", "max-snippet:0", "none"):
+        bad_llms = f"/llms.txt\n  X-Robots-Tag: {bad_dir}\n"
+        with pytest.raises(ValueError):
+            assert_headers_snippet_policy(bad_llms)
+
+    # 5. Drift detection + reflection sync heals legacy _headers and is strictly idempotent on pass 2
+    legacy_headers = (
+        "# Cloudflare Pages Edge Headers generated by pseofactory.edge\n"
+        "/*\n"
+        "  Cache-Control: public, max-age=0, s-maxage=86400, stale-while-revalidate=604800\n"
+        "  X-Content-Type-Options: nosniff\n"
+        "  Strict-Transport-Security: max-age=31536000; includeSubDomains\n\n"
+        "/llms.txt\n"
+        '  Link: <https://prexvo.com/llms.txt>; rel="canonical"\n'
+        "  Content-Type: text/plain; charset=utf-8\n"
+        "  ! Cache-Control\n"
+        "  Cache-Control: public, max-age=0, s-maxage=60, must-revalidate\n\n"
+        "/llms-full.txt\n"
+        '  Link: <https://prexvo.com/llms-full.txt>; rel="canonical"\n'
+        "  Content-Type: text/plain; charset=utf-8\n"
+        "  ! Cache-Control\n"
+        "  Cache-Control: public, max-age=0, s-maxage=60, must-revalidate\n"
+    )
+    assert maintenance._headers_missing_llms_noindex(legacy_headers) is True
+
+    sync_dist = tmp_path / "sync-dist"
+    sync_dist.mkdir(parents=True, exist_ok=True)
+    (sync_dist / "_headers").write_text(legacy_headers, encoding="utf-8")
+    prof = get_porcelain_tenant_profile("prexvo")
+    mut1 = _sync_sitemaps_headers_and_redirects(sync_dist, prof)
+    assert "_headers" in mut1
+    synced_txt = (sync_dist / "_headers").read_text(encoding="utf-8")
+    assert maintenance._headers_missing_llms_noindex(synced_txt) is False
+    assert assert_headers_snippet_policy(synced_txt) is True
+    assert validate_edge_headers_file(sync_dist / "_headers")["status"] == "PASS"
+    assert MasterSEOVerifier(dist_dir=sync_dist, domain="prexvo.com").check_snippet_eligibility_gate(sync_dist)["status"] == "PASS"
+    mut2 = _sync_sitemaps_headers_and_redirects(sync_dist, prof)
+    assert "_headers" not in mut2
+
+    # 6. sync_tenant_publisher_prerequisites also heals legacy _headers cleanly
+    prereq_dist = tmp_path / "prereq-dist"
+    (prereq_dist / "tools").mkdir(parents=True, exist_ok=True)
+    (prereq_dist / "index.html").write_text("<html><head><title>Prexvo</title></head><body><h1>Prexvo</h1></body></html>", encoding="utf-8")
+    (prereq_dist / "tools" / "index.html").write_text("<html><head><title>Tools</title></head><body><h1>Tools</h1></body></html>", encoding="utf-8")
+    (prereq_dist / "llms.txt").write_text("# Prexvo\n", encoding="utf-8")
+    (prereq_dist / "llms-full.txt").write_text("# Prexvo Full\n", encoding="utf-8")
+    (prereq_dist / "_headers").write_text(legacy_headers, encoding="utf-8")
+    updated_prereq = maintenance.RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+        prereq_dist, "prexvo", canonical_base="https://prexvo.com"
+    )
+    assert "_headers" in updated_prereq
+    healed_prereq_hdr = (prereq_dist / "_headers").read_text(encoding="utf-8")
+    assert maintenance._headers_missing_llms_noindex(healed_prereq_hdr) is False
+    assert assert_headers_snippet_policy(healed_prereq_hdr) is True
+    assert validate_edge_headers_file(prereq_dist / "_headers")["status"] == "PASS"
+

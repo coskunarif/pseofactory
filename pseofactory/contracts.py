@@ -1363,6 +1363,9 @@ def assert_robots_txt_mandatory_disallows(
     return True
 
 
+LLMS_NOINDEX_ROUTES = frozenset({"/llms.txt", "/llms-full.txt"})
+
+
 def assert_headers_snippet_policy(
     headers_content: str,
     public_routes: Optional[List[str]] = None,
@@ -1374,6 +1377,8 @@ def assert_headers_snippet_policy(
        globally or for AI search crawlers.
     2. Model training crawlers (gptbot, google-extended, ccbot, etc.) may be restricted.
     3. Non-public routes (/signal, /staging, /test, /tests, /syndication) may be restricted.
+    4. Machine LLM manifests (/llms.txt, /llms-full.txt) may set X-Robots-Tag: noindex
+       to prevent raw text indexing in web SERPs while staying readable to AI crawlers.
     Zero em-dashes. Zero en-dashes.
     """
     ctx = f" in {context}" if context else ""
@@ -1405,6 +1410,7 @@ def assert_headers_snippet_policy(
                         continue
                     if public_routes and not any(current_route.startswith(pr) for pr in public_routes):
                         continue
+                    is_llms_noindex_route = current_route.strip().lower() in LLMS_NOINDEX_ROUTES
 
                     h_val_strip = h_val.strip()
                     if ":" in h_val_strip:
@@ -1422,7 +1428,7 @@ def assert_headers_snippet_policy(
                                 raise ValueError(
                                     f"_headers applies 'max-snippet:0' to public route '{current_route}' for bot '{prefix_lower}'{ctx}"
                                 )
-                            if "noindex" in dir_lower or re.search(r'\bnone\b', dir_lower):
+                            if re.search(r'\bnone\b', dir_lower) or ("noindex" in dir_lower and not is_llms_noindex_route):
                                 raise ValueError(
                                     f"_headers applies 'noindex' to public route '{current_route}' for bot '{prefix_lower}'{ctx}"
                                 )
@@ -1437,7 +1443,7 @@ def assert_headers_snippet_policy(
                         raise ValueError(
                             f"_headers applies 'max-snippet:0' to public route '{current_route}' via X-Robots-Tag{ctx}"
                         )
-                    if "noindex" in val_lower or re.search(r'\bnone\b', val_lower):
+                    if re.search(r'\bnone\b', val_lower) or ("noindex" in val_lower and not is_llms_noindex_route):
                         raise ValueError(
                             f"_headers applies 'noindex' to public route '{current_route}' via X-Robots-Tag{ctx}"
                         )

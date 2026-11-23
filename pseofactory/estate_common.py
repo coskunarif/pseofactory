@@ -1165,11 +1165,12 @@ def compile_schema_graph(
     canonical_base: str,
     site_name: str,
     org_schema: Dict[str, Any],
-    localbiz_schema: Dict[str, Any],
+    localbiz_schema: Optional[Dict[str, Any]] = None,
     title: Optional[str] = None,
     meta_description: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Assembles a deduplicated JSON-LD @graph linking Organization, WebSite, WebPage, and apps."""
+    _ = localbiz_schema  # Deprecated: national calculator estates standardize on Organization (no LocalBusiness).
     base = canonical_base.rstrip("/")
     clean_canonical = canonical_url.split("#")[0]
     if clean_canonical == base:
@@ -1194,10 +1195,23 @@ def compile_schema_graph(
             return [t]
         return [str(x) for x in t] if isinstance(t, list) else []
 
+    filtered_nodes: List[Dict[str, Any]] = []
+    for n in raw_nodes:
+        t_list = _types(n)
+        nid = str(n.get("@id") or "").strip().lower()
+        if "LocalBusiness" in t_list or nid.endswith("#localbusiness") or nid == localbiz_id.lower():
+            if "Organization" in t_list:
+                cleaned_types = [t for t in t_list if t != "LocalBusiness"]
+                n["@type"] = cleaned_types[0] if len(cleaned_types) == 1 else cleaned_types
+                if nid.endswith("#localbusiness"):
+                    n["@id"] = org_id
+                filtered_nodes.append(n)
+            continue
+        filtered_nodes.append(n)
+    raw_nodes = filtered_nodes
+
     if not any("Organization" in _types(n) or n.get("@id") == org_id for n in raw_nodes):
         raw_nodes.append(copy.deepcopy(org_schema))
-    if not any("LocalBusiness" in _types(n) or n.get("@id") == localbiz_id for n in raw_nodes):
-        raw_nodes.append(copy.deepcopy(localbiz_schema))
     if not any("WebSite" in _types(n) or n.get("@id") == website_id for n in raw_nodes):
         raw_nodes.append({"@type": "WebSite", "@id": website_id, "url": base, "name": site_name, "publisher": {"@id": org_id}})
     if not any("WebPage" in _types(n) or n.get("@id") == webpage_id for n in raw_nodes):
@@ -1209,7 +1223,7 @@ def compile_schema_graph(
         raw_nodes.append(wp)
 
     has_app = any("SoftwareApplication" in _types(n) or "WebApplication" in _types(n) for n in raw_nodes)
-    priority = {"Organization": 1, "LocalBusiness": 2, "FinancialService": 2, "WebSite": 3, "WebPage": 4, "BreadcrumbList": 5, "SoftwareApplication": 6, "WebApplication": 7, "FAQPage": 8, "HowTo": 9, "Dataset": 10}
+    priority = {"Organization": 1, "WebSite": 3, "WebPage": 4, "CollectionPage": 4, "BreadcrumbList": 5, "SoftwareApplication": 6, "WebApplication": 7, "FAQPage": 8, "HowTo": 9, "Dataset": 10}
     normalized: List[Dict[str, Any]] = []
     seen_ids: Set[str] = set()
     for node in raw_nodes:
@@ -1217,9 +1231,6 @@ def compile_schema_graph(
         types = _types(node)
         if "Organization" in types or node.get("@id") == org_id:
             node.setdefault("@id", org_id)
-        if "LocalBusiness" in types or node.get("@id") == localbiz_id:
-            node.setdefault("@id", localbiz_id)
-            node["parentOrganization"] = {"@id": org_id}
         if "WebSite" in types or node.get("@id") == website_id:
             node.setdefault("@id", website_id)
             node.setdefault("publisher", {"@id": org_id})
@@ -1504,13 +1515,14 @@ def render_base_html(
     linkedin_url: str,
     editorial_policy_text: str,
     org_schema: Dict[str, Any],
-    localbiz_schema: Dict[str, Any],
-    footer_tagline: str,
+    localbiz_schema: Optional[Dict[str, Any]] = None,
+    footer_tagline: str = "",
     normalize_title_fn: Optional[Any] = None,
     jsonld_schemas: Optional[Sequence[Dict[str, Any]]] = None,
     css_text: str = "",
 ) -> str:
     """Renders a complete Porcelain-CSS-compliant HTML shell document for a tenant page."""
+    _ = localbiz_schema  # Deprecated: national calculator estates standardize on Organization (no LocalBusiness).
     base = canonical_base.rstrip("/")
     is_404 = "404" in canonical_url or "404" in title or title.strip().startswith("404")
     if is_404:
@@ -1531,7 +1543,6 @@ def render_base_html(
             canonical_base=base,
             site_name=site_name,
             org_schema=org_schema,
-            localbiz_schema=localbiz_schema,
             title=clean_title,
             meta_description=meta_description,
         ),

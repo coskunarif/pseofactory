@@ -3165,6 +3165,7 @@ class MasterSEOVerifier:
             if headers_file.is_file():
                 current_route = ""
                 non_public_prefixes = ("/signal", "/staging", "/test", "/tests", "/syndication")
+                llms_noindex_routes = {"/llms.txt", "/llms-full.txt"}
                 training_bot_names = {b.lower() for b in AI_TRAINING_BOTS}
                 search_bot_names = {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS} | {"robots", "claude-web"}
 
@@ -3180,6 +3181,7 @@ class MasterSEOVerifier:
                             if h_name.strip().lower() == "x-robots-tag":
                                 if current_route.startswith(non_public_prefixes):
                                     continue
+                                is_llms_noindex_route = current_route.strip().lower() in llms_noindex_routes
                                 h_val_strip = h_val.strip()
                                 # Bot-specific directive check (e.g., "gptbot: noindex" or "googlebot: nosnippet")
                                 if ":" in h_val_strip:
@@ -3194,7 +3196,7 @@ class MasterSEOVerifier:
                                             issues.append(f"_headers applies 'nosnippet' to public route '{current_route}' for bot '{prefix_lower}' via X-Robots-Tag")
                                         if re.search(r'max-snippet\s*:\s*0\b', directive_lower):
                                             issues.append(f"_headers applies 'max-snippet:0' to public route '{current_route}' for bot '{prefix_lower}' via X-Robots-Tag")
-                                        if "noindex" in directive_lower or re.search(r'\bnone\b', directive_lower):
+                                        if re.search(r'\bnone\b', directive_lower) or ("noindex" in directive_lower and not is_llms_noindex_route):
                                             issues.append(f"_headers applies 'noindex' to public route '{current_route}' for bot '{prefix_lower}' via X-Robots-Tag")
                                         continue
 
@@ -3204,7 +3206,7 @@ class MasterSEOVerifier:
                                     issues.append(f"_headers applies 'nosnippet' to public route '{current_route}' via X-Robots-Tag")
                                 if re.search(r'max-snippet\s*:\s*0\b', val_lower):
                                     issues.append(f"_headers applies 'max-snippet:0' to public route '{current_route}' via X-Robots-Tag")
-                                if "noindex" in val_lower or re.search(r'\bnone\b', val_lower):
+                                if re.search(r'\bnone\b', val_lower) or ("noindex" in val_lower and not is_llms_noindex_route):
                                     issues.append(f"_headers applies 'noindex' to public route '{current_route}' via X-Robots-Tag")
 
             robots_file = target / "robots.txt"

@@ -167,6 +167,10 @@ def build_edge_headers(
         "/llms.txt",
         "/llms-full.txt",
     }
+    llms_noindex_endpoints: Set[str] = {
+        "/llms.txt",
+        "/llms-full.txt",
+    }
 
     for ep in raw_endpoints:
         path = ep if ep.startswith("/") else f"/{ep}"
@@ -184,6 +188,8 @@ def build_edge_headers(
         elif path in ("/catalog.json", "/media-kit.json"):
             lines.append(f"  Cache-Control: {EdgeConfigStandards.HTML_MACHINE_CACHE}")
             lines.append("  X-Robots-Tag: index, follow")
+        if path in llms_noindex_endpoints:
+            lines.append("  X-Robots-Tag: noindex")
         lines.append("")
         active_rules_count += 1
 
@@ -1108,11 +1114,12 @@ def validate_edge_headers_file(
                 issues.append(f"Machine endpoint '{r}' missing UTF-8 charset in Content-Type")
 
     # 4. Check for lethal crawler barriers on public routes
+    llms_noindex_routes = {"/llms.txt", "/llms-full.txt"}
     for r, hdrs in route_headers.items():
         if r.startswith(("/signal", "/staging", "/test")):
             continue
         x_robots = hdrs.get("x-robots-tag", "").lower()
-        if "noindex" in x_robots:
+        if "noindex" in x_robots and r.strip().lower() not in llms_noindex_routes:
             issues.append(f"Public route '{r}' has lethal noindex directive")
         if "nosnippet" in x_robots:
             issues.append(f"Public route '{r}' has lethal nosnippet directive")

@@ -19,7 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from pseofactory.affiliates import GAINHELM_AFFILIATES, GAINHELM_DISCLOSURES
 from pseofactory.contracts import assert_ai_mode_calculation_manifest, assert_no_forbidden_dashes
 from pseofactory.estate_common import (
-    build_local_business_schema,
     build_organization_schema,
     build_partner_cta,
     build_partners_matrix_section,
@@ -545,27 +544,6 @@ def _get_gainhelm_organization_schema() -> Dict[str, Any]:
         site_name=GAINHELM_SITE_NAME,
         site_description=GAINHELM_SITE_DESCRIPTION,
         same_as=[GAINHELM_LINKEDIN_URL, "https://www.wikidata.org/wiki/Q166142"],
-    )
-
-
-def _get_gainhelm_local_business_schema() -> Dict[str, Any]:
-    return build_local_business_schema(
-        canonical_base=GAINHELM_CANONICAL_BASE,
-        legal_name=GAINHELM_COMPANY_LEGAL_NAME,
-        contact_email=GAINHELM_CONTACT_EMAIL,
-        telephone=GAINHELM_COMPANY_PHONE,
-        price_range="$0 (Open-Access Enterprise Cyber Compliance & Audit Cost Models)",
-        address={
-            "street": GAINHELM_COMPANY_STREET,
-            "city": GAINHELM_COMPANY_CITY,
-            "state": GAINHELM_COMPANY_STATE,
-            "zip": GAINHELM_COMPANY_ZIP,
-            "country": GAINHELM_COMPANY_COUNTRY,
-        },
-        geo={"lat": GAINHELM_COMPANY_LAT, "lng": GAINHELM_COMPANY_LNG},
-        same_as=[GAINHELM_LINKEDIN_URL, "https://www.wikidata.org/wiki/Q166142", GAINHELM_COMPANY_WA_SOS_URL],
-        catalog_name="GainHelm Enterprise GRC Automation & Security Audit Partner Catalog",
-        offers=list(GAINHELM_AFFILIATES.values()),
     )
 
 
@@ -1673,7 +1651,6 @@ def _render_base_html(
         linkedin_url=GAINHELM_LINKEDIN_URL,
         editorial_policy_text=policy_txt,
         org_schema=_get_gainhelm_organization_schema(),
-        localbiz_schema=_get_gainhelm_local_business_schema(),
         footer_tagline="Independent Enterprise Security & Statutory Compliance Modeling.",
         normalize_title_fn=normalize_gainhelm_seo_title,
         jsonld_schemas=jsonld_schemas,

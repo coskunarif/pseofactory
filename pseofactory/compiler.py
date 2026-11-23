@@ -3264,62 +3264,96 @@ def _build_lienbond_support_page_html(
     quick_answer_text: str,
     body_html: str,
     gsc_token: str,
+    collection_items: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Renders a support/hub page (tools/index, methodology/index, disclaimers/index, 404) with full SEO/GEO parity."""
     current_utc_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    graph_nodes: List[Dict[str, Any]] = [
+        {
+            "@type": "Organization",
+            "@id": "https://lienbond.com/#organization",
+            "name": "LienBond",
+            "url": "https://lienbond.com",
+            "publishingPrinciples": "https://lienbond.com/methodology/",
+            "contactPoint": {
+                "@type": "ContactPoint",
+                "contactType": "editorial",
+                "email": "compliance@lienbond.com",
+            },
+            "sameAs": [
+                "https://www.wikidata.org/wiki/Q192161",
+            ],
+        },
+        {
+            "@type": "WebSite",
+            "@id": "https://lienbond.com/#website",
+            "url": "https://lienbond.com",
+            "name": "LienBond",
+            "inLanguage": "en-US",
+            "publisher": {"@id": "https://lienbond.com/#organization"},
+        },
+        {
+            "@type": "WebPage",
+            "@id": f"{canonical_url}#webpage",
+            "url": canonical_url,
+            "name": page_title,
+            "description": meta_desc,
+            "inLanguage": "en-US",
+            "isPartOf": {"@id": "https://lienbond.com/#website"},
+            "datePublished": "2026-01-15",
+            "dateModified": current_utc_date,
+            "speakable": {
+                "@type": "SpeakableSpecification",
+                "cssSelector": [".quick-answer", "h1"],
+            },
+            "breadcrumb": {"@id": f"{canonical_url}#breadcrumb"},
+        },
+        {
+            "@type": "BreadcrumbList",
+            "@id": f"{canonical_url}#breadcrumb",
+            "isPartOf": {"@id": f"{canonical_url}#webpage"},
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://lienbond.com/"},
+                {"@type": "ListItem", "position": 2, "name": h1_text, "item": canonical_url},
+            ],
+        },
+    ]
+    if collection_items:
+        list_elements = [
+            {
+                "@type": "ListItem",
+                "position": idx,
+                "name": str(item.get("name") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+            }
+            for idx, item in enumerate(collection_items, start=1)
+            if item.get("name") and item.get("url")
+        ]
+        if list_elements:
+            graph_nodes.append(
+                {
+                    "@type": "CollectionPage",
+                    "@id": f"{canonical_url}#collectionpage",
+                    "name": page_title,
+                    "url": canonical_url,
+                    "description": meta_desc,
+                    "inLanguage": "en-US",
+                    "datePublished": "2026-01-15",
+                    "dateModified": current_utc_date,
+                    "mainEntity": {
+                        "@type": "ItemList",
+                        "@id": f"{canonical_url}#itemlist",
+                        "name": page_title,
+                        "itemListOrder": "https://schema.org/ItemListOrderAscending",
+                        "numberOfItems": len(list_elements),
+                        "itemListElement": list_elements,
+                    },
+                }
+            )
     page_json_ld = json.dumps(
         {
             "@context": "https://schema.org",
-            "@graph": [
-                {
-                    "@type": "Organization",
-                    "@id": "https://lienbond.com/#organization",
-                    "name": "LienBond",
-                    "url": "https://lienbond.com",
-                    "publishingPrinciples": "https://lienbond.com/methodology/",
-                    "contactPoint": {
-                        "@type": "ContactPoint",
-                        "contactType": "editorial",
-                        "email": "compliance@lienbond.com",
-                    },
-                    "sameAs": [
-                        "https://www.wikidata.org/wiki/Q192161",
-                    ],
-                },
-                {
-                    "@type": "WebSite",
-                    "@id": "https://lienbond.com/#website",
-                    "url": "https://lienbond.com",
-                    "name": "LienBond",
-                    "inLanguage": "en-US",
-                    "publisher": {"@id": "https://lienbond.com/#organization"},
-                },
-                {
-                    "@type": "WebPage",
-                    "@id": f"{canonical_url}#webpage",
-                    "url": canonical_url,
-                    "name": page_title,
-                    "description": meta_desc,
-                    "inLanguage": "en-US",
-                    "isPartOf": {"@id": "https://lienbond.com/#website"},
-                    "datePublished": "2026-01-15",
-                    "dateModified": current_utc_date,
-                    "speakable": {
-                        "@type": "SpeakableSpecification",
-                        "cssSelector": [".quick-answer", "h1"],
-                    },
-                    "breadcrumb": {"@id": f"{canonical_url}#breadcrumb"},
-                },
-                {
-                    "@type": "BreadcrumbList",
-                    "@id": f"{canonical_url}#breadcrumb",
-                    "isPartOf": {"@id": f"{canonical_url}#webpage"},
-                    "itemListElement": [
-                        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://lienbond.com/"},
-                        {"@type": "ListItem", "position": 2, "name": h1_text, "item": canonical_url},
-                    ],
-                },
-            ],
+            "@graph": graph_nodes,
         },
         indent=2,
     )
@@ -4009,6 +4043,10 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         quick_answer_text=f"The LienBond Tools Directory indexes {total_lb_tools} deterministic calculators covering contractor license surety bonds, Federal Miller Act performance bonds under 40 U.S.C. Section 3131, ERISA Section 412 fidelity bonds, NCCI workers compensation class codes and EMR modifiers, 50-state mechanics lien deadlines, and Davis-Bacon Form WH-347 payroll.",
         body_html=tools_index_body,
         gsc_token=gsc_token,
+        collection_items=[
+            {"name": p["title"], "url": f"https://lienbond.com/tools/{p['slug']}/"}
+            for p in compiled_pages
+        ],
     )
     assert_no_forbidden_dashes(tools_index_html, context="lienbond tools_index_html")
     (tools_dir / "index.html").write_text(tools_index_html, encoding="utf-8")

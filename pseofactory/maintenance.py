@@ -6181,6 +6181,83 @@ def _has_lienbond_poisoned_meta(
     return False
 
 
+def _headers_missing_llms_noindex(headers_content: str) -> bool:
+    """Returns True if /llms.txt or /llms-full.txt active blocks in _headers lack X-Robots-Tag: noindex."""
+    route_xrobots: Dict[str, List[str]] = {}
+    current_route = ""
+    for raw_line in (headers_content or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not raw_line[:1].isspace():
+            current_route = line
+            route_xrobots.setdefault(current_route, [])
+        elif current_route and ":" in line:
+            hk, hv = line.split(":", 1)
+            if hk.strip().lower() == "x-robots-tag":
+                route_xrobots[current_route].append(hv.strip().lower())
+    for ep in ("/llms.txt", "/llms-full.txt"):
+        if ep not in route_xrobots:
+            return True
+        if not any("noindex" in val for val in route_xrobots[ep]):
+            return True
+    return False
+
+
+def _ensure_llms_noindex_in_headers(
+    headers_content: str,
+    canonical_base: str,
+    require_llms_blocks: bool = True,
+) -> str:
+    """Ensures /llms.txt and /llms-full.txt blocks in _headers emit X-Robots-Tag: noindex."""
+    base = (canonical_base or "").rstrip("/")
+    lines = (headers_content or "").splitlines()
+    out_lines: List[str] = []
+    seen_eps: Set[str] = set()
+    i = 0
+    n = len(lines)
+    while i < n:
+        raw_line = lines[i]
+        stripped = raw_line.strip()
+        if stripped in ("/llms.txt", "/llms-full.txt") and not raw_line[:1].isspace():
+            ep = stripped
+            seen_eps.add(ep)
+            out_lines.append(raw_line)
+            i += 1
+            block_lines: List[str] = []
+            while i < n and (lines[i][:1].isspace() and lines[i].strip()):
+                block_lines.append(lines[i])
+                i += 1
+            has_x_robots = False
+            for bl in block_lines:
+                bl_s = bl.strip()
+                if ":" in bl_s and bl_s.split(":", 1)[0].strip().lower() == "x-robots-tag":
+                    has_x_robots = True
+                    out_lines.append("  X-Robots-Tag: noindex")
+                else:
+                    out_lines.append(bl)
+            if not has_x_robots:
+                out_lines.append("  X-Robots-Tag: noindex")
+            continue
+        out_lines.append(raw_line)
+        i += 1
+
+    result = "\n".join(out_lines)
+    if require_llms_blocks:
+        for ep in ("/llms.txt", "/llms-full.txt"):
+            if ep not in seen_eps:
+                block_txt = (
+                    f"\n{ep}\n"
+                    f'  Link: <{base}{ep}>; rel="canonical"\n'
+                    f"  Content-Type: text/plain; charset=utf-8\n"
+                    f"  ! Cache-Control\n"
+                    f"  Cache-Control: public, max-age=0, s-maxage=60, must-revalidate\n"
+                    f"  X-Robots-Tag: noindex\n"
+                )
+                result = result.rstrip() + "\n" + block_txt
+    return result.rstrip() + "\n" if result.strip() else result
+
+
 def _needs_page_structure_geo_normalization(
     html_content: str,
     check_aeo_geo_graph: bool = True,
@@ -6428,6 +6505,15 @@ def _needs_page_structure_geo_normalization(
     if '"WebApplication"' in html_content and '"priceCurrency"' not in html_content:
         return True
 
+    for _ld_m in re.finditer(
+        r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        html_content,
+        re.IGNORECASE,
+    ):
+        _ld_body = _ld_m.group(1)
+        if '"LocalBusiness"' in _ld_body or "/#localbusiness\"" in _ld_body.lower():
+            return True
+
     if check_aeo_geo_graph and '"@graph"' in html_content and (
         '"inLanguage"' not in html_content
         or '"dateModified"' not in html_content
@@ -6435,6 +6521,10 @@ def _needs_page_structure_geo_normalization(
         or (
             canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com", "https://lienbond.com")
             and '"ItemList"' not in html_content
+        )
+        or (
+            canon_url.rstrip("/").endswith("/tools")
+            and ('"CollectionPage"' not in html_content or '"ItemList"' not in html_content)
         )
         or (
             "/tools/" in canon_url
@@ -8505,28 +8595,108 @@ def _normalize_page_structure_and_geo_parity(
                     return m_ld.group(0)
                 mod_g = False
                 prop_l = property_id.lower()
-                base_u = (
-                    "https://prexvo.com"
-                    if prop_l == "prexvo"
-                    else (
-                        "https://gainhelm.com"
-                        if prop_l == "gainhelm"
-                        else ("https://lienbond.com" if prop_l == "lienbond" else "https://profithelm.com")
-                    )
-                )
                 canon_clean_u = (canonical_url or "").split("#")[0].rstrip("/")
+                parsed_canon = urllib.parse.urlparse(canon_clean_u) if canon_clean_u else None
+                if parsed_canon and parsed_canon.scheme in ("http", "https") and parsed_canon.netloc:
+                    base_u = f"{parsed_canon.scheme}://{parsed_canon.netloc}"
+                else:
+                    base_u = (
+                        "https://prexvo.com"
+                        if prop_l == "prexvo"
+                        else (
+                            "https://gainhelm.com"
+                            if prop_l == "gainhelm"
+                            else ("https://lienbond.com" if prop_l == "lienbond" else "https://profithelm.com")
+                        )
+                    )
+                effective_brand = (
+                    brand_label
+                    if prop_l in ("prexvo", "gainhelm", "lienbond", "profithelm")
+                    else (property_id.replace("-", " ").replace("_", " ").strip().title() or brand_label)
+                )
                 is_root_home = (
                     slug == "index"
                     or canon_clean_u in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com", "https://lienbond.com")
                 )
+                is_tools_directory = (
+                    slug.lower() in ("tools-directory", "tools")
+                    or canon_clean_u.lower().rstrip("/").endswith("/tools")
+                )
                 is_tool_route = (
                     not is_root_home
+                    and not is_tools_directory
                     and not is_non_tool_slug
                     and (
                         "/tools/" in canon_clean_u
                         or (slug and slug not in ("index", "tools-directory", "tools"))
                     )
                 )
+                org_id = f"{base_u}/#organization"
+
+                def _rewrite_lb_refs(val: Any) -> Any:
+                    if isinstance(val, dict):
+                        return {
+                            k: (
+                                org_id
+                                if k == "@id" and isinstance(v, str) and v.strip().lower().endswith("#localbusiness")
+                                else _rewrite_lb_refs(v)
+                            )
+                            for k, v in val.items()
+                        }
+                    if isinstance(val, list):
+                        return [_rewrite_lb_refs(v) for v in val]
+                    return val
+
+                cleaned_g_nodes: List[Any] = []
+                stripped_lb = False
+                for n in g_nodes:
+                    if not isinstance(n, dict):
+                        cleaned_g_nodes.append(n)
+                        continue
+                    nt_raw = n.get("@type")
+                    nt_vals = [str(x) for x in nt_raw] if isinstance(nt_raw, list) else ([str(nt_raw)] if nt_raw else [])
+                    nid_l = str(n.get("@id") or "").strip().lower()
+                    if "LocalBusiness" in nt_vals or nid_l.endswith("#localbusiness"):
+                        stripped_lb = True
+                        mod_g = True
+                        if "Organization" in nt_vals:
+                            kept_t = [t for t in nt_vals if t != "LocalBusiness"]
+                            n["@type"] = kept_t[0] if len(kept_t) == 1 else kept_t
+                            if nid_l.endswith("#localbusiness"):
+                                n["@id"] = org_id
+                            cleaned_g_nodes.append(_rewrite_lb_refs(n))
+                        continue
+                    rewritten_n = _rewrite_lb_refs(n)
+                    if rewritten_n != n:
+                        mod_g = True
+                    cleaned_g_nodes.append(rewritten_n)
+
+                if stripped_lb:
+                    has_org_node = any(
+                        isinstance(n, dict)
+                        and (
+                            (isinstance(n.get("@type"), str) and n.get("@type") == "Organization")
+                            or (isinstance(n.get("@type"), list) and "Organization" in [str(x) for x in n.get("@type")])
+                            or str(n.get("@id") or "").strip().lower().endswith("#organization")
+                        )
+                        for n in cleaned_g_nodes
+                    )
+                    if not has_org_node:
+                        cleaned_g_nodes.insert(
+                            0,
+                            {
+                                "@type": "Organization",
+                                "@id": org_id,
+                                "name": effective_brand,
+                                "url": base_u,
+                                "publishingPrinciples": f"{base_u}/methodology/",
+                            },
+                        )
+                if stripped_lb or cleaned_g_nodes != g_nodes:
+                    parsed_j["@graph"] = cleaned_g_nodes
+                    g_nodes = cleaned_g_nodes
+                    if not g_nodes:
+                        return m_ld.group(0)
                 has_qa_dom = 'class="quick-answer' in updated or "class='quick-answer" in updated
                 if prop_l == "prexvo":
                     peer_candidates = [
@@ -8728,6 +8898,142 @@ def _normalize_page_structure_and_geo_parity(
                     )
                     mod_g = True
 
+                has_collection_page = "CollectionPage" in existing_types
+                has_tools_item_list = "ItemList" in existing_types or any(
+                    isinstance(n, dict)
+                    and isinstance(n.get("mainEntity"), dict)
+                    and (
+                        n["mainEntity"].get("@type") == "ItemList"
+                        or (
+                            isinstance(n["mainEntity"].get("@type"), list)
+                            and "ItemList" in [str(x) for x in n["mainEntity"].get("@type")]
+                        )
+                    )
+                    for n in g_nodes
+                )
+                if is_tools_directory and (not has_collection_page or not has_tools_item_list):
+                    import html as _html_mod_ld
+                    from pseofactory.contracts import normalize_statutory_acronym_casing
+
+                    main_m_ld = re.search(r"<main\b[^>]*>([\s\S]*?)</main>", updated, re.IGNORECASE)
+                    tools_scan_src = main_m_ld.group(1) if main_m_ld else updated
+                    extracted_tools: Dict[str, str] = {}
+                    generic_cta_labels = {
+                        "",
+                        "open",
+                        "open ->",
+                        "open \u2192",
+                        "launch calculator",
+                        "launch",
+                        "calculate",
+                        "view",
+                        "view calculator",
+                        "learn more",
+                    }
+                    for am in re.finditer(
+                        r'<a\b[^>]*href=["\'](?:https?://[^"\']+)?/tools/([a-z0-9][a-z0-9-]*)/?["\'][^>]*>([\s\S]*?)</a>',
+                        tools_scan_src,
+                        re.IGNORECASE,
+                    ):
+                        t_slug = am.group(1).strip().lower()
+                        raw_lbl = _html_mod_ld.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", am.group(2)))).strip()
+                        raw_lbl = raw_lbl.replace("\u2014", "-").replace("\u2013", "-")
+                        fallback_lbl = t_slug.replace("-", " ").title()
+                        if raw_lbl.lower() in generic_cta_labels:
+                            extracted_tools.setdefault(t_slug, fallback_lbl)
+                        elif t_slug not in extracted_tools or extracted_tools[t_slug] == fallback_lbl:
+                            extracted_tools[t_slug] = raw_lbl
+                    if extracted_tools:
+                        tools_item_elements = [
+                            {
+                                "@type": "ListItem",
+                                "position": idx,
+                                "name": normalize_statutory_acronym_casing(t_lbl),
+                                "url": f"{base_u}/tools/{t_slug}/",
+                            }
+                            for idx, (t_slug, t_lbl) in enumerate(extracted_tools.items(), start=1)
+                        ]
+                    else:
+                        tools_item_elements = [
+                            {
+                                "@type": "ListItem",
+                                "position": idx,
+                                "name": normalize_statutory_acronym_casing(p_lbl),
+                                "url": f"{base_u}/tools/{p_s}/",
+                            }
+                            for idx, (p_s, p_lbl) in enumerate(peer_candidates, start=1)
+                        ]
+
+                    title_m_ld = re.search(r"<title[^>]*>([\s\S]*?)</title>", updated, re.IGNORECASE)
+                    page_title_ld = (
+                        _html_mod_ld.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", title_m_ld.group(1)))).strip()
+                        if title_m_ld
+                        else f"{effective_brand} Calculators Directory"
+                    )
+                    page_title_ld = normalize_statutory_acronym_casing(
+                        page_title_ld.replace("\u2014", "-").replace("\u2013", "-")
+                    )
+                    desc_m_ld = re.search(
+                        r'<meta\b[^>]*name=["\']description["\'][^>]*content=["\']([^"\']*)["\']',
+                        updated,
+                        re.IGNORECASE,
+                    ) or re.search(
+                        r'<meta\b[^>]*content=["\']([^"\']*)["\'][^>]*name=["\']description["\']',
+                        updated,
+                        re.IGNORECASE,
+                    )
+                    page_desc_ld = (
+                        _html_mod_ld.unescape(desc_m_ld.group(1)).strip()
+                        if desc_m_ld
+                        else f"Directory of {effective_brand} deterministic calculators and statutory models."
+                    )
+                    page_desc_ld = normalize_statutory_acronym_casing(
+                        page_desc_ld.replace("\u2014", "-").replace("\u2013", "-")
+                    )
+
+                    tools_itemlist_obj: Dict[str, Any] = {
+                        "@type": "ItemList",
+                        "@id": f"{base_u}/tools/#itemlist",
+                        "name": page_title_ld,
+                        "itemListOrder": "https://schema.org/ItemListOrderAscending",
+                        "numberOfItems": len(tools_item_elements),
+                        "itemListElement": tools_item_elements,
+                    }
+                    if not has_collection_page:
+                        g_nodes.append(
+                            {
+                                "@type": "CollectionPage",
+                                "@id": f"{base_u}/tools/#collectionpage",
+                                "name": page_title_ld,
+                                "url": f"{base_u}/tools/",
+                                "description": page_desc_ld,
+                                "inLanguage": "en-US",
+                                "datePublished": "2026-01-15",
+                                "dateModified": "2026-10-31",
+                                "mainEntity": tools_itemlist_obj,
+                            }
+                        )
+                        mod_g = True
+                    elif not has_tools_item_list:
+                        cp_node = next(
+                            (
+                                n
+                                for n in g_nodes
+                                if isinstance(n, dict)
+                                and (
+                                    n.get("@type") == "CollectionPage"
+                                    or (
+                                        isinstance(n.get("@type"), list)
+                                        and "CollectionPage" in [str(x) for x in n.get("@type")]
+                                    )
+                                )
+                            ),
+                            None,
+                        )
+                        if isinstance(cp_node, dict):
+                            cp_node["mainEntity"] = tools_itemlist_obj
+                            mod_g = True
+
                 if mod_g:
                     return f"{o_tag}\n{json.dumps(parsed_j, indent=2)}\n  {c_tag}"
             except Exception:
@@ -8743,6 +9049,48 @@ def _normalize_page_structure_and_geo_parity(
         )
         if aeo_ld_updated != updated:
             updated = aeo_ld_updated
+            changed = True
+
+    if '"LocalBusiness"' in updated or '/#localbusiness"' in updated.lower():
+        def _strip_standalone_localbusiness_ld(m_lb: re.Match) -> str:
+            o_tag, raw_j, c_tag = m_lb.group(1), m_lb.group(2), m_lb.group(3)
+            if '"LocalBusiness"' not in raw_j and '/#localbusiness"' not in raw_j.lower():
+                return m_lb.group(0)
+            try:
+                parsed_lb = json.loads(raw_j.strip())
+                if isinstance(parsed_lb, dict) and "@graph" not in parsed_lb:
+                    nt = parsed_lb.get("@type")
+                    nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
+                    nid = str(parsed_lb.get("@id") or "").strip().lower()
+                    if "LocalBusiness" in nt_list or nid.endswith("#localbusiness"):
+                        if '"Organization"' in updated:
+                            return ""
+                        parsed_canon_lb = urllib.parse.urlparse((canonical_url or "").split("#")[0].rstrip("/"))
+                        lb_base = (
+                            f"{parsed_canon_lb.scheme}://{parsed_canon_lb.netloc}"
+                            if parsed_canon_lb.scheme in ("http", "https") and parsed_canon_lb.netloc
+                            else ""
+                        )
+                        org_repl = {
+                            "@context": "https://schema.org",
+                            "@type": "Organization",
+                            "@id": f"{lb_base}/#organization" if lb_base else "#organization",
+                            "name": brand_label,
+                            "url": lb_base or "/",
+                        }
+                        return f"{o_tag}\n{json.dumps(org_repl, indent=2)}\n  {c_tag}"
+            except Exception:
+                pass
+            return m_lb.group(0)
+
+        lb_stripped_updated = re.sub(
+            r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+            _strip_standalone_localbusiness_ld,
+            updated,
+            flags=re.IGNORECASE,
+        )
+        if lb_stripped_updated != updated:
+            updated = lb_stripped_updated
             changed = True
 
     if '"dateModified": "2026-10-27"' in updated or '"dateModified":"2026-10-27"' in updated:
@@ -14112,6 +14460,11 @@ class RetroReflectionEngine:
                             f'  Link: <{canon}{ep_json}>; rel="canonical"\n'
                         )
                         new_hdr = new_hdr.rstrip() + "\n" + block_hdr
+                new_hdr = _ensure_llms_noindex_in_headers(
+                    new_hdr,
+                    canonical_base=canon,
+                    require_llms_blocks=(d / "llms.txt").is_file() or (d / "llms-full.txt").is_file(),
+                )
                 new_hdr = compact_edge_headers_to_cloudflare_cap(new_hdr)
                 if new_hdr != orig_hdr:
                     headers_file.write_text(new_hdr, encoding="utf-8")
@@ -14676,7 +15029,16 @@ class RetroReflectionEngine:
             hdr_f = d / "_headers"
             if hdr_f.is_file():
                 try:
-                    if "/catalog.json" not in hdr_f.read_text(encoding="utf-8", errors="ignore"):
+                    hdr_txt_chk = hdr_f.read_text(encoding="utf-8", errors="ignore")
+                    has_llms_surface = (
+                        (d / "llms.txt").is_file()
+                        or (d / "llms-full.txt").is_file()
+                        or "/llms.txt" in hdr_txt_chk
+                        or "/llms-full.txt" in hdr_txt_chk
+                    )
+                    if "/catalog.json" not in hdr_txt_chk or (
+                        has_llms_surface and _headers_missing_llms_noindex(hdr_txt_chk)
+                    ):
                         stale_pages["_headers"] = ["publisher_prerequisites_parity"]
                 except Exception:
                     pass
