@@ -6789,10 +6789,66 @@ def sync_tenant_test_isolation_guards(
         try:
             pxf_src = px_freshness_py.read_text(encoding="utf-8")
             pxf_new = pxf_src
-            old_px_status = '        elif status == "pending_p2":\n            suppressed_partners += 1'
-            new_px_status = '        elif status in ("pending_p2", "declined"):\n            suppressed_partners += 1'
-            if old_px_status in pxf_new:
-                pxf_new = pxf_new.replace(old_px_status, new_px_status, 1)
+            new_px_status = '        elif status in ("pending", "pending_p2", "declined"):\n            suppressed_partners += 1'
+            for old_px_status in (
+                '        elif status == "pending_p2":\n            suppressed_partners += 1',
+                '        elif status in ("pending_p2", "declined"):\n            suppressed_partners += 1',
+            ):
+                if old_px_status in pxf_new:
+                    pxf_new = pxf_new.replace(old_px_status, new_px_status, 1)
+
+            old_px_doc = "    2. Operational statuses are either pending_p2 or live."
+            new_px_doc = "    2. Operational statuses are live, pending, pending_p2, or declined."
+            if old_px_doc in pxf_new:
+                pxf_new = pxf_new.replace(old_px_doc, new_px_doc, 1)
+
+            old_px_ext = (
+                'PREXVO_EXTENDED_PARTNERS: Dict[str, Dict[str, str]] = {\n'
+                '    "sofi_refi": {\n'
+                '        "default_url": "https://www.sofi.com/refinance-student-loan/",\n'
+                '        "env_var": "AFFILIATE_SOFI_URL",\n'
+                '        "status_env_var": "AFFILIATE_SOFI_STATUS",\n'
+                '        "status": "live",\n'
+                '    },\n'
+                '    "laurel_road": {\n'
+                '        "default_url": "https://www.laurelroad.com/student-loan-refinancing/",\n'
+                '        "env_var": "AFFILIATE_LAUREL_ROAD_URL",\n'
+                '        "status_env_var": "AFFILIATE_LAUREL_ROAD_STATUS",\n'
+                '        "status": "live",\n'
+                '    },\n'
+                '    "juno": {\n'
+                '        "default_url": "https://joinjuno.com/student-loan-refinancing",\n'
+                '        "env_var": "AFFILIATE_JUNO_URL",\n'
+                '        "status_env_var": "AFFILIATE_JUNO_STATUS",\n'
+                '        "status": "live",\n'
+                '    },\n'
+                '}'
+            )
+            new_px_ext = (
+                'PREXVO_EXTENDED_PARTNERS: Dict[str, Dict[str, str]] = {\n'
+                '    "sofi_refi": {\n'
+                '        "default_url": "https://www.sofi.com/refinance-student-loan/",\n'
+                '        "env_var": "AFFILIATE_SOFI_URL",\n'
+                '        "status_env_var": "AFFILIATE_SOFI_STATUS",\n'
+                '        "status": "declined",\n'
+                '    },\n'
+                '    "laurel_road": {\n'
+                '        "default_url": "https://www.laurelroad.com/student-loan-refinancing/",\n'
+                '        "env_var": "AFFILIATE_LAUREL_ROAD_URL",\n'
+                '        "status_env_var": "AFFILIATE_LAUREL_ROAD_STATUS",\n'
+                '        "status": "pending",\n'
+                '    },\n'
+                '    "juno": {\n'
+                '        "default_url": "https://joinjuno.com/student-loan-refinancing",\n'
+                '        "env_var": "AFFILIATE_JUNO_URL",\n'
+                '        "status_env_var": "AFFILIATE_JUNO_STATUS",\n'
+                '        "status": "pending",\n'
+                '    },\n'
+                '}'
+            )
+            if old_px_ext in pxf_new:
+                pxf_new = pxf_new.replace(old_px_ext, new_px_ext, 1)
+
             if pxf_new != pxf_src:
                 px_freshness_py.write_text(pxf_new, encoding="utf-8")
                 updated_files.append(str(px_freshness_py))
@@ -6804,65 +6860,124 @@ def sync_tenant_test_isolation_guards(
         try:
             pxt_src = px_aff_test_py.read_text(encoding="utf-8")
             pxt_new = pxt_src
-            old_px_rep_census = (
-                '    assert report["total_partners"] == 5\n'
-                '    assert report["live_partners"] == 5\n'
-                '    assert report["suppressed_partners"] == 0'
-            )
             new_px_rep_census = (
-                '    expected_live = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("live", "pending"))\n'
-                '    expected_suppressed = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("pending_p2", "declined"))\n'
+                '    expected_live = sum(1 for p in PREXVO_AFFILIATES.values() if p.status == "live")\n'
+                '    expected_suppressed = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("pending", "pending_p2", "declined"))\n'
                 '    assert report["total_partners"] == len(PREXVO_AFFILIATES)\n'
                 '    assert report["live_partners"] == expected_live\n'
                 '    assert report["suppressed_partners"] == expected_suppressed'
             )
-            if old_px_rep_census in pxt_new:
-                pxt_new = pxt_new.replace(old_px_rep_census, new_px_rep_census, 1)
+            for old_px_rep_census in (
+                (
+                    '    assert report["total_partners"] == 5\n'
+                    '    assert report["live_partners"] == 5\n'
+                    '    assert report["suppressed_partners"] == 0'
+                ),
+                (
+                    '    expected_live = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("live", "pending"))\n'
+                    '    expected_suppressed = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("pending_p2", "declined"))\n'
+                    '    assert report["total_partners"] == len(PREXVO_AFFILIATES)\n'
+                    '    assert report["live_partners"] == expected_live\n'
+                    '    assert report["suppressed_partners"] == expected_suppressed'
+                ),
+            ):
+                if old_px_rep_census in pxt_new:
+                    pxt_new = pxt_new.replace(old_px_rep_census, new_px_rep_census, 1)
 
-            old_px_cli_census = (
-                '    assert data["total_partners"] == 5\n'
-                '    assert data["live_partners"] == 5\n'
-                '    assert data["suppressed_partners"] == 0'
-            )
             new_px_cli_census = (
-                '    expected_live = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("live", "pending"))\n'
-                '    expected_suppressed = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("pending_p2", "declined"))\n'
+                '    expected_live = sum(1 for p in PREXVO_AFFILIATES.values() if p.status == "live")\n'
+                '    expected_suppressed = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("pending", "pending_p2", "declined"))\n'
                 '    assert data["total_partners"] == len(PREXVO_AFFILIATES)\n'
                 '    assert data["live_partners"] == expected_live\n'
                 '    assert data["suppressed_partners"] == expected_suppressed'
             )
-            if old_px_cli_census in pxt_new:
-                pxt_new = pxt_new.replace(old_px_cli_census, new_px_cli_census, 1)
+            for old_px_cli_census in (
+                (
+                    '    assert data["total_partners"] == 5\n'
+                    '    assert data["live_partners"] == 5\n'
+                    '    assert data["suppressed_partners"] == 0'
+                ),
+                (
+                    '    expected_live = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("live", "pending"))\n'
+                    '    expected_suppressed = sum(1 for p in PREXVO_AFFILIATES.values() if p.status in ("pending_p2", "declined"))\n'
+                    '    assert data["total_partners"] == len(PREXVO_AFFILIATES)\n'
+                    '    assert data["live_partners"] == expected_live\n'
+                    '    assert data["suppressed_partners"] == expected_suppressed'
+                ),
+            ):
+                if old_px_cli_census in pxt_new:
+                    pxt_new = pxt_new.replace(old_px_cli_census, new_px_cli_census, 1)
 
-            old_px_matrix_loop = (
-                '    for p_key in PREXVO_AFFILIATES.keys():\n'
-                "        assert f'/r/{p_key}' in matrix_html"
+            new_px_slot_block = (
+                '    # Default CTA and matrix reflect live vs suppressed status dynamically\n'
+                '    cta_html = build_refinance_partner_cta()\n'
+                '    live_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status == "live"]\n'
+                '    if PREXVO_AFFILIATES["splash_financial"].status == "live":\n'
+                '        assert "/r/splash_financial" in cta_html\n'
+                '        assert \'rel="noopener sponsored nofollow"\' in cta_html\n'
+                '    elif live_keys:\n'
+                '        assert any(f"/r/{k}" in cta_html for k in live_keys)\n'
+                '        assert \'rel="noopener sponsored nofollow"\' in cta_html\n'
+                '    else:\n'
+                '        assert "/r/" not in cta_html\n'
+                '        assert "withheld" in cta_html.lower()\n'
+                '\n'
+                '    matrix_html = build_partners_matrix_section()\n'
+                '    if live_keys:\n'
+                '        assert "partner-matrix-grid" in matrix_html\n'
+                '        for p_key, p_obj in PREXVO_AFFILIATES.items():\n'
+                '            if p_obj.status == "live":\n'
+                "                assert f'/r/{p_key}' in matrix_html\n"
+                '            else:\n'
+                "                assert f'/r/{p_key}' not in matrix_html\n"
+                '    else:\n'
+                '        assert "/r/" not in matrix_html\n'
+                '        assert "partner-matrix-grid" not in matrix_html\n'
+                '        assert "withheld" in matrix_html.lower()\n'
+                '\n'
+                '    # Explicit live partner CTA and matrix coverage remains verified when vault partners are pending\n'
+                '    live_fixture = {**PREXVO_AFFILIATES["splash_financial"].to_dict(), "status": "live"}\n'
+                '    live_cta_html = build_refinance_partner_cta(partner=live_fixture)\n'
+                '    assert "/r/splash_financial" in live_cta_html\n'
+                '    assert \'rel="noopener sponsored nofollow"\' in live_cta_html\n'
+                '    live_matrix_html = build_partners_matrix_section({"splash_financial": live_fixture})\n'
+                '    assert "partner-matrix-grid" in live_matrix_html\n'
+                '    assert "/r/splash_financial" in live_matrix_html'
             )
-            new_px_matrix_loop = (
-                '    for p_key, p_obj in PREXVO_AFFILIATES.items():\n'
-                '        if p_obj.status in ("live", "pending"):\n'
-                "            assert f'/r/{p_key}' in matrix_html\n"
-                '        else:\n'
-                "            assert f'/r/{p_key}' not in matrix_html"
-            )
-            if old_px_matrix_loop in pxt_new:
-                pxt_new = pxt_new.replace(old_px_matrix_loop, new_px_matrix_loop, 1)
+            for old_px_slot_block in (
+                (
+                    '    # Default CTA and matrix are live and route via /r/\n'
+                    '    cta_html = build_refinance_partner_cta()\n'
+                    '    assert "/r/splash_financial" in cta_html\n'
+                    '    assert \'rel="noopener sponsored nofollow"\' in cta_html\n'
+                    '\n'
+                    '    matrix_html = build_partners_matrix_section()\n'
+                    '    assert "partner-matrix-grid" in matrix_html\n'
+                    '    for p_key in PREXVO_AFFILIATES.keys():\n'
+                    "        assert f'/r/{p_key}' in matrix_html"
+                ),
+                (
+                    '    # Default CTA and matrix are live and route via /r/\n'
+                    '    cta_html = build_refinance_partner_cta()\n'
+                    '    assert "/r/splash_financial" in cta_html\n'
+                    '    assert \'rel="noopener sponsored nofollow"\' in cta_html\n'
+                    '\n'
+                    '    matrix_html = build_partners_matrix_section()\n'
+                    '    assert "partner-matrix-grid" in matrix_html\n'
+                    '    for p_key, p_obj in PREXVO_AFFILIATES.items():\n'
+                    '        if p_obj.status in ("live", "pending"):\n'
+                    "            assert f'/r/{p_key}' in matrix_html\n"
+                    '        else:\n'
+                    "            assert f'/r/{p_key}' not in matrix_html"
+                ),
+            ):
+                if old_px_slot_block in pxt_new:
+                    pxt_new = pxt_new.replace(old_px_slot_block, new_px_slot_block, 1)
 
-            old_px_edge_loop = (
-                '    for p_key in list(PREXVO_AFFILIATES.keys()) + ["sofi_refi", "laurel_road", "juno"]:\n'
-                '        edge_res = simulate_edge_redirect(p_key)\n'
-                '        assert edge_res["status"] == 302\n'
-                '        assert edge_res["location"] != EDUCATIONAL_CALCULATOR_URL\n'
-                '        assert "prexvo.com" not in edge_res["location"].split("?")[0]\n'
-                '        assert "ref=prexvo" in edge_res["location"]\n'
-                '        assert edge_res["has_tracking"] is True\n'
-                '        assert "noindex, nofollow" in edge_res["headers"]["X-Robots-Tag"]\n'
-                '        assert "no-cache" in edge_res["headers"]["Cache-Control"]'
-            )
             new_px_edge_loop = (
-                '    active_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status in ("live", "pending")]\n'
-                '    suppressed_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status in ("pending_p2", "declined")]\n'
-                '    for p_key in active_keys + ["sofi_refi", "laurel_road", "juno"]:\n'
+                '    active_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status == "live"]\n'
+                '    suppressed_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status in ("pending", "pending_p2", "declined")]\n'
+                '    for p_key in active_keys:\n'
                 '        edge_res = simulate_edge_redirect(p_key)\n'
                 '        assert edge_res["status"] == 302\n'
                 '        assert edge_res["location"] != EDUCATIONAL_CALCULATOR_URL\n'
@@ -6871,14 +6986,56 @@ def sync_tenant_test_isolation_guards(
                 '        assert edge_res["has_tracking"] is True\n'
                 '        assert "noindex, nofollow" in edge_res["headers"]["X-Robots-Tag"]\n'
                 '        assert "no-cache" in edge_res["headers"]["Cache-Control"]\n'
-                '    for p_key in suppressed_keys:\n'
+                '    for p_key in suppressed_keys + ["sofi_refi", "laurel_road", "juno"]:\n'
                 '        edge_res = simulate_edge_redirect(p_key)\n'
                 '        assert edge_res["status"] == 302\n'
                 '        assert edge_res["location"] == EDUCATIONAL_CALCULATOR_URL\n'
-                '        assert edge_res["has_tracking"] is False'
+                '        assert edge_res["has_tracking"] is False\n'
+                '        assert "noindex, nofollow" in edge_res["headers"]["X-Robots-Tag"]\n'
+                '        assert "no-cache" in edge_res["headers"]["Cache-Control"]\n'
+                '    for p_key, env_var in (("splash_financial", "AFFILIATE_SPLASH_FINANCIAL_STATUS"), ("sofi_refi", "AFFILIATE_SOFI_STATUS")):\n'
+                '        live_override_res = simulate_edge_redirect(p_key, env={env_var: "live"})\n'
+                '        assert live_override_res["status"] == 302\n'
+                '        assert live_override_res["location"] != EDUCATIONAL_CALCULATOR_URL\n'
+                '        assert "prexvo.com" not in live_override_res["location"].split("?")[0]\n'
+                '        assert "ref=prexvo" in live_override_res["location"]\n'
+                '        assert live_override_res["has_tracking"] is True\n'
+                '        assert "noindex, nofollow" in live_override_res["headers"]["X-Robots-Tag"]\n'
+                '        assert "no-cache" in live_override_res["headers"]["Cache-Control"]'
             )
-            if old_px_edge_loop in pxt_new:
-                pxt_new = pxt_new.replace(old_px_edge_loop, new_px_edge_loop, 1)
+            for old_px_edge_loop in (
+                (
+                    '    for p_key in list(PREXVO_AFFILIATES.keys()) + ["sofi_refi", "laurel_road", "juno"]:\n'
+                    '        edge_res = simulate_edge_redirect(p_key)\n'
+                    '        assert edge_res["status"] == 302\n'
+                    '        assert edge_res["location"] != EDUCATIONAL_CALCULATOR_URL\n'
+                    '        assert "prexvo.com" not in edge_res["location"].split("?")[0]\n'
+                    '        assert "ref=prexvo" in edge_res["location"]\n'
+                    '        assert edge_res["has_tracking"] is True\n'
+                    '        assert "noindex, nofollow" in edge_res["headers"]["X-Robots-Tag"]\n'
+                    '        assert "no-cache" in edge_res["headers"]["Cache-Control"]'
+                ),
+                (
+                    '    active_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status in ("live", "pending")]\n'
+                    '    suppressed_keys = [k for k, v in PREXVO_AFFILIATES.items() if v.status in ("pending_p2", "declined")]\n'
+                    '    for p_key in active_keys + ["sofi_refi", "laurel_road", "juno"]:\n'
+                    '        edge_res = simulate_edge_redirect(p_key)\n'
+                    '        assert edge_res["status"] == 302\n'
+                    '        assert edge_res["location"] != EDUCATIONAL_CALCULATOR_URL\n'
+                    '        assert "prexvo.com" not in edge_res["location"].split("?")[0]\n'
+                    '        assert "ref=prexvo" in edge_res["location"]\n'
+                    '        assert edge_res["has_tracking"] is True\n'
+                    '        assert "noindex, nofollow" in edge_res["headers"]["X-Robots-Tag"]\n'
+                    '        assert "no-cache" in edge_res["headers"]["Cache-Control"]\n'
+                    '    for p_key in suppressed_keys:\n'
+                    '        edge_res = simulate_edge_redirect(p_key)\n'
+                    '        assert edge_res["status"] == 302\n'
+                    '        assert edge_res["location"] == EDUCATIONAL_CALCULATOR_URL\n'
+                    '        assert edge_res["has_tracking"] is False'
+                ),
+            ):
+                if old_px_edge_loop in pxt_new:
+                    pxt_new = pxt_new.replace(old_px_edge_loop, new_px_edge_loop, 1)
 
             if pxt_new != pxt_src:
                 px_aff_test_py.write_text(pxt_new, encoding="utf-8")
