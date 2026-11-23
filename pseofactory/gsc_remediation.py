@@ -2001,10 +2001,23 @@ def _normalize_title_50_60(
     from pseofactory.contracts import normalize_statutory_acronym_casing
     clean = normalize_statutory_acronym_casing(clean)
     suffix = f" | {brand}"
-    if clean.lower().endswith(suffix.lower()):
-        base = clean[: -len(suffix)].strip(" |-:")
-    else:
-        base = clean.strip(" |-:")
+    base = clean.strip(" |-:")
+    while brand:
+        stripped_end = False
+        for sfx in (f"| {brand}", f"- {brand}", f": {brand}"):
+            if base.lower().endswith(sfx.lower()) and len(base) > len(sfx):
+                base = base[: -len(sfx)].strip(" |-:")
+                stripped_end = True
+                break
+        if not stripped_end:
+            break
+    if brand:
+        base = re.sub(
+            rf"^{re.escape(brand)}\s*[:|\-]\s*",
+            "",
+            base,
+            flags=re.IGNORECASE,
+        ).strip(" |-:")
 
     # Strip robotic bare parenthetical tokens and filler pads from prior normalizations
     base = re.sub(r"\s*\((?:Rules|Tax|Guide|Model)\)(?:\s+Model)?", "", base, flags=re.IGNORECASE)
@@ -2810,10 +2823,58 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "workers comp class codes, EMR, 50-state mechanics liens, and WH-347 payroll.",
                     " Grounded in 40 U.S.C. Section 3131 and NCCI rate filings.",
                 )
+            if any(k in q_low for k in ("erisa", "fidelity-bond", "fidelity bond", "1112", "section 412")):
+                return (
+                    "Calculate ERISA Section 412 fidelity bond coverage limits (10% of qualifying plan "
+                    "assets, $1,000 minimum to $500,000 cap) under 29 U.S.C. Section 1112.",
+                    " Verified under 29 CFR 2580.412-1 and Treasury Circular 570.",
+                )
+            if any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347", "fringe")):
+                return (
+                    "Calculate Davis-Bacon prevailing wage and fringe benefit cash-in-lieu payroll "
+                    "burdens under 40 U.S.C. Section 3141 and 29 CFR Section 5.5 Form WH-347.",
+                    " Verified under DOL Wage Determinations and IRC Section 3111.",
+                )
+            if any(k in q_low for k in ("retainage", "prompt-payment", "prompt payment", "3903")):
+                return (
+                    "Calculate commercial construction retainage caps and statutory late-payment "
+                    "interest penalties under 31 U.S.C. Section 3903 and state prompt pay laws.",
+                    " Verified under 48 CFR 52.232-5 and state retainage statutes.",
+                )
+            if any(k in q_low for k in ("markup", "margin", "overhead", "far-31", "aia-a102")):
+                return (
+                    "Calculate contractor overhead and profit markup versus gross margin bid divisors "
+                    "under 48 CFR Part 31 FAR cost principles and IRC Section 460 rules.",
+                    " Verified under AIA A102 and BLS construction PPI.",
+                )
+            if any(k in q_low for k in ("workers-comp", "workers comp", "class-code", "class code", "emr", "experience-modification", "experience modification")):
+                return (
+                    f"Calculate {lbl} using NCCI Basic Manual class code rates, experience modification "
+                    f"rate (EMR) multipliers, and payroll exposure per $100.",
+                    " Verified under NCCI Experience Rating Plan manuals.",
+                )
+            if any(k in q_low for k in ("preliminary-notice", "preliminary notice", "lien-release", "lien release", "lien-waiver", "lien waiver", "mechanics-lien", "mechanics lien")):
+                return (
+                    f"Calculate {lbl} statutory filing deadlines, preliminary notice windows, and "
+                    f"lien waiver rules under 50-state civil and property lien codes.",
+                    " Verified under state mechanics lien statutory timelines.",
+                )
+            if any(k in q_low for k in ("miller-act", "miller act", "performance-bond", "performance bond", "payment-bond", "payment bond", "bid-bond", "bid bond")):
+                return (
+                    f"Calculate {lbl} using SFAA sliding-scale contract bond rate tiers under "
+                    f"40 U.S.C. Section 3131 Federal Miller Act and FAR 28.102-2.",
+                    " Verified under U.S. Treasury Circular 570.",
+                )
+            if any(k in q_low for k in ("license-bond", "license bond", "surety-bond", "surety bond", "commercial-bond", "commercial bond", "bond")):
+                return (
+                    f"Calculate {lbl} penal sum coverage and credit-tier surety bond premiums under "
+                    f"U.S. Treasury Circular 570 and applicable statutory bonding rules.",
+                    " Verified under 31 CFR Part 223 surety schedules.",
+                )
             return (
-                f"Calculate {lbl} premiums, NCCI class code rates, and statutory deadlines under "
-                f"40 U.S.C. Section 3131, NCCI manuals, and 50-state construction lien codes.",
-                " Verified under 40 U.S.C. Section 3131 and NCCI rate schedules.",
+                f"Calculate {lbl} deterministically using verified statutory schedules, surety "
+                f"rate benchmarks, and state commercial compliance statutes.",
+                " Verified under U.S. Treasury Circular 570 and state statutes.",
             )
         if "disclaimer" in q_low:
             return (

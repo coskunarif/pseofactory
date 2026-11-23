@@ -203,6 +203,8 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
 
     contract = get_tenant_contract(prop)
     pal = dict(TENANT_BRAND_PALETTES.get(prop) or TENANT_BRAND_PALETTES["profithelm"])
+    if prop not in TENANT_BRAND_PALETTES:
+        pal["default_gsc_token"] = ""
     assert_porcelain_palette_wcag(pal)
 
     if prop == "prexvo":
@@ -4044,21 +4046,134 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
     return f"{stripped_head}\n{script_tag}\n"
 
 
+def _resolve_expected_gsc_token(profile: Dict[str, Any]) -> str:
+    """Resolves canonical GSC verification token with per-tenant and global env override support."""
+    prop = str(profile.get("property_id") or "").strip().upper()
+    if prop:
+        tenant_env = os.environ.get(f"{prop}_GSC_VERIFICATION_TOKEN", "").strip()
+        if tenant_env:
+            return tenant_env
+    global_env = os.environ.get("GSC_VERIFICATION_TOKEN", "").strip()
+    if global_env:
+        return global_env
+    return str(profile.get("default_gsc_token") or "").strip()
+
+
+def _enforce_canonical_gsc_meta(html_chunk: str, expected_token: str) -> str:
+    """Replaces any mismatched google-site-verification meta tag with the tenant's canonical token."""
+    if not expected_token:
+        return html_chunk
+    cleaned = html_chunk
+    for fake_gsc in (
+        "google-site-verification-verified-2026",
+        "google-site-verification-profithelm-2026",
+        "google-site-verification-prexvo-2026",
+        "google-site-verification-gainhelm-2026",
+        "google-site-verification-lienbond-2026",
+        "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q",
+    ):
+        if fake_gsc in cleaned:
+            cleaned = cleaned.replace(fake_gsc, expected_token)
+
+    if "google-site-verification" not in cleaned.lower():
+        return cleaned
+
+    canonical_tag = f'<meta name="google-site-verification" content="{html_lib.escape(expected_token, quote=True)}">'
+    seen_canonical = False
+
+    def _replace_gsc_tag(m: re.Match[str]) -> str:
+        nonlocal seen_canonical
+        raw_tag = m.group(0)
+        cm = re.search(r'\bcontent\s*=\s*["\']([^"\']*)["\']', raw_tag, flags=re.IGNORECASE)
+        cur_val = cm.group(1).strip() if cm else ""
+        if not seen_canonical:
+            seen_canonical = True
+            if cur_val == expected_token:
+                return raw_tag
+            return canonical_tag
+        return ""
+
+    cleaned = re.sub(
+        r'<meta\b[^>]*\bname\s*=\s*["\']google-site-verification["\'][^>]*>',
+        _replace_gsc_tag,
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
+def _dedupe_title_brand(title_text: str, brand: str) -> str:
+    """Strips duplicate trailing brand suffix when a title already starts or ends with the brand."""
+    raw = (title_text or "").strip()
+    if not raw or not brand:
+        return raw
+    t = re.sub(
+        rf"(?:\s*\|\s*{re.escape(brand)}){{2,}}\s*$",
+        f" | {brand}",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if re.match(rf"^{re.escape(brand)}\s*[:|\-]\s*", t, flags=re.IGNORECASE):
+        while True:
+            trimmed = re.sub(
+                rf"\s*[|\-]\s*{re.escape(brand)}\s*$",
+                "",
+                t,
+                flags=re.IGNORECASE,
+            ).strip()
+            if trimmed == t:
+                break
+            t = trimmed
+    return t
+
+
+def _dedupe_head_titles(head_html: str, brand: str) -> str:
+    """Removes duplicate leading+trailing brand tokens from <title>, og:title, and twitter:title in <head>."""
+    if not head_html or not brand:
+        return head_html
+
+    def _clean_title_tag(m: re.Match[str]) -> str:
+        inner = html_lib.unescape(m.group(2))
+        deduped = _dedupe_title_brand(inner, brand)
+        if deduped == inner.strip():
+            return m.group(0)
+        return f"{m.group(1)}{html_lib.escape(deduped, quote=False)}{m.group(3)}"
+
+    cleaned = re.sub(
+        r"(<title\b[^>]*>)([\s\S]*?)(</title>)",
+        _clean_title_tag,
+        head_html,
+        flags=re.IGNORECASE,
+    )
+
+    def _clean_meta_title(m: re.Match[str]) -> str:
+        raw_tag = m.group(0)
+        cm = re.search(r'(\bcontent\s*=\s*)(["\'])([^"\']*)\2', raw_tag, flags=re.IGNORECASE)
+        if not cm:
+            return raw_tag
+        inner = html_lib.unescape(cm.group(3))
+        deduped = _dedupe_title_brand(inner, brand)
+        if deduped == inner.strip():
+            return raw_tag
+        q = cm.group(2)
+        esc_val = html_lib.escape(deduped, quote=True)
+        return raw_tag[: cm.start()] + f"{cm.group(1)}{q}{esc_val}{q}" + raw_tag[cm.end() :]
+
+    cleaned = re.sub(
+        r'<meta\b[^>]*\b(?:property|name)\s*=\s*["\'](?:og:title|twitter:title)["\'][^>]*>',
+        _clean_meta_title,
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
 def _ensure_porcelain_publisher_head_tags(head_html: str, profile: Dict[str, Any]) -> str:
     """Deterministically enforces tenant publisher/affiliate <meta> & <link> tags in <head>."""
     cleaned = head_html
-    gsc_default = str(profile.get("default_gsc_token") or "")
+    gsc_default = _resolve_expected_gsc_token(profile)
     if gsc_default:
-        for fake_gsc in (
-            "google-site-verification-verified-2026",
-            "google-site-verification-profithelm-2026",
-            "google-site-verification-prexvo-2026",
-            "google-site-verification-gainhelm-2026",
-            "google-site-verification-lienbond-2026",
-            "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q",
-        ):
-            if fake_gsc in cleaned:
-                cleaned = cleaned.replace(fake_gsc, gsc_default)
+        cleaned = _enforce_canonical_gsc_meta(cleaned, gsc_default)
 
     impact_uuid = str(profile.get("impact_verification_uuid") or "").strip()
     cj_pid = str(profile.get("cj_property_id") or "").strip()
@@ -4408,21 +4523,11 @@ def _clean_visible_raw_python_formulas(html_content: str) -> str:
 
 
 def _scrub_operator_pwa_gsc_token(html_content: str, profile: Dict[str, Any]) -> str:
-    """Replaces placeholder GSC verification tokens inside /signal/ operator PWA pages."""
-    gsc_default = str(profile.get("default_gsc_token") or "").strip()
+    """Enforces canonical GSC verification token inside /signal/ operator PWA pages."""
+    gsc_default = _resolve_expected_gsc_token(profile)
     if not gsc_default:
         return html_content
-    cleaned = html_content
-    for fake_gsc in (
-        "google-site-verification-profithelm-2026",
-        "google-site-verification-verified-2026",
-        "google-site-verification-prexvo-2026",
-        "google-site-verification-gainhelm-2026",
-        "google-site-verification-lienbond-2026",
-    ):
-        if fake_gsc in cleaned:
-            cleaned = cleaned.replace(fake_gsc, gsc_default)
-    return cleaned
+    return _enforce_canonical_gsc_meta(html_content, gsc_default)
 
 
 def _ensure_prexvo_ymyl_forfeiture_notice(
@@ -4887,6 +4992,7 @@ def normalize_html_to_porcelain_shell(
         flags=re.IGNORECASE,
     )
     clean_head = _ensure_porcelain_publisher_head_tags(clean_head, profile)
+    clean_head = _dedupe_head_titles(clean_head, str(profile.get("brand_name") or ""))
     if "content-language" not in clean_head.lower():
         clean_head = '  <meta http-equiv="content-language" content="en-US">\n' + clean_head.lstrip("\n")
     if not re.search(r'<link\b[^>]*href=["\']/favicon\.svg["\']', clean_head, flags=re.IGNORECASE):
@@ -5164,21 +5270,38 @@ def normalize_html_to_porcelain_shell(
 def _fit_seo_title(raw_title: str, brand: str) -> str:
     """Guarantees <title> is strictly 50..60 chars with zero forbidden dashes or spaced hyphens."""
     t = raw_title.replace("\u2014", "|").replace("\u2013", "|").replace(" - ", " | ").strip()
+    t = _dedupe_title_brand(t, brand)
+    has_brand_already = bool(
+        brand
+        and (
+            re.match(rf"^{re.escape(brand)}\s*[:|\-]\s*", t, flags=re.IGNORECASE)
+            or re.search(rf"[|\-]\s*{re.escape(brand)}\s*$", t, flags=re.IGNORECASE)
+        )
+    )
     if 50 <= len(t) <= 60:
         return t
     if len(t) < 50:
-        pads = [
-            f"{t} | {brand} Statutory Governance",
-            f"{t} | {brand} Research & Governance",
-            f"{t} | {brand} Official Governance",
-            f"{t} | {brand} Compliance Guide",
-            f"{t} | {brand} Research",
-            f"{t} | {brand}",
-        ]
+        if has_brand_already:
+            pads = [
+                f"{t} | Statutory Governance",
+                f"{t} | Research & Governance",
+                f"{t} | Official Governance",
+                f"{t} | Compliance Guide",
+                f"{t} | Research",
+            ]
+        else:
+            pads = [
+                f"{t} | {brand} Statutory Governance",
+                f"{t} | {brand} Research & Governance",
+                f"{t} | {brand} Official Governance",
+                f"{t} | {brand} Compliance Guide",
+                f"{t} | {brand} Research",
+                f"{t} | {brand}",
+            ]
         for cand in pads:
             if 50 <= len(cand) <= 60:
                 return cand
-        padded = f"{t} | {brand} Statutory Modeling Standards"
+        padded = f"{t} | Statutory Modeling Standards" if has_brand_already else f"{t} | {brand} Statutory Modeling Standards"
         while len(padded) > 60 and " " in padded:
             padded = padded.rsplit(" ", 1)[0].rstrip(" |&:")
         while len(padded) < 50:
@@ -5669,17 +5792,18 @@ def build_porcelain_404_page(
 
 def _discover_estate_tools_and_gsc_token(dist_dir: Path, profile: Dict[str, Any]) -> Tuple[List[Tuple[str, str]], str]:
     """Discovers active tool (slug, title) pairs and GSC verification token from dist_dir."""
-    gsc_token = profile["default_gsc_token"]
-    idx_file = dist_dir / "index.html"
-    if idx_file.is_file():
-        idx_txt = idx_file.read_text(encoding="utf-8", errors="ignore")
-        gm = re.search(
-            r'<meta\b[^>]*name=["\']google-site-verification["\'][^>]*content=["\']([^"\']+)["\']',
-            idx_txt,
-            flags=re.IGNORECASE,
-        )
-        if gm:
-            gsc_token = gm.group(1).strip()
+    gsc_token = _resolve_expected_gsc_token(profile)
+    if not gsc_token:
+        idx_file = dist_dir / "index.html"
+        if idx_file.is_file():
+            idx_txt = idx_file.read_text(encoding="utf-8", errors="ignore")
+            gm = re.search(
+                r'<meta\b[^>]*name=["\']google-site-verification["\'][^>]*content=["\']([^"\']+)["\']',
+                idx_txt,
+                flags=re.IGNORECASE,
+            )
+            if gm:
+                gsc_token = gm.group(1).strip()
 
     discovered: List[Tuple[str, str]] = []
     seen: Set[str] = set()

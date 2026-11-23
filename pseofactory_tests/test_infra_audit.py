@@ -274,10 +274,10 @@ def test_audit_hibernated_and_retired_dns_isolation_catches_dangling_records():
 def test_active_zone_dns_hygiene_live_and_registrar_attestation_ledger():
     """
     Verifies live active-zone DNS hygiene (profithelm.com, prexvo.com, arifcoskun.com)
-    and cryptographic Registrar state attestation across all 8 portfolio domains:
+    and cryptographic Registrar state attestation across all portfolio domains:
     - Proxied Pages CNAMEs, SPF, and DMARC (p=reject) verified on all 3 active zones.
     - Transfer lock (locked=True, clienttransferprohibited), WHOIS privacy (redaction),
-      and $41.84/yr exposure verified across the 8-domain Registrar ledger.
+      and total annual renewal exposure verified across the canonical Registrar ledger.
     - Unlocks or WHOIS privacy regressions are caught deterministically.
     """
     ok_active, msg_active, summaries = audit_active_zone_dns_hygiene()
@@ -289,8 +289,14 @@ def test_active_zone_dns_hygiene_live_and_registrar_attestation_ledger():
 
     ok_ledger, msg_ledger, meta = TenantFactStore.verify_registrar_ledger_integrity()
     assert ok_ledger is True, f"Registrar ledger integrity failed: {msg_ledger}"
-    assert meta["domains_verified"] == 8
-    assert meta["total_annual_exposure_usd"] == 41.84
+    expected_domains_count = len(CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER)
+    expected_exposure = round(
+        sum(float(v.get("effective_annual_exposure_usd", 0.0)) for v in CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER.values()),
+        2,
+    )
+    assert "lienbond.com" in CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER
+    assert meta["domains_verified"] == expected_domains_count
+    assert meta["total_annual_exposure_usd"] == expected_exposure
     assert meta["attestation_sha256"] == CLOUDFLARE_REGISTRAR_ATTESTATION_SHA256
     for retired in DECOMMISSIONED_DOMAINS:
         assert retired in meta["sunset_windows_days"]

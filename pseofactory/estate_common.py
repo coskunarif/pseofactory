@@ -851,39 +851,69 @@ def normalize_tenant_seo_title(
     raw = re.sub(r"\s+", " ", raw).replace("\u2014", "-").replace("\u2013", "-")
     raw = re.sub(r"\|\s*\|+", "|", raw)
     raw = re.sub(r"\s*\|\s*", " | ", raw)
-    raw = re.sub(rf"(\s*\|\s*{re.escape(brand)})+", f" | {brand}", raw)
+    if brand:
+        raw = re.sub(rf"(?:\s*\|\s*{re.escape(brand)})+", f" | {brand}", raw, flags=re.IGNORECASE)
 
-    brand_suffix = f" | {brand}"
+    brand_suffix = f" | {brand}" if brand else ""
     base = raw
-    for suffix in (f"| {brand}", f"- {brand}", brand):
-        if base.endswith(suffix):
-            base = base[: -len(suffix)].strip()
+    while brand:
+        stripped = False
+        for suffix in (f"| {brand}", f"- {brand}", f": {brand}", brand):
+            if base.lower().endswith(suffix.lower()) and len(base) > len(suffix):
+                base = base[: -len(suffix)].strip(" |-:")
+                stripped = True
+                break
+        if not stripped:
             break
     base = base.rstrip(" |-").strip()
 
-    normalized = f"{base}{brand_suffix}" if base else f"{brand} {default_tagline}"
+    starts_with_brand = bool(
+        brand and re.match(rf"^{re.escape(brand)}\s*[:|\-]\s*", base, flags=re.IGNORECASE)
+    )
+    if starts_with_brand:
+        raw = base
+        effective_suffix = ""
+        normalized = base
+    else:
+        effective_suffix = brand_suffix
+        normalized = f"{base}{effective_suffix}" if base else f"{brand} {default_tagline}"
+
     if min_len <= len(normalized) <= max_len and "| |" not in normalized:
         return normalized
     if min_len <= len(raw) <= max_len and "| |" not in raw and not raw.endswith((" |", " -")):
         return raw
 
     if len(normalized) < min_len:
-        default_pads = (
-            f"{base} | {brand} Statutory Calculator",
-            f"{base} | {brand} Modeling Engine",
-            f"{base} Calculator Tool{brand_suffix}",
-            f"{base} Cost Model{brand_suffix}",
-        )
+        if starts_with_brand:
+            default_pads = (
+                f"{base} | Statutory Calculator",
+                f"{base} | Modeling Engine",
+                f"{base} Calculator Tool",
+                f"{base} Cost Model",
+            )
+        else:
+            default_pads = (
+                f"{base} | {brand} Statutory Calculator",
+                f"{base} | {brand} Modeling Engine",
+                f"{base} Calculator Tool{brand_suffix}",
+                f"{base} Cost Model{brand_suffix}",
+            )
         for tmpl in tuple(pad_candidates) + default_pads:
-            cand = tmpl.format(base=base, brand=brand, brand_suffix=brand_suffix) if "{base}" in tmpl else tmpl
+            cand = (
+                tmpl.format(base=base, brand=brand, brand_suffix=effective_suffix)
+                if "{base}" in tmpl
+                else tmpl
+            )
             cand = re.sub(r"\s*\|\s*", " | ", re.sub(r"\|\s*\|+", "|", cand))
+            if starts_with_brand and brand and cand.lower().count(brand.lower()) > 1:
+                continue
             if min_len <= len(cand) <= max_len:
                 return cand
 
     stopwords = {"and", "or", "for", "with", "in", "to", "of", "&", "-"}
     if len(normalized) > max_len:
-        max_base = max_len - len(brand_suffix)
-        min_base = min_len - len(brand_suffix)
+        max_base = max_len - len(effective_suffix)
+        min_base = min_len - len(effective_suffix)
         trimmed = base[:max_base]
         while " " in trimmed:
             words = trimmed.rsplit(" ", 1)[0].rstrip(" |-&")
@@ -891,16 +921,16 @@ def normalize_tenant_seo_title(
             while w_list and w_list[-1].lower() in stopwords and " " in words:
                 words = words.rsplit(" ", 1)[0].rstrip(" |-&")
                 w_list = words.split()
-            if len(words) >= min_base and min_len <= len(f"{words}{brand_suffix}") <= max_len:
-                return f"{words}{brand_suffix}"
+            if len(words) >= min_base and min_len <= len(f"{words}{effective_suffix}") <= max_len:
+                return f"{words}{effective_suffix}"
             for pad_w in ("Models", "Engine", "Suite", "Tools", "Guide"):
                 padded = f"{words} {pad_w}"
                 if min_base <= len(padded) <= max_base:
-                    cand = f"{padded}{brand_suffix}"
+                    cand = f"{padded}{effective_suffix}"
                     if min_len <= len(cand) <= max_len:
                         return cand
             trimmed = words
-        cand = f"{base[:max_base].rstrip(' |-&')}{brand_suffix}"
+        cand = f"{base[:max_base].rstrip(' |-&')}{effective_suffix}"
         if len(cand) <= max_len:
             return cand
 

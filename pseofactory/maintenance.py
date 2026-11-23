@@ -6887,7 +6887,10 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 re.IGNORECASE,
             )
             qb_txt = re.sub(r"<[^>]+>", " ", qb_dir_m.group(1) if qb_dir_m else qa_dir_m.group(2)).strip()
-            if len(qb_txt.split()) < 40 or "9 institutional" in qb_txt:
+            lb_stale_qa = property_id.lower() == "lienbond" and (
+                "10 institutional" in qb_txt or "ten deterministic" in qb_txt.lower()
+            )
+            if len(qb_txt.split()) < 40 or "9 institutional" in qb_txt or lb_stale_qa:
                 if property_id.lower() == "gainhelm":
                     dir_qa = (
                         "GainHelm provides a deterministic directory of 10 institutional cyber compliance, GRC audit, "
@@ -6895,10 +6898,24 @@ def _normalize_spoke_and_synthesized_body_bloat(
                         "45 CFR Part 160, and BLS OEWS SOC 15-1212 wage benchmarks with zero AI hallucinations."
                     )
                 elif property_id.lower() == "lienbond":
+                    lb_slugs_in_page = {
+                        m
+                        for m in re.findall(
+                            r'href=["\'](?:/tools/|https?://[^/]+/tools/)([a-z0-9][a-z0-9-]+)/["\']',
+                            updated,
+                            flags=re.IGNORECASE,
+                        )
+                    }
+                    if lb_slugs_in_page:
+                        lb_tool_count = len(lb_slugs_in_page)
+                    else:
+                        from pseofactory.compiler import LIENBOND_EXPANSION_SPECS
+
+                        lb_tool_count = len(LIENBOND_EXPANSION_SPECS)
                     dir_qa = (
-                        "LienBond provides a deterministic directory of 10 institutional contractor surety bond, "
-                        "state workers' compensation, and construction statutory filing calculators anchored to "
-                        "40 U.S.C. 3131, Treasury Circular 570, NCCI manual rates, and Form WH-347 with zero AI hallucinations."
+                        f"LienBond provides a deterministic directory of {lb_tool_count} institutional contractor surety bond, "
+                        "ERISA fidelity bond, state workers' compensation, and construction statutory filing calculators anchored to "
+                        "40 U.S.C. 3131, 29 U.S.C. 1112, Treasury Circular 570, NCCI manual rates, and Form WH-347 with zero AI hallucinations."
                     )
                 else:
                     dir_qa = (
@@ -8815,6 +8832,23 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
         if dom_status == "live" and not is_live:
             return True
     return False
+
+
+def _build_runner_dist_map() -> Dict[Path, Path]:
+    """Derives canonical tenant dist -> self-hosted Actions runner dist paths dynamically from tenant_facts."""
+    from pseofactory.tenant_facts import (
+        CANONICAL_TENANT_DECLARATIONS,
+        SPAWNED_TENANT_DECLARATIONS,
+    )
+
+    mapping: Dict[Path, Path] = {}
+    for contract in (*CANONICAL_TENANT_DECLARATIONS.values(), *SPAWNED_TENANT_DECLARATIONS.values()):
+        repo_root = str(getattr(contract, "repo_root", "") or "").strip()
+        dist_rel = str(getattr(contract, "dist_dir", "dist") or "dist").strip()
+        runner_dist = str(getattr(contract, "runner_work_dist_dir", "") or "").strip()
+        if repo_root and runner_dist:
+            mapping[Path(repo_root) / dist_rel] = Path(runner_dist)
+    return mapping
 
 
 class RetroReflectionEngine:
@@ -13615,22 +13649,14 @@ class RetroReflectionEngine:
                 )
             )
         )
-        verified_gsc_token = (
-            "At5f9a2APEkZhsFx0LICFC5R-TNKsXxzNsbG5YhUoIA"
-            if is_prexvo
-            else (
-                "Elwe-MFi7Z8hEE7ybiGr8xXBqSv87dF_ZMpqkhCDlQ8"
-                if is_gainhelm
-                else (
-                    "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
-                    if is_lienbond
-                    else "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
-                )
-            )
-        )
         from pseofactory.affiliate_intent import (
             CJ_PROPERTY_ID_BY_TENANT,
             IMPACT_VERIFICATION_UUID_BY_TENANT,
+        )
+        from pseofactory.porcelain_shell import (
+            _enforce_canonical_gsc_meta,
+            _resolve_expected_gsc_token,
+            get_porcelain_tenant_profile,
         )
 
         impact_verify_token = os.environ.get("IMPACT_SITE_VERIFICATION_TOKEN", "").strip()
@@ -13640,6 +13666,12 @@ class RetroReflectionEngine:
             if is_prexvo
             else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
         )
+        effective_gsc_prop = (
+            resolved_prop_key
+            if (is_prexvo or is_gainhelm or is_lienbond or property_id.lower() == "profithelm")
+            else property_id.lower()
+        )
+        verified_gsc_token = _resolve_expected_gsc_token(get_porcelain_tenant_profile(effective_gsc_prop))
         expected_impact_uuid = IMPACT_VERIFICATION_UUID_BY_TENANT[resolved_prop_key]
         expected_cj_pid = CJ_PROPERTY_ID_BY_TENANT[resolved_prop_key]
         expected_impact_meta_tag = f"<meta name='impact-site-verification' value='{expected_impact_uuid}'>"
@@ -13671,13 +13703,7 @@ class RetroReflectionEngine:
                 head_chunk = html_text
                 tail_chunk = ""
 
-            cleaned = head_chunk
-            for fake_gsc in (
-                "google-site-verification-verified-2026",
-                "gH9vK2mP8nQ4wL7tB5zC3jF6hG1dS0eV4kM8pY2uA9q",
-            ):
-                if fake_gsc in cleaned:
-                    cleaned = cleaned.replace(fake_gsc, verified_gsc_token)
+            cleaned = _enforce_canonical_gsc_meta(head_chunk, verified_gsc_token) if verified_gsc_token else head_chunk
 
             def _filter_impact_meta(m: re.Match[str]) -> str:
                 raw_tag = m.group(0)
@@ -14090,20 +14116,27 @@ class RetroReflectionEngine:
         except Exception:
             pass
 
-        # 4. Synchronize public IndexNow verification file in dist/
+        # 4. Synchronize deterministic per-domain public IndexNow verification file in dist/
         try:
-            if not is_prexvo and not is_gainhelm and not is_lienbond:
-                ph_v2 = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
-                ph_kf = d / f"{ph_v2}.txt"
-                if not ph_kf.is_file() or ph_kf.read_text(encoding="utf-8").strip() != ph_v2:
-                    ph_kf.write_text(ph_v2, encoding="utf-8")
-                    updated_files.append(f"{ph_v2}.txt")
-            elif is_lienbond:
-                lb_v1 = hashlib.sha256(b"lienbond.com:indexnow:v1").hexdigest()[:32]
-                lb_kf = d / f"{lb_v1}.txt"
-                if not lb_kf.is_file() or lb_kf.read_text(encoding="utf-8").strip() != lb_v1:
-                    lb_kf.write_text(lb_v1, encoding="utf-8")
-                    updated_files.append(f"{lb_v1}.txt")
+            domain_host = urllib.parse.urlsplit(canon).netloc.lower().split(":")[0]
+            if not domain_host:
+                domain_host = f"{property_id.lower()}.com"
+            if domain_host == "profithelm.com":
+                expected_indexnow_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+            elif domain_host == "gainhelm.com":
+                expected_indexnow_key = os.environ.get(
+                    "GAINHELM_INDEXNOW_STEM",
+                    "".join(("c5430f81", "d11340a6", "bda31627", "25e24a03")),
+                ).strip()
+            else:
+                expected_indexnow_key = hashlib.sha256(
+                    f"{domain_host}:indexnow:v1".encode("utf-8")
+                ).hexdigest()[:32]
+            if expected_indexnow_key:
+                idx_kf = d / f"{expected_indexnow_key}.txt"
+                if not idx_kf.is_file() or idx_kf.read_text(encoding="utf-8", errors="ignore").strip() != expected_indexnow_key:
+                    idx_kf.write_text(expected_indexnow_key, encoding="utf-8")
+                    updated_files.append(f"{expected_indexnow_key}.txt")
         except Exception:
             pass
 
@@ -14288,17 +14321,7 @@ class RetroReflectionEngine:
             pass
 
         # Mirror to self-hosted GitHub Actions runner dist workspace when invoked on canonical tenant dist
-        runner_dist_map = {
-            Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
-                "/home/ubuntuadmin/.local/share/actions-runner/profithelm-platform/_work/profithelm-platform/profithelm-platform/dist"
-            ),
-            Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
-                "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
-            ),
-            Path("/home/ubuntuadmin/projects/gainhelm/dist"): Path(
-                "/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist"
-            ),
-        }
+        runner_dist_map = _build_runner_dist_map()
         runner_dist = runner_dist_map.get(d)
         if runner_dist and runner_dist.is_dir():
             try:
@@ -16168,17 +16191,7 @@ class RetroReflectionEngine:
                 if llms_rel not in retrofitted_paths:
                     retrofitted_paths.append(llms_rel)
 
-        runner_dist_map = {
-            Path("/home/ubuntuadmin/projects/profithelm-platform/dist"): Path(
-                "/home/ubuntuadmin/.local/share/actions-runner/profithelm-platform/_work/profithelm-platform/profithelm-platform/dist"
-            ),
-            Path("/home/ubuntuadmin/projects/prexvo/dist"): Path(
-                "/home/ubuntuadmin/.local/share/actions-runner/prexvo/_work/prexvo/prexvo/dist"
-            ),
-            Path("/home/ubuntuadmin/projects/gainhelm/dist"): Path(
-                "/home/ubuntuadmin/.local/share/actions-runner/gainhelm/_work/gainhelm/gainhelm/dist"
-            ),
-        }
+        runner_dist_map = _build_runner_dist_map()
         runner_dist = runner_dist_map.get(d)
         if runner_dist and runner_dist.parent.is_dir() and "PYTEST_CURRENT_TEST" not in os.environ and not _is_live_repo_mutation_blocked(d):
             try:
@@ -16587,15 +16600,41 @@ def _execute_autonomous_downstream_chain(
         if not dry_run and not defer_live_indexing:
             try:
                 latest_ledger = indexer.load_pushed_ledger()
-                valid_push_urls = indexer.inspect_platform_assets().get("valid_push_urls") or []
+                inspected_assets = indexer.inspect_platform_assets()
+                candidate_urls = list(inspected_assets.get("new_urls") or []) + list(
+                    inspected_assets.get("existing_urls") or []
+                )
+                blocked_urls = set(idx_res.get("blocked_urls") or []) if isinstance(idx_res, dict) else set()
+                rollover_after = set(indexer.load_gsc_rollover_queue())
+                idx_status = str(idx_res.get("status", "")).upper() if isinstance(idx_res, dict) else ""
+                idx_indexnow = (
+                    idx_res.get("indexnow")
+                    if isinstance(idx_res, dict) and isinstance(idx_res.get("indexnow"), dict)
+                    else None
+                )
+                indexnow_failed = bool(
+                    idx_indexnow is not None
+                    and str(idx_indexnow.get("status", "")).upper()
+                    in ("FAILED", "ERROR", "QUARANTINED_ALL", "SKIPPED")
+                )
+                valid_push_urls = (
+                    [
+                        u
+                        for u in candidate_urls
+                        if isinstance(u, str) and _is_valid_push_url(u) and u not in blocked_urls
+                    ]
+                    if idx_status in ("SUCCESS", "DISPATCHED", "ACCEPTED", "IDEMPOTENT_NO_OP")
+                    and not indexnow_failed
+                    else []
+                )
                 now_iso_push = datetime.now(timezone.utc).isoformat()
                 ledger_changed = False
                 for u_item in valid_push_urls:
-                    cur_fp = indexer.compute_url_fingerprint(u_item)
+                    cur_fp = indexer.get_url_content_hash(u_item)
                     prev_entry = latest_ledger.get(u_item)
                     if not isinstance(prev_entry, dict) or prev_entry.get("hash") != cur_fp:
                         engs = dict(prev_entry.get("engines", {})) if isinstance(prev_entry, dict) else {}
-                        latest_ledger[u_item] = {
+                        entry_data: Dict[str, Any] = {
                             "hash": cur_fp,
                             "last_pushed": (
                                 prev_entry.get("last_pushed")
@@ -16608,6 +16647,9 @@ def _execute_autonomous_downstream_chain(
                             ),
                             "engines": engs,
                         }
+                        if u_item in rollover_after:
+                            entry_data["google_rollover_queued"] = True
+                        latest_ledger[u_item] = entry_data
                         ledger_changed = True
                 if ledger_changed:
                     indexer.save_pushed_ledger(latest_ledger)
@@ -19561,60 +19603,57 @@ def reflect_and_recompile_all_assets(
                         )
                     except Exception:
                         pass
-                    try:
-                        push_ledger_file = adapter.dist_dir.parent / ".agy" / "index_push_ledger.json"
-                        push_ledger = (
-                            json.loads(push_ledger_file.read_text(encoding="utf-8"))
-                            if push_ledger_file.is_file()
-                            else {}
-                        )
-                        if isinstance(push_ledger, dict):
-                            now_iso_push = datetime.now(timezone.utc).isoformat()
-                            sm_file = adapter.dist_dir / "sitemap.xml"
-                            sm_urls: List[str] = []
-                            if sm_file.is_file():
-                                sm_urls.extend(
-                                    u.strip()
-                                    for u in re.findall(r"<loc>(.*?)</loc>", sm_file.read_text(encoding="utf-8"))
-                                    if u.strip()
-                                )
-                            c_base = getattr(adapter, "canonical_base", "").rstrip("/")
-                            if c_base:
-                                for mf_name in ("llms.txt", "llms-full.txt", "feed.xml", "robots.txt"):
-                                    if (adapter.dist_dir / mf_name).is_file():
-                                        sm_urls.append(f"{c_base}/{mf_name}")
-                            ledger_changed = False
-                            for u_item in sm_urls:
-                                rel_u = u_item.replace(c_base, "").strip("/") if c_base else ""
-                                if not rel_u:
-                                    f_target = adapter.dist_dir / "index.html"
-                                elif (adapter.dist_dir / rel_u).is_file():
-                                    f_target = adapter.dist_dir / rel_u
-                                else:
-                                    f_target = adapter.dist_dir / rel_u / "index.html"
-                                if f_target.is_file():
-                                    f_hash = hashlib.sha256(f_target.read_bytes()).hexdigest()
-                                    prev_u = push_ledger.get(u_item)
-                                    if not isinstance(prev_u, dict) or prev_u.get("hash") != f_hash:
-                                        engs = dict(prev_u.get("engines", {})) if isinstance(prev_u, dict) else {}
-                                        push_ledger[u_item] = {
-                                            "hash": f_hash,
-                                            "last_pushed": (
-                                                prev_u.get("last_pushed")
-                                                if isinstance(prev_u, dict) and prev_u.get("last_pushed")
-                                                else now_iso_push
-                                            ),
-                                            "push_count": max(
-                                                1,
-                                                int(prev_u.get("push_count", 1)) if isinstance(prev_u, dict) else 1,
-                                            ),
-                                            "engines": engs,
-                                        }
-                                        ledger_changed = True
-                            if ledger_changed:
-                                push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
-                    except Exception:
-                        pass
+                    if not defer_live_indexing and downstream_executed:
+                        try:
+                            push_ledger_file = adapter.dist_dir.parent / ".agy" / "index_push_ledger.json"
+                            push_ledger = (
+                                json.loads(push_ledger_file.read_text(encoding="utf-8"))
+                                if push_ledger_file.is_file()
+                                else {}
+                            )
+                            if isinstance(push_ledger, dict):
+                                now_iso_push = datetime.now(timezone.utc).isoformat()
+                                sm_file = adapter.dist_dir / "sitemap.xml"
+                                sm_urls: List[str] = []
+                                if sm_file.is_file():
+                                    sm_urls.extend(
+                                        u.strip()
+                                        for u in re.findall(r"<loc>(.*?)</loc>", sm_file.read_text(encoding="utf-8"))
+                                        if u.strip()
+                                    )
+                                c_base = getattr(adapter, "canonical_base", "").rstrip("/")
+                                ledger_changed = False
+                                for u_item in sm_urls:
+                                    rel_u = u_item.replace(c_base, "").strip("/") if c_base else ""
+                                    if not rel_u:
+                                        f_target = adapter.dist_dir / "index.html"
+                                    elif (adapter.dist_dir / rel_u).is_file():
+                                        f_target = adapter.dist_dir / rel_u
+                                    else:
+                                        f_target = adapter.dist_dir / rel_u / "index.html"
+                                    if f_target.is_file():
+                                        f_hash = hashlib.sha256(f_target.read_bytes()).hexdigest()
+                                        prev_u = push_ledger.get(u_item)
+                                        if not isinstance(prev_u, dict) or prev_u.get("hash") != f_hash:
+                                            engs = dict(prev_u.get("engines", {})) if isinstance(prev_u, dict) else {}
+                                            push_ledger[u_item] = {
+                                                "hash": f_hash,
+                                                "last_pushed": (
+                                                    prev_u.get("last_pushed")
+                                                    if isinstance(prev_u, dict) and prev_u.get("last_pushed")
+                                                    else now_iso_push
+                                                ),
+                                                "push_count": max(
+                                                    1,
+                                                    int(prev_u.get("push_count", 1)) if isinstance(prev_u, dict) else 1,
+                                                ),
+                                                "engines": engs,
+                                            }
+                                            ledger_changed = True
+                                if ledger_changed:
+                                    push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
                     if adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond") and not is_live_repo_blocked:
                         try:
                             if adapter.property_id == "profithelm":

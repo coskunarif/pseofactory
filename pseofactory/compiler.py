@@ -2585,7 +2585,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         short_t = re.sub(r"\s+and\s+Statutory\s+Analysis$", "", title, flags=re.IGNORECASE).strip()
         short_t = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", short_t, flags=re.IGNORECASE)
         if is_lienbond:
-            raw_meta_desc = f"Calculate {short_t} deterministically under 40 U.S.C. Section 3131 and NCCI rate schedules."
+            primary_stat_auth = statutory_authority.split(",")[0].strip() or statutory_authority
+            raw_meta_desc = f"Calculate {short_t} deterministically under {primary_stat_auth}."
         else:
             raw_meta_desc = f"Verified quantitative calculation engine evaluating {short_t} deterministically under {statutory_authority}."
     if len(raw_meta_desc) > 155:
@@ -2602,10 +2603,17 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         from pseofactory.gsc_remediation import _normalize_meta_120_155
 
         raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "gainhelm", title, slug=slug)
-    if len(raw_meta_desc) < 120 and is_lienbond:
-        raw_meta_desc = f"{raw_meta_desc.rstrip('.')} Grounded in U.S. Treasury Circular 570 and 50-state construction statutes."
-        if len(raw_meta_desc) > 155:
-            raw_meta_desc = f"Calculate {title[:48].strip()} deterministically under 40 U.S.C. Section 3131, Treasury Circular 570, and NCCI manuals."
+    if is_lienbond:
+        from pseofactory.gsc_remediation import _normalize_meta_120_155
+
+        if len(raw_meta_desc) < 120:
+            primary_stat_auth = statutory_authority.split(",")[0].strip() or statutory_authority
+            if primary_stat_auth.lower() not in raw_meta_desc.lower():
+                cand_lb_desc = f"{raw_meta_desc.rstrip('.')} Grounded in {primary_stat_auth}."
+                if len(cand_lb_desc) <= 155:
+                    raw_meta_desc = cand_lb_desc
+        if len(raw_meta_desc) < 120 or len(raw_meta_desc) > 155:
+            raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "lienbond", title, slug=slug)
 
     brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
     default_takeaway_html = (
@@ -3778,6 +3786,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         )
     )
 
+    total_lb_tools = len(compiled_pages)
+
     hub_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3873,7 +3883,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 {hub_sensitivity_table_html}
 
     <section class="card">
-      <h2>Complete LienBond Statutory Calculator Directory (10 Models)</h2>
+      <h2>Complete LienBond Statutory Calculator Directory ({total_lb_tools} Models)</h2>
       <div class="table-wrap">
         <table class="comparison-table">
           <thead>
@@ -3986,17 +3996,17 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       </div>
     </section>
     <section class="card">
-      <h2>All 10 LienBond Quantitative Calculators</h2>
+      <h2>All {total_lb_tools} LienBond Quantitative Calculators</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
 {tool_cards_html}
       </div>
     </section>"""
     tools_index_html = _build_lienbond_support_page_html(
         page_title="Construction Surety, Workers Comp & Lien Tools | LienBond",
-        meta_desc="Browse all 10 LienBond calculators for contractor license bonds, AIA A312 performance bonds, NCCI workers comp class codes, EMR, and state mechanics liens.",
+        meta_desc=f"Browse all {total_lb_tools} LienBond calculators for contractor license bonds, AIA A312 performance bonds, NCCI workers comp, EMR, ERISA bonds, and state liens.",
         canonical_url="https://lienbond.com/tools/",
         h1_text="Construction Surety, Workers Comp & Lien Tools Directory",
-        quick_answer_text="The LienBond Tools Directory indexes ten deterministic calculators covering contractor license surety bonds, Federal Miller Act performance bonds under 40 U.S.C. Section 3131, NCCI workers compensation class codes and EMR modifiers, 50-state mechanics lien deadlines, and Davis-Bacon Form WH-347 payroll.",
+        quick_answer_text=f"The LienBond Tools Directory indexes {total_lb_tools} deterministic calculators covering contractor license surety bonds, Federal Miller Act performance bonds under 40 U.S.C. Section 3131, ERISA Section 412 fidelity bonds, NCCI workers compensation class codes and EMR modifiers, 50-state mechanics lien deadlines, and Davis-Bacon Form WH-347 payroll.",
         body_html=tools_index_body,
         gsc_token=gsc_token,
     )
@@ -4120,6 +4130,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     ]
     lb_ai_bots = [
         "*",
+        "Googlebot",
+        "Bingbot",
         "GPTBot",
         "OAI-SearchBot",
         "ChatGPT-User",
@@ -4146,7 +4158,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         hub_specs=lb_hub_specs,
         leaf_tools=compiled_pages,
         ai_bots=lb_ai_bots,
-        disallow_paths=["/api/", "/cdn-cgi/", "/_astro/", "/private/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        disallow_paths=["/api/", "/cdn-cgi/", "/private/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
         allow_paths=["/"],
         include_changefreq_and_priority=False,
         validate_governor=False,

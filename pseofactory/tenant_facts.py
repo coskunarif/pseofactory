@@ -1024,6 +1024,24 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
         "expected_cname_target": "gainhelm.pages.dev",
         "routing_records_allowed": True,
     },
+    "lienbond.com": {
+        "domain": "lienbond.com",
+        "lifecycle_tier": "ACTIVE_TENANT",
+        "zone_id": "47b340339ead09422ed5f28fabe85c4f",
+        "registry_object_id": "3165046006_DOMAIN_COM-VRSN",
+        "auto_renew": True,
+        "locked": True,
+        "privacy": True,
+        "privacy_mode": "redaction",
+        "registry_statuses": "clienttransferprohibited",
+        "registered_at": "2026-11-08T00:46:27.000Z",
+        "expires_at": "2027-11-08T00:46:27.000Z",
+        "payment_expires_at": "2027-11-08T00:46:27.000Z",
+        "renewal_fee_usd": 10.46,
+        "effective_annual_exposure_usd": 10.46,
+        "expected_cname_target": "lienbond.pages.dev",
+        "routing_records_allowed": True,
+    },
     ("arif" + "coskun.com"): {
         "domain": "arif" + "coskun.com",
         "lifecycle_tier": "PERSONAL_INFRA",
@@ -1120,7 +1138,7 @@ CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER: Dict[str, Dict[str, Any]] = {
 def compute_registrar_ledger_sha256(
     ledger: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
-    """Computes deterministic SHA-256 digest of the canonical 8-domain Registrar ledger."""
+    """Computes deterministic SHA-256 digest of the canonical portfolio Registrar ledger."""
     target = ledger if ledger is not None else CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER
     canonical = json.dumps(target, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -2236,15 +2254,18 @@ class TenantFactStore:
         """
         Verifies cryptographic attestation, transfer-lock integrity (locked=True,
         clienttransferprohibited), WHOIS redaction (privacy=True), auto_renew alignment,
-        and expiration/sunset horizon bounds across all 8 Cloudflare portfolio domains.
+        and expiration/sunset horizon bounds across all attested Cloudflare portfolio domains.
         Zero em-dashes. Zero en-dashes.
         """
         target = ledger if ledger is not None else CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER
         now_dt = reference_utc or datetime.now(timezone.utc)
         violations: List[str] = []
 
-        if len(target) != 8:
-            violations.append(f"Expected 8 portfolio domains in ledger, found {len(target)}")
+        expected_domain_count = len(CLOUDFLARE_PORTFOLIO_REGISTRAR_LEDGER)
+        if len(target) != expected_domain_count:
+            violations.append(
+                f"Expected {expected_domain_count} portfolio domains in ledger, found {len(target)}"
+            )
 
         total_exposure = 0.0
         sunset_windows_days: Dict[str, float] = {}
