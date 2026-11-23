@@ -9,7 +9,7 @@ import json
 import shutil
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -603,17 +603,100 @@ def _collect_tenant_middleware_redirects(
     return exact_redirects, prefix_redirects
 
 
+_GAINHELM_LEGACY_GONE_SLUGS: Tuple[str, ...] = (
+    "/mobile-dispatch-board",
+    "/plumbing-dispatch-software",
+    "/buildops-alternative",
+    "/jobber-alternative",
+    "/fieldedge-alternative",
+    "/servicetitan-alternative",
+    "/tree-service-dispatch-software",
+    "/landscaping-dispatch-software",
+    "/commercial-facilities-dispatch-software",
+    "/field-service-scheduling",
+    "/housecallpro-alternative",
+    "/locksmith-dispatch-software",
+    "/servicefusion-alternative",
+    "/hvac-dispatch-software",
+    "/septic-service-dispatch-software",
+    "/appliance-repair-dispatch-software",
+    "/cleaning-dispatch-software",
+    "/emergency-restoration-dispatch-software",
+    "/garage-door-dispatch-software",
+    "/hvac-dispatch-app-vs-spreadsheets",
+    "/pool-service-dispatch-software",
+    "/electrical-dispatch-software",
+    "/how-hvac-dispatch-apps-reduce-phone-tag",
+    "/pest-control-dispatch-software",
+    "/setup",
+)
+
+
+def _collect_tenant_middleware_gone_paths(
+    repo: Path,
+    dist_dir: Path,
+) -> List[str]:
+    """
+    Collects HTTP 410 Gone paths from content/redirects.json and dist/_redirects so
+    functions/_middleware.js can de-index retired off-topic routes cleanly across tenants.
+    """
+    gone_paths: List[str] = []
+    seen: Set[str] = set()
+
+    def _add_gone(raw_path: str) -> None:
+        if not isinstance(raw_path, str):
+            return
+        src = raw_path.strip()
+        if not src.startswith("/") or "*" in src or ":" in src or src == "/":
+            return
+        base_src = src.rstrip("/")
+        if not base_src or (dist_dir / base_src.lstrip("/") / "index.html").is_file():
+            return
+        for variant in (base_src, base_src + "/"):
+            if variant not in seen:
+                seen.add(variant)
+                gone_paths.append(variant)
+
+    content_redirects_json = repo / "content" / "redirects.json"
+    if content_redirects_json.is_file():
+        try:
+            raw_rj = json.loads(content_redirects_json.read_text(encoding="utf-8"))
+            if isinstance(raw_rj, dict):
+                for r_src, r_info in raw_rj.items():
+                    r_code = int(r_info.get("status", 301)) if isinstance(r_info, dict) else 301
+                    if r_code == 410:
+                        _add_gone(r_src)
+        except Exception:
+            pass
+
+    dist_redirects_file = dist_dir / "_redirects"
+    if dist_redirects_file.is_file():
+        try:
+            parsed_rules = parse_edge_redirects_rules(
+                dist_redirects_file.read_text(encoding="utf-8", errors="ignore"),
+                include_middleware_overflow=True,
+            )
+            for r_src, _r_dst, r_code_str, _is_ov in parsed_rules:
+                if r_code_str == "410":
+                    _add_gone(r_src)
+        except Exception:
+            pass
+
+    return gone_paths
+
+
 def _sync_middleware_redirect_table(
     mw_text: str,
     extra_exact_redirects: Dict[str, str],
     extra_prefix_redirects: Optional[Dict[str, str]] = None,
     apex_domain: Optional[str] = None,
     existing_governance_routes: Optional[Set[str]] = None,
+    extra_gone_paths: Optional[Iterable[str]] = None,
 ) -> str:
     """
-    Synchronizes exact and prefix 301 redirect mappings into functions/_middleware.js,
-    sorting prefix rules longest-first, preserving query strings, and resolving redirects
-    prior to www-to-apex canonicalization so legacy www URLs redirect in a single 301 hop.
+    Synchronizes HTTP 410 Gone routes and exact/prefix 301 redirect mappings into
+    functions/_middleware.js, sorting prefix rules longest-first, preserving query strings,
+    and resolving 410/301 rules prior to www-to-apex canonicalization.
     """
     eff_apex = apex_domain
     if not eff_apex:
@@ -631,6 +714,29 @@ def _sync_middleware_redirect_table(
         probe_m = re.search(r"  const (legacySaaSRedirects|edgeRedirects) = \{\n", working)
         if probe_m:
             working = early_www_pat.sub("\n\n", working[: probe_m.start()]) + working[probe_m.start() :]
+
+    gone_str_pat = re.compile(r'"(/[^"]*)"')
+    merged_gone: List[str] = []
+    merged_gone_set: Set[str] = set()
+    for gm in re.finditer(r"const edgeGone = new Set\(\[([\s\S]*?)\]\);", working):
+        for sm in gone_str_pat.finditer(gm.group(1)):
+            gp = sm.group(1).strip()
+            if gp and gp != "/" and gp not in merged_gone_set:
+                merged_gone_set.add(gp)
+                merged_gone.append(gp)
+    for raw_gp in (extra_gone_paths or ()):
+        if not isinstance(raw_gp, str):
+            continue
+        gp = raw_gp.strip()
+        if not gp.startswith("/") or "*" in gp or ":" in gp or gp == "/":
+            continue
+        base_gp = gp.rstrip("/")
+        if not base_gp:
+            continue
+        for variant in (base_gp, base_gp + "/"):
+            if variant not in merged_gone_set:
+                merged_gone_set.add(variant)
+                merged_gone.append(variant)
 
     prefix_pair_pat = re.compile(r'\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]')
     merged_prefixes: Dict[str, str] = {}
@@ -669,6 +775,8 @@ def _sync_middleware_redirect_table(
         em = entry_pat.match(raw_line)
         if em:
             k, v = em.group(1), em.group(2)
+            if k in merged_gone_set or k.rstrip("/") in merged_gone_set:
+                continue
             if (
                 existing_governance_routes
                 and k in _CROSS_LEGAL_GOVERNANCE_SOURCES
@@ -686,6 +794,8 @@ def _sync_middleware_redirect_table(
 
     for k, v in extra_exact_redirects.items():
         if not k.startswith("/") or "*" in k or ":" in k or k == "/":
+            continue
+        if k in merged_gone_set or k.rstrip("/") in merged_gone_set:
             continue
         if (
             existing_governance_routes
@@ -705,7 +815,8 @@ def _sync_middleware_redirect_table(
         merged_entries[k] = v
 
     rendered_lines = [f'    "{k}": "{merged_entries[k]}",' for k in entry_order]
-    new_obj_block = obj_match.group(1) + "\n".join(rendered_lines) + "\n" + obj_match.group(4)
+    inner_body = ("\n".join(rendered_lines) + "\n") if rendered_lines else ""
+    new_obj_block = obj_match.group(1) + inner_body + obj_match.group(4)
 
     post_part = working[obj_match.end() :]
     post_part = re.sub(
@@ -739,6 +850,28 @@ def _sync_middleware_redirect_table(
         f"  const _canonicalOrigin = {origin_expr};",
         '  const _normRedirectPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;',
     ]
+    if merged_gone:
+        dispatch_lines.append("  const edgeGone = new Set([")
+        for gp in merged_gone:
+            dispatch_lines.append(f'    "{gp}",')
+        dispatch_lines.extend(
+            [
+                "  ]);",
+                '  if (edgeGone.has(pathname) || edgeGone.has(_normRedirectPath) || edgeGone.has(_normRedirectPath + "/")) {',
+                "    return new Response(",
+                '      "<!DOCTYPE html><html lang=\\"en\\"><head><meta charset=\\"utf-8\\"><meta name=\\"robots\\" content=\\"noindex\\"><title>410 Gone</title></head><body><h1>410 Gone</h1><p>This page has been permanently removed.</p></body></html>",',
+                "      {",
+                "        status: 410,",
+                "        headers: {",
+                '          "Content-Type": "text/html; charset=utf-8",',
+                '          "X-Robots-Tag": "noindex",',
+                '          "Cache-Control": "public, max-age=86400",',
+                "        },",
+                "      }",
+                "    );",
+                "  }",
+            ]
+        )
     if sorted_prefixes:
         dispatch_lines.append(
             f'  let _matchedRedirectTarget = {var_name}[pathname] || {var_name}[_normRedirectPath] || {var_name}[_normRedirectPath + "/"] || null;'
@@ -15767,65 +15900,14 @@ def sync_tenant_edge_redirect_function(
                     f'const isApex = hostname === "{apex_domain}";',
                 )
 
+            extra_gone_paths = _collect_tenant_middleware_gone_paths(
+                repo=repo,
+                dist_dir=dist_dir,
+            )
             if prop_clean == "gainhelm":
-                gh_gsc_redirects = [
-                    '    "/mobile-dispatch-board": "/tools/",',
-                    '    "/mobile-dispatch-board/": "/tools/",',
-                    '    "/plumbing-dispatch-software": "/tools/",',
-                    '    "/plumbing-dispatch-software/": "/tools/",',
-                    '    "/buildops-alternative": "/tools/",',
-                    '    "/buildops-alternative/": "/tools/",',
-                    '    "/jobber-alternative": "/tools/",',
-                    '    "/jobber-alternative/": "/tools/",',
-                    '    "/fieldedge-alternative": "/tools/",',
-                    '    "/fieldedge-alternative/": "/tools/",',
-                    '    "/servicetitan-alternative": "/tools/",',
-                    '    "/servicetitan-alternative/": "/tools/",',
-                    '    "/tree-service-dispatch-software": "/tools/",',
-                    '    "/tree-service-dispatch-software/": "/tools/",',
-                    '    "/landscaping-dispatch-software": "/tools/",',
-                    '    "/landscaping-dispatch-software/": "/tools/",',
-                    '    "/commercial-facilities-dispatch-software": "/tools/",',
-                    '    "/commercial-facilities-dispatch-software/": "/tools/",',
-                    '    "/field-service-scheduling": "/tools/",',
-                    '    "/field-service-scheduling/": "/tools/",',
-                    '    "/housecallpro-alternative": "/tools/",',
-                    '    "/housecallpro-alternative/": "/tools/",',
-                    '    "/locksmith-dispatch-software": "/tools/",',
-                    '    "/locksmith-dispatch-software/": "/tools/",',
-                    '    "/servicefusion-alternative": "/tools/",',
-                    '    "/servicefusion-alternative/": "/tools/",',
-                    '    "/hvac-dispatch-software": "/tools/",',
-                    '    "/hvac-dispatch-software/": "/tools/",',
-                    '    "/septic-service-dispatch-software": "/tools/",',
-                    '    "/septic-service-dispatch-software/": "/tools/",',
-                    '    "/appliance-repair-dispatch-software": "/tools/",',
-                    '    "/appliance-repair-dispatch-software/": "/tools/",',
-                    '    "/cleaning-dispatch-software": "/tools/",',
-                    '    "/cleaning-dispatch-software/": "/tools/",',
-                    '    "/emergency-restoration-dispatch-software": "/tools/",',
-                    '    "/emergency-restoration-dispatch-software/": "/tools/",',
-                    '    "/garage-door-dispatch-software": "/tools/",',
-                    '    "/garage-door-dispatch-software/": "/tools/",',
-                    '    "/hvac-dispatch-app-vs-spreadsheets": "/tools/",',
-                    '    "/hvac-dispatch-app-vs-spreadsheets/": "/tools/",',
-                    '    "/pool-service-dispatch-software": "/tools/",',
-                    '    "/pool-service-dispatch-software/": "/tools/",',
-                    '    "/electrical-dispatch-software": "/tools/",',
-                    '    "/electrical-dispatch-software/": "/tools/",',
-                    '    "/how-hvac-dispatch-apps-reduce-phone-tag": "/tools/",',
-                    '    "/how-hvac-dispatch-apps-reduce-phone-tag/": "/tools/",',
-                    '    "/pest-control-dispatch-software": "/tools/",',
-                    '    "/pest-control-dispatch-software/": "/tools/",',
-                    '    "/setup": "/tools/",',
-                    '    "/setup/": "/tools/",',
-                ]
-                if '"/mobile-dispatch-board"' not in mw_new and "const edgeRedirects = {\n" in mw_new:
-                    mw_new = mw_new.replace(
-                        "const edgeRedirects = {\n",
-                        "const edgeRedirects = {\n" + "\n".join(gh_gsc_redirects) + "\n",
-                        1,
-                    )
+                for gh_slug in _GAINHELM_LEGACY_GONE_SLUGS:
+                    if not (dist_dir / gh_slug.lstrip("/") / "index.html").is_file():
+                        extra_gone_paths.extend([gh_slug, gh_slug + "/"])
             elif prop_clean == "profithelm":
                 ph_gsc_redirects = [
                     '    "/tools/kalshi-prediction-market-arbitrage-strategy": "/tools/prediction-market-odds/",',
@@ -15887,6 +15969,7 @@ def sync_tenant_edge_redirect_function(
                 extra_prefix_redirects=extra_prefix_redirects,
                 apex_domain=apex_domain,
                 existing_governance_routes=existing_gov_routes,
+                extra_gone_paths=extra_gone_paths,
             )
             if f'if (hostname === "www.{apex_domain}")' not in mw_new and "const pathname = url.pathname;\n" in mw_new:
                 mw_new = mw_new.replace(

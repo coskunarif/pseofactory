@@ -377,3 +377,197 @@ def test_synthesized_1031_calculator_manifest_and_ssr_parity(tmp_path: Path) -> 
     )
     assert issues == []
 
+
+def test_unpushed_empty_engines_entry_classified_new_and_dispatched(tmp_path: Path) -> None:
+    """
+    Verifies:
+    1. A ledger entry with matching top-level hash but empty engines={} is classified
+       as NEW (is_new=True), never EXISTING, so dispatch_automated_indexing submits it
+       rather than returning IDEMPOTENT_NO_OP.
+    2. 2-segment /tools/<calculator>/ paths are classified as asset_type='hub' and
+       included in automated dispatch, while 3-segment /tools/<hub>/<leaf>/ paths
+       remain asset_type='leaf' and excluded by default.
+    3. audit_asset_submission_status(live=True) does not count engines={} entries as
+       Google/Bing accepted.
+    4. dispatch_automated_indexing(live=True) does not latch an engines={} entry when
+       IndexNow fails.
+    """
+    base_dir = tmp_path / "gainhelm"
+    dist_dir = base_dir / "dist"
+    agy_dir = base_dir / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "robots.txt").write_text("User-agent: *\nAllow: /\n", encoding="utf-8")
+
+    hub_url = "https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
+    leaf_url = "https://gainhelm.com/tools/soc-2-audit-cost-calculator/texas/"
+    _write_test_html(
+        dist_dir / "tools" / "soc-2-audit-cost-calculator" / "index.html",
+        hub_url,
+        "SOC 2 Audit Cost Calculator",
+    )
+    _write_test_html(
+        dist_dir / "tools" / "soc-2-audit-cost-calculator" / "texas" / "index.html",
+        leaf_url,
+        "SOC 2 Audit Cost Calculator Texas",
+    )
+    (dist_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"<url><loc>{hub_url}</loc></url>"
+        f"<url><loc>{leaf_url}</loc></url>"
+        "</urlset>",
+        encoding="utf-8",
+    )
+
+    indexer = PushIndexer(
+        domain="gainhelm.com",
+        canonical_base="https://gainhelm.com",
+        base_dir=base_dir,
+        dist_dir=dist_dir,
+        ledger_path=agy_dir / "index_push_ledger.json",
+        audit_log_path=agy_dir / "indexing_audit_log.json",
+        rollover_queue_path=agy_dir / "gsc_rollover_queue.json",
+        tenant_id="gainhelm",
+    )
+    hub_hash = indexer.get_url_content_hash(hub_url)
+    indexer.save_pushed_ledger(
+        {
+            hub_url: {
+                "hash": hub_hash,
+                "last_pushed": "2026-11-01T00:00:00+00:00",
+                "push_count": 1,
+                "tenant_id": "gainhelm",
+                "engines": {},
+            }
+        }
+    )
+
+    inspection = indexer.inspect_platform_assets()
+    by_url = {a["url"]: a for a in inspection["assets"]}
+    assert by_url[hub_url]["asset_type"] == "hub"
+    assert by_url[hub_url]["is_new"] is True
+    assert by_url[hub_url]["status"] == "NEW"
+    assert by_url[leaf_url]["asset_type"] == "leaf"
+
+    audit_before = indexer.audit_asset_submission_status(assets=inspection["assets"], live=True)
+    assert audit_before["summary"]["google_accepted_count"] == 0
+    assert audit_before["summary"]["bing_accepted_count"] == 0
+
+    sim_dispatch = indexer.dispatch_automated_indexing(live=False)
+    assert sim_dispatch["dispatch_type"] == "NEW_ASSETS_SUBMITTED"
+    assert hub_url in sim_dispatch["urls_submitted"]
+    assert leaf_url not in sim_dispatch["urls_submitted"]
+
+    # If live IndexNow fails, ledger must NOT latch an engines={} entry for hub_url
+    indexer.save_pushed_ledger({})
+    with (
+        patch.object(
+            indexer,
+            "submit_indexnow_batch",
+            return_value={"status": "FAILED", "urls_submitted": 1, "urls_dispatched": 0},
+        ),
+        patch.object(indexer, "ping_websub_hub", return_value={"status": "SIMULATED"}),
+        patch.object(indexer, "ping_pingomatic", return_value={"status": "SIMULATED"}),
+        patch.object(
+            indexer,
+            "submit_gsc_indexing",
+            return_value={"results": [], "sitemap_registration": {"status": "ACCEPTED", "submissions": []}},
+        ),
+        patch.object(indexer, "submit_indexmysite", return_value={"status": "SKIPPED"}),
+        patch.object(indexer, "submit_fast_index", return_value={"status": "SKIPPED"}),
+    ):
+        indexer.dispatch_automated_indexing(live=True)
+    assert hub_url not in indexer.load_pushed_ledger()
+
+
+def test_submit_bing_webmaster_accepts_dispatched_and_idempotent_no_op(tmp_path: Path) -> None:
+    """
+    Verifies submit_bing_webmaster maps DISPATCHED and IDEMPOTENT_NO_OP to SUCCESS,
+    while mapping FAILED and QUARANTINED_ALL to FAILED.
+    """
+    base_dir = tmp_path / "lienbond"
+    dist_dir = base_dir / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    indexer = PushIndexer(
+        domain="lienbond.com",
+        canonical_base="https://lienbond.com",
+        base_dir=base_dir,
+        dist_dir=dist_dir,
+        tenant_id="lienbond",
+    )
+
+    for ok_status in ("DISPATCHED", "IDEMPOTENT_NO_OP", "SIMULATED", "PARTIAL"):
+        with patch.object(
+            indexer,
+            "submit_indexnow_batch",
+            return_value={"status": ok_status, "urls_submitted": 3},
+        ):
+            res = indexer.submit_bing_webmaster(urls=["https://lienbond.com/"], dry_run=False)
+        assert res["status"] == "SUCCESS", f"Expected SUCCESS for {ok_status}, got {res}"
+        assert res["urls_submitted"] == 3
+
+    for bad_status in ("FAILED", "QUARANTINED_ALL"):
+        with patch.object(
+            indexer,
+            "submit_indexnow_batch",
+            return_value={"status": bad_status, "urls_submitted": 0},
+        ):
+            res = indexer.submit_bing_webmaster(urls=["https://lienbond.com/"], dry_run=False)
+        assert res["status"] == "FAILED", f"Expected FAILED for {bad_status}, got {res}"
+
+
+def test_deterministic_per_domain_indexnow_keys_across_50_plus_tenants(tmp_path: Path) -> None:
+    """
+    Verifies derive_deterministic_indexnow_key and PushIndexer.__init__ preserve
+    existing live keys (profithelm.com, gainhelm.com) and generate deterministic,
+    unique per-domain keys for lienbond.com, prexvo.com, and any 50+ future domains
+    without falling back to ProfitHelm's key or DEFAULT_INDEXNOW_KEY.
+    """
+    import hashlib
+    from pseofactory.indexer import DEFAULT_INDEXNOW_KEY, derive_deterministic_indexnow_key
+
+    ph_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+    gh_key = "c5430f81d11340a6bda3162725e24a03"
+    lb_key = hashlib.sha256(b"lienbond.com:indexnow:v1").hexdigest()[:32]
+    px_key = hashlib.sha256(b"prexvo.com:indexnow:v1").hexdigest()[:32]
+    t50_key = hashlib.sha256(b"tenant-fifty.example:indexnow:v1").hexdigest()[:32]
+
+    assert derive_deterministic_indexnow_key("profithelm.com") == ph_key
+    assert derive_deterministic_indexnow_key("www.profithelm.com") == ph_key
+    assert derive_deterministic_indexnow_key("gainhelm.com") == gh_key
+    assert derive_deterministic_indexnow_key("lienbond.com") == lb_key
+    assert derive_deterministic_indexnow_key("prexvo.com") == px_key
+    assert derive_deterministic_indexnow_key("https://tenant-fifty.example/tools/") == t50_key
+
+    assert len({ph_key, gh_key, lb_key, px_key, t50_key, DEFAULT_INDEXNOW_KEY}) == 6
+
+    for dom, expected in (
+        ("profithelm.com", ph_key),
+        ("gainhelm.com", gh_key),
+        ("lienbond.com", lb_key),
+        ("prexvo.com", px_key),
+        ("tenant-fifty.example", t50_key),
+    ):
+        t_dir = tmp_path / dom
+        idx = PushIndexer(domain=dom, canonical_base=f"https://{dom}", base_dir=t_dir, dist_dir=t_dir / "dist")
+        assert idx.indexnow_key == expected
+        if dom != "profithelm.com":
+            assert idx.indexnow_key != ph_key
+            assert idx.indexnow_key != DEFAULT_INDEXNOW_KEY
+
+    # Existing valid deployed dist/<32-hex>.txt keyfile is preserved for tenants with custom live keys
+    custom_dir = tmp_path / "custom-deployed"
+    custom_dist = custom_dir / "dist"
+    custom_dist.mkdir(parents=True, exist_ok=True)
+    custom_key = "0123456789abcdef0123456789abcdef"
+    (custom_dist / f"{custom_key}.txt").write_text(custom_key + "\n", encoding="utf-8")
+    idx_custom = PushIndexer(
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        base_dir=custom_dir,
+        dist_dir=custom_dist,
+    )
+    assert idx_custom.indexnow_key == custom_key
+
+

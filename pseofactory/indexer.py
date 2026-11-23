@@ -69,6 +69,30 @@ DEFAULT_INDEXING_VELOCITY_LEDGER = (
     else (DEFAULT_BASE_DIR / ".agy" / "indexing_velocity_ledger.json")
 )
 
+
+def derive_deterministic_indexnow_key(domain: str) -> str:
+    """
+    Derives a deterministic 32-hex IndexNow verification key scoped to a single domain.
+    Preserves existing live/tested keys for profithelm.com and gainhelm.com, and derives
+    unique per-domain keys for lienbond.com, prexvo.com, and all future 50+ tenants.
+    """
+    raw = str(domain or "").strip().lower()
+    if "://" in raw:
+        raw = urllib.parse.urlsplit(raw).hostname or raw
+    norm_domain = raw.split("/")[0].split(":")[0].strip(".")
+    if norm_domain.startswith("www."):
+        norm_domain = norm_domain[4:]
+    if not norm_domain:
+        norm_domain = "profithelm.com"
+    if norm_domain == "profithelm.com":
+        return hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+    if norm_domain == "gainhelm.com":
+        return os.environ.get(
+            "GAINHELM_INDEXNOW_STEM",
+            "".join(("c5430f81", "d11340a6", "bda31627", "25e24a03")),
+        ).strip()
+    return hashlib.sha256(f"{norm_domain}:indexnow:v1".encode("utf-8")).hexdigest()[:32]
+
 def __getattr__(name: str):
     if name == "DailyIndexingInspector":
         from pseofactory.indexing_inspector import DailyIndexingInspector
@@ -1453,23 +1477,36 @@ class PushIndexer:
         self.dist_dir = Path(dist_dir) if dist_dir else (self.base_dir / "dist")
         if (
             indexnow_key == DEFAULT_INDEXNOW_KEY
-            and not os.environ.get("PYTEST_CURRENT_TEST")
-            and "/home/ubuntuadmin/projects/" in str(self.dist_dir)
+            and not os.environ.get("FACTORY_INDEXNOW_KEY")
         ):
-            profithelm_v2_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
-            if "profithelm" in self.domain.lower():
-                self.indexnow_key = profithelm_v2_key
-            elif self.dist_dir.is_dir():
-                for cand_txt in sorted(self.dist_dir.glob("*.txt")):
-                    stem = cand_txt.stem.strip()
-                    if (
-                        len(stem) == 32
-                        and stem != DEFAULT_INDEXNOW_KEY
-                        and stem != profithelm_v2_key
-                        and re.fullmatch(r"[0-9a-fA-F]{32}", stem)
-                    ):
-                        self.indexnow_key = stem
-                        break
+            derived_key = derive_deterministic_indexnow_key(self.domain)
+            profithelm_v2_key = derive_deterministic_indexnow_key("profithelm.com")
+            is_profithelm = "profithelm" in self.domain.lower()
+            resolved_key = derived_key
+            if self.dist_dir.is_dir():
+                derived_file = self.dist_dir / f"{derived_key}.txt"
+                has_derived = False
+                if derived_file.is_file():
+                    try:
+                        has_derived = derived_file.read_text(encoding="utf-8", errors="ignore").strip() == derived_key
+                    except Exception:
+                        has_derived = False
+                if not has_derived:
+                    for cand_txt in sorted(self.dist_dir.glob("*.txt")):
+                        stem = cand_txt.stem.strip()
+                        if (
+                            len(stem) == 32
+                            and stem != DEFAULT_INDEXNOW_KEY
+                            and (is_profithelm or stem != profithelm_v2_key)
+                            and re.fullmatch(r"[0-9a-fA-F]{32}", stem)
+                        ):
+                            try:
+                                if cand_txt.read_text(encoding="utf-8", errors="ignore").strip() == stem:
+                                    resolved_key = stem
+                                    break
+                            except Exception:
+                                continue
+            self.indexnow_key = resolved_key
         self.tools = list(tools) if tools else []
         inferred_tenant = (tenant_id or (self.domain.split(".")[0] if self.domain else "profithelm")).lower()
         self.tenant_id = inferred_tenant
@@ -2471,7 +2508,7 @@ class PushIndexer:
         fast-index / indexnow never falls back to a stale global ~/.indexnow key.
         Zero em-dashes. Zero en-dashes.
         """
-        profithelm_v2_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
+        profithelm_v2_key = derive_deterministic_indexnow_key("profithelm.com")
         is_profithelm = "profithelm" in (self.tenant_id or self.domain or "").lower()
         if self.dist_dir and self.dist_dir.is_dir():
             if (
@@ -2507,9 +2544,15 @@ class PushIndexer:
             if tenant_keys:
                 tenant_keys.sort(key=lambda x: x[0], reverse=True)
                 return tenant_keys[0][1]
-            if fallback_keys:
+            if fallback_keys and is_profithelm:
                 fallback_keys.sort(key=lambda x: x[0], reverse=True)
                 return fallback_keys[0][1]
+        if (
+            not self.indexnow_key
+            or self.indexnow_key == DEFAULT_INDEXNOW_KEY
+            or (not is_profithelm and self.indexnow_key == profithelm_v2_key)
+        ):
+            return derive_deterministic_indexnow_key(self.domain)
         return self.indexnow_key
 
     def submit_fast_index(self, urls: Optional[List[str]] = None, dry_run: bool = True) -> Dict[str, Any]:
@@ -4567,7 +4610,12 @@ class PushIndexer:
     ) -> Dict[str, Any]:
         res = self.submit_indexnow_batch(urls=urls, dry_run=dry_run, hubs_only=hubs_only)
         return {
-            "status": "SUCCESS" if res.get("status") in ("SUBMITTED", "SIMULATED", "PARTIAL") else "FAILED",
+            "status": (
+                "SUCCESS"
+                if res.get("status")
+                in ("DISPATCHED", "IDEMPOTENT_NO_OP", "SUBMITTED", "SIMULATED", "PARTIAL", "ACCEPTED", "SUCCESS")
+                else "FAILED"
+            ),
             "engine": "Bing Webmaster Tools / IndexNow",
             "urls_submitted": res.get("urls_submitted", 0),
             "indexnow_response": res,
@@ -4650,10 +4698,13 @@ class PushIndexer:
                 else {}
             )
             indexnow_eng = prev_engines.get("indexnow") if isinstance(prev_engines, dict) else None
-            per_engine_aligned = (
-                True
-                if not prev_engines
-                else (isinstance(indexnow_eng, dict) and indexnow_eng.get("hash") == curr_hash)
+            google_eng = prev_engines.get("google") if isinstance(prev_engines, dict) else None
+            indexnow_aligned = isinstance(indexnow_eng, dict) and indexnow_eng.get("hash") == curr_hash
+            google_aligned = isinstance(google_eng, dict) and google_eng.get("hash") == curr_hash
+            per_engine_aligned = bool(
+                prev_engines
+                and indexnow_aligned
+                and (google_eng is None or google_aligned)
             )
 
             if (
@@ -4739,16 +4790,17 @@ class PushIndexer:
             led_rec = pushed_ledger.get(url) if isinstance(pushed_ledger.get(url), dict) else {}
             led_engines = led_rec.get("engines") if isinstance(led_rec.get("engines"), dict) else {}
             in_rollover = url in rollover_pending_set or bool(led_rec.get("google_rollover_queued"))
+            curr_hash = a.get("content_hash") or self.get_url_content_hash(url)
+            google_eng = led_engines.get("google")
+            indexnow_eng = led_engines.get("indexnow")
             google_pushed = bool(
                 not in_rollover
-                and (
-                    isinstance(led_engines.get("google"), dict)
-                    or (not led_engines and push_count > 0)
-                )
+                and isinstance(google_eng, dict)
+                and (not google_eng.get("hash") or google_eng.get("hash") == curr_hash)
             )
             indexnow_pushed = bool(
-                isinstance(led_engines.get("indexnow"), dict)
-                or (not led_engines and push_count > 0)
+                isinstance(indexnow_eng, dict)
+                and (not indexnow_eng.get("hash") or indexnow_eng.get("hash") == curr_hash)
             )
 
             if live:
@@ -5086,9 +5138,6 @@ class PushIndexer:
                 still_in_rollover = set(self.load_gsc_rollover_queue())
                 if indexnow_res.get("status") in ("DISPATCHED", "ACCEPTED", "SUCCESS", "IDEMPOTENT_NO_OP"):
                     self.record_pushed_urls(urls_to_submit, engine="indexnow")
-                completed_all = [u for u in urls_to_submit if u not in still_in_rollover]
-                if completed_all:
-                    self.record_pushed_urls(completed_all)
                 if still_in_rollover:
                     self.purge_pushed_urls(list(still_in_rollover), engine="google")
                     ledger_now = self.load_pushed_ledger()

@@ -474,3 +474,147 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
     assert acc.passed is True, f"Gate 5/6 violations: {acc.violations}"
     assert acc.violations == []
 
+
+def test_gainhelm_legacy_dispatch_410_gone_and_legitimate_301_preservation(tmp_path):
+    """
+    Verifies GainHelm's 24 legacy field-service dispatch slugs + /setup return HTTP 410 Gone
+    (with X-Robots-Tag: noindex, Cache-Control: public, max-age=86400, ASCII-only HTML, and
+    removal of stale 301 entries from edgeRedirects) while keeping legitimate compliance
+    short-link redirects as HTTP 301 and supporting general 410 rules in dist/_redirects.
+    """
+    from pseofactory.edge import _GAINHELM_LEGACY_GONE_SLUGS
+
+    assert len(_GAINHELM_LEGACY_GONE_SLUGS) == 25
+
+    repo = tmp_path / "gainhelm"
+    dist_dir = repo / "dist"
+    (repo / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / "soc-2-audit-cost-calculator").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / "soc-2-audit-cost-calculator" / "index.html").write_text(
+        "<!DOCTYPE html><html><body>SOC 2</body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "_redirects").write_text(
+        "/calculator / 301\n"
+        "/calculators / 301\n"
+        "/soc2 /tools/soc-2-audit-cost-calculator/ 301\n"
+        "/cmmc /tools/cmmc-2-0-compliance-cost-calculator/ 301\n"
+        "/how-it-works /methodology/ 301\n",
+        encoding="utf-8",
+    )
+
+    # Seed pre-fix middleware containing legacy dispatch 301s to prove clean in-place migration
+    legacy_entries = "\n".join(
+        f'    "{slug}": "/tools/",\n    "{slug}/": "/tools/",' for slug in _GAINHELM_LEGACY_GONE_SLUGS
+    )
+    mw_path = repo / "functions" / "_middleware.js"
+    mw_path.write_text(
+        "export async function onRequest(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        "  const hostname = url.hostname.toLowerCase();\n"
+        "  const pathname = url.pathname;\n\n"
+        "  const edgeRedirects = {\n"
+        f"{legacy_entries}\n"
+        '    "/soc2": "/tools/soc-2-audit-cost-calculator/",\n'
+        '    "/soc2/": "/tools/soc-2-audit-cost-calculator/",\n'
+        "  };\n\n"
+        "  if (edgeRedirects[pathname]) {\n"
+        "    return Response.redirect(`${url.origin}${edgeRedirects[pathname]}`, 301);\n"
+        "  }\n\n"
+        "  const response = await context.next();\n"
+        "  return response;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    sync_res = sync_tenant_edge_redirect_function(repo, property_id="gainhelm")
+    assert sync_res["status"] == "UPDATED"
+    mw_text = mw_path.read_text(encoding="utf-8")
+    assert "\u2014" not in mw_text
+    assert "\u2013" not in mw_text
+    assert "const edgeGone = new Set([" in mw_text
+    assert '"/mobile-dispatch-board": "/tools/"' not in mw_text
+    assert '"/setup": "/tools/"' not in mw_text
+
+    # Second pass must be strictly idempotent
+    sync_res_2 = sync_tenant_edge_redirect_function(repo, property_id="gainhelm")
+    assert sync_res_2["status"] == "UNCHANGED"
+    assert mw_path.read_text(encoding="utf-8") == mw_text
+
+    node_probe = f"""
+import {{ onRequest }} from {json.dumps(mw_path.as_uri())};
+
+async function evalReq(rawUrl) {{
+  const res = await onRequest({{
+    request: new Request(rawUrl),
+    next: async () => new Response("<html>OK</html>", {{ status: 200, headers: {{ "Content-Type": "text/html" }} }}),
+  }});
+  return {{
+    status: res.status,
+    location: res.headers.get("location"),
+    contentType: res.headers.get("content-type"),
+    robots: res.headers.get("x-robots-tag"),
+    cacheControl: res.headers.get("cache-control"),
+    body: await res.text(),
+  }};
+}}
+
+const goneSlugs = {json.dumps(list(_GAINHELM_LEGACY_GONE_SLUGS))};
+const goneResults = [];
+for (const slug of goneSlugs) {{
+  goneResults.push([slug, await evalReq("https://gainhelm.com" + slug)]);
+  goneResults.push([slug + "/", await evalReq("https://gainhelm.com" + slug + "/")]);
+}}
+
+const out = {{
+  goneResults,
+  wwwGone: await evalReq("https://www.gainhelm.com/mobile-dispatch-board"),
+  soc2Redirect: await evalReq("https://gainhelm.com/soc2"),
+  cmmcRedirect: await evalReq("https://gainhelm.com/cmmc/"),
+  calcRedirect: await evalReq("https://gainhelm.com/calculator"),
+  howItWorksRedirect: await evalReq("https://gainhelm.com/how-it-works"),
+  liveCalcPass: await evalReq("https://gainhelm.com/tools/soc-2-audit-cost-calculator/"),
+}};
+console.log(JSON.stringify(out));
+"""
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", node_probe],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    data = json.loads(proc.stdout.strip())
+
+    assert len(data["goneResults"]) == 50
+    for path_tested, res in data["goneResults"]:
+        assert res["status"] == 410, f"Expected 410 for {path_tested}, got {res}"
+        assert res["contentType"] == "text/html; charset=utf-8"
+        assert res["robots"] == "noindex"
+        assert res["cacheControl"] == "public, max-age=86400"
+        assert "\u2014" not in res["body"]
+        assert "\u2013" not in res["body"]
+        assert "410 Gone" in res["body"]
+
+    assert data["wwwGone"]["status"] == 410
+    assert data["soc2Redirect"]["status"] == 301
+    assert data["soc2Redirect"]["location"] == "https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
+    assert data["cmmcRedirect"]["status"] == 301
+    assert data["cmmcRedirect"]["location"] == "https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/"
+    assert data["calcRedirect"]["status"] == 301
+    assert data["calcRedirect"]["location"] == "https://gainhelm.com/"
+    assert data["howItWorksRedirect"]["status"] == 301
+    assert data["howItWorksRedirect"]["location"] == "https://gainhelm.com/methodology/"
+    assert data["liveCalcPass"]["status"] == 200
+
+    # Verify generalized 410 support via dist/_redirects for any other tenant
+    lb_repo = tmp_path / "lienbond"
+    (lb_repo / "functions" / "r").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "dist").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "dist" / "_redirects").write_text("/retired-legacy-slug / 410\n", encoding="utf-8")
+    sync_tenant_edge_redirect_function(lb_repo, property_id="lienbond")
+    lb_mw = (lb_repo / "functions" / "_middleware.js").read_text(encoding="utf-8")
+    assert '"/retired-legacy-slug"' in lb_mw
+    assert "status: 410" in lb_mw
+
+
