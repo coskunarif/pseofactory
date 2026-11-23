@@ -8,10 +8,10 @@ Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -27,10 +27,10 @@ def test_historical_year_cannibalization_and_off_jurisdiction_guards() -> None:
        for US-statutory tenants (profithelm, prexvo, lienbond), while EU DORA/AI Act on
        gainhelm and Section 301 China tariff queries on profithelm remain allowed.
     """
+    import pseofactory.qualification as qual_mod
     from pseofactory.qualification import (
         assert_high_effort_content_qualified,
         check_search_intent_cannibalization,
-        detect_non_us_jurisdiction,
         normalize_search_intent_tokens,
         qualify_search_intent,
     )
@@ -50,16 +50,7 @@ def test_historical_year_cannibalization_and_off_jurisdiction_guards() -> None:
     norm_osha = normalize_search_intent_tokens("29 cfr 1904 osha recordkeeping calculator")
     assert "1904" in norm_osha["core_tokens"]
 
-    # Non-US foreign jurisdiction queries rejected for US-statutory tenants
-    assert detect_non_us_jurisdiction("surety bond cost calculator philippines", property_id="lienbond") == "philippines"
-    assert detect_non_us_jurisdiction("capital gains tax calculator canada", property_id="profithelm") == "canada"
-    assert detect_non_us_jurisdiction("student loan repayment calculator uk", property_id="prexvo") == "united_kingdom"
-
-    # Legitimate EU compliance on gainhelm and US Section 301 China tariffs on profithelm stay allowed
-    assert detect_non_us_jurisdiction("eu ai act high risk conformity assessment cost calculator", property_id="gainhelm") is None
-    assert detect_non_us_jurisdiction("dora ict third party risk compliance cost calculator", property_id="gainhelm") is None
-    assert detect_non_us_jurisdiction("section 301 china import tariff landed cost calculator", property_id="profithelm") is None
-
+    # Non-US foreign jurisdiction queries rejected through public qualification entrypoints
     verdict = qualify_search_intent(
         {"query": "surety bond cost calculator philippines", "property_id": "lienbond", "impressions": 200},
         existing_tools=[],
@@ -83,16 +74,25 @@ def test_historical_year_cannibalization_and_off_jurisdiction_guards() -> None:
             }
         )
 
+    detect_non_us_jurisdiction = getattr(qual_mod, "detect_non_us_jurisdiction", None)
+    assert callable(detect_non_us_jurisdiction), "detect_non_us_jurisdiction helper missing"
+    assert detect_non_us_jurisdiction("surety bond cost calculator philippines", property_id="lienbond") == "philippines"
+    assert detect_non_us_jurisdiction("capital gains tax calculator canada", property_id="profithelm") == "canada"
+    assert detect_non_us_jurisdiction("student loan repayment calculator uk", property_id="prexvo") == "united_kingdom"
+
+    # Legitimate EU compliance on gainhelm and US Section 301 China tariffs on profithelm stay allowed
+    assert detect_non_us_jurisdiction("eu ai act high risk conformity assessment cost calculator", property_id="gainhelm") is None
+    assert detect_non_us_jurisdiction("dora ict third party risk compliance cost calculator", property_id="gainhelm") is None
+    assert detect_non_us_jurisdiction("section 301 china import tariff landed cost calculator", property_id="profithelm") is None
+
 
 def test_non_page_discovery_artifacts_excluded_from_gsc_cannibalization() -> None:
     """
     GSC striking-distance rows for llms.txt, llms-full.txt, robots.txt, sitemap*.xml,
     feed.xml, and *.json must never be selected as cannibalization or REFACTOR_PAGE targets.
     """
-    from pseofactory.qualification import (
-        check_search_intent_cannibalization,
-        is_non_page_discovery_artifact,
-    )
+    import pseofactory.qualification as qual_mod
+    from pseofactory.qualification import check_search_intent_cannibalization
 
     for art in (
         "llms.txt",
@@ -104,7 +104,6 @@ def test_non_page_discovery_artifacts_excluded_from_gsc_cannibalization() -> Non
         "catalog.json",
         "ai-benchmarks.json",
     ):
-        assert is_non_page_discovery_artifact(art) is True
         res = check_search_intent_cannibalization(
             "pslf calculator",
             existing_tools=[],
@@ -119,8 +118,7 @@ def test_non_page_discovery_artifacts_excluded_from_gsc_cannibalization() -> Non
         )
         assert res["is_cannibalizing"] is False, f"Artifact {art} was falsely matched: {res}"
 
-    assert is_non_page_discovery_artifact("pslf-qualifying-payment-simulator") is False
-    # Real tool page still matches properly
+    # Real tool page still matches properly even when llms.txt ranks higher in GSC
     res_real = check_search_intent_cannibalization(
         "pslf calculator",
         existing_tools=[],
@@ -142,19 +140,58 @@ def test_non_page_discovery_artifacts_excluded_from_gsc_cannibalization() -> Non
     assert res_real["is_cannibalizing"] is True
     assert res_real["parent_slug"] == "pslf-qualifying-payment-simulator"
 
+    is_art_fn = getattr(qual_mod, "is_non_page_discovery_artifact", None)
+    assert callable(is_art_fn), "is_non_page_discovery_artifact helper missing"
+    assert is_art_fn("llms.txt") is True
+    assert is_art_fn("pslf-qualifying-payment-simulator") is False
+
 
 def test_daily_trend_builder_fail_closed_ymyl_gate_and_reweighted_queue_persist(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     1. execute_autonomous_daily_trend_page_build fails closed when a compiled page violates
        detect_asset_partner_roster_and_slot_issues (such as a Prexvo suppressed-default page
-       carrying commercial /r/ links) or off-jurisdiction guards.
+       carrying commercial /r/ links) or off-jurisdiction guards, even after compiler fixes.
     2. execute_autonomous_daily_trend_page_build persists revenue_weighted_expansion_queue.json
        alongside void_candidates.jsonl when dry_run=False.
     """
+    import pseofactory.maintenance as maint_mod
+    import pseofactory.pipeline as pipe_mod
     from pseofactory.maintenance import ConfigurablePropertyAdapter, TenantRegistry
     from pseofactory.pipeline import execute_autonomous_daily_trend_page_build
+
+    # Wrap retrofit_html so the Prexvo test slug always receives a contradictory
+    # suppressed-default YMYL + commercial /r/ link section right before Stage 4 gating.
+    # This proves pipeline.py fails closed independently of compiler.py fixes.
+    orig_retrofit_html = maint_mod.RetroReflectionEngine.retrofit_html
+
+    def _inject_contradictory_ymyl_retrofit(
+        cls: Any,
+        html_text: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        out_html, changed = orig_retrofit_html(html_text, *args, **kwargs)
+        slug_arg = str(kwargs.get("slug") or "")
+        if slug_arg == "discretionary-income-calculator-for-student-loans":
+            poison_block = (
+                '<section data-commercial-offers="suppressed-default">'
+                '<a href="/r/splash_financial">Compare Refinance Rates</a>'
+                "</section>"
+            )
+            if "</body>" in out_html:
+                out_html = out_html.replace("</body>", f"{poison_block}</body>", 1)
+            else:
+                out_html = out_html + poison_block
+        return out_html, changed
+
+    monkeypatch.setattr(
+        maint_mod.RetroReflectionEngine,
+        "retrofit_html",
+        classmethod(_inject_contradictory_ymyl_retrofit),
+    )
 
     prexvo_dist = tmp_path / "prexvo" / "dist"
     (prexvo_dist / "tools").mkdir(parents=True, exist_ok=True)
@@ -209,6 +246,9 @@ def test_daily_trend_builder_fail_closed_ymyl_gate_and_reweighted_queue_persist(
     ]
     queue_file.write_text("\n".join(json.dumps(c) for c in candidates) + "\n", encoding="utf-8")
 
+    # Sanity-check module binding is untouched
+    assert pipe_mod.execute_autonomous_daily_trend_page_build is execute_autonomous_daily_trend_page_build
+
     res = execute_autonomous_daily_trend_page_build(
         property_ids=["prexvo", "lienbond"],
         void_candidates_path=queue_file,
@@ -242,21 +282,27 @@ def test_daily_trend_builder_fail_closed_ymyl_gate_and_reweighted_queue_persist(
 
 def test_handoff_verifier_does_not_bypass_on_dirty_git_without_active_lock(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    DepartmentHandoffChainVerifier._has_active_build_lock must return False when no
-    process holds an advisory flock (even if git working tree is dirty), and return True
-    only when a live process holds the lockfile.
+    DepartmentHandoffChainVerifier must NOT use dirty `git status --porcelain` to force
+    in_flight_build=True, and must require a real active advisory flock via
+    _has_active_build_lock (False on unheld lockfile, True only while live process holds LOCK_EX).
     """
     from pseofactory.supervisor import DepartmentHandoffChainVerifier
+
+    # Stage 4 (_run_verification_stage) must not consult git status --porcelain to set in_flight_build
+    stage4_src = inspect.getsource(DepartmentHandoffChainVerifier._run_verification_stage)
+    assert "--porcelain" not in stage4_src
+
+    has_lock = getattr(DepartmentHandoffChainVerifier, "_has_active_build_lock", None)
+    assert callable(has_lock), "DepartmentHandoffChainVerifier._has_active_build_lock missing"
 
     test_pid_slug = f"guard_test_tenant_{tmp_path.name}"
     lock_path = Path(f"/tmp/{test_pid_slug}_factory.lock")
     try:
         # Unheld lock file must NOT trigger in-flight bypass
         lock_path.write_text("", encoding="utf-8")
-        assert DepartmentHandoffChainVerifier._has_active_build_lock(test_pid_slug) is False
+        assert has_lock(test_pid_slug) is False
 
         # Spawn a child process that actually holds LOCK_EX on the tenant lock
         holder = subprocess.Popen(
@@ -277,25 +323,25 @@ def test_handoff_verifier_does_not_bypass_on_dirty_git_without_active_lock(
         try:
             line = holder.stdout.readline().strip() if holder.stdout else ""
             assert line == "LOCKED"
-            assert DepartmentHandoffChainVerifier._has_active_build_lock(test_pid_slug) is True
+            assert has_lock(test_pid_slug) is True
         finally:
             holder.terminate()
             holder.wait(timeout=5)
 
         # Immediately after child exits, lock is released -> False
-        assert DepartmentHandoffChainVerifier._has_active_build_lock(test_pid_slug) is False
+        assert has_lock(test_pid_slug) is False
     finally:
         lock_path.unlink(missing_ok=True)
 
 
 def test_dynamic_tenant_discovery_in_verifier_and_drift_latch(tmp_path: Path) -> None:
     """
-    Both verifier._discover_live_audit_tenants and drift.verify_all_tenants_aligned_for_latch
-    must dynamically discover newly added .pseofactory.json tenants (50+ site scaling)
-    rather than hardcoding 3 or 4 tenants.
+    Both drift.verify_all_tenants_aligned_for_latch and verifier dynamic tenant discovery
+    must discover newly added .pseofactory.json tenants (50+ site scaling) rather than
+    hardcoding 3 or 4 tenants.
     """
+    import pseofactory.verifier as ver_mod
     from pseofactory.drift import verify_all_tenants_aligned_for_latch
-    from pseofactory.verifier import _discover_live_audit_tenants
 
     ws = tmp_path / "ws_50_sites"
     new_tenant = ws / "novacorp"
@@ -315,15 +361,17 @@ def test_dynamic_tenant_discovery_in_verifier_and_drift_latch(tmp_path: Path) ->
     )
     (new_tenant / "dist" / "index.html").write_text("<html><body>NovaCorp</body></html>", encoding="utf-8")
 
-    discovered = _discover_live_audit_tenants(workspace_root=ws)
-    assert "novacorp" in discovered
-
     ok, reasons = verify_all_tenants_aligned_for_latch(
         workspace_root=ws,
         require_git_clean_and_pushed=False,
     )
     assert ok is False
     assert any("novacorp: missing substrate_lock.json" in r for r in reasons), reasons
+
+    discover_fn = getattr(ver_mod, "_discover_live_audit_tenants", None)
+    assert callable(discover_fn), "verifier._discover_live_audit_tenants missing"
+    discovered = discover_fn(workspace_root=ws)
+    assert "novacorp" in discovered
 
 
 def test_supervisor_failure_streak_updates_timestamp_and_skips_duplicate_retro(
