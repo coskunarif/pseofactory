@@ -843,11 +843,10 @@
         "firstpromoter_api_v1": {
           "provider": "FirstPromoter REST API",
           "active_partners": [
-            "coinledger (fpr=arif-554004, 25% recurring commission, PayPal payout arif.coskun@profithelm.com verified)",
-            "koinly (fpr=arif-4c0b88, 20% one-time first purchase commission per Inbox #1071, PayPal payout arif.coskun@profithelm.com verified)"
+            "coinledger (fpr=arif-554004, 25% recurring commission, PayPal payout arif.coskun@profithelm.com verified)"
           ],
           "verified_clicks": 10,
-          "role": "Token-based crypto tax referral tracking (25% recurring on CoinLedger + 20% one-time first purchase on Koinly per Inbox #1071; Xendoo promoted to Impact #16354 at $500 CPA)"
+          "role": "Token-based crypto tax referral tracking (25% recurring on CoinLedger; Koinly uses native affiliate portal via=F0D55B86&utm_source=affiliate at 20% one-time first purchase per Inbox #1071; Xendoo promoted to Impact #16354 at $500 CPA)"
         },
         "impact_rest_api": {
           "provider": "Impact.com Publisher REST API",
@@ -929,17 +928,16 @@
           "status": "live",
           "is_fallback_partner": true,
           "pipeline_tier": "live_revenue_ready",
-          "portal_key": "firstpromoter",
-          "url": "https://koinly.io/?fpr=arif-4c0b88",
-          "direct_url": "https://koinly.io/?fpr=arif-4c0b88",
+          "portal_key": "koinly_native",
+          "url": "https://koinly.io/?via=F0D55B86&utm_source=affiliate",
+          "direct_url": "https://koinly.io/?via=F0D55B86&utm_source=affiliate",
           "edge_route": "/r/koinly",
           "category": "DIGITAL_ASSETS",
-          "network": "FirstPromoter",
+          "network": "Koinly Native Affiliate",
           "commission_est": "20% one-time first purchase",
           "bounty": "20% one-time first purchase",
-          "firstpromoter_welcome_url": "https://koinly.io/?fpr=arif-4c0b88",
           "payout_method": "PayPal (arif.coskun@profithelm.com - verified)",
-          "correspondence_status": "Approved & Live (FirstPromoter fpr=arif-4c0b88; 20% one-time first purchase commission confirmed in Inbox #1071)"
+          "correspondence_status": "Approved & Live (Koinly Native Affiliate Portal via=F0D55B86&utm_source=affiliate; 20% one-time first purchase commission confirmed in Inbox #1071; legacy FirstPromoter fpr link retired because koinly.io frontend only tracks via and utm_source)"
         },
         "rippling": {
           "status": "live",

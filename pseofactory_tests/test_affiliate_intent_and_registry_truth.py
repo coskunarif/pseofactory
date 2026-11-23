@@ -50,7 +50,8 @@ def test_unapproved_lenders_and_grc_vendors_are_not_marked_live():
     assert all(p.status == "pending" for p in GAINHELM_AFFILIATES.values())
     assert PROFITHELM_AFFILIATES["ramp"].status == "live"
     assert "join.ramp.com" in PROFITHELM_AFFILIATES["ramp"].default_url
-    assert "fpr=arif-4c0b88" in PROFITHELM_AFFILIATES["koinly"].default_url
+    assert PROFITHELM_AFFILIATES["koinly"].default_url == "https://koinly.io/?via=F0D55B86&utm_source=affiliate"
+    assert "fpr=arif-4c0b88" not in PROFITHELM_AFFILIATES["koinly"].default_url
 
 
 def test_vault_is_reconciled_with_registry():
@@ -59,8 +60,11 @@ def test_vault_is_reconciled_with_registry():
     assert not any(pid in text for pid in DEAD_CJ_PROPERTY_IDS)
     assert ACTIVE_CJ_PROPERTY_ID in text
     assert "via=A4FABF09&utm_source=affiliate" not in text
+    assert "fpr=arif-4c0b88" not in text
+    assert "https://koinly.io/?via=F0D55B86&utm_source=affiliate" in text
     props = vault["properties"]
     assert props["profithelm"]["partners"]["ramp"]["status"] == "live"
+    assert props["profithelm"]["partners"]["koinly"]["url"] == "https://koinly.io/?via=F0D55B86&utm_source=affiliate"
     assert {v["status"] for v in props["prexvo"]["partners"].values()} == {"pending", "declined"}
     assert {v["status"] for v in props["gainhelm"]["partners"].values()} == {"pending"}
 
@@ -202,6 +206,113 @@ def test_profithelm_factory_pipeline_test_sync_adds_top_level_pytest_import():
 
     src = inspect.getsource(reflect_and_recompile_all_assets)
     assert 'not ph_fp_src.startswith("import pytest") and "\\nimport pytest" not in ph_fp_src' in src
+
+
+def test_koinly_live_native_via_tracking_url_across_registry_vault_hub_and_edge_runtime(tmp_path):
+    import subprocess
+    from urllib.parse import parse_qs, urlsplit
+    import pseofactory.affiliate_intent as affiliate_intent
+    from pseofactory.action_bus import HumanActionBus
+    from pseofactory.affiliates_hub import AUTHORITATIVE_EDGE_REDIRECT_URLS
+    from pseofactory.email_ingest import EmailIngestionEngine, EmailMessage
+    from pseofactory.partner_tracker import PartnerTrackingEngine
+
+    expected_url = "https://koinly.io/?via=F0D55B86&utm_source=affiliate"
+
+    # 1. Registry, vault, hub, and compiled edge redirect source all agree on native via=F0D55B86
+    assert PROFITHELM_AFFILIATES["koinly"].default_url == expected_url
+    assert getattr(affiliate_intent, "KOINLY_NATIVE_AFFILIATE_URL", None) == expected_url
+    assert is_intent_matched("koinly", expected_url) is True
+    assert is_intent_matched("coinledger", expected_url) is False
+    assert is_intent_matched("vanta_security", expected_url) is False
+    vault_raw = VAULT.read_text(encoding="utf-8")
+    assert "fpr=arif-4c0b88" not in vault_raw
+    assert "A4FABF09" not in vault_raw
+    vault = json.loads(vault_raw)
+    koinly_vault = vault["properties"]["profithelm"]["partners"]["koinly"]
+    assert koinly_vault["url"] == expected_url
+    assert koinly_vault["direct_url"] == expected_url
+
+    assert AUTHORITATIVE_EDGE_REDIRECT_URLS["koinly"] == expected_url
+    hub = MonetizationHub()
+    assert hub.get_direct_contract_upgrades("profithelm")["koinly"] == expected_url
+
+    edge_js = generate_edge_redirect_function("profithelm", hub=hub)
+    assert expected_url in edge_js
+    assert "fpr=arif-4c0b88" not in edge_js
+    assert "A4FABF09" not in edge_js
+
+    # 2. Execute generated ProfitHelm functions/r/[partner].js in Node.js for human Chrome GET /r/koinly
+    edge_file = tmp_path / "profithelm_r.mjs"
+    edge_file.write_text(edge_js, encoding="utf-8")
+    runner = tmp_path / "run_koinly_check.mjs"
+    runner.write_text(
+        """
+import * as ph from "./profithelm_r.mjs";
+
+const CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+const bareRes = await ph.onRequest({
+  request: new Request("https://profithelm.com/r/koinly", {
+    method: "GET",
+    headers: { "user-agent": CHROME_UA },
+  }),
+  env: {},
+  params: { partner: "koinly" },
+});
+
+const taggedRes = await ph.onRequest({
+  request: new Request("https://profithelm.com/r/koinly?source_tool=crypto-tax-calculator&cta_slot=card_1&utm_source=profithelm", {
+    method: "GET",
+    headers: { "user-agent": CHROME_UA },
+  }),
+  env: {},
+  params: { partner: "koinly" },
+});
+
+console.log(JSON.stringify({
+  bare: { status: bareRes.status, location: bareRes.headers.get("Location") },
+  tagged: { status: taggedRes.status, location: taggedRes.headers.get("Location") },
+}));
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(["node", str(runner)], cwd=str(tmp_path), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    assert out["bare"]["status"] == 302
+    assert out["bare"]["location"] == expected_url
+
+    assert out["tagged"]["status"] == 302
+    tagged_qs = parse_qs(urlsplit(out["tagged"]["location"]).query)
+    assert tagged_qs.get("via") == ["F0D55B86"]
+    assert tagged_qs.get("utm_source") == ["affiliate"]
+    assert "fpr" not in tagged_qs
+
+    # 3. Historical FirstPromoter Newsletter #1588 email must NEVER overwrite live native via=F0D55B86
+    email_engine = EmailIngestionEngine(
+        cache_path=tmp_path / "email_cache.json",
+        state_path=tmp_path / "email_state.json",
+    )
+    action_bus = HumanActionBus(bus_path=tmp_path / "bus.json")
+    tracker = PartnerTrackingEngine(email_engine=email_engine, action_bus=action_bus)
+    legacy_msg = EmailMessage(
+        id="1588",
+        message_id="<1588@firstpromoter.com>",
+        account="zoho",
+        mailbox="Newsletter",
+        subject="Welcome to Koinly Affiliates!",
+        sender_name="Koinly Affiliates",
+        sender_email="promoter@firstpromoter.com",
+        date="2026-10-20 19:14:05+00:00",
+        body_snippet="Welcome to Koinly Affiliates! Your referral link is http://koinly.io?fpr=arif-4c0b88",
+    )
+    classified = email_engine.classify_partner_emails([legacy_msg])
+    promo = tracker.auto_promote_approved_links(classified, persist=False)
+    assert promo["promoted_count"] == 0
+    assert tracker.hub.get_direct_contract_upgrades("profithelm")["koinly"] == expected_url
+
 
 
 

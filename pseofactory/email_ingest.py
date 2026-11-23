@@ -1316,7 +1316,7 @@ class EmailIngestionEngine:
                         category="DIGITAL_ASSETS",
                         classification_type="APPLICATION_APPROVED",
                         requires_operator_decision=False,
-                        summary="Koinly Affiliates program approved and active (native via=A4FABF09 on app.koinly.io/affiliate with verified PayPal arif.coskun@profithelm.com + FirstPromoter welcome link http://koinly.io?fpr=arif-4c0b88 in Newsletter #1588).",
+                        summary="Koinly Affiliates program approved and active (live native via=F0D55B86&utm_source=affiliate on app.koinly.io/affiliate with verified PayPal arif.coskun@profithelm.com; legacy FirstPromoter welcome email http://koinly.io?fpr=arif-4c0b88 in Newsletter #1588 is deprecated).",
                         urgency="LOW",
                         deadline=None,
                         missing_requirements=[],

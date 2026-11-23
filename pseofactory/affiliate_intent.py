@@ -31,7 +31,8 @@ WALLETHUB_CJ_URL = "https://www.jdoqocy.com/click-101906407-16952385"
 MERCURY_PARTNERSTACK_URL = "https://mercury.com/r/profithelm-llc"
 RIPPLING_PARTNERSTACK_URL = "https://try.rippling.com/mcfo1m09qiwt"
 COINLEDGER_FIRSTPROMOTER_URL = "https://coinledger.io/?fpr=arif-554004"
-KOINLY_FIRSTPROMOTER_URL = "https://koinly.io/?fpr=arif-4c0b88"
+KOINLY_NATIVE_AFFILIATE_URL = "https://koinly.io/?via=F0D55B86&utm_source=affiliate"
+KOINLY_FIRSTPROMOTER_URL = KOINLY_NATIVE_AFFILIATE_URL
 
 # Active CJ publisher properties across all 4 tenants. Legacy PID 101725461 returns HTTP 400 and must never be used.
 ACTIVE_CJ_PROPERTY_ID = "101906407"
@@ -72,7 +73,7 @@ def _norm(url: str) -> str:
     fp_pairs = [
         (k.lower(), v.lower())
         for k, v in parse_qsl(parts.query, keep_blank_values=False)
-        if k.lower() in ("fpr", "fp_ref")
+        if k.lower() in ("fpr", "fp_ref", "via")
     ]
     base = f"{parts.scheme}://{parts.netloc}{parts.path}".rstrip("/").lower()
     if fp_pairs:
@@ -128,7 +129,7 @@ ALLOWED_PARTNER_KEYS_BY_TRACKING_URL: Dict[str, FrozenSet[str]] = {
     _norm(MERCURY_PARTNERSTACK_URL): frozenset({"mercury", "mercury_treasury"}),
     _norm(RIPPLING_PARTNERSTACK_URL): frozenset({"rippling", "rippling_hr"}),
     _norm(COINLEDGER_FIRSTPROMOTER_URL): frozenset({"coinledger", "coinledger_tax"}),
-    _norm(KOINLY_FIRSTPROMOTER_URL): frozenset({"koinly", "koinly_tax"}),
+    _norm(KOINLY_NATIVE_AFFILIATE_URL): frozenset({"koinly", "koinly_tax"}),
 }
 
 # Retained for backward-compatible imports; `is_intent_matched` enforces strict brand allowlisting
@@ -242,6 +243,7 @@ def is_intent_matched(partner_key: str, tracking_url: str) -> bool:
                 "try.rippling.com/",
                 "fpr=",
                 "fp_ref=",
+                "via=",
             )
         ):
             return False

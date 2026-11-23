@@ -2351,7 +2351,7 @@ export async function onRequest(context) {{
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
     const val = normParams.get(param);
-    if (val !== undefined && val !== "") {{
+    if (val !== undefined && val !== "" && !targetObj.searchParams.has(param)) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
@@ -2822,7 +2822,7 @@ export async function onRequest(context) {{
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
     const val = normParams.get(param);
-    if (val !== undefined && val !== "") {{
+    if (val !== undefined && val !== "" && !targetObj.searchParams.has(param)) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
@@ -3329,7 +3329,7 @@ export async function onRequest(context) {{
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
     const val = normParams.get(param);
-    if (val !== undefined && val !== "") {{
+    if (val !== undefined && val !== "" && !targetObj.searchParams.has(param)) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
@@ -3439,7 +3439,7 @@ export async function onRequest(context) {{
     else:
         direct_contract_upgrades = {
             "coinledger": "https://coinledger.io/?fpr=arif-554004",
-            "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+            "koinly": "https://koinly.io/?via=F0D55B86&utm_source=affiliate",
             "mercury": "https://mercury.com/r/profithelm-llc",
             "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",
             "rippling": "https://try.rippling.com/mcfo1m09qiwt",
@@ -4008,7 +4008,7 @@ export async function onRequest(context) {{
   const targetObj = new URL(rawTargetUrl);
   for (const param of TRACKING_PARAMS) {{
     const val = normParams.get(param);
-    if (val !== undefined && val !== "") {{
+    if (val !== undefined && val !== "" && !targetObj.searchParams.has(param)) {{
       targetObj.searchParams.set(param, val);
     }}
   }}
@@ -4370,7 +4370,7 @@ def resolve_canonical_partner_redirect(
 
     for param in tracking_params:
         val = norm_params.get(param)
-        if val is not None and val != "":
+        if val is not None and val != "" and param not in q_dict:
             q_dict[param] = val
 
     source_tool = norm_params.get("source_tool") or norm_params.get("source") or ""

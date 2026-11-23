@@ -1653,7 +1653,7 @@ def test_ui_ux_e2e_repro_gate(tmp_path):
             "mercury": "https://mercury.com/r/profithelm-llc",
             "kalshi": "https://kalshi.pxf.io/",
             "coinledger": "https://coinledger.io/?fpr=arif-554004",
-            "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+            "koinly": "https://koinly.io/?via=F0D55B86&utm_source=affiliate",
         }
         for p_key, expected_prefix in expected_partner_prefixes.items():
             try:

@@ -548,7 +548,10 @@ console.log(JSON.stringify(out));
     # Live ProfitHelm partners stay 100% active
     assert out["ph_live_xendoo"]["status"] == 302 and "xendoo.pxf.io" in out["ph_live_xendoo"]["location"]
     assert out["ph_live_efile"]["status"] == 302 and "jdoqocy.com" in out["ph_live_efile"]["location"]
-    assert out["ph_live_koinly"]["status"] == 302 and "fpr=arif-4c0b88" in out["ph_live_koinly"]["location"]
+    assert out["ph_live_koinly"]["status"] == 302
+    assert "via=F0D55B86" in out["ph_live_koinly"]["location"]
+    assert "utm_source=affiliate" in out["ph_live_koinly"]["location"]
+    assert "fpr=arif-4c0b88" not in out["ph_live_koinly"]["location"]
 
     # Pending partners default fail-closed on-site hold (never checkout!)
     for key, expected_host in (

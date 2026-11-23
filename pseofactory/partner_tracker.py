@@ -1661,6 +1661,25 @@ class PartnerTrackingEngine:
                 )
                 continue
 
+            if (
+                p_key == "koinly"
+                and "fpr=" in cand_url.lower()
+                and "via=" not in cand_url.lower()
+            ):
+                skipped_gated.append(
+                    {
+                        "email_id": c.email_id,
+                        "property_id": prop_clean,
+                        "partner_key": p_key,
+                        "partner_name": c.partner_name,
+                        "reason": (
+                            "Legacy Koinly FirstPromoter fpr= link ignored; "
+                            "live koinly.io frontend only tracks native via= and utm_source=affiliate"
+                        ),
+                    }
+                )
+                continue
+
             prop_section = self.hub.vault_data.setdefault("properties", {}).setdefault(prop_clean, {})
             partners_dict = prop_section.setdefault("partners", {})
             p_entry = partners_dict.setdefault(p_key, {})
@@ -2225,9 +2244,9 @@ class PartnerTrackingEngine:
                     )
                 elif prop_id == "profithelm" and p_key == "koinly":
                     delta_note = (
-                        "UPDATED: Newsletter #1588 (19:14:05Z) issued FirstPromoter link "
-                        "https://koinly.io/?fpr=arif-4c0b88 and Inbox #1007 (19:36:05Z) confirmed "
-                        "PayPal payout setup on native affiliate portal (via=A4FABF09, 3 clicks)."
+                        "UPDATED: Live Koinly Native Affiliate Portal link is "
+                        "https://koinly.io/?via=F0D55B86&utm_source=affiliate and Inbox #1007 (19:36:05Z) confirmed "
+                        "PayPal payout setup on native affiliate portal (legacy Newsletter #1588 FirstPromoter fpr link retired)."
                     )
                 elif prop_id == "profithelm" and p_key == "otr_solutions_factoring":
                     delta_note = (
@@ -4934,8 +4953,8 @@ class PartnerTrackingEngine:
                 "subject": "Re: Joining Koinly's Affiliate Program - ProfitHelm Promotion Plan",
                 "body_text": (
                     "Hi Robin,\n\n"
-                    "Thank you for reaching out after our Koinly FirstPromoter approval (tracking link "
-                    "https://koinly.io/?fpr=arif-4c0b88).\n\n"
+                    "Thank you for reaching out regarding our Koinly Affiliate Program (tracking link "
+                    "https://koinly.io/?via=F0D55B86&utm_source=affiliate).\n\n"
                     "We promote Koinly across ProfitHelm (https://profithelm.com), our statutory tax and financial "
                     "modeling platform for US investors and business owners. Specifically, Koinly is integrated as "
                     "the primary portfolio tax-lot reconciliation partner on our interactive crypto tax calculators, "

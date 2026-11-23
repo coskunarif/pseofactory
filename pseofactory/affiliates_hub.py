@@ -105,7 +105,7 @@ SOVRN_REDIRECT_BASE = "https://redirect.viglink.com"
 # Uses live ProfitHelm LLC CJ Property ID 101906407.
 AUTHORITATIVE_EDGE_REDIRECT_URLS: Dict[str, str] = {
     "coinledger": "https://coinledger.io/?fpr=arif-554004",
-    "koinly": "https://koinly.io/?fpr=arif-4c0b88",
+    "koinly": "https://koinly.io/?via=F0D55B86&utm_source=affiliate",
     "mercury": "https://mercury.com/r/profithelm-llc",
     "rippling": "https://try.rippling.com/mcfo1m09qiwt",
     "gusto": "https://gusto.pxf.io/c/7932737/1226287/15154",

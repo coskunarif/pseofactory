@@ -2935,7 +2935,7 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
     lead-capture (/api/lead-capture?checkout=1) functions that:
     1. Every canonical and alias partner key resolves with HTTP 302 (zero HTTP 404 dead-ends).
     2. 100% of ProfitHelm and GainHelm clicks route strictly to verified active affiliate contracts
-       (zero leaks to redirect.viglink.com or unapproved merchants, and /r/koinly uses ?fpr=arif-4c0b88).
+       (zero leaks to redirect.viglink.com or unapproved merchants, and /r/koinly uses ?via=F0D55B86&utm_source=affiliate).
     3. 100% of Prexvo clicks fail closed onto first-party direct Stripe Checkout capture
        (https://prexvo.com/api/lead-capture?checkout=1&sku=px_refi_amortization_decision_audit&redirect=1)
        when no approved lender contract URL is present, sending zero clicks to declined/unapproved lenders.
@@ -3063,8 +3063,8 @@ def test_strict_yield_gated_routing_zero_unapproved_clicks_and_direct_checkout_r
             }}
           }}
         }}
-        if (k === "koinly" && loc.searchParams.get("fpr") !== "arif-4c0b88") {{
-          console.error("Koinly missing FirstPromoter fpr=arif-4c0b88:", loc.toString());
+        if (k === "koinly" && (loc.searchParams.get("via") !== "F0D55B86" || loc.searchParams.get("utm_source") !== "affiliate" || loc.searchParams.has("fpr"))) {{
+          console.error("Koinly missing live native via=F0D55B86&utm_source=affiliate (or leaking dead fpr):", loc.toString());
           process.exit(12);
         }}
       }}
