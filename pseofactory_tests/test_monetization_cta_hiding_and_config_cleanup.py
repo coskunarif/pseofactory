@@ -617,3 +617,13 @@ def test_pending_to_live_restores_stripped_placeholder_for_gainhelm_and_prexvo(
     assert px_restored_pass2 == px_restored
 
 
+def test_porcelain_css_defines_prexvo_ymyl_refinance_guardrail_classes() -> None:
+    """Porcelain stylesheet must define ymyl-refinance-guardrail and ymyl-statutory-warning emitted on prexvo."""
+    from pseofactory.porcelain_shell import get_porcelain_css_audit_sets
+
+    _, defined_classes = get_porcelain_css_audit_sets("prexvo")
+    assert "ymyl-refinance-guardrail" in defined_classes
+    assert "ymyl-statutory-warning" in defined_classes
+
+
+

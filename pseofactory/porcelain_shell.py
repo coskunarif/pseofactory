@@ -1835,7 +1835,8 @@ details.faq-accordion > summary::-webkit-details-marker {{
 .commentary-box,
 .statutory-edge-case-trap,
 .overlay-partner-guardrail,
-.ymyl-public-service-guardrail {{
+.ymyl-public-service-guardrail,
+.ymyl-refinance-guardrail {{
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-left: 4px solid var(--brand-primary);
@@ -1849,9 +1850,16 @@ details.faq-accordion > summary::-webkit-details-marker {{
 }}
 
 .overlay-partner-guardrail,
-.ymyl-public-service-guardrail {{
+.ymyl-public-service-guardrail,
+.ymyl-refinance-guardrail {{
   border-left-color: var(--status-positive);
   background-color: var(--bg-subtle);
+}}
+
+.ymyl-statutory-warning {{
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--text-muted);
 }}
 
 .ymyl-disclaimer-banner,
