@@ -225,11 +225,11 @@ class DailyIndexingInspector:
         try:
             recent_events = self.telemetry_logger.read_recent(limit=50, tenant_id=self.tenant_id)
             for ev in recent_events:
-                if (ev.event_type or "").upper() not in ("INDEXING_ANOMALY", "SUBPROCESS_CRASH"):
-                    continue
                 act = (ev.action_taken or "").upper()
                 if act in ("AUTO_REMEDIATED", "QUOTA_GOVERNOR_DEFERRED"):
                     break
+                if (ev.event_type or "").upper() not in ("INDEXING_ANOMALY", "SUBPROCESS_CRASH"):
+                    continue
                 ev_ts_raw = getattr(ev, "timestamp", "") or ""
                 if ev_ts_raw:
                     try:
