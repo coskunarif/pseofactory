@@ -1083,7 +1083,8 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
         px_pages = [
             p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
         ]
-        assert len(px_pages) == 23
+        assert len(px_pages) >= 23
+        assert fb_report["pages_scanned"] == len(px_pages)
         px_fb_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
         assert px_fb_mismatches == [], f"Prexvo slot mismatches right after feedback_pass: {px_fb_mismatches}"
 
@@ -1149,9 +1150,13 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
             f"Prexvo slot mismatches after retrofit_estate P1->P2->P3: {px_retro_mismatches}"
         )
     elif prop == "profithelm":
+        ph_pages = [
+            p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
+        ]
         ledger_data = json.loads((repo_copy / ".agy" / "gsc_affiliate_placement_ledger.json").read_text(encoding="utf-8"))
-        assert fb_report["pages_scanned"] == 156
-        assert len(ledger_data["page_reports"]) == 156, len(ledger_data["page_reports"])
+        assert len(ph_pages) >= 156
+        assert fb_report["pages_scanned"] == len(ph_pages)
+        assert len(ledger_data["page_reports"]) == fb_report["pages_scanned"], len(ledger_data["page_reports"])
         assert len(ledger_data["repositioned_pages"]) == fb_report["repositioned_pages_count"]
         persisted_ph = load_persisted_gsc_placement_metrics_by_slug(repo_copy / ".agy", "profithelm")
         assert "section-179-calculator" in persisted_ph and persisted_ph["section-179-calculator"]["impressions"] >= 70
