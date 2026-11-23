@@ -683,3 +683,173 @@ def test_lienbond_legacy_poisoned_meta_healed_and_all_13_slugs_clean() -> None:
             assert "3131" not in desc.lower(), f"{slug} leaked 3131: {desc}"
         assert desc not in seen_descriptions, f"Duplicate meta for {slug} and {seen_descriptions[desc]}: {desc}"
         seen_descriptions[desc] = slug
+
+
+def test_lienbond_poisoned_meta_detector_overlay_and_retrofit_idempotency(tmp_path: Path) -> None:
+    """Detector, audit_page, overlay heal detector, and retrofit_estate detect and heal poisoned LienBond metas idempotently."""
+    from pseofactory.gsc_remediation import compile_remediation_overlay_spec
+
+    poisoned_erisa_md = (
+        "Calculate Erisa Fidelity premiums, NCCI class code rates, and statutory deadlines "
+        "under 40 U.S.C. Section 3131, NCCI manuals, and 50-state construction."
+    )
+    poisoned_miller_md = (
+        "Calculate Miller Act premiums, NCCI class code rates, and statutory deadlines "
+        "under 40 U.S.C. Section 3131, NCCI manuals, and 50-state construction lien."
+    )
+    poisoned_wc_md = (
+        "Calculate Workers Compensation premiums, NCCI class code rates, and statutory deadlines "
+        "under 40 U.S.C. Section 3131, NCCI manuals, and 50-state."
+    )
+
+    # 1. Shared helper distinguishes poisoned vs clean across routes and tenants
+    assert maintenance._has_lienbond_poisoned_meta(
+        poisoned_erisa_md,
+        slug_or_url="https://lienbond.com/tools/erisa-fidelity-bond-coverage-amount-calculator/",
+        canonical_url="https://lienbond.com/tools/erisa-fidelity-bond-coverage-amount-calculator/",
+    )
+    assert maintenance._has_lienbond_poisoned_meta(
+        poisoned_wc_md,
+        slug_or_url="https://lienbond.com/tools/workers-compensation-class-code-rate-calculator-by-state/",
+        canonical_url="https://lienbond.com/tools/workers-compensation-class-code-rate-calculator-by-state/",
+    )
+    assert maintenance._has_lienbond_poisoned_meta(
+        "Calculate ERISA fidelity bond coverage using NCCI manuals and state rules.",
+        slug_or_url="erisa-fidelity-bond-coverage-amount-calculator",
+        property_id="lienbond",
+    )
+    assert not maintenance._has_lienbond_poisoned_meta(
+        "Calculate contractor surety bond premiums, NCCI workers comp class code and EMR rates, 50-state mechanics lien deadlines, and WH-347 payroll.",
+        slug_or_url="https://lienbond.com/",
+        canonical_url="https://lienbond.com/",
+    )
+    assert not maintenance._has_lienbond_poisoned_meta(
+        "Browse all 13 LienBond calculators for contractor license bonds, AIA A312 performance bonds, NCCI workers comp, EMR, ERISA bonds, and state liens.",
+        slug_or_url="https://lienbond.com/tools/",
+        is_non_tool=True,
+        canonical_url="https://lienbond.com/tools/",
+    )
+    assert not maintenance._has_lienbond_poisoned_meta(
+        "Calculate state contractor workers compensation premiums using NCCI Basic Manual class code rates per $100 of payroll, EMR multipliers, and credits.",
+        slug_or_url="https://lienbond.com/tools/workers-compensation-class-code-rate-calculator-by-state/",
+        canonical_url="https://lienbond.com/tools/workers-compensation-class-code-rate-calculator-by-state/",
+    )
+    assert not maintenance._has_lienbond_poisoned_meta(
+        "Calculate Miller Act performance and payment bond premiums using SFAA sliding-scale contract rate tiers under 40 U.S.C. Section 3131 and FAR 28.102-2.",
+        slug_or_url="https://lienbond.com/tools/miller-act-performance-and-payment-bond-premium-calculator/",
+        canonical_url="https://lienbond.com/tools/miller-act-performance-and-payment-bond-premium-calculator/",
+    )
+    assert not maintenance._has_lienbond_poisoned_meta(
+        poisoned_erisa_md,
+        slug_or_url="https://prexvo.com/tools/rap-payment-calculator/",
+        property_id="prexvo",
+        canonical_url="https://prexvo.com/tools/rap-payment-calculator/",
+    )
+
+    # 2. Stale overlay detector catches poisoned LienBond overlay JSON and clears healed overlay
+    poisoned_ov = {
+        "property_id": "lienbond",
+        "tenant_id": "lienbond",
+        "slug": "erisa-fidelity-bond-coverage-amount-calculator",
+        "target_url": "https://lienbond.com/tools/erisa-fidelity-bond-coverage-amount-calculator/",
+        "query": "erisa fidelity bond coverage amount calculator",
+        "status": "ACTIVE_LOCKED",
+        "title_rewrite": "ERISA Section 412 Fidelity Bond Calculator | LienBond",
+        "meta_description": poisoned_erisa_md,
+        "quick_answer": (
+            "ERISA Section 412 requires fiduciaries handling qualifying employee benefit plan assets to maintain "
+            "a fidelity bond equal to at least 10 percent of funds handled, subject to a $1,000 statutory floor "
+            "and a $500,000 standard maximum cap per plan under 29 U.S.C. Section 1112."
+        ),
+    }
+    assert maintenance.RetroReflectionEngine._overlay_spec_needs_heal(
+        "erisa-fidelity-bond-coverage-amount-calculator",
+        poisoned_ov,
+    )
+    healed_ov = compile_remediation_overlay_spec(
+        {
+            "slug": "erisa-fidelity-bond-coverage-amount-calculator",
+            "target_url": "https://lienbond.com/tools/erisa-fidelity-bond-coverage-amount-calculator/",
+            "query": "erisa fidelity bond coverage amount calculator",
+            "position": 12.0,
+            "impressions": 50,
+        },
+        tenant_id="lienbond",
+    )
+    assert not maintenance.RetroReflectionEngine._overlay_spec_needs_heal(
+        "erisa-fidelity-bond-coverage-amount-calculator",
+        healed_ov,
+    )
+
+    # 3. End-to-end audit_page / audit_estate -> retrofit_estate -> clean second audit_estate pass
+    repo_dir = tmp_path / "lienbond"
+    compiler.compile_lienbond_estate(repo_dir, run_retrofit=True)
+    dist_dir = repo_dir / "dist"
+    assert maintenance.RetroReflectionEngine.audit_estate(dist_dir, "lienbond")["stale_count"] == 0
+
+    poison_targets = {
+        "erisa-fidelity-bond-coverage-amount-calculator": poisoned_erisa_md,
+        "miller-act-performance-and-payment-bond-premium-calculator": poisoned_miller_md,
+        "workers-compensation-class-code-rate-calculator-by-state": poisoned_wc_md,
+    }
+    ov_dir = repo_dir / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    for slug, bad_md in poison_targets.items():
+        page_path = dist_dir / "tools" / slug / "index.html"
+        html_raw = page_path.read_text(encoding="utf-8")
+        poisoned_html = re.sub(
+            r'(<meta[^>]+name=["\']description["\'][^>]+content=["\'])([^"\']+)(["\'])',
+            lambda m, _v=bad_md: f"{m.group(1)}{_v}{m.group(3)}",
+            html_raw,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        poisoned_html = re.sub(
+            r'(<meta\b[^>]*(?:property|name)=["\'](?:og|twitter):description["\'][^>]*content=["\'])([^"\']*)(["\'])',
+            lambda m, _v=bad_md: f"{m.group(1)}{_v}{m.group(3)}",
+            poisoned_html,
+            flags=re.IGNORECASE,
+        )
+        page_path.write_text(poisoned_html, encoding="utf-8")
+        assert maintenance._needs_page_structure_geo_normalization(poisoned_html) is True
+        missing = maintenance.RetroReflectionEngine.audit_html_mechanics(poisoned_html)
+        assert "deterministic_visual_primitives" in missing
+
+        ov_payload = dict(poisoned_ov)
+        ov_payload["slug"] = slug
+        ov_payload["target_url"] = f"https://lienbond.com/tools/{slug}/"
+        ov_payload["query"] = slug.replace("-", " ")
+        ov_payload["meta_description"] = bad_md
+        (ov_dir / f"{slug}.json").write_text(json.dumps(ov_payload, indent=2), encoding="utf-8")
+
+    audit_before = maintenance.RetroReflectionEngine.audit_estate(dist_dir, "lienbond")
+    for slug in poison_targets:
+        rel = f"tools/{slug}/index.html"
+        assert rel in audit_before["stale_pages"], f"{rel} not detected before retrofit"
+    assert "index.html" not in audit_before["stale_pages"]
+    assert "tools/index.html" not in audit_before["stale_pages"]
+
+    retrofit_res = maintenance.RetroReflectionEngine.retrofit_estate(
+        dist_dir,
+        "lienbond",
+        canonical_base="https://lienbond.com",
+    )
+    assert retrofit_res["pages_retrofitted"] >= len(poison_targets)
+
+    for slug in poison_targets:
+        healed_html = (dist_dir / "tools" / slug / "index.html").read_text(encoding="utf-8")
+        md_m = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']', healed_html, re.I)
+        og_m = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', healed_html, re.I)
+        tw_m = re.search(r'<meta[^>]+name=["\']twitter:description["\'][^>]+content=["\']([^"\']+)["\']', healed_html, re.I)
+        assert md_m and og_m and tw_m
+        healed_md = md_m.group(1)
+        assert healed_md == og_m.group(1) == tw_m.group(1)
+        assert 120 <= len(healed_md) <= 155
+        assert "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131" not in healed_md.lower()
+        assert maintenance._needs_page_structure_geo_normalization(healed_html) is False
+        ov_after = json.loads((ov_dir / f"{slug}.json").read_text(encoding="utf-8"))
+        assert ov_after["meta_description"] == healed_md
+        assert maintenance.RetroReflectionEngine._overlay_spec_needs_heal(slug, ov_after) is False
+
+    audit_after = maintenance.RetroReflectionEngine.audit_estate(dist_dir, "lienbond")
+    assert audit_after["stale_count"] == 0, f"Not idempotent: {audit_after}"

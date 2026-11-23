@@ -6128,6 +6128,59 @@ def _collect_degraded_rolled_back_overlays(
     return rolled
 
 
+def _has_lienbond_poisoned_meta(
+    meta_desc: str,
+    *,
+    slug_or_url: str,
+    property_id: str = "",
+    is_non_tool: bool = False,
+    canonical_url: str = "",
+) -> bool:
+    """Returns True when a LienBond meta description has legacy poisoned boilerplate or cross-topic statutory leaks."""
+    prop_low = str(property_id or "").strip().lower()
+    target_low = str(slug_or_url or "").strip().lower()
+    canon_low = str(canonical_url or "").strip().lower()
+    if prop_low != "lienbond" and "lienbond.com" not in canon_low and "lienbond.com" not in target_low:
+        return False
+
+    md_low = str(meta_desc or "").strip().lower()
+    if not md_low:
+        return False
+
+    if "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131" in md_low:
+        return True
+
+    if is_non_tool:
+        return False
+
+    if (
+        (target_low and is_non_tool_or_governance_route(target_low))
+        or (canon_low and is_non_tool_or_governance_route(canon_low))
+    ):
+        return False
+
+    is_root_home = (
+        target_low in ("", "index")
+        or bool(re.fullmatch(r"https?://[^/]+/?", target_low))
+        or bool(re.fullmatch(r"https?://[^/]+/?", canon_low))
+    )
+    if is_root_home:
+        return False
+
+    route_haystack = f"{target_low} {canon_low}"
+    if (
+        not any(
+            k in route_haystack
+            for k in ("workers-comp", "class-code", "emr", "experience-modification")
+        )
+        and "ncci" in md_low
+    ):
+        return True
+    if "miller-act" not in route_haystack and "40 u.s.c. section 3131" in md_low:
+        return True
+    return False
+
+
 def _needs_page_structure_geo_normalization(
     html_content: str,
     check_aeo_geo_graph: bool = True,
@@ -6500,8 +6553,33 @@ def _needs_page_structure_geo_normalization(
                 and not canon_url.rstrip("/").endswith("/tools/section-179-calculator")
                 and md_val_chk.lower().startswith("calculate section 179 deductions under irc section 179")
             )
+            or _has_lienbond_poisoned_meta(
+                md_val_chk,
+                slug_or_url=canon_url,
+                is_non_tool=is_non_tool_inst,
+                canonical_url=canon_url,
+            )
         ):
             return True
+
+    if "lienbond.com" in canon_url:
+        for _og_prop_chk in ("og:description", "twitter:description"):
+            _og_m_chk = re.search(
+                rf'<meta\b[^>]*(?:property|name)=["\']{_og_prop_chk}["\'][^>]*content=["\']([^"\']+)["\']',
+                html_content,
+                re.IGNORECASE,
+            ) or re.search(
+                rf'<meta\b[^>]*content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']{_og_prop_chk}["\']',
+                html_content,
+                re.IGNORECASE,
+            )
+            if _og_m_chk and _has_lienbond_poisoned_meta(
+                _og_m_chk.group(1).strip(),
+                slug_or_url=canon_url,
+                is_non_tool=is_non_tool_inst,
+                canonical_url=canon_url,
+            ):
+                return True
 
     if 'class="touch-target scenario-preset-link"' in html_content and bool(
         re.search(r'<a\b(?![^>]*\brel=["\']nofollow["\'])[^>]*\bscenario-preset-link\b', html_content, re.IGNORECASE)
@@ -7955,30 +8033,12 @@ def _normalize_page_structure_and_geo_parity(
                     "loophole" in slug.lower()
                     and "repayment options comparing 10% idr" in old_md_raw.lower()
                 )
-                or (
-                    property_id.lower() == "lienbond"
-                    and (
-                        "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131"
-                        in old_md_raw.lower()
-                        or (
-                            not is_non_tool_slug
-                            and slug.lower() not in ("", "index")
-                            and not re.fullmatch(r"https?://[^/]+/?", (canonical_url or "").strip())
-                            and (
-                                (
-                                    not any(
-                                        k in slug.lower()
-                                        for k in ("workers-comp", "class-code", "emr", "experience-modification")
-                                    )
-                                    and "ncci" in old_md_raw.lower()
-                                )
-                                or (
-                                    "miller-act" not in slug.lower()
-                                    and "40 u.s.c. section 3131" in old_md_raw.lower()
-                                )
-                            )
-                        )
-                    )
+                or _has_lienbond_poisoned_meta(
+                    old_md_raw,
+                    slug_or_url=slug,
+                    property_id=property_id,
+                    is_non_tool=is_non_tool_slug,
+                    canonical_url=canonical_url or "",
                 )
             )
         ):
@@ -8014,6 +8074,46 @@ def _normalize_page_structure_and_geo_parity(
                         flags=re.IGNORECASE,
                     )
                 changed = True
+                old_md_raw = healed_md
+
+        for og_prop in ("og:description", "twitter:description"):
+            og_m_cur = re.search(
+                rf'<meta\b[^>]*(?:property|name)=["\']{og_prop}["\'][^>]*content=["\']([^"\']*)["\']',
+                updated,
+                re.IGNORECASE,
+            ) or re.search(
+                rf'<meta\b[^>]*content=["\']([^"\']*)["\'][^>]*(?:property|name)=["\']{og_prop}["\']',
+                updated,
+                re.IGNORECASE,
+            )
+            if og_m_cur:
+                og_val_cur = og_m_cur.group(1).strip()
+                if og_val_cur != old_md_raw and (
+                    _has_lienbond_poisoned_meta(
+                        og_val_cur,
+                        slug_or_url=slug,
+                        property_id=property_id,
+                        is_non_tool=is_non_tool_slug,
+                        canonical_url=canonical_url or "",
+                    )
+                    or detect_sentence_truncation_issues(og_val_cur)
+                    or bool(re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", og_val_cur, re.IGNORECASE))
+                ):
+                    og_synced = re.sub(
+                        rf'(<meta\b[^>]*(?:property|name)=["\']{og_prop}["\'][^>]*content=["\'])([^"\']*)(["\'][^>]*>)',
+                        lambda m, _val=old_md_raw: f"{m.group(1)}{_val}{m.group(3)}",
+                        updated,
+                        flags=re.IGNORECASE,
+                    )
+                    og_synced = re.sub(
+                        rf'(<meta\b[^>]*content=["\'])([^"\']*)(["\'][^>]*(?:property|name)=["\']{og_prop}["\'][^>]*>)',
+                        lambda m, _val=old_md_raw: f"{m.group(1)}{_val}{m.group(3)}",
+                        og_synced,
+                        flags=re.IGNORECASE,
+                    )
+                    if og_synced != updated:
+                        updated = og_synced
+                        changed = True
 
     if 'class="touch-target scenario-preset-link"' in updated:
         nof_updated = re.sub(
@@ -12519,6 +12619,13 @@ class RetroReflectionEngine:
             )
             or ("pslf-qualifying" in ov_s_low and "hold harmless buyback lump-sum" in m_val.lower())
             or ("loophole" in ov_s_low and "repayment options comparing 10% idr" in m_val.lower())
+            or _has_lienbond_poisoned_meta(
+                m_val,
+                slug_or_url=ov_s_low,
+                property_id=str(raw_ov.get("property_id") or raw_ov.get("tenant_id") or ""),
+                is_non_tool=cls._is_non_tool_overlay_spec(ov_s_low, raw_ov),
+                canonical_url=str(raw_ov.get("target_url") or ""),
+            )
             or bool(
                 re.search(
                     r"(?<![/-])\b(?:Calculator\s+Calculator|Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b(?![/-])",
@@ -15535,8 +15642,45 @@ class RetroReflectionEngine:
             if rel in active_overlays:
                 _, ov_spec = active_overlays[rel]
                 try:
+                    _md_before_m = re.search(
+                        r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)["\']',
+                        working_content,
+                        re.IGNORECASE,
+                    ) or re.search(
+                        r'<meta[^>]+content=["\']([^"\']*)["\'][^>]+name=["\']description["\']',
+                        working_content,
+                        re.IGNORECASE,
+                    )
                     ov_html = normalize_statutory_acronym_casing(inject_overlay_into_html(working_content, ov_spec))
                     if ov_html != working_content:
+                        _md_after_m = re.search(
+                            r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)["\']',
+                            ov_html,
+                            re.IGNORECASE,
+                        ) or re.search(
+                            r'<meta[^>]+content=["\']([^"\']*)["\'][^>]+name=["\']description["\']',
+                            ov_html,
+                            re.IGNORECASE,
+                        )
+                        if (
+                            _md_after_m
+                            and _md_after_m.group(1).strip()
+                            and (_md_before_m is None or _md_before_m.group(1).strip() != _md_after_m.group(1).strip())
+                        ):
+                            _new_ov_md = _md_after_m.group(1).strip()
+                            for _og_p in ("og:description", "twitter:description"):
+                                ov_html = re.sub(
+                                    rf'(<meta\b[^>]*(?:property|name)=["\']{_og_p}["\'][^>]*content=["\'])([^"\']*)(["\'][^>]*>)',
+                                    lambda m, _val=_new_ov_md: f"{m.group(1)}{_val}{m.group(3)}",
+                                    ov_html,
+                                    flags=re.IGNORECASE,
+                                )
+                                ov_html = re.sub(
+                                    rf'(<meta\b[^>]*content=["\'])([^"\']*)(["\'][^>]*(?:property|name)=["\']{_og_p}["\'][^>]*>)',
+                                    lambda m, _val=_new_ov_md: f"{m.group(1)}{_val}{m.group(3)}",
+                                    ov_html,
+                                    flags=re.IGNORECASE,
+                                )
                         working_content = ov_html
                         overlay_injected = True
                 except Exception:
