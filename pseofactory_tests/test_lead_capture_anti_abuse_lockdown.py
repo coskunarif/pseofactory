@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.contracts import assert_no_forbidden_dashes, detect_tool_utility_issues
 from pseofactory.edge import generate_edge_lead_capture_function
 from pseofactory.porcelain_shell import (
     get_porcelain_tenant_profile,
@@ -617,8 +617,11 @@ def test_porcelain_root_index_slug_and_footer_anti_abuse_markup() -> None:
 
     footer_html = render_porcelain_footer(profile, page_slug="homepage")
     assert 'name="company_website"' in footer_html
+    assert 'aria-label="Company website"' in footer_html
     assert 'class="cf-turnstile-slot"' in footer_html
     assert_no_forbidden_dashes(footer_html, "render_porcelain_footer_anti_abuse")
+    utility_issues = detect_tool_utility_issues(norm_home, rel_path="index.html")
+    assert not any("company_website" in issue for issue in utility_issues), utility_issues
 
 
 def test_ephemeral_dist_server_handles_lead_capture_config_endpoint(tmp_path: Path) -> None:

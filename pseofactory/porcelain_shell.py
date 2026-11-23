@@ -3304,7 +3304,7 @@ def render_porcelain_footer(
           <label for="footer-lead-email" class="sr-only">Work email address</label>
           <input type="email" id="footer-lead-email" name="email" required autocomplete="email" placeholder="you@company.com">
           <input type="hidden" name="tool_slug" value="{safe_slug}">
-          <input type="text" name="company_website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;">
+          <input type="text" name="company_website" tabindex="-1" autocomplete="off" aria-hidden="true" aria-label="Company website" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;">
           <div class="cf-turnstile-slot" data-turnstile-slot="1"></div>
           <button type="submit" class="btn btn-cta touch-target">Subscribe to Updates</button>
           <div id="footer-lead-status" class="footer-lead-status" aria-live="polite"></div>

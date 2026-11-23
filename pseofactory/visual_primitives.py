@@ -4406,6 +4406,7 @@ def _render_runtime_sync_events_js() -> str:
           hpInp.setAttribute("tabindex", "-1");
           hpInp.setAttribute("autocomplete", "off");
           hpInp.setAttribute("aria-hidden", "true");
+          hpInp.setAttribute("aria-label", "Company website");
           if (hpInp.style) {
             hpInp.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
           }
