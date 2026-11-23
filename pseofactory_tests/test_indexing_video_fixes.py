@@ -86,6 +86,17 @@ def _make_site(tmp_path: Path, tenant_id: str, domain: str, slugs: list[str]) ->
     return base_dir, dist_dir, idx
 
 
+def _frozen_datetime_cls(fixed_utc: datetime):
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return fixed_utc.replace(tzinfo=None)
+            return fixed_utc.astimezone(tz)
+
+    return _FrozenDateTime
+
+
 def test_gsc_quota_governor_resets_on_pacific_time_not_utc(tmp_path: Path) -> None:
     """
     Google Indexing API resets at midnight Pacific Time (America/Los_Angeles).
@@ -99,16 +110,16 @@ def test_gsc_quota_governor_resets_on_pacific_time_not_utc(tmp_path: Path) -> No
     t_same_pt_evening = datetime(2026, 11, 22, 4, 0, 0, tzinfo=timezone.utc)
     t_after_pt_midnight = datetime(2026, 11, 22, 8, 5, 0, tzinfo=timezone.utc)
 
-    with patch("pseofactory.indexer._utc_now", return_value=t_429):
+    with patch("pseofactory.indexer.datetime", _frozen_datetime_cls(t_429)):
         tripped = idx.trip_gsc_quota_breaker(bucket="indexing", reason="HTTP 429")
     assert tripped["date"] == "2026-11-21"
 
-    with patch("pseofactory.indexer._utc_now", return_value=t_same_pt_evening):
+    with patch("pseofactory.indexer.datetime", _frozen_datetime_cls(t_same_pt_evening)):
         still_blocked = idx.check_and_consume_gsc_quota(units=1, bucket="indexing")
     assert still_blocked["date"] == "2026-11-21"
     assert still_blocked["allowed"] is False
 
-    with patch("pseofactory.indexer._utc_now", return_value=t_after_pt_midnight):
+    with patch("pseofactory.indexer.datetime", _frozen_datetime_cls(t_after_pt_midnight)):
         reset_ok = idx.check_and_consume_gsc_quota(units=1, bucket="indexing")
     assert reset_ok["date"] == "2026-11-22"
     assert reset_ok["allowed"] is True
@@ -316,7 +327,7 @@ def test_youtube_upload_ledger_merge_preserves_truth_flags_and_fresh_upload_pers
     fixed_t = datetime(2026, 11, 22, 18, 0, 0, tzinfo=timezone.utc)
     with (
         patch("pseofactory.video_factory._in_pytest", return_value=False),
-        patch("pseofactory.video_factory._utc_now", return_value=fixed_t),
+        patch("pseofactory.video_factory.datetime", _frozen_datetime_cls(fixed_t)),
         patch("pseofactory.video_factory._load_upload_idempotency_map") as load_mock,
         patch("pseofactory.video_factory._save_upload_idempotency_record") as save_mock,
         patch("pseofactory.video_factory.reconcile_remote_youtube_video_quality_and_visibility", side_effect=_fake_reconcile),
@@ -382,7 +393,7 @@ def test_youtube_quota_governor_pt_reset_cost_fairness_and_starvation_telemetry(
     # At 2026-11-23T03:48Z (= 2026-11-22 19:48 PST), PT date is still 2026-11-22
     t_evening_pt = datetime(2026, 11, 23, 3, 48, 0, tzinfo=timezone.utc)
     t_next_pt_day = datetime(2026, 11, 23, 8, 10, 0, tzinfo=timezone.utc)
-    with patch("pseofactory.video_factory._utc_now", return_value=t_evening_pt):
+    with patch("pseofactory.video_factory.datetime", _frozen_datetime_cls(t_evening_pt)):
         gov.record_upload_consumption("profithelm", "s1", "v1", 2101)
         gov.record_upload_consumption("profithelm", "s1:in_place_reconcile", "v1:reconcile:1", 100)
         st_pt = gov.get_budget_status(include_thumbnail=True, include_caption=True)
@@ -390,7 +401,7 @@ def test_youtube_quota_governor_pt_reset_cost_fairness_and_starvation_telemetry(
     assert st_pt.used_units_today == 2201
 
     # After PT midnight (08:10Z = 00:10 PST), bucket resets to 2026-11-23
-    with patch("pseofactory.video_factory._utc_now", return_value=t_next_pt_day):
+    with patch("pseofactory.video_factory.datetime", _frozen_datetime_cls(t_next_pt_day)):
         st_reset = gov.get_budget_status(include_thumbnail=True, include_caption=True)
     assert st_reset.date_utc == "2026-11-23"
     assert st_reset.used_units_today == 0
@@ -403,7 +414,7 @@ def test_youtube_quota_governor_pt_reset_cost_fairness_and_starvation_telemetry(
         safety_reserve_units=400,
     )
     tenants = ["profithelm", "prexvo", "gainhelm", "lienbond"]
-    with patch("pseofactory.video_factory._utc_now", return_value=t_next_pt_day):
+    with patch("pseofactory.video_factory.datetime", _frozen_datetime_cls(t_next_pt_day)):
         st_ph1 = fair_gov.get_budget_status(
             include_thumbnail=True, include_caption=True, property_id="profithelm", active_tenants=tenants
         )
@@ -530,7 +541,7 @@ def test_aio_observatory_retries_transient_502_timeout_and_blocks_junk_probes(tm
     with (
         patch("pseofactory.aio_observatory.shutil.which", return_value="/usr/bin/treg"),
         patch("pseofactory.aio_observatory.subprocess.run", side_effect=_flaky_run),
-        patch("pseofactory.aio_observatory.time.sleep", side_effect=lambda s: sleeps.append(s)),
+        patch("time.sleep", side_effect=lambda s: sleeps.append(s)),
     ):
         res = treg_sampler("soc 2 audit cost calculator", timeout=10.0)
     assert res["found"] is True
@@ -548,7 +559,7 @@ def test_aio_observatory_retries_transient_502_timeout_and_blocks_junk_probes(tm
     with (
         patch("pseofactory.aio_observatory.shutil.which", return_value="/usr/bin/treg"),
         patch("pseofactory.aio_observatory.subprocess.run", side_effect=_err_400),
-        patch("pseofactory.aio_observatory.time.sleep"),
+        patch("time.sleep"),
     ):
         with pytest.raises(RuntimeError, match="HTTP 400"):
             treg_sampler("bad query", timeout=10.0)

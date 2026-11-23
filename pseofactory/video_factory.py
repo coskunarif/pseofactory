@@ -339,15 +339,30 @@ class YouTubeQuotaGovernor:
 
     @staticmethod
     def _infer_tenant_from_path(file_path: str) -> Optional[str]:
-        fp = str(file_path or "").lower()
-        if "/profithelm-platform/" in fp or "/profithelm/" in fp:
-            return "profithelm"
-        if "/prexvo/" in fp:
-            return "prexvo"
-        if "/gainhelm/" in fp:
-            return "gainhelm"
-        if "/lienbond/" in fp:
-            return "lienbond"
+        fp = str(file_path or "").strip()
+        if not fp:
+            return None
+        try:
+            path_obj = Path(fp)
+            parts = path_obj.parts
+            repo_dir: Optional[Path] = None
+            for i in range(len(parts) - 1):
+                if parts[i].lower() == "dist" and parts[i + 1].lower() == "videos" and i > 0:
+                    repo_dir = Path(*parts[:i])
+                    break
+            if repo_dir is None:
+                return None
+            cfg_path = repo_dir / ".pseofactory.json"
+            if cfg_path.is_file():
+                raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+                pid = str(raw.get("property_id") or "").strip().lower()
+                if pid:
+                    return resolve_canonical_property_id(pid, default=pid)
+            dir_name = repo_dir.name.strip().lower()
+            if dir_name:
+                return resolve_canonical_property_id(dir_name, default=dir_name)
+        except Exception:
+            return None
         return None
 
     @staticmethod
