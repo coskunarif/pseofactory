@@ -6126,16 +6126,29 @@ def compile_tenant_porcelain_estate_with_profile(
     governance_written = False
     if is_full_estate:
         gov_pages = build_governance_pages(profile, active_tools=active_tools, gsc_token=gsc_token)
+        _, allowed_gov_classes = get_porcelain_css_audit_sets(prop_id)
         for route_slug, gov_html in gov_pages.items():
             gov_rel = f"{route_slug}/index.html"
             gov_file = target_dist / gov_rel
             source_gov_html = gov_html
             if route_slug in ("disclaimers", "methodology") and gov_file.is_file():
                 existing_gov = gov_file.read_text(encoding="utf-8", errors="ignore")
-                existing_plain = re.sub(
+                existing_no_script = re.sub(
                     r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", existing_gov, flags=re.IGNORECASE
                 )
-                existing_plain = re.sub(r"<[^>]+>", " ", existing_plain)
+                existing_plain = re.sub(r"<[^>]+>", " ", existing_no_script)
+                has_undef_legacy_classes = bool(
+                    re.search(
+                        r'\bclass\s*=\s*["\'][^"\']*\barticle-[a-z0-9_-]+',
+                        existing_no_script,
+                        flags=re.IGNORECASE,
+                    )
+                    or _find_undefined_ui_classes_in_html(
+                        existing_gov,
+                        allowed_gov_classes,
+                        visible_no_script=existing_no_script,
+                    )
+                )
                 has_polluted_calc = (
                     'id="calculation-manifest"' in existing_gov
                     or "id='calculation-manifest'" in existing_gov
@@ -6143,6 +6156,7 @@ def compile_tenant_porcelain_estate_with_profile(
                     or "How to Calculate Methodology" in existing_gov
                     or "Q499388" in existing_gov
                     or "round((" in existing_plain
+                    or has_undef_legacy_classes
                 )
                 if not has_polluted_calc and len(existing_plain.strip()) >= 1800 and "<table" in existing_gov.lower():
                     source_gov_html = existing_gov

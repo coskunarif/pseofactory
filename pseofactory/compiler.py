@@ -3456,6 +3456,36 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         )
     )
     all_slugs = [str(s["slug"]) for s in specs]
+    from pseofactory.qualification import detect_non_us_jurisdiction
+
+    raw_void_slugs: Set[str] = set()
+    raw_voids_file = root / "content" / "deployed_voids.json"
+    if raw_voids_file.is_file():
+        try:
+            raw_voids_payload = json.loads(raw_voids_file.read_text(encoding="utf-8"))
+            if isinstance(raw_voids_payload, list):
+                for rv in raw_voids_payload:
+                    if isinstance(rv, dict) and rv.get("slug"):
+                        raw_void_slugs.add(str(rv["slug"]).strip().lower())
+        except Exception:
+            pass
+
+    active_slug_set = {s.strip().lower() for s in all_slugs}
+    if tools_dir.is_dir():
+        import shutil as _shutil
+
+        for existing_tool_dir in list(tools_dir.iterdir()):
+            if not existing_tool_dir.is_dir():
+                continue
+            cand_slug = existing_tool_dir.name.strip().lower()
+            if cand_slug in active_slug_set:
+                continue
+            if detect_non_us_jurisdiction(cand_slug, property_id="lienbond") or cand_slug in raw_void_slugs:
+                _shutil.rmtree(existing_tool_dir, ignore_errors=True)
+                stale_manifest = manifests_dir / f"{existing_tool_dir.name}.json"
+                if stale_manifest.is_file():
+                    stale_manifest.unlink(missing_ok=True)
+
     compiled_pages: List[Dict[str, Any]] = []
     catalog_tools: List[Dict[str, Any]] = []
 

@@ -394,3 +394,74 @@ def test_maintenance_sitemap_sync_prevents_hub_leaf_overlap(tmp_path: Path) -> N
     assert (hubs | leaves) == sm
     assert "https://gainhelm.com/tools/soc-2-audit-cost-calculator/" in leaves
     assert "https://gainhelm.com/tools/soc-2-audit-cost-calculator/" not in hubs
+
+
+def test_porcelain_replaces_legacy_article_class_governance_pages(tmp_path: Path) -> None:
+    from pseofactory.porcelain_shell import (
+        audit_porcelain_shell_page,
+        compile_tenant_porcelain_estate_with_profile,
+    )
+
+    dist = tmp_path / "dist"
+    (dist / "disclaimers").mkdir(parents=True)
+    (dist / "methodology").mkdir(parents=True)
+    (dist / "index.html").write_text(
+        "<!doctype html><html><head><title>Prexvo</title></head><body><main><h1>Prexvo</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    filler = " ".join(["Title IV 34 CFR Part 685 statutory calculation standard."] * 40)
+    legacy_html = (
+        "<!doctype html><html><head><title>Legacy Prexvo Governance</title></head><body><main>"
+        '<h1 class="article-title">Statutory Disclaimers</h1>'
+        '<p class="article-lead">Legacy lead paragraph with undefined class.</p>'
+        '<h2 class="article-h2">Compliance Schedule</h2>'
+        f'<p class="article-p">{filler}</p>'
+        "<table><thead><tr><th>Statute</th><th>Scope</th></tr></thead>"
+        "<tbody><tr><td>34 CFR 685</td><td>Federal repayment</td></tr></tbody></table>"
+        "</main></body></html>"
+    )
+    (dist / "disclaimers" / "index.html").write_text(legacy_html, encoding="utf-8")
+    (dist / "methodology" / "index.html").write_text(legacy_html, encoding="utf-8")
+
+    profile = get_porcelain_tenant_profile("prexvo")
+    compile_tenant_porcelain_estate_with_profile(dist, profile)
+
+    for slug in ("disclaimers", "methodology"):
+        out_html = (dist / slug / "index.html").read_text(encoding="utf-8")
+        assert "article-title" not in out_html
+        assert "article-h2" not in out_html
+        assert "article-lead" not in out_html
+        assert "article-p" not in out_html
+        issues = audit_porcelain_shell_page(
+            out_html,
+            f"{slug}/index.html",
+            property_id="prexvo",
+            dist_dir=dist,
+        )
+        undef_issues = [i for i in issues if "Undefined CSS class" in i]
+        assert undef_issues == [], f"{slug} still has undefined CSS classes: {undef_issues}"
+
+
+def test_compile_lienbond_estate_prunes_stale_off_jurisdiction_tool_dir(tmp_path: Path) -> None:
+    from pseofactory.compiler import compile_lienbond_estate
+
+    stale_slug = "surety-bond-cost-calculator-philippines"
+    stale_dir = tmp_path / "dist" / "tools" / stale_slug
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "index.html").write_text(
+        "<!doctype html><html><head><title>Stale</title></head><body><h1>Stale</h1></body></html>",
+        encoding="utf-8",
+    )
+    manifests_dir = tmp_path / "dist" / "manifests"
+    manifests_dir.mkdir(parents=True)
+    stale_manifest = manifests_dir / f"{stale_slug}.json"
+    stale_manifest.write_text('{"slug": "surety-bond-cost-calculator-philippines"}', encoding="utf-8")
+
+    compile_lienbond_estate(tmp_path)
+
+    assert not stale_dir.exists(), "Stale off-jurisdiction tool dir must be pruned"
+    assert not stale_manifest.exists(), "Stale off-jurisdiction manifest must be pruned"
+    assert (
+        tmp_path / "dist" / "tools" / "contractor-license-bond-cost-calculator-by-credit-score" / "index.html"
+    ).is_file()
+
