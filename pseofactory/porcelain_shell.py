@@ -3379,7 +3379,7 @@ def render_porcelain_footer(
     function loadLeadConfig() {{
       var loc = window.location || null;
       var isLocalStatic = Boolean(
-        loc && (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1' || loc.protocol === 'file:')
+        loc && (loc.protocol === 'http:' || loc.protocol === 'file:')
       );
       if (
         window.__PSEO_SYNTHETIC_TEST__

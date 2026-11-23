@@ -619,6 +619,10 @@ def test_porcelain_root_index_slug_and_footer_anti_abuse_markup() -> None:
     assert 'name="company_website"' in footer_html
     assert 'aria-label="Company website"' in footer_html
     assert 'class="cf-turnstile-slot"' in footer_html
+    assert "localhost" not in footer_html
+    assert "127.0.0.1" not in footer_html
+    assert "localhost" not in norm_home
+    assert "127.0.0.1" not in norm_home
     assert_no_forbidden_dashes(footer_html, "render_porcelain_footer_anti_abuse")
     utility_issues = detect_tool_utility_issues(norm_home, rel_path="index.html")
     assert not any("company_website" in issue for issue in utility_issues), utility_issues
