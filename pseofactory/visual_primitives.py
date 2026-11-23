@@ -1100,6 +1100,9 @@ def _render_runtime_sync_maps_js() -> str:
     var _userInteracted = false;
     var _initialUrlHydrated = false;
     var _lastInteractionScope = "primary";
+    var _initialLiveOutputNum = NaN;
+    var _initialCliffEpochBase = NaN;
+    var _latestLiveOutputNum = NaN;
     var SLIDER_TO_INPUT_MAP = {
       "field-income_slider": "field-gross_income",
       "field-bond_slider": "field-bond_amount",
@@ -1615,6 +1618,137 @@ def _render_runtime_sync_workbench_js() -> str:
       return Math.round(ltcg + niit);
     }
 
+    function captureInitialLiveBaseline() {
+      try {
+        var cliffYearsInit = [2024, 2025, 2026, 2027, 2028];
+        for (var ci = 0; ci < cliffYearsInit.length; ci++) {
+          var ce = document.getElementById("cliff-exposure-" + String(cliffYearsInit[ci]));
+          if (ce && !ce.hasAttribute("data-ssr-text")) {
+            ce.setAttribute("data-ssr-text", (ce.textContent || "").trim());
+          }
+        }
+        if (isNaN(_initialLiveOutputNum)) {
+          var initSelectors = [
+            "[data-primary-output='true']",
+            "#val-total_federal_tax",
+            "#sec179-res-writeoff",
+            "#res-crypto-tax",
+            "#res-total-tax",
+            "#res-runway-months",
+            "#res-arb-profit",
+            "#res-pm-tax-savings",
+            "#metric-rap_payment",
+            "#hero-range-baseline",
+            "[id^='val-']",
+            "[id^='sec179-res-']",
+            "[id^='res-']",
+            "[id^='metric-']:not([id^='metric-card-'])",
+            ".output-value:not(.overlay-preset-readout)"
+          ];
+          for (var si = 0; si < initSelectors.length; si++) {
+            var se = document.querySelector(initSelectors[si]);
+            if (!se) continue;
+            var sm = (se.textContent || "").trim().match(/-?[\\d,]+(?:\\.\\d+)?/);
+            if (sm) {
+              var sn = parseFloat(sm[0].replace(/,/g, ""));
+              if (!isNaN(sn) && isFinite(sn) && sn > 0) {
+                _initialLiveOutputNum = sn;
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (typeof document !== "undefined") {
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", captureInitialLiveBaseline, { once: true });
+      } else {
+        captureInitialLiveBaseline();
+      }
+    }
+
+    function scaleDomainCliffExposureText(ssrTxt, scale) {
+      var raw = String(ssrTxt || "");
+      if (!raw || !isFinite(scale) || scale <= 0 || Math.abs(scale - 1.0) <= 1e-4) {
+        return raw;
+      }
+      var effScale = Math.max(0.05, Math.min(50.0, scale));
+      var leadRe = /^(\\s*\\$?)([\\d,]+(?:\\.\\d+)?)([kKmM]?)/;
+      var m = raw.match(leadRe);
+      if (!m) return raw;
+      var prefix = m[1] || "";
+      var numStr = m[2] || "";
+      var unitSuffix = m[3] || "";
+      var baseNum = parseFloat(numStr.replace(/,/g, ""));
+      if (isNaN(baseNum) || !isFinite(baseNum) || baseNum <= 0) return raw;
+      var hasDec = numStr.indexOf(".") !== -1;
+      var scaled = baseNum * effScale;
+      var fmtScaled;
+      if (unitSuffix) {
+        fmtScaled = (Math.round(scaled * 10) / 10).toLocaleString("en-US", { maximumFractionDigits: 1 });
+      } else if (hasDec) {
+        fmtScaled = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(scaled);
+      } else {
+        fmtScaled = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(scaled));
+      }
+      var out = prefix + fmtScaled + unitSuffix + raw.slice(m[0].length);
+      out = out.replace(/\\(\\$?([\\d,]+(?:\\.\\d+)?)(\\s+monthly)\\)/i, function(_full, mNum, mTail) {
+        var mb = parseFloat(String(mNum).replace(/,/g, ""));
+        if (isNaN(mb) || !isFinite(mb) || mb <= 0) return _full;
+        var ms = mb * effScale;
+        var mFmt = mNum.indexOf(".") !== -1
+          ? new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(ms)
+          : new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(ms));
+        return "($" + mFmt + mTail + ")";
+      });
+      return out;
+    }
+
+    function syncDomainCliffExposures(liveNum, epochBase) {
+      try {
+        var wbEl = document.getElementById("serp-incumbent-depth-workbench");
+        var activeMode = String((wbEl ? wbEl.getAttribute("data-workbench-mode") : "") || "").toLowerCase();
+        if (activeMode === "tax_brackets") return;
+        var cliffYears = [2024, 2025, 2026, 2027, 2028];
+        for (var initIdx = 0; initIdx < cliffYears.length; initIdx++) {
+          var initEl = document.getElementById("cliff-exposure-" + String(cliffYears[initIdx]));
+          if (initEl && !initEl.hasAttribute("data-ssr-text")) {
+            initEl.setAttribute("data-ssr-text", (initEl.textContent || "").trim());
+          }
+        }
+        if (!_userInteracted) {
+          if (isNaN(_initialCliffEpochBase) && typeof epochBase === "number" && isFinite(epochBase) && epochBase > 0) {
+            _initialCliffEpochBase = epochBase;
+          }
+          return;
+        }
+        var scale = 1.0;
+        var effLive = (typeof liveNum === "number" && isFinite(liveNum) && liveNum > 0) ? liveNum : _latestLiveOutputNum;
+        if (!isNaN(_initialLiveOutputNum) && _initialLiveOutputNum > 0 && !isNaN(effLive) && effLive > 0 && Math.abs(effLive - _initialLiveOutputNum) > 1e-6) {
+          scale = effLive / _initialLiveOutputNum;
+        } else if (!isNaN(_initialCliffEpochBase) && _initialCliffEpochBase > 0 && typeof epochBase === "number" && isFinite(epochBase) && epochBase > 0 && Math.abs(epochBase - _initialCliffEpochBase) > 1e-6) {
+          scale = epochBase / _initialCliffEpochBase;
+        } else {
+          var pInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input):not([id^="serp-"])');
+          if (pInp) {
+            var curV = parseFloat(String(pInp.value || "").replace(/,/g, ""));
+            var baseV = parseFloat(String(pInp.getAttribute("data-pseo-base-val") || pInp.defaultValue || "").replace(/,/g, ""));
+            if (!isNaN(curV) && !isNaN(baseV) && baseV > 0 && curV > 0 && Math.abs(curV - baseV) > 1e-6) {
+              scale = curV / baseV;
+            }
+          }
+        }
+        for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {
+          var domExp = document.getElementById("cliff-exposure-" + String(cliffYears[cIdx]));
+          if (!domExp) continue;
+          var ssrTxt = domExp.getAttribute("data-ssr-text") || (domExp.textContent || "").trim();
+          domExp.textContent = scaleDomainCliffExposureText(ssrTxt, scale);
+        }
+      } catch (e) {}
+    }
+
     function updateInteractiveCliffAndComparator(retainedVal, taxVal, workbenchMode, counterfactualVal) {
       try {
         var wbEl = document.getElementById("serp-incumbent-depth-workbench");
@@ -1624,7 +1758,9 @@ def _render_runtime_sync_workbench_js() -> str:
         var cliffYears = [2024, 2025, 2026, 2027, 2028, 2030];
         var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];
         var epochBase = taxVal > 0 ? taxVal : Math.max(100, Math.round(retainedVal * 0.15));
-        var hasSvgCliffVals = Boolean(document.getElementById("serp-cliff-val-0"));
+        if (!_userInteracted && isNaN(_initialCliffEpochBase) && epochBase > 0) {
+          _initialCliffEpochBase = epochBase;
+        }
         for (var cIdx = 0; cIdx < cliffYears.length; cIdx++) {
           var barEl = document.getElementById("serp-cliff-bar-" + String(cIdx));
           var valEl = document.getElementById("serp-cliff-val-" + String(cIdx));
@@ -1649,17 +1785,21 @@ def _render_runtime_sync_workbench_js() -> str:
             var yrKey = String(cliffYears[cIdx]);
             var domBar = document.getElementById("cliff-bar-" + yrKey);
             var domExp = document.getElementById("cliff-exposure-" + yrKey);
+            if (domExp && !domExp.hasAttribute("data-ssr-text")) {
+              domExp.setAttribute("data-ssr-text", (domExp.textContent || "").trim());
+            }
             var pctH = Math.max(20, Math.min(96, Math.round((yrVal / Math.max(1, epochBase * 1.15)) * 90)));
             if (domBar) {
               domBar.style.height = String(pctH) + "%";
               domBar.setAttribute("data-exposure-usd", String(yrVal));
             }
-            if (domExp && _userInteracted) {
-              if (isIncomeTaxMode || (!hasSvgCliffVals && /^\\$?[\\d,]+(?:\\.\\d+)?$/.test((domExp.textContent || "").trim()))) {
-                domExp.textContent = fmtUsd(yrVal);
-              }
+            if (domExp && _userInteracted && isIncomeTaxMode) {
+              domExp.textContent = fmtUsd(yrVal);
             }
           }
+        }
+        if (!isIncomeTaxMode) {
+          syncDomainCliffExposures(_latestLiveOutputNum, epochBase);
         }
         var compRoot = document.getElementById("stateful-scenario-comparator");
         if (compRoot) {
@@ -2181,10 +2321,23 @@ def _render_runtime_sync_workbench_js() -> str:
 
       var outNodes = document.querySelectorAll(".output-value");
       if (syncComplianceAuditFormOutputs(outNodes)) {
+        var ghHeroEl = document.getElementById("hero-range-baseline") || (outNodes && outNodes.length ? outNodes[0] : null);
+        if (ghHeroEl) {
+          var ghMatch = (ghHeroEl.textContent || "").trim().match(/-?[\\d,]+(?:\\.\\d+)?/);
+          var ghNum = ghMatch ? parseFloat(ghMatch[0].replace(/,/g, "")) : NaN;
+          if (!isNaN(ghNum) && isFinite(ghNum) && ghNum > 0) {
+            if (!_userInteracted && isNaN(_initialLiveOutputNum)) {
+              _initialLiveOutputNum = ghNum;
+            }
+            _latestLiveOutputNum = ghNum;
+          }
+        }
+        syncDomainCliffExposures(_latestLiveOutputNum, _initialCliffEpochBase);
         syncOutboundAffiliateLinks();
         return;
       }
       if (!outNodes.length) {
+        syncDomainCliffExposures(_latestLiveOutputNum, _initialCliffEpochBase);
         syncOutboundAffiliateLinks();
         return;
       }
@@ -2204,36 +2357,46 @@ def _render_runtime_sync_workbench_js() -> str:
             break;
           }
         }
-        var liveSourceEl = staticOutEl;
-        if (_userInteracted) {
-          var nativeOutSelectors = [
-            "[data-primary-output='true']",
-            "#val-total_federal_tax",
-            "#sec179-res-writeoff",
-            "#res-crypto-tax",
-            "#res-total-tax",
-            "#res-runway-months",
-            "#res-arb-profit",
-            "#res-pm-tax-savings",
-            "#metric-rap_payment",
-            "[id^='val-']",
-            "[id^='sec179-res-']",
-            "[id^='res-']",
-            "[id^='metric-']:not([id^='metric-card-'])"
-          ];
-          for (var nsIdx = 0; nsIdx < nativeOutSelectors.length; nsIdx++) {
-            var candEl = document.querySelector(nativeOutSelectors[nsIdx]);
-            if (candEl && !(candEl.classList && candEl.classList.contains("overlay-preset-readout"))) {
-              var candTxt = (candEl.textContent || "").trim();
-              var candMatch = candTxt.match(/-?[\\d,]+(?:\\.\\d+)?/);
-              if (candMatch) {
-                var candNum = parseFloat(candMatch[0].replace(/,/g, ""));
-                if (!isNaN(candNum) && isFinite(candNum)) {
-                  liveSourceEl = candEl;
-                  break;
-                }
+        var nativeOutSelectors = [
+          "[data-primary-output='true']",
+          "#val-total_federal_tax",
+          "#sec179-res-writeoff",
+          "#res-crypto-tax",
+          "#res-total-tax",
+          "#res-runway-months",
+          "#res-arb-profit",
+          "#res-pm-tax-savings",
+          "#metric-rap_payment",
+          "[id^='val-']",
+          "[id^='sec179-res-']",
+          "[id^='res-']",
+          "[id^='metric-']:not([id^='metric-card-'])"
+        ];
+        var detectedNativeEl = null;
+        for (var nsIdx = 0; nsIdx < nativeOutSelectors.length; nsIdx++) {
+          var candEl = document.querySelector(nativeOutSelectors[nsIdx]);
+          if (candEl && !(candEl.classList && candEl.classList.contains("overlay-preset-readout"))) {
+            var candTxt = (candEl.textContent || "").trim();
+            var candMatch = candTxt.match(/-?[\\d,]+(?:\\.\\d+)?/);
+            if (candMatch) {
+              var candNum = parseFloat(candMatch[0].replace(/,/g, ""));
+              if (!isNaN(candNum) && isFinite(candNum)) {
+                detectedNativeEl = candEl;
+                break;
               }
             }
+          }
+        }
+        var liveSourceEl = (_userInteracted && detectedNativeEl) ? detectedNativeEl : (staticOutEl || detectedNativeEl);
+        var baselineProbeEl = detectedNativeEl || staticOutEl;
+        if (baselineProbeEl) {
+          var bProbeMatch = (baselineProbeEl.textContent || "").trim().match(/-?[\\d,]+(?:\\.\\d+)?/);
+          var bProbeNum = bProbeMatch ? parseFloat(bProbeMatch[0].replace(/,/g, "")) : NaN;
+          if (!isNaN(bProbeNum) && isFinite(bProbeNum) && bProbeNum > 0) {
+            if (!_userInteracted && isNaN(_initialLiveOutputNum)) {
+              _initialLiveOutputNum = bProbeNum;
+            }
+            _latestLiveOutputNum = bProbeNum;
           }
         }
         if (liveSourceEl && !(liveSourceEl.classList && liveSourceEl.classList.contains("overlay-preset-readout"))) {
@@ -2241,6 +2404,12 @@ def _render_runtime_sync_workbench_js() -> str:
           var liveNumMatch = rawLiveTxt.match(/-?[\\d,]+(?:\\.\\d+)?/);
           var liveNum = liveNumMatch ? parseFloat(liveNumMatch[0].replace(/,/g, "")) : NaN;
           if (!isNaN(liveNum) && isFinite(liveNum)) {
+            if (!_userInteracted && isNaN(_initialLiveOutputNum) && liveNum > 0) {
+              _initialLiveOutputNum = liveNum;
+            }
+            if (liveNum > 0) {
+              _latestLiveOutputNum = liveNum;
+            }
             var hrBaseLive = document.getElementById("hero-range-baseline");
             var hrLowLive = document.getElementById("hero-range-low");
             var hrHighLive = document.getElementById("hero-range-high");
@@ -2271,6 +2440,7 @@ def _render_runtime_sync_workbench_js() -> str:
             }
           }
         }
+        syncDomainCliffExposures(_latestLiveOutputNum, _initialCliffEpochBase);
         syncOutboundAffiliateLinks();
         return;
       }

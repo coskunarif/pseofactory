@@ -163,11 +163,12 @@ window.updateSection179Calculator = function() {{
     assert res["afterInput"]["heroLow"] == "$420,000"
     assert res["afterInput"]["heroHigh"] == "$630,000"
     assert res["afterInput"]["outVal"] == "525,000"
-    # 2. SSR domain comparator & cliff text are NOT overwritten with IRS income tax ($147,362 / $126,174)
+    # 2. SSR domain comparator is NOT overwritten with IRS income tax ($147,362), and cliff scales proportionally (1.5x) while preserving its domain suffix
     assert res["afterInput"]["compATax"] == "$13,300 Cash Tax Saved (at 35%)"
     assert res["afterInput"]["compBTax"] == "$122,500 Cash Tax Saved (at 35%)"
     assert res["afterInput"]["compLTax"] == "$38,000 / $350,000"
-    assert res["afterInput"]["cliff2028"] == "$68,000 SUV / 100% Bonus"
+    assert res["afterInput"]["cliff2028"] == "$102,000 SUV / 100% Bonus"
+    assert "$126,174" not in res["afterInput"]["cliff2028"]
     assert "$147,362" not in res["afterPin"]["compBTax"]
     # 3. Pinning works cleanly and Reset restores SSR comparator text
     assert res["afterPin"]["compARet"] and res["afterPin"]["compARet"] != "$0"
@@ -464,4 +465,78 @@ def test_compile_lienbond_estate_prunes_stale_off_jurisdiction_tool_dir(tmp_path
     assert (
         tmp_path / "dist" / "tools" / "contractor-license-bond-cost-calculator-by-credit-score" / "index.html"
     ).is_file()
+
+
+def test_non_income_tax_cliff_scales_domain_suffix_without_svg_cliff_nodes() -> None:
+    rt_js = render_runtime_synchronizer_js()
+    html = f"""<!doctype html>
+<html><body>
+<main>
+  <div id="hero-range-anchor">
+    <strong id="hero-range-low">$62,480</strong>
+    <strong id="hero-range-baseline">$78,100.40</strong>
+    <strong id="hero-range-high">$93,720</strong>
+  </div>
+  <span class="output-value">78,100.40</span>
+  <form id="soc2-compliance-form">
+    <input id="calc-input-headcount" type="number" value="75" />
+    <input id="calc-input-extra_criteria" type="number" value="2" />
+  </form>
+  <section id="serp-incumbent-depth-workbench" data-workbench-mode="cyber_grc">
+    <input id="serp-b2b-gross" type="number" value="84000" />
+    <input id="serp-b2b-deduction" type="number" value="25800" />
+    <input id="serp-b2b-rate" type="number" value="22.0" />
+  </section>
+  <section id="multi-year-cliff-visualizer">
+    <div id="cliff-bar-2024"></div><span id="cliff-exposure-2024">$64,800 SOC 2 TCO</span>
+    <div id="cliff-bar-2025"></div><span id="cliff-exposure-2025">$71,200 SOC 2 TCO</span>
+    <div id="cliff-bar-2026"></div><span id="cliff-exposure-2026">$78,100.40 SOC 2 TCO</span>
+    <div id="cliff-bar-2027"></div><span id="cliff-exposure-2027">$83,400 SOC 2 TCO</span>
+    <div id="cliff-bar-2028"></div><span id="cliff-exposure-2028">$94,600 SOC 2 TCO</span>
+  </section>
+  <section id="stateful-scenario-comparator">
+    <table><tr>
+      <td id="comp-a-tax">$78,100.40 Net Type II Audit TCO</td>
+      <td id="comp-b-tax">$125,900 Unoptimized Manual TCO</td>
+    </tr></table>
+  </section>
+</main>
+<script>
+window.__complianceSyncWorkspaceOutputs = function() {{
+  var hc = parseFloat(document.getElementById("calc-input-headcount").value) || 75;
+  var crit = parseFloat(document.getElementById("calc-input-extra_criteria").value) || 0;
+  var total = Math.round((28000 + crit * 4500 + 26500 + 120 * (hc / 75) * 121.67) * 100) / 100;
+  document.getElementById("hero-range-baseline").textContent = "$" + total.toLocaleString("en-US", {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+  document.querySelector(".output-value").textContent = total.toLocaleString("en-US", {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+}};
+</script>
+<script>{rt_js}</script>
+</body></html>"""
+
+    res = _run_playwright_dom(
+        html,
+        """() => {
+            const before = document.getElementById("cliff-exposure-2024").textContent.trim();
+            const crit = document.getElementById("calc-input-extra_criteria");
+            crit.value = "4";
+            crit.dispatchEvent(new Event("input", {bubbles: true}));
+            crit.dispatchEvent(new Event("change", {bubbles: true}));
+            return {
+                before,
+                after2024: document.getElementById("cliff-exposure-2024").textContent.trim(),
+                after2026: document.getElementById("cliff-exposure-2026").textContent.trim(),
+                heroBase: document.getElementById("hero-range-baseline").textContent.trim(),
+                compATax: document.getElementById("comp-a-tax").textContent.trim(),
+                compBTax: document.getElementById("comp-b-tax").textContent.trim(),
+            };
+        }""",
+    )
+    assert res["heroBase"] == "$87,100.40"
+    assert res["after2024"] != res["before"]
+    assert res["after2024"].endswith("SOC 2 TCO")
+    assert res["after2024"] == "$72,267 SOC 2 TCO"
+    assert res["after2026"] == "$87,100.40 SOC 2 TCO"
+    assert res["compATax"] == "$78,100.40 Net Type II Audit TCO"
+    assert res["compBTax"] == "$125,900 Unoptimized Manual TCO"
+
 
