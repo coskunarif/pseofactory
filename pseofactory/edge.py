@@ -692,6 +692,7 @@ def _sync_middleware_redirect_table(
     apex_domain: Optional[str] = None,
     existing_governance_routes: Optional[Set[str]] = None,
     extra_gone_paths: Optional[Iterable[str]] = None,
+    dist_dir: Optional[Path] = None,
 ) -> str:
     """
     Synchronizes HTTP 410 Gone routes and exact/prefix 301 redirect mappings into
@@ -715,13 +716,37 @@ def _sync_middleware_redirect_table(
         if probe_m:
             working = early_www_pat.sub("\n\n", working[: probe_m.start()]) + working[probe_m.start() :]
 
-    gone_str_pat = re.compile(r'"(/[^"]*)"')
+    def _is_live_dist_route(path_str: str) -> bool:
+        if dist_dir is None:
+            return False
+        base_slug = path_str.rstrip("/").lstrip("/")
+        if not base_slug:
+            return False
+        try:
+            candidate = (dist_dir / base_slug / "index.html").resolve()
+            if not candidate.is_relative_to(dist_dir.resolve()):
+                return False
+            return candidate.is_file()
+        except Exception:
+            return (dist_dir / base_slug / "index.html").is_file()
+
+    gone_str_pat = re.compile(r'"((?:[^"\\]|\\.)*)"')
     merged_gone: List[str] = []
     merged_gone_set: Set[str] = set()
     for gm in re.finditer(r"const edgeGone = new Set\(\[([\s\S]*?)\]\);", working):
         for sm in gone_str_pat.finditer(gm.group(1)):
-            gp = sm.group(1).strip()
-            if gp and gp != "/" and gp not in merged_gone_set:
+            try:
+                gp = json.loads(sm.group(0))
+            except Exception:
+                gp = sm.group(1)
+            if not isinstance(gp, str):
+                continue
+            gp = gp.strip()
+            if not gp.startswith("/") or gp == "/":
+                continue
+            if _is_live_dist_route(gp):
+                continue
+            if gp not in merged_gone_set:
                 merged_gone_set.add(gp)
                 merged_gone.append(gp)
     for raw_gp in (extra_gone_paths or ()):
@@ -731,7 +756,7 @@ def _sync_middleware_redirect_table(
         if not gp.startswith("/") or "*" in gp or ":" in gp or gp == "/":
             continue
         base_gp = gp.rstrip("/")
-        if not base_gp:
+        if not base_gp or _is_live_dist_route(base_gp):
             continue
         for variant in (base_gp, base_gp + "/"):
             if variant not in merged_gone_set:
@@ -853,7 +878,7 @@ def _sync_middleware_redirect_table(
     if merged_gone:
         dispatch_lines.append("  const edgeGone = new Set([")
         for gp in merged_gone:
-            dispatch_lines.append(f'    "{gp}",')
+            dispatch_lines.append(f"    {json.dumps(gp)},")
         dispatch_lines.extend(
             [
                 "  ]);",
@@ -15970,6 +15995,7 @@ def sync_tenant_edge_redirect_function(
                 apex_domain=apex_domain,
                 existing_governance_routes=existing_gov_routes,
                 extra_gone_paths=extra_gone_paths,
+                dist_dir=dist_dir,
             )
             if f'if (hostname === "www.{apex_domain}")' not in mw_new and "const pathname = url.pathname;\n" in mw_new:
                 mw_new = mw_new.replace(

@@ -337,3 +337,253 @@ def test_duplicate_brand_prevention_and_cleaning_across_title_normalizers() -> N
     assert title_m is not None
     assert title_m.group(1).lower().count("profithelm") == 1, title_m.group(1)
     assert 'property="og:title" content="ProfitHelm: 2026 Financial &amp; Tax Modeling Engine"' in norm_hp
+
+
+def test_indexnow_key_sync_matches_indexer_for_www_and_custom_domains(tmp_path: Path, monkeypatch) -> None:
+    """maintenance IndexNow key file sync must match derive_deterministic_indexnow_key for www. and 50+ domains."""
+    from pseofactory.indexer import derive_deterministic_indexnow_key
+
+    monkeypatch.delenv("GAINHELM_INDEXNOW_STEM", raising=False)
+    for prop_id, canon in (
+        ("profithelm", "https://www.profithelm.com"),
+        ("gainhelm", "https://www.gainhelm.com"),
+        ("prexvo", "https://www.prexvo.com"),
+        ("lienbond", "https://www.lienbond.com"),
+        ("newtenant55", "https://www.newtenant55.io"),
+    ):
+        d = tmp_path / prop_id / "dist"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.html").write_text("<!doctype html><html><head></head><body>Hi</body></html>", encoding="utf-8")
+        maintenance.RetroReflectionEngine.sync_tenant_publisher_prerequisites(d, prop_id, canon)
+        expected_key = derive_deterministic_indexnow_key(canon)
+        kf = d / f"{expected_key}.txt"
+        assert kf.is_file(), f"Missing unified IndexNow key file for {canon}: {kf}"
+        assert kf.read_text(encoding="utf-8").strip() == expected_key
+
+
+def test_downstream_and_reflect_ledger_failure_guard_metadata_preservation_and_leaf_skip(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Downstream and reflect must not backfill failed indexing, must preserve extra metadata, and must skip leaf URLs."""
+    from pseofactory.action_bus import HumanActionBus
+
+    repo_dir = tmp_path / "prexvo"
+    dist_dir = repo_dir / "dist"
+    hub_dir = dist_dir / "tools" / "rap-payment-calculator"
+    leaf_dir = hub_dir / "california"
+    leaf_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        "<!doctype html><html><head><title>Prexvo</title></head><body><h1>Prexvo</h1></body></html>",
+        encoding="utf-8",
+    )
+    (hub_dir / "index.html").write_text(
+        "<!doctype html><html><head><title>RAP Hub | Prexvo</title></head><body><h1>Hub</h1></body></html>",
+        encoding="utf-8",
+    )
+    (leaf_dir / "index.html").write_text(
+        "<!doctype html><html><head><title>RAP CA | Prexvo</title></head><body><h1>Leaf</h1></body></html>",
+        encoding="utf-8",
+    )
+    hub_url = "https://prexvo.com/tools/rap-payment-calculator/"
+    leaf_url = "https://prexvo.com/tools/rap-payment-calculator/california/"
+    (dist_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url><loc>https://prexvo.com/</loc></url>\n"
+        f"  <url><loc>{hub_url}</loc></url>\n"
+        f"  <url><loc>{leaf_url}</loc></url>\n"
+        "</urlset>\n",
+        encoding="utf-8",
+    )
+
+    ledger_path = repo_dir / ".agy" / "index_push_ledger.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    seed_entry = {
+        "hash": "stale-hash",
+        "last_pushed": "2026-01-01T00:00:00+00:00",
+        "push_count": 2,
+        "tenant_id": "prexvo",
+        "google_rollover_queued": True,
+        "custom_meta": "keep-me",
+        "engines": {"indexnow": {"hash": "stale-hash"}},
+    }
+    ledger_path.write_text(json.dumps({hub_url: seed_entry}, indent=2), encoding="utf-8")
+
+    adapter = maintenance.SubprocessPropertyAdapter(
+        property_id="prexvo",
+        brand_name="Prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        dist_dir=dist_dir,
+        repo_path=repo_dir,
+    )
+    bus = HumanActionBus(bus_path=str(tmp_path / "bus.json"))
+
+    # 1. Downstream success: preserve tenant_id and custom metadata, and skip leaf URL
+    with patch("pseofactory.distributor.dispatch_to_distribution_lead", return_value={"status": "SKIPPED"}), patch(
+        "pseofactory.indexer.PushIndexer.dispatch_automated_indexing",
+        return_value={"status": "SUCCESS", "blocked_urls": [], "urls_submitted": [hub_url], "indexnow": {"status": "DISPATCHED"}},
+    ):
+        ds_ok = maintenance._execute_autonomous_downstream_chain(
+            adapter,
+            dry_run=False,
+            defer_live_indexing=False,
+            run_id="test-meta-leaf",
+            action_bus=bus,
+        )
+    assert ds_ok["indexing_indexnow_status"] == "DISPATCHED"
+    ledger_after = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert ledger_after[hub_url]["tenant_id"] == "prexvo"
+    assert ledger_after[hub_url]["google_rollover_queued"] is True
+    assert ledger_after[hub_url]["custom_meta"] == "keep-me"
+    assert leaf_url not in ledger_after
+
+    # 2. Reflect must NOT backfill ledger when downstream indexing failed / quarantined / errored
+    reg = maintenance.TenantRegistry()
+    reg.register_adapter(adapter)
+    clean_report = maintenance.AssetIntegrityReport(
+        property_id="prexvo",
+        total_assets_checked=3,
+        compliant_assets_count=3,
+        drifted_assets_count=0,
+        drifted_assets=[],
+        status="PASS",
+    )
+    monkeypatch.setattr(maintenance.AssetIntegrityEvaluator, "audit_all", lambda self, *a, **k: clean_report)
+    monkeypatch.setattr(
+        maintenance.RetroReflectionEngine,
+        "audit_estate",
+        classmethod(lambda cls, *a, **k: {"stale_count": 0, "stale_pages": []}),
+    )
+    monkeypatch.setattr(
+        maintenance.RetroReflectionEngine,
+        "retrofit_estate",
+        classmethod(lambda cls, *a, **k: {"pages_retrofitted": 1, "retrofitted_count": 1, "retrofitted_paths": []}),
+    )
+
+    for failure_summary in (
+        {"indexing_status": "QUARANTINED_ALL"},
+        {"indexing_status": "EXCEPTION_ROUTED"},
+        {"indexing_status": "SUCCESS", "indexnow": {"status": "FAILED"}},
+    ):
+        ledger_path.write_text("{}", encoding="utf-8")
+        with patch.object(maintenance, "_execute_autonomous_downstream_chain", return_value=failure_summary) as mock_ds:
+            maintenance.reflect_and_recompile_all_assets(
+                properties=["prexvo"],
+                force=True,
+                latch_state=True,
+                run_downstream=True,
+                defer_live_indexing=False,
+                registry=reg,
+                workspace_root=tmp_path,
+                verbose=False,
+            )
+            mock_ds.assert_called_once()
+        assert json.loads(ledger_path.read_text(encoding="utf-8")) == {}, f"Backfilled on {failure_summary}"
+
+    # 3. Reflect success updates hash while preserving existing extra metadata keys
+    ledger_path.write_text(json.dumps({hub_url: seed_entry}, indent=2), encoding="utf-8")
+    with patch.object(
+        maintenance,
+        "_execute_autonomous_downstream_chain",
+        return_value={"indexing_status": "SUCCESS", "indexing_indexnow_status": "DISPATCHED", "indexing_urls_submitted": [hub_url]},
+    ) as mock_ds_ok:
+        maintenance.reflect_and_recompile_all_assets(
+            properties=["prexvo"],
+            force=True,
+            latch_state=True,
+            run_downstream=True,
+            defer_live_indexing=False,
+            registry=reg,
+            workspace_root=tmp_path,
+            verbose=False,
+        )
+        mock_ds_ok.assert_called_once()
+    reflected_ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert reflected_ledger[hub_url]["hash"] != "stale-hash"
+    assert reflected_ledger[hub_url]["tenant_id"] == "prexvo"
+    assert reflected_ledger[hub_url]["google_rollover_queued"] is True
+    assert reflected_ledger[hub_url]["custom_meta"] == "keep-me"
+    assert leaf_url not in reflected_ledger
+
+
+def test_lienbond_tools_directory_quick_answer_is_idempotent_across_tool_counts() -> None:
+    """lb_stale_qa must trigger on mismatch/stale wording and be idempotent for 10, 11, 13, and 50 tools."""
+    for tool_count in (10, 11, 13, 50):
+        links = "".join(f'<a href="/tools/bond-calc-{i}/">Calc {i}</a>' for i in range(tool_count))
+        stale_html = (
+            "<!doctype html><html><head><title>Tools | LienBond</title></head><body>"
+            '<aside class="quick-answer"><div class="quick-answer-body">'
+            "<p>LienBond provides ten deterministic calculators for surety bonds.</p>"
+            f"</div></aside><main>{links}</main></body></html>"
+        )
+        fixed_html, changed_1 = maintenance._normalize_spoke_and_synthesized_body_bloat(
+            stale_html,
+            property_id="lienbond",
+            slug="tools-directory",
+            topic_label="LienBond Tools",
+            stat_auth="40 U.S.C. 3131",
+            econ_ds="Treasury Circular 570",
+        )
+        assert changed_1 is True
+        assert f"{tool_count} institutional" in fixed_html
+        fixed_html_2, changed_2 = maintenance._normalize_spoke_and_synthesized_body_bloat(
+            fixed_html,
+            property_id="lienbond",
+            slug="tools-directory",
+            topic_label="LienBond Tools",
+            stat_auth="40 U.S.C. 3131",
+            econ_ds="Treasury Circular 570",
+        )
+        assert changed_2 is False, f"Non-idempotent for {tool_count} tools"
+        assert fixed_html_2 == fixed_html
+
+
+def test_edge_gone_safe_js_quoting_and_recreated_route_removal(tmp_path: Path) -> None:
+    """_sync_middleware_redirect_table must quote edgeGone safely and drop routes recreated on disk."""
+    from pseofactory.edge import _sync_middleware_redirect_table
+
+    dist_dir = tmp_path / "dist"
+    (dist_dir / "recreated-page").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "recreated-page" / "index.html").write_text("<html>Live</html>", encoding="utf-8")
+
+    mw_seed = (
+        "export async function onRequest(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        "  const hostname = url.hostname.toLowerCase();\n"
+        "  const pathname = url.pathname;\n\n"
+        "  const edgeRedirects = {\n"
+        "  };\n"
+        "  // [BEGIN_EDGE_REDIRECT_DISPATCH]\n"
+        "  const edgeGone = new Set([\n"
+        '    "/recreated-page",\n'
+        '    "/recreated-page/",\n'
+        '    "/still-gone",\n'
+        '    "/still-gone/",\n'
+        "  ]);\n"
+        "  // [END_EDGE_REDIRECT_DISPATCH]\n"
+        "  return await context.next();\n"
+        "}\n"
+    )
+    quoted_path = '/weird"quote\\slug'
+    mw_out = _sync_middleware_redirect_table(
+        mw_seed,
+        {},
+        apex_domain="example.com",
+        extra_gone_paths=[quoted_path],
+        dist_dir=dist_dir,
+    )
+    assert '"/recreated-page"' not in mw_out
+    assert '"/recreated-page/"' not in mw_out
+    assert '"/still-gone"' in mw_out
+    assert json.dumps(quoted_path) in mw_out
+    assert json.dumps(quoted_path + "/") in mw_out
+    # Second pass must be idempotent even with escaped quotes/backslashes
+    mw_out_2 = _sync_middleware_redirect_table(
+        mw_out,
+        {},
+        apex_domain="example.com",
+        extra_gone_paths=[quoted_path],
+        dist_dir=dist_dir,
+    )
+    assert mw_out_2 == mw_out

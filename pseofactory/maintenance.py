@@ -6887,10 +6887,28 @@ def _normalize_spoke_and_synthesized_body_bloat(
                 re.IGNORECASE,
             )
             qb_txt = re.sub(r"<[^>]+>", " ", qb_dir_m.group(1) if qb_dir_m else qa_dir_m.group(2)).strip()
-            lb_stale_qa = property_id.lower() == "lienbond" and (
-                "10 institutional" in qb_txt or "ten deterministic" in qb_txt.lower()
-            )
-            if len(qb_txt.split()) < 40 or "9 institutional" in qb_txt or lb_stale_qa:
+            lb_tool_count = 0
+            lb_stale_qa = False
+            if property_id.lower() == "lienbond":
+                lb_slugs_in_page = {
+                    m
+                    for m in re.findall(
+                        r'href=["\'](?:/tools/|https?://[^/]+/tools/)([a-z0-9][a-z0-9-]+)/["\']',
+                        updated,
+                        flags=re.IGNORECASE,
+                    )
+                }
+                if lb_slugs_in_page:
+                    lb_tool_count = len(lb_slugs_in_page)
+                else:
+                    from pseofactory.compiler import LIENBOND_EXPANSION_SPECS
+
+                    lb_tool_count = len(LIENBOND_EXPANSION_SPECS)
+                lb_stale_qa = (
+                    f"{lb_tool_count} institutional" not in qb_txt
+                    or "ten deterministic" in qb_txt.lower()
+                )
+            if len(qb_txt.split()) < 40 or re.search(r"\b9 institutional\b", qb_txt) or lb_stale_qa:
                 if property_id.lower() == "gainhelm":
                     dir_qa = (
                         "GainHelm provides a deterministic directory of 10 institutional cyber compliance, GRC audit, "
@@ -6898,20 +6916,6 @@ def _normalize_spoke_and_synthesized_body_bloat(
                         "45 CFR Part 160, and BLS OEWS SOC 15-1212 wage benchmarks with zero AI hallucinations."
                     )
                 elif property_id.lower() == "lienbond":
-                    lb_slugs_in_page = {
-                        m
-                        for m in re.findall(
-                            r'href=["\'](?:/tools/|https?://[^/]+/tools/)([a-z0-9][a-z0-9-]+)/["\']',
-                            updated,
-                            flags=re.IGNORECASE,
-                        )
-                    }
-                    if lb_slugs_in_page:
-                        lb_tool_count = len(lb_slugs_in_page)
-                    else:
-                        from pseofactory.compiler import LIENBOND_EXPANSION_SPECS
-
-                        lb_tool_count = len(LIENBOND_EXPANSION_SPECS)
                     dir_qa = (
                         f"LienBond provides a deterministic directory of {lb_tool_count} institutional contractor surety bond, "
                         "ERISA fidelity bond, state workers' compensation, and construction statutory filing calculators anchored to "
@@ -14118,20 +14122,9 @@ class RetroReflectionEngine:
 
         # 4. Synchronize deterministic per-domain public IndexNow verification file in dist/
         try:
-            domain_host = urllib.parse.urlsplit(canon).netloc.lower().split(":")[0]
-            if not domain_host:
-                domain_host = f"{property_id.lower()}.com"
-            if domain_host == "profithelm.com":
-                expected_indexnow_key = hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]
-            elif domain_host == "gainhelm.com":
-                expected_indexnow_key = os.environ.get(
-                    "GAINHELM_INDEXNOW_STEM",
-                    "".join(("c5430f81", "d11340a6", "bda31627", "25e24a03")),
-                ).strip()
-            else:
-                expected_indexnow_key = hashlib.sha256(
-                    f"{domain_host}:indexnow:v1".encode("utf-8")
-                ).hexdigest()[:32]
+            from pseofactory.indexer import derive_deterministic_indexnow_key
+
+            expected_indexnow_key = derive_deterministic_indexnow_key(canon or f"{property_id.lower()}.com")
             if expected_indexnow_key:
                 idx_kf = d / f"{expected_indexnow_key}.txt"
                 if not idx_kf.is_file() or idx_kf.read_text(encoding="utf-8", errors="ignore").strip() != expected_indexnow_key:
@@ -16596,6 +16589,13 @@ def _execute_autonomous_downstream_chain(
                 live=not dry_run,
             )
             summary["indexing_status"] = idx_res.get("status", "SUCCESS") if isinstance(idx_res, dict) else "SUCCESS"
+            if isinstance(idx_res, dict):
+                if isinstance(idx_res.get("indexnow"), dict):
+                    summary["indexing_indexnow_status"] = idx_res["indexnow"].get("status")
+                if isinstance(idx_res.get("blocked_urls"), list):
+                    summary["indexing_blocked_urls"] = list(idx_res.get("blocked_urls") or [])
+                if isinstance(idx_res.get("urls_submitted"), list):
+                    summary["indexing_urls_submitted"] = list(idx_res.get("urls_submitted") or [])
 
         if not dry_run and not defer_live_indexing:
             try:
@@ -16604,6 +16604,35 @@ def _execute_autonomous_downstream_chain(
                 candidate_urls = list(inspected_assets.get("new_urls") or []) + list(
                     inspected_assets.get("existing_urls") or []
                 )
+                asset_types_by_url: Dict[str, str] = {}
+                for a_item in (
+                    list(inspected_assets.get("assets") or [])
+                    + list(inspected_assets.get("new_assets") or [])
+                    + list(inspected_assets.get("existing_assets") or [])
+                ):
+                    if isinstance(a_item, dict) and isinstance(a_item.get("url"), str):
+                        asset_types_by_url[a_item["url"]] = str(a_item.get("asset_type") or "")
+                submitted_urls_set = (
+                    set(u for u in (idx_res.get("urls_submitted") or []) if isinstance(u, str))
+                    if isinstance(idx_res, dict)
+                    else set()
+                )
+
+                def _is_skipped_leaf_url(u_str: str) -> bool:
+                    if u_str in submitted_urls_set:
+                        return False
+                    a_type = asset_types_by_url.get(u_str)
+                    if a_type == "leaf":
+                        return True
+                    if a_type:
+                        return False
+                    clean_p = urllib.parse.urlsplit(u_str).path.strip("/")
+                    if clean_p.startswith("tools/"):
+                        parts = [p for p in clean_p.split("/") if p]
+                        if len(parts) > 2:
+                            return True
+                    return False
+
                 blocked_urls = set(idx_res.get("blocked_urls") or []) if isinstance(idx_res, dict) else set()
                 rollover_after = set(indexer.load_gsc_rollover_queue())
                 idx_status = str(idx_res.get("status", "")).upper() if isinstance(idx_res, dict) else ""
@@ -16621,7 +16650,11 @@ def _execute_autonomous_downstream_chain(
                     [
                         u
                         for u in candidate_urls
-                        if isinstance(u, str) and _is_valid_push_url(u) and u not in blocked_urls
+                        if isinstance(u, str)
+                        and _is_valid_push_url(u)
+                        and u not in blocked_urls
+                        and asset_types_by_url.get(u) != "machine_endpoint"
+                        and not _is_skipped_leaf_url(u)
                     ]
                     if idx_status in ("SUCCESS", "DISPATCHED", "ACCEPTED", "IDEMPOTENT_NO_OP")
                     and not indexnow_failed
@@ -16633,20 +16666,28 @@ def _execute_autonomous_downstream_chain(
                     cur_fp = indexer.get_url_content_hash(u_item)
                     prev_entry = latest_ledger.get(u_item)
                     if not isinstance(prev_entry, dict) or prev_entry.get("hash") != cur_fp:
-                        engs = dict(prev_entry.get("engines", {})) if isinstance(prev_entry, dict) else {}
-                        entry_data: Dict[str, Any] = {
-                            "hash": cur_fp,
-                            "last_pushed": (
-                                prev_entry.get("last_pushed")
-                                if isinstance(prev_entry, dict) and prev_entry.get("last_pushed")
-                                else now_iso_push
-                            ),
-                            "push_count": max(
-                                1,
-                                int(prev_entry.get("push_count", 1)) if isinstance(prev_entry, dict) else 1,
-                            ),
-                            "engines": engs,
-                        }
+                        entry_data: Dict[str, Any] = dict(prev_entry) if isinstance(prev_entry, dict) else {}
+                        engs = (
+                            dict(prev_entry.get("engines", {}))
+                            if isinstance(prev_entry, dict) and isinstance(prev_entry.get("engines"), dict)
+                            else {}
+                        )
+                        entry_data.update(
+                            {
+                                "hash": cur_fp,
+                                "last_pushed": (
+                                    prev_entry.get("last_pushed")
+                                    if isinstance(prev_entry, dict) and prev_entry.get("last_pushed")
+                                    else now_iso_push
+                                ),
+                                "push_count": max(
+                                    1,
+                                    int(prev_entry.get("push_count", 1)) if isinstance(prev_entry, dict) else 1,
+                                ),
+                                "engines": engs,
+                            }
+                        )
+                        entry_data.setdefault("tenant_id", adapter.property_id)
                         if u_item in rollover_after:
                             entry_data["google_rollover_queued"] = True
                         latest_ledger[u_item] = entry_data
@@ -19603,7 +19644,24 @@ def reflect_and_recompile_all_assets(
                         )
                     except Exception:
                         pass
-                    if not defer_live_indexing and downstream_executed:
+                    ds_status_u = str(downstream_summary.get("status", "")).upper() if isinstance(downstream_summary, dict) else ""
+                    ds_idx_status = str(downstream_summary.get("indexing_status", "")).upper() if isinstance(downstream_summary, dict) else ""
+                    ds_indexnow_obj = (
+                        downstream_summary.get("indexnow")
+                        if isinstance(downstream_summary, dict) and isinstance(downstream_summary.get("indexnow"), dict)
+                        else None
+                    )
+                    ds_indexnow_status = str(
+                        (downstream_summary.get("indexing_indexnow_status") if isinstance(downstream_summary, dict) else None)
+                        or (ds_indexnow_obj.get("status") if ds_indexnow_obj else "")
+                        or ""
+                    ).upper()
+                    ds_indexing_ok = (
+                        ds_status_u not in ("EXCEPTION_ROUTED", "FAILED", "ERROR", "SKIPPED")
+                        and ds_idx_status in ("SUCCESS", "DISPATCHED", "ACCEPTED", "IDEMPOTENT_NO_OP")
+                        and ds_indexnow_status not in ("FAILED", "ERROR", "QUARANTINED_ALL", "SKIPPED")
+                    )
+                    if not defer_live_indexing and downstream_executed and ds_indexing_ok:
                         try:
                             push_ledger_file = adapter.dist_dir.parent / ".agy" / "index_push_ledger.json"
                             push_ledger = (
@@ -19613,6 +19671,17 @@ def reflect_and_recompile_all_assets(
                             )
                             if isinstance(push_ledger, dict):
                                 now_iso_push = datetime.now(timezone.utc).isoformat()
+                                ds_blocked_urls = set(
+                                    (downstream_summary.get("indexing_blocked_urls") or [])
+                                    + (downstream_summary.get("blocked_urls") or [])
+                                    if isinstance(downstream_summary, dict)
+                                    else []
+                                )
+                                ds_submitted_urls = set(
+                                    downstream_summary.get("indexing_urls_submitted") or []
+                                    if isinstance(downstream_summary, dict)
+                                    else []
+                                )
                                 sm_file = adapter.dist_dir / "sitemap.xml"
                                 sm_urls: List[str] = []
                                 if sm_file.is_file():
@@ -19624,7 +19693,13 @@ def reflect_and_recompile_all_assets(
                                 c_base = getattr(adapter, "canonical_base", "").rstrip("/")
                                 ledger_changed = False
                                 for u_item in sm_urls:
+                                    if u_item in ds_blocked_urls:
+                                        continue
                                     rel_u = u_item.replace(c_base, "").strip("/") if c_base else ""
+                                    is_leaf_route = rel_u.startswith("tools/") and len([p for p in rel_u.split("/") if p]) > 2
+                                    prev_u = push_ledger.get(u_item)
+                                    if is_leaf_route and u_item not in ds_submitted_urls and not isinstance(prev_u, dict):
+                                        continue
                                     if not rel_u:
                                         f_target = adapter.dist_dir / "index.html"
                                     elif (adapter.dist_dir / rel_u).is_file():
@@ -19633,22 +19708,30 @@ def reflect_and_recompile_all_assets(
                                         f_target = adapter.dist_dir / rel_u / "index.html"
                                     if f_target.is_file():
                                         f_hash = hashlib.sha256(f_target.read_bytes()).hexdigest()
-                                        prev_u = push_ledger.get(u_item)
                                         if not isinstance(prev_u, dict) or prev_u.get("hash") != f_hash:
-                                            engs = dict(prev_u.get("engines", {})) if isinstance(prev_u, dict) else {}
-                                            push_ledger[u_item] = {
-                                                "hash": f_hash,
-                                                "last_pushed": (
-                                                    prev_u.get("last_pushed")
-                                                    if isinstance(prev_u, dict) and prev_u.get("last_pushed")
-                                                    else now_iso_push
-                                                ),
-                                                "push_count": max(
-                                                    1,
-                                                    int(prev_u.get("push_count", 1)) if isinstance(prev_u, dict) else 1,
-                                                ),
-                                                "engines": engs,
-                                            }
+                                            updated_u: Dict[str, Any] = dict(prev_u) if isinstance(prev_u, dict) else {}
+                                            engs = (
+                                                dict(prev_u.get("engines", {}))
+                                                if isinstance(prev_u, dict) and isinstance(prev_u.get("engines"), dict)
+                                                else {}
+                                            )
+                                            updated_u.update(
+                                                {
+                                                    "hash": f_hash,
+                                                    "last_pushed": (
+                                                        prev_u.get("last_pushed")
+                                                        if isinstance(prev_u, dict) and prev_u.get("last_pushed")
+                                                        else now_iso_push
+                                                    ),
+                                                    "push_count": max(
+                                                        1,
+                                                        int(prev_u.get("push_count", 1)) if isinstance(prev_u, dict) else 1,
+                                                    ),
+                                                    "engines": engs,
+                                                }
+                                            )
+                                            updated_u.setdefault("tenant_id", adapter.property_id)
+                                            push_ledger[u_item] = updated_u
                                             ledger_changed = True
                                 if ledger_changed:
                                     push_ledger_file.write_text(json.dumps(push_ledger, indent=2), encoding="utf-8")
