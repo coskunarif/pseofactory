@@ -1774,7 +1774,19 @@ class PartnerTrackingEngine:
             or sovrn_api_cfg.get("tax_form_status")
             or "Electronic IRS Form W-9 SUBMITTED via Tipalti (ProfitHelm LLC, EIN 41-2311423)"
         )
-        sovrn_ok = bool(sovrn_cfg.get("enabled", False)) and "incomplete" not in sovrn_payout.lower()
+        sovrn_ok = (
+            bool(sovrn_cfg or sovrn_api_cfg)
+            and "incomplete" not in sovrn_payout.lower()
+            and (
+                "complete" in sovrn_payout.lower()
+                or "approved" in sovrn_payout.lower()
+            )
+            and (
+                "1395" in sovrn_payout
+                or "direct deposit" in sovrn_payout.lower()
+                or "tipalti" in sovrn_payout.lower()
+            )
+        )
 
         ph_partners = (
             self.hub.vault_data.get("properties", {})

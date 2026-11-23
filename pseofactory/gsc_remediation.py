@@ -7727,35 +7727,32 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
             if merged_h2:
                 merged["h2_headings"] = merged_h2
 
-            # Merge preset_scenarios
-            merged_sc = list(merged.get("preset_scenarios") or [])
-            seen_sc = {
-                str(s.get("query") or s.get("label") or "").strip().lower()
-                for s in merged_sc
-                if isinstance(s, dict)
-            }
-            for sc in spec.get("preset_scenarios") or []:
+            # Merge and deduplicate preset_scenarios
+            merged_sc: List[Dict[str, Any]] = []
+            seen_sc: set = set()
+            for sc in list(merged.get("preset_scenarios") or []) + list(spec.get("preset_scenarios") or []):
                 if isinstance(sc, dict):
-                    sc_key = str(sc.get("query") or sc.get("label") or "").strip().lower()
-                    if sc_key and sc_key not in seen_sc:
+                    sc_key = (
+                        re.sub(r"[^a-z0-9]+", " ", str(sc.get("label") or sc.get("query") or "").lower()).strip(),
+                        json.dumps(sc.get("params") or {}, sort_keys=True),
+                    )
+                    if sc_key[0] and sc_key not in seen_sc:
                         merged_sc.append(sc)
                         seen_sc.add(sc_key)
             if merged_sc:
                 merged["preset_scenarios"] = merged_sc
 
-            # Merge faq_entries / faq_additions / faq_schema
+            # Merge and deduplicate faq_entries / faq_additions / faq_schema
             for faq_key in ("faq_entries", "faq_additions"):
                 existing_val = merged.get(faq_key)
-                cur_faqs = list(existing_val) if isinstance(existing_val, list) else []
-                seen_q = {
-                    str(f.get("question") or "").strip().lower()
-                    for f in cur_faqs
-                    if isinstance(f, dict)
-                }
                 incoming_val = spec.get(faq_key)
-                for f in (incoming_val if isinstance(incoming_val, list) else []):
+                cur_faqs: List[Dict[str, Any]] = []
+                seen_q: set = set()
+                for f in (existing_val if isinstance(existing_val, list) else []) + (
+                    incoming_val if isinstance(incoming_val, list) else []
+                ):
                     if isinstance(f, dict):
-                        fq = str(f.get("question") or "").strip().lower()
+                        fq = _norm_overlay_faq_key(str(f.get("question") or ""))
                         if fq and fq not in seen_q:
                             cur_faqs.append(f)
                             seen_q.add(fq)
@@ -7766,15 +7763,12 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
             cur_schema = merged.get("faq_schema")
             if isinstance(inc_schema, dict):
                 if isinstance(cur_schema, dict):
-                    cur_ents = list(cur_schema.get("mainEntity") or []) if isinstance(cur_schema.get("mainEntity"), list) else []
-                    seen_names = {
-                        str(e.get("name") or "").strip().lower()
-                        for e in cur_ents
-                        if isinstance(e, dict)
-                    }
-                    for e in (inc_schema.get("mainEntity") or []):
+                    raw_cur_ents = list(cur_schema.get("mainEntity") or []) if isinstance(cur_schema.get("mainEntity"), list) else []
+                    cur_ents: List[Dict[str, Any]] = []
+                    seen_names: set = set()
+                    for e in raw_cur_ents + list(inc_schema.get("mainEntity") or []):
                         if isinstance(e, dict):
-                            en = str(e.get("name") or "").strip().lower()
+                            en = _norm_overlay_faq_key(str(e.get("name") or ""))
                             if en and en not in seen_names:
                                 cur_ents.append(e)
                                 seen_names.add(en)
@@ -11043,10 +11037,20 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         sc_parts = ['<section class="overlay-section overlay-scenarios card pseo-card">']
         sc_parts.append('  <h3 class="section-subtitle">Target Scenarios</h3>')
         sc_parts.append('  <div class="scenarios-grid" style="display: grid; gap: 1rem;">')
+        seen_sc_render_keys: set = set()
+        rendered_sc_count = 0
         for idx, sc in enumerate(scenarios):
             if not isinstance(sc, dict):
                 continue
             label, params_obj, desc_str = _sanitize_overlay_scenario_preset(sc, idx)
+            sc_render_key = (
+                re.sub(r"[^a-z0-9]+", " ", html_lib.unescape(label).lower()).strip(),
+                json.dumps(params_obj, sort_keys=True),
+            )
+            if sc_render_key in seen_sc_render_keys:
+                continue
+            seen_sc_render_keys.add(sc_render_key)
+            rendered_sc_count += 1
             preset_json = html_lib.escape(json.dumps(params_obj))
             sc_parts.append(
                 f'    <div class="card pseo-card scenario-card" data-calc-preset="{preset_json}">'
@@ -11060,10 +11064,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 f'style="margin-top: 0.5rem; min-height: 44px; min-width: 44px; padding: 10px 16px;">Load Preset Scenario</button>'
             )
             sc_parts.append("    </div>")
-        sc_parts.append("  </div>")
-        sc_parts.append("</section>")
-        sc_section_markup = "\n".join(sc_parts)
-        injected_sections.append(sc_section_markup)
+        if rendered_sc_count > 0:
+            sc_parts.append("  </div>")
+            sc_parts.append("</section>")
+            sc_section_markup = "\n".join(sc_parts)
+            injected_sections.append(sc_section_markup)
 
     # 4c. Injected Comparison Table Rows & Second-Level AI Mode Decision-Branch Matrix
     comparison_rows = overlay_data.get("comparison_rows", [])
@@ -11367,13 +11372,18 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         or []
     )
     faq_items: List[Dict[str, str]] = []
+    seen_ov_faq_keys: set = set()
     if isinstance(raw_faqs, list):
         for f in raw_faqs:
             if isinstance(f, dict) and f.get("question") and f.get("answer"):
-                faq_items.append({
-                    "question": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(f["question"]))),
-                    "answer": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(f["answer"]))),
-                })
+                q_clean = normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(f["question"])))
+                a_clean = normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(f["answer"])))
+                q_key = _norm_overlay_faq_key(q_clean)
+                if q_key and q_key in seen_ov_faq_keys:
+                    continue
+                if q_key:
+                    seen_ov_faq_keys.add(q_key)
+                faq_items.append({"question": q_clean, "answer": a_clean})
     elif isinstance(raw_faqs, dict) and isinstance(raw_faqs.get("mainEntity"), list):
         for entity in raw_faqs["mainEntity"]:
             if isinstance(entity, dict):
@@ -11381,10 +11391,14 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 acc = entity.get("acceptedAnswer") or {}
                 a_text = acc.get("text") if isinstance(acc, dict) else ""
                 if q_name and a_text:
-                    faq_items.append({
-                        "question": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(q_name))),
-                        "answer": normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(a_text))),
-                    })
+                    q_clean = normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(q_name)))
+                    a_clean = normalize_statutory_acronym_casing(_strip_forbidden_dashes(str(a_text)))
+                    q_key = _norm_overlay_faq_key(q_clean)
+                    if q_key and q_key in seen_ov_faq_keys:
+                        continue
+                    if q_key:
+                        seen_ov_faq_keys.add(q_key)
+                    faq_items.append({"question": q_clean, "answer": a_clean})
 
     def _find_existing_non_overlay_faq_section(doc: str) -> Optional[Tuple[int, int, str, str, str]]:
         stack: List[Tuple[int, int, str]] = []
@@ -11530,20 +11544,36 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             merged_faq_section = f"{open_tag}{updated_inner}{close_tag}"
             html = html[:faq_start] + merged_faq_section + html[faq_end:]
         else:
-            faq_parts = ['<section class="overlay-section overlay-faqs">']
-            faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
-            faq_parts.append('  <div class="faq-list">')
-            for f in faq_items:
-                q = f["question"]
-                a = f["answer"]
-                faq_parts.append('    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; border: 1px solid var(--border);">')
-                faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
-                faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
-                faq_parts.append("    </details>")
-            faq_parts.append("  </div>")
-            faq_parts.append("</section>")
-            faq_section_markup = "\n".join(faq_parts)
-            injected_sections.append(faq_section_markup)
+            html_without_ov_faqs = re.sub(
+                r'<section\s+class=["\']overlay-section\s+overlay-faqs\b[^>]*>.*?</section>',
+                "",
+                html,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            outside_q_norms = {
+                _norm_overlay_faq_key(sm)
+                for sm in re.findall(r"<summary[^>]*>(.*?)</summary>", html_without_ov_faqs, flags=re.DOTALL | re.IGNORECASE)
+            }
+            standalone_faqs = [
+                f
+                for f in faq_items
+                if not (_norm_overlay_faq_key(f["question"]) and _norm_overlay_faq_key(f["question"]) in outside_q_norms)
+            ]
+            if standalone_faqs:
+                faq_parts = ['<section class="overlay-section overlay-faqs">']
+                faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
+                faq_parts.append('  <div class="faq-list">')
+                for f in standalone_faqs:
+                    q = f["question"]
+                    a = f["answer"]
+                    faq_parts.append('    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; border: 1px solid var(--border);">')
+                    faq_parts.append(f'      <summary class="touch-target" style="display: flex; align-items: center; min-height: 44px; min-width: 44px; padding: 8px 4px; cursor: pointer; font-weight: 700;">{html_lib.escape(q)}</summary>')
+                    faq_parts.append(f'      <p style="font-size: 0.9375rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">{html_lib.escape(a)}</p>')
+                    faq_parts.append("    </details>")
+                faq_parts.append("  </div>")
+                faq_parts.append("</section>")
+                faq_section_markup = "\n".join(faq_parts)
+                injected_sections.append(faq_section_markup)
 
         if schema_entities:
             faq_ld_json = {

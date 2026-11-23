@@ -10985,6 +10985,49 @@ def reposition_affiliate_placements_from_gsc_signals(
         updated = _COMPARISON_TABLE_CTA_BAR_STRIP_RE.sub("", updated)
 
     # 3. Rebuild or expand .affiliates-section / .affiliate-cta-section with the diversified multi-company roster
+    _hidden_unapproved_sec_re = re.compile(
+        r'<section\b[^>]*\bdata-partner-ctas-hidden=["\']unapproved["\'][^>]*>.*?</section>',
+        flags=re.S | re.I,
+    )
+
+    def _collect_secondary_hidden_unapproved_meta(
+        doc_html: str,
+        primary_start: int,
+    ) -> Tuple[str, str, bool]:
+        """Extracts inherited id= and #partner-registration-drawer from secondary hidden-unapproved sections."""
+        other_spans: List[Tuple[int, int, str]] = [
+            (hm.start(), hm.end(), hm.group(0))
+            for hm in _hidden_unapproved_sec_re.finditer(doc_html)
+            if hm.start() != primary_start
+        ]
+        if not other_spans:
+            return "", "", False
+        doc_without_other = doc_html
+        for hs, he, _ in reversed(other_spans):
+            doc_without_other = doc_without_other[:hs] + doc_without_other[he:]
+        has_drawer_elsewhere = 'id="partner-registration-drawer"' in doc_without_other
+        inh_id = ""
+        inh_drawer = ""
+        for _, _, h_blk in other_spans:
+            if not inh_id:
+                h_open_m = re.match(r"<section\b[^>]*>", h_blk, flags=re.I)
+                inh_id = _extract_section_id_attr(h_open_m.group(0) if h_open_m else "")
+            if not inh_drawer and not has_drawer_elsewhere:
+                inh_drawer = _extract_partner_registration_drawer(h_blk)
+        return inh_id, inh_drawer, True
+
+    def _strip_remaining_hidden_unapproved_placeholders(doc_html: str, had_other_sections: bool) -> str:
+        """Removes stale hidden-unapproved workpaper placeholders once live partner CTAs are restored."""
+        cleaned_doc = _hidden_unapproved_sec_re.sub("", doc_html) if had_other_sections else doc_html
+        if 'data-partner-ctas-hidden="unapproved"' in cleaned_doc:
+            cleaned_doc = _strip_balanced_blocks_matching(
+                cleaned_doc,
+                "div",
+                r'<div\b[^>]*\bdata-partner-ctas-hidden=["\']unapproved["\'][^>]*>',
+                predicate=lambda _b: True,
+            )
+        return cleaned_doc
+
     if matrix_cards and prop != "prexvo":
         def _render_roster_card(card_offer: Dict[str, Any], idx: int) -> str:
             c_pk = str(card_offer["partner_key"])
@@ -11053,12 +11096,17 @@ def reposition_affiliate_placements_from_gsc_signals(
             if prop == "gainhelm"
             else r'<section\b[^>]*\b(?:class=["\'][^"\']*affiliates?-section[^"\']*["\']|data-partner-ctas-hidden=["\']unapproved["\'])[^>]*>.*?</section>'
         )
-        if re.search(aff_sec_pat, updated, flags=re.S | re.I):
+        m_primary_aff = re.search(aff_sec_pat, updated, flags=re.S | re.I)
+        if m_primary_aff:
+            inherited_id_attr, inherited_reg_drawer, has_other_hidden = _collect_secondary_hidden_unapproved_meta(
+                updated, m_primary_aff.start()
+            )
+
             def _replace_aff_sec(m_sec: re.Match) -> str:
                 raw_sec = m_sec.group(0)
                 raw_open_m = re.match(r"<section\b[^>]*>", raw_sec, flags=re.I)
                 raw_open = raw_open_m.group(0) if raw_open_m else ""
-                sec_id_attr = _extract_section_id_attr(raw_open)
+                sec_id_attr = _extract_section_id_attr(raw_open) or inherited_id_attr
                 sec_classes = ["affiliate-section", "affiliates-section"]
                 for extra_cls in ("partners-section", "refinance-partner-section"):
                     if re.search(rf"\b{re.escape(extra_cls)}\b", raw_open):
@@ -11066,7 +11114,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 sec_cls_attr = " ".join(sec_classes)
                 lead_pk_str = effective_lead_pk
                 h2_str = _normalize_affiliates_section_h2(raw_sec, lead_pk_str, registry)
-                reg_str = _extract_partner_registration_drawer(raw_sec)
+                reg_str = _extract_partner_registration_drawer(raw_sec) or inherited_reg_drawer
                 lead_pk_attr = html_lib.escape(lead_pk_str)
                 sec_rep_val = "true" if slot_plan.get("gsc_repositioned") else "false"
                 return (
@@ -11086,6 +11134,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 count=1,
                 flags=re.S | re.I,
             )
+            updated = _strip_remaining_hidden_unapproved_placeholders(updated, has_other_hidden)
     elif matrix_cards and prop == "prexvo":
         live_px_keys = [str(c["partner_key"]) for c in matrix_cards]
         live_px_companies = list(
@@ -11111,6 +11160,12 @@ def reposition_affiliate_placements_from_gsc_signals(
             or "CPA_BOUNTY"
         )
         px_sec_pat = r'<section\b[^>]*\b(?:class=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\']|data-partner-ctas-hidden=["\']unapproved["\'])[^>]*>.*?</section>'
+        m_primary_px = re.search(px_sec_pat, updated, flags=re.S | re.I)
+        px_inherited_id_attr, px_inherited_reg_drawer, px_has_other_hidden = (
+            _collect_secondary_hidden_unapproved_meta(updated, m_primary_px.start())
+            if m_primary_px
+            else ("", "", False)
+        )
 
         def _replace_prexvo_sec(m_sec: re.Match) -> str:
             raw_sec = m_sec.group(0)
@@ -11121,8 +11176,15 @@ def reposition_affiliate_placements_from_gsc_signals(
                 or "ymyl-public-service-guardrail" in raw_sec
             ):
                 return raw_sec
+            eff_raw_sec = raw_sec
+            if px_inherited_id_attr:
+                raw_open_m = re.match(r"<section\b[^>]*>", eff_raw_sec, flags=re.I)
+                if raw_open_m and not _extract_section_id_attr(raw_open_m.group(0)):
+                    eff_raw_sec = eff_raw_sec.replace("<section", f"<section{px_inherited_id_attr}", 1)
+            if px_inherited_reg_drawer and not _extract_partner_registration_drawer(eff_raw_sec):
+                eff_raw_sec = re.sub(r"</section>\s*$", f"{px_inherited_reg_drawer}\n</section>", eff_raw_sec, count=1, flags=re.I)
             return _build_prexvo_refinance_section_html(
-                raw_sec=raw_sec,
+                raw_sec=eff_raw_sec,
                 ordered_offers_or_keys=matrix_cards,
                 slug_id=slug_id,
                 page_v_fam=roster["vertical_family"],
@@ -11142,6 +11204,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             count=1,
             flags=re.S | re.I,
         )
+        updated = _strip_remaining_hidden_unapproved_placeholders(updated, px_has_other_hidden)
 
     # 4. Update #gsc-striking-overlay .overlay-partner-offer if present (any class ordering)
     _ov_partner_sec_re = re.compile(

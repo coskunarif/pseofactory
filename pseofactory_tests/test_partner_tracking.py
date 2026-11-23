@@ -1640,7 +1640,10 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
     # longer counted as an edge-upgraded click.
     assert ph_audit["compiled_dom_parity"]["edge_upgraded_click_share_pct"] >= 80.0
     assert ph_audit["compiled_dom_parity"]["pending_partner_links_in_dom"] == 0
-    assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 75
+    # Prexvo has zero approved live partners: all unapproved /r/ CTAs must remain hidden in compiled DOM
+    assert px_audit["compiled_dom_parity"]["total_html_files"] >= 23
+    assert px_audit["compiled_dom_parity"]["total_outbound_r_links"] == 0
+    assert px_audit["compiled_dom_parity"]["pending_partner_links_in_dom"] == 0
     assert px_audit["compiled_dom_parity"]["ymyl_restricted_pages_clean"] is True
 
 

@@ -1477,3 +1477,84 @@ def test_reposition_preserves_gsc_placed_partner_and_multiclass_table_bar(
     assert sec_m and "SuretyBondsDirect" not in re.search(r"<h2[^>]*>(.*?)</h2>", sec_m.group(1), re.S).group(1)
 
 
+def test_overlay_duplicate_faqs_and_scenarios_converge_without_pass1_pass2_oscillation(tmp_path: Path) -> None:
+    """
+    Verifies inject_overlay_into_html deduplicates repeated overlay faq_entries and preset_scenarios
+    so repeated overlay injection + RetroReflectionEngine.retrofit_html passes converge with zero
+    Pass 1 -> Pass 2 byte drift (preventing _dedup_details_faq vs overlay-faqs oscillation).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import json
+    from pseofactory.gsc_remediation import inject_overlay_into_html, persist_overlay_respecting_lock
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    dup_faq = {
+        "question": "How is HITRUST CSF e1, i1 & r2 Certification calculated under 2026 audit standards?",
+        "answer": "Our deterministic HITRUST model sums accredited assessor fees, GRC tooling, and internal labor.",
+    }
+    dup_preset = {
+        "id": "preset-gainhelm-series-a",
+        "label": "HITRUST CSF e1 i1 r2 Certification Core Scope Baseline",
+        "query": "HITRUST CSF e1, i1 & r2 Certification",
+        "params": {"headcount": 45, "grc_tier": 1, "audit_type": 2},
+        "description": "45-employee B2B SaaS modeling external assessor fees alongside continuous control automation.",
+    }
+    bloated_overlay = {
+        "slug": "hitrust-csf-e1-i1-r2-certification-cost-calculator",
+        "property_id": "gainhelm",
+        "tenant_id": "gainhelm",
+        "query": "hitrust csf e1 i1 r2 certification cost calculator",
+        "preset_scenarios": [dict(dup_preset) for _ in range(12)],
+        "faq_entries": [dict(dup_faq) for _ in range(12)],
+    }
+
+    base_html = (
+        '<!DOCTYPE html><html><head>'
+        '<title>HITRUST CSF e1 i1 r2 Certification Calculator | GainHelm</title>'
+        '<link rel="canonical" href="https://gainhelm.com/tools/hitrust-csf-e1-i1-r2-certification-cost-calculator/">'
+        '</head><body><main><h1>HITRUST CSF e1 i1 r2 Certification Cost Calculator</h1>'
+        '<div id="gsc-striking-overlay" class="gsc-overlay-container">'
+        '<section class="overlay-section overlay-scenarios card pseo-card"></section>'
+        '<section class="overlay-section overlay-faqs"><div class="faq-list"></div></section>'
+        '</div></main></body></html>'
+    )
+
+    p1_ov = inject_overlay_into_html(base_html, bloated_overlay)
+    assert p1_ov.count('class="card pseo-card scenario-card"') == 1
+    assert p1_ov.count('data-overlay-faq="true"') == 1
+
+    p1_ret, _ = RetroReflectionEngine.retrofit_html(
+        p1_ov,
+        property_id="gainhelm",
+        slug="hitrust-csf-e1-i1-r2-certification-cost-calculator",
+    )
+    RetroReflectionEngine._RETROFIT_HTML_CACHE.clear()
+    p2_ov = inject_overlay_into_html(p1_ret, bloated_overlay)
+    p2_ret, _ = RetroReflectionEngine.retrofit_html(
+        p2_ov,
+        property_id="gainhelm",
+        slug="hitrust-csf-e1-i1-r2-certification-cost-calculator",
+    )
+    assert p2_ret == p1_ret
+    assert p2_ret.count('class="card pseo-card scenario-card"') == 1
+    assert p2_ret.count('data-overlay-faq="true"') == 1
+
+    ov_file = tmp_path / "hitrust.json"
+    existing_locked = {
+        **bloated_overlay,
+        "locked_until": "2099-01-01T00:00:00+00:00",
+        "grouped_queries": ["hitrust csf e1 i1 r2 certification cost calculator"],
+    }
+    ov_file.write_text(json.dumps(existing_locked), encoding="utf-8")
+    incoming_new = {
+        **bloated_overlay,
+        "query": "hitrust r2 cost breakdown",
+        "grouped_queries": ["hitrust r2 cost breakdown"],
+    }
+    merged_spec, written = persist_overlay_respecting_lock(ov_file, incoming_new)
+    assert written is True
+    assert len(merged_spec["preset_scenarios"]) == 1
+    assert len(merged_spec["faq_entries"]) == 1
+
+
+
