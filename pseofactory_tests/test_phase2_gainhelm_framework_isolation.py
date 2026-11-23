@@ -116,13 +116,13 @@ def test_gainhelm_full_compile_retrofit_porcelain_framework_isolation(tmp_path: 
         workspaces = soup.select("#calculator-workspace-anchor")
         compliance_strips = soup.select(".compliance-strip")
         affiliate_sections = soup.select(
-            ".affiliate-section, .affiliates-section, .refinance-partner-section, .partners-section"
+            '.affiliate-section, .affiliates-section, .refinance-partner-section, .partners-section, section[data-first-party-checkout="true"]'
         )
         assert len(workbenches) == 1, f"Expected single #serp-incumbent-depth-workbench on {slug}, found {len(workbenches)}"
         assert workbenches, f"Missing #serp-incumbent-depth-workbench on {slug}"
         assert workspaces, f"Missing #calculator-workspace-anchor on {slug}"
         assert compliance_strips, f"Missing .compliance-strip on {slug}"
-        assert affiliate_sections, f"Missing affiliate/partner section on {slug}"
+        assert affiliate_sections, f"Missing monetization/partner section on {slug}"
 
         for idx, wb_el in enumerate(workbenches):
             _assert_container_framework_clean(wb_el, slug, f"#serp-incumbent-depth-workbench[{idx}]")
@@ -145,8 +145,9 @@ def test_gainhelm_full_compile_retrofit_porcelain_framework_isolation(tmp_path: 
         assert quote_step is not None, f"Missing #partner-quote-intake-step on {slug}"
         assert quote_step.get("data-vertical") == meta["vertical"]
 
+        # While all GainHelm partners are pending in monetization_vault.json, zero unapproved /r/ links render.
         r_links = soup.select('a[href^="/r/"]')
-        assert any("/r/vanta_security" in a.get("href", "") for a in r_links)
+        assert r_links == []
 
     # Confirm SOC 2 and CMMC pages continue rendering SOC 2 / CMMC and $79 SKU cleanly
     soc2_soup = BeautifulSoup(
@@ -234,12 +235,13 @@ def test_gainhelm_stale_html_self_heals_and_edge_fulfillment_parity() -> None:
             "#serp-incumbent-depth-workbench",
             "#calculator-workspace-anchor",
             ".compliance-strip",
-            ".affiliates-section",
+            'section[data-first-party-checkout="true"]',
         ):
             els = soup.select(sel)
             assert els, f"Missing {sel} after self-heal on {slug}"
             for idx, el in enumerate(els):
                 _assert_container_framework_clean(el, slug, f"{sel}[{idx}]")
+        assert not soup.select('a[href^="/r/"]')
         assert len(soup.select("#serp-incumbent-depth-workbench")) == 1
         assert soup.select_one("#partner-quote-intake-step").get("data-vertical") == meta["vertical"]
 
@@ -715,14 +717,14 @@ def _assert_live_fixture_healed(html_txt: str, slug: str, expected_vertical: str
         "#post-calculation-upgrade-drawer",
         ".pro-hook-card",
         "#calc-result-quick-unlock-bar",
-        ".calc-inline-cta",
         ".compliance-strip",
-        ".refinance-partner-section, .affiliates-section, .affiliate-section",
+        'section[data-first-party-checkout="true"]',
     ):
         els = soup.select(sel)
         assert els, f"Missing {sel} after healing live {slug}"
         for idx, el in enumerate(els):
             _assert_container_framework_clean(el, slug, f"{sel}[{idx}]")
+    assert not soup.select('a[href^="/r/"]')
 
     assert len(soup.select("#serp-incumbent-depth-workbench")) == 1
     quote_step = soup.select_one("#partner-quote-intake-step")
@@ -1270,7 +1272,10 @@ def test_gainhelm_estate_convergence_strict_and_core_containers(tmp_path: Path) 
         assert not _blob_has_forbidden_tokens(json.dumps(comp), prof["forbidden"]), f"comparator leak on {fw_slug}"
 
 
-def test_gainhelm_fallback_manifest_path_slug_pro_sample_unlock_and_partners_section() -> None:
+def test_gainhelm_fallback_manifest_path_slug_pro_sample_unlock_and_partners_section(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verifies manifest fallback synthesis, path slug normalization, .pro-hook-sample-unlock, and partners-section badge heals."""
     from pseofactory.audit import detect_tautological_or_fabricated_manifest_issues
     from pseofactory.maintenance import RetroReflectionEngine
@@ -1343,7 +1348,27 @@ def test_gainhelm_fallback_manifest_path_slug_pro_sample_unlock_and_partners_sec
     assert "Locked: $49" in su_txt
     assert not _blob_has_forbidden_tokens(str(sample_unlock), dora_forbidden)
 
-    partners_sec = soup.select_one("section.partners-section")
+    # While all GainHelm partners are pending, unapproved /r/ links are hidden and replaced by 1st-party checkout CTA
+    assert not soup.select('a[href^="/r/"]')
+    fp_sec = soup.select_one('section[data-first-party-checkout="true"]')
+    assert fp_sec is not None
+    assert not _blob_has_forbidden_tokens(str(fp_sec), dora_forbidden)
+
+    # Once vanta_security flips to live in monetization_vault.json, partners-section badges auto-render framework-clean
+    from pseofactory import affiliates as aff_mod
+
+    vault_copy = json.loads(aff_mod.MONETIZATION_VAULT_PATH.read_text(encoding="utf-8"))
+    vault_copy["properties"]["gainhelm"]["partners"]["vanta_security"]["status"] = "live"
+    tmp_vault = tmp_path / "monetization_vault.json"
+    tmp_vault.write_text(json.dumps(vault_copy), encoding="utf-8")
+    monkeypatch.setattr(aff_mod, "MONETIZATION_VAULT_PATH", tmp_vault)
+    healed_live, _ = RetroReflectionEngine.retrofit_html(
+        stale_pro_and_partners,
+        property_id="gainhelm",
+        slug="dora-ict-third-party-risk-compliance-cost-calculator",
+    )
+    soup_live = BeautifulSoup(healed_live, "html.parser")
+    partners_sec = soup_live.select_one("section.partners-section")
     assert partners_sec is not None
     badges = partners_sec.select("span.partner-badge")
     assert badges and all(not _blob_has_forbidden_tokens(str(b), dora_forbidden) for b in badges)
@@ -2042,7 +2067,10 @@ run().catch((err) => {{ console.error(err); process.exit(1); }});
 
 
 @pytest.mark.host_estate
-def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspace() -> None:
+def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     Verifies:
     1) normalize_html_callout_message_match -> reposition_affiliate_placements_from_gsc_signals
@@ -2072,6 +2100,25 @@ def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspa
         '<a href="/r/cobalt_pentest">Cobalt</a></div></section></body></html>'
     )
     # Direct reposition_affiliate_placements_from_gsc_signals on <section class="partners-section"> is Pass 1 == Pass 2 idempotent
+    # While cobalt_pentest is pending in monetization_vault.json, zero /r/ links render.
+    direct_pending_p1, _ = reposition_affiliate_placements_from_gsc_signals(
+        pentest_html, property_id="gainhelm", slug=pentest_slug
+    )
+    direct_pending_p2, _ = reposition_affiliate_placements_from_gsc_signals(
+        direct_pending_p1, property_id="gainhelm", slug=pentest_slug
+    )
+    assert direct_pending_p1 == direct_pending_p2
+    assert not BeautifulSoup(direct_pending_p1, "html.parser").select('a[href^="/r/"]')
+
+    # Once cobalt_pentest flips to live in monetization_vault.json, partners-section preserves class and primary partner.
+    from pseofactory import affiliates as aff_mod
+
+    vault_copy = json.loads(aff_mod.MONETIZATION_VAULT_PATH.read_text(encoding="utf-8"))
+    vault_copy["properties"]["gainhelm"]["partners"]["cobalt_pentest"]["status"] = "live"
+    tmp_vault = tmp_path / "monetization_vault.json"
+    tmp_vault.write_text(json.dumps(vault_copy), encoding="utf-8")
+    monkeypatch.setattr(aff_mod, "MONETIZATION_VAULT_PATH", tmp_vault)
+
     direct_p1, _ = reposition_affiliate_placements_from_gsc_signals(
         pentest_html, property_id="gainhelm", slug=pentest_slug
     )

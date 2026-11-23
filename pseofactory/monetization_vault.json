@@ -8,6 +8,8 @@
     "sovrn_commerce": {
       "name": "Sovrn Commerce",
       "account_id": "2987330",
+      "account_status": "denied",
+      "eligibility_note": "profithelm.com marked ineligible by Sovrn",
       "domain_key": "0a5ac1bfe04034bff021b394f5e71d90",
       "api_key": "",
       "site_domain": "profithelm.com",
@@ -15,7 +17,7 @@
       "redirect_base": "https://redirect.viglink.com",
       "payout_method_status": "COMPLETE - Direct Deposit / ACH via Tipalti Suppliers Portal APPROVED (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, onboarded 2026-10-20, Suppliers Portal application approved 2026-10-26T21:52:28Z in Zoho Inbox #1032 from accounting@sovrn.com)",
       "tax_form_status": "Electronic IRS Form W-9 SUBMITTED & Suppliers Portal APPROVED via Tipalti (ProfitHelm LLC, EIN 41-2311423, Zoho Inbox #1032)",
-      "enabled": true
+      "enabled": false
     },
     "partnerstack": {
       "name": "PartnerStack",
@@ -29,7 +31,8 @@
         "https://gainhelm.com",
         "https://lienbond.com"
       ],
-      "marketplace_application_status": "in_review",
+      "marketplace_status": "declined_reapply_2026_11_25",
+      "marketplace_application_status": "declined_reapply_2026_11_25",
       "verified_clicks": 2578,
       "enabled": true
     },
@@ -176,6 +179,27 @@
             "Personalized 2026-2027 TCJA Sunset Marginal Bracket & Entity Tax Workpaper (HTML/PDF)",
             "5-Point Statutory Exposure & Quarterly Safe-Harbor Reconciliation Schedule (CSV)",
             "Signed Scenario Audit Manifest & CPA Filing Binder Checklist (JSON)"
+          ]
+        },
+        "px_instant_repayment_worksheet_19": {
+          "sku": "px_instant_repayment_worksheet_19",
+          "property_id": "prexvo",
+          "vertical": "student_loan_refinance",
+          "title": "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
+          "price_usd": 19.0,
+          "price_cents": 1900,
+          "currency": "usd",
+          "statutory_authority": "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026) & 34 CFR 685.209",
+          "trend_timeseries_ids": [
+            "ed_direct_undergrad_rate",
+            "ed_idr_discretionary_levy",
+            "hhs_fpl_single_base"
+          ],
+          "deliverables": [
+            "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
+            "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
+            "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
+            "Machine-Readable Borrower Refinance Scenario Pack (JSON)"
           ]
         },
         "px_refi_amortization_decision_audit": {
@@ -392,6 +416,90 @@
             "Personalized 50-State Mechanics Lien Waiver, AIA A312 Penal Sum & WH-347 Compliance Master Workpaper (HTML/PDF)",
             "Integrated Surety Indemnity, NCCI EMR & Prevailing Wage Reconciliation Schedule (CSV)",
             "Signed General Contractor & Subcontractor Statutory Filing Binder (JSON)"
+          ]
+        },
+        "ph_verified_partner_slot": {
+          "sku": "ph_verified_partner_slot",
+          "property_id": "profithelm",
+          "vertical": "b2b_partner_slot",
+          "title": "Verified Calculator Partner Slot",
+          "price_usd": 299.0,
+          "price_cents": 29900,
+          "currency": "usd",
+          "statutory_authority": "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
+          "trend_timeseries_ids": [
+            "irs_sec199a_qbi",
+            "fred_dgs10_yield",
+            "fred_cpilfesl_inflation"
+          ],
+          "deliverables": [
+            "Verified Commercial Partner Desk Placement on Target Calculator Route",
+            "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+            "Direct Calculator CTA & Partner Matrix Priority Slot",
+            "Monthly Partner Attribution & Conversion Reconciliation Digest"
+          ]
+        },
+        "px_verified_partner_slot": {
+          "sku": "px_verified_partner_slot",
+          "property_id": "prexvo",
+          "vertical": "student_loan_partner_slot",
+          "title": "Verified Calculator Partner Slot",
+          "price_usd": 299.0,
+          "price_cents": 29900,
+          "currency": "usd",
+          "statutory_authority": "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
+          "trend_timeseries_ids": [
+            "ed_direct_undergrad_rate",
+            "ed_idr_discretionary_levy",
+            "hhs_fpl_single_base"
+          ],
+          "deliverables": [
+            "Verified Commercial Partner Desk Placement on Target Calculator Route",
+            "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+            "Direct Calculator CTA & Partner Matrix Priority Slot",
+            "Monthly Partner Attribution & Conversion Reconciliation Digest"
+          ]
+        },
+        "gh_verified_partner_slot": {
+          "sku": "gh_verified_partner_slot",
+          "property_id": "gainhelm",
+          "vertical": "b2b_cyber_partner_slot",
+          "title": "Verified Calculator Partner Slot",
+          "price_usd": 299.0,
+          "price_cents": 29900,
+          "currency": "usd",
+          "statutory_authority": "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
+          "trend_timeseries_ids": [
+            "dod_32cfr170_cmmc_controls",
+            "iso_27006_stage2_days",
+            "hhs_ocr_hipaa_tier4_cap"
+          ],
+          "deliverables": [
+            "Verified Commercial Partner Desk Placement on Target Calculator Route",
+            "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+            "Direct Calculator CTA & Partner Matrix Priority Slot",
+            "Monthly Partner Attribution & Conversion Reconciliation Digest"
+          ]
+        },
+        "lb_verified_partner_slot": {
+          "sku": "lb_verified_partner_slot",
+          "property_id": "lienbond",
+          "vertical": "commercial_surety_partner_slot",
+          "title": "Verified Calculator Partner Slot",
+          "price_usd": 299.0,
+          "price_cents": 29900,
+          "currency": "usd",
+          "statutory_authority": "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "ncci_emr_split_point",
+            "census_vip_construction"
+          ],
+          "deliverables": [
+            "Verified Commercial Partner Desk Placement on Target Calculator Route",
+            "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
+            "Direct Calculator CTA & Partner Matrix Priority Slot",
+            "Monthly Partner Attribution & Conversion Reconciliation Digest"
           ]
         }
       },
@@ -726,7 +834,7 @@
           ],
           "live_verified_clicks": 2578,
           "network_profile_completion_pct": 94,
-          "marketplace_application_status": "in_review",
+          "marketplace_application_status": "declined_reapply_2026_11_25",
           "network_marketplace_status": "Direct invite Rippling part_jp9R0iYpPGriHu is Active; Mercury is direct in-house referral https://mercury.com/r/profithelm-llc",
           "tax_registered_location_status": "COMPLETE (ProfitHelm LLC, EIN 41-2311423, 522 W Riverside Ave Ste N, Spokane, WA 99201)",
           "payout_method": "Direct Deposit via Airwallex (ProfitHelm LLC, Choice Financial Group, Routing *****1229, Account ********1395, default: true; PayPal arif.coskun@profithelm.com verified backup)",

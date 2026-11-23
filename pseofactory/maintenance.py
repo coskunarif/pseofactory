@@ -8777,6 +8777,7 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
             LIENBOND_AFFILIATES,
             PREXVO_AFFILIATES,
             PROFITHELM_AFFILIATES,
+            is_partner_live_in_vault,
         )
 
         prop = (property_id or "").strip().lower()
@@ -8791,7 +8792,6 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
         )
     except Exception:
         return True
-    prop_has_live = any(p.status == "live" for p in registry.values())
     for tag in re.finditer(r"<[a-z]+\b[^>]*(?:data-status=|href=[\"\']/r/)[^>]*>", content, re.I):
         raw_tag = tag.group(0)
         pk_m = re.search(r'data-partner=["\']([a-z0-9_]+)["\']', raw_tag, re.I)
@@ -8802,18 +8802,17 @@ def _has_stale_pending_status(content: str, property_id: str) -> bool:
             pk = pk_m.group(1).lower()
         if not pk:
             continue
+        is_live = is_partner_live_in_vault(prop, pk)
         entry = registry.get(pk)
         st_m = re.search(r'data-status=["\']([a-z0-9_]+)["\']', raw_tag, re.I)
         dom_status = st_m.group(1).lower() if st_m else ""
-        if entry is None:
+        if entry is None and not is_live:
             return True
-        if entry.status == "declined":
+        if ('href="/r/' in raw_tag or "href='/r/" in raw_tag) and not is_live:
             return True
-        if dom_status == "pending" and entry.status == "live":
+        if dom_status == "pending" and is_live:
             return True
-        if dom_status == "live" and entry.status != "live":
-            return True
-        if prop_has_live and entry.status != "live" and ('href="/r/' in raw_tag or "href='/r/" in raw_tag):
+        if dom_status == "live" and not is_live:
             return True
     return False
 
@@ -11347,8 +11346,10 @@ class RetroReflectionEngine:
                 if rb_t_val and rb_t_val not in eff_forbidden_titles:
                     eff_forbidden_titles.append(rb_t_val)
 
-        cache_key: Optional[Tuple[str, str, str, str, bool, bool, Tuple[str, ...]]] = None
+        cache_key: Optional[Tuple[Any, ...]] = None
         if manifest_override is None and html_content:
+            from pseofactory.affiliates import load_live_partner_keys_from_vault as _rt_live_keys
+
             h_digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
             dist_key = str(Path(dist_dir).resolve()) if dist_dir is not None else ""
             cache_key = (
@@ -11359,6 +11360,7 @@ class RetroReflectionEngine:
                 dist_dir is not None,
                 eff_preserve_title,
                 tuple(sorted(eff_forbidden_titles)),
+                tuple(sorted(_rt_live_keys(property_id))),
             )
             cached_res = cls._retrofit_cache_get(cache_key)
             if cached_res is not None:
@@ -11443,6 +11445,9 @@ class RetroReflectionEngine:
                 and cls._gainhelm_workbench_has_outer_leak(html_content, slug)
             ):
                 missing.append("serp_incumbent_depth_upgrade")
+        if _has_stale_pending_status(html_content, property_id):
+            if "callout_message_match" not in missing:
+                missing.append("callout_message_match")
         if not missing:
             if dist_dir is not None and (
                 'id="pseo-runtime-sync"' in html_content or "id='pseo-runtime-sync'" in html_content
@@ -11468,6 +11473,7 @@ class RetroReflectionEngine:
                                     cache_key[4],
                                     cache_key[5],
                                     cache_key[6],
+                                    cache_key[7],
                                 ),
                                 (ext_html, []),
                             )
@@ -12136,6 +12142,7 @@ class RetroReflectionEngine:
                     cache_key[4],
                     cache_key[5],
                     cache_key[6],
+                    cache_key[7],
                 ),
                 (updated, []),
             )
@@ -14751,8 +14758,20 @@ class RetroReflectionEngine:
     ) -> Optional[str]:
         """Content-addressed estate signature across dist/, overlays, and .agy telemetry ledgers."""
         try:
+            from pseofactory import affiliates as _aff_sig_mod
+
             h = hashlib.sha256()
-            h.update(f"{property_id.lower()}|{canonical_base or ''}|{bool(defer_live_indexing)}|{'PYTEST_CURRENT_TEST' in os.environ}\n".encode("utf-8"))
+            live_sig = ",".join(sorted(_aff_sig_mod.load_live_partner_keys_from_vault(property_id)))
+            v_stat_sig = ""
+            try:
+                v_st = Path(_aff_sig_mod.MONETIZATION_VAULT_PATH).stat()
+                v_stat_sig = f"{int(v_st.st_mtime_ns)}:{int(v_st.st_size)}"
+            except OSError:
+                v_stat_sig = ""
+            h.update(
+                f"{property_id.lower()}|{canonical_base or ''}|{bool(defer_live_indexing)}|"
+                f"{'PYTEST_CURRENT_TEST' in os.environ}|live={live_sig}|vault={v_stat_sig}\n".encode("utf-8")
+            )
             for fp in sorted(d.rglob("*")):
                 if not fp.is_file() or fp.name.startswith("."):
                     continue
@@ -15161,42 +15180,61 @@ class RetroReflectionEngine:
                     and "data-partner-roster=" not in content
                     and "affiliates-section" not in content
                     and "refinance-partner-section" not in content
+                    and 'data-first-party-checkout="true"' not in content
                     and "</main>" in content
                 ):
-                    if property_id.lower() == "prexvo":
+                    from pseofactory.affiliates import (
+                        build_first_party_workpaper_cta_html,
+                        load_live_partner_keys_from_vault,
+                    )
+
+                    _live_dir_keys = load_live_partner_keys_from_vault(property_id)
+                    if not _live_dir_keys:
+                        _fp_dir = build_first_party_workpaper_cta_html(
+                            property_id=property_id,
+                            slug="tools-directory",
+                            slot="section",
+                        )
+                        seed_sec = f"\n      {_fp_dir}\n    " if _fp_dir else ""
+                    elif property_id.lower() == "prexvo":
+                        _px_live = next(iter(sorted(_live_dir_keys)))
                         seed_sec = (
                             '\n    <section class="refinance-partner-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-                            '      <a href="/r/splash_financial" target="_blank" rel="noopener sponsored nofollow">Splash Financial</a>\n'
+                            f'      <a href="/r/{_px_live}" target="_blank" rel="noopener sponsored nofollow">Refinance Partner</a>\n'
                             '    </section>\n  '
                         )
                     elif property_id.lower() == "gainhelm":
+                        _gh_live = next(iter(sorted(_live_dir_keys)))
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Enterprise GRC &amp; Security Execution Options</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>\n'
+                            f'        <div class="affiliate-card partner-card"><a href="/r/{_gh_live}" target="_blank" rel="noopener sponsored nofollow">GRC Partner</a></div>\n'
                             '      </section>\n    '
                         )
                     elif property_id.lower() == "lienbond":
+                        _lb_live = next(iter(sorted(_live_dir_keys)))
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Commercial Surety &amp; Construction Execution Options</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/suretybonds_direct" target="_blank" rel="noopener sponsored nofollow">SuretyBonds Direct</a></div>\n'
+                            f'        <div class="affiliate-card partner-card"><a href="/r/{_lb_live}" target="_blank" rel="noopener sponsored nofollow">Surety Partner</a></div>\n'
                             '      </section>\n    '
                         )
                     else:
+                        _ph_live = "xendoo" if "xendoo" in _live_dir_keys else next(iter(sorted(_live_dir_keys)))
                         seed_sec = (
                             '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
                             '        <h2>Commercial Execution Options</h2>\n'
-                            '        <div class="affiliate-card partner-card"><a href="/r/xendoo" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
+                            f'        <div class="affiliate-card partner-card"><a href="/r/{_ph_live}" target="_blank" rel="noopener sponsored nofollow">Verified Partner</a></div>\n'
                             '      </section>\n    '
                         )
-                    if "</div>\n  </main>" in content:
-                        content = content.replace("</div>\n  </main>", f"{seed_sec}</div>\n  </main>", 1)
-                    else:
-                        content = content.replace("</main>", f"{seed_sec}</main>", 1)
-                    html_file.write_text(content, encoding="utf-8")
-                    if rel not in retrofitted_paths:
-                        retrofitted_paths.append(rel)
+                    if seed_sec:
+                        if "</div>\n  </main>" in content:
+                            content = content.replace("</div>\n  </main>", f"{seed_sec}</div>\n  </main>", 1)
+                        else:
+                            content = content.replace("</main>", f"{seed_sec}</main>", 1)
+                        html_file.write_text(content, encoding="utf-8")
+                        if rel not in retrofitted_paths:
+                            retrofitted_paths.append(rel)
                 if (
                     re.search(r'href\s*=\s*["\']/r/', content, flags=re.I)
                     or "overlay-partner-offer" in content
@@ -16922,9 +16960,9 @@ def _execute_autonomous_downstream_chain(
 
 def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
     """
-    Synchronizes prexvo/builder.py and prexvo/freshness.py so honest-destination
-    lender routes with contract status 'pending' remain operational alongside 'live',
-    while 'declined' and 'pending_p2' partners are strictly suppressed and never rendered.
+    Synchronizes prexvo/builder.py and prexvo/freshness.py so ONLY partners with vault/registry
+    status 'live' render outbound /r/ CTAs, while 'pending', 'declined', and 'pending_p2'
+    partners are strictly hidden from rendered HTML pages.
     Zero em-dashes. Zero en-dashes.
     """
     changed = False
@@ -16934,19 +16972,19 @@ def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
         b_orig = b_src
         b_src = b_src.replace(
             'if p_info.get("status") in ("live", "pending", "declined")',
-            'if p_info.get("status") in ("live", "pending")',
+            'if p_info.get("status") == "live"',
         )
         b_src = b_src.replace(
-            'if p_info.get("status") == "live"',
             'if p_info.get("status") in ("live", "pending")',
+            'if p_info.get("status") == "live"',
         )
         b_src = b_src.replace(
             'if status not in ("live", "pending", "declined"):',
-            'if status not in ("live", "pending"):',
+            'if status != "live":',
         )
         b_src = b_src.replace(
-            'if status != "live":',
             'if status not in ("live", "pending"):',
+            'if status != "live":',
         )
         if b_src != b_orig:
             px_builder.write_text(b_src, encoding="utf-8")
@@ -16958,27 +16996,27 @@ def _sync_prexvo_affiliate_status_compat(repo_path: Path) -> bool:
         f_orig = f_src
         f_src = f_src.replace(
             'if effective_status not in ("live", "pending", "declined"):',
-            'if effective_status not in ("live", "pending"):',
+            'if effective_status != "live":',
         )
         f_src = f_src.replace(
-            'if effective_status != "live":',
             'if effective_status not in ("live", "pending"):',
+            'if effective_status != "live":',
         )
         f_src = f_src.replace(
             'if status in ("live", "pending", "declined"):',
-            'if status in ("live", "pending"):',
+            'if status == "live":',
         )
         f_src = f_src.replace(
-            'if status == "live":',
             'if status in ("live", "pending"):',
+            'if status == "live":',
         )
         f_src = f_src.replace(
             'if getattr(p_data, "status", "") in ("live", "pending", "declined"):',
-            'if getattr(p_data, "status", "") in ("live", "pending"):',
+            'if getattr(p_data, "status", "") == "live":',
         )
         f_src = f_src.replace(
-            'if getattr(p_data, "status", "") == "live":',
             'if getattr(p_data, "status", "") in ("live", "pending"):',
+            'if getattr(p_data, "status", "") == "live":',
         )
         if f_src != f_orig:
             px_freshness.write_text(f_src, encoding="utf-8")

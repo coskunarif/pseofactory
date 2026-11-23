@@ -392,7 +392,8 @@ def test_per_property_affiliate_registries_and_fail_closed_merchant_audit(tmp_pa
     changed = maintenance._sync_prexvo_affiliate_status_compat(fake_prexvo)
     assert changed is True
     synced_src = target_py.read_text(encoding="utf-8")
-    assert 'if p_info.get("status") in ("live", "pending"):' in synced_src
+    assert 'if p_info.get("status") == "live":' in synced_src
+    assert '"pending"' not in synced_src
     assert '"declined"' not in synced_src
 
 
@@ -928,7 +929,8 @@ def test_lienbond_compiler_sku_price_parity_and_publisher_meta_isolation(tmp_pat
     assert "($49)" in home_html
     assert "($89)" not in home_html
     assert "Next Insurance" not in home_html
-    assert "Simply Business" in home_html
+    assert 'href="/r/' not in home_html
+    assert "href='/r/" not in home_html
     assert "editorial@lienbond.com" not in home_html
     assert "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q" in home_html
 

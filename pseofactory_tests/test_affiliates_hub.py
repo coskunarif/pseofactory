@@ -707,8 +707,9 @@ def test_callout_destination_message_match_audit(tmp_path):
     assert pass_audit["above_fold_verified_pages"] == 1
 
 
-def test_callout_expansion_for_prexvo_and_profithelm_approved_partners():
-    """Verifies that normalize_html_callout_message_match expands Prexvo non-restricted refinance grids to all 5 live partners and enriches ProfitHelm crypto/R&D sections with Koinly and Rippling."""
+def test_callout_expansion_for_prexvo_and_profithelm_approved_partners(tmp_path, monkeypatch):
+    """Verifies that normalize_html_callout_message_match hides unapproved Prexvo /r/ CTAs while pending, expands them automatically once live in monetization_vault.json, and enriches ProfitHelm crypto/R&D sections with live Koinly and Rippling."""
+    from pseofactory import affiliates as aff_mod
     from pseofactory.affiliates import normalize_html_callout_message_match
 
     prexvo_single_partner_html = """<!DOCTYPE html>
@@ -722,6 +723,22 @@ def test_callout_expansion_for_prexvo_and_profithelm_approved_partners():
     </div>
   </section>
 </body></html>"""
+    # While all Prexvo partners are pending/declined in monetization_vault.json, zero /r/ links render
+    # and the section cleanly features Prexvo's 1st-party Stripe Checkout workpaper CTA.
+    hidden_prexvo = normalize_html_callout_message_match(prexvo_single_partner_html, property_id="prexvo")
+    assert "/r/" not in hidden_prexvo
+    assert 'data-first-party-checkout="true"' in hidden_prexvo
+    assert "/api/lead-capture?checkout=1" in hidden_prexvo
+
+    # Once splash_financial, credible, and lendkey flip to live in monetization_vault.json,
+    # their /r/ CTAs expand automatically while declined sofi/earnest stay excluded.
+    vault_copy = json.loads(aff_mod.MONETIZATION_VAULT_PATH.read_text(encoding="utf-8"))
+    for pk in ("splash_financial", "credible", "lendkey"):
+        vault_copy["properties"]["prexvo"]["partners"][pk]["status"] = "live"
+    tmp_vault = tmp_path / "monetization_vault.json"
+    tmp_vault.write_text(json.dumps(vault_copy), encoding="utf-8")
+    monkeypatch.setattr(aff_mod, "MONETIZATION_VAULT_PATH", tmp_vault)
+
     expanded_prexvo = normalize_html_callout_message_match(prexvo_single_partner_html, property_id="prexvo")
     for route in ("/r/splash_financial", "/r/credible", "/r/lendkey"):
         assert route in expanded_prexvo, f"Expected {route} in expanded Prexvo callout section"
@@ -899,7 +916,7 @@ def test_gsc_traffic_weighted_ranking_and_xendoo_live_tax_bracket_alignment():
     assert "E-file.com" in norm_overlay
 
 
-def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
+def test_full_estate_monetization_realignment_zero_unpaid_fallbacks(tmp_path, monkeypatch):
     """Verifies that Section 1031, Section 174, Treasury Yield, Surety Bond, Homepage, and Prexvo overlays upgrade all pending/placeholder slots to active approved sponsors."""
     import re
     from pseofactory.affiliates import normalize_html_callout_message_match
@@ -935,7 +952,8 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
     assert "subid=section-1031-calculator-alabama_inline" in norm_1031
     assert "subid=section-1031-calculator-alabama_overlay" in norm_1031
 
-    # 2. Prexvo calculator overlay upgrades legacy sofi_refi UTM placeholder to live splash_financial (/r/splash_financial)
+    # 2. Prexvo calculator overlay strips unapproved sofi_refi/pending offers while 0 Prexvo partners are live,
+    #    and auto-upgrades to /r/splash_financial once splash_financial flips to live in monetization_vault.json.
     prexvo_ov_html = """<!DOCTYPE html>
 <html><head><title>Student Loan Repayment Calculator</title><link rel="canonical" href="https://prexvo.com/tools/student-loan-repayment-calculator/" /></head><body>
   <div id="gsc-striking-overlay" class="gsc-overlay-container" data-slug="student-loan-repayment-calculator">
@@ -945,14 +963,26 @@ def test_full_estate_monetization_realignment_zero_unpaid_fallbacks():
     </section>
   </div>
 </body></html>"""
-    norm_px = normalize_html_callout_message_match(prexvo_ov_html, property_id="prexvo")
-    assert 'data-partner="splash_financial"' in norm_px
-    assert 'href="/r/splash_financial' in norm_px
-    assert "source_tool=student-loan-repayment-calculator" in norm_px
-    assert "subid=student-loan-repayment-calculator_overlay" in norm_px
-    # Splash Financial has no approved contract yet (pending on Impact), so it is labeled pending.
-    assert 'data-status="pending"' in norm_px
-    assert "utm_source=prexvo" not in norm_px
+    norm_px_hidden = normalize_html_callout_message_match(prexvo_ov_html, property_id="prexvo")
+    assert "sofi_refi" not in norm_px_hidden
+    assert "utm_source=prexvo" not in norm_px_hidden
+    assert "/r/" not in norm_px_hidden
+
+    from pseofactory import affiliates as aff_mod
+
+    vault_copy = json.loads(aff_mod.MONETIZATION_VAULT_PATH.read_text(encoding="utf-8"))
+    vault_copy["properties"]["prexvo"]["partners"]["splash_financial"]["status"] = "live"
+    tmp_vault = tmp_path / "monetization_vault.json"
+    tmp_vault.write_text(json.dumps(vault_copy), encoding="utf-8")
+    with monkeypatch.context() as mp:
+        mp.setattr(aff_mod, "MONETIZATION_VAULT_PATH", tmp_vault)
+        norm_px = normalize_html_callout_message_match(prexvo_ov_html, property_id="prexvo")
+        assert 'data-partner="splash_financial"' in norm_px
+        assert 'href="/r/splash_financial' in norm_px
+        assert "source_tool=student-loan-repayment-calculator" in norm_px
+        assert "subid=student-loan-repayment-calculator_overlay" in norm_px
+        assert 'data-status="live"' in norm_px
+        assert "utm_source=prexvo" not in norm_px
 
     # 3. Homepage standalone affiliate-cta-section replaces stale TaxAct button label with Xendoo and injects above-the-fold FTC disclosure banner
     homepage_html = """<!DOCTYPE html>

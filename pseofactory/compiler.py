@@ -1026,7 +1026,11 @@ def _render_compiler_monetization_and_guardrail_html(
     Zero em-dashes. Zero en-dashes.
     """
     import html as html_lib
-    from pseofactory.affiliates import bind_asset_partner_roster
+    from pseofactory.affiliates import (
+        bind_asset_partner_roster,
+        build_first_party_workpaper_cta_html,
+        is_partner_live_in_vault,
+    )
 
     prop_id = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
     gsc_metrics_raw: Dict[str, Any] = {}
@@ -1072,7 +1076,11 @@ def _render_compiler_monetization_and_guardrail_html(
         table_offer = bindings.get("comparison_table_cta")
         inline_html = ""
         table_html = ""
-        if isinstance(inline_offer, dict) and inline_offer.get("partner_key"):
+        if (
+            isinstance(inline_offer, dict)
+            and inline_offer.get("partner_key")
+            and is_partner_live_in_vault(prop_id, str(inline_offer["partner_key"]))
+        ):
             pk_in = str(inline_offer["partner_key"])
             in_badge = html_lib.escape(str(inline_offer.get("badge") or "Verified Offer"))
             in_name = html_lib.escape(str(inline_offer.get("name") or pk_in))
@@ -1081,8 +1089,8 @@ def _render_compiler_monetization_and_guardrail_html(
             in_model = html_lib.escape(str(inline_offer.get("partnership_model") or "CPA_BOUNTY"))
             in_href = html_lib.escape(str(inline_offer.get("attributed_href") or f"/r/{pk_in}"))
             in_sub = html_lib.escape(str(inline_offer.get("subid") or f"{slug_id}_inline"))
-            in_status = html_lib.escape(str(inline_offer.get("status") or "pending"))
-            in_slot_label = "Primary Conversion Slot" if in_status == "live" else "Referral Resource"
+            in_status = "live"
+            in_slot_label = "Primary Conversion Slot"
             inline_html = (
                 f'\n        <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{pk_in}" data-company-brand="{in_brand}" data-partner-tier="primary" '
@@ -1101,7 +1109,12 @@ def _render_compiler_monetization_and_guardrail_html(
                 f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; white-space: nowrap;">{in_cta}</a>\n'
                 f'        </div>'
             )
-        if "comparison_table_cta" in (slot_plan.get("active_slots") or []) and isinstance(table_offer, dict) and table_offer.get("partner_key"):
+        if (
+            "comparison_table_cta" in (slot_plan.get("active_slots") or [])
+            and isinstance(table_offer, dict)
+            and table_offer.get("partner_key")
+            and is_partner_live_in_vault(prop_id, str(table_offer["partner_key"]))
+        ):
             pk_tb = str(table_offer["partner_key"])
             tb_name = html_lib.escape(str(table_offer.get("name") or pk_tb))
             tb_cta = html_lib.escape(str(table_offer.get("cta_text") or "Compare Partner"))
@@ -1110,7 +1123,7 @@ def _render_compiler_monetization_and_guardrail_html(
             tb_model = html_lib.escape(str(table_offer.get("partnership_model") or "CPA_BOUNTY"))
             tb_href = html_lib.escape(str(table_offer.get("attributed_href") or f"/r/{pk_tb}"))
             tb_sub = html_lib.escape(str(table_offer.get("subid") or f"{slug_id}_table"))
-            tb_status = html_lib.escape(str(table_offer.get("status") or "pending"))
+            tb_status = "live"
             table_html = (
                 f'    <div class="comparison-table-cta-bar card pseo-card" data-mechanic="compliant_intent_monetization" '
                 f'data-partner="{pk_tb}" data-company-brand="{tb_brand}" data-partner-tier="{tb_role}" '
@@ -1129,7 +1142,11 @@ def _render_compiler_monetization_and_guardrail_html(
         return inline_html, table_html
 
     def _build_roster_cards_grid_html() -> str:
-        matrix_cards = bindings.get("partner_matrix_cards") or []
+        matrix_cards = [
+            c
+            for c in (bindings.get("partner_matrix_cards") or [])
+            if isinstance(c, dict) and is_partner_live_in_vault(prop_id, str(c.get("partner_key") or ""))
+        ]
         if not matrix_cards:
             return ""
         card_items: List[str] = []
@@ -1272,6 +1289,39 @@ def _render_compiler_monetization_and_guardrail_html(
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
         partner_reg_drawer_html = _build_partner_registration_drawer_html()
+
+        if not is_partner_live_in_vault(prop_id, partner_key):
+            live_alt = next(
+                (
+                    o
+                    for o in (roster_info.get("roster_offers") or [])
+                    if isinstance(o, dict) and is_partner_live_in_vault(prop_id, str(o.get("partner_key") or ""))
+                ),
+                None,
+            )
+            if live_alt:
+                partner_key = str(live_alt["partner_key"])
+                partner_name = str(live_alt.get("name") or partner_key)
+                cta_text = str(live_alt.get("cta_text") or "Explore Partner")
+                url = f"/r/{partner_key}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
+            else:
+                block_html = "    " + build_first_party_workpaper_cta_html(
+                    property_id=prop_id,
+                    slug=slug,
+                    query=query,
+                    slot="section",
+                    reg_drawer_html="\n" + partner_reg_drawer_html,
+                )
+                return {
+                    "html": block_html,
+                    "inline_calc_cta_html": "",
+                    "comparison_table_cta_html": "",
+                    "affiliate_route": route,
+                    "partner_roster": roster_info,
+                    "slot_plan": slot_plan,
+                    "commercial_offers_allowed": True,
+                    "restricted_public_service": False,
+                }
         if is_gainhelm:
             from pseofactory.affiliates import get_gainhelm_framework_profile
 
@@ -1370,6 +1420,39 @@ def _render_compiler_monetization_and_guardrail_html(
         inline_calc_html, table_cta_html = _build_inline_and_table_slots()
         roster_grid_html = _build_roster_cards_grid_html()
         partner_reg_drawer_html = _build_partner_registration_drawer_html()
+
+        if not is_partner_live_in_vault(prop_id, partner_key):
+            live_alt = next(
+                (
+                    o
+                    for o in (roster_info.get("roster_offers") or [])
+                    if isinstance(o, dict) and is_partner_live_in_vault(prop_id, str(o.get("partner_key") or ""))
+                ),
+                None,
+            )
+            if live_alt:
+                partner_key = str(live_alt["partner_key"])
+                partner_name = str(live_alt.get("name") or partner_key)
+                cta_text = str(live_alt.get("cta_text") or "Explore Partner")
+                url = f"/r/{partner_key}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
+            else:
+                block_html = "    " + build_first_party_workpaper_cta_html(
+                    property_id=prop_id,
+                    slug=slug,
+                    query=query,
+                    slot="section",
+                    reg_drawer_html="\n" + partner_reg_drawer_html,
+                )
+                return {
+                    "html": block_html,
+                    "inline_calc_cta_html": "",
+                    "comparison_table_cta_html": "",
+                    "affiliate_route": route,
+                    "partner_roster": roster_info,
+                    "slot_plan": slot_plan,
+                    "commercial_offers_allowed": True,
+                    "restricted_public_service": False,
+                }
 
         block_html = (
             f'    <section class="affiliate-cta-section refinance-partner-section ymyl-refinance-guardrail card pseo-card" data-property="prexvo" '
@@ -3635,6 +3718,66 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         inputs=home_manifest_dict["inputs"],
     )
 
+    from pseofactory.affiliates import is_partner_live_in_vault as _lb_is_live
+
+    _lb_home_partner_specs = [
+        (
+            "suretybonds_direct",
+            "SuretyBondsDirect",
+            "Treasury Circular 570 Contractor License, Bid &amp; AIA A312 Performance Bonds",
+            "homepage_card_1",
+            "calculator_primary_cta",
+            "Get Your Instant State License or Performance Bond Quote at SuretyBondsDirect",
+        ),
+        (
+            "simply_business",
+            "Simply Business",
+            "NCCI Class-Code Contractor Workers Compensation &amp; General Liability COI",
+            "homepage_card_2",
+            "partner_matrix_card",
+            "Compare Contractor Workers Comp &amp; GL Quotes via Simply Business",
+        ),
+        (
+            "levelset_lien_filing",
+            "Levelset",
+            "50-State Preliminary Notices, Statutory Lien Waivers &amp; County Lien Recording",
+            "homepage_card_3",
+            "partner_matrix_card",
+            "File Your State Preliminary Notice or Mechanics Lien via Levelset",
+        ),
+    ]
+    _lb_live_rows = [
+        (
+            f"            <tr>\n"
+            f"              <td><strong>{p_label}</strong></td>\n"
+            f"              <td>{p_focus}</td>\n"
+            f'              <td><a href="/r/{p_key}?source_tool=homepage&amp;subid={p_sub}&amp;cta_slot={p_slot}" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">{p_cta}</a></td>\n'
+            f"            </tr>"
+        )
+        for p_key, p_label, p_focus, p_sub, p_slot, p_cta in _lb_home_partner_specs
+        if _lb_is_live("lienbond", p_key)
+    ]
+    lb_partner_table_html = (
+        '      <div class="table-wrap">\n'
+        '        <table class="comparison-table">\n'
+        "          <thead>\n"
+        "            <tr>\n"
+        '              <th scope="col">Provider</th>\n'
+        '              <th scope="col">Underwriting &amp; Statutory Focus</th>\n'
+        '              <th scope="col">Action</th>\n'
+        "            </tr>\n"
+        "          </thead>\n"
+        "          <tbody>\n"
+        + "\n".join(_lb_live_rows)
+        + "\n          </tbody>\n"
+        "        </table>\n"
+        "      </div>\n"
+        if _lb_live_rows
+        else (
+            '      <p style="font-size:14px;color:var(--text-muted);">Export deterministic 50-state statutory mechanics lien, AIA A312 surety bond, NCCI EMR, and Form WH-347 workpaper packets directly via Stripe Checkout.</p>\n'
+        )
+    )
+
     hub_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3755,37 +3898,9 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       </div>
     </section>
 
-    <aside class="card partner-cta-section" data-mechanic="compliant_intent_monetization" aria-label="Vetted Surety, Workers Comp &amp; Lien Partners">
-      <h2>Verified Surety Bond Underwriters, Workers Comp Carriers &amp; Lien Services</h2>
-      <div class="table-wrap">
-        <table class="comparison-table">
-          <thead>
-            <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">Underwriting &amp; Statutory Focus</th>
-              <th scope="col">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>SuretyBondsDirect</strong></td>
-              <td>Treasury Circular 570 Contractor License, Bid &amp; AIA A312 Performance Bonds</td>
-              <td><a href="/r/suretybonds_direct?source_tool=homepage&amp;subid=homepage_card_1&amp;cta_slot=calculator_primary_cta" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">Get Your Instant State License or Performance Bond Quote at SuretyBondsDirect</a></td>
-            </tr>
-            <tr>
-              <td><strong>Simply Business</strong></td>
-              <td>NCCI Class-Code Contractor Workers Compensation &amp; General Liability COI</td>
-              <td><a href="/r/simply_business?source_tool=homepage&amp;subid=homepage_card_2&amp;cta_slot=partner_matrix_card" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">Compare Contractor Workers Comp &amp; GL Quotes via Simply Business</a></td>
-            </tr>
-            <tr>
-              <td><strong>Levelset</strong></td>
-              <td>50-State Preliminary Notices, Statutory Lien Waivers &amp; County Lien Recording</td>
-              <td><a href="/r/levelset_lien_filing?source_tool=homepage&amp;subid=homepage_card_3&amp;cta_slot=partner_matrix_card" rel="noopener sponsored nofollow" target="_blank" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;color:var(--accent);">File Your State Preliminary Notice or Mechanics Lien via Levelset</a></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
+    <aside class="card partner-cta-section" data-mechanic="compliant_intent_monetization" aria-label="Vetted Surety, Workers Comp &amp; Lien Resources">
+      <h2>Statutory Surety Bond, Workers Comp &amp; Mechanics Lien Workpaper Packets</h2>
+{lb_partner_table_html}      <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
         <a href="/api/lead-capture?checkout=1&amp;sku=lb_surety_lien_wh347_packet&amp;tool_slug=contractor-license-bond-cost-calculator-by-credit-score&amp;redirect=1" class="btn-cta touch-target">Download 50-State Lien, AIA A312 &amp; WH-347 Packet ($79)</a>
         <a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1" class="btn-secondary touch-target">Download NCCI Class Code &amp; EMR Audit Packet ($49)</a>
       </div>

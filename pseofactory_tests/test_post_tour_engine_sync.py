@@ -422,10 +422,11 @@ def test_monetization_vault_post_tour_baseline_snapshot() -> None:
     assert cj_net["pending_advertiser_applications"] == 13
     assert cj_net["live_pending_advertiser_applications"] == 13
 
-    # PartnerStack: 94% profile with all 4 domains, Marketplace in_review, 2578 clicks on Rippling
+    # PartnerStack: 94% profile with all 4 domains, Marketplace declined_reapply_2026_11_25, 2578 clicks on Rippling
     ps_net = vault["master_networks"]["partnerstack"]
     assert ps_net["network_profile_completion_pct"] == 94
-    assert ps_net["marketplace_application_status"] == "in_review"
+    assert ps_net["marketplace_status"] == "declined_reapply_2026_11_25"
+    assert ps_net["marketplace_application_status"] == "declined_reapply_2026_11_25"
     assert ps_net["verified_clicks"] == 2578
     ps_api = vault["properties"]["profithelm"]["agentic_api_programs"]["partnerstack_api_v2"]
     assert ps_api["live_verified_clicks"] == 2578

@@ -3900,6 +3900,528 @@ def strip_commercial_affiliate_blocks_for_restricted_ymyl(html_content: str) -> 
     return updated
 
 
+MONETIZATION_VAULT_PATH = Path(__file__).resolve().parent / "monetization_vault.json"
+_VAULT_LIVE_PARTNERS_CACHE: Dict[Tuple[str, int, int], Dict[str, Set[str]]] = {}
+_PARTNER_KEY_CANONICAL_ALIASES: Dict[str, str] = {
+    "efile": "efile_com",
+    "eztaxreturn": "eztaxreturn_com",
+}
+
+
+def _normalize_vault_property_id(property_id: str) -> str:
+    prop = str(property_id or "").strip().lower()
+    if prop == "exchange1031":
+        return "profithelm"
+    return prop
+
+
+def _load_all_live_partner_keys_by_property(
+    vault_path: Optional[Any] = None,
+    vault_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Set[str]]:
+    """
+    Loads the live partner key sets for every property defined in monetization_vault.json.
+    Caches by (resolved_path, mtime_ns, size) so edits or monkeypatches take effect immediately
+    without hardcoded tenant lists (designed for 50+ tenants).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(vault_data, dict):
+        props = vault_data.get("properties")
+        out: Dict[str, Set[str]] = {}
+        if isinstance(props, dict):
+            for p_id, p_meta in props.items():
+                p_clean = _normalize_vault_property_id(str(p_id))
+                live_set: Set[str] = set()
+                partners = (p_meta or {}).get("partners") if isinstance(p_meta, dict) else None
+                if isinstance(partners, dict):
+                    for pk, p_entry in partners.items():
+                        if isinstance(p_entry, dict) and str(p_entry.get("status") or "").strip().lower() in ("live", "active_direct"):
+                            norm_pk = str(pk).strip().lower().replace("-", "_")
+                            live_set.add(norm_pk)
+                out[p_clean] = live_set
+        return out
+
+    v_path = Path(vault_path) if vault_path is not None else Path(MONETIZATION_VAULT_PATH)
+    try:
+        st = v_path.stat()
+    except OSError:
+        return {}
+    cache_key = (str(v_path.resolve()), int(st.st_mtime_ns), int(st.st_size))
+    cached = _VAULT_LIVE_PARTNERS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        parsed = json.loads(v_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    out = _load_all_live_partner_keys_by_property(vault_data=parsed)
+    _VAULT_LIVE_PARTNERS_CACHE.clear()
+    _VAULT_LIVE_PARTNERS_CACHE[cache_key] = out
+    return out
+
+
+def load_live_partner_keys_from_vault(
+    property_id: str,
+    vault_path: Optional[Any] = None,
+    vault_data: Optional[Dict[str, Any]] = None,
+) -> Set[str]:
+    """
+    Returns the exact set of partner keys whose status in monetization_vault.json is 'live'
+    for the requested property (fail-closed: empty set if property or vault is missing).
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = _normalize_vault_property_id(property_id)
+    if not prop:
+        return set()
+    by_prop = _load_all_live_partner_keys_by_property(vault_path=vault_path, vault_data=vault_data)
+    live_keys = set(by_prop.get(prop) or ())
+    for alias_k, canon_k in _PARTNER_KEY_CANONICAL_ALIASES.items():
+        if canon_k in live_keys:
+            live_keys.add(alias_k)
+    return live_keys
+
+
+def is_partner_live_in_vault(
+    property_id: str,
+    partner_key: str,
+    vault_path: Optional[Any] = None,
+    vault_data: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Returns True ONLY when partner_key has status == 'live' for property_id in monetization_vault.json.
+    Zero em-dashes. Zero en-dashes.
+    """
+    pk_clean = str(partner_key or "").strip().lower().replace("-", "_")
+    if not pk_clean:
+        return False
+    live_keys = load_live_partner_keys_from_vault(
+        property_id=property_id,
+        vault_path=vault_path,
+        vault_data=vault_data,
+    )
+    if pk_clean in live_keys:
+        return True
+    canon = _PARTNER_KEY_CANONICAL_ALIASES.get(pk_clean)
+    return bool(canon and canon in live_keys)
+
+
+def build_first_party_workpaper_cta_html(
+    property_id: str,
+    slug: str = "",
+    query: str = "",
+    slot: str = "section",
+    reg_drawer_html: str = "",
+    section_id_attr: str = "",
+) -> str:
+    """
+    Renders a clean first-party Stripe Checkout workpaper CTA card/section when a tenant
+    has no live approved third-party partner offers for a page, so visitors never hit
+    looping local /r/ redirects. Suppresses commercial offers on restricted public-service
+    YMYL pages.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+
+    prop = _normalize_vault_property_id(property_id) or "profithelm"
+    clean_slug = str(slug or "").strip().strip("/").lower()
+    if is_restricted_public_service_slug(clean_slug, query):
+        return ""
+
+    brand_display = " ".join(part.capitalize() for part in re.split(r"[_-]+", prop) if part) or "Verified"
+    offer_sku = f"{prop}_workpaper_pack_19"
+    offer_title = f"{brand_display} Personalized Calculation Workpaper & CSV Pack"
+    offer_price_usd = 19.0
+    statutory_authority = "Deterministic Statutory Calculation Model"
+    deliverables: List[str] = [
+        "Personalized Scenario Reconciliation Workpaper (Print-Ready HTML/PDF)",
+        "Sensitivity Schedule & Signed Scenario Audit Pack (CSV & JSON)",
+    ]
+    try:
+        from pseofactory.partner_tracker import resolve_lead_monetization_offer
+
+        offer = resolve_lead_monetization_offer(
+            property_id=prop,
+            tool_slug=clean_slug or "index",
+        )
+        # Never bleed ProfitHelm branding/ph_ SKU onto a new or synthetic 5th+ tenant
+        resolved_prop = _normalize_vault_property_id(str(offer.get("property_id") or ""))
+        cand_sku = str(offer.get("offer_sku") or "").strip()
+        cand_title = str(offer.get("offer_title") or "").strip()
+        is_foreign_ph_fallback = prop != "profithelm" and (
+            cand_sku.lower().startswith("ph_") or "profithelm" in cand_title.lower()
+        )
+        if resolved_prop == prop and not is_foreign_ph_fallback:
+            offer_sku = cand_sku or offer_sku
+            offer_title = cand_title or offer_title
+            offer_price_usd = float(offer.get("offer_price_usd") or offer_price_usd)
+            statutory_authority = str(offer.get("statutory_authority") or statutory_authority).strip()
+            deliverables = [str(d) for d in (offer.get("deliverables") or [])[:2] if str(d).strip()]
+    except ValueError:
+        return ""
+    except Exception:
+        pass
+
+    slug_param = html_lib.escape(clean_slug or "index")
+    sku_q = f"&amp;sku={html_lib.escape(offer_sku)}" if offer_sku else ""
+    checkout_href = f"/api/lead-capture?checkout=1{sku_q}&amp;tool_slug={slug_param}&amp;redirect=1"
+    price_str = f"${int(offer_price_usd)}" if float(offer_price_usd).is_integer() else f"${offer_price_usd:.2f}"
+    safe_title = html_lib.escape(offer_title)
+    safe_auth = html_lib.escape(statutory_authority)
+    safe_sku = html_lib.escape(offer_sku)
+
+    if slot == "inline":
+        return (
+            f'\n        <div class="card pseo-card" data-mechanic="compliant_intent_monetization" '
+            f'data-first-party-checkout="true" data-offer-sku="{safe_sku}" data-partner-ctas-hidden="unapproved" '
+            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; '
+            f'padding: 12px 14px; margin-top: 12px; background: var(--bg-elevated); border: 1px solid var(--border-strong); '
+            f'border-left: 4px solid var(--accent); border-radius: 8px;">\n'
+            f'          <div style="flex: 1; min-width: 180px;">\n'
+            f'            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);">First-Party Audit Deliverable</div>\n'
+            f'            <div style="font-size: 14px; font-weight: 700; color: var(--text); margin-top: 2px;">{safe_title}</div>\n'
+            f'          </div>\n'
+            f'          <a rel="nofollow" href="{checkout_href}" data-first-party-checkout="true" data-offer-sku="{safe_sku}" '
+            f'class="btn-cta touch-target" '
+            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; '
+            f'padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; '
+            f'text-decoration: none; white-space: nowrap;">Download Workpaper ({price_str})</a>\n'
+            f'        </div>'
+        )
+
+    deliv_items = "".join(f"<li>{html_lib.escape(item)}</li>" for item in deliverables)
+    deliv_html = f'\n      <ul style="margin: 8px 0 12px 18px; font-size: 13px; color: var(--text-muted);">{deliv_items}</ul>' if deliv_items else ""
+    ymyl_note = ""
+    if prop == "prexvo":
+        ymyl_disc = (PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer") or "").strip()
+        ymyl_sentence = ymyl_disc or (
+            "Refinancing federal student loans permanently eliminates federal protections, including income-driven repayment "
+            "and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685."
+        )
+        ymyl_note = (
+            '\n      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted);">\n'
+            f'        {html_lib.escape(ymyl_sentence)}\n'
+            '      </p>'
+        )
+    sec_classes = (
+        "ymyl-refinance-guardrail card pseo-card"
+        if prop == "prexvo"
+        else "card pseo-card"
+    )
+    return (
+        f'<section{section_id_attr} class="{sec_classes}" data-property="{html_lib.escape(prop)}" '
+        f'data-first-party-checkout="true" data-offer-sku="{safe_sku}" data-partner-ctas-hidden="unapproved" '
+        f'data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+        f'      <h2>{safe_title}</h2>\n'
+        f'      <p style="font-size: 14px; color: var(--text-muted);">Export your deterministic scenario as a print-ready HTML/PDF workpaper, CSV sensitivity schedule, and signed JSON audit pack ({safe_auth}).</p>'
+        f'{ymyl_note}'
+        f'{deliv_html}\n'
+        f'      <p style="margin-top: 12px;">\n'
+        f'        <a rel="nofollow" href="{checkout_href}" data-first-party-checkout="true" data-offer-sku="{safe_sku}" '
+        f'class="btn-cta touch-target" '
+        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; '
+        f'padding: 12px 18px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">'
+        f'Get Personalized Workpaper Pack ({price_str})</a>\n'
+        f'      </p>'
+        f'{reg_drawer_html}\n'
+        f'    </section>'
+    )
+
+
+def _strip_balanced_blocks_matching(
+    html_text: str,
+    tag_name: str,
+    open_pattern: str,
+    predicate: Any,
+    replacer: Optional[Any] = None,
+) -> str:
+    """
+    Scans balanced HTML blocks of `tag_name` whose opening tag matches `open_pattern`.
+    For each block where `predicate(block_html)` is True, replaces it with `replacer(block_html)`
+    (or empty string when `replacer` is None).
+    """
+    if not html_text:
+        return html_text
+    open_re = re.compile(open_pattern, flags=re.IGNORECASE)
+    token_re = re.compile(rf"</?{tag_name}\b[^>]*>", flags=re.IGNORECASE)
+    out: List[str] = []
+    pos = 0
+    while True:
+        m = open_re.search(html_text, pos)
+        if not m:
+            out.append(html_text[pos:])
+            break
+        start = m.start()
+        depth = 0
+        end = -1
+        for tok in token_re.finditer(html_text, start):
+            tok_txt = tok.group(0).lower()
+            if tok_txt.startswith(f"</{tag_name}"):
+                depth -= 1
+                if depth == 0:
+                    end = tok.end()
+                    break
+            elif not tok_txt.endswith("/>"):
+                depth += 1
+        if end == -1:
+            out.append(html_text[pos:])
+            break
+        block = html_text[start:end]
+        out.append(html_text[pos:start])
+        if predicate(block):
+            out.append(replacer(block) if replacer is not None else "")
+        else:
+            out.append(block)
+        pos = end
+    return "".join(out)
+
+
+def strip_unapproved_partner_ctas_from_html(
+    html_content: str,
+    property_id: str = "profithelm",
+    slug: str = "",
+    query: str = "",
+    vault_path: Optional[Any] = None,
+    vault_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Fail-closed HTML filter guaranteeing zero outbound /r/<partner> CTA links or cards
+    for any partner whose status in monetization_vault.json is NOT 'live'.
+    Replaces dead unapproved partner sections with the tenant's working 1st-party Stripe
+    Checkout workpaper CTA (while preserving #partner-registration-drawer and strict
+    Title IV YMYL guardrails on restricted pages).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(html_content, str) or not html_content:
+        return html_content
+    if "/r/" not in html_content and "overlay-partner-offer" not in html_content:
+        return html_content
+
+    prop = _normalize_vault_property_id(property_id) or "profithelm"
+    live_keys = load_live_partner_keys_from_vault(
+        property_id=prop,
+        vault_path=vault_path,
+        vault_data=vault_data,
+    )
+    eff_slug = (slug or _extract_tool_slug_from_html_head(html_content) or "").strip().lower()
+    r_href_re = re.compile(r'href=["\'](?:https?://[^/"\']+)?/r/([a-z0-9_-]+)', flags=re.IGNORECASE)
+    r_anchor_re = re.compile(
+        r'<a\b[^>]*href=["\'](?:https?://[^/"\']+)?/r/([a-z0-9_-]+)[^"\']*["\'][^>]*>.*?</a>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    def _extract_r_keys(fragment: str) -> List[str]:
+        return [m.group(1).strip().lower().replace("-", "_") for m in r_href_re.finditer(fragment)]
+
+    def _is_key_live(pk: str) -> bool:
+        norm = pk.strip().lower().replace("-", "_")
+        if norm in live_keys:
+            return True
+        canon = _PARTNER_KEY_CANONICAL_ALIASES.get(norm)
+        return bool(canon and canon in live_keys)
+
+    def _has_unapproved_r(fragment: str) -> bool:
+        keys = _extract_r_keys(fragment)
+        return any(not _is_key_live(k) for k in keys)
+
+    def _has_live_r(fragment: str) -> bool:
+        keys = _extract_r_keys(fragment)
+        return any(_is_key_live(k) for k in keys)
+
+    def _is_suppressed_ymyl_fragment(fragment: str) -> bool:
+        return (
+            'data-restricted-public-service="true"' in fragment
+            or 'data-commercial-offers="none"' in fragment
+            or 'data-commercial-offers="suppressed-default"' in fragment
+            or "ymyl-public-service-guardrail" in fragment
+        )
+
+    page_is_restricted_ymyl = _is_suppressed_ymyl_fragment(html_content) or is_restricted_public_service_slug(eff_slug, query)
+
+    updated = html_content
+
+    # 1. Strip unapproved inline calculator CTAs and comparison table CTA bars
+    updated = _strip_balanced_blocks_matching(
+        updated,
+        "div",
+        r'<div\b[^>]*class=["\'][^"\']*\bcalc-inline-cta\b[^"\']*["\'][^>]*>',
+        predicate=_has_unapproved_r,
+    )
+    updated = _strip_balanced_blocks_matching(
+        updated,
+        "div",
+        r'<div\b[^>]*class=["\'][^"\']*\bcomparison-table-cta-bar\b[^"\']*["\'][^>]*>',
+        predicate=_has_unapproved_r,
+    )
+
+    # 2. Strip unapproved overlay partner offers
+    def _overlay_is_unapproved(block: str) -> bool:
+        if _has_unapproved_r(block):
+            return True
+        if _has_live_r(block):
+            return False
+        dp_m = re.search(r'data-partner=["\']([a-z0-9_-]+)["\']', block, flags=re.IGNORECASE)
+        if dp_m:
+            return not _is_key_live(dp_m.group(1))
+        return False
+
+    updated = _strip_balanced_blocks_matching(
+        updated,
+        "section",
+        r'<section\b[^>]*class=["\'][^"\']*\boverlay-partner-offer\b[^"\']*["\'][^>]*>',
+        predicate=_overlay_is_unapproved,
+    )
+
+    # 3. Handle commercial partner sections (<section> and <aside>)
+    first_party_section_emitted = 'data-first-party-checkout="true"' in updated
+
+    def _clean_partner_section(sec_block: str) -> str:
+        nonlocal first_party_section_emitted
+        if _is_suppressed_ymyl_fragment(sec_block) or 'data-first-party-checkout="true"' in sec_block:
+            return sec_block
+        if not _has_unapproved_r(sec_block):
+            return sec_block
+
+        # Strip unapproved individual partner cards and table rows inside the section first
+        cleaned = _strip_balanced_blocks_matching(
+            sec_block,
+            "div",
+            r'<div\b[^>]*class=["\'][^"\']*\b(?:partner-card|affiliate-card)\b[^"\']*["\'][^>]*>',
+            predicate=_has_unapproved_r,
+        )
+        cleaned = re.sub(
+            r"<tr\b[^>]*>.*?</tr>",
+            lambda tr_m: "" if _has_unapproved_r(tr_m.group(0)) else tr_m.group(0),
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Remove now-empty comparison tables inside partner sections
+        cleaned = re.sub(
+            r'<div\s+class=["\']table-wrap["\'][^>]*>\s*<table\b[^>]*>[\s\S]*?<tbody[^>]*>\s*</tbody>\s*</table>\s*</div>',
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"<table\b[^>]*>[\s\S]*?<tbody[^>]*>\s*</tbody>\s*</table>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        # Remove any remaining stray unapproved <a> inside this section
+        cleaned = r_anchor_re.sub(
+            lambda a_m: a_m.group(0) if _is_key_live(a_m.group(1)) else "",
+            cleaned,
+        )
+
+        # If the section still contains live partner links, clean stale unapproved data-partner* attrs and keep it
+        if _has_live_r(cleaned):
+            remaining_live = list(dict.fromkeys(k for k in _extract_r_keys(cleaned) if _is_key_live(k)))
+            lead_live = remaining_live[0] if remaining_live else ""
+            sec_open_m2 = re.match(r"<(?:section|aside)\b[^>]*>", cleaned, flags=re.IGNORECASE)
+            if sec_open_m2 and lead_live:
+                open_tag = sec_open_m2.group(0)
+                new_open = open_tag
+                for attr_name in ("data-partner", "data-primary-partner"):
+                    am = re.search(rf'{attr_name}=["\']([a-z0-9_-]+)["\']', new_open, flags=re.IGNORECASE)
+                    if am and not _is_key_live(am.group(1)):
+                        new_open = re.sub(
+                            rf'{attr_name}=["\'][^"\']*["\']',
+                            f'{attr_name}="{lead_live}"',
+                            new_open,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                rm = re.search(r'data-partner-roster=["\']([^"\']+)["\']', new_open, flags=re.IGNORECASE)
+                if rm:
+                    kept_roster = [
+                        rk.strip().lower()
+                        for rk in rm.group(1).split(",")
+                        if rk.strip() and _is_key_live(rk.strip())
+                    ]
+                    if not kept_roster:
+                        kept_roster = remaining_live
+                    new_open = re.sub(
+                        r'data-partner-roster=["\'][^"\']*["\']',
+                        f'data-partner-roster="{",".join(dict.fromkeys(kept_roster))}"',
+                        new_open,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                if new_open != open_tag:
+                    cleaned = new_open + cleaned[sec_open_m2.end() :]
+            return cleaned
+
+        # If this section ALREADY has first-party Stripe Checkout CTA links (e.g. LienBond homepage aside),
+        # keep it cleanly without the dead partner table
+        if "/api/lead-capture?checkout=1" in cleaned:
+            return cleaned
+
+        # Otherwise replace dead partner section with the tenant's 1st-party Stripe Checkout workpaper CTA
+        if page_is_restricted_ymyl:
+            return ""
+        sec_open_m = re.match(r"<(?:section|aside)\b[^>]*>", sec_block, flags=re.IGNORECASE)
+        sec_id_attr = _extract_section_id_attr(sec_open_m.group(0) if sec_open_m else "")
+        reg_drawer = _extract_partner_registration_drawer(sec_block)
+        if first_party_section_emitted:
+            return reg_drawer
+        first_party_section_emitted = True
+        return build_first_party_workpaper_cta_html(
+            property_id=prop,
+            slug=eff_slug,
+            query=query,
+            slot="section",
+            reg_drawer_html=reg_drawer,
+            section_id_attr=sec_id_attr,
+        )
+
+    partner_sec_open_pat = (
+        r'<section\b[^>]*class=["\'][^"\']*\b'
+        r'(?:affiliate-cta-section|affiliates-section|affiliate-section|refinance-partner-section|partners-section|partner-cta-section)'
+        r'\b[^"\']*["\'][^>]*>'
+    )
+    updated = _strip_balanced_blocks_matching(
+        updated,
+        "section",
+        partner_sec_open_pat,
+        predicate=_has_unapproved_r,
+        replacer=_clean_partner_section,
+    )
+    partner_aside_open_pat = (
+        r'<aside\b[^>]*class=["\'][^"\']*\b'
+        r'(?:affiliate-cta-section|affiliates-section|affiliate-section|refinance-partner-section|partners-section|partner-cta-section)'
+        r'\b[^"\']*["\'][^>]*>'
+    )
+    updated = _strip_balanced_blocks_matching(
+        updated,
+        "aside",
+        partner_aside_open_pat,
+        predicate=_has_unapproved_r,
+        replacer=_clean_partner_section,
+    )
+
+    # 4. Strip any unapproved standalone partner cards or table rows outside partner sections
+    if "/r/" in updated:
+        updated = _strip_balanced_blocks_matching(
+            updated,
+            "div",
+            r'<div\b[^>]*class=["\'][^"\']*\b(?:partner-card|affiliate-card)\b[^"\']*["\'][^>]*>',
+            predicate=_has_unapproved_r,
+        )
+        updated = re.sub(
+            r"<tr\b[^>]*>.*?</tr>",
+            lambda tr_m: "" if _has_unapproved_r(tr_m.group(0)) else tr_m.group(0),
+            updated,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # 5. Final fail-closed safety net: strip any stray unapproved <a href="[https://...]/r/<pk>">...</a>
+        updated = r_anchor_re.sub(
+            lambda a_m: a_m.group(0) if _is_key_live(a_m.group(1)) else "",
+            updated,
+        )
+
+    return updated
+
+
 def _extract_partner_vault_status(
     partner_key: str,
     vault_overrides: Optional[Dict[str, Any]],
@@ -6782,6 +7304,11 @@ def _normalize_affiliates_section_h2(
 ) -> str:
     """Preserves valid affiliates-section <h2> headings while normalizing headings that name a non-promoted partner."""
     default_h2 = '<h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Recommended Partner Solutions</h2>'
+    if (
+        'data-partner-ctas-hidden="unapproved"' in raw_sec
+        or "data-partner-ctas-hidden='unapproved'" in raw_sec
+    ):
+        return default_h2
     h2_m = re.search(r"<h2\b[^>]*>.*?</h2>", raw_sec, flags=re.S | re.I)
     if not h2_m:
         return default_h2
@@ -6936,7 +7463,7 @@ def _render_prexvo_partner_card(
         slot = "calculator_primary_cta" if idx == 1 else "partner_matrix_card"
         subid = f"{slug_id}_card_{idx}"
         href = f"/r/{pk}?source_tool={slug_id}&subid={subid}&cta_slot={slot}"
-        status = p_obj.status
+        status = "live" if is_partner_live_in_vault("prexvo", pk) else p_obj.status
     else:
         badge = str(offer.get("badge") or (p_obj.badge if p_obj else "Partner Option"))
         name = str(offer.get("name") or (p_obj.name if p_obj else pk))
@@ -6946,7 +7473,11 @@ def _render_prexvo_partner_card(
         slot = str(offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card"))
         subid = str(offer.get("subid") or f"{slug_id}_card_{idx}")
         href = str(offer.get("attributed_href") or f"/r/{pk}?source_tool={slug_id}&subid={subid}&cta_slot={slot}")
-        status = str(offer.get("status") or (p_obj.status if p_obj else "pending"))
+        status = (
+            "live"
+            if is_partner_live_in_vault("prexvo", pk)
+            else str(offer.get("status") or (p_obj.status if p_obj else "pending"))
+        )
 
     safe_pk = html_lib.escape(pk)
     safe_model = html_lib.escape(p_model)
@@ -7093,7 +7624,20 @@ def _build_prexvo_refinance_section_html(
         return f"{open_tag}{replaced_inner}</section>"
 
     reg_str = _extract_partner_registration_drawer(raw_sec)
-    return f"{open_tag}\n      {grid_html}{reg_str}\n    </section>"
+    is_hidden_placeholder = (
+        'data-partner-ctas-hidden="unapproved"' in raw_open
+        or "data-partner-ctas-hidden='unapproved'" in raw_open
+    )
+    ymyl_warn_m = re.search(
+        r'<p\b[^>]*\bclass=["\'][^"\']*\bymyl-statutory-warning\b[^"\']*["\'][^>]*>.*?</p>',
+        raw_sec,
+        flags=re.S | re.I,
+    )
+    ymyl_warn_block = f"\n      {ymyl_warn_m.group(0).strip()}" if ymyl_warn_m else ""
+    if is_hidden_placeholder:
+        heading_block = '\n      <h2 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 1rem;">Private Student Loan Refinance Comparison</h2>'
+        return f"{open_tag}{heading_block}{ymyl_warn_block}\n      {grid_html}{reg_str}\n    </section>"
+    return f"{open_tag}{ymyl_warn_block}\n      {grid_html}{reg_str}\n    </section>"
 
 
 def normalize_html_callout_message_match(
@@ -7175,11 +7719,14 @@ def normalize_html_callout_message_match(
             property_id=prop,
         )["description"]
 
+    live_partner_keys = load_live_partner_keys_from_vault(prop)
+
     def _effective_dom_status(pk: str, p_obj: Optional[AffiliatePartner]) -> str:
+        pk_norm = str(pk or "").strip().lower().replace("-", "_")
+        if pk_norm in live_partner_keys:
+            return "live"
         if p_obj:
             return p_obj.status
-        if prop in ("profithelm", "exchange1031") and pk in SOVRN_VERIFIED_PAYING_MERCHANTS:
-            return "live"
         return "pending"
 
     # Extract page-level identity (title, canonical, h1) excluding footer/related links
@@ -7477,6 +8024,8 @@ def normalize_html_callout_message_match(
                     pk = "mercury"
                 else:
                     pk = "rippling"
+        if pk not in live_partner_keys:
+            return ""
         if pk != old_pk:
             sec_html = re.sub(
                 rf'data-partner=["\']{re.escape(old_pk)}["\']',
@@ -7703,6 +8252,9 @@ def normalize_html_callout_message_match(
             gsc_inline_meta,
             preserve_promoted_primary,
         )
+        px_keys_ordered = [k for k in px_keys_ordered if k in live_partner_keys]
+        eff_px_pk = eff_px_pk if eff_px_pk in live_partner_keys else (px_keys_ordered[0] if px_keys_ordered else "")
+        promoted_px_cand = promoted_px_cand if promoted_px_cand in live_partner_keys else ""
         px_roster_csv = ",".join(px_keys_ordered)
         px_companies_csv = ",".join(
             COMPANY_BRAND_BY_PARTNER_KEY.get(k, k) for k in px_keys_ordered
@@ -7715,11 +8267,13 @@ def normalize_html_callout_message_match(
             )
         )
         px_models_csv = ",".join(px_models_list) or "CPA_BOUNTY,QUALIFIED_LEAD_CPL"
-        eff_px_obj = PREXVO_AFFILIATES.get(eff_px_pk)
+        eff_px_obj = PREXVO_AFFILIATES.get(eff_px_pk) if eff_px_pk else None
         px_lead_model = (eff_px_obj.partnership_model if eff_px_obj else "CPA_BOUNTY")
 
         def _expand_prexvo_refinance_section(match: re.Match) -> str:
             sec_html = match.group(0)
+            if not px_keys_ordered or not eff_px_pk:
+                return sec_html
             has_any_px_route = any(
                 f"/r/{k}" in sec_html
                 for k in ("splash_financial", "credible", "lendkey", "sofi", "earnest")
@@ -7772,34 +8326,35 @@ def normalize_html_callout_message_match(
                 companies_csv=px_companies_csv,
             )
 
-        updated = re.sub(
-            r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>',
-            _expand_prexvo_refinance_section,
-            updated,
-            flags=re.S | re.I,
-        )
-        updated = re.sub(
-            r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
-            rf'<section class="partners-section"\g<1> data-partner="{eff_px_pk}" data-primary-partner="{eff_px_pk}" data-partnership-model="{html_lib.escape(px_lead_model)}" data-partner-models="{html_lib.escape(px_models_csv)}" data-partner-roster="{html_lib.escape(px_roster_csv)}" data-partner-companies="{html_lib.escape(px_companies_csv)}">',
-            updated,
-            count=1,
-            flags=re.I,
-        )
-        updated = re.sub(
-            r'(<section\s+class=["\']partners-section["\'][^>]*data-partner-roster=["\'][^"\']+["\'])(?![^>]*data-partnership-model=)([^>]*>)',
-            rf'\g<1> data-partnership-model="{html_lib.escape(px_lead_model)}" data-partner-models="{html_lib.escape(px_models_csv)}"\g<2>',
-            updated,
-            count=1,
-            flags=re.I,
-        )
-        if (
-            "ymyl-public-service-guardrail" not in updated
-            and 'data-restricted-public-service="true"' not in updated
-            and 'data-commercial-offers="none"' not in updated
-            and 'data-commercial-offers="suppressed-default"' not in updated
-            and any(f"/r/{k}" in updated for k in ("splash_financial", "credible", "lendkey"))
-        ):
-            primary_inline_pk = eff_px_pk
+        if px_keys_ordered and eff_px_pk:
+            updated = re.sub(
+                r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>',
+                _expand_prexvo_refinance_section,
+                updated,
+                flags=re.S | re.I,
+            )
+            updated = re.sub(
+                r'<section\s+class=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
+                rf'<section class="partners-section"\g<1> data-partner="{eff_px_pk}" data-primary-partner="{eff_px_pk}" data-partnership-model="{html_lib.escape(px_lead_model)}" data-partner-models="{html_lib.escape(px_models_csv)}" data-partner-roster="{html_lib.escape(px_roster_csv)}" data-partner-companies="{html_lib.escape(px_companies_csv)}">',
+                updated,
+                count=1,
+                flags=re.I,
+            )
+            updated = re.sub(
+                r'(<section\s+class=["\']partners-section["\'][^>]*data-partner-roster=["\'][^"\']+["\'])(?![^>]*data-partnership-model=)([^>]*>)',
+                rf'\g<1> data-partnership-model="{html_lib.escape(px_lead_model)}" data-partner-models="{html_lib.escape(px_models_csv)}"\g<2>',
+                updated,
+                count=1,
+                flags=re.I,
+            )
+            if (
+                "ymyl-public-service-guardrail" not in updated
+                and 'data-restricted-public-service="true"' not in updated
+                and 'data-commercial-offers="none"' not in updated
+                and 'data-commercial-offers="suppressed-default"' not in updated
+                and any(f"/r/{k}" in updated for k in px_keys_ordered)
+            ):
+                primary_inline_pk = eff_px_pk
 
     elif prop == "gainhelm":
         gh_fw_prof = get_gainhelm_framework_profile(slug=page_slug, vertical=page_v_fam)
@@ -7815,9 +8370,9 @@ def normalize_html_callout_message_match(
         valid_gh_keys = {
             k
             for k in gh_base_roster
-            if GAINHELM_AFFILIATES.get(k) and GAINHELM_AFFILIATES[k].status not in ("declined", "rejected")
+            if GAINHELM_AFFILIATES.get(k) and k in live_partner_keys
         }
-        if gh_primary_pk not in valid_gh_keys and GAINHELM_AFFILIATES.get(gh_primary_pk):
+        if gh_primary_pk not in valid_gh_keys and gh_primary_pk in live_partner_keys and GAINHELM_AFFILIATES.get(gh_primary_pk):
             valid_gh_keys.add(gh_primary_pk)
 
         gh_sec_pat = (
@@ -7864,10 +8419,13 @@ def normalize_html_callout_message_match(
         ):
             promoted_cand = sec_pk
 
-        eff_gh_pk = promoted_cand or gh_primary_pk
+        eff_gh_pk = promoted_cand if promoted_cand in valid_gh_keys else (gh_primary_pk if gh_primary_pk in valid_gh_keys else "")
         gainhelm_roster_keys = tuple(
-            [eff_gh_pk] + [k for k in gh_base_roster if k != eff_gh_pk]
+            ([eff_gh_pk] if eff_gh_pk else [])
+            + [k for k in gh_base_roster if k != eff_gh_pk and k in valid_gh_keys]
         )
+        if not eff_gh_pk and gainhelm_roster_keys:
+            eff_gh_pk = gainhelm_roster_keys[0]
         gainhelm_roster_csv = ",".join(gainhelm_roster_keys)
         gainhelm_companies_csv = ",".join(
             COMPANY_BRAND_BY_PARTNER_KEY.get(k, k) for k in gainhelm_roster_keys
@@ -7878,13 +8436,15 @@ def normalize_html_callout_message_match(
             if p_k and p_k.partnership_model not in gh_models_seen:
                 gh_models_seen.append(p_k.partnership_model)
         gainhelm_models_csv = ",".join(gh_models_seen) or "QUALIFIED_LEAD_CPL,HYBRID_CPA_REVSHARE,CPA_BOUNTY"
-        prim_p_obj = GAINHELM_AFFILIATES.get(eff_gh_pk)
+        prim_p_obj = GAINHELM_AFFILIATES.get(eff_gh_pk) if eff_gh_pk else None
         gainhelm_primary_model = html_lib.escape(
             (prim_p_obj.partnership_model if prim_p_obj else None) or "QUALIFIED_LEAD_CPL"
         )
 
         def _expand_gainhelm_partner_section(match: re.Match) -> str:
             sec_html = match.group(0)
+            if not gainhelm_roster_keys or not eff_gh_pk:
+                return sec_html
             prim_obj = GAINHELM_AFFILIATES.get(eff_gh_pk)
             prim_badge = (
                 resolve_contextual_partner_offer_copy(
@@ -7955,12 +8515,13 @@ def normalize_html_callout_message_match(
                 safe_sub = html_lib.escape(f"{page_slug}_card_{idx}")
                 safe_p_model = html_lib.escape(p_obj.partnership_model)
                 c_brand = html_lib.escape(COMPANY_BRAND_BY_PARTNER_KEY.get(pk, pk))
+                eff_card_st = html_lib.escape(_effective_dom_status(pk, p_obj))
                 cards_html.append(
                     f'      <div class="partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
                     f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html_lib.escape(ctx_gh["badge"])}</span>\n'
                     f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html_lib.escape(ctx_gh["name"])}</h3>\n'
                     f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html_lib.escape(ctx_gh["description"])}</p>\n'
-                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{html_lib.escape(p_obj.status)}" data-cta-slot="{slot}">\n'
+                    f'        <a href="{card_href}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{pk}" data-company-brand="{c_brand}" data-partnership-model="{safe_p_model}" data-tool="{safe_s}" data-subid="{safe_sub}" data-status="{eff_card_st}" data-cta-slot="{slot}">\n'
                     f'          {html_lib.escape(ctx_gh["cta_text"])} &rarr;\n'
                     f'        </a>\n'
                     f'      </div>'
@@ -7988,26 +8549,27 @@ def normalize_html_callout_message_match(
                 '    </section>'
             )
 
-        updated = re.sub(
-            gh_sec_pat,
-            _expand_gainhelm_partner_section,
-            updated,
-            flags=re.S | re.I,
-        )
-        updated = re.sub(
-            r'<section\b[^>]*\bclass=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
-            rf'<section class="partners-section"\g<1> data-partner="{eff_gh_pk}" data-primary-partner="{eff_gh_pk}" data-partnership-model="{gainhelm_primary_model}" data-partner-models="{gainhelm_models_csv}" data-partner-roster="{gainhelm_roster_csv}" data-partner-companies="{gainhelm_companies_csv}">',
-            updated,
-            count=1,
-            flags=re.I,
-        )
-        if (
-            'data-restricted-public-service="true"' not in updated
-            and 'data-commercial-offers="none"' not in updated
-            and 'data-commercial-offers="suppressed-default"' not in updated
-            and "/r/" in updated
-        ):
-            primary_inline_pk = eff_gh_pk
+        if gainhelm_roster_keys and eff_gh_pk:
+            updated = re.sub(
+                gh_sec_pat,
+                _expand_gainhelm_partner_section,
+                updated,
+                flags=re.S | re.I,
+            )
+            updated = re.sub(
+                r'<section\b[^>]*\bclass=["\']partners-section["\'](?![^>]*data-partner-roster=)([^>]*)>',
+                rf'<section class="partners-section"\g<1> data-partner="{eff_gh_pk}" data-primary-partner="{eff_gh_pk}" data-partnership-model="{gainhelm_primary_model}" data-partner-models="{gainhelm_models_csv}" data-partner-roster="{gainhelm_roster_csv}" data-partner-companies="{gainhelm_companies_csv}">',
+                updated,
+                count=1,
+                flags=re.I,
+            )
+            if (
+                'data-restricted-public-service="true"' not in updated
+                and 'data-commercial-offers="none"' not in updated
+                and 'data-commercial-offers="suppressed-default"' not in updated
+                and "/r/" in updated
+            ):
+                primary_inline_pk = eff_gh_pk
 
     elif prop == "lienbond":
         if (
@@ -8018,18 +8580,17 @@ def normalize_html_callout_message_match(
         ):
             m_prim_lb = re.search(r'data-primary-partner=["\']([a-z0-9_]+)["\']', updated, re.I)
             cand_lb = m_prim_lb.group(1).lower() if m_prim_lb else ""
-            if (
-                cand_lb in LIENBOND_AFFILIATES
-                and LIENBOND_AFFILIATES[cand_lb].status not in ("declined", "rejected")
-            ):
+            if cand_lb in LIENBOND_AFFILIATES and cand_lb in live_partner_keys:
                 primary_inline_pk = cand_lb
             else:
-                primary_inline_pk = "simply_business"
+                live_lb = [k for k in LIENBOND_AFFILIATES if k in live_partner_keys]
+                if live_lb:
+                    primary_inline_pk = live_lb[0]
 
     elif prop in ("profithelm", "exchange1031"):
         def _build_profithelm_partner_card(pk: str, card_idx: int = 1) -> str:
             p_obj = PROFITHELM_AFFILIATES.get(pk)
-            if not p_obj or p_obj.status in ("declined", "rejected"):
+            if not p_obj or pk not in live_partner_keys:
                 return ""
             ctx_card = resolve_contextual_partner_offer_copy(
                 partner_key=pk,
@@ -8248,8 +8809,7 @@ def normalize_html_callout_message_match(
     if (
         not is_suppressed_ymyl_page
         and gsc_cand_pk in registry
-        and registry[gsc_cand_pk].status not in ("declined", "rejected")
-        and (prop not in ("profithelm", "exchange1031") or gsc_cand_pk in SOVRN_VERIFIED_PAYING_MERCHANTS)
+        and gsc_cand_pk in live_partner_keys
         and (prop != "gainhelm" or not eff_gh_pk or gsc_cand_pk == eff_gh_pk)
         and (prop != "prexvo" or not promoted_px_cand or gsc_cand_pk == promoted_px_cand)
     ):
@@ -8258,7 +8818,7 @@ def normalize_html_callout_message_match(
         not is_suppressed_ymyl_page
         and primary_inline_pk
         and primary_inline_pk in registry
-        and registry[primary_inline_pk].status not in ("declined", "rejected")
+        and primary_inline_pk in live_partner_keys
     ):
         p_inline = registry[primary_inline_pk]
         ctx_in = resolve_contextual_partner_offer_copy(
@@ -8451,11 +9011,12 @@ def normalize_html_callout_message_match(
                 cur_obj = registry.get(cur_pk)
                 needs_tbl_upgrade = (
                     not cur_obj
-                    or cur_obj.status in ("declined", "rejected")
-                    or (prop in ("profithelm", "exchange1031") and cur_obj.status != "live")
+                    or cur_pk not in live_partner_keys
                 )
                 if not needs_tbl_upgrade:
                     return bar_raw
+                if primary_inline_pk not in live_partner_keys:
+                    return ""
                 tbl_href = f"/r/{primary_inline_pk}?source_tool={page_slug}&subid={page_slug}_table&cta_slot=comparison_table_cta"
                 gsc_t_m = re.search(r'data-gsc-tier=["\']([^"\']+)["\']', bar_raw, re.I)
                 gsc_t_val = gsc_t_m.group(1) if gsc_t_m else "baseline"
@@ -8478,6 +9039,13 @@ def normalize_html_callout_message_match(
                 _replace_comparison_table_cta_bar,
                 updated,
             )
+
+    # Fail-closed pass: hide ALL unapproved/non-live /r/<partner> CTAs and feature 1st-party Stripe workpaper CTA
+    updated = strip_unapproved_partner_ctas_from_html(
+        updated,
+        property_id=prop,
+        slug=page_slug,
+    )
 
     # Stamp any remaining bare /r/<partner> anchors with page (source_tool) and slot (subid, cta_slot) attribution
     def _stamp_attribution_on_r_anchor(match: re.Match) -> str:
@@ -9584,7 +10152,11 @@ def _build_roster_offer_entry(
         vertical_family=vertical_family,
         property_id=prop,
     )
-    offer_status = str(meta.get("status") or p_obj.status or "pending")
+    if is_partner_live_in_vault(prop, pk):
+        offer_status = "live"
+    else:
+        raw_st = str(meta.get("status") or p_obj.status or "pending").strip().lower()
+        offer_status = "pending" if raw_st == "live" else raw_st
     return {
         "partner_key": pk,
         "name": ctx_copy["name"],
@@ -10187,10 +10759,39 @@ def reposition_affiliate_placements_from_gsc_signals(
             registry=registry,
         )
 
+    live_vault_keys = load_live_partner_keys_from_vault(prop)
     bindings = slot_plan["slot_bindings"]
     inline_offer = bindings["calculator_result_inline"]
+    if isinstance(inline_offer, dict) and str(inline_offer.get("partner_key") or "").strip().lower() not in live_vault_keys:
+        inline_offer = None
     table_offer = bindings["comparison_table_cta"]
-    matrix_cards = bindings["partner_matrix_cards"]
+    if isinstance(table_offer, dict) and str(table_offer.get("partner_key") or "").strip().lower() not in live_vault_keys:
+        table_offer = None
+    matrix_cards = [
+        c
+        for c in (bindings["partner_matrix_cards"] or [])
+        if isinstance(c, dict) and str(c.get("partner_key") or "").strip().lower() in live_vault_keys
+    ]
+    if inline_offer is None and matrix_cards:
+        lead_card = dict(matrix_cards[0])
+        lead_pk_fb = str(lead_card["partner_key"])
+        lead_card["cta_slot"] = "calculator_result_inline"
+        lead_card["subid"] = f"{slug_id}_inline"
+        lead_card["attributed_href"] = (
+            f"/r/{lead_pk_fb}?source_tool={slug_id}&subid={slug_id}_inline&cta_slot=calculator_result_inline"
+        )
+        lead_card["status"] = "live"
+        inline_offer = lead_card
+    if table_offer is None and matrix_cards and "comparison_table_cta" in (slot_plan.get("active_slots") or []):
+        lead_tbl = dict(matrix_cards[0])
+        lead_pk_fb = str(lead_tbl["partner_key"])
+        lead_tbl["cta_slot"] = "comparison_table_cta"
+        lead_tbl["subid"] = f"{slug_id}_table"
+        lead_tbl["attributed_href"] = (
+            f"/r/{lead_pk_fb}?source_tool={slug_id}&subid={slug_id}_table&cta_slot=comparison_table_cta"
+        )
+        lead_tbl["status"] = "live"
+        table_offer = lead_tbl
     gsc_tier = str(slot_plan.get("gsc_opportunity_tier") or "BASELINE_MULTI_SLOT")
     updated = html_content
 
@@ -10204,7 +10805,7 @@ def reposition_affiliate_placements_from_gsc_signals(
         safe_in_model = html_lib.escape(str(inline_offer.get("partnership_model") or resolve_partnership_model_spec(pk_in)["partnership_model"]))
         safe_href = html_lib.escape(str(inline_offer.get("attributed_href") or f"/r/{pk_in}"))
         safe_sub = html_lib.escape(str(inline_offer.get("subid") or f"{slug_id}_inline"))
-        safe_in_status = html_lib.escape(str(inline_offer.get("status") or "pending"))
+        safe_in_status = "live"
         safe_tool = html_lib.escape(slug_id)
         safe_gsc_tier = html_lib.escape(gsc_tier)
         yield_str = f"{float(inline_offer.get('yield_score', 0.0) or 0.0):.2f}"
@@ -10353,7 +10954,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                 href=str(table_offer.get("attributed_href") or f"/r/{pk_tbl}"),
                 tool=slug_id,
                 subid=f"{slug_id}_table",
-                status=str(table_offer.get("status") or "pending"),
+                status="live",
                 gsc_tier=gsc_tier,
                 tier_role=str(table_offer.get("tier_role") or "primary"),
                 existing_class_attr=existing_cls,
@@ -10397,7 +10998,7 @@ def reposition_affiliate_placements_from_gsc_signals(
             c_slot = html_lib.escape(str(card_offer.get("cta_slot") or ("calculator_primary_cta" if idx == 1 else "partner_matrix_card")))
             c_href = html_lib.escape(str(card_offer.get("attributed_href") or f"/r/{c_pk}"))
             c_sub = html_lib.escape(str(card_offer.get("subid") or f"{slug_id}_card_{idx}"))
-            c_status = html_lib.escape(str(card_offer.get("status") or "pending"))
+            c_status = "live"
             c_tool = html_lib.escape(slug_id)
             return (
                 f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}">\n'
@@ -10421,15 +11022,36 @@ def reposition_affiliate_placements_from_gsc_signals(
             )
 
         cards_html = "\n".join(_render_roster_card(c, idx) for idx, c in enumerate(matrix_cards, start=1))
-        roster_keys_csv = html_lib.escape(",".join(roster["roster_keys"]))
-        companies_csv = html_lib.escape(",".join(roster["distinct_companies"]))
-        models_csv = html_lib.escape(",".join(roster.get("partnership_models_represented") or []))
-        lead_model_attr = html_lib.escape(str(roster.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
+        live_card_keys = [str(c["partner_key"]) for c in matrix_cards]
+        live_card_companies = list(
+            dict.fromkeys(
+                str(c.get("company_brand") or COMPANY_BRAND_BY_PARTNER_KEY.get(str(c["partner_key"]), str(c["partner_key"])))
+                for c in matrix_cards
+            )
+        )
+        live_card_models = list(
+            dict.fromkeys(
+                str(c.get("partnership_model") or resolve_partnership_model_spec(str(c["partner_key"]))["partnership_model"])
+                for c in matrix_cards
+            )
+        )
+        roster_keys_csv = html_lib.escape(",".join(live_card_keys))
+        companies_csv = html_lib.escape(",".join(live_card_companies))
+        models_csv = html_lib.escape(",".join(live_card_models or (roster.get("partnership_models_represented") or [])))
+        lead_pk_cand = str(slot_plan.get("promoted_partner_key") or "").strip().lower()
+        effective_lead_pk = lead_pk_cand if lead_pk_cand in live_vault_keys else live_card_keys[0]
+        lead_model_attr = html_lib.escape(
+            str(
+                matrix_cards[0].get("partnership_model")
+                or roster.get("primary_partnership_model")
+                or "HYBRID_CPA_REVSHARE"
+            )
+        )
 
         aff_sec_pat = (
-            r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section|affiliates?-section)[^"\']*["\'][^>]*>.*?</section>'
+            r'<section\b[^>]*\b(?:class=["\'][^"\']*(?:refinance-partner-section|partners-section|affiliates?-section)[^"\']*["\']|data-partner-ctas-hidden=["\']unapproved["\'])[^>]*>.*?</section>'
             if prop == "gainhelm"
-            else r'<section\b[^>]*\bclass=["\'][^"\']*affiliates?-section[^"\']*["\'][^>]*>.*?</section>'
+            else r'<section\b[^>]*\b(?:class=["\'][^"\']*affiliates?-section[^"\']*["\']|data-partner-ctas-hidden=["\']unapproved["\'])[^>]*>.*?</section>'
         )
         if re.search(aff_sec_pat, updated, flags=re.S | re.I):
             def _replace_aff_sec(m_sec: re.Match) -> str:
@@ -10442,7 +11064,7 @@ def reposition_affiliate_placements_from_gsc_signals(
                     if re.search(rf"\b{re.escape(extra_cls)}\b", raw_open):
                         sec_classes.append(extra_cls)
                 sec_cls_attr = " ".join(sec_classes)
-                lead_pk_str = str(slot_plan.get("promoted_partner_key") or "")
+                lead_pk_str = effective_lead_pk
                 h2_str = _normalize_affiliates_section_h2(raw_sec, lead_pk_str, registry)
                 reg_str = _extract_partner_registration_drawer(raw_sec)
                 lead_pk_attr = html_lib.escape(lead_pk_str)
@@ -10465,12 +11087,30 @@ def reposition_affiliate_placements_from_gsc_signals(
                 flags=re.S | re.I,
             )
     elif matrix_cards and prop == "prexvo":
-        roster_keys_csv = ",".join(roster["roster_keys"])
-        companies_csv = ",".join(roster["distinct_companies"])
-        models_csv = ",".join(roster.get("partnership_models_represented") or [])
-        lead_model_val = str(roster.get("primary_partnership_model") or "CPA_BOUNTY")
-        lead_pk_val = str(slot_plan.get("promoted_partner_key") or "splash_financial")
-        px_sec_pat = r'<section\b[^>]*\bclass=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\'][^>]*>.*?</section>'
+        live_px_keys = [str(c["partner_key"]) for c in matrix_cards]
+        live_px_companies = list(
+            dict.fromkeys(
+                str(c.get("company_brand") or COMPANY_BRAND_BY_PARTNER_KEY.get(str(c["partner_key"]), str(c["partner_key"])))
+                for c in matrix_cards
+            )
+        )
+        live_px_models = list(
+            dict.fromkeys(
+                str(c.get("partnership_model") or resolve_partnership_model_spec(str(c["partner_key"]))["partnership_model"])
+                for c in matrix_cards
+            )
+        )
+        roster_keys_csv = ",".join(live_px_keys)
+        companies_csv = ",".join(live_px_companies)
+        models_csv = ",".join(live_px_models or (roster.get("partnership_models_represented") or []))
+        lead_pk_cand = str(slot_plan.get("promoted_partner_key") or "").strip().lower()
+        lead_pk_val = lead_pk_cand if lead_pk_cand in live_vault_keys else live_px_keys[0]
+        lead_model_val = str(
+            matrix_cards[0].get("partnership_model")
+            or roster.get("primary_partnership_model")
+            or "CPA_BOUNTY"
+        )
+        px_sec_pat = r'<section\b[^>]*\b(?:class=["\'][^"\']*(?:refinance-partner-section|partners-section)[^"\']*["\']|data-partner-ctas-hidden=["\']unapproved["\'])[^>]*>.*?</section>'
 
         def _replace_prexvo_sec(m_sec: re.Match) -> str:
             raw_sec = m_sec.group(0)
@@ -10533,10 +11173,15 @@ def reposition_affiliate_placements_from_gsc_signals(
         )
         updated = _ov_partner_sec_re.sub(ov_markup, updated, count=1)
 
+    has_unapproved_r_in_dom = any(
+        m.group(1).strip().lower().replace("-", "_") not in live_vault_keys
+        for m in re.finditer(r'href=["\'](?:https?://[^/"\']+)?/r/([a-z0-9_-]+)', updated, flags=re.IGNORECASE)
+    )
     callout_skipped = bool(
         skip_callout_if_unchanged
         and updated == html_content
         and not slot_plan.get("gsc_repositioned")
+        and not has_unapproved_r_in_dom
     )
     if not callout_skipped:
         updated = normalize_html_callout_message_match(
@@ -10544,8 +11189,16 @@ def reposition_affiliate_placements_from_gsc_signals(
             property_id=prop,
             preserve_promoted_primary=bool(slot_plan.get("gsc_repositioned")),
         )
+    elif has_unapproved_r_in_dom:
+        updated = strip_unapproved_partner_ctas_from_html(
+            updated,
+            property_id=prop,
+            slug=page_slug,
+        )
     after_slots = list(dict.fromkeys(re.findall(r'data-cta-slot=["\']([^"\']+)["\']', updated, flags=re.I)))
     after_primary = str(slot_plan.get("promoted_partner_key") or "")
+    if after_primary and after_primary.lower() not in live_vault_keys:
+        after_primary = str(matrix_cards[0]["partner_key"]) if matrix_cards else ""
 
     return updated, {
         "slug": page_slug,

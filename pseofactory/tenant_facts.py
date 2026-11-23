@@ -1432,7 +1432,7 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
             tools_directory_seed_section_html=(
                 '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
                 '        <h2>Verified Commercial Execution Partners</h2>\n'
-                '        <div class="affiliate-card partner-card"><a href="/r/crest_capital" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
+                '        <div class="affiliate-card partner-card"><a href="/r/xendoo" target="_blank" rel="noopener sponsored nofollow">Xendoo</a></div>\n'
                 '      </section>\n    '
             ),
         ),
@@ -1594,11 +1594,7 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
             primary_partner_name="Splash Financial Student Loan Refinancing",
             primary_partner_url="https://www.splashfinancial.com/",
             primary_partner_cta="Compare Rates with Splash Financial",
-            tools_directory_seed_section_html=(
-                '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-                '      <a href="/r/splash_financial" target="_blank" rel="noopener sponsored nofollow">Splash Financial</a>\n'
-                '    </section>\n  '
-            ),
+            tools_directory_seed_section_html="",
         ),
         "gainhelm": DeclarativeTenantContract(
             property_id="gainhelm",
@@ -1759,12 +1755,7 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
             primary_partner_name="Vanta Automated SOC 2, ISO 27001 & HIPAA Compliance",
             primary_partner_url="https://www.vanta.com/",
             primary_partner_cta="Automate Audit Readiness with Vanta",
-            tools_directory_seed_section_html=(
-                '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
-                '        <h2>Verified Enterprise GRC &amp; Security Execution Partners</h2>\n'
-                '        <div class="affiliate-card partner-card"><a href="/r/vanta_security" target="_blank" rel="noopener sponsored nofollow">Vanta</a></div>\n'
-                '      </section>\n    '
-            ),
+            tools_directory_seed_section_html="",
         ),
     }
 
@@ -1919,12 +1910,7 @@ LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
     primary_partner_name="Simply Business Commercial Contractor Insurance & Bonding",
     primary_partner_url="https://www.simplybusiness.com/",
     primary_partner_cta="Compare Instant Contractor Insurance & Bond Quotes at Simply Business",
-    tools_directory_seed_section_html=(
-        '\n      <section class="affiliate-section affiliates-section" data-mechanic="compliant_intent_monetization">\n'
-        '        <h2>Verified Surety Bond, Workers Comp &amp; Lien Execution Partners</h2>\n'
-        '        <div class="affiliate-card partner-card"><a href="/r/simply_business" target="_blank" rel="noopener sponsored nofollow">Simply Business</a></div>\n'
-        '      </section>\n    '
-    ),
+    tools_directory_seed_section_html="",
 )
 
 CANONICAL_TENANT_DECLARATIONS["lienbond"] = LIENBOND_TENANT_CONTRACT

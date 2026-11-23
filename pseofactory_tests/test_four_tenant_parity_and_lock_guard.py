@@ -313,8 +313,26 @@ def test_no_copy_oscillation_between_reposition_and_normalize_and_no_inline_lock
         assert norm_html == rep_html, f"Copy oscillation detected between reposition and normalize for {slug}"
 
 
+def _monkeypatch_live_partners_for_prop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prop_id: str) -> Path:
+    """Marks all non-declined partners of prop_id as 'live' in an isolated vault copy for slot-repositioning tests."""
+    import json
+    import pseofactory.affiliates as _aff
+
+    v_data = json.loads(_aff.MONETIZATION_VAULT_PATH.read_text(encoding="utf-8"))
+    for p_entry in (v_data.get("properties", {}).get(prop_id, {}).get("partners") or {}).values():
+        if isinstance(p_entry, dict) and str(p_entry.get("status") or "").lower() not in ("declined", "rejected"):
+            p_entry["status"] = "live"
+    v_tmp = tmp_path / f"vault_live_{prop_id}.json"
+    v_tmp.write_text(json.dumps(v_data), encoding="utf-8")
+    monkeypatch.setattr(_aff, "MONETIZATION_VAULT_PATH", v_tmp)
+    return v_tmp
+
+
 @pytest.mark.host_estate
-def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path: Path):
+def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     """
     Verifies GainHelm query-intent swaps, empirical-yield swaps (real dist + outbound_partner_engagement.json),
     and unhealed non-Vanta upgrades keep Card 1, <section data-primary-partner>, .calc-inline-cta,
@@ -331,6 +349,8 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
         reposition_affiliate_placements_from_gsc_signals,
         run_gsc_affiliate_placement_feedback_pass,
     )
+
+    _monkeypatch_live_partners_for_prop(tmp_path, monkeypatch, "gainhelm")
 
     live_gh_dist = Path("/home/ubuntuadmin/projects/gainhelm/dist")
     live_gh_eng = Path("/home/ubuntuadmin/projects/gainhelm/.agy/outbound_partner_engagement.json")
@@ -389,13 +409,32 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
         return s
 
     # 1. Verify live iso-27001 conforms cleanly AND unhealed static non-Vanta baseline heals to thoropass_audit & keeps <h2>
+    #    Works both pre-reflection (live /r/ links on disk) and post-reflection (zero-contract stripped HTML on disk).
     iso_live_raw = (live_gh_dist / "tools" / "iso-27001-certification-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    live_iso_slots = _extract_slot_partners(iso_live_raw)
+    iso_is_stripped = 'data-partner-ctas-hidden="unapproved"' in iso_live_raw and 'href="/r/' not in iso_live_raw
+    if iso_is_stripped:
+        assert 'data-first-party-checkout="true"' in iso_live_raw
+        iso_live_doc, _ = reposition_affiliate_placements_from_gsc_signals(
+            iso_live_raw,
+            property_id="gainhelm",
+            slug="iso-27001-certification-cost-calculator",
+        )
+    else:
+        iso_live_doc = iso_live_raw
+    live_iso_slots = _extract_slot_partners(iso_live_doc)
     assert live_iso_slots["h2_text"] == "Recommended Partner Solutions"
-    assert live_iso_slots["sec_pk"] == live_iso_slots["card1_pk"] == live_iso_slots["inline_pk"] == live_iso_slots["ov_pk"]
-    assert normalize_html_callout_message_match(iso_live_raw, property_id="gainhelm") == iso_live_raw
+    assert live_iso_slots["sec_pk"] == live_iso_slots["card1_pk"] == live_iso_slots["inline_pk"]
+    if live_iso_slots["ov_pk"] is not None:
+        assert live_iso_slots["ov_pk"] == live_iso_slots["sec_pk"]
+    iso_live_norm = normalize_html_callout_message_match(iso_live_doc, property_id="gainhelm")
+    norm_iso_slots = _extract_slot_partners(iso_live_norm)
+    assert norm_iso_slots["h2_text"] == "Recommended Partner Solutions"
+    assert norm_iso_slots["sec_pk"] == norm_iso_slots["card1_pk"] == norm_iso_slots["inline_pk"]
+    if norm_iso_slots["ov_pk"] is not None:
+        assert norm_iso_slots["ov_pk"] == norm_iso_slots["sec_pk"]
+    assert normalize_html_callout_message_match(iso_live_norm, property_id="gainhelm") == iso_live_norm
 
-    iso_unhealed = _reset_to_baseline_unrepositioned(iso_live_raw, inject_vanta_tm=True)
+    iso_unhealed = _reset_to_baseline_unrepositioned(iso_live_doc, inject_vanta_tm=True)
     iso_healed = normalize_html_callout_message_match(iso_unhealed, property_id="gainhelm")
     iso_slots = _extract_slot_partners(iso_healed)
     assert iso_slots["sec_pk"] == "thoropass_audit"
@@ -407,11 +446,20 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
 
     # 2. Query-intent swap on SOC 2 (promoting thoropass_audit) with id= before class= on <section>
     soc2_raw = (live_gh_dist / "tools" / "soc-2-audit-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    soc2_with_id = soc2_raw.replace(
-        '<section class="affiliate-section affiliates-section"',
-        '<section id="gainhelm-partners" class="affiliate-section affiliates-section"',
-        1,
-    )
+    if '<section class="affiliate-section affiliates-section' in soc2_raw:
+        soc2_with_id = soc2_raw.replace(
+            '<section class="affiliate-section affiliates-section',
+            '<section id="gainhelm-partners" class="affiliate-section affiliates-section',
+            1,
+        )
+    else:
+        soc2_with_id = re.sub(
+            r'<section\b(?![^>]*\bid=)([^>]*\bdata-partner-ctas-hidden=["\']unapproved["\'])',
+            r'<section id="gainhelm-partners"\1',
+            soc2_raw,
+            count=1,
+            flags=re.IGNORECASE,
+        )
     q_rep, q_meta = reposition_affiliate_placements_from_gsc_signals(
         soc2_with_id,
         property_id="gainhelm",
@@ -428,15 +476,18 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
     assert q_meta["gsc_repositioned"] is True
     assert q_meta["after_primary_partner"] == "thoropass_audit"
     q_slots = _extract_slot_partners(q_rep)
+    assert q_slots["sec"] is not None and q_slots["sec"].get("id") == "gainhelm-partners"
     assert q_slots["sec_rep"] == "true"
     assert q_slots["h2_text"] == "Recommended Partner Solutions"
-    assert {
+    q_slot_pks = {
         q_slots["sec_pk"],
         q_slots["card1_pk"],
         q_slots["inline_pk"],
         q_slots["tbl_pk"],
-        q_slots["ov_pk"],
-    } == {"thoropass_audit"}
+    }
+    if q_slots["ov_pk"] is not None:
+        q_slot_pks.add(q_slots["ov_pk"])
+    assert q_slot_pks == {"thoropass_audit"}
     q_after_norm = normalize_html_callout_message_match(q_rep, property_id="gainhelm")
     assert q_after_norm == q_rep
 
@@ -473,11 +524,13 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
         slots = _extract_slot_partners(page_html)
         orig_h2 = before_h2_by_slug[t_slug]
         assert slots["h2_text"], f"Missing <h2> on {t_slug}"
-        if orig_h2 == "Recommended Partner Solutions" or slots["sec_pk"] != "vanta_security":
+        if not orig_h2 or orig_h2 == "Recommended Partner Solutions" or slots["sec_pk"] != "vanta_security":
             assert slots["h2_text"] == "Recommended Partner Solutions", f"Mismatched <h2> on {t_slug}: {slots['h2_text']}"
         else:
             assert slots["h2_text"] == orig_h2 and "Vanta" in slots["h2_text"], f"Lost valid <h2> on {t_slug}: {slots['h2_text']}"
-        assert slots["sec_pk"] == slots["card1_pk"] == slots["inline_pk"] == slots["ov_pk"], (t_slug, slots)
+        assert slots["sec_pk"] == slots["card1_pk"] == slots["inline_pk"], (t_slug, slots)
+        if slots["ov_pk"] is not None:
+            assert slots["ov_pk"] == slots["sec_pk"], (t_slug, slots)
         if slots["sec_rep"] == "true":
             repositioned_slugs += 1
             assert slots["tbl_pk"] == slots["sec_pk"], f"Table bar split-brain on {t_slug}: {slots}"
@@ -486,7 +539,12 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
         norm_after = normalize_html_callout_message_match(page_html, property_id="gainhelm")
         assert norm_after == page_html, f"normalize_html_callout_message_match reverted/mutated {t_slug}"
 
-    assert repositioned_slugs >= 12
+    eng_tool_slugs = {
+        s
+        for s in (json.loads(live_gh_eng.read_text(encoding="utf-8")).get("by_slug") or {})
+        if (gh_dist / "tools" / s / "index.html").is_file()
+    }
+    assert repositioned_slugs >= max(10, len(eng_tool_slugs))
     fb_pass2 = run_gsc_affiliate_placement_feedback_pass(
         property_id="gainhelm",
         dist_dir=gh_dist,
@@ -495,6 +553,32 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(tmp_path
         dry_run=False,
     )
     assert fb_pass2["pages_updated"] == 0
+
+    # 4. Explicitly verify simulated post-reflection stripped GainHelm HTML restores cleanly when partners go live
+    real_vault_path = Path(_aff.__file__).resolve().parent / "monetization_vault.json"
+    with monkeypatch.context() as mp_zero:
+        mp_zero.setattr(_aff, "MONETIZATION_VAULT_PATH", real_vault_path)
+        iso_stripped_sim = _aff.strip_unapproved_partner_ctas_from_html(
+            iso_live_raw,
+            property_id="gainhelm",
+            slug="iso-27001-certification-cost-calculator",
+        )
+    assert 'data-partner-ctas-hidden="unapproved"' in iso_stripped_sim
+    assert 'href="/r/' not in iso_stripped_sim
+    assert "calc-inline-cta" not in iso_stripped_sim
+    assert "overlay-partner-offer" not in iso_stripped_sim
+    iso_restored_sim, _ = reposition_affiliate_placements_from_gsc_signals(
+        iso_stripped_sim,
+        property_id="gainhelm",
+        slug="iso-27001-certification-cost-calculator",
+    )
+    restored_sim_slots = _extract_slot_partners(iso_restored_sim)
+    assert 'data-partner-ctas-hidden="unapproved"' not in iso_restored_sim
+    assert restored_sim_slots["h2_text"] == "Recommended Partner Solutions"
+    assert restored_sim_slots["sec_pk"] == restored_sim_slots["card1_pk"] == restored_sim_slots["inline_pk"]
+    assert restored_sim_slots["ov_pk"] is None
+    assert BeautifulSoup(iso_restored_sim, "html.parser").select_one("#partner-registration-drawer") is not None
+    assert normalize_html_callout_message_match(iso_restored_sim, property_id="gainhelm") == iso_restored_sim
 
 
 def test_idempotency_of_write_substrate_lock_on_lienbond_result_box_and_prexvo_rap_meter():
@@ -1015,11 +1099,19 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
 
     def _collect_prexvo_slot_mismatches(dist_dir_px: Path) -> list:
         mismatches = []
+        px_live_keys = _aff.load_live_partner_keys_from_vault("prexvo")
         for lp in sorted((dist_dir_px / "tools").rglob("index.html")):
             if lp.parent == dist_dir_px / "tools":
                 continue
             soup = BeautifulSoup(lp.read_text(encoding="utf-8"), "html.parser")
             if soup.select_one('[data-restricted-public-service="true"], .ymyl-public-service-guardrail'):
+                continue
+            if not px_live_keys:
+                r_links = soup.select('a[href^="/r/"]')
+                if r_links:
+                    mismatches.append((lp.relative_to(dist_dir_px).as_posix(), f"unapproved_r_links:{len(r_links)}"))
+                if not soup.select_one('[data-first-party-checkout="true"], #btn-post-calc-upgrade-checkout'):
+                    mismatches.append((lp.relative_to(dist_dir_px).as_posix(), "missing_first_party_checkout_cta"))
                 continue
             sec = soup.select_one("section.refinance-partner-section, section.partners-section")
             if sec is None:
@@ -1169,21 +1261,20 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
             if lp.parent == dist_copy / "tools":
                 continue
             txt = lp.read_text(encoding="utf-8")
-            m_sec = re.search(r'<section[^>]*affiliates-section[^>]*>(.*?)</section>', txt, re.S)
-            assert m_sec is not None, lp
-            sec_pk_m = re.search(r'data-primary-partner=["\']([^"\']+)["\']', m_sec.group(0))
-            assert sec_pk_m is not None, lp
-            if sec_pk_m.group(1) == "levelset_lien_filing":
-                h2_m = re.search(r"<h2[^>]*>(.*?)</h2>", m_sec.group(1), re.S)
-                assert h2_m and "SuretyBondsDirect" not in h2_m.group(1)
-            m_bar = re.search(r'<div[^>]*comparison-table-cta-bar[^>]*>', txt)
-            if m_bar and 'data-gsc-repositioned="true"' in m_sec.group(0):
-                p_bar = re.search(r'data-partner=["\']([^"\']+)["\']', m_bar.group(0))
-                assert p_bar and p_bar.group(1) == sec_pk_m.group(1)
-                assert "card pseo-card" in m_bar.group(0)
+            assert 'href="/r/' not in txt and "href='/r/" not in txt, lp
+            assert 'data-first-party-checkout="true"' in txt or 'id="btn-post-calc-upgrade-checkout"' in txt, lp
+    if prop in ("prexvo", "gainhelm", "lienbond"):
+        for tp in sorted((dist_copy / "tools").rglob("index.html")):
+            if tp.parent == dist_copy / "tools":
+                continue
+            txt = tp.read_text(encoding="utf-8")
+            assert 'href="/r/' not in txt and "href='/r/" not in txt, f"Unapproved /r/ CTA remained in {prop}:{tp}"
 
 
-def test_engagement_precedence_prexvo_card1_and_non_empirical_gsc_preservation(tmp_path: Path) -> None:
+def test_engagement_precedence_prexvo_card1_and_non_empirical_gsc_preservation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     Verifies:
     1. load_property_partner_engagement_metrics prefers outbound_partner_engagement.json over partner_engagement_metrics.json.
@@ -1201,6 +1292,8 @@ def test_engagement_precedence_prexvo_card1_and_non_empirical_gsc_preservation(t
         reposition_affiliate_placements_from_gsc_signals,
         run_gsc_affiliate_placement_feedback_pass,
     )
+
+    _monkeypatch_live_partners_for_prop(tmp_path, monkeypatch, "prexvo")
 
     load_property_partner_engagement_metrics = getattr(_aff, "load_property_partner_engagement_metrics", None)
     load_persisted_gsc_placement_metrics_by_slug = getattr(_aff, "load_persisted_gsc_placement_metrics_by_slug", None)
@@ -1340,7 +1433,10 @@ def test_engagement_precedence_prexvo_card1_and_non_empirical_gsc_preservation(t
     assert "tool-bulk-109" in bulk_persisted and bulk_persisted["tool-bulk-109"]["impressions"] == 169
 
 
-def test_reposition_preserves_gsc_placed_partner_and_multiclass_table_bar() -> None:
+def test_reposition_preserves_gsc_placed_partner_and_multiclass_table_bar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     Verifies reposition_affiliate_placements_from_gsc_signals preserves promoted partners
     when gsc_metrics=None, preserves multi-class .comparison-table-cta-bar card pseo-card,
@@ -1349,6 +1445,8 @@ def test_reposition_preserves_gsc_placed_partner_and_multiclass_table_bar() -> N
     """
     import re
     from pseofactory.affiliates import reposition_affiliate_placements_from_gsc_signals
+
+    _monkeypatch_live_partners_for_prop(tmp_path, monkeypatch, "lienbond")
 
     sample_lb = (
         '<html><body>'

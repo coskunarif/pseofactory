@@ -9329,9 +9329,24 @@ def detect_asset_partner_roster_and_slot_issues(
             for k, v in {**PROFITHELM_AFFILIATES, **PREXVO_AFFILIATES, **GAINHELM_AFFILIATES}.items()
             if k not in LIENBOND_AFFILIATES
         }
-    else:
+    elif prop in ("profithelm", "exchange1031"):
         registry = PROFITHELM_AFFILIATES
         foreign_registry = {**PREXVO_AFFILIATES, **GAINHELM_AFFILIATES}
+    else:
+        registry = {}
+        foreign_registry = {
+            **PROFITHELM_AFFILIATES,
+            **PREXVO_AFFILIATES,
+            **GAINHELM_AFFILIATES,
+            **LIENBOND_AFFILIATES,
+        }
+
+    from pseofactory.affiliates import (
+        is_partner_live_in_vault,
+        load_live_partner_keys_from_vault,
+    )
+
+    live_vault_keys = load_live_partner_keys_from_vault(prop)
 
     # Extract all bound partner keys across /r/ links and data-partner attributes
     found_partner_keys: List[str] = []
@@ -9342,7 +9357,7 @@ def detect_asset_partner_roster_and_slot_issues(
         if pk not in found_partner_keys:
             found_partner_keys.append(pk)
 
-        if pk not in registry:
+        if pk not in registry and not is_partner_live_in_vault(prop, pk):
             if pk in foreign_registry:
                 issues.append(
                     f"Page {rel_path}: Cross-tenant partner bleed detected on /r/{pk} (foreign partner for {prop})"
@@ -9351,6 +9366,10 @@ def detect_asset_partner_roster_and_slot_issues(
                 issues.append(
                     f"Page {rel_path}: Unregistered partner key '/r/{pk}' not found in {prop} affiliate catalog"
                 )
+        elif not is_partner_live_in_vault(prop, pk):
+            issues.append(
+                f"Page {rel_path}: Unapproved/non-live partner link '/r/{pk}' rendered in HTML"
+            )
 
         rel_m = re.search(r'\brel=["\']([^"\']*)["\']', tag_open, flags=re.I)
         rel_val = (rel_m.group(1).lower() if rel_m else "")
@@ -9363,9 +9382,9 @@ def detect_asset_partner_roster_and_slot_issues(
                 f"Page {rel_path}: Affiliate link '{href}' missing required target='_blank'"
             )
         reg_entry = registry.get(pk)
-        # A pending label is only stale when the registry says the partner is live; partners that
-        # are honestly pending/declined (no approved contract) legitimately render data-status=pending.
-        if 'data-status="pending"' in tag_open.lower() and reg_entry is not None and reg_entry.status == "live":
+        if 'data-status="pending"' in tag_open.lower() and (
+            is_partner_live_in_vault(prop, pk) or (reg_entry is not None and reg_entry.status == "live")
+        ):
             issues.append(
                 f"Page {rel_path}: Affiliate link '{href}' has stale data-status='pending'"
             )
@@ -9386,6 +9405,16 @@ def detect_asset_partner_roster_and_slot_issues(
             if rk_clean and rk_clean not in found_partner_keys:
                 found_partner_keys.append(rk_clean)
 
+    if not live_vault_keys:
+        # Zero-contract tenant: commercial pages hide unapproved /r/ CTAs and feature 1st-party Stripe checkout
+        low_html = html_text.lower()
+        if prop == "prexvo":
+            if not any(t in low_html for t in ("waives", "forfeit", "title iv", "pslf", "income-driven")):
+                issues.append(
+                    f"Page {rel_path}: Prexvo commercial refinance page missing required Title IV federal protection forfeiture warning"
+                )
+        return issues
+
     if not found_partner_keys:
         issues.append(f"Page {rel_path}: Commercial page binds 0 affiliate partners")
         return issues
@@ -9396,7 +9425,14 @@ def detect_asset_partner_roster_and_slot_issues(
             for k in found_partner_keys
             if k in registry
         }
-        min_req = 6 if prop == "gainhelm" else 3
+        live_brand_cap = len(
+            {
+                COMPANY_BRAND_BY_PARTNER_KEY.get(k, k)
+                for k in live_vault_keys
+                if k in registry
+            }
+        )
+        min_req = min(6 if prop == "gainhelm" else 3, max(1, live_brand_cap))
         if len(found_partner_keys) < min_req or len(distinct_brands) < min_req:
             issues.append(
                 f"Page {rel_path}: Multi-company partner roster violation: found {len(found_partner_keys)} partner keys "

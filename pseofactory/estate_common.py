@@ -1105,12 +1105,16 @@ def build_partners_matrix_section(
     engagement_metrics: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Renders the vetted partner matrix cards sorted by estimated partner yield."""
-    from pseofactory.affiliates import resolve_contextual_partner_offer_copy, score_partner_yield
+    from pseofactory.affiliates import (
+        is_partner_live_in_vault,
+        resolve_contextual_partner_offer_copy,
+        score_partner_yield,
+    )
 
     live_items = [
         (p_id, p_info)
         for p_id, p_info in affiliates.items()
-        if getattr(p_info, "status", "") == "live"
+        if is_partner_live_in_vault(getattr(p_info, "property_id", "profithelm"), p_id)
     ]
     if len(live_items) > 1:
         try:
@@ -1176,7 +1180,11 @@ def build_partner_cta(
     slug: str = "",
 ) -> str:
     """Renders the primary partner callout card or public-service statutory guardrail."""
-    from pseofactory.affiliates import is_restricted_public_service_slug, resolve_contextual_partner_offer_copy
+    from pseofactory.affiliates import (
+        is_partner_live_in_vault,
+        is_restricted_public_service_slug,
+        resolve_contextual_partner_offer_copy,
+    )
 
     if slug and is_restricted_public_service_slug(slug):
         return (
@@ -1190,15 +1198,23 @@ def build_partner_cta(
             "      </div>\n    </section>"
         )
     ref_partner = affiliates.get(preferred_key) or next(iter(affiliates.values()))
-    if getattr(ref_partner, "status", "pending") != "live":
-        return (
-            '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-            '      <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
-            f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">{html.escape(fallback_badge)}</span>\n'
-            f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html.escape(fallback_title)}</h3>\n'
-            f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html.escape(fallback_body)}</p>\n'
-            "      </div>\n    </section>"
+    ref_prop = getattr(ref_partner, "property_id", "profithelm")
+    if not is_partner_live_in_vault(ref_prop, ref_partner.key):
+        live_fallback = next(
+            (p for k, p in affiliates.items() if is_partner_live_in_vault(getattr(p, "property_id", ref_prop), k)),
+            None,
         )
+        if live_fallback is not None:
+            ref_partner = live_fallback
+        else:
+            return (
+                '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
+                '      <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
+                f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">{html.escape(fallback_badge)}</span>\n'
+                f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html.escape(fallback_title)}</h3>\n'
+                f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html.escape(fallback_body)}</p>\n'
+                "      </div>\n    </section>"
+            )
     p_key = ref_partner.key
     ctx_copy = resolve_contextual_partner_offer_copy(
         partner_key=p_key,

@@ -121,7 +121,8 @@ def test_profithelm_state_spoke_manifest_formula_parity():
     assert spoke["formula"].startswith("round(1220.0 + min(max(0.0, (gross_income - sunset_standard_deduction) - 12200.0)")
 
 
-def test_normalize_html_callout_injects_inline_cta_when_result_box_class_added():
+def test_normalize_html_callout_injects_inline_cta_when_result_box_class_added(tmp_path, monkeypatch):
+    from pseofactory import affiliates as aff_mod
     from pseofactory.affiliates import normalize_html_callout_message_match
 
     html = (
@@ -134,9 +135,22 @@ def test_normalize_html_callout_injects_inline_cta_when_result_box_class_added()
         '<section class="refinance-partner-section affiliates-section"><a href="/r/vanta_security">Vanta</a></section>'
         '</body></html>'
     )
+    # While GainHelm has 0 live partners in monetization_vault.json, unapproved /r/ CTAs are hidden
+    # and replaced with the 1st-party Stripe Checkout workpaper CTA.
+    out_pending = normalize_html_callout_message_match(html, property_id="gainhelm")
+    assert "/r/" not in out_pending
+    assert 'data-first-party-checkout="true"' in out_pending
+
+    # Once vanta_security flips from pending -> live in monetization_vault.json, inline CTA auto-appears.
+    vault_copy = json.loads(VAULT.read_text(encoding="utf-8"))
+    vault_copy["properties"]["gainhelm"]["partners"]["vanta_security"]["status"] = "live"
+    tmp_vault = tmp_path / "monetization_vault.json"
+    tmp_vault.write_text(json.dumps(vault_copy), encoding="utf-8")
+    monkeypatch.setattr(aff_mod, "MONETIZATION_VAULT_PATH", tmp_vault)
     out = normalize_html_callout_message_match(html, property_id="gainhelm")
     assert 'data-cta-slot="calculator_result_inline"' in out
     assert 'class="calc-inline-cta"' in out
+    assert "/r/vanta_security" in out
 
     ph_html = (
         '<html><head><link rel="canonical" href="https://profithelm.com/tools/section-1031-calculator/"></head>'
@@ -163,18 +177,20 @@ def test_sync_prexvo_affiliate_status_compat(tmp_path):
     builder = px_dir / "builder.py"
     freshness = px_dir / "freshness.py"
     builder.write_text(
-        'live_items = [x for x in c if p_info.get("status") == "live"]\nif status != "live":\n    pass\n',
+        'live_items = [x for x in c if p_info.get("status") in ("live", "pending")]\nif status not in ("live", "pending"):\n    pass\n',
         encoding="utf-8",
     )
     freshness.write_text(
-        'if effective_status != "live":\n    pass\nif status == "live":\n    pass\nif getattr(p_data, "status", "") == "live":\n    pass\n',
+        'if effective_status not in ("live", "pending"):\n    pass\nif status in ("live", "pending"):\n    pass\nif getattr(p_data, "status", "") in ("live", "pending"):\n    pass\n',
         encoding="utf-8",
     )
     assert sync_fn(tmp_path) is True
     builder_txt = builder.read_text(encoding="utf-8")
     freshness_txt = freshness.read_text(encoding="utf-8")
-    assert 'in ("live", "pending")' in builder_txt
-    assert 'not in ("live", "pending")' in freshness_txt
+    assert '== "live"' in builder_txt
+    assert '!= "live"' in freshness_txt
+    assert "pending" not in builder_txt
+    assert "pending" not in freshness_txt
     assert "declined" not in builder_txt
     assert "declined" not in freshness_txt
 

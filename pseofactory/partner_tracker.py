@@ -5182,7 +5182,11 @@ class PartnerTrackingEngine:
         stripe_realized = float(stripe_ledger.get("realized_revenue_usd", 0.0) or 0.0)
         total_realized_usd = round(aff_realized + stripe_realized, 2)
 
-        vault_data_fals = getattr(self.hub, "_vault", {}) if hasattr(self, "hub") else {}
+        vault_data_fals = (
+            (getattr(self.hub, "vault_data", None) or getattr(self.hub, "_vault", {}) or {})
+            if hasattr(self, "hub")
+            else {}
+        )
         vault_props_fals = (
             vault_data_fals.get("properties")
             if isinstance(vault_data_fals.get("properties"), dict)
@@ -9471,19 +9475,32 @@ def diagnose_stripe_merchant_readiness(execute_live: bool = False) -> Dict[str, 
             primary_webhook_id = str(first_ep.get("webhook_endpoint_id") or "")
             primary_webhook_url = str(first_ep.get("url") or "")
 
+    vault_digital_products = (
+        vault_stripe.get("digital_products")
+        if isinstance(vault_stripe.get("digital_products"), dict)
+        else {}
+    )
+    dynamic_product_skus = [
+        str(sku_k).strip()
+        for sku_k in vault_digital_products.keys()
+        if str(sku_k).strip()
+    ]
+    if not dynamic_product_skus:
+        dynamic_product_skus = [
+            "ph_1031_boot_replacement_workpapers",
+            "ph_commercial_capital_audit_toolkit",
+            "ph_statutory_tax_audit_workpapers",
+            "px_refi_amortization_decision_audit",
+        ]
+
     return {
         "merchant_email": creds.get("merchant_email", "arif.coskun@profithelm.com"),
         "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
         "display_name": creds.get("display_name", "CoachOS"),
         "device_name": creds.get("device_name", "IN-PF4HYA85"),
         "credential_source": creds.get("source", "stripe_cli_config"),
-        "product_count": 4,
-        "product_skus": [
-            "ph_1031_boot_replacement_workpapers",
-            "ph_commercial_capital_audit_toolkit",
-            "ph_statutory_tax_audit_workpapers",
-            "px_refi_amortization_decision_audit",
-        ],
+        "product_count": len(dynamic_product_skus),
+        "product_skus": dynamic_product_skus,
         "publishable_key_present": bool(pub_key),
         "publishable_key_prefix": pub_key[:14] if pub_key else "",
         "secret_key_present": bool(sec_key),
@@ -9766,6 +9783,7 @@ def _load_email_engine_credentials() -> Dict[str, str]:
         "NANGO_INTEGRATION_ID",
         "NANGO_BASE_URL",
         "NANGO_SECRET_KEY",
+        "EMAIL_PRIMARY_RAIL",
         "TELEMETRY_EXPORT_SECRET",
     ):
         if os.environ.get(key):
@@ -10179,9 +10197,11 @@ def dispatch_transactional_playbook(
 ) -> Dict[str, Any]:
     """
     Dispatches the transactional calculation worksheet and compliance playbook email.
-    Primary Rail: ZeptoMail v1.1 REST API (`https://api.zeptomail.com/v1.1/email`).
-    Automatic Verified Failover Rail: Zoho Mail REST API (`https://mail.zoho.com/api/accounts/.../messages`
-    via Nango OAuth) when ZeptoMail returns `SM_111` (sender domain awaiting DKIM re-verification).
+    Primary Rail (default): Zoho Mail REST API (`https://mail.zoho.com/api/accounts/.../messages`
+    via Nango OAuth), matching `EMAIL_PRIMARY_RAIL = "zoho"` across all Cloudflare edge workers
+    and avoiding ZeptoMail `SM_111` first-attempt failures.
+    Fallback Rail: ZeptoMail v1.1 REST API (`https://api.zeptomail.com/v1.1/email`) when Zoho
+    fails or is unconfigured, or as primary when `EMAIL_PRIMARY_RAIL=zeptomail` is explicitly set.
     Zero em-dashes. Zero en-dashes.
     """
     import urllib.request
@@ -10199,11 +10219,19 @@ def dispatch_transactional_playbook(
         env_creds.get("ZEPTOMAIL_FROM_EMAIL") or CANONICAL_ZOHO_SENDER_EMAIL
     )
     from_name = (env_creds.get("ZEPTOMAIL_FROM_NAME") or "Arif Coskun").strip()
+    primary_rail_cfg = str(
+        os.environ.get("EMAIL_PRIMARY_RAIL") or env_creds.get("EMAIL_PRIMARY_RAIL") or "zoho"
+    ).strip().lower()
+    zoho_configured = all(
+        env_creds.get(k) for k in ("NANGO_BASE_URL", "NANGO_CONNECTION_ID", "NANGO_INTEGRATION_ID", "NANGO_SECRET_KEY")
+    )
+    zoho_primary = bool(zoho_configured and allow_zoho_failover and primary_rail_cfg != "zeptomail")
 
     result: Dict[str, Any] = {
         "dispatched": False,
         "status": "queued",
         "provider": None,
+        "primary_rail": "zoho" if primary_rail_cfg != "zeptomail" else "zeptomail",
         "recipient_email": target_email,
         "from_email": from_email,
         "subject": rendered["subject"],
@@ -10211,8 +10239,10 @@ def dispatch_transactional_playbook(
         "zeptomail_http_status": None,
         "zeptomail_error_code": None,
         "zeptomail_request_id": None,
+        "zoho_attempted": False,
         "zoho_failover_attempted": False,
         "zoho_http_status": None,
+        "zoho_error": None,
         "message_id": None,
         "mail_id": None,
     }
@@ -10234,7 +10264,9 @@ def dispatch_transactional_playbook(
         )
         return result
 
-    if zepto_token:
+    def _try_zeptomail() -> bool:
+        if not zepto_token:
+            return False
         result["zeptomail_attempted"] = True
         auth_header = zepto_token if zepto_token.startswith("Zoho-enczapikey") else f"Zoho-enczapikey {zepto_token}"
         zepto_payload = {
@@ -10263,7 +10295,7 @@ def dispatch_transactional_playbook(
                 result["status"] = "sent_zeptomail"
                 result["provider"] = "zeptomail_v1"
                 result["message_id"] = resp_data.get("request_id")
-                return result
+                return True
         except urllib.error.HTTPError as exc:
             result["zeptomail_http_status"] = exc.code
             raw_err = exc.read().decode("utf-8", errors="ignore")
@@ -10277,11 +10309,14 @@ def dispatch_transactional_playbook(
                 result["zeptomail_error_code"] = f"http_{exc.code}"
         except Exception as exc:
             result["zeptomail_error_code"] = str(exc)
+        return False
 
-    if allow_zoho_failover and all(
-        env_creds.get(k) for k in ("NANGO_BASE_URL", "NANGO_CONNECTION_ID", "NANGO_INTEGRATION_ID", "NANGO_SECRET_KEY")
-    ):
-        result["zoho_failover_attempted"] = True
+    def _try_zoho(is_primary: bool) -> bool:
+        if not (allow_zoho_failover and zoho_configured):
+            return False
+        result["zoho_attempted"] = True
+        if not is_primary:
+            result["zoho_failover_attempted"] = True
         try:
             nango_url = (
                 f"{env_creds['NANGO_BASE_URL'].rstrip('/')}/connection/{env_creds['NANGO_CONNECTION_ID']}"
@@ -10326,13 +10361,26 @@ def dispatch_transactional_playbook(
                 z_data = json.loads(z_resp.read().decode("utf-8")).get("data", {})
                 result["zoho_http_status"] = z_resp.status
                 result["dispatched"] = True
-                result["status"] = "sent_zoho_verified_failover"
+                result["status"] = "sent_zoho_primary" if is_primary else "sent_zoho_verified_failover"
                 result["provider"] = "zoho_mail_oauth"
                 result["message_id"] = z_data.get("messageId")
                 result["mail_id"] = z_data.get("mailId")
-                return result
+                return True
         except Exception as exc:
-            result["status"] = f"failover_error:{exc}"
+            result["zoho_error"] = str(exc)
+            result["status"] = f"zoho_primary_error:{exc}" if is_primary else f"failover_error:{exc}"
+        return False
+
+    if zoho_primary:
+        if _try_zoho(is_primary=True):
+            return result
+        if _try_zeptomail():
+            return result
+    else:
+        if _try_zeptomail():
+            return result
+        if _try_zoho(is_primary=False):
+            return result
 
     return result
 
@@ -12234,7 +12282,15 @@ def _audit_tenant_outbound_routing_truth(
     )
 
     prop_clean = (prop_id or "").strip().lower()
-    prop_vault = vault_data.get(prop_clean, {}) if isinstance(vault_data, dict) else {}
+    if isinstance(vault_data, dict):
+        if isinstance(vault_data.get(prop_clean), dict):
+            prop_vault = vault_data.get(prop_clean) or {}
+        elif isinstance((vault_data.get("properties") or {}).get(prop_clean), dict):
+            prop_vault = (vault_data["properties"][prop_clean].get("partners") or {})
+        else:
+            prop_vault = {}
+    else:
+        prop_vault = {}
     canonical_keys = [k for k, p_obj in reg_map.items() if k == p_obj.key]
     live_direct: List[str] = []
     fail_closed_fallback: List[str] = []
@@ -12278,8 +12334,10 @@ def _audit_tenant_outbound_routing_truth(
 
     html_r_links_scanned = 0
     html_pending_cta_count = 0
+    html_declined_cta_count = 0
     dead_end_404_routes_count = 0
     html_pending_cta_slugs: set = set()
+    html_declined_cta_slugs: set = set()
     dead_end_404_slugs: set = set()
 
     if resolved_dist is not None and resolved_dist.is_dir():
@@ -12306,10 +12364,15 @@ def _audit_tenant_outbound_routing_truth(
                     or norm_slug in live_direct_set
                 )
                 is_declined = entry_status in ("declined", "rejected", "pending_p2")
-                if not is_live and not is_declined:
-                    html_pending_cta_count += 1
-                    html_pending_cta_slugs.add(raw_slug)
+                if not is_live:
+                    if is_declined:
+                        html_declined_cta_count += 1
+                        html_declined_cta_slugs.add(raw_slug)
+                    else:
+                        html_pending_cta_count += 1
+                        html_pending_cta_slugs.add(raw_slug)
 
+    html_unapproved_cta_count = html_pending_cta_count + html_declined_cta_count
     edge_blocked_pending_cta_count = (
         html_pending_cta_count if blocks_unapproved_by_default else 0
     )
@@ -12330,6 +12393,9 @@ def _audit_tenant_outbound_routing_truth(
         "html_r_links_scanned": html_r_links_scanned,
         "html_pending_cta_count": html_pending_cta_count,
         "html_pending_cta_slugs": sorted(html_pending_cta_slugs),
+        "html_declined_cta_count": html_declined_cta_count,
+        "html_declined_cta_slugs": sorted(html_declined_cta_slugs),
+        "html_unapproved_cta_count": html_unapproved_cta_count,
         "edge_blocked_pending_cta_count": edge_blocked_pending_cta_count,
         "unapproved_external_leaks_count": unapproved_external_leaks_count,
         "dead_end_404_routes_count": dead_end_404_routes_count,
@@ -12364,7 +12430,8 @@ def audit_end_to_end_monetization_and_fulfillment(
     settlement = diag.get("bank_payout_settlement") or {}
 
     hub = MonetizationHub()
-    vault_data = getattr(hub, "_vault", {}) or {}
+    vault_data = getattr(hub, "vault_data", None) or {}
+    partner_vault_index = getattr(hub, "_vault", None) or {}
     vault_digital_products = (
         (vault_data.get("master_networks") or {}).get("stripe", {}).get("digital_products") or {}
     )
@@ -12373,11 +12440,14 @@ def audit_end_to_end_monetization_and_fulfillment(
         "ph_commercial_capital_audit_toolkit": "section-179-calculator",
         "ph_statutory_tax_audit_workpapers": "s-corp-reasonable-salary-tax-calculator",
         "ph_instant_statutory_worksheet_19": "section-179-calculator",
+        "ph_verified_partner_slot": "section-1031-calculator",
         "px_refi_amortization_decision_audit": "student-loan-refinance-break-even-calculator",
         "px_instant_repayment_worksheet_19": "student-loan-refinance-break-even-calculator",
+        "px_verified_partner_slot": "student-loan-refinance-break-even-calculator",
         "gh_soc2_cmmc_audit_workpapers": "soc-2-audit-cost-calculator",
         "gh_hipaa_iso27001_governance_kit": "iso-27001-certification-cost-calculator",
         "gh_instant_compliance_worksheet_19": "soc-2-audit-cost-calculator",
+        "gh_verified_partner_slot": "soc-2-audit-cost-calculator",
         "lb_instant_lien_bond_worksheet_19": "contractor-license-bond-cost-calculator-by-credit-score",
         "lb_surety_bond_underwriting_kit": "contractor-license-bond-cost-calculator-by-credit-score",
         "lb_workers_comp_emr_audit_kit": "experience-modification-rate-emr-workers-comp-penalty-calculator",
@@ -12385,6 +12455,7 @@ def audit_end_to_end_monetization_and_fulfillment(
         "lb_wh347_certified_payroll_packet": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
         "lb_mechanics_lien_waiver_packet": "california-texas-florida-preliminary-notice-deadline-calculator",
         "lb_surety_lien_wh347_packet": "miller-act-performance-and-payment-bond-premium-calculator",
+        "lb_verified_partner_slot": "contractor-license-bond-cost-calculator-by-credit-score",
     }
     sku_matrix: List[Tuple[str, str, str, float]] = []
     seen_matrix_skus: set[str] = set()
@@ -12591,7 +12662,7 @@ def audit_end_to_end_monetization_and_fulfillment(
         outbound_summary[prop_id] = _audit_tenant_outbound_routing_truth(
             prop_id=prop_id,
             reg_map=reg_map,
-            vault_data=vault_data,
+            vault_data=partner_vault_index,
             repo_root=r_override,
             edge_redirect_source=e_override,
             use_default_workspace=(repo_roots is None),

@@ -509,10 +509,8 @@ def test_lienbond_homepage_declined_next_insurance_heals_cleanly_in_callout_norm
 
     healed = normalize_html_callout_message_match(stale_lienbond_home, property_id="lienbond")
     assert "next_insurance_b2b" not in healed
-    assert 'href="/r/simply_business?' in healed
-    assert 'data-partner="simply_business"' in healed
+    assert 'href="/r/' not in healed
     assert 'data-partner-key="simply_business"' in healed
-    assert 'data-status="pending"' in healed
     assert _has_stale_pending_status(healed, "lienbond") is False
 
     dist_dir = tmp_path / "dist"

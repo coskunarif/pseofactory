@@ -7430,6 +7430,8 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
     default_state = resolve_state_code_from_slug(tool_slug, prop_id)
 
     if has_quote_intake and not is_restricted_ps and 'href="/r/' not in updated and "href='/r/" not in updated:
+        from pseofactory.affiliates import is_partner_live_in_vault as _vp_is_partner_live
+
         pk_fallback = (
             _extract_attr(q_tag, "data-partner-key")
             or (
@@ -7438,29 +7440,30 @@ def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[st
                 else ("vanta_security" if prop_id == "gainhelm" else ("suretybonds_direct" if prop_id == "lienbond" else "ipx1031"))
             )
         ).strip().lower()
-        pname_fallback = (
-            _extract_attr(q_tag, "data-partner-name")
-            or (
-                "Splash Financial"
-                if prop_id == "prexvo"
-                else ("Vanta" if prop_id == "gainhelm" else ("SuretyBondsDirect.com" if prop_id == "lienbond" else "Verified Partner"))
+        if _vp_is_partner_live(prop_id, pk_fallback):
+            pname_fallback = (
+                _extract_attr(q_tag, "data-partner-name")
+                or (
+                    "Splash Financial"
+                    if prop_id == "prexvo"
+                    else ("Vanta" if prop_id == "gainhelm" else ("SuretyBondsDirect.com" if prop_id == "lienbond" else "Verified Partner"))
+                )
+            ).strip()
+            fallback_cta_html = (
+                f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
+                f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
+                f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
+                f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
+                f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
+                f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
+                f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
+                f'      </div>\n'
             )
-        ).strip()
-        fallback_cta_html = (
-            f'      <div class="calc-inline-cta" data-mechanic="compliant_intent_monetization" '
-            f'data-partner="{pk_fallback}" data-cta-slot="calculator_result_inline" '
-            f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">\n'
-            f'        <span style="font-size: 13px; font-weight: 600;">Matched Execution Partner: <strong>{pname_fallback}</strong></span>\n'
-            f'        <a href="/r/{pk_fallback}?source_tool={tool_slug}&amp;subid={tool_slug}_inline&amp;cta_slot=calculator_result_inline" '
-            f'rel="noopener sponsored nofollow" target="_blank" data-partner="{pk_fallback}" '
-            f'data-cta-slot="calculator_result_inline" class="affiliate-cta-link btn-cta partner-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none; font-size: 13px;">Compare {pname_fallback} Rates</a>\n'
-            f'      </div>\n'
-        )
-        q_pos = updated.find('<div id="partner-quote-intake-step"')
-        if q_pos != -1:
-            updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
-            actions.append("commercial_affiliate_cta_fallback")
+            q_pos = updated.find('<div id="partner-quote-intake-step"')
+            if q_pos != -1:
+                updated = updated[:q_pos] + fallback_cta_html + updated[q_pos:]
+                actions.append("commercial_affiliate_cta_fallback")
 
     updated = _retrofit_pro_hook_and_lead_capture_cards(
         updated,
@@ -8936,6 +8939,9 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
             except Exception:
                 ext_rt_js_valid = False
 
+        from pseofactory.affiliates import load_live_partner_keys_from_vault as _vp_live_keys
+
+        tenant_live_keys = _vp_live_keys(tenant)
         for html_file in html_files:
             rel_parts = html_file.relative_to(tools_dir).parts[:-1]
             slug = "-".join(rel_parts) if rel_parts else html_file.parent.name
@@ -9012,8 +9018,10 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
                 if n_chk > 0:
                     page_issues.append(f"restricted_ymyl_has_checkout_drawer:{n_chk}")
             else:
-                if n_aff == 0:
+                if tenant_live_keys and n_aff == 0:
                     page_issues.append("missing_affiliate_cta")
+                elif not tenant_live_keys and n_aff > 0:
+                    page_issues.append(f"unapproved_affiliate_cta_rendered:{n_aff}")
                 if n_chk != 1:
                     page_issues.append(f"expected_1_datapack_checkout_button_got_{n_chk}")
                 if n_prv != 1:
@@ -9067,7 +9075,11 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
                     "scenario_pin_buttons": n_pin,
                     "preset_buttons": n_pre,
                     "monetization_forms": n_sub,
-                    "coexistence_verified": (n_aff == 0 and n_chk == 0) if is_restricted else (n_aff >= 1 and n_chk == 1),
+                    "coexistence_verified": (
+                        (n_aff == 0 and n_chk == 0)
+                        if is_restricted
+                        else ((n_aff >= 1 if tenant_live_keys else n_aff == 0) and n_chk == 1)
+                    ),
                     "issues": page_issues,
                 }
             )

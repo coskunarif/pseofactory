@@ -1294,7 +1294,10 @@ def evaluate_asset_conversion_and_distribution_readiness(
                 or 'data-commercial-offers="none"' in raw_html
             )
         else:
-            has_partner_cta = (
+            from pseofactory.affiliates import load_live_partner_keys_from_vault
+
+            live_tenant_keys = load_live_partner_keys_from_vault(eff_tenant)
+            has_affiliate_cta = (
                 'rel="noopener sponsored nofollow"' in raw_html
                 and (
                     "affiliate-cta" in raw_html
@@ -1302,6 +1305,11 @@ def evaluate_asset_conversion_and_distribution_readiness(
                     or "overlay-partner-offer" in raw_html
                 )
             )
+            has_first_party_cta = (
+                'data-first-party-checkout="true"' in raw_html
+                or 'id="btn-post-calc-upgrade-checkout"' in raw_html
+            )
+            has_partner_cta = has_affiliate_cta if live_tenant_keys else (has_first_party_cta or has_affiliate_cta)
             p_matches = re.findall(r'data-partner=["\']([^"\']+)["\']', raw_html, flags=re.IGNORECASE)
             if p_matches:
                 # Prefer the overlay-partner-offer partner if present
@@ -11205,20 +11213,34 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             except Exception:
                 pass
         p_disc = html_lib.escape(raw_disc)
-        partner_section_markup = (
-            f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
-            f'data-property="{prop_id}" data-partner="{p_key}" data-partner-url="{html_lib.escape(raw_p_url)}" data-cta-slot="{p_slot}" '
-            f'data-cta-id="{p_cta_id}" data-yield-score="{p_yield}" data-empirical-erpm="{p_erpm}" '
-            f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization">\n'
-            f'  <h3 class="section-subtitle">Recommended Partner Solution: {p_name}</h3>\n'
-            f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 0.75rem;">{p_disc}</p>\n'
-            f'  <a href="{p_url}" rel="noopener sponsored nofollow" target="_blank" '
-            f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{p_key}" '
-            f'data-cta-slot="{p_slot}" data-cta-id="{p_cta_id}" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
-            f'</section>'
+        from pseofactory.affiliates import (
+            build_first_party_workpaper_cta_html,
+            is_partner_live_in_vault,
         )
-        injected_sections.append(partner_section_markup)
+
+        if is_partner_live_in_vault(raw_prop_id, raw_p_key):
+            partner_section_markup = (
+                f'<section class="overlay-section overlay-partner-offer affiliate-cta-section card" '
+                f'data-property="{prop_id}" data-partner="{p_key}" data-partner-url="{html_lib.escape(raw_p_url)}" data-cta-slot="{p_slot}" '
+                f'data-cta-id="{p_cta_id}" data-yield-score="{p_yield}" data-empirical-erpm="{p_erpm}" '
+                f'data-optimization-status="{p_opt_status}" data-mechanic="compliant_intent_monetization">\n'
+                f'  <h3 class="section-subtitle">Recommended Partner Solution: {p_name}</h3>\n'
+                f'  <p class="affiliate-disclosure" style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 0.75rem;">{p_disc}</p>\n'
+                f'  <a href="{p_url}" rel="noopener sponsored nofollow" target="_blank" '
+                f'class="affiliate-cta affiliate-cta-link partner-btn btn-cta touch-target" data-partner="{p_key}" '
+                f'data-cta-slot="{p_slot}" data-cta-id="{p_cta_id}" '
+                f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">{p_cta}</a>\n'
+                f'</section>'
+            )
+            injected_sections.append(partner_section_markup)
+        elif 'data-first-party-checkout="true"' not in html:
+            fp_markup = build_first_party_workpaper_cta_html(
+                property_id=raw_prop_id,
+                slug=str(overlay_data.get("slug") or ""),
+                slot="section",
+            )
+            if fp_markup:
+                injected_sections.append(fp_markup)
 
     # 5. Injected FAQ Additions & FAQPage Schema
     raw_faqs = (

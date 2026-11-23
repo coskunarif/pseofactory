@@ -185,7 +185,8 @@ class MonetizationHub:
         overwriting newer category updates with stale partners entries.
         """
         props = self.vault_data.get("properties", {}) if isinstance(self.vault_data, dict) else {}
-        for prop_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        all_prop_ids = list(dict.fromkeys([*self._vault.keys(), *(str(k).strip().lower() for k in props.keys())]))
+        for prop_id in all_prop_ids:
             prop_map = self._vault.setdefault(prop_id, {})
             prop_map.clear()
             prop_data = props.get(prop_id, {})
