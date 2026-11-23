@@ -18,13 +18,15 @@ from __future__ import annotations
 
 import glob
 import hashlib
+import hmac
 import json
 import os
 import re
 import time
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from urllib.parse import urlencode
 
 from pseofactory.lead_classification import (
@@ -9448,6 +9450,27 @@ def diagnose_stripe_merchant_readiness(execute_live: bool = False) -> Dict[str, 
             else "Live Stripe API probe was not executed or secret key is missing; deterministic cs_edge_<lead_id> fallback token issued."
         )
     )
+    vault_stripe: Dict[str, Any] = {}
+    try:
+        vault_stripe = (
+            MonetizationHub().vault_data.get("master_networks", {}).get("stripe", {}) or {}
+        )
+    except Exception:
+        vault_stripe = {}
+    vault_webhook_endpoints = (
+        vault_stripe.get("webhook_endpoints")
+        if isinstance(vault_stripe.get("webhook_endpoints"), dict)
+        else {}
+    )
+    primary_webhook_id = str(vault_stripe.get("webhook_endpoint_id") or "")
+    primary_webhook_url = str(vault_stripe.get("webhook_url") or "")
+    primary_webhook_status = str(vault_stripe.get("webhook_status") or "disabled")
+    if not primary_webhook_id and vault_webhook_endpoints:
+        first_ep = vault_webhook_endpoints.get("profithelm") or next(iter(vault_webhook_endpoints.values()), {})
+        if isinstance(first_ep, dict):
+            primary_webhook_id = str(first_ep.get("webhook_endpoint_id") or "")
+            primary_webhook_url = str(first_ep.get("url") or "")
+
     return {
         "merchant_email": creds.get("merchant_email", "arif.coskun@profithelm.com"),
         "stripe_account_id": creds.get("account_id", "acct_1T6fSTIq0ckFsf5j"),
@@ -9487,9 +9510,10 @@ def diagnose_stripe_merchant_readiness(execute_live: bool = False) -> Dict[str, 
             "currency": "usd",
             "payout_schedule_interval": "daily",
             "payout_delay_days": 2,
-            "webhook_endpoint_id": "we_1T7R8gIq0ckFsf5jfX3AKZ06",
-            "webhook_url": "https://api.thecoachloop.com/api/webhooks/stripe",
-            "webhook_status": "disabled",
+            "webhook_endpoint_id": primary_webhook_id,
+            "webhook_url": primary_webhook_url,
+            "webhook_status": primary_webhook_status,
+            "webhook_endpoints": vault_webhook_endpoints,
         },
         "live_vs_simulated_breakdown": {
             "cloudflare_pages_edge_worker": "LIVE_PRODUCTION",
@@ -10498,9 +10522,13 @@ def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[s
     }
 
     for proj_name, kv_vars in projects_spec.items():
+        merged_kv_vars = dict(kv_vars)
+        per_tenant_whsec = _load_tenant_stripe_webhook_secret(proj_name)
+        if per_tenant_whsec:
+            merged_kv_vars["STRIPE_WEBHOOK_SECRET"] = per_tenant_whsec
         non_empty_vars = {
             k: ({"value": v} if k in ("CANONICAL_BASE", "DOMAIN") else {"type": "secret_text", "value": v})
-            for k, v in kv_vars.items()
+            for k, v in merged_kv_vars.items()
             if v
         }
         tenant_upper = proj_name.upper()
@@ -10521,11 +10549,22 @@ def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[s
             }
         }
         if not execute_live or not cf_token:
+            redacted_env = {
+                k: (
+                    {"type": "secret_text", "value": "[REDACTED]"}
+                    if isinstance(v, dict) and v.get("type") == "secret_text"
+                    else dict(v)
+                )
+                for k, v in non_empty_vars.items()
+            }
             report["projects"][proj_name] = {
                 "updated": False,
                 "bound_keys": sorted(non_empty_vars.keys()),
                 "bound_kv_namespaces": kv_bindings,
-                "deployment_configs_preview": patch_body["deployment_configs"],
+                "deployment_configs_preview": {
+                    "production": {"env_vars": redacted_env, "kv_namespaces": kv_bindings},
+                    "preview": {"env_vars": redacted_env, "kv_namespaces": kv_bindings},
+                },
             }
             continue
         url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/pages/projects/{proj_name}"
@@ -10564,6 +10603,912 @@ def sync_cloudflare_pages_lead_credentials(execute_live: bool = False) -> Dict[s
                 "bound_keys": sorted(non_empty_vars.keys()),
                 "bound_kv_namespaces": kv_bindings,
             }
+
+    return report
+
+
+_STRIPE_SECRET_PREFIXES: Tuple[str, ...] = (
+    "whsec_",
+    "sk_live_",
+    "rk_live_",
+    "sk_test_",
+    "rk_test_",
+)
+
+
+def _normalize_webhook_url(url: str) -> str:
+    """Normalizes a webhook URL for deterministic equality matching, preserving query strings."""
+    import urllib.parse
+
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    parsed = urllib.parse.urlsplit(raw)
+    scheme = (parsed.scheme or "https").lower()
+    netloc = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+    base = f"{scheme}://{netloc}{path}"
+    return f"{base}?{parsed.query}" if parsed.query else base
+
+
+def _contains_stripe_secret_material(obj: Any) -> bool:
+    """Recursively checks whether an object contains Stripe secret tokens (whsec_/sk_/rk_)."""
+    if isinstance(obj, str):
+        return any(prefix in obj for prefix in _STRIPE_SECRET_PREFIXES)
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if _contains_stripe_secret_material(k) or _contains_stripe_secret_material(v):
+                return True
+        return False
+    if isinstance(obj, (list, tuple, set)):
+        return any(_contains_stripe_secret_material(item) for item in obj)
+    return False
+
+
+def _sanitize_error_text(text: str) -> str:
+    """Strips any accidental Stripe secret token substrings without leaving secret prefixes."""
+    clean = str(text or "")
+    for prefix in _STRIPE_SECRET_PREFIXES:
+        clean = re.sub(rf"{re.escape(prefix)}[A-Za-z0-9_-]*", "[REDACTED_STRIPE_SECRET]", clean)
+    return clean
+
+
+def _load_tenant_stripe_webhook_secret(
+    property_id: str,
+    workspace_root: Optional[Union[str, Path]] = None,
+    env_override: Optional[Dict[str, str]] = None,
+) -> str:
+    """
+    Loads an optional per-tenant Stripe webhook signing secret from
+    `STRIPE_WEBHOOK_SECRET_<PROPERTY_UPPER>` in `env_override` (authoritative when provided),
+    process env, or workspace `.env` files. Never returns masked values or prints secrets.
+    """
+    prop_token = re.sub(r"[^A-Za-z0-9]+", "_", str(property_id or "").strip()).strip("_").upper()
+    if not prop_token:
+        return ""
+    env_key = f"STRIPE_WEBHOOK_SECRET_{prop_token}"
+
+    def _clean_secret(raw: Any) -> str:
+        val = str(raw or "").strip().strip('"').strip("'")
+        if not val or "*" in val:
+            return ""
+        return val
+
+    if env_override is not None:
+        return _clean_secret(env_override.get(env_key)) if isinstance(env_override, dict) else ""
+
+    env_val = _clean_secret(os.environ.get(env_key))
+    if env_val:
+        return env_val
+
+    ws = Path(workspace_root or os.environ.get("WORKSPACE_ROOT") or "/home/ubuntuadmin/projects").resolve()
+    candidate_files = [
+        ws / "pseofactory" / ".env",
+        ws / ".env",
+    ]
+    if workspace_root is None:
+        candidate_files.append(Path(__file__).resolve().parent.parent / ".env")
+    seen: Set[str] = set()
+    for env_path in candidate_files:
+        key_p = str(env_path)
+        if key_p in seen or not env_path.is_file():
+            continue
+        seen.add(key_p)
+        try:
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k.strip() == env_key:
+                    found = _clean_secret(v)
+                    if found:
+                        return found
+        except Exception:
+            continue
+    return ""
+
+
+def _discover_tenant_webhook_targets(
+    workspace_root: Optional[Union[str, Path]] = None,
+    property_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Dynamically discovers active tenants via `.pseofactory.json` in `workspace_root`
+    (reusing `pseofactory.impact_planner.discover_active_tenants`) and builds each
+    tenant's canonical `https://<domain>/api/stripe-webhook` target and Cloudflare Pages
+    project name. Supports arbitrary N tenants (50+ sites) with zero hardcoded tenant lists.
+    """
+    import tomllib
+    import urllib.parse
+    from pseofactory.impact_planner import discover_active_tenants
+
+    ws = Path(workspace_root or os.environ.get("WORKSPACE_ROOT") or "/home/ubuntuadmin/projects").resolve()
+    filter_ids: Optional[Set[str]] = None
+    if property_id and str(property_id).strip().lower() != "all":
+        filter_ids = {
+            part.strip().lower()
+            for part in str(property_id).split(",")
+            if part.strip()
+        }
+
+    def _clean_host(raw_val: str) -> str:
+        s = str(raw_val or "").strip()
+        if not s:
+            return ""
+        parsed = urllib.parse.urlsplit(s if "://" in s else f"https://{s}")
+        return parsed.netloc.strip().lower()
+
+    targets: List[Dict[str, Any]] = []
+    for pid, repo_dir in discover_active_tenants(ws):
+        pid_clean = str(pid or "").strip().lower()
+        if not pid_clean:
+            continue
+        if filter_ids is not None and pid_clean not in filter_ids:
+            continue
+
+        meta: Dict[str, Any] = {}
+        marker = repo_dir / ".pseofactory.json"
+        if marker.is_file():
+            try:
+                loaded = json.loads(marker.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    meta = loaded
+            except Exception:
+                meta = {}
+
+        raw_canonical = str(meta.get("canonical_base") or "").strip().rstrip("/")
+        domain = _clean_host(str(meta.get("domain") or ""))
+        if not domain and raw_canonical:
+            domain = _clean_host(raw_canonical)
+        if not domain:
+            domain = f"{pid_clean}.com"
+
+        if raw_canonical:
+            parsed_cb = urllib.parse.urlsplit(
+                raw_canonical if "://" in raw_canonical else f"https://{raw_canonical}"
+            )
+            cb_scheme = (parsed_cb.scheme or "https").lower()
+            cb_netloc = (parsed_cb.netloc or domain).lower()
+            cb_path = parsed_cb.path.rstrip("/")
+            canonical_base = f"{cb_scheme}://{cb_netloc}{cb_path}"
+        else:
+            canonical_base = f"https://{domain}"
+
+        pages_project = str(
+            meta.get("pages_project") or meta.get("cloudflare_pages_project") or ""
+        ).strip()
+        if not pages_project:
+            wrangler_path = repo_dir / "wrangler.toml"
+            if wrangler_path.is_file():
+                try:
+                    w_doc = tomllib.loads(wrangler_path.read_text(encoding="utf-8"))
+                    if isinstance(w_doc, dict) and isinstance(w_doc.get("name"), str):
+                        pages_project = w_doc["name"].strip()
+                except Exception:
+                    pass
+        if not pages_project:
+            pages_project = pid_clean
+
+        targets.append(
+            {
+                "property_id": pid_clean,
+                "repo_dir": str(repo_dir),
+                "domain": domain,
+                "canonical_base": canonical_base,
+                "webhook_url": f"{canonical_base}/api/stripe-webhook",
+                "pages_project": pages_project,
+            }
+        )
+    return targets
+
+
+def _list_stripe_webhook_endpoints(
+    stripe_secret_key: str,
+    timeout: int = 15,
+) -> List[Dict[str, Any]]:
+    """
+    Lists all Stripe webhook endpoints via `GET /v1/webhook_endpoints?limit=100`,
+    following `has_more` cursor pagination (`starting_after`) until complete.
+    """
+    import urllib.parse
+    import urllib.request
+
+    endpoints: List[Dict[str, Any]] = []
+    starting_after: Optional[str] = None
+    seen_cursors: Set[str] = set()
+
+    for _ in range(50):
+        qs = "limit=100"
+        if starting_after:
+            qs = f"{qs}&starting_after={urllib.parse.quote(starting_after, safe='')}"
+        url = f"https://api.stripe.com/v1/webhook_endpoints?{qs}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {stripe_secret_key}",
+                "Accept": "application/json",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        rows = payload.get("data") or []
+        for item in rows:
+            if isinstance(item, dict):
+                endpoints.append(item)
+        if not payload.get("has_more") or not rows:
+            break
+        last_id = str(rows[-1].get("id") or "").strip() if isinstance(rows[-1], dict) else ""
+        if not last_id or last_id in seen_cursors:
+            break
+        seen_cursors.add(last_id)
+        starting_after = last_id
+
+    return endpoints
+
+
+def _create_stripe_webhook_endpoint(
+    stripe_secret_key: str,
+    webhook_url: str,
+    property_id: str,
+    enabled_events: Optional[List[str]] = None,
+    timeout: int = 15,
+) -> Dict[str, Any]:
+    """
+    Creates a Stripe webhook endpoint (`POST /v1/webhook_endpoints`) subscribed to
+    `checkout.session.completed` (or `enabled_events`) and returns the full response
+    including the one-time `secret` (`whsec_...`) in memory for immediate Pages binding.
+    """
+    import urllib.request
+
+    events = list(enabled_events or ["checkout.session.completed"])
+    form_pairs: List[Tuple[str, str]] = [
+        ("url", webhook_url),
+        ("description", f"pseofactory {property_id} checkout webhook"),
+    ]
+    for ev in events:
+        form_pairs.append(("enabled_events[]", ev))
+    body_bytes = urlencode(form_pairs).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.stripe.com/v1/webhook_endpoints",
+        data=body_bytes,
+        headers={
+            "Authorization": f"Bearer {stripe_secret_key}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def _delete_stripe_webhook_endpoint(
+    stripe_secret_key: str,
+    endpoint_id: str,
+    timeout: int = 15,
+) -> Tuple[bool, str]:
+    """Deletes a Stripe webhook endpoint (`DELETE /v1/webhook_endpoints/{id}`) for rollback cleanup."""
+    import urllib.parse
+    import urllib.request
+
+    clean_id = str(endpoint_id or "").strip()
+    if not clean_id or not (stripe_secret_key or "").strip():
+        return False, "missing_endpoint_id_or_stripe_key"
+    url = f"https://api.stripe.com/v1/webhook_endpoints/{urllib.parse.quote(clean_id, safe='')}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {stripe_secret_key}",
+            "Accept": "application/json",
+        },
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return bool(data.get("deleted", True)), ""
+    except Exception as exc:
+        return False, _sanitize_error_text(f"stripe_delete_failed: {exc}")
+
+
+def _get_cloudflare_pages_deployment_configs(
+    pages_project: str,
+    cf_token: str,
+    account_id: str = CF_ACCOUNT_ID,
+    timeout: int = 15,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Preflights Cloudflare token and fetches current Pages `deployment_configs`."""
+    import urllib.request
+
+    clean_token = (cf_token or "").strip()
+    if not clean_token:
+        return None, "cloudflare_token_missing"
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects/{pages_project}"
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "Content-Type": "application/json",
+        "User-Agent": "wrangler/4.151.1",
+    }
+    try:
+        get_req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(get_req, timeout=timeout) as get_resp:
+            get_data = json.loads(get_resp.read().decode("utf-8", errors="replace"))
+            if get_data.get("success") is False:
+                return None, "cloudflare_get_unsuccessful"
+            configs = (get_data.get("result") or {}).get("deployment_configs") or {}
+            return configs if isinstance(configs, dict) else {}, ""
+    except Exception as exc:
+        return None, _sanitize_error_text(f"cloudflare_get_failed: {exc}")
+
+
+def _patch_cloudflare_pages_webhook_secret(
+    pages_project: str,
+    webhook_secret: str,
+    cf_token: str,
+    account_id: str = CF_ACCOUNT_ID,
+    timeout: int = 15,
+    existing_configs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    PATCHes `STRIPE_WEBHOOK_SECRET` (`type: secret_text`) onto a tenant's Cloudflare Pages
+    project (`production` and `preview` `deployment_configs`) while preserving existing
+    environment variables and never overwriting with empty text. Unconditionally omits
+    pre-existing `secret_text` keys from the PATCH payload and fails closed if the post-PATCH
+    response drops any pre-existing production secret key or omits `STRIPE_WEBHOOK_SECRET`.
+    Never returns raw secrets.
+    """
+    import urllib.request
+
+    clean_secret = (webhook_secret or "").strip()
+    if not clean_secret:
+        return {
+            "updated": False,
+            "skipped": True,
+            "reason": "empty_webhook_secret",
+            "pages_project": pages_project,
+        }
+    clean_token = (cf_token or "").strip()
+    if not clean_token:
+        return {
+            "updated": False,
+            "skipped": True,
+            "reason": "cloudflare_token_missing",
+            "pages_project": pages_project,
+        }
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects/{pages_project}"
+    headers = {
+        "Authorization": f"Bearer {clean_token}",
+        "Content-Type": "application/json",
+        "User-Agent": "wrangler/4.151.1",
+    }
+
+    if existing_configs is None:
+        fetched_configs, get_err = _get_cloudflare_pages_deployment_configs(
+            pages_project=pages_project,
+            cf_token=clean_token,
+            account_id=account_id,
+            timeout=timeout,
+        )
+        if get_err or fetched_configs is None:
+            return {
+                "updated": False,
+                "skipped": False,
+                "pages_project": pages_project,
+                "error": get_err or "cloudflare_get_failed",
+            }
+        existing_configs = fetched_configs
+
+    patch_deployment_configs: Dict[str, Any] = {}
+    preserved_plain_keys: Set[str] = set()
+    preserved_secret_keys: Set[str] = set()
+    existing_prod_secret_keys: Set[str] = set()
+
+    for env_name in ("production", "preview"):
+        cur_cfg = existing_configs.get(env_name) if isinstance(existing_configs, dict) else {}
+        cur_env = (cur_cfg.get("env_vars") or {}) if isinstance(cur_cfg, dict) else {}
+        merged_env: Dict[str, Any] = {}
+        if isinstance(cur_env, dict):
+            for k, v in cur_env.items():
+                if k == "STRIPE_WEBHOOK_SECRET":
+                    continue
+                if isinstance(v, dict):
+                    v_type = str(v.get("type") or "").strip().lower()
+                    if v_type == "secret_text":
+                        # Unconditionally omit existing secret_text bindings regardless of value
+                        # so Cloudflare retains them untouched and masked values are never echoed.
+                        preserved_secret_keys.add(k)
+                        if env_name == "production":
+                            existing_prod_secret_keys.add(k)
+                        continue
+                    v_val = v.get("value")
+                    if v_val is not None and str(v_val) != "":
+                        merged_env[k] = dict(v)
+                        preserved_plain_keys.add(k)
+        merged_env["STRIPE_WEBHOOK_SECRET"] = {
+            "type": "secret_text",
+            "value": clean_secret,
+        }
+        patch_deployment_configs[env_name] = {"env_vars": merged_env}
+
+    patch_body = {"deployment_configs": patch_deployment_configs}
+    try:
+        patch_req = urllib.request.Request(
+            url,
+            data=json.dumps(patch_body).encode("utf-8"),
+            headers=headers,
+            method="PATCH",
+        )
+        with urllib.request.urlopen(patch_req, timeout=timeout) as patch_resp:
+            patch_data = json.loads(patch_resp.read().decode("utf-8", errors="replace"))
+            prod_env = (
+                ((patch_data.get("result") or {}).get("deployment_configs") or {})
+                .get("production", {})
+                .get("env_vars")
+                or {}
+            )
+            prod_keys = set(prod_env.keys()) if isinstance(prod_env, dict) else set()
+            dropped_prod_secrets = sorted(existing_prod_secret_keys - prod_keys)
+            webhook_bound = "STRIPE_WEBHOOK_SECRET" in prod_keys
+            api_success = bool(patch_data.get("success"))
+
+            err_parts: List[str] = []
+            if not api_success:
+                err_parts.append("cloudflare_patch_unsuccessful")
+            if not webhook_bound:
+                err_parts.append("stripe_webhook_secret_missing_in_production_response")
+            if dropped_prod_secrets:
+                err_parts.append(
+                    f"existing_production_secrets_dropped:{','.join(dropped_prod_secrets)}"
+                )
+
+            out: Dict[str, Any] = {
+                "updated": bool(api_success and webhook_bound and not dropped_prod_secrets),
+                "http_status": patch_resp.status,
+                "pages_project": pages_project,
+                "preserved_plain_keys": sorted(preserved_plain_keys),
+                "existing_secret_keys_untouched": sorted(preserved_secret_keys),
+                "active_production_env_keys": sorted(prod_keys),
+            }
+            if err_parts:
+                out["error"] = "; ".join(err_parts)
+                if dropped_prod_secrets:
+                    out["dropped_production_secret_keys"] = dropped_prod_secrets
+            return out
+    except Exception as exc:
+        return {
+            "updated": False,
+            "skipped": False,
+            "pages_project": pages_project,
+            "error": _sanitize_error_text(f"cloudflare_patch_failed: {exc}"),
+        }
+
+
+def verify_stripe_webhook_endpoint(
+    webhook_url: str,
+    webhook_secret: Optional[str] = None,
+    timeout: int = 12,
+    timestamp_sec: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Live verification helper for a tenant `/api/stripe-webhook` Cloudflare Pages Function:
+    1. Unsigned POST probe: asserts HTTP 400 with `error == "invalid_stripe_signature_header"`
+       (fails if HTTP 503 `stripe_webhook_secret_unconfigured` or 404/5xx).
+    2. Optional signed POST probe (when `webhook_secret` is available in memory): builds a real
+       Stripe `t=<ts>,v1=<hmac_sha256>` header for a harmless `pseofactory.webhook.probe` payload
+       and asserts HTTP 200 with `ok: true, ignored: true, reason: "unhandled_event_type"`.
+    Never logs or returns any `whsec_` secret or signature material.
+    """
+    import urllib.error
+    import urllib.request
+
+    probe_payload = json.dumps(
+        {
+            "id": "evt_pseofactory_probe",
+            "type": "pseofactory.webhook.probe",
+            "livemode": True,
+            "data": {"object": {}},
+        },
+        separators=(",", ":"),
+    )
+    payload_bytes = probe_payload.encode("utf-8")
+
+    def _post(extra_headers: Optional[Dict[str, str]] = None) -> Tuple[int, Dict[str, Any], str]:
+        hdrs = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "PseoFactoryWebhookProbe/1.0",
+        }
+        if extra_headers:
+            hdrs.update(extra_headers)
+        req = urllib.request.Request(webhook_url, data=payload_bytes, headers=hdrs, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw_txt = resp.read().decode("utf-8", errors="replace")
+                try:
+                    parsed = json.loads(raw_txt)
+                    if not isinstance(parsed, dict):
+                        parsed = {}
+                except Exception:
+                    parsed = {}
+                return int(resp.status), parsed, ""
+        except urllib.error.HTTPError as http_err:
+            raw_txt = ""
+            try:
+                raw_txt = http_err.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            try:
+                parsed = json.loads(raw_txt)
+                if not isinstance(parsed, dict):
+                    parsed = {}
+            except Exception:
+                parsed = {}
+            return int(http_err.code), parsed, ""
+        except Exception as exc:
+            return 0, {}, _sanitize_error_text(str(exc))
+
+    unsigned_status, unsigned_body, unsigned_exc = _post()
+    unsigned_error = str(unsigned_body.get("error") or unsigned_exc or "")
+    unsigned_ok = (
+        unsigned_status == 400 and unsigned_error == "invalid_stripe_signature_header"
+    )
+    secret_configured = unsigned_ok
+
+    signed_probe: Dict[str, Any] = {
+        "executed": False,
+        "ok": None,
+        "http_status": None,
+        "reason": "",
+    }
+    clean_secret = (webhook_secret or "").strip()
+    if clean_secret:
+        ts_val = str(int(timestamp_sec if timestamp_sec is not None else time.time()))
+        sig_hex = hmac.new(
+            clean_secret.encode("utf-8"),
+            f"{ts_val}.{probe_payload}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        signed_status, signed_body, signed_exc = _post(
+            {"Stripe-Signature": f"t={ts_val},v1={sig_hex}"}
+        )
+        signed_reason = str(
+            signed_body.get("reason") or signed_body.get("error") or signed_exc or ""
+        )
+        signed_ok = (
+            signed_status == 200
+            and signed_body.get("ok") is True
+            and signed_body.get("ignored") is True
+            and signed_reason == "unhandled_event_type"
+        )
+        signed_probe = {
+            "executed": True,
+            "ok": signed_ok,
+            "http_status": signed_status,
+            "reason": signed_reason,
+        }
+
+    verified = unsigned_ok and (not signed_probe["executed"] or bool(signed_probe["ok"]))
+    return {
+        "webhook_url": webhook_url,
+        "unsigned_probe": {
+            "ok": unsigned_ok,
+            "http_status": unsigned_status,
+            "error_code": unsigned_error,
+            "secret_configured": secret_configured,
+        },
+        "signed_probe": signed_probe,
+        "verified": verified,
+    }
+
+
+def sync_stripe_webhooks_for_tenants(
+    execute_live: bool = False,
+    verify_live: bool = False,
+    dry_run: bool = False,
+    property_id: Optional[str] = None,
+    workspace_root: Optional[Union[str, Path]] = None,
+    vault_path: Optional[Union[str, Path]] = None,
+    update_vault: bool = True,
+    env_override: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Idempotent Stripe webhook provisioning, Cloudflare Pages secret binding,
+    live endpoint verification, and atomic `monetization_vault.json` sync across
+    all dynamically discovered active tenants (`.pseofactory.json`, 50+ site ready).
+    Never stores or prints `whsec_` secrets or `sk_live_` keys in logs, reports, or vault.
+    Zero em-dashes. Zero en-dashes.
+    """
+    targets = _discover_tenant_webhook_targets(
+        workspace_root=workspace_root,
+        property_id=property_id,
+    )
+    stripe_creds = _load_stripe_credentials()
+    stripe_key = (stripe_creds.get("secret_key") or "").strip()
+    stripe_account_id = str(stripe_creds.get("account_id") or "acct_1T6fSTIq0ckFsf5j").strip()
+    cf_token = _load_wrangler_oauth_token()
+
+    report: Dict[str, Any] = {
+        "execute_live": bool(execute_live),
+        "verify_live": bool(verify_live),
+        "dry_run": bool(dry_run),
+        "stripe_account_id": stripe_account_id,
+        "stripe_key_present": bool(stripe_key),
+        "cloudflare_token_present": bool(cf_token),
+        "discovered_tenants_count": len(targets),
+        "discovered_tenants": [t["property_id"] for t in targets],
+        "created_count": 0,
+        "reused_count": 0,
+        "pages_updated_count": 0,
+        "vault_updated": False,
+        "all_verified": None,
+        "errors": [],
+        "tenants": {},
+    }
+
+    existing_by_url: Dict[str, Dict[str, Any]] = {}
+    stripe_list_error = ""
+    if execute_live and stripe_key:
+        try:
+            existing_endpoints = _list_stripe_webhook_endpoints(stripe_key)
+            for ep in existing_endpoints:
+                norm_url = _normalize_webhook_url(str(ep.get("url") or ""))
+                status_val = str(ep.get("status") or "").strip().lower()
+                ev_list = [str(e) for e in (ep.get("enabled_events") or [])]
+                has_checkout = ("checkout.session.completed" in ev_list) or ("*" in ev_list)
+                if norm_url and status_val == "enabled" and has_checkout:
+                    existing_by_url.setdefault(norm_url, ep)
+        except Exception as exc:
+            stripe_list_error = _sanitize_error_text(f"stripe_list_failed: {exc}")
+            report["errors"].append(stripe_list_error)
+    elif execute_live and not stripe_key:
+        stripe_list_error = "stripe_secret_key_missing"
+        report["errors"].append(stripe_list_error)
+
+    vault_entries_to_merge: Dict[str, Dict[str, Any]] = {}
+    verified_results: List[bool] = []
+
+    for target in targets:
+        pid = target["property_id"]
+        webhook_url = target["webhook_url"]
+        pages_project = target["pages_project"]
+        norm_url = _normalize_webhook_url(webhook_url)
+        env_secret = _load_tenant_stripe_webhook_secret(
+            pid,
+            workspace_root=workspace_root,
+            env_override=env_override,
+        )
+        in_memory_secret = env_secret
+
+        default_action = (
+            "verify_only"
+            if (not execute_live and verify_live)
+            else ("error" if (execute_live and stripe_list_error) else "dry_run_planned")
+        )
+        tenant_rec: Dict[str, Any] = {
+            "property_id": pid,
+            "domain": target["domain"],
+            "pages_project": pages_project,
+            "url": webhook_url,
+            "action": default_action,
+            "webhook_endpoint_id": "",
+            "status": "unknown",
+            "enabled_events": ["checkout.session.completed"],
+            "env_secret_present": bool(env_secret),
+            "pages_secret_sync": None,
+            "verification": None,
+        }
+        if execute_live and stripe_list_error:
+            tenant_rec["error"] = stripe_list_error
+
+        if execute_live and stripe_key and not stripe_list_error:
+            matched = existing_by_url.get(norm_url)
+            if matched is not None:
+                ep_id = str(matched.get("id") or "")
+                ep_url = str(matched.get("url") or webhook_url)
+                ep_status = str(matched.get("status") or "enabled")
+                ep_events = [str(e) for e in (matched.get("enabled_events") or ["checkout.session.completed"])]
+                tenant_rec["action"] = "would_reuse" if dry_run else "reused"
+                tenant_rec["webhook_endpoint_id"] = ep_id
+                tenant_rec["url"] = ep_url
+                tenant_rec["status"] = ep_status
+                tenant_rec["enabled_events"] = ep_events
+                report["reused_count"] += 1
+
+                if not dry_run:
+                    vault_entries_to_merge[pid] = {
+                        "webhook_endpoint_id": ep_id,
+                        "url": ep_url,
+                        "status": ep_status,
+                        "enabled_events": ep_events,
+                    }
+                    if env_secret:
+                        cf_res = _patch_cloudflare_pages_webhook_secret(
+                            pages_project=pages_project,
+                            webhook_secret=env_secret,
+                            cf_token=cf_token,
+                        )
+                        tenant_rec["pages_secret_sync"] = cf_res
+                        if cf_res.get("updated"):
+                            report["pages_updated_count"] += 1
+                        elif cf_res.get("error") or cf_res.get("skipped"):
+                            err_reason = cf_res.get("error") or cf_res.get("reason") or "pages_sync_skipped"
+                            report["errors"].append(f"{pid}: {err_reason}")
+            else:
+                if dry_run:
+                    tenant_rec["action"] = "would_create"
+                    tenant_rec["status"] = "missing"
+                else:
+                    # Preflight Cloudflare token and Pages project BEFORE creating a Stripe
+                    # webhook endpoint so a one-time whsec_ signing secret is never lost.
+                    existing_cf_configs, preflight_err = _get_cloudflare_pages_deployment_configs(
+                        pages_project=pages_project,
+                        cf_token=cf_token,
+                    )
+                    if preflight_err or existing_cf_configs is None:
+                        err_msg = _sanitize_error_text(
+                            f"{pid}: cloudflare_preflight_failed: {preflight_err or 'unknown'}"
+                        )
+                        tenant_rec["action"] = "error"
+                        tenant_rec["status"] = "missing"
+                        tenant_rec["error"] = err_msg
+                        tenant_rec["pages_secret_sync"] = {
+                            "updated": False,
+                            "skipped": True,
+                            "reason": preflight_err or "cloudflare_preflight_failed",
+                            "pages_project": pages_project,
+                        }
+                        report["errors"].append(err_msg)
+                    else:
+                        try:
+                            created = _create_stripe_webhook_endpoint(
+                                stripe_secret_key=stripe_key,
+                                webhook_url=webhook_url,
+                                property_id=pid,
+                                enabled_events=["checkout.session.completed"],
+                            )
+                            ep_id = str(created.get("id") or "")
+                            ep_url = str(created.get("url") or webhook_url)
+                            ep_status = str(created.get("status") or "enabled")
+                            ep_events = [
+                                str(e)
+                                for e in (created.get("enabled_events") or ["checkout.session.completed"])
+                            ]
+                            created_secret = str(created.get("secret") or "").strip()
+
+                            if not created_secret:
+                                deleted, del_err = _delete_stripe_webhook_endpoint(stripe_key, ep_id)
+                                err_msg = _sanitize_error_text(
+                                    f"{pid}: stripe_create_missing_secret (rollback_deleted={deleted}"
+                                    + (f", {del_err}" if del_err else "")
+                                    + ")"
+                                )
+                                tenant_rec["action"] = "error"
+                                tenant_rec["status"] = "rolled_back" if deleted else "orphaned_unconfigured"
+                                tenant_rec["error"] = err_msg
+                                report["errors"].append(err_msg)
+                            else:
+                                cf_res = _patch_cloudflare_pages_webhook_secret(
+                                    pages_project=pages_project,
+                                    webhook_secret=created_secret,
+                                    cf_token=cf_token,
+                                    existing_configs=existing_cf_configs,
+                                )
+                                tenant_rec["pages_secret_sync"] = cf_res
+                                if cf_res.get("updated") is True:
+                                    in_memory_secret = created_secret
+                                    tenant_rec["action"] = "created"
+                                    tenant_rec["webhook_endpoint_id"] = ep_id
+                                    tenant_rec["url"] = ep_url
+                                    tenant_rec["status"] = ep_status
+                                    tenant_rec["enabled_events"] = ep_events
+                                    report["created_count"] += 1
+                                    report["pages_updated_count"] += 1
+                                    vault_entries_to_merge[pid] = {
+                                        "webhook_endpoint_id": ep_id,
+                                        "url": ep_url,
+                                        "status": ep_status,
+                                        "enabled_events": ep_events,
+                                    }
+                                else:
+                                    deleted, del_err = _delete_stripe_webhook_endpoint(stripe_key, ep_id)
+                                    err_reason = cf_res.get("error") or cf_res.get("reason") or "pages_patch_failed"
+                                    err_msg = _sanitize_error_text(
+                                        f"{pid}: {err_reason} (rollback_deleted={deleted}"
+                                        + (f", {del_err}" if del_err else "")
+                                        + ")"
+                                    )
+                                    tenant_rec["action"] = "error"
+                                    tenant_rec["webhook_endpoint_id"] = ep_id
+                                    tenant_rec["status"] = "rolled_back" if deleted else "orphaned_unconfigured"
+                                    tenant_rec["rollback_deleted"] = deleted
+                                    tenant_rec["error"] = err_msg
+                                    report["errors"].append(err_msg)
+                        except Exception as exc:
+                            err_msg = _sanitize_error_text(f"{pid}: stripe_create_failed: {exc}")
+                            tenant_rec["action"] = "error"
+                            tenant_rec["error"] = err_msg
+                            report["errors"].append(err_msg)
+
+        if verify_live:
+            probe_res = verify_stripe_webhook_endpoint(
+                webhook_url=tenant_rec["url"],
+                webhook_secret=in_memory_secret or None,
+            )
+            tenant_rec["verification"] = probe_res
+            verified_results.append(bool(probe_res.get("verified")))
+
+        report["tenants"][pid] = tenant_rec
+
+    if verify_live:
+        report["all_verified"] = bool(verified_results) and all(verified_results)
+
+    if execute_live and not dry_run and update_vault and vault_entries_to_merge:
+        if _contains_stripe_secret_material(vault_entries_to_merge):
+            raise ValueError("Refusing to persist Stripe secret material into monetization_vault.json")
+        hub = MonetizationHub(vault_path=str(vault_path) if vault_path else None)
+        master_nets = hub.vault_data.setdefault("master_networks", {})
+        stripe_net = master_nets.setdefault("stripe", {})
+        existing_map = stripe_net.get("webhook_endpoints")
+        if not isinstance(existing_map, dict):
+            existing_map = {}
+        merged_map = dict(existing_map)
+        for pid, entry in vault_entries_to_merge.items():
+            merged_map[pid] = {
+                "webhook_endpoint_id": str(entry["webhook_endpoint_id"]),
+                "url": str(entry["url"]),
+                "status": str(entry["status"]),
+                "enabled_events": list(entry["enabled_events"]),
+            }
+
+        if _contains_stripe_secret_material(merged_map):
+            raise ValueError("Refusing to persist Stripe secret material into monetization_vault.json")
+
+        stripe_net["webhook_endpoints"] = merged_map
+        enabled_items = [
+            (k, v)
+            for k, v in sorted(merged_map.items())
+            if isinstance(v, dict) and str(v.get("status") or "").lower() == "enabled"
+        ]
+        if enabled_items and len(enabled_items) == len(merged_map):
+            top_status = "enabled"
+        elif enabled_items:
+            top_status = "partial"
+        else:
+            top_status = "disabled"
+        stripe_net["webhook_status"] = top_status
+
+        primary_entry = (
+            merged_map.get("profithelm")
+            if isinstance(merged_map.get("profithelm"), dict)
+            and str(merged_map["profithelm"].get("status") or "").lower() == "enabled"
+            else (enabled_items[0][1] if enabled_items else None)
+        )
+        if isinstance(primary_entry, dict):
+            stripe_net["webhook_endpoint_id"] = str(primary_entry.get("webhook_endpoint_id") or "")
+            stripe_net["webhook_url"] = str(primary_entry.get("url") or "")
+
+        active_names = ", ".join(k for k, _ in enabled_items)
+        acct_for_note = str(stripe_net.get("account_id") or stripe_account_id)
+        if enabled_items:
+            stripe_net["webhook_url_status"] = (
+                f"ENABLED_ON_STRIPE: {len(enabled_items)} active per-tenant webhook endpoints "
+                f"({active_names}) configured for checkout.session.completed on {acct_for_note}; "
+                "direct edge GET /v1/checkout/sessions/{id} verification remains active as secondary settlement check"
+            )
+        else:
+            stripe_net["webhook_url_status"] = (
+                f"DISABLED_ON_STRIPE: no active per-tenant webhook endpoints configured on {acct_for_note}; "
+                "settlement continues via direct edge GET /v1/checkout/sessions/{id} verification"
+            )
+
+        assert_no_forbidden_dashes(stripe_net["webhook_url_status"], context="stripe webhook_url_status")
+        if _contains_stripe_secret_material(stripe_net):
+            raise ValueError("Refusing to persist Stripe secret material into monetization_vault.json")
+        hub.save_vault()
+        report["vault_updated"] = True
 
     return report
 

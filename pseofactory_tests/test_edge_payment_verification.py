@@ -402,13 +402,16 @@ def test_edge_checkout_emits_per_brand_display_name_without_contamination(tmp_pa
     vault_path = Path(__file__).resolve().parent.parent / "pseofactory" / "monetization_vault.json"
     vault_raw = vault_path.read_text(encoding="utf-8")
     assert_no_forbidden_dashes(vault_raw, context="monetization_vault.json")
+    assert "whsec_" not in vault_raw
     vault = json.loads(vault_raw)
     stripe_vault = vault["master_networks"]["stripe"]
     assert stripe_vault["checkout_display_names"][tenant] == expected_brand
-    assert stripe_vault["webhook_endpoint_id"] == "we_1T7R8gIq0ckFsf5jfX3AKZ06"
-    assert stripe_vault["webhook_status"] == "disabled"
-    assert "we_1T7R8gIq0ckFsf5jfX3AKZ06" in stripe_vault["webhook_url_status"]
-    assert "status=disabled" in stripe_vault["webhook_url_status"]
+    assert stripe_vault["webhook_status"] == "enabled"
+    assert stripe_vault["webhook_endpoints"][tenant]["status"] == "enabled"
+    assert stripe_vault["webhook_endpoints"][tenant]["url"] == f"https://{tenant}.com/api/stripe-webhook"
+    assert "checkout.session.completed" in stripe_vault["webhook_endpoints"][tenant]["enabled_events"]
+    assert stripe_vault["webhook_endpoints"][tenant]["webhook_endpoint_id"].startswith("we_")
+    assert "ENABLED_ON_STRIPE" in stripe_vault["webhook_url_status"]
     assert "GET /v1/checkout/sessions/{id}" in stripe_vault["webhook_url_status"]
 
 
@@ -433,8 +436,10 @@ def test_partner_tracker_checkout_session_sets_per_brand_display_name(tenant):
     assert sess["diagnostic_telemetry"]["display_name"] == expected_brand
 
     diag = diagnose_stripe_merchant_readiness(execute_live=False)
-    assert diag["bank_payout_settlement"]["webhook_endpoint_id"] == "we_1T7R8gIq0ckFsf5jfX3AKZ06"
-    assert diag["bank_payout_settlement"]["webhook_status"] == "disabled"
+    assert diag["bank_payout_settlement"]["webhook_status"] == "enabled"
+    assert diag["bank_payout_settlement"]["webhook_endpoint_id"] == "we_1UeQESIq0ckFsf5jesBwLBL7"
+    assert diag["bank_payout_settlement"]["webhook_endpoints"][tenant]["status"] == "enabled"
+    assert diag["bank_payout_settlement"]["webhook_endpoints"][tenant]["url"] == f"https://{tenant}.com/api/stripe-webhook"
 
 
 def test_verify_tenant_edge_functions_parity_enforces_dist_functions_and_obbba_alabama_guard(tmp_path):

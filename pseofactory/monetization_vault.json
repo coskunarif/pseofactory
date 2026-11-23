@@ -56,9 +56,43 @@
       "details_submitted": true,
       "external_bank_account": "MERCURY, PARTNERING WITH CHOICE BANK (Routing 091311229, Account ****1395)",
       "payout_schedule": "Automatic daily payouts (2 business day rolling delay)",
-      "webhook_endpoint_id": "we_1T7R8gIq0ckFsf5jfX3AKZ06",
-      "webhook_url": "https://api.thecoachloop.com/api/webhooks/stripe",
-      "webhook_status": "disabled",
+      "webhook_endpoint_id": "we_1UeQESIq0ckFsf5jesBwLBL7",
+      "webhook_url": "https://profithelm.com/api/stripe-webhook",
+      "webhook_status": "enabled",
+      "webhook_endpoints": {
+        "profithelm": {
+          "webhook_endpoint_id": "we_1UeQESIq0ckFsf5jesBwLBL7",
+          "url": "https://profithelm.com/api/stripe-webhook",
+          "status": "enabled",
+          "enabled_events": [
+            "checkout.session.completed"
+          ]
+        },
+        "prexvo": {
+          "webhook_endpoint_id": "we_1UeQEZIq0ckFsf5jIFbpWYIl",
+          "url": "https://prexvo.com/api/stripe-webhook",
+          "status": "enabled",
+          "enabled_events": [
+            "checkout.session.completed"
+          ]
+        },
+        "gainhelm": {
+          "webhook_endpoint_id": "we_1UeQEgIq0ckFsf5jYixaFW3P",
+          "url": "https://gainhelm.com/api/stripe-webhook",
+          "status": "enabled",
+          "enabled_events": [
+            "checkout.session.completed"
+          ]
+        },
+        "lienbond": {
+          "webhook_endpoint_id": "we_1UeQEnIq0ckFsf5jZ97iobAe",
+          "url": "https://lienbond.com/api/stripe-webhook",
+          "status": "enabled",
+          "enabled_events": [
+            "checkout.session.completed"
+          ]
+        }
+      },
       "fulfillment_engine": "personalized_statutory_workpaper_and_csv_bundle",
       "digital_products": {
         "ph_instant_statutory_worksheet_19": {
@@ -362,7 +396,7 @@
         }
       },
       "settlement_verification": "direct_checkout_session_lookup",
-      "webhook_url_status": "DISABLED_ON_STRIPE: endpoint we_1T7R8gIq0ckFsf5jfX3AKZ06 (https://api.thecoachloop.com/api/webhooks/stripe) disabled on acct_1T6fSTIq0ckFsf5j (status=disabled); settlement continues via direct edge GET /v1/checkout/sessions/{id} verification"
+      "webhook_url_status": "ENABLED_ON_STRIPE: 4 active per-tenant webhook endpoints (gainhelm, lienbond, prexvo, profithelm) configured for checkout.session.completed on acct_1T6fSTIq0ckFsf5j; direct edge GET /v1/checkout/sessions/{id} verification remains active as secondary settlement check"
     },
     "impact": {
       "name": "Impact.com",

@@ -1321,7 +1321,9 @@ def test_trend_mined_statutory_timeseries_and_three_rail_monetization(tmp_path):
     assert stripe_diag["bank_payout_settlement"]["bank_name"] == "MERCURY, PARTNERING WITH CHOICE BANK"
     assert stripe_diag["bank_payout_settlement"]["routing_number"] == "091311229"
     assert stripe_diag["bank_payout_settlement"]["account_last4"] == "1395"
-    assert stripe_diag["bank_payout_settlement"]["webhook_url"] == "https://api.thecoachloop.com/api/webhooks/stripe"
+    assert stripe_diag["bank_payout_settlement"]["webhook_url"] == "https://profithelm.com/api/stripe-webhook"
+    assert stripe_diag["bank_payout_settlement"]["webhook_status"] == "enabled"
+    assert "profithelm" in stripe_diag["bank_payout_settlement"]["webhook_endpoints"]
 
     q_1031 = qualify_monetization_opportunity(
         "section 1031 exchange boot calculator",

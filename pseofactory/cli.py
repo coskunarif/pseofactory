@@ -2838,11 +2838,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_lm = subparsers.add_parser(
         "lead-monitor",
-        help="Monitor captured leads, sync edge KV endpoints to local ledger, dispatch transactional playbooks, and verify Stripe Checkout readiness",
+        help="Monitor captured leads, sync edge KV endpoints to local ledger, dispatch transactional playbooks, sync Stripe webhooks, and verify Stripe Checkout readiness",
     )
-    p_lm.add_argument("--property", "--tenant", dest="property", type=str, default=None, help="Filter by property ID (profithelm, prexvo, gainhelm, or all)")
+    p_lm.add_argument("--property", "--tenant", dest="property", type=str, default=None, help="Filter by property ID (any discovered tenant ID or all)")
     p_lm.add_argument("--sync-edge", action="store_true", help="Pull live captured leads from Cloudflare Pages edge /api/lead-capture endpoints")
     p_lm.add_argument("--sync-pages-secrets", action="store_true", help="Bind ZeptoMail, Nango/Zoho OAuth, and Stripe credentials onto Cloudflare Pages projects")
+    p_lm.add_argument("--sync-stripe-webhooks", action="store_true", help="Idempotently provision missing per-tenant Stripe webhook endpoints, bind STRIPE_WEBHOOK_SECRET on Cloudflare Pages, and sync monetization_vault.json")
+    p_lm.add_argument("--verify-stripe-webhooks", action="store_true", help="Probe each active tenant /api/stripe-webhook endpoint (unsigned 400 check plus optional signed HMAC-SHA256 200 check)")
+    p_lm.add_argument("--dry-run", action="store_true", help="Plan Stripe webhook sync without creating endpoints, patching Cloudflare Pages, or mutating monetization_vault.json")
     p_lm.add_argument("--fulfill", action="store_true", help="Dispatch transactional playbook emails for unfulfilled leads")
     p_lm.add_argument("--recipient-override", type=str, default=None, help="Override recipient email address for live fulfillment verification")
     p_lm.add_argument("--verify-providers", action="store_true", help="Execute live provider probes against ZeptoMail/Zoho Mail and Stripe Checkout APIs")
@@ -2876,20 +2879,37 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_lead_monitor(args: argparse.Namespace) -> int:
     """
-    Monitors captured leads across ProfitHelm, Prexvo, and GainHelm, synchronizes live Cloudflare edge
+    Monitors captured leads across active tenants, synchronizes live Cloudflare edge
     `/api/lead-capture` records into `.agy/captured_leads.jsonl`, fulfills transactional
-    playbooks, and verifies live ZeptoMail/Zoho Mail and Stripe Checkout session readiness.
+    playbooks, provisions/verifies per-tenant Stripe webhooks, and verifies live
+    ZeptoMail/Zoho Mail and Stripe Checkout session readiness.
     Zero em-dashes. Zero en-dashes.
     """
     from pseofactory.partner_tracker import (
         sync_cloudflare_pages_lead_credentials,
         sync_edge_leads_to_ledger,
+        sync_stripe_webhooks_for_tenants,
         get_lead_monitoring_summary,
     )
+
+    raw_prop = getattr(args, "property", None)
+    eff_prop = None if (raw_prop and str(raw_prop).strip().lower() == "all") else raw_prop
 
     pages_secrets_report = None
     if getattr(args, "sync_pages_secrets", False):
         pages_secrets_report = sync_cloudflare_pages_lead_credentials(execute_live=True)
+
+    stripe_webhooks_report = None
+    do_sync_webhooks = bool(getattr(args, "sync_stripe_webhooks", False))
+    do_verify_webhooks = bool(getattr(args, "verify_stripe_webhooks", False))
+    is_dry_run = bool(getattr(args, "dry_run", False))
+    if do_sync_webhooks or do_verify_webhooks:
+        stripe_webhooks_report = sync_stripe_webhooks_for_tenants(
+            execute_live=do_sync_webhooks,
+            verify_live=do_verify_webhooks,
+            dry_run=is_dry_run,
+            property_id=eff_prop,
+        )
 
     sync_report = None
     if getattr(args, "sync_edge", False):
@@ -2898,16 +2918,23 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
             fulfill_recipient_override=getattr(args, "recipient_override", None),
         )
 
-    raw_prop = getattr(args, "property", None)
-    eff_prop = None if (raw_prop and str(raw_prop).strip().lower() == "all") else raw_prop
     summary = get_lead_monitoring_summary(
         property_id=eff_prop,
         verify_live_providers=bool(getattr(args, "verify_providers", False)),
     )
     if pages_secrets_report is not None:
         summary["pages_secrets_sync"] = pages_secrets_report
+    if stripe_webhooks_report is not None:
+        summary["stripe_webhooks_sync"] = stripe_webhooks_report
     if sync_report is not None:
         summary["edge_sync"] = sync_report
+
+    exit_code = 0
+    if stripe_webhooks_report is not None:
+        if do_verify_webhooks and not stripe_webhooks_report.get("all_verified"):
+            exit_code = 1
+        elif do_sync_webhooks and not is_dry_run and stripe_webhooks_report.get("errors"):
+            exit_code = 1
 
     if getattr(args, "json", False):
         print(json.dumps(summary, indent=2))
@@ -2923,7 +2950,17 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
             f"pipeline_usd=${summary['total_pipeline_calculated_usd']:,.2f} | "
             f"checkout_offers_usd=${summary['total_checkout_offer_pipeline_usd']:,.2f}"
         )
-    return 0
+        if stripe_webhooks_report is not None:
+            wh_tag = "PASS" if exit_code == 0 else "FAIL"
+            print(
+                f"[{wh_tag}] Stripe Webhooks: tenants={stripe_webhooks_report['discovered_tenants_count']} | "
+                f"reused={stripe_webhooks_report['reused_count']} | "
+                f"created={stripe_webhooks_report['created_count']} | "
+                f"pages_updated={stripe_webhooks_report['pages_updated_count']} | "
+                f"vault_updated={stripe_webhooks_report['vault_updated']} | "
+                f"all_verified={stripe_webhooks_report['all_verified']}"
+            )
+    return exit_code
 
 
 def cmd_north_star(args: argparse.Namespace) -> int:
