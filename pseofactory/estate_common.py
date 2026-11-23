@@ -1195,6 +1195,21 @@ def compile_schema_graph(
             return [t]
         return [str(x) for x in t] if isinstance(t, list) else []
 
+    def _rewrite_localbusiness_id_refs(val: Any) -> Any:
+        if isinstance(val, dict):
+            out: Dict[str, Any] = {}
+            for k, v in val.items():
+                if k == "@id" and isinstance(v, str) and (
+                    v.strip().lower().endswith("#localbusiness") or v.strip().lower() == localbiz_id.lower()
+                ):
+                    out[k] = org_id
+                else:
+                    out[k] = _rewrite_localbusiness_id_refs(v)
+            return out
+        if isinstance(val, list):
+            return [_rewrite_localbusiness_id_refs(v) for v in val]
+        return val
+
     filtered_nodes: List[Dict[str, Any]] = []
     for n in raw_nodes:
         t_list = _types(n)
@@ -1203,11 +1218,11 @@ def compile_schema_graph(
             if "Organization" in t_list:
                 cleaned_types = [t for t in t_list if t != "LocalBusiness"]
                 n["@type"] = cleaned_types[0] if len(cleaned_types) == 1 else cleaned_types
-                if nid.endswith("#localbusiness"):
+                if nid.endswith("#localbusiness") or nid == localbiz_id.lower():
                     n["@id"] = org_id
-                filtered_nodes.append(n)
+                filtered_nodes.append(_rewrite_localbusiness_id_refs(n))
             continue
-        filtered_nodes.append(n)
+        filtered_nodes.append(_rewrite_localbusiness_id_refs(n))
     raw_nodes = filtered_nodes
 
     if not any("Organization" in _types(n) or n.get("@id") == org_id for n in raw_nodes):

@@ -888,7 +888,14 @@ def test_schema_standardization_no_localbusiness_and_tools_collectionpage_across
         offers=[],
     )
     graph = compile_schema_graph(
-        schemas=[legacy_lb],
+        schemas=[
+            legacy_lb,
+            {
+                "@type": "SoftwareApplication",
+                "name": "FleetBond Calculator",
+                "provider": {"@id": "https://fleetbond.com/#localbusiness"},
+            },
+        ],
         canonical_url="https://fleetbond.com/",
         canonical_base="https://fleetbond.com",
         site_name="FleetBond",
@@ -901,6 +908,95 @@ def test_schema_standardization_no_localbusiness_and_tools_collectionpage_across
     assert "LocalBusiness" not in graph_str
     assert "#localbusiness" not in graph_str.lower()
     assert any(n.get("@type") == "Organization" for n in graph["@graph"])
+    app_nodes = [n for n in graph["@graph"] if n.get("@type") == "SoftwareApplication"]
+    assert app_nodes and app_nodes[0]["provider"]["@id"] == "https://fleetbond.com/#organization"
+
+    # 1b. Standalone JSON-LD edge cases: nested #localbusiness ref AND combined ["Organization", "LocalBusiness"] block
+    standalone_nested_ref_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>FleetBond Nested Ref Test</title>
+  <meta name="description" content="Browse FleetBond commercial compliance calculators covering DOT hours of service, IFTA fuel tax, and FMCSA bond rates.">
+  <link rel="canonical" href="https://fleetbond.com/about/">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://fleetbond.com/about/#webpage",
+    "provider": {"@id": "https://fleetbond.com/#localbusiness"}
+  }
+  </script>
+</head>
+<body><main><h1>About FleetBond</h1></main></body>
+</html>"""
+    assert maintenance._needs_page_structure_geo_normalization(standalone_nested_ref_html) is True
+    ref_out1, ref_ch1 = maintenance._normalize_page_structure_and_geo_parity(
+        standalone_nested_ref_html,
+        property_id="fleetbond",
+        slug="about",
+        topic_label="About FleetBond",
+        canonical_url="https://fleetbond.com/about/",
+        stat_auth="49 CFR Part 387",
+        econ_ds="FMCSA Carrier Census",
+    )
+    assert ref_ch1 is True
+    assert "#localbusiness" not in ref_out1.lower()
+    assert "https://fleetbond.com/#organization" in ref_out1
+    assert maintenance._needs_page_structure_geo_normalization(ref_out1) is False
+    ref_out2, ref_ch2 = maintenance._normalize_page_structure_and_geo_parity(
+        ref_out1,
+        property_id="fleetbond",
+        slug="about",
+        topic_label="About FleetBond",
+        canonical_url="https://fleetbond.com/about/",
+        stat_auth="49 CFR Part 387",
+        econ_ds="FMCSA Carrier Census",
+    )
+    assert ref_ch2 is False and ref_out2 == ref_out1
+
+    standalone_combined_org_lb_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>FleetBond Combined Org Test</title>
+  <meta name="description" content="Browse FleetBond commercial compliance calculators covering DOT hours of service, IFTA fuel tax, and FMCSA bond rates.">
+  <link rel="canonical" href="https://fleetbond.com/about/">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": ["Organization", "LocalBusiness"],
+    "@id": "https://fleetbond.com/#localbusiness",
+    "name": "FleetBond"
+  }
+  </script>
+</head>
+<body><main><h1>About FleetBond</h1></main></body>
+</html>"""
+    assert maintenance._needs_page_structure_geo_normalization(standalone_combined_org_lb_html) is True
+    comb_out1, comb_ch1 = maintenance._normalize_page_structure_and_geo_parity(
+        standalone_combined_org_lb_html,
+        property_id="fleetbond",
+        slug="about",
+        topic_label="About FleetBond",
+        canonical_url="https://fleetbond.com/about/",
+        stat_auth="49 CFR Part 387",
+        econ_ds="FMCSA Carrier Census",
+    )
+    assert comb_ch1 is True
+    assert "LocalBusiness" not in comb_out1
+    assert "#localbusiness" not in comb_out1.lower()
+    assert '"Organization"' in comb_out1
+    assert "https://fleetbond.com/#organization" in comb_out1
+    assert maintenance._needs_page_structure_geo_normalization(comb_out1) is False
+    comb_out2, comb_ch2 = maintenance._normalize_page_structure_and_geo_parity(
+        comb_out1,
+        property_id="fleetbond",
+        slug="about",
+        topic_label="About FleetBond",
+        canonical_url="https://fleetbond.com/about/",
+        stat_auth="49 CFR Part 387",
+        econ_ds="FMCSA Carrier Census",
+    )
+    assert comb_ch2 is False and comb_out2 == comb_out1
 
     # 2. porcelain_shell._consolidate_jsonld_head strips LocalBusiness, rewrites #localbusiness refs, ensures Organization
     head_only_lb = (
@@ -1179,4 +1275,34 @@ def test_llms_txt_x_robots_tag_noindex_policy_and_reflection_sync(tmp_path: Path
     assert maintenance._headers_missing_llms_noindex(healed_prereq_hdr) is False
     assert assert_headers_snippet_policy(healed_prereq_hdr) is True
     assert validate_edge_headers_file(prereq_dist / "_headers")["status"] == "PASS"
+
+    # 7. Predicate parity: _headers with only /llms.txt (no llms*.txt files on disk) heals cleanly without infinite drift
+    headers_only_dist = tmp_path / "headers-only-llms-dist"
+    (headers_only_dist / "tools").mkdir(parents=True, exist_ok=True)
+    (headers_only_dist / "index.html").write_text("<html><head><title>Prexvo</title></head><body><h1>Prexvo</h1></body></html>", encoding="utf-8")
+    (headers_only_dist / "tools" / "index.html").write_text("<html><head><title>Tools</title></head><body><h1>Tools</h1></body></html>", encoding="utf-8")
+    headers_only_llms_txt = (
+        "# Cloudflare Pages Edge Headers generated by pseofactory.edge\n"
+        "/*\n"
+        "  Cache-Control: public, max-age=0, s-maxage=86400, stale-while-revalidate=604800\n\n"
+        "/llms.txt\n"
+        '  Link: <https://prexvo.com/llms.txt>; rel="canonical"\n'
+        "  Content-Type: text/plain; charset=utf-8\n"
+        "  Cache-Control: public, max-age=0, s-maxage=60, must-revalidate\n"
+    )
+    (headers_only_dist / "_headers").write_text(headers_only_llms_txt, encoding="utf-8")
+    assert maintenance._has_llms_headers_surface(headers_only_dist, headers_only_llms_txt) is True
+    assert maintenance._headers_missing_llms_noindex(headers_only_llms_txt) is True
+    updated_ho = maintenance.RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+        headers_only_dist, "prexvo", canonical_base="https://prexvo.com"
+    )
+    assert "_headers" in updated_ho
+    healed_ho_hdr = (headers_only_dist / "_headers").read_text(encoding="utf-8")
+    assert maintenance._headers_missing_llms_noindex(healed_ho_hdr) is False
+    assert assert_headers_snippet_policy(healed_ho_hdr) is True
+    assert validate_edge_headers_file(headers_only_dist / "_headers")["status"] == "PASS"
+    updated_ho_pass2 = maintenance.RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+        headers_only_dist, "prexvo", canonical_base="https://prexvo.com"
+    )
+    assert "_headers" not in updated_ho_pass2
 

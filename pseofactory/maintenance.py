@@ -6181,6 +6181,17 @@ def _has_lienbond_poisoned_meta(
     return False
 
 
+def _has_llms_headers_surface(dist_dir: Path, headers_content: str) -> bool:
+    """Returns True if dist_dir or _headers declares an llms.txt or llms-full.txt surface."""
+    hdr = headers_content or ""
+    return (
+        (dist_dir / "llms.txt").is_file()
+        or (dist_dir / "llms-full.txt").is_file()
+        or "/llms.txt" in hdr
+        or "/llms-full.txt" in hdr
+    )
+
+
 def _headers_missing_llms_noindex(headers_content: str) -> bool:
     """Returns True if /llms.txt or /llms-full.txt active blocks in _headers lack X-Robots-Tag: noindex."""
     route_xrobots: Dict[str, List[str]] = {}
@@ -6511,7 +6522,7 @@ def _needs_page_structure_geo_normalization(
         re.IGNORECASE,
     ):
         _ld_body = _ld_m.group(1)
-        if '"LocalBusiness"' in _ld_body or "/#localbusiness\"" in _ld_body.lower():
+        if '"LocalBusiness"' in _ld_body or '#localbusiness"' in _ld_body.lower():
             return True
 
     if check_aeo_geo_graph and '"@graph"' in html_content and (
@@ -9051,10 +9062,46 @@ def _normalize_page_structure_and_geo_parity(
             updated = aeo_ld_updated
             changed = True
 
-    if '"LocalBusiness"' in updated or '/#localbusiness"' in updated.lower():
+    if '"LocalBusiness"' in updated or '#localbusiness"' in updated.lower():
+        parsed_canon_lb = urllib.parse.urlparse((canonical_url or "").split("#")[0].rstrip("/"))
+        lb_base = (
+            f"{parsed_canon_lb.scheme}://{parsed_canon_lb.netloc}"
+            if parsed_canon_lb.scheme in ("http", "https") and parsed_canon_lb.netloc
+            else ""
+        )
+        lb_org_id = f"{lb_base}/#organization" if lb_base else "#organization"
+        eff_lb_brand = (
+            brand_label
+            if property_id.lower() in ("prexvo", "gainhelm", "lienbond", "profithelm")
+            else (property_id.replace("-", " ").replace("_", " ").strip().title() or brand_label)
+        )
+
+        def _rewrite_standalone_lb_refs(val: Any) -> Any:
+            if isinstance(val, dict):
+                out_d: Dict[str, Any] = {}
+                for k, v in val.items():
+                    if k == "@id" and isinstance(v, str) and v.strip().lower().endswith("#localbusiness"):
+                        out_d[k] = lb_org_id
+                    elif k == "@type":
+                        if isinstance(v, str) and v == "LocalBusiness":
+                            out_d[k] = "Organization"
+                        elif isinstance(v, list) and "LocalBusiness" in [str(x) for x in v]:
+                            kept_nested = [str(x) for x in v if str(x) != "LocalBusiness"]
+                            if "Organization" not in kept_nested:
+                                kept_nested.insert(0, "Organization")
+                            out_d[k] = kept_nested[0] if len(kept_nested) == 1 else kept_nested
+                        else:
+                            out_d[k] = v
+                    else:
+                        out_d[k] = _rewrite_standalone_lb_refs(v)
+                return out_d
+            if isinstance(val, list):
+                return [_rewrite_standalone_lb_refs(v) for v in val]
+            return val
+
         def _strip_standalone_localbusiness_ld(m_lb: re.Match) -> str:
             o_tag, raw_j, c_tag = m_lb.group(1), m_lb.group(2), m_lb.group(3)
-            if '"LocalBusiness"' not in raw_j and '/#localbusiness"' not in raw_j.lower():
+            if '"LocalBusiness"' not in raw_j and '#localbusiness"' not in raw_j.lower():
                 return m_lb.group(0)
             try:
                 parsed_lb = json.loads(raw_j.strip())
@@ -9063,22 +9110,27 @@ def _normalize_page_structure_and_geo_parity(
                     nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
                     nid = str(parsed_lb.get("@id") or "").strip().lower()
                     if "LocalBusiness" in nt_list or nid.endswith("#localbusiness"):
-                        if '"Organization"' in updated:
+                        if "Organization" in nt_list:
+                            kept_t = [t for t in nt_list if t != "LocalBusiness"]
+                            parsed_lb["@type"] = kept_t[0] if len(kept_t) == 1 else kept_t
+                            rewritten_comb = _rewrite_standalone_lb_refs(parsed_lb)
+                            return f"{o_tag}\n{json.dumps(rewritten_comb, indent=2)}\n  {c_tag}"
+                        outside_block = updated[: m_lb.start()] + updated[m_lb.end() :]
+                        if '"Organization"' in outside_block:
                             return ""
-                        parsed_canon_lb = urllib.parse.urlparse((canonical_url or "").split("#")[0].rstrip("/"))
-                        lb_base = (
-                            f"{parsed_canon_lb.scheme}://{parsed_canon_lb.netloc}"
-                            if parsed_canon_lb.scheme in ("http", "https") and parsed_canon_lb.netloc
-                            else ""
-                        )
-                        org_repl = {
+                        org_repl: Dict[str, Any] = {
                             "@context": "https://schema.org",
                             "@type": "Organization",
-                            "@id": f"{lb_base}/#organization" if lb_base else "#organization",
-                            "name": brand_label,
+                            "@id": lb_org_id,
+                            "name": eff_lb_brand,
                             "url": lb_base or "/",
                         }
+                        if lb_base:
+                            org_repl["publishingPrinciples"] = f"{lb_base}/methodology/"
                         return f"{o_tag}\n{json.dumps(org_repl, indent=2)}\n  {c_tag}"
+                    rewritten_other = _rewrite_standalone_lb_refs(parsed_lb)
+                    if rewritten_other != parsed_lb:
+                        return f"{o_tag}\n{json.dumps(rewritten_other, indent=2)}\n  {c_tag}"
             except Exception:
                 pass
             return m_lb.group(0)
@@ -14463,7 +14515,7 @@ class RetroReflectionEngine:
                 new_hdr = _ensure_llms_noindex_in_headers(
                     new_hdr,
                     canonical_base=canon,
-                    require_llms_blocks=(d / "llms.txt").is_file() or (d / "llms-full.txt").is_file(),
+                    require_llms_blocks=_has_llms_headers_surface(d, new_hdr),
                 )
                 new_hdr = compact_edge_headers_to_cloudflare_cap(new_hdr)
                 if new_hdr != orig_hdr:
@@ -15030,12 +15082,7 @@ class RetroReflectionEngine:
             if hdr_f.is_file():
                 try:
                     hdr_txt_chk = hdr_f.read_text(encoding="utf-8", errors="ignore")
-                    has_llms_surface = (
-                        (d / "llms.txt").is_file()
-                        or (d / "llms-full.txt").is_file()
-                        or "/llms.txt" in hdr_txt_chk
-                        or "/llms-full.txt" in hdr_txt_chk
-                    )
+                    has_llms_surface = _has_llms_headers_surface(d, hdr_txt_chk)
                     if "/catalog.json" not in hdr_txt_chk or (
                         has_llms_surface and _headers_missing_llms_noindex(hdr_txt_chk)
                     ):
