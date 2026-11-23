@@ -566,3 +566,85 @@ def test_cli_verify_handoffs_prints_failures_and_aio_observe_exit_codes(
     )
     capsys.readouterr()
     assert rc_ok == 0
+
+
+def test_load_and_enrich_deployed_voids_skips_legacy_off_jurisdiction_entries(
+    tmp_path: Path,
+) -> None:
+    """
+    load_and_enrich_deployed_voids must skip legacy off-jurisdiction non-US entries
+    (such as lienbond's surety-bond-cost-calculator-philippines) so full estate rebuilds
+    succeed without direct tenant repo edits, while keeping valid US voids and GainHelm
+    EU compliance voids intact.
+    """
+    from pseofactory.estate_common import load_and_enrich_deployed_voids
+    from pseofactory.qualification import assert_high_effort_content_qualified
+
+    lb_repo = tmp_path / "lienbond"
+    (lb_repo / "content").mkdir(parents=True, exist_ok=True)
+    (lb_repo / "content" / "deployed_voids.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "surety-bond-cost-calculator-philippines",
+                    "query": "surety bond cost calculator philippines",
+                    "title": "Surety Bond Cost Calculator Philippines",
+                },
+                {
+                    "slug": "miller-act-payment-bond-calculator",
+                    "query": "miller act payment bond calculator",
+                    "title": "Miller Act Payment Bond Calculator",
+                    "formula": "bond_amount * 0.015",
+                    "inputs": {"bond_amount": 100000.0},
+                    "published_output": 1500.0,
+                    "sample_calculation": "100000 * 0.015 = 1500",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    known_lb: set = set()
+    lb_voids = load_and_enrich_deployed_voids(
+        repo_root=lb_repo,
+        property_id="lienbond",
+        domain="lienbond.com",
+        brand_name="LienBond",
+        canonical_base="https://lienbond.com",
+        known_slugs=known_lb,
+        default_authority="40 U.S.C. Section 3131 Miller Act",
+        default_dataset="FRED Total Construction Spending Series",
+    )
+    loaded_lb_slugs = [v["slug"] for v in lb_voids]
+    assert "surety-bond-cost-calculator-philippines" not in loaded_lb_slugs
+    assert "surety-bond-cost-calculator-philippines" not in known_lb
+    assert loaded_lb_slugs == ["miller-act-payment-bond-calculator"]
+    assert_high_effort_content_qualified(lb_voids[0], context="test_estate_common:lienbond")
+
+    # Non-US-statutory tenant (gainhelm) retains legitimate EU compliance voids
+    gh_repo = tmp_path / "gainhelm"
+    (gh_repo / "content").mkdir(parents=True, exist_ok=True)
+    (gh_repo / "content" / "deployed_voids.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "eu-ai-act-conformity-fee-estimator",
+                    "query": "eu ai act conformity fee estimator",
+                    "title": "EU AI Act Conformity Fee Estimator",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    gh_voids = load_and_enrich_deployed_voids(
+        repo_root=gh_repo,
+        property_id="gainhelm",
+        domain="gainhelm.com",
+        brand_name="GainHelm",
+        canonical_base="https://gainhelm.com",
+        known_slugs=set(),
+        default_authority="Regulation (EU) 2024/1689 EU AI Act",
+        default_dataset="IBM Cost of a Data Breach Report 2025",
+    )
+    assert [v["slug"] for v in gh_voids] == ["eu-ai-act-conformity-fee-estimator"]
+

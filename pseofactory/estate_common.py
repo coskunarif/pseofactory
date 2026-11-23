@@ -77,6 +77,7 @@ def load_and_enrich_deployed_voids(
         return []
 
     from pseofactory.pipeline import CompetitorGapEngine, TenantFactStore
+    from pseofactory.qualification import detect_non_us_jurisdiction
 
     profile = TenantFactStore.get_instance().get_profile(property_id)
     gap_engine = CompetitorGapEngine(tenant_profile=profile)
@@ -91,10 +92,22 @@ def load_and_enrich_deployed_voids(
         cm = dv.get("calculation_manifest") if isinstance(dv.get("calculation_manifest"), dict) else {}
         dv_query = str(dv.get("query") or dv.get("primary_keyword") or dv_slug.replace("-", " ")).strip()
         dv_title = str(dv.get("title") or dv_query.title()).strip()
+        dv_primary_kw = str(dv.get("primary_keyword") or dv_query).strip()
+        if detect_non_us_jurisdiction(
+            dv_query,
+            property_id=property_id,
+            spec={
+                "slug": dv_slug,
+                "query": dv_query,
+                "primary_keyword": dv_primary_kw,
+                "title": dv_title,
+            },
+        ):
+            continue
         dv_spec: Dict[str, Any] = {
             "slug": dv_slug,
             "query": dv_query,
-            "primary_keyword": str(dv.get("primary_keyword") or dv_query).strip(),
+            "primary_keyword": dv_primary_kw,
             "title": dv_title,
             "short_title": str(dv.get("short_title") or dv_title[:24]).strip(),
             "description": str(dv.get("description") or "").strip(),
