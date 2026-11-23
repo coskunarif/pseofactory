@@ -592,35 +592,55 @@ def test_gainhelm_url_sync_throttles_burst_and_cancels_on_popstate() -> None:
         page.route("https://gainhelm.test/**", lambda route: route.fulfill(status=200, content_type="text/html", body=full_html))
         page.goto("https://gainhelm.test/tools/soc-2-audit-cost-calculator/", wait_until="load")
         res = page.evaluate("""() => {
-            let calls = 0;
+            const callTs = [];
             const orig = window.history.replaceState.bind(window.history);
             window.history.replaceState = function(...args) {
-                calls += 1;
+                callTs.push(Date.now());
                 return orig(...args);
             };
             const hc = document.getElementById("calc-input-headcount");
+            const startTs = Date.now();
             for (let i = 1; i <= 150; i++) {
                 hc.value = String(50 + i);
                 hc.dispatchEvent(new Event("input", {bubbles: true}));
                 hc.dispatchEvent(new Event("change", {bubbles: true}));
             }
-            const immediateCalls = calls;
+            // Guarantee a trailing debounce timer is queued right before popstate even if iteration 150 hit a leading edge
+            hc.value = "201";
+            hc.dispatchEvent(new Event("input", {bubbles: true}));
+            hc.value = "202";
+            hc.dispatchEvent(new Event("input", {bubbles: true}));
+            const elapsedMs = Date.now() - startTs;
+            const immediateCalls = callTs.length;
             const immediateUrl = window.location.search;
             // Fire popstate while trailing debounce is queued; stale queued write must be canceled
             orig(null, "", window.location.pathname + "?headcount=999");
             window.dispatchEvent(new PopStateEvent("popstate"));
             return new Promise(resolve => setTimeout(() => {
                 resolve({
+                    callTs,
+                    elapsedMs,
                     immediateCalls,
-                    totalCalls: calls,
+                    totalCalls: callTs.length,
                     immediateUrl,
                     finalUrl: window.location.search,
                 });
             }, 220));
         }""")
         browser.close()
-    assert res["immediateCalls"] <= 2, f"Expected throttled replaceState calls, got {res['immediateCalls']}"
-    assert res["totalCalls"] <= 2, f"Expected popstate to cancel trailing replaceState, got {res['totalCalls']}"
+    assert res["immediateCalls"] >= 1, f"Expected leading replaceState call, got {res['immediateCalls']}"
+    max_allowed = 1 + (res["elapsedMs"] // 150)
+    assert res["immediateCalls"] <= max_allowed, (
+        f"Expected throttled replaceState calls <= {max_allowed} over {res['elapsedMs']}ms, "
+        f"got {res['immediateCalls']} ({res['callTs']})"
+    )
+    for prev_ts, cur_ts in zip(res["callTs"], res["callTs"][1:]):
+        assert (cur_ts - prev_ts) >= 150, (
+            f"Throttle interval violated: {cur_ts - prev_ts}ms < 150ms ({res['callTs']})"
+        )
+    assert res["totalCalls"] == res["immediateCalls"], (
+        f"Expected popstate to cancel trailing replaceState, got {res['totalCalls']} vs {res['immediateCalls']}"
+    )
     assert res["finalUrl"] == "?headcount=999", f"Stale queued replaceState overwrote popstate URL: {res['finalUrl']}"
 
 

@@ -2496,7 +2496,7 @@ def test_sync_tenant_test_isolation_guards_aligns_prexvo_and_profithelm_monetiza
     res_ph = sync_tenant_test_isolation_guards(ph_root, "profithelm")
     assert res_px["updated_files"] == 2
     assert res_ph["updated_files"] == 2
-    assert 'status in ("pending_p2", "declined")' in (px_root / "prexvo" / "freshness.py").read_text(encoding="utf-8")
+    assert 'status in ("pending", "pending_p2", "declined")' in (px_root / "prexvo" / "freshness.py").read_text(encoding="utf-8")
     assert "suppressed_keys" in (px_root / "tests" / "test_affiliate_routes.py").read_text(encoding="utf-8")
     assert 'TELEMETRY_EXPORT_SECRET: "test_secret_123"' in (
         ph_root / "tests" / "test_audit_closed_loop_upgrades.py"

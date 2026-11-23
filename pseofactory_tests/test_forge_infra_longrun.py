@@ -182,6 +182,7 @@ import {{ onRequestPost, onRequestGet }} from {json.dumps(str(lead_mjs))};
 
 let putCalls = [];
 let getCalls = 0;
+let inGetPhase = false;
 
 const mockKv = {{
   async put(key, val, opts) {{
@@ -196,8 +197,11 @@ const mockKv = {{
     }};
   }},
   async get() {{
-    getCalls += 1;
-    throw new Error("Should not call kv.get when k.metadata is present");
+    if (inGetPhase) {{
+      getCalls += 1;
+      throw new Error("Should not call kv.get when k.metadata is present");
+    }}
+    return null;
   }},
 }};
 
@@ -221,6 +225,7 @@ await postResp.json();
 
 // Clear isolate memory buffer to force KV list read
 globalThis.__PROFITHELM_LEADS_MEM__ = [];
+inGetPhase = true;
 
 const getResp = await onRequestGet({{
   request: new Request("https://profithelm.com/api/lead-capture?limit=25", {{
@@ -229,10 +234,11 @@ const getResp = await onRequestGet({{
   env: {{ PROFITHELM_LEADS: mockKv, TELEMETRY_EXPORT_SECRET: "lead_sec_123" }},
 }});
 const getData = await getResp.json();
+const leadPut = putCalls.find((c) => c.key.startsWith("lead_profithelm_"));
 
 console.log(JSON.stringify({{
   postStatus: postResp.status,
-  hasMeta: Boolean(putCalls[0]?.opts?.metadata?.lead_id),
+  hasMeta: Boolean(leadPut?.opts?.metadata?.lead_id),
   getStatus: getResp.status,
   getCalls,
   count: getData.count,

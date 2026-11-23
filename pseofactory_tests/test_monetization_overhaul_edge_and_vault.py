@@ -730,18 +730,21 @@ def test_edge_lead_capture_homepage_checkout_lienbond_skus_auth_and_anti_bounce(
       STRIPE_SECRET_KEY: "sk_live_mock",
       ZEPTOMAIL_TOKEN: "zm_mock",
       TELEMETRY_EXPORT_SECRET: "lead_sec_777",
+      PLAYBOOK_FREE_EMAIL_ENABLED: "1",
     }};
     const ghEnv = {{
       GAINHELM_LEADS: ghKv,
       STRIPE_SECRET_KEY: "sk_live_mock",
       ZEPTOMAIL_TOKEN: "zm_mock",
       TELEMETRY_EXPORT_SECRET: "lead_sec_777",
+      PLAYBOOK_FREE_EMAIL_ENABLED: "1",
     }};
     const lbEnv = {{
       LIENBOND_LEADS: lbKv,
       STRIPE_SECRET_KEY: "sk_live_mock",
       ZEPTOMAIL_TOKEN: "zm_mock",
       TELEMETRY_EXPORT_SECRET: "lead_sec_777",
+      PLAYBOOK_FREE_EMAIL_ENABLED: "1",
     }};
 
     // 1. ProfitHelm homepage hub slug resolves to "/" instead of 404 /tools/tax-bracket-capital-allocation-hub/
@@ -1129,6 +1132,7 @@ def test_redteam_bug_1_1_and_1_2_all_four_tenants_anti_bounce_and_canonical_send
         NANGO_CONNECTION_ID: "nango_conn_rt",
         ZOHO_FROM_EMAIL: "billing@prexvo.com",
         ZOHO_SYNTHETIC_SINK_EMAIL: "arif@profithelm.com",
+        PLAYBOOK_FREE_EMAIL_ENABLED: "1",
       }};
       for (const badEmail of blockedEmails) {{
         await cfg.mod.onRequestPost({{
@@ -1164,6 +1168,7 @@ def test_redteam_bug_1_1_and_1_2_all_four_tenants_anti_bounce_and_canonical_send
         NANGO_CONNECTION_ID: "nango_conn_rt",
         ZOHO_FROM_EMAIL: "arif@profithelm.com",
         ZOHO_SYNTHETIC_SINK_EMAIL: "editorial@lienbond.com",
+        PLAYBOOK_FREE_EMAIL_ENABLED: "1",
       }};
       await cfg.mod.onRequestPost({{
         request: new Request(`${{cfg.host}}/api/lead-capture`, {{

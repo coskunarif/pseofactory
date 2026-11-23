@@ -3377,7 +3377,15 @@ def render_porcelain_footer(
     }}
 
     function loadLeadConfig() {{
-      if (window.__PSEO_SYNTHETIC_TEST__ || typeof fetch !== 'function') {{
+      var loc = window.location || null;
+      var isLocalStatic = Boolean(
+        loc && (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1' || loc.protocol === 'file:')
+      );
+      if (
+        window.__PSEO_SYNTHETIC_TEST__
+        || (isLocalStatic && !window.__PSEO_FORCE_TURNSTILE_CONFIG__)
+        || typeof fetch !== 'function'
+      ) {{
         return Promise.resolve({{ turnstile_enabled: false, turnstile_site_key: '' }});
       }}
       if (!window.__pseoLeadConfigPromise) {{

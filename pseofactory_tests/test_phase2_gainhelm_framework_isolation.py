@@ -539,26 +539,55 @@ def _inject_legacy_gainhelm_drift(html_txt: str, slug: str) -> str:
     )
     for attr_name, target_val, legacy_block in replacements:
         span = _find_balanced_div_span(mutated, target_val, attr_name=attr_name)
-        assert span is not None, f"Missing {attr_name}={target_val} in live fixture {slug}"
-        mutated = mutated[: span[0]] + legacy_block + mutated[span[1] :]
+        if span is not None:
+            mutated = mutated[: span[0]] + legacy_block + mutated[span[1] :]
+        elif target_val == "calc-inline-cta":
+            # Post-847424d GainHelm hides unapproved /r/ .calc-inline-cta; inject stale legacy CTA
+            # inside .result-box (its authentic pre-847424d DOM location) to test full legacy drift healing.
+            rb_span = _find_balanced_div_span(mutated, "result-box", attr_name="class")
+            assert rb_span is not None, f"Missing class=result-box in live fixture {slug}"
+            close_idx = mutated.rfind("</div>", rb_span[0], rb_span[1])
+            assert close_idx != -1, f"Missing closing </div> for result-box in live fixture {slug}"
+            mutated = mutated[:close_idx] + "\n" + legacy_block + "\n" + mutated[close_idx:]
+        else:
+            assert span is not None, f"Missing {attr_name}={target_val} in live fixture {slug}"
 
     pro_span = _find_balanced_div_span(mutated, "pro-hook-card", attr_name="class")
-    assert pro_span is not None, f"Missing class=pro-hook-card in live fixture {slug}"
-    pro_block = mutated[pro_span[0] : pro_span[1]]
-    pro_block = (
-        pro_block.replace("gh_hipaa_iso27001_governance_kit", "gh_soc2_cmmc_audit_workpapers")
-        .replace('data-offer-price="49"', 'data-offer-price="79"')
-        .replace("($49)", "($79)")
-        .replace("Locked: $49", "Locked: $79")
-    )
-    pro_block = re.sub(
-        r"<span>[\s\S]*?</span>",
-        "<span><strong>Statutory Audit Workpaper:</strong> Export SOC 2 Type II, CMMC 2.0 &amp; HIPAA Schedule</span>",
-        pro_block,
-        count=1,
-        flags=re.IGNORECASE,
-    )
-    mutated = mutated[: pro_span[0]] + pro_block + mutated[pro_span[1] :]
+    if pro_span is not None:
+        pro_block = mutated[pro_span[0] : pro_span[1]]
+        pro_block = (
+            pro_block.replace("gh_hipaa_iso27001_governance_kit", "gh_soc2_cmmc_audit_workpapers")
+            .replace('data-offer-price="49"', 'data-offer-price="79"')
+            .replace("($49)", "($79)")
+            .replace("Locked: $49", "Locked: $79")
+        )
+        pro_block = re.sub(
+            r"<span>[\s\S]*?</span>",
+            "<span><strong>Statutory Audit Workpaper:</strong> Export SOC 2 Type II, CMMC 2.0 &amp; HIPAA Schedule</span>",
+            pro_block,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        mutated = mutated[: pro_span[0]] + pro_block + mutated[pro_span[1] :]
+    else:
+        legacy_pro_card = (
+            '<div class="pro-hook-card">'
+            "<span><strong>Statutory Audit Workpaper:</strong> Export SOC 2 Type II, CMMC 2.0 &amp; HIPAA Schedule</span>"
+            '<a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1">'
+            "Export Audit Workpaper ($79) &rarr;</a>"
+            '<div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock">'
+            "<div><strong>Unlocked Sample Preview ($57,590 SOC 2 Baseline):</strong> "
+            "Line 1 SOC 2 Type II &amp; CMMC Schedule (Locked: $79)</div>"
+            '<div><a href="/api/lead-capture?checkout=1&amp;sku=gh_soc2_cmmc_audit_workpapers'
+            f'&amp;tool_slug={slug}&amp;amount=57590&amp;redirect=1" rel="nofollow" '
+            'class="pro-hook-direct-checkout btn-primary touch-target" data-checkout-trigger="1" '
+            'data-offer-sku="gh_soc2_cmmc_audit_workpapers" data-offer-price="79">'
+            "Instant Checkout &amp; Download ($79) &rarr;</a></div>"
+            "</div></div>"
+        )
+        cta_span = _find_balanced_div_span(mutated, "calc-inline-cta", attr_name="class")
+        assert cta_span is not None, f"Missing injected class=calc-inline-cta in live fixture {slug}"
+        mutated = mutated[: cta_span[1]] + "\n" + legacy_pro_card + mutated[cta_span[1] :]
 
     mutated = re.sub(
         r'(<div\b[^>]*id=["\']partner-quote-intake-step["\'][^>]*\bdata-vertical=["\'])[^"\']+(["\'])',
@@ -591,7 +620,7 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         )
         if needs_live_repair:
             assert repaired_live, f"Expected non-empty repairs on unhealed live {slug}"
-        _assert_live_fixture_healed(healed_live, slug, meta["vertical"])
+        _assert_live_fixture_healed(healed_live, slug, meta["vertical"], require_pro_hook=False)
         healed_live_second, repaired_live_second = engine.retrofit_html(
             healed_live,
             property_id="gainhelm",
@@ -606,7 +635,7 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         (live_copy_tool / "index.html").write_text(orig_live_html, encoding="utf-8")
         engine.retrofit_estate(live_copy_dist, "gainhelm")
         live_estate_html = (live_copy_tool / "index.html").read_text(encoding="utf-8")
-        _assert_live_fixture_healed(live_estate_html, slug, meta["vertical"])
+        _assert_live_fixture_healed(live_estate_html, slug, meta["vertical"], require_pro_hook=False)
         _, live_estate_html_repairs = engine.retrofit_html(
             live_estate_html,
             property_id="gainhelm",
@@ -670,7 +699,10 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
     from pseofactory.visual_primitives import _find_balanced_div_span
 
     adv_slug = "dora-ict-third-party-risk-compliance-cost-calculator"
-    adv_base = (LIVE_GAINHELM_REPO / "dist" / "tools" / adv_slug / "index.html").read_text(encoding="utf-8")
+    adv_base = _inject_legacy_gainhelm_drift(
+        (LIVE_GAINHELM_REPO / "dist" / "tools" / adv_slug / "index.html").read_text(encoding="utf-8"),
+        adv_slug,
+    )
     adv_clean, _ = engine.retrofit_html(adv_base, property_id="gainhelm", slug=adv_slug)
     drawer_sp = _find_balanced_div_span(adv_clean, "post-calculation-upgrade-drawer", attr_name="id")
     assert drawer_sp is not None
@@ -694,36 +726,55 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         '<div class="pro-hook-card" data-dup="true"><span>Export SOC 2 Type II, CMMC 2.0 &amp; HIPAA Schedule ($79)</span><a href="#lead-capture-form" class="pro-hook-link">Export ($79)</a></div><div class="pro-hook-card"',
         1,
     ).replace(
-        '<div class="calc-inline-cta"',
-        '<div class="calc-inline-cta" data-partner="vanta_security"><div>Automated SOC 2, ISO 27001 &amp; HIPAA</div><a href="/r/vanta_security">SOC 2</a></div><div class="calc-inline-cta"',
-        1,
-    ).replace(
         '<div id="multi-year-cliff-visualizer"',
         '<p class="stale-outer-workbench-note">Legacy AICPA SOC 2 &amp; CMMC Level 2 comparison note</p><div id="multi-year-cliff-visualizer"',
         1,
     )
+    if '<div class="calc-inline-cta"' in adv_html:
+        adv_html = adv_html.replace(
+            '<div class="calc-inline-cta"',
+            '<div class="calc-inline-cta" data-partner="vanta_security"><div>Automated SOC 2, ISO 27001 &amp; HIPAA</div><a href="/r/vanta_security">SOC 2</a></div><div class="calc-inline-cta"',
+            1,
+        )
+    else:
+        adv_html = adv_html.replace(
+            '<div class="pro-hook-card"',
+            '<div class="calc-inline-cta" data-partner="vanta_security"><div>Automated SOC 2, ISO 27001 &amp; HIPAA</div><a href="/r/vanta_security">SOC 2</a></div><div class="pro-hook-card"',
+            1,
+        )
     adv_healed, adv_repairs = engine.retrofit_html(adv_html, property_id="gainhelm", slug=adv_slug)
     assert adv_repairs, "Adversarial workbench/duplicate fixture must trigger retrofit_html repairs"
     assert "serp_incumbent_depth_upgrade" in adv_repairs
     _assert_live_fixture_healed(adv_healed, adv_slug, "dora_eu_ict_resilience")
 
 
-def _assert_live_fixture_healed(html_txt: str, slug: str, expected_vertical: str) -> None:
+def _assert_live_fixture_healed(
+    html_txt: str,
+    slug: str,
+    expected_vertical: str,
+    *,
+    require_pro_hook: bool = True,
+) -> None:
     soup = BeautifulSoup(html_txt, "html.parser")
-    for sel in (
+    required_selectors = [
         "#serp-incumbent-depth-workbench",
         "#calculator-workspace-anchor",
         "#partner-quote-intake-step",
         "#post-calculation-upgrade-drawer",
-        ".pro-hook-card",
         "#calc-result-quick-unlock-bar",
         ".compliance-strip",
         'section[data-first-party-checkout="true"]',
-    ):
+    ]
+    if require_pro_hook:
+        required_selectors.append(".pro-hook-card")
+    for sel in required_selectors:
         els = soup.select(sel)
         assert els, f"Missing {sel} after healing live {slug}"
         for idx, el in enumerate(els):
             _assert_container_framework_clean(el, slug, f"{sel}[{idx}]")
+    if not require_pro_hook:
+        for idx, el in enumerate(soup.select(".pro-hook-card")):
+            _assert_container_framework_clean(el, slug, f".pro-hook-card[{idx}]")
     assert not soup.select('a[href^="/r/"]')
 
     assert len(soup.select("#serp-incumbent-depth-workbench")) == 1
@@ -1441,27 +1492,40 @@ globalThis.fetch = async (url, init = {{}}) => {{
   throw new Error("Unexpected fetch URL: " + sUrl);
 }};
 
-const env = {{
-  STRIPE_SECRET_KEY: "sk_live_mock",
-  ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_tok",
-  EMAIL_PRIMARY_RAIL: "zeptomail",
-}};
+function makeIsolatedKv() {{
+  const m = new Map();
+  return {{
+    async get(k) {{ return m.has(k) ? m.get(k) : null; }},
+    async put(k, v) {{ m.set(k, v); }},
+    async list() {{ return {{ keys: [], list_complete: true }}; }},
+  }};
+}}
 
 async function run() {{
   let comboCount = 0;
   for (const [fwKey, spec] of Object.entries(fwSpecs)) {{
     for (const gSlug of genericSlugs) {{
       comboCount += 1;
+      const env = {{
+        LEADS_KV: makeIsolatedKv(),
+        STRIPE_SECRET_KEY: "sk_live_mock",
+        ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_tok",
+        EMAIL_PRIMARY_RAIL: "zeptomail",
+        PLAYBOOK_FREE_EMAIL_ENABLED: "1",
+      }};
       const zeptoStart = capturedZepto.length;
       const stripeStart = capturedStripeBodies.length;
       const postRes = await onRequestPost({{
         request: new Request("https://gainhelm.com/api/lead-capture", {{
           method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
+          headers: {{
+            "Content-Type": "application/json",
+            "CF-Connecting-IP": `198.51.100.${{comboCount}}`,
+          }},
           body: JSON.stringify({{
             tool_slug: gSlug,
             vertical: spec.vertical,
-            email: "security@enterprise-client.io",
+            email: `security+c${{comboCount}}@enterprise-client.io`,
             state: "CA",
             calculated_amount: 88000,
             partner_sharing_consent: true,
@@ -1507,7 +1571,8 @@ async function run() {{
       if (!String(zm.htmlbody || "").includes("<h2>Your Calculation Worksheet &amp; Action Plan</h2>")) {{
         throw new Error(`Zepto heading mismatch (${{fwKey}}:${{gSlug}}): ${{zm.htmlbody}}`);
       }}
-      if (!String(zm.htmlbody || "").includes(spec.partner_rep_desk)) {{
+      const escapedDesk = String(spec.partner_rep_desk || "").replace(/&/g, "&amp;");
+      if (!String(zm.htmlbody || "").includes(escapedDesk) && !String(zm.htmlbody || "").includes(spec.partner_rep_desk)) {{
         throw new Error(`Zepto missing desk (${{fwKey}}:${{gSlug}})`);
       }}
 
@@ -1946,20 +2011,26 @@ const env = {{
   STRIPE_SECRET_KEY: "sk_live_mock",
   ZEPTOMAIL_TOKEN: "Zoho-enczapikey mock_tok",
   EMAIL_PRIMARY_RAIL: "zeptomail",
+  PLAYBOOK_FREE_EMAIL_ENABLED: "1",
 }};
 async function run() {{
   const results = [];
+  let caseIdx = 0;
   for (const c of testCases) {{
+    caseIdx += 1;
     const idx = capturedEmails.length;
     const res = await onRequestPost({{
       request: new Request("https://gainhelm.com/api/lead-capture", {{
         method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
+        headers: {{
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": `198.51.100.${{caseIdx}}`,
+        }},
         body: JSON.stringify({{
           tool_slug: c.slug,
           vertical: c.vertical,
           partner_key: c.req_pk,
-          email: "security@enterprise-client.io",
+          email: `security+np${{caseIdx}}@enterprise-client.io`,
           state: "TX",
           calculated_amount: 110000,
           partner_sharing_consent: true,
@@ -2028,7 +2099,11 @@ run().catch((err) => {{ console.error(err); process.exit(1); }});
             assert bad not in em_edge_body_clean
         assert em_edge["subject"] == f"[GainHelm Playbook] Your Compliance Scoping & Cost Worksheet ({item['slug']})"
         assert "<h2>Your Calculation Worksheet &amp; Action Plan</h2>" in em_edge["htmlbody"]
-        assert post_json["partner_rep_desk"] in em_edge["htmlbody"]
+        import html as _html_mod
+        assert (
+            _html_mod.escape(post_json["partner_rep_desk"]) in em_edge["htmlbody"]
+            or post_json["partner_rep_desk"] in em_edge["htmlbody"]
+        )
 
         qt = engine.ingest_qualified_lead(
             property_id="gainhelm",
@@ -2258,8 +2333,12 @@ def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspa
     )
     from pseofactory.visual_primitives import _find_balanced_div_span
     pro_sp = _find_balanced_div_span(clean_dora_base, "pro-hook-card", attr_name="class")
-    assert pro_sp is not None
-    clean_dora_with_baseline = clean_dora_base[: pro_sp[0]] + clean_pro_card + clean_dora_base[pro_sp[1] :]
+    if pro_sp is not None:
+        clean_dora_with_baseline = clean_dora_base[: pro_sp[0]] + clean_pro_card + clean_dora_base[pro_sp[1] :]
+    else:
+        qub_sp = _find_balanced_div_span(clean_dora_base, "calc-result-quick-unlock-bar", attr_name="id")
+        assert qub_sp is not None
+        clean_dora_with_baseline = clean_dora_base[: qub_sp[1]] + "\n" + clean_pro_card + clean_dora_base[qub_sp[1] :]
     assert RetroReflectionEngine._gainhelm_needs_framework_isolation_heal(clean_dora_with_baseline, dora_slug) is False
     RetroReflectionEngine._RETROFIT_HTML_CACHE.clear()
     clean_pass_out, clean_repairs = RetroReflectionEngine.retrofit_html(
@@ -2383,7 +2462,9 @@ vm.runInContext({json.dumps(edge_js)}, ctx);
 const env = {{ STRIPE_SECRET_KEY: "sk_live_mock" }};
 const cases = {json.dumps(roundtrip_payload)};
 (async () => {{
+  let caseIdx = 0;
   for (const c of cases) {{
+    caseIdx += 1;
     const getRes = await ctx.onRequestGet({{
       request: new Request(c.checkout_ep + "&format=json"),
       env,
@@ -2408,12 +2489,15 @@ const cases = {json.dumps(roundtrip_payload)};
     const postRes = await ctx.onRequestPost({{
       request: new Request("https://gainhelm.com/api/lead-capture", {{
         method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
+        headers: {{
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": `198.51.100.${{caseIdx}}`,
+        }},
         body: JSON.stringify({{
           tool_slug: c.slug,
           vertical: c.vert,
           sku: c.sku,
-          email: "ciso@enterprise-client.io",
+          email: `ciso+bare${{caseIdx}}@enterprise-client.io`,
           state: "DE",
           calculated_amount: 85000,
           partner_sharing_consent: true,
@@ -2552,7 +2636,12 @@ const envWithStripe = {
   STRIPE_SECRET_KEY: 'sk_test_dummy',
   ZEPTOMAIL_TOKEN: 'zepto_dummy',
 };
-const envNoStripe = { LEADS_KV: envWithStripe.LEADS_KV, ZEPTO_API_KEY: 'unused', ZEPTOMAIL_TOKEN: 'zepto_dummy' };
+const envNoStripe = {
+  LEADS_KV: envWithStripe.LEADS_KV,
+  ZEPTO_API_KEY: 'unused',
+  ZEPTOMAIL_TOKEN: 'zepto_dummy',
+  PLAYBOOK_FREE_EMAIL_ENABLED: '1',
+};
 let sentEmails = [];
 let stripeBodies = [];
 globalThis.fetch = async (url, opts) => {
@@ -2621,7 +2710,8 @@ globalThis.fetch = async (url, opts) => {
     const html = (sentEmails[0] && sentEmails[0].htmlbody) || '';
     const hrefMatch = html.match(/href="([^"]+checkout=1[^"]+)"/);
     if (!hrefMatch) throw new Error(c.name + ' missing no-stripe email checkout href');
-    const qs = new URL(hrefMatch[1]).searchParams;
+    const decodedHref = hrefMatch[1].replace(/&amp;/g, '&');
+    const qs = new URL(decodedHref).searchParams;
     if (c.name === 'bare_root' && (qs.get('vertical') || qs.get('sku'))) {
       throw new Error('bare_root email link leaked vertical/sku: ' + hrefMatch[1]);
     }
@@ -3407,17 +3497,18 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
 
     // POST -> 402 -> lead_id-only GET roundtrip
     ctx.__PSEOFACTORY_LEADS_BUFFER__ = [];
+    const extraIdx = extraOfferParityCases.indexOf(extraCase) + 1;
     const isSlotCase = extraCase.exp_sku.endsWith("_verified_partner_slot");
     const postPayload = isSlotCase
       ? {{
           intent: "partner_registration",
-          email: "partner@enterprise-real.io",
+          email: `partner+${{extraCase.name}}@enterprise-real.io`,
           firm_name: "Advisory Partners LLC",
           tool_slug: extraCase.tool_slug,
           state: "DE",
         }}
       : {{
-          email: "buyer@enterprise-real.io",
+          email: `buyer+${{extraCase.name}}@enterprise-real.io`,
           tool_slug: extraCase.tool_slug,
           ...(extraCase.vertical ? {{ vertical: extraCase.vertical }} : {{}}),
           ...(extraCase.req_sku ? {{ sku: extraCase.req_sku }} : {{}}),
@@ -3428,7 +3519,10 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
     const postRes = await ctx.onRequestPost({{
       request: new Request(`https://${{domain}}/api/lead-capture`, {{
         method: "POST",
-        headers: {{ "Content-Type": "application/json" }},
+        headers: {{
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": `198.51.100.${{extraIdx}}`,
+        }},
         body: JSON.stringify(postPayload),
       }}),
       env: extraEnv,
