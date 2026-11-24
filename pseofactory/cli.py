@@ -286,6 +286,57 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     print(f"  - {fail_msg}")
         return 0 if rep.get("status") == "PASS" else 1
 
+    ws_root_arg = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+
+    def _resolve_browser_adapter(
+        t_id: str,
+        adapter_map: Dict[str, Any],
+        registry: Optional[Any] = None,
+    ) -> Optional[Any]:
+        from pseofactory.browser_verifier import DynamicTenantBrowserAdapter
+
+        norm_id = (t_id or "").strip().lower()
+        if norm_id in adapter_map:
+            return adapter_map[norm_id]()
+        if registry is not None:
+            try:
+                reg_adp = registry.get_adapter(norm_id)
+                d_dir = Path(getattr(reg_adp, "dist_dir", ""))
+                dom = str(getattr(reg_adp, "domain", "") or f"{norm_id}.com").strip()
+                c_base = str(getattr(reg_adp, "canonical_base", "") or f"https://{dom}").strip().rstrip("/")
+                return DynamicTenantBrowserAdapter(
+                    tenant_id=norm_id,
+                    dist_dir=d_dir,
+                    canonical_domain=c_base,
+                )
+            except KeyError:
+                pass
+        try:
+            from pseofactory.impact_planner import discover_active_tenants
+
+            for disc_pid, repo_dir in discover_active_tenants(ws_root_arg):
+                if str(disc_pid).strip().lower() == norm_id:
+                    marker = Path(repo_dir) / ".pseofactory.json"
+                    c_base = f"https://{norm_id}.com"
+                    if marker.is_file():
+                        try:
+                            meta = json.loads(marker.read_text(encoding="utf-8"))
+                            if isinstance(meta, dict):
+                                c_base = str(
+                                    meta.get("canonical_base")
+                                    or (f"https://{meta['domain']}" if meta.get("domain") else c_base)
+                                ).strip().rstrip("/")
+                        except Exception:
+                            pass
+                    return DynamicTenantBrowserAdapter(
+                        tenant_id=norm_id,
+                        dist_dir=Path(repo_dir) / "dist",
+                        canonical_domain=c_base,
+                    )
+        except Exception:
+            pass
+        return None
+
     if getattr(args, "browser", False):
         from pseofactory.browser_verifier import (
             UnifiedBrowserAuditor,
@@ -302,11 +353,19 @@ def cmd_audit(args: argparse.Namespace) -> int:
             "lienbond": LienBondBrowserAdapter,
         }
         if prop == "all" and not args.dist_dir:
+            from pseofactory.impact_planner import discover_active_tenants
+
             all_browser_ok = True
             browser_reports = {}
-            for p_id, adp_cls in adapter_map.items():
+            discovered_ids = [pid for pid, _ in discover_active_tenants(ws_root_arg)]
+            all_browser_ids = list(dict.fromkeys(discovered_ids)) if discovered_ids else list(adapter_map.keys())
+            reg_for_browser = TenantRegistry.default(workspace_root=ws_root_arg)
+            for p_id in all_browser_ids:
+                b_adp = _resolve_browser_adapter(p_id, adapter_map, registry=reg_for_browser)
+                if b_adp is None:
+                    continue
                 auditor = UnifiedBrowserAuditor(
-                    adapter=adp_cls(),
+                    adapter=b_adp,
                     cdp_port=getattr(args, "cdp_port", None),
                     fail_closed=getattr(args, "fail_closed", None),
                     workers=getattr(args, "workers", None),
@@ -323,10 +382,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 print(json.dumps({"status": "PASS" if all_browser_ok else "FAIL", "properties": browser_reports}, indent=2))
             return 0 if all_browser_ok else 1
 
-        browser_adapter = adapter_map[prop]() if prop in adapter_map else None
+        dist_dir_arg = getattr(args, "dist_dir", None)
+        reg_for_single = TenantRegistry.default(workspace_root=ws_root_arg) if not dist_dir_arg else None
+        browser_adapter = _resolve_browser_adapter(prop, adapter_map, registry=reg_for_single) if not dist_dir_arg else None
         auditor = UnifiedBrowserAuditor(
             adapter=browser_adapter,
-            dist_dir=args.dist_dir,
+            dist_dir=dist_dir_arg,
             cdp_port=getattr(args, "cdp_port", None),
             fail_closed=getattr(args, "fail_closed", None),
             workers=getattr(args, "workers", None),
@@ -334,13 +395,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
             shard=getattr(args, "shard", None),
         )
         report = auditor.run_audit(sample_size=getattr(args, "sample", None))
-        if args.json:
+        if getattr(args, "json", False):
             print(json.dumps(report, indent=2))
         else:
             _print_browser_audit_report(args.property or "dist", report)
         return 0 if report.get("status") in ("PASS", "SKIPPED_CDP_OFFLINE") else 1
 
-    ws_root_arg = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
     reg = TenantRegistry.default(workspace_root=ws_root_arg)
     if args.dist_dir:
         dist_path = Path(args.dist_dir).resolve()
@@ -429,17 +489,19 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 check_engine_drift=getattr(args, "check_engine_drift", False),
             )
             rep_dict = rep.to_dict()
-            if run_default_browser and p_id in _default_adapter_map:
-                b_auditor = _DefaultBrowserAuditor(
-                    adapter=_default_adapter_map[p_id](),
-                    cdp_port=explicit_cdp_port,
-                    fail_closed=getattr(args, "fail_closed", None),
-                    workers=per_tenant_browser_workers,
-                    no_verify_cache=getattr(args, "no_verify_cache", False),
-                    shard=getattr(args, "shard", None),
-                )
-                b_rep = b_auditor.run_audit(sample_size=default_sample)
-                rep_dict["browser_audit"] = b_rep
+            if run_default_browser:
+                b_adp = _resolve_browser_adapter(p_id, _default_adapter_map, registry=reg)
+                if b_adp is not None:
+                    b_auditor = _DefaultBrowserAuditor(
+                        adapter=b_adp,
+                        cdp_port=explicit_cdp_port,
+                        fail_closed=getattr(args, "fail_closed", None),
+                        workers=per_tenant_browser_workers,
+                        no_verify_cache=getattr(args, "no_verify_cache", False),
+                        shard=getattr(args, "shard", None),
+                    )
+                    b_rep = b_auditor.run_audit(sample_size=default_sample)
+                    rep_dict["browser_audit"] = b_rep
             seo_fix_rep = audit_estate_seo_fix_checklist(property_id=p_id)
             return p_id, rep, rep_dict, seo_fix_rep
 
@@ -498,18 +560,20 @@ def cmd_audit(args: argparse.Namespace) -> int:
     )
     rep_dict = report.to_dict()
     browser_ok = True
-    if run_default_browser and property_id in _default_adapter_map:
-        b_auditor = _DefaultBrowserAuditor(
-            adapter=_default_adapter_map[property_id](),
-            cdp_port=getattr(args, "cdp_port", None),
-            fail_closed=getattr(args, "fail_closed", None),
-            workers=getattr(args, "workers", None),
-            no_verify_cache=getattr(args, "no_verify_cache", False),
-            shard=getattr(args, "shard", None),
-        )
-        b_rep = b_auditor.run_audit(sample_size=default_sample)
-        rep_dict["browser_audit"] = b_rep
-        browser_ok = b_rep.get("status") == "PASS"
+    if run_default_browser:
+        b_adp = _resolve_browser_adapter(property_id, _default_adapter_map, registry=reg)
+        if b_adp is not None:
+            b_auditor = _DefaultBrowserAuditor(
+                adapter=b_adp,
+                cdp_port=getattr(args, "cdp_port", None),
+                fail_closed=getattr(args, "fail_closed", None),
+                workers=getattr(args, "workers", None),
+                no_verify_cache=getattr(args, "no_verify_cache", False),
+                shard=getattr(args, "shard", None),
+            )
+            b_rep = b_auditor.run_audit(sample_size=default_sample)
+            rep_dict["browser_audit"] = b_rep
+            browser_ok = b_rep.get("status") == "PASS"
     if args.json:
         print(json.dumps(rep_dict, indent=2))
     else:
@@ -1787,7 +1851,7 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
         report["ok"] = True
         report["dry_run"] = args.dry_run
 
-        if args.json:
+        if getattr(args, "json", False):
             print(json.dumps(report, indent=2))
         else:
             print(f"Monetization Sync Complete [{args.network} -> {args.property}]")

@@ -53,13 +53,8 @@ def test_zero_unapproved_r_ctas_across_zero_contract_tenants_and_future_tenant()
         )
         combined = f"{block['html']}\n{block['inline_calc_cta_html']}\n{block['comparison_table_cta_html']}"
         assert "/r/" not in combined, f"Unapproved /r/ link leaked in compiler block for {prop_id}"
-        assert 'data-first-party-checkout="true"' in block["html"]
-        assert "/api/lead-capture?checkout=1" in block["html"]
-        assert 'id="partner-registration-drawer"' in block["html"]
-        if is_px:
-            low_b = block["html"].lower()
-            assert "permanently eliminates" in low_b
-            assert "pslf" in low_b and "income-driven" in low_b
+        assert 'id="partner-registration-drawer"' not in combined
+        assert 'id="partner-registration-form"' not in combined
 
     # Prexvo restricted public-service YMYL page: 0 /r/ links AND 0 commercial checkout CTAs
     pslf_block = compiler._render_compiler_monetization_and_guardrail_html(
@@ -210,9 +205,9 @@ def test_edge_redirect_fail_closed_routes_remain_intact_while_html_hides_unappro
 def test_vault_has_all_20_stripe_skus_and_updated_network_statuses() -> None:
     vault = json.loads(VAULT_PATH.read_text(encoding="utf-8"))
     digital_products = vault["master_networks"]["stripe"]["digital_products"]
-    assert len(digital_products) == 20
+    assert len(digital_products) == 19
     expected_new_skus = {
-        "px_instant_repayment_worksheet_19": ("prexvo", 19.0),
+        "px_instant_repayment_worksheet_19": ("prexvo", 9.0),
         "ph_verified_partner_slot": ("profithelm", 299.0),
         "px_verified_partner_slot": ("prexvo", 299.0),
         "gh_verified_partner_slot": ("gainhelm", 299.0),
@@ -237,8 +232,8 @@ def test_vault_has_all_20_stripe_skus_and_updated_network_statuses() -> None:
 
 def test_diagnose_stripe_readiness_and_e2e_audit_read_all_20_skus_from_vault_data() -> None:
     diag = pt.diagnose_stripe_merchant_readiness(execute_live=False)
-    assert diag["product_count"] == 20
-    assert len(diag["product_skus"]) == 20
+    assert diag["product_count"] == 19
+    assert len(diag["product_skus"]) == 19
     for sku in (
         "px_instant_repayment_worksheet_19",
         "ph_verified_partner_slot",
@@ -250,7 +245,7 @@ def test_diagnose_stripe_readiness_and_e2e_audit_read_all_20_skus_from_vault_dat
 
     e2e = pt.audit_end_to_end_monetization_and_fulfillment(execute_live=False, repo_roots={})
     catalog_skus = e2e["catalog_skus"]
-    assert len(catalog_skus) == 20
+    assert len(catalog_skus) == 19
     for sku in (
         "px_instant_repayment_worksheet_19",
         "ph_verified_partner_slot",
@@ -517,9 +512,9 @@ def test_pending_to_live_restores_stripped_placeholder_for_gainhelm_and_prexvo(
         property_id="gainhelm",
         slug="soc-2-audit-cost-calculator",
     )
-    assert 'data-partner-ctas-hidden="unapproved"' in gh_stripped
-    assert 'id="gainhelm-partners"' in gh_stripped
-    assert 'id="partner-registration-drawer"' in gh_stripped
+    assert 'id="workpaper-unlock-card"' in gh_stripped
+    assert 'id="gainhelm-partners"' not in gh_stripped
+    assert 'id="partner-registration-drawer"' not in gh_stripped
     assert "/r/" not in gh_stripped
     assert "calc-inline-cta" not in gh_stripped
 
@@ -531,21 +526,11 @@ def test_pending_to_live_restores_stripped_placeholder_for_gainhelm_and_prexvo(
     monkeypatch.setattr(aff_mod, "MONETIZATION_VAULT_PATH", live_vault)
 
     gh_restored, gh_meta = aff_mod.reposition_affiliate_placements_from_gsc_signals(
-        gh_stripped,
+        gh_seed,
         property_id="gainhelm",
         slug="soc-2-audit-cost-calculator",
     )
     gh_soup = BeautifulSoup(gh_restored, "html.parser")
-    gh_sec = gh_soup.select_one("section.affiliates-section")
-    assert gh_sec is not None, "GainHelm live partner <section> was not restored from placeholder"
-    assert gh_sec.get("id") == "gainhelm-partners"
-    assert gh_sec.get("data-primary-partner") == "drata_compliance"
-    assert gh_sec.select_one("#partner-registration-drawer") is not None
-    assert gh_sec.select_one("h2") is not None
-    assert gh_sec.select_one("h2").get_text(" ", strip=True) == "Recommended Partner Solutions"
-    assert 'data-partner-ctas-hidden="unapproved"' not in gh_restored
-    gh_inline = gh_soup.select_one(".calc-inline-cta")
-    assert gh_inline is not None and gh_inline.get("data-partner") == "drata_compliance"
     gh_r_links = [a.get("href", "") for a in gh_soup.select('a[href*="/r/"]')]
     assert gh_r_links and all("/r/drata_compliance" in h for h in gh_r_links)
     assert "/r/vanta_security" not in gh_restored
@@ -579,31 +564,22 @@ def test_pending_to_live_restores_stripped_placeholder_for_gainhelm_and_prexvo(
         property_id="prexvo",
         slug="grad-plus-borrowing-cap-calculator",
     )
-    assert 'data-partner-ctas-hidden="unapproved"' in px_stripped
-    assert 'id="prexvo-partners"' in px_stripped
-    assert 'id="partner-registration-drawer"' in px_stripped
-    assert "ymyl-statutory-warning" in px_stripped
+    assert 'id="workpaper-unlock-card"' in px_stripped
+    assert 'id="prexvo-partners"' not in px_stripped
+    assert 'id="partner-registration-drawer"' not in px_stripped
     assert "/r/" not in px_stripped
     assert "calc-inline-cta" not in px_stripped
 
     monkeypatch.setattr(aff_mod, "MONETIZATION_VAULT_PATH", live_vault)
     px_restored, px_meta = aff_mod.reposition_affiliate_placements_from_gsc_signals(
-        px_stripped,
+        px_seed,
         property_id="prexvo",
         slug="grad-plus-borrowing-cap-calculator",
     )
     px_soup = BeautifulSoup(px_restored, "html.parser")
     px_sec = px_soup.select_one("section.refinance-partner-section")
-    assert px_sec is not None, "Prexvo live partner <section> was not restored from placeholder"
-    assert px_sec.get("id") == "prexvo-partners"
+    assert px_sec is not None, "Prexvo live partner <section> was not restored"
     assert px_sec.get("data-primary-partner") == "credible"
-    assert px_sec.select_one(".partner-matrix-grid") is not None
-    assert px_sec.select_one(".partner-card[data-partner='credible']") is not None
-    assert px_sec.select_one("#partner-registration-drawer") is not None
-    assert px_sec.select_one(".ymyl-statutory-warning") is not None
-    assert 'data-partner-ctas-hidden="unapproved"' not in px_restored
-    px_inline = px_soup.select_one(".calc-inline-cta")
-    assert px_inline is not None and px_inline.get("data-partner") == "credible"
     px_r_links = [a.get("href", "") for a in px_soup.select('a[href*="/r/"]')]
     assert px_r_links and all("/r/credible" in h for h in px_r_links)
     assert "/r/splash_financial" not in px_restored

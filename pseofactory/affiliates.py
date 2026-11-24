@@ -1892,8 +1892,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "dora": {
         "framework_key": "dora",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm DORA ICT Third-Party Risk & TLPT Compliance Workpaper Suite",
         "statutory_authority": "Regulation (EU) 2022/2554 (DORA Articles 5-30), Commission Delegated Regulation (EU) 2024/1772 & EBA/ESMA/EIOPA RTS",
         "economic_dataset": "ESA DORA Joint Technical Standards & ENISA ICT Resilience Cost Benchmarks",
@@ -1946,8 +1946,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "eu_ai_act": {
         "framework_key": "eu_ai_act",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm EU AI Act High-Risk Conformity & Article 99 Exposure Workpaper Suite",
         "statutory_authority": "Regulation (EU) 2024/1689 (EU AI Act Annex III, Articles 9-17, 43 & 99) & ISO/IEC 42001:2023",
         "economic_dataset": "European AI Office Implementing Rules & Notified Body Conformity Benchmarks",
@@ -2000,8 +2000,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "sec_8k": {
         "framework_key": "sec_8k",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm SEC Form 8-K Item 1.05 & Reg S-K Item 106 Materiality Workpaper Suite",
         "statutory_authority": "17 CFR 229.106 (Reg S-K Item 106), 17 CFR 249.308 (Form 8-K Item 1.05) & SEC Release 33-11216",
         "economic_dataset": "SEC EDGAR Item 1.05 Filing Benchmarks, Legal Counsel & DFIR Retainer Surveys",
@@ -2054,8 +2054,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "gdpr": {
         "framework_key": "gdpr",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm GDPR Article 83 Privacy Governance & DPIA Workpaper Suite",
         "statutory_authority": "Regulation (EU) 2016/679 (GDPR Articles 30, 32, 35 & 83) & EDPB Fining Guidelines 04/2022",
         "economic_dataset": "EDPB Supervisory Enforcement Benchmarks & EU DPO Cost Surveys",
@@ -2095,8 +2095,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "ccpa": {
         "framework_key": "ccpa",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm CCPA/CPRA Privacy Compliance & Breach Liability Workpaper Suite",
         "statutory_authority": "Cal. Civ. Code 1798.100 et seq. (CCPA/CPRA) & 11 CCR 7000 et seq.",
         "economic_dataset": "CPPA Enforcement Benchmarks & California Privacy Compliance Surveys",
@@ -2136,8 +2136,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "nis2": {
         "framework_key": "nis2",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm EU NIS2 Directive Article 21 Compliance Workpaper Suite",
         "statutory_authority": "Directive (EU) 2022/2555 (NIS2 Articles 20, 21, 23 & 34) & National Member State Transpositions",
         "economic_dataset": "ENISA NIS2 Investment Surveys & National CSIRT Compliance Benchmarks",
@@ -2177,8 +2177,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "iso_27001": {
         "framework_key": "iso_27001",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm ISO/IEC 27001:2022 Certification & Stage 1/2 Audit Workpaper Kit",
         "statutory_authority": "ISO/IEC 27001:2022, ISO/IEC 27006-1:2024 & IAF MD 5 Auditor-Day Rules",
         "economic_dataset": "IAF MD 5 Certification Body Audit-Day Tables & ANAB Accredited Registrar Surveys",
@@ -2218,8 +2218,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "hipaa": {
         "framework_key": "hipaa",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm HIPAA Penalty Tier, Security Rule & Breach Cost Workpaper Kit",
         "statutory_authority": "45 CFR 160.404 (HIPAA CMP Tiers 1-4), 45 CFR Part 164 & 45 CFR 102.3 Inflation Index",
         "economic_dataset": "HHS OCR Civil Monetary Penalty Schedules & Healthcare Breach Cost Benchmarks",
@@ -2259,8 +2259,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "pci_dss": {
         "framework_key": "pci_dss",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm PCI DSS 4.0.1 ROC / SAQ & QSA Audit Workpaper Kit",
         "statutory_authority": "PCI Security Standards Council PCI DSS v4.0.1 (Requirements 1-12, Req 11.4 & 12.10)",
         "economic_dataset": "PCI SSC QSA Assessment Benchmarks & Card-Brand Acquirer Fee Schedules",
@@ -2300,8 +2300,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "hitrust": {
         "framework_key": "hitrust",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm HITRUST CSF e1 / i1 / r2 Authorized Assessor Workpaper Kit",
         "statutory_authority": "HITRUST CSF v11 (e1, i1, and r2 Validated Assessment & MyCSF Licensing Framework)",
         "economic_dataset": "HITRUST Authorized External Assessor Pricing & MyCSF Subscription Benchmarks",
@@ -2341,8 +2341,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "cyber_insurance": {
         "framework_key": "cyber_insurance",
         "offer_sku": "gh_hipaa_iso27001_governance_kit",
-        "offer_price_usd": 49.0,
-        "offer_price_cents": 4900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm Cyber Liability Premium, SIR & Breach Exposure Workpaper Kit",
         "statutory_authority": "NAIC Cyber Insurance Market Data, State Breach Notification Statutes & IBM/Ponemon Cost Factors",
         "economic_dataset": "U.S. Cyber Insurance Rate-per-Million Underwriting & Breach Severity Benchmarks",
@@ -2382,8 +2382,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "fedramp": {
         "framework_key": "fedramp",
         "offer_sku": "gh_soc2_cmmc_audit_workpapers",
-        "offer_price_usd": 79.0,
-        "offer_price_cents": 7900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm FedRAMP Moderate / High & 3PAO Authorization Workpaper Suite",
         "statutory_authority": "NIST SP 800-53 Rev 5, FedRAMP Rev 5 Baselines & OMB M-24-15 Authorization Policy",
         "economic_dataset": "FedRAMP PMO 3PAO Assessment Benchmarks & ConMon Engineering Cost Surveys",
@@ -2423,8 +2423,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "pentest": {
         "framework_key": "pentest",
         "offer_sku": "gh_soc2_cmmc_audit_workpapers",
-        "offer_price_usd": 79.0,
-        "offer_price_cents": 7900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm CREST/OSCP Penetration Testing Scoping & RoE Workpaper Suite",
         "statutory_authority": "NIST SP 800-115, PTES Execution Standard, OWASP ASVS v4 & PCI Req 11.4",
         "economic_dataset": "CREST / PtaaS Penetration Testing Day-Rate & Retest Benchmarks",
@@ -2464,8 +2464,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "cmmc": {
         "framework_key": "cmmc",
         "offer_sku": "gh_soc2_cmmc_audit_workpapers",
-        "offer_price_usd": 79.0,
-        "offer_price_cents": 7900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm CMMC 2.0 Level 2 & NIST SP 800-171 SPRS Audit Workpaper Suite",
         "statutory_authority": "32 CFR Part 170 (CMMC 2.0), DFARS 252.204-7012/7021 & NIST SP 800-171 Rev 2",
         "economic_dataset": "DoD CIO 32 CFR Part 170 Regulatory Impact Analysis & Cyber-AB C3PAO Benchmarks",
@@ -2505,8 +2505,8 @@ GAINHELM_FRAMEWORK_PROFILES: Dict[str, Dict[str, Any]] = {
     "soc2": {
         "framework_key": "soc2",
         "offer_sku": "gh_soc2_cmmc_audit_workpapers",
-        "offer_price_usd": 79.0,
-        "offer_price_cents": 7900,
+        "offer_price_usd": 0.0,  # Resolved from pseofactory.pricing
+        "offer_price_cents": 0,
         "offer_title": "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite",
         "statutory_authority": "AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) & 32 CFR Part 170",
         "economic_dataset": "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Benchmarks",
@@ -2565,6 +2565,20 @@ GAINHELM_STRICT_ISOLATED_FRAMEWORKS: Tuple[str, ...] = (
 )
 for _gh_fw_k, _gh_fw_v in GAINHELM_FRAMEWORK_PROFILES.items():
     _gh_fw_v["strict_isolated"] = _gh_fw_k in GAINHELM_STRICT_ISOLATED_FRAMEWORKS
+    try:
+        from pseofactory.pricing import resolve_offer_pricing as _gh_resolve_pricing
+
+        _gh_priced = _gh_resolve_pricing(
+            "gainhelm",
+            tier_kind="full",
+            slug=str(_gh_fw_v.get("default_sku_slug") or ""),
+            sku=str(_gh_fw_v.get("offer_sku") or ""),
+        )
+        _gh_fw_v["offer_price_usd"] = float(_gh_priced["price_usd"])
+        _gh_fw_v["offer_price_cents"] = int(_gh_priced["price_cents"])
+    except Exception:
+        _gh_fw_v["offer_price_usd"] = 29.0
+        _gh_fw_v["offer_price_cents"] = 2900
 
 
 GAINHELM_VANTA_URLS_BY_FRAMEWORK: Dict[str, str] = {
@@ -4005,6 +4019,324 @@ def is_partner_live_in_vault(
     return bool(canon and canon in live_keys)
 
 
+def _format_clean_usd_label(amount: float) -> str:
+    """Formats a USD price cleanly without trailing .00 for whole-dollar amounts."""
+    f = float(amount)
+    return str(int(round(f))) if abs(f - round(f)) < 1e-6 else f"{f:.2f}"
+
+
+def build_step1_preview_controls_html(
+    property_id: str,
+    slug: str = "",
+    query: str = "",
+    baseline_output: Optional[float] = None,
+    display_output: str = "",
+    statutory_authority: str = "",
+) -> str:
+    """
+    Renders Step 1 (Free, On-Screen Only) inline 'Preview Workpaper' toggle button and
+    expandable preview container (#workpaper-preview-panel). Zero email inputs, zero Turnstile.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+
+    prop = _normalize_vault_property_id(property_id) or "profithelm"
+    clean_slug = str(slug or "").strip().strip("/").lower() or "index"
+    if clean_slug.startswith("tools/"):
+        clean_slug = clean_slug[len("tools/") :]
+    is_restricted = is_restricted_public_service_slug(clean_slug, query)
+    safe_slug = html_lib.escape(clean_slug)
+    safe_prop = html_lib.escape(prop)
+    safe_out = html_lib.escape(str(display_output or (f"{baseline_output:,.2f}" if baseline_output is not None else "Computed Live")))
+    raw_preview_auth = str(statutory_authority or "").strip()
+    if prop == "gainhelm" and (not raw_preview_auth or has_gainhelm_cross_framework_leak(raw_preview_auth, slug=clean_slug)):
+        raw_preview_auth = str(get_gainhelm_framework_profile(slug=clean_slug).get("statutory_authority") or "").strip()
+    safe_auth = html_lib.escape(raw_preview_auth or "Deterministic Statutory Model")
+    locked_row = (
+        ""
+        if is_restricted
+        else (
+            '        <div class="workpaper-preview-row workpaper-preview-locked">'
+            '<strong>Paid Schedules (Locked):</strong> Multi-row sensitivity schedule, CSV export, and JSON statutory data pack available in Step 2 below.'
+            '</div>\n'
+        )
+    )
+    return (
+        f'      <div class="workpaper-preview-controls" data-step="1" data-property-id="{safe_prop}" data-tool-slug="{safe_slug}" style="margin-top: 12px;">\n'
+        f'        <button type="button" id="btn-preview-workpaper" class="btn-secondary touch-target preview-workpaper-btn" '
+        f'data-workpaper-preview="1" data-tool-slug="{safe_slug}" aria-expanded="false" aria-controls="workpaper-preview-panel">'
+        f'Preview Workpaper</button>\n'
+        f'        <div id="workpaper-preview-panel" class="workpaper-preview-panel" hidden data-tool-slug="{safe_slug}" '
+        f'style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px dashed var(--border-strong); background: var(--bg-inset); font-size: 13px; line-height: 1.5;">\n'
+        f'          <div class="workpaper-preview-row"><strong>On-Screen Headline Output:</strong> <span id="workpaper-preview-headline">{safe_out}</span></div>\n'
+        f'          <div class="workpaper-preview-row"><strong>Statutory Basis:</strong> {safe_auth}</div>\n'
+        f'{locked_row}'
+        f'        </div>\n'
+        f'      </div>'
+    )
+
+
+def build_workpaper_unlock_card_html(
+    property_id: str,
+    slug: str = "",
+    query: str = "",
+    topic_label: str = "",
+    statutory_authority: str = "",
+    baseline_amount: Optional[float] = None,
+    repo_root: Optional[Any] = None,
+) -> str:
+    """
+    Renders Step 2: a single full-width #workpaper-unlock-card directly below .calc-grid
+    with Quick Worksheet and Full Workpaper & Data Pack buttons priced dynamically from pricing.py.
+    Suppressed completely on restricted public-service YMYL pages (PSLF, SAVE litigation, buyback).
+    Zero email inputs. Zero Turnstile. Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+    from pseofactory.pricing import resolve_offer_pricing
+
+    prop = _normalize_vault_property_id(property_id) or "profithelm"
+    clean_slug = str(slug or "").strip().strip("/").lower()
+    if clean_slug.startswith("tools/"):
+        clean_slug = clean_slug[len("tools/") :]
+    if is_restricted_public_service_slug(clean_slug, query):
+        return ""
+    if clean_slug in ("about", "privacy", "terms", "disclaimers", "methodology", "partners", "tools", "tools-directory", "404"):
+        return ""
+
+    eff_slug = clean_slug or "general"
+    gh_prof: Dict[str, Any] = get_gainhelm_framework_profile(slug=eff_slug) if prop == "gainhelm" else {}
+    gh_fw_sku = str(gh_prof.get("offer_sku") or "").strip() if gh_prof else ""
+    quick_offer = resolve_offer_pricing(prop, tier_kind="quick", slug=eff_slug, repo_root=repo_root)
+    full_offer = resolve_offer_pricing(prop, tier_kind="full", slug=eff_slug, sku=gh_fw_sku, repo_root=repo_root)
+
+    quick_sku = str(quick_offer["sku"])
+    full_sku = str(gh_fw_sku or full_offer["sku"])
+    quick_price_usd = float(quick_offer["price_usd"])
+    full_price_usd = float(full_offer["price_usd"])
+    quick_price_int = int(round(quick_price_usd))
+    full_price_int = int(round(full_price_usd))
+    quick_price_str = _format_clean_usd_label(quick_price_usd)
+    full_price_str = _format_clean_usd_label(full_price_usd)
+
+    raw_auth = str(statutory_authority or "").strip()
+    if gh_prof:
+        if not raw_auth or has_gainhelm_cross_framework_leak(raw_auth, slug=eff_slug):
+            raw_auth = str(gh_prof.get("statutory_authority") or "").strip()
+    eff_auth = str(raw_auth or (gh_prof.get("statutory_authority") if gh_prof else "") or full_offer.get("statutory_authority") or "Deterministic Statutory Model").strip()
+    amt_int = int(round(float(baseline_amount))) if baseline_amount is not None else 0
+    amt_qs = f"&amp;amount={amt_int}" if amt_int > 0 else ""
+
+    slug_param = html_lib.escape(eff_slug)
+    quick_href = f"/api/lead-capture?checkout=1&amp;sku={html_lib.escape(quick_sku)}&amp;tool_slug={slug_param}{amt_qs}&amp;redirect=1"
+    full_href = f"/api/lead-capture?checkout=1&amp;sku={html_lib.escape(full_sku)}&amp;tool_slug={slug_param}{amt_qs}&amp;redirect=1"
+
+    safe_prop = html_lib.escape(prop)
+    raw_topic = str(topic_label or "").strip()
+    if gh_prof and (not raw_topic or has_gainhelm_cross_framework_leak(raw_topic, slug=eff_slug)):
+        raw_topic = str(gh_prof.get("offer_title") or "").strip()
+    raw_topic = str(raw_topic or (gh_prof.get("offer_title") if gh_prof else "") or full_offer.get("title") or "Calculation Workpaper").strip()
+    safe_topic = html_lib.escape(raw_topic)
+    unlock_heading = (
+        f"Export {safe_topic}"
+        if "workpaper" in raw_topic.lower()
+        else f"Export {safe_topic} Workpaper &amp; Data Pack"
+    )
+    safe_auth = html_lib.escape(eff_auth)
+    prexvo_refi_note = ""
+    if prop == "prexvo" and any(tok in f"{clean_slug} {query}".lower() for tok in ("refinance", "refinancing")):
+        prexvo_refi_note = (
+            '      <p class="ymyl-refinance-warning" style="font-size: 12.5px; color: var(--text-muted); margin: 10px 0 0 0;">'
+            'Federal Student Loan Notice: Refinancing federal student loans into private loans permanently eliminates federal protections '
+            '(waives federal protections including Income-Driven Repayment and PSLF eligibility) under 34 CFR Part 685.'
+            '</p>\n'
+        )
+
+    return (
+        f'<section id="workpaper-unlock-card" class="workpaper-unlock-card card pseo-card" '
+        f'data-mechanic="workpaper_unlock_funnel" data-first-party-checkout="true" '
+        f'data-property="{safe_prop}" data-property-id="{safe_prop}" data-tool-slug="{slug_param}" '
+        f'data-quick-sku="{html_lib.escape(quick_sku)}" data-quick-price="{quick_price_int}" '
+        f'data-full-sku="{html_lib.escape(full_sku)}" data-full-price="{full_price_int}" '
+        f'data-offer-sku="{html_lib.escape(full_sku)}" data-offer-price="{full_price_int}" '
+        f'data-calculated-amount="{amt_int}">\n'
+        f'      <div class="workpaper-unlock-header">\n'
+        f'        <h3>{unlock_heading}</h3>\n'
+        f'        <p class="workpaper-unlock-subtitle">Instant Stripe Checkout preserving your active calculator inputs and outputs under {safe_auth}.</p>\n'
+        f'      </div>\n'
+        f'      <div class="workpaper-unlock-actions">\n'
+        f'        <a id="btn-workpaper-quick-checkout" rel="nofollow" href="{quick_href}" '
+        f'class="btn-cta touch-target workpaper-cta-primary" data-checkout-trigger="1" '
+        f'data-offer-sku="{html_lib.escape(quick_sku)}" data-offer-price="{quick_price_int}" '
+        f'data-cta-slot="workpaper_quick_checkout_cta">Quick Worksheet (${quick_price_str})</a>\n'
+        f'        <a id="btn-workpaper-full-checkout" rel="nofollow" href="{full_href}" '
+        f'class="btn-secondary touch-target workpaper-cta-secondary" data-checkout-trigger="1" '
+        f'data-offer-sku="{html_lib.escape(full_sku)}" data-offer-price="{full_price_int}" '
+        f'data-cta-slot="workpaper_full_checkout_cta">Full Workpaper &amp; Data Pack (${full_price_str})</a>\n'
+        f'      </div>\n'
+        f'{prexvo_refi_note}'
+        f'      <div id="workpaper-checkout-status" class="workpaper-checkout-status" role="status" aria-live="polite"></div>\n'
+        f'    </section>'
+    )
+
+
+def build_contextual_referral_card_html(
+    property_id: str,
+    slug: str = "",
+    query: str = "",
+    gsc_metrics: Optional[Dict[str, Any]] = None,
+    engagement_metrics: Optional[Dict[str, Any]] = None,
+    page_archetype: str = "",
+    forced_partner_key: str = "",
+    gsc_repositioned: bool = False,
+    gsc_tier: str = "",
+) -> str:
+    """
+    Renders Step 3: one compact <section class="contextual-referral-card"> below Step 2
+    ONLY when an intent-matched partner has status == 'live' in monetization_vault.json,
+    with inline FTC 16 CFR Part 255 disclosure.
+    Returns '' (zero referral sections and zero placeholder boxes) when no live partner matches
+    or on restricted public-service YMYL pages.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+
+    prop = _normalize_vault_property_id(property_id) or "profithelm"
+    clean_slug = str(slug or "").strip().strip("/").lower()
+    if clean_slug.startswith("tools/"):
+        clean_slug = clean_slug[len("tools/") :]
+    if is_restricted_public_service_slug(clean_slug, query):
+        return ""
+    if prop == "prexvo":
+        combined_lower = f"{clean_slug} {query}".lower()
+        if not any(tok in combined_lower for tok in ("refinance", "refinancing")):
+            return ""
+
+    live_keys = load_live_partner_keys_from_vault(property_id=prop)
+    if not live_keys:
+        return ""
+
+    roster_info = bind_asset_partner_roster(
+        property_id=prop,
+        slug=clean_slug or "index",
+        query=query,
+        page_archetype=page_archetype,
+        gsc_metrics=gsc_metrics,
+        engagement_metrics=engagement_metrics,
+    )
+    roster_models = [
+        str(o.get("partnership_model") or "")
+        for o in (roster_info.get("roster_offers") or [])
+        if isinstance(o, dict) and o.get("partnership_model")
+    ]
+    slot_plan_ref = roster_info.get("slot_plan") or {}
+    promoted_pk_ref = str(slot_plan_ref.get("promoted_partner_key") or "").strip().lower()
+    registry = _property_partner_registry(prop)
+
+    p_key = ""
+    p_obj = None
+    if forced_partner_key and is_partner_live_in_vault(prop, forced_partner_key):
+        p_key = str(forced_partner_key).strip().lower()
+        p_obj = registry.get(p_key)
+    elif (slot_plan_ref.get("gsc_repositioned") or gsc_metrics or engagement_metrics) and promoted_pk_ref and is_partner_live_in_vault(prop, promoted_pk_ref):
+        p_key = promoted_pk_ref
+        p_obj = registry.get(p_key)
+    elif prop in ("profithelm", "exchange1031"):
+        live_offer = next(
+            (
+                o
+                for o in (roster_info.get("roster_offers") or [])
+                if isinstance(o, dict) and is_partner_live_in_vault(prop, str(o.get("partner_key") or ""))
+            ),
+            None,
+        )
+        if live_offer:
+            p_key = str(live_offer["partner_key"])
+            p_obj = registry.get(p_key)
+
+    if not p_key:
+        p_obj = resolve_optimal_partner_for_slug(
+            prop,
+            clean_slug or "index",
+            engagement_metrics=engagement_metrics,
+        )
+        if p_obj is not None and is_partner_live_in_vault(prop, p_obj.key):
+            p_key = p_obj.key
+        else:
+            live_offer = next(
+                (
+                    o
+                    for o in (roster_info.get("roster_offers") or [])
+                    if isinstance(o, dict) and is_partner_live_in_vault(prop, str(o.get("partner_key") or ""))
+                ),
+                None,
+            )
+            if not live_offer:
+                return ""
+            p_key = str(live_offer["partner_key"])
+            p_obj = registry.get(p_key)
+
+    if p_obj is not None:
+        ctx_copy = resolve_contextual_partner_offer_copy(
+            partner_key=p_key,
+            p_obj=p_obj,
+            slug=clean_slug or "index",
+            property_id=prop,
+        )
+        partner_name = str(ctx_copy.get("name") or p_obj.name)
+        partner_desc = str(ctx_copy.get("description") or p_obj.description)
+        cta_text = str(ctx_copy.get("cta_text") or p_obj.cta_text or f"Explore {partner_name}")
+        p_model = str(p_obj.partnership_model or "CPA_BOUNTY")
+    else:
+        partner_name = COMPANY_BRAND_BY_PARTNER_KEY.get(p_key, p_key.replace("_", " ").title())
+        partner_desc = "Verified commercial partner matched to this calculation."
+        cta_text = f"Explore {partner_name}"
+        p_model = "CPA_BOUNTY"
+
+    slug_id = (clean_slug or "index").replace("/", "-")
+    brand_str = COMPANY_BRAND_BY_PARTNER_KEY.get(p_key, partner_name)
+    href = f"/r/{html_lib.escape(p_key)}?source_tool={html_lib.escape(slug_id)}&amp;subid={html_lib.escape(slug_id)}_referral&amp;cta_slot=contextual_referral"
+    disc_dict = (
+        GAINHELM_DISCLOSURES
+        if prop == "gainhelm"
+        else (LIENBOND_DISCLOSURES if prop == "lienbond" else (PREXVO_DISCLOSURES if prop == "prexvo" else PROFITHELM_DISCLOSURES))
+    )
+    ftc_disc = str(
+        disc_dict.get("ftc_disclosure")
+        or "FTC 16 CFR Part 255 Disclosure: We may earn a referral fee if you engage a matched partner at no extra cost to you."
+    ).strip()
+
+    extra_attr = ""
+    if prop == "prexvo" and any(tok in f"{clean_slug} {query}".lower() for tok in ("refinance", "refinancing")):
+        extra_attr = ' data-commercial-offers="compliant-refinance"'
+    if gsc_repositioned or slot_plan_ref.get("gsc_repositioned"):
+        eff_gsc_tier = str(gsc_tier or slot_plan_ref.get("gsc_opportunity_tier") or "STRIKING_DISTANCE_PROMOTE")
+        extra_attr += f' data-gsc-repositioned="true" data-gsc-tier="{html_lib.escape(eff_gsc_tier)}"'
+    models_csv = ",".join(dict.fromkeys([m for m in ([p_model] + roster_models) if m]))
+
+    return (
+        f'<section class="contextual-referral-card card pseo-card" '
+        f'data-mechanic="compliant_intent_monetization" data-property="{html_lib.escape(prop)}"{extra_attr} '
+        f'data-partner="{html_lib.escape(p_key)}" data-company-brand="{html_lib.escape(brand_str)}" '
+        f'data-partnership-model="{html_lib.escape(p_model)}" data-partner-models="{html_lib.escape(models_csv)}">\n'
+        f'      <div class="contextual-referral-body">\n'
+        f'        <div class="contextual-referral-copy">\n'
+        f'          <span class="contextual-referral-badge">Optional Partner Resource</span>\n'
+        f'          <div class="contextual-referral-title">{html_lib.escape(partner_name)}</div>\n'
+        f'          <p class="contextual-referral-desc">{html_lib.escape(partner_desc)}</p>\n'
+        f'        </div>\n'
+        f'        <a href="{href}" rel="noopener sponsored nofollow" target="_blank" '
+        f'data-partner="{html_lib.escape(p_key)}" data-company-brand="{html_lib.escape(brand_str)}" '
+        f'data-partnership-model="{html_lib.escape(p_model)}" data-tool="{html_lib.escape(slug_id)}" '
+        f'data-subid="{html_lib.escape(slug_id)}_referral" data-status="live" '
+        f'data-cta-slot="contextual_referral" class="btn-secondary partner-cta affiliate-cta-link touch-target">'
+        f'{html_lib.escape(cta_text)}</a>\n'
+        f'      </div>\n'
+        f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 8px; margin-bottom: 0;">'
+        f'{html_lib.escape(ftc_disc)}</p>\n'
+        f'    </section>'
+    )
+
+
 def build_first_party_workpaper_cta_html(
     property_id: str,
     slug: str = "",
@@ -4014,116 +4346,15 @@ def build_first_party_workpaper_cta_html(
     section_id_attr: str = "",
 ) -> str:
     """
-    Renders a clean first-party Stripe Checkout workpaper CTA card/section when a tenant
-    has no live approved third-party partner offers for a page, so visitors never hit
-    looping local /r/ redirects. Suppresses commercial offers on restricted public-service
-    YMYL pages.
+    Delegates to build_workpaper_unlock_card_html so all callers emit the single canonical
+    #workpaper-unlock-card priced from pricing.py with zero #partner-registration-drawer.
     Zero em-dashes. Zero en-dashes.
     """
-    import html as html_lib
-
-    prop = _normalize_vault_property_id(property_id) or "profithelm"
-    clean_slug = str(slug or "").strip().strip("/").lower()
-    if is_restricted_public_service_slug(clean_slug, query):
-        return ""
-
-    brand_display = " ".join(part.capitalize() for part in re.split(r"[_-]+", prop) if part) or "Verified"
-    offer_sku = f"{prop}_workpaper_pack_19"
-    offer_title = f"{brand_display} Personalized Calculation Workpaper & CSV Pack"
-    offer_price_usd = 19.0
-    statutory_authority = "Deterministic Statutory Calculation Model"
-    deliverables: List[str] = [
-        "Personalized Scenario Reconciliation Workpaper (Print-Ready HTML/PDF)",
-        "Sensitivity Schedule & Signed Scenario Audit Pack (CSV & JSON)",
-    ]
-    try:
-        from pseofactory.partner_tracker import resolve_lead_monetization_offer
-
-        offer = resolve_lead_monetization_offer(
-            property_id=prop,
-            tool_slug=clean_slug or "index",
-        )
-        # Never bleed ProfitHelm branding/ph_ SKU onto a new or synthetic 5th+ tenant
-        resolved_prop = _normalize_vault_property_id(str(offer.get("property_id") or ""))
-        cand_sku = str(offer.get("offer_sku") or "").strip()
-        cand_title = str(offer.get("offer_title") or "").strip()
-        is_foreign_ph_fallback = prop != "profithelm" and (
-            cand_sku.lower().startswith("ph_") or "profithelm" in cand_title.lower()
-        )
-        if resolved_prop == prop and not is_foreign_ph_fallback:
-            offer_sku = cand_sku or offer_sku
-            offer_title = cand_title or offer_title
-            offer_price_usd = float(offer.get("offer_price_usd") or offer_price_usd)
-            statutory_authority = str(offer.get("statutory_authority") or statutory_authority).strip()
-            deliverables = [str(d) for d in (offer.get("deliverables") or [])[:2] if str(d).strip()]
-    except ValueError:
-        return ""
-    except Exception:
-        pass
-
-    slug_param = html_lib.escape(clean_slug or "index")
-    sku_q = f"&amp;sku={html_lib.escape(offer_sku)}" if offer_sku else ""
-    checkout_href = f"/api/lead-capture?checkout=1{sku_q}&amp;tool_slug={slug_param}&amp;redirect=1"
-    price_str = f"${int(offer_price_usd)}" if float(offer_price_usd).is_integer() else f"${offer_price_usd:.2f}"
-    safe_title = html_lib.escape(offer_title)
-    safe_auth = html_lib.escape(statutory_authority)
-    safe_sku = html_lib.escape(offer_sku)
-
-    if slot == "inline":
-        return (
-            f'\n        <div class="card pseo-card" data-mechanic="compliant_intent_monetization" '
-            f'data-first-party-checkout="true" data-offer-sku="{safe_sku}" data-partner-ctas-hidden="unapproved" '
-            f'style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; '
-            f'padding: 12px 14px; margin-top: 12px; background: var(--bg-elevated); border: 1px solid var(--border-strong); '
-            f'border-left: 4px solid var(--accent); border-radius: 8px;">\n'
-            f'          <div style="flex: 1; min-width: 180px;">\n'
-            f'            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);">First-Party Audit Deliverable</div>\n'
-            f'            <div style="font-size: 14px; font-weight: 700; color: var(--text); margin-top: 2px;">{safe_title}</div>\n'
-            f'          </div>\n'
-            f'          <a rel="nofollow" href="{checkout_href}" data-first-party-checkout="true" data-offer-sku="{safe_sku}" '
-            f'class="btn-cta touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; '
-            f'padding: 10px 14px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; '
-            f'text-decoration: none; white-space: nowrap;">Download Workpaper ({price_str})</a>\n'
-            f'        </div>'
-        )
-
-    deliv_items = "".join(f"<li>{html_lib.escape(item)}</li>" for item in deliverables)
-    deliv_html = f'\n      <ul style="margin: 8px 0 12px 18px; font-size: 13px; color: var(--text-muted);">{deliv_items}</ul>' if deliv_items else ""
-    ymyl_note = ""
-    if prop == "prexvo":
-        ymyl_disc = (PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer") or "").strip()
-        ymyl_sentence = ymyl_disc or (
-            "Refinancing federal student loans permanently eliminates federal protections, including income-driven repayment "
-            "and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685."
-        )
-        ymyl_note = (
-            '\n      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted);">\n'
-            f'        {html_lib.escape(ymyl_sentence)}\n'
-            '      </p>'
-        )
-    sec_classes = (
-        "ymyl-refinance-guardrail card pseo-card"
-        if prop == "prexvo"
-        else "card pseo-card"
-    )
-    return (
-        f'<section{section_id_attr} class="{sec_classes}" data-property="{html_lib.escape(prop)}" '
-        f'data-first-party-checkout="true" data-offer-sku="{safe_sku}" data-partner-ctas-hidden="unapproved" '
-        f'data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-        f'      <h2>{safe_title}</h2>\n'
-        f'      <p style="font-size: 14px; color: var(--text-muted);">Export your deterministic scenario as a print-ready HTML/PDF workpaper, CSV sensitivity schedule, and signed JSON audit pack ({safe_auth}).</p>'
-        f'{ymyl_note}'
-        f'{deliv_html}\n'
-        f'      <p style="margin-top: 12px;">\n'
-        f'        <a rel="nofollow" href="{checkout_href}" data-first-party-checkout="true" data-offer-sku="{safe_sku}" '
-        f'class="btn-cta touch-target" '
-        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; '
-        f'padding: 12px 18px; border-radius: 8px; background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">'
-        f'Get Personalized Workpaper Pack ({price_str})</a>\n'
-        f'      </p>'
-        f'{reg_drawer_html}\n'
-        f'    </section>'
+    _ = slot, reg_drawer_html, section_id_attr
+    return build_workpaper_unlock_card_html(
+        property_id=property_id,
+        slug=slug,
+        query=query,
     )
 
 
@@ -4615,9 +4846,18 @@ def resolve_optimal_partner_for_slug(
 
     if prop in ("profithelm", "exchange1031"):
         matched_bucket_name = _resolve_profithelm_bucket(s)
+        greenfield_roster_used = False
         raw_keys = INTENT_ROUTING_TABLE.get(matched_bucket_name, ["efile_com", "eztaxreturn_com", "freetaxusa"])
         is_b2b = is_commercial_b2b_slug(s)
         is_retail = (s in RETAIL_TAX_SLUGS) or (not is_b2b)
+        if matched_bucket_name == "tax" and s not in RETAIL_TAX_SLUGS:
+            cls_info = classify_asset_archetype_and_intent(prop, s, s.replace("-", " "))
+            vf = str(cls_info.get("vertical_family") or "")
+            if vf and vf not in ("tax_compliance", "retail_tax") and vf in VERTICAL_DIVERSIFIED_PARTNER_ROSTERS:
+                raw_keys = list(VERTICAL_DIVERSIFIED_PARTNER_ROSTERS[vf])
+                is_b2b = True
+                is_retail = False
+                greenfield_roster_used = True
 
         candidates = []
         seen_keys: Set[str] = set()
@@ -4656,6 +4896,10 @@ def resolve_optimal_partner_for_slug(
                 live_candidates.append((p, eff_status))
 
         if live_candidates:
+            if greenfield_roster_used and not engagement_metrics:
+                for p, _ in live_candidates:
+                    if p.key == raw_keys[0]:
+                        return p
             if matched_bucket_name in ("crypto", "prediction-market-tax") and not engagement_metrics:
                 for p, eff_st in live_candidates:
                     if p.key == "coinledger" and not (explicit_vault_live_keys - {"coinledger"}):
@@ -7961,13 +8205,14 @@ def normalize_html_callout_message_match(
             )
         updated = (
             updated.replace("SuretyBonds.com", "SuretyBondsDirect.com")
-            .replace("EMR Audit Packet ($89)", "EMR Audit Packet ($49)")
+            .replace("EMR Audit Packet ($89)", "EMR Audit Packet ($29)")
             .replace("Next Insurance, ", "")
             .replace(", Next Insurance", "")
         )
         if preserved_gsc_inline_block:
             preserved_gsc_inline_block = (
                 preserved_gsc_inline_block.replace("SuretyBonds.com", "SuretyBondsDirect.com")
+                .replace("EMR Audit Packet ($89)", "EMR Audit Packet ($29)")
                 .replace("Next Insurance, ", "")
                 .replace(", Next Insurance", "")
             )
@@ -8816,6 +9061,7 @@ def normalize_html_callout_message_match(
         primary_inline_pk = gsc_cand_pk
     if (
         not is_suppressed_ymyl_page
+        and 'id="workpaper-unlock-card"' not in updated
         and primary_inline_pk
         and primary_inline_pk in registry
         and primary_inline_pk in live_partner_keys
@@ -10795,8 +11041,8 @@ def reposition_affiliate_placements_from_gsc_signals(
     gsc_tier = str(slot_plan.get("gsc_opportunity_tier") or "BASELINE_MULTI_SLOT")
     updated = html_content
 
-    # 1. Reposition / inject calculator_result_inline (.calc-inline-cta)
-    if inline_offer:
+    # 1. Reposition / inject calculator_result_inline (.calc-inline-cta) only on legacy non-3-step pages
+    if inline_offer and 'id="workpaper-unlock-card"' not in updated:
         pk_in = str(inline_offer["partner_key"])
         safe_badge = html_lib.escape(str(inline_offer.get("badge") or "Featured Offer"))
         safe_name = html_lib.escape(str(inline_offer.get("name") or pk_in))
@@ -10939,9 +11185,12 @@ def reposition_affiliate_placements_from_gsc_signals(
                     + updated[gm_e2:]
                 )
 
-    # 2. Inject or update comparison_table_cta when active in slot_plan (or heal any pre-existing bar in DOM)
+    # 2. Inject or update comparison_table_cta when active in slot_plan (skip on 3-step #workpaper-unlock-card pages)
     has_existing_table_cta = bool(_COMPARISON_TABLE_CTA_BAR_RE.search(updated))
-    if ("comparison_table_cta" in slot_plan["active_slots"] or has_existing_table_cta) and table_offer:
+    if 'id="workpaper-unlock-card"' in updated:
+        if has_existing_table_cta:
+            updated = _COMPARISON_TABLE_CTA_BAR_STRIP_RE.sub("", updated)
+    elif ("comparison_table_cta" in slot_plan["active_slots"] or has_existing_table_cta) and table_offer:
         pk_tbl = str(table_offer["partner_key"])
 
         def _build_table_cta_bar(existing_cls: str = "") -> str:
@@ -11028,7 +11277,37 @@ def reposition_affiliate_placements_from_gsc_signals(
             )
         return cleaned_doc
 
-    if matrix_cards and prop != "prexvo":
+    if 'id="workpaper-unlock-card"' in updated:
+        # 3-step funnel pages update their single compact .contextual-referral-card in place
+        # (never re-injecting #partner-registration-drawer or multi-card .affiliates-section).
+        target_pk = ""
+        if isinstance(inline_offer, dict) and inline_offer.get("partner_key"):
+            cand_pk = str(inline_offer["partner_key"]).strip().lower()
+            if cand_pk in live_vault_keys:
+                target_pk = cand_pk
+        if not target_pk and matrix_cards:
+            cand_pk = str(matrix_cards[0].get("partner_key") or "").strip().lower()
+            if cand_pk in live_vault_keys:
+                target_pk = cand_pk
+        ref_sec_re = re.compile(
+            r'<section\b[^>]*\bclass=["\'][^"\']*\bcontextual-referral-card\b[^"\']*["\'][^>]*>.*?</section>',
+            flags=re.S | re.I,
+        )
+        if target_pk and not (prop == "prexvo" and not any(t in f"{page_slug} {eff_query}".lower() for t in ("refinance", "refinancing"))):
+            new_ref_card = build_contextual_referral_card_html(
+                property_id=prop,
+                slug=page_slug,
+                query=eff_query,
+                gsc_metrics=gsc_metrics,
+                engagement_metrics=engagement_metrics,
+                page_archetype=roster["page_archetype"],
+                forced_partner_key=target_pk,
+                gsc_repositioned=bool(slot_plan.get("gsc_repositioned")),
+                gsc_tier=gsc_tier,
+            )
+            if new_ref_card and ref_sec_re.search(updated):
+                updated = ref_sec_re.sub(lambda _m: new_ref_card, updated, count=1)
+    elif matrix_cards and prop != "prexvo":
         def _render_roster_card(card_offer: Dict[str, Any], idx: int) -> str:
             c_pk = str(card_offer["partner_key"])
             c_name = html_lib.escape(str(card_offer.get("name") or c_pk))

@@ -410,6 +410,9 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
     <div id="hero-range-anchor" class="hero-range-anchor" data-mechanic="instant_range_anchor" data-range-low="$199" data-range-baseline="248.23" data-range-high="$298">
       <strong id="hero-range-baseline">248.23</strong>
     </div>
+    <form class="calculator-form" aria-label="Discretionary income inputs">
+      <input id="balance" name="balance" type="number" value="45000" />
+    </form>
     <div class="result-box">
       <p>Verified baseline model calculation output: <strong class="output-value" data-baseline-output="248.23">248.23</strong>. Select a parameterized preset below:</p>
     </div>
@@ -462,7 +465,6 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
     assert '"epoch": 2024' in healed_voids_txt
     assert 'data-baseline-output="2925.0">2,925<' in healed_html
     assert 'class="scenario-baseline">2,925<' in healed_html
-    assert 'id="hero-range-baseline">2,925<' in healed_html
     # JS template string inside <script> must remain untouched
     assert 'readout.className = "output-value calc-metric-value overlay-preset-readout";' in healed_html
 

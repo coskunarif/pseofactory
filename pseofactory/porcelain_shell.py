@@ -42,6 +42,7 @@ GOVERNANCE_ROUTES: Tuple[str, ...] = (
     "terms",
     "disclaimers",
     "contact",
+    "partners",
 )
 
 CROSS_LEGAL_REDIRECT_SOURCES: Set[str] = {
@@ -57,6 +58,8 @@ CROSS_LEGAL_REDIRECT_SOURCES: Set[str] = {
     "/disclaimers/",
     "/contact",
     "/contact/",
+    "/partners",
+    "/partners/",
 }
 
 TENANT_BRAND_PALETTES: Dict[str, Dict[str, str]] = {
@@ -481,7 +484,7 @@ def _generate_porcelain_stylesheet_cached(
 
 html {{
   font-size: 16px;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   scroll-padding-top: 5.5rem;
   -webkit-text-size-adjust: 100%;
   background-color: var(--bg-canvas);
@@ -912,21 +915,59 @@ summary:focus-visible,
   text-decoration: underline;
 }}
 
+.hero-section,
+.tool-hero {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}}
+
+.hero-section > h1,
+.hero-section > .hero-title,
+.hero-section > .hero-subtitle,
+.hero-section > .hero-desc,
+.hero-section > .byline-wrap,
+.hero-section > .quick-answer,
+.tool-hero > h1,
+.tool-hero > .hero-title,
+.tool-hero > .hero-subtitle,
+.tool-hero > .hero-desc,
+.tool-hero > .byline-wrap,
+.tool-hero > .quick-answer {{
+  margin: 0;
+}}
+
+.hero-actions {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}}
+
 .quick-answer {{
   background-color: var(--brand-soft);
   border: 1px solid var(--brand-border);
   border-left: 4px solid var(--brand-primary);
   border-radius: var(--radius-md);
-  padding: 1rem 1.25rem;
-  margin-top: 0.75rem;
+  padding: 0.875rem 1.125rem;
+  margin-top: 0;
   color: var(--text-primary);
+}}
+
+.quick-answer .takeaway {{
+  background-color: transparent;
+  border: none;
+  border-left: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
 }}
 
 .quick-answer p,
 .quick-answer .quick-answer-body {{
   color: var(--text-primary);
-  font-size: 0.96875rem;
-  line-height: 1.6;
+  font-size: 0.9375rem;
+  line-height: 1.55;
   margin: 0;
 }}
 
@@ -936,9 +977,9 @@ summary:focus-visible,
   border: 1px solid var(--border-subtle);
   border-left: 4px solid var(--brand-primary);
   border-radius: 12px;
-  padding: 0.875rem 1.25rem;
-  font-size: 0.875rem;
-  line-height: 1.55;
+  padding: 0.625rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
   color: var(--text-secondary);
 }}
 
@@ -948,7 +989,6 @@ summary:focus-visible,
 }}
 
 /* Buttons & Primary CTAs */
-#calculate-btn,
 .btn,
 .btn-cta,
 .btn-primary,
@@ -981,7 +1021,6 @@ button.btn-primary {{
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }}
 
-#calculate-btn:hover,
 .btn:hover,
 .btn-cta:hover,
 .btn-primary:hover,
@@ -996,13 +1035,47 @@ a.affiliate-cta-link:hover {{
   color: #ffffff;
 }}
 
+#calculate-btn,
+#calc-submit-btn,
+.calc-recalculate-btn {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  width: fit-content;
+  align-self: flex-start;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.9375rem;
+  background-color: var(--bg-surface);
+  color: var(--brand-primary);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}}
+
+#calculate-btn:hover,
+#calc-submit-btn:hover,
+.calc-recalculate-btn:hover {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-primary);
+  color: var(--brand-hover);
+}}
+
 .btn-secondary,
 .btn-outline,
 .btn-preset,
 .scenario-preset-link,
 .on-this-page-nav a,
 .cluster-link,
-.calc-switcher-btn {{
+.calc-switcher-btn,
+.workpaper-preview-btn {{
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1027,7 +1100,8 @@ a.affiliate-cta-link:hover {{
 .scenario-preset-link:hover,
 .on-this-page-nav a:hover,
 .cluster-link:hover,
-.calc-switcher-btn:hover {{
+.calc-switcher-btn:hover,
+.workpaper-preview-btn:hover {{
   background-color: var(--brand-soft);
   border-color: var(--brand-primary);
   color: var(--brand-hover);
@@ -1038,7 +1112,7 @@ a.affiliate-cta-link:hover {{
 .calculator-grid,
 .grid-2 {{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
   align-items: start;
 }}
@@ -1159,6 +1233,9 @@ output,
 .authority-badge {{
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
@@ -1171,6 +1248,9 @@ output,
 .badge-success {{
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
@@ -1183,6 +1263,9 @@ output,
 .badge-warning {{
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
@@ -1195,6 +1278,9 @@ output,
 .badge-danger {{
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
@@ -1207,6 +1293,9 @@ output,
 .badge-neutral {{
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
@@ -1417,6 +1506,8 @@ template {{
 .cf-turnstile-slot {{
   flex-basis: 100%;
   min-height: 0;
+  max-width: 100%;
+  overflow: hidden;
 }}
 
 .cf-turnstile-slot:empty {{
@@ -1688,16 +1779,18 @@ details.faq-accordion > summary::-webkit-details-marker {{
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.25rem 0.5rem;
   font-size: 0.875rem;
+  line-height: 1.4;
   color: var(--text-muted);
-  margin: 0.5rem 0 0.75rem 0;
+  margin: 0;
 }}
 
 .byline-author {{
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.25rem;
   font-style: normal;
 }}
 
@@ -1705,6 +1798,7 @@ details.faq-accordion > summary::-webkit-details-marker {{
 .byline-sep,
 .byline-date {{
   color: var(--text-muted);
+  white-space: nowrap;
 }}
 
 .byline-link {{
@@ -1728,9 +1822,13 @@ details.faq-accordion > summary::-webkit-details-marker {{
   font-weight: 600;
 }}
 
-.badge-tag {{
+.badge-tag,
+.hero-badge {{
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.25rem 0.75rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
@@ -2535,9 +2633,347 @@ details.faq-accordion > summary::-webkit-details-marker {{
   line-height: 1.5;
 }}
 
-.lead-capture-form,
-.inline-worksheet-capture-form,
-.newsletter-form,
+.workpaper-preview-actions {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}}
+
+.workpaper-preview-panel[hidden] {{
+  display: none !important;
+}}
+
+.workpaper-preview-panel {{
+  margin-top: 0.75rem;
+  padding: 1rem 1.125rem;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}}
+
+.workpaper-preview-grid {{
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}}
+
+.workpaper-preview-row {{
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid var(--border-hairline);
+  font-variant-numeric: tabular-nums;
+}}
+
+.workpaper-preview-locked {{
+  margin-top: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  background-color: var(--bg-subtle);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+}}
+
+.workpaper-unlock-card {{
+  background-color: #ffffff;
+  border: 1px solid var(--brand-border);
+  border-left: 4px solid var(--brand-primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}}
+
+.workpaper-unlock-header {{
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}}
+
+.workpaper-unlock-badge {{
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--brand-soft);
+  color: var(--brand-hover);
+  border: 1px solid var(--brand-border);
+}}
+
+.workpaper-unlock-title {{
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}}
+
+.workpaper-unlock-subtitle,
+.workpaper-unlock-summary {{
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0;
+}}
+
+.workpaper-preview-controls {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}}
+
+.preview-workpaper-btn {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5625rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--brand-border);
+  background-color: var(--bg-surface);
+  color: var(--brand-primary);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}}
+
+.preview-workpaper-btn:hover {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-primary);
+  color: var(--brand-hover);
+}}
+
+.compliance-disclosure-inline {{
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin: 0.5rem 0 0;
+}}
+
+.workpaper-unlock-options {{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}}
+
+.workpaper-unlock-option {{
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}}
+
+.workpaper-unlock-actions {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}}
+
+.workpaper-quick-btn,
+.workpaper-cta-primary,
+.workpaper-full-btn,
+.workpaper-cta-secondary {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.625rem 1.125rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}}
+
+.workpaper-quick-btn,
+.workpaper-cta-primary {{
+  background-color: var(--brand-primary);
+  color: var(--cta-fg);
+  border: 1px solid var(--brand-primary);
+}}
+
+.workpaper-quick-btn:hover,
+.workpaper-cta-primary:hover {{
+  background-color: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: var(--cta-fg);
+}}
+
+.workpaper-full-btn,
+.workpaper-cta-secondary {{
+  background-color: var(--bg-surface);
+  color: var(--brand-primary);
+  border: 1px solid var(--brand-border);
+}}
+
+.workpaper-full-btn:hover,
+.workpaper-cta-secondary:hover {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-primary);
+  color: var(--brand-hover);
+}}
+
+.workpaper-checkout-status {{
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-height: 0;
+}}
+
+.workpaper-checkout-status[data-status="error"] {{
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  background-color: var(--status-danger-bg);
+  border: 1px solid var(--status-danger-border);
+  color: var(--status-danger);
+}}
+
+.ymyl-refinance-warning {{
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  background-color: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  border-left: 3px solid var(--status-warning);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0;
+}}
+
+.contextual-referral-card {{
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}}
+
+.contextual-referral-header {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}}
+
+.contextual-referral-eyebrow,
+.contextual-referral-badge {{
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0;
+  display: inline-block;
+  width: fit-content;
+}}
+
+.contextual-referral-body {{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}}
+
+.contextual-referral-title,
+.contextual-referral-card h3 {{
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}}
+
+.contextual-referral-copy {{
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}}
+
+.contextual-referral-desc {{
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}}
+
+.contextual-referral-disclosure {{
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}}
+
+.contextual-referral-cta {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  width: fit-content;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  color: var(--brand-primary);
+  border: 1px solid var(--brand-border);
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-decoration: none;
+}}
+
+.contextual-referral-cta:hover {{
+  background-color: var(--brand-soft);
+  border-color: var(--brand-primary);
+  color: var(--brand-hover);
+}}
+
+.partner-benefits-list {{
+  margin: 0.5rem 0 0 1.25rem;
+  padding: 0;
+  color: var(--text-secondary);
+}}
+
+.partner-slot-summary {{
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  margin: 0 0 0.75rem 0;
+}}
+
 .partner-registration-form {{
   display: flex;
   flex-wrap: wrap;
@@ -3004,6 +3440,7 @@ details.faq-accordion > summary::-webkit-details-marker {{
   .partner-matrix-grid,
   .framework-steps-grid,
   .post-calc-upgrade-pillars,
+  .workpaper-unlock-options,
   .features-grid,
   .scenarios-grid,
   .tools-grid,
@@ -3039,6 +3476,10 @@ details.faq-accordion > summary::-webkit-details-marker {{
   .pro-hook-card a,
   .affiliate-card a,
   .partner-card a,
+  .workpaper-unlock-actions a,
+  .workpaper-unlock-actions button,
+  .workpaper-preview-btn,
+  .contextual-referral-cta,
   .btn-cta,
   .btn-primary,
   .partner-cta,
@@ -3272,17 +3713,13 @@ def render_porcelain_footer(
     has_main_lead_form: bool = False,
     has_quote_intake_step: bool = False,
 ) -> str:
-    """Renders canonical <footer class='site-footer footer'> with lead card + 4 columns."""
+    """Renders canonical <footer class='site-footer footer'> with 4 governance/navigation columns and /partners/ link."""
+    _ = (page_slug, has_main_lead_form, has_quote_intake_step)
     brand = html_lib.escape(profile["brand_name"])
     legal_entity = html_lib.escape(profile["legal_entity"])
     research_entity = html_lib.escape(profile["research_entity"])
     email = html_lib.escape(profile["contact_email"])
     li_id = str(profile.get("linkedin_company_id") or "").strip()
-    form_id = (
-        "lead-capture-form"
-        if (not has_main_lead_form and has_quote_intake_step)
-        else "footer-lead-capture-form"
-    )
 
     tools_list = list(active_tools or profile.get("default_tools") or [])[:5]
     tool_items = [
@@ -3301,25 +3738,9 @@ def render_porcelain_footer(
             f'class="touch-target">{brand} Company LinkedIn</a>\n'
         )
 
-    safe_slug = html_lib.escape(page_slug or "homepage")
     year_str = "2026"
     return f"""  <footer class="site-footer footer" role="contentinfo">
     <div class="container">
-      <div class="footer-lead-card regulatory-lead-magnet-card">
-        <div class="footer-lead-copy">
-          <h2>Statutory Parameter &amp; Rate Update Briefings</h2>
-          <p>Receive deterministic statutory schedule updates and calculator workpaper notices from {research_entity}.</p>
-        </div>
-        <form id="{form_id}" class="footer-lead-form newsletter-form" action="/api/lead-capture" method="post" novalidate>
-          <label for="footer-lead-email" class="sr-only">Work email address</label>
-          <input type="email" id="footer-lead-email" name="email" required autocomplete="email" placeholder="you@company.com">
-          <input type="hidden" name="tool_slug" value="{safe_slug}">
-          <input type="text" name="company_website" tabindex="-1" autocomplete="off" aria-hidden="true" aria-label="Company website" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;">
-          <div class="cf-turnstile-slot" data-turnstile-slot="1"></div>
-          <button type="submit" class="btn btn-cta touch-target">Subscribe to Updates</button>
-          <div id="footer-lead-status" class="footer-lead-status" aria-live="polite"></div>
-        </form>
-      </div>
       <div class="footer-grid">
         <div class="footer-col">
           <h3>Calculators &amp; Tools</h3>
@@ -3336,6 +3757,7 @@ def render_porcelain_footer(
             <li><a href="/terms/" class="touch-target">Terms of Use</a></li>
             <li><a href="/disclaimers/" class="touch-target">Disclaimers &amp; FTC Notice</a></li>
             <li><a href="/contact/" class="touch-target">Contact Editorial Desk</a></li>
+            <li><a href="/partners/" class="touch-target">Partner With Us</a></li>
           </ul>
         </div>
         <div class="footer-col">
@@ -3361,283 +3783,7 @@ def render_porcelain_footer(
         <span>Independent statutory calculation publisher. Zero personalized legal or tax advice.</span>
       </div>
     </div>
-  </footer>
-  <script id="porcelain-footer-lead-handler">
-  (function() {{
-    var form = document.getElementById('{form_id}');
-    if (!form || form.dataset.porcelainBound === '1') return;
-    form.dataset.porcelainBound = '1';
-    var renderedAt = Date.now();
-
-    function getFormTsState(f) {{
-      if (!f.__pseoTsState) {{
-        f.__pseoTsState = {{ booting: false, mounted: false, enabled: false, siteKey: '', token: '', widgetId: null }};
-      }}
-      return f.__pseoTsState;
-    }}
-
-    function loadLeadConfig() {{
-      var loc = window.location || null;
-      var isLocalStatic = Boolean(
-        loc && (loc.protocol === 'http:' || loc.protocol === 'file:')
-      );
-      if (
-        window.__PSEO_SYNTHETIC_TEST__
-        || (isLocalStatic && !window.__PSEO_FORCE_TURNSTILE_CONFIG__)
-        || typeof fetch !== 'function'
-      ) {{
-        return Promise.resolve({{ turnstile_enabled: false, turnstile_site_key: '' }});
-      }}
-      if (!window.__pseoLeadConfigPromise) {{
-        window.__pseoLeadConfigPromise = fetch('/api/lead-capture?config=1', {{
-          method: 'GET',
-          headers: {{ 'Accept': 'application/json' }}
-        }})
-          .then(function(r) {{ return r && r.ok ? r.json() : {{}}; }})
-          .then(function(cfg) {{
-            return {{
-              turnstile_enabled: Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key),
-              turnstile_site_key: String((cfg && cfg.turnstile_site_key) || '')
-            }};
-          }})
-          .catch(function() {{
-            return {{ turnstile_enabled: false, turnstile_site_key: '' }};
-          }});
-      }}
-      return window.__pseoLeadConfigPromise;
-    }}
-
-    function ensureTurnstileScript() {{
-      if (window.turnstile && typeof window.turnstile.render === 'function') {{
-        return Promise.resolve(window.turnstile);
-      }}
-      if (!window.__pseoTurnstileScriptPromise) {{
-        window.__pseoTurnstileScriptPromise = new Promise(function(resolve) {{
-          var existing = document.querySelector('script[src*="challenges.cloudflare.com/turnstile/v0/api.js"]');
-          if (existing) {{
-            var waited = 0;
-            var poll = setInterval(function() {{
-              waited += 50;
-              if (window.turnstile && typeof window.turnstile.render === 'function') {{
-                clearInterval(poll);
-                resolve(window.turnstile);
-              }} else if (waited >= 6000) {{
-                clearInterval(poll);
-                resolve(null);
-              }}
-            }}, 50);
-            return;
-          }}
-          var s = document.createElement('script');
-          s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-          s.async = true;
-          s.defer = true;
-          s.onload = function() {{ resolve(window.turnstile || null); }};
-          s.onerror = function() {{ resolve(null); }};
-          (document.head || document.body || document.documentElement).appendChild(s);
-        }});
-      }}
-      return window.__pseoTurnstileScriptPromise;
-    }}
-
-    function mountTurnstileIfEnabled() {{
-      var slot = form.querySelector('.cf-turnstile-slot');
-      if (!slot) return;
-      var st = getFormTsState(form);
-      if (st.booting || st.mounted || slot.getAttribute('data-turnstile-mounted') === '1') return;
-      st.booting = true;
-      loadLeadConfig().then(function(cfg) {{
-        st.enabled = Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key);
-        st.siteKey = String((cfg && cfg.turnstile_site_key) || '');
-        if (!st.enabled || !st.siteKey) {{
-          st.booting = false;
-          return;
-        }}
-        ensureTurnstileScript().then(function(tsApi) {{
-          if (!tsApi || typeof tsApi.render !== 'function' || st.mounted || slot.getAttribute('data-turnstile-mounted') === '1') {{
-            st.booting = false;
-            return;
-          }}
-          try {{
-            slot.setAttribute('data-turnstile-mounted', '1');
-            st.mounted = true;
-            st.widgetId = tsApi.render(slot, {{
-              sitekey: st.siteKey,
-              callback: function(tok) {{ st.token = String(tok || ''); }},
-              'expired-callback': function() {{ st.token = ''; }},
-              'error-callback': function() {{ st.token = ''; }}
-            }});
-          }} catch (e) {{
-            st.mounted = false;
-            slot.removeAttribute('data-turnstile-mounted');
-          }}
-          st.booting = false;
-        }});
-      }});
-    }}
-
-    function buildSafeHtmlWorksheetUrl(rawUrl) {{
-      var u = String(rawUrl || '').trim();
-      if (!u || u.charAt(0) !== '/' || u.indexOf('//') === 0) return '';
-      if (u.indexOf('format=') === -1) {{
-        u += (u.indexOf('?') === -1 ? '?format=html' : '&format=html');
-      }}
-      return u;
-    }}
-
-    function readCurrentToken() {{
-      var st = getFormTsState(form);
-      var tsInput = form.querySelector('input[name="cf-turnstile-response"]');
-      return String(st.token || (tsInput ? tsInput.value || '' : '')).trim();
-    }}
-
-    function waitForTurnstileReady(statusEl, onReady) {{
-      if (window.__PSEO_SYNTHETIC_TEST__) {{
-        onReady('');
-        return;
-      }}
-      loadLeadConfig().then(function(cfg) {{
-        if (!cfg || !cfg.turnstile_enabled || !cfg.turnstile_site_key) {{
-          onReady('');
-          return;
-        }}
-        mountTurnstileIfEnabled();
-        var tokNow = readCurrentToken();
-        if (tokNow) {{
-          onReady(tokNow);
-          return;
-        }}
-        if (statusEl) statusEl.textContent = 'Verifying browser security check...';
-        var elapsed = 0;
-        var timer = setInterval(function() {{
-          elapsed += 100;
-          var tok = readCurrentToken();
-          if (tok) {{
-            clearInterval(timer);
-            onReady(tok);
-          }} else if (elapsed >= 2500) {{
-            clearInterval(timer);
-            form.setAttribute('data-submission-state', 'verification_required');
-            if (statusEl) statusEl.textContent = 'Please complete the security verification check before submitting.';
-          }}
-        }}, 100);
-      }});
-    }}
-
-    // Eagerly fetch config and warm up Turnstile on page load
-    if (!window.__PSEO_SYNTHETIC_TEST__) {{
-      mountTurnstileIfEnabled();
-    }}
-    form.addEventListener('focusin', mountTurnstileIfEnabled);
-    form.addEventListener('mouseenter', mountTurnstileIfEnabled);
-
-    function formatLeadError(data, httpStatus) {{
-      var code = String((data && (data.error || data.status)) || '').toLowerCase();
-      if (httpStatus === 429 || code === 'rate_limited') {{
-        return 'Too many requests from this network. Please try again in an hour.';
-      }}
-      if (code === 'bot_verification_failed') {{
-        return 'Verification check failed. Please complete the security widget and try again.';
-      }}
-      if (code === 'submitted_too_fast') {{
-        return 'Please wait a second before submitting the form.';
-      }}
-      if (code === 'bot_detected' || code === 'origin_not_allowed') {{
-        return 'Submission could not be verified. Please refresh the page and try again.';
-      }}
-      return (data && data.error) ? String(data.error) : 'Unable to submit right now. Please try again.';
-    }}
-
-    form.addEventListener('submit', function(ev) {{
-      if (form.id === 'lead-capture-form' && window.__PSEO_RUNTIME_LEAD_HANDLER__) {{
-        return;
-      }}
-      ev.preventDefault();
-      var emailEl = form.querySelector('input[type="email"]');
-      var statusEl = form.querySelector('#footer-lead-status, .footer-lead-status') || document.getElementById('footer-lead-status');
-      var emailVal = emailEl ? String(emailEl.value || '').trim() : '';
-      if (!emailVal || emailVal.indexOf('@') === -1) {{
-        if (statusEl) statusEl.textContent = 'Enter a valid email address.';
-        if (emailEl) emailEl.focus();
-        return;
-      }}
-      var hpEl = form.querySelector('input[name="company_website"]');
-      var hpVal = hpEl ? String(hpEl.value || '') : '';
-      var slugEl = form.querySelector('input[name="tool_slug"]');
-      if (typeof fetch !== 'function') {{
-        if (statusEl) statusEl.textContent = 'Unable to submit in this browser environment.';
-        return;
-      }}
-      waitForTurnstileReady(statusEl, function(tokenVal) {{
-        var payload = {{
-          email: emailVal,
-          tool_slug: slugEl ? slugEl.value : 'homepage',
-          source: window.location.pathname || '/',
-          company_website: hpVal,
-          form_rendered_at: renderedAt,
-          cf_turnstile_response: tokenVal
-        }};
-        if (window.__PSEO_SYNTHETIC_TEST__) {{
-          payload.synthetic_test = true;
-        }}
-        if (statusEl) statusEl.textContent = 'Preparing your worksheet...';
-        var reqHeaders = {{ 'Content-Type': 'application/json' }};
-        if (window.__PSEO_SYNTHETIC_TEST__) {{
-          reqHeaders['X-Pseofactory-Test'] = '1';
-        }}
-        fetch('/api/lead-capture', {{
-          method: 'POST',
-          headers: reqHeaders,
-          body: JSON.stringify(payload)
-        }})
-          .then(function(resp) {{
-            return resp.json().catch(function() {{ return {{}}; }}).then(function(data) {{
-              return {{ ok: Boolean(resp && resp.ok), status: resp ? resp.status : 0, data: data || {{}} }};
-            }});
-          }})
-          .then(function(res) {{
-            var st = getFormTsState(form);
-            if (res.ok && res.data && res.data.ok) {{
-              form.setAttribute('data-submission-state', 'success');
-              form.setAttribute('data-lead-captured', 'true');
-              if (statusEl) {{
-                statusEl.textContent = '';
-                var msgSpan = document.createElement('span');
-                msgSpan.textContent = res.data.deduplicated
-                  ? 'Already registered. Your worksheet is ready: '
-                  : 'Subscription confirmed. Your worksheet is ready: ';
-                statusEl.appendChild(msgSpan);
-                var safeWsUrl = buildSafeHtmlWorksheetUrl(res.data.playbook_url);
-                if (safeWsUrl) {{
-                  var link = document.createElement('a');
-                  link.href = safeWsUrl;
-                  link.target = '_blank';
-                  link.rel = 'noopener noreferrer';
-                  link.textContent = 'Open Free Worksheet';
-                  link.className = 'touch-target';
-                  link.style.fontWeight = '600';
-                  link.style.textDecoration = 'underline';
-                  statusEl.appendChild(link);
-                }}
-              }}
-              emailEl.value = '';
-            }} else {{
-              form.setAttribute('data-submission-state', 'error');
-              if (statusEl) statusEl.textContent = formatLeadError(res.data, res.status);
-            }}
-            if (window.turnstile && st.widgetId !== null && typeof window.turnstile.reset === 'function') {{
-              try {{ window.turnstile.reset(st.widgetId); }} catch (e) {{}}
-              st.token = '';
-            }}
-          }})
-          .catch(function() {{
-            form.setAttribute('data-submission-state', 'error');
-            if (statusEl) statusEl.textContent = 'Network error while submitting. Please try again.';
-          }});
-      }});
-    }});
-  }})();
-  </script>"""
+  </footer>"""
 
 
 # Mapping of common raw inline color values to canonical Porcelain CSS custom properties
@@ -4448,28 +4594,18 @@ def _strip_legacy_shell_chrome(raw_body: str) -> Tuple[str, List[str]]:
 
     body = _convert_or_strip_header(body)
 
-    # Remove old site footers (including legacy <footer class="card">) after rescuing any .playbook-capture-card
+    # Remove old site footers (including legacy <footer class="card">)
     body = re.sub(
         r'<script\b[^>]*id=["\']porcelain-footer-lead-handler["\'][^>]*>[\s\S]*?</script>',
         "",
         body,
         flags=re.IGNORECASE,
     )
-    rescued_footer_cards: List[str] = []
     while True:
         fm = re.search(r"<footer\b[^>]*>", body, flags=re.IGNORECASE)
         if not fm:
             break
-        footer_block, body = _extract_balanced_element(body, fm, "footer")
-        pb_m = re.search(
-            r'<(div|section)\b[^>]*class=["\'][^"\']*\bplaybook-capture-card\b[^"\']*["\'][^>]*>',
-            footer_block,
-            flags=re.IGNORECASE,
-        )
-        if pb_m:
-            pb_card, _ = _extract_balanced_element(footer_block, pb_m, pb_m.group(1))
-            if pb_card.strip():
-                rescued_footer_cards.append(pb_card.strip())
+        _, body = _extract_balanced_element(body, fm, "footer")
 
     # Separate trailing <script> tags outside <main> so we keep them cleanly at end of body
     trailing_scripts: List[str] = []
@@ -4488,11 +4624,6 @@ def _strip_legacy_shell_chrome(raw_body: str) -> Tuple[str, List[str]]:
         container_block, after_container = _extract_balanced_element(inner_main, cm, "div")
         container_inner = re.sub(r"^<div\b[^>]*>|</div\s*>$", "", container_block, flags=re.IGNORECASE).strip()
         inner_main = (container_inner + "\n" + after_container.strip()).strip()
-
-    if rescued_footer_cards:
-        for r_card in rescued_footer_cards:
-            if "playbook-capture-card" not in inner_main:
-                inner_main = (inner_main + "\n" + r_card).strip()
 
     return inner_main, trailing_scripts
 
@@ -4586,11 +4717,17 @@ def _clean_visible_raw_python_formulas(html_content: str) -> str:
 
 
 def _scrub_operator_pwa_gsc_token(html_content: str, profile: Dict[str, Any]) -> str:
-    """Enforces canonical GSC verification token inside /signal/ operator PWA pages."""
+    """Enforces canonical GSC verification token and >=7.5:1 .vault-subtext contrast inside /signal/ operator PWA pages."""
+    updated = re.sub(
+        r"(\.vault-locked-card\s+\.vault-subtext\s*\{[^}]*?\bcolor\s*:\s*)(?:#71717A|rgb\(\s*113\s*,\s*113\s*,\s*122\s*\))",
+        r"\1#B4B4BE",
+        html_content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     gsc_default = _resolve_expected_gsc_token(profile)
     if not gsc_default:
-        return html_content
-    return _enforce_canonical_gsc_meta(html_content, gsc_default)
+        return updated
+    return _enforce_canonical_gsc_meta(updated, gsc_default)
 
 
 def _ensure_prexvo_ymyl_forfeiture_notice(
@@ -4851,12 +4988,36 @@ def _enforce_calculator_leaf_slot_order(
         rel_path=rel_path,
     )
 
+    body_rest = work.strip()
+    calc_m = re.search(
+        r'<(section|div)\b[^>]*class=["\'][^"\']*\b(?:interactive-calculator-container|calculation-container|calc-card)\b[^"\']*["\'][^>]*>',
+        body_rest,
+        flags=re.IGNORECASE,
+    )
+    if calc_m:
+        calc_block, after_calc = _extract_balanced_element(body_rest, calc_m, calc_m.group(1))
+        unlock_m = re.match(
+            r'^\s*<section\b[^>]*id=["\']workpaper-unlock-card["\'][^>]*>',
+            after_calc,
+            flags=re.IGNORECASE,
+        )
+        if unlock_m:
+            unlock_block, after_unlock = _extract_balanced_element(after_calc, unlock_m, "section")
+            ordered_body = "\n".join(
+                p for p in (calc_block.strip(), unlock_block.strip(), compliance_html, after_unlock.strip()) if p
+            )
+        else:
+            ordered_body = "\n".join(
+                p for p in (calc_block.strip(), compliance_html, after_calc.strip()) if p
+            )
+    else:
+        ordered_body = "\n".join(p for p in (body_rest, compliance_html) if p)
+
     return "\n".join(
         [
             f"      {breadcrumb_html.strip()}",
             hero_section_html,
-            compliance_html,
-            work.strip(),
+            ordered_body,
         ]
     )
 
@@ -5088,6 +5249,7 @@ def normalize_html_to_porcelain_shell(
     from pseofactory.visual_primitives import (
         has_current_external_runtime_sync_tag,
         render_external_runtime_synchronizer_tag,
+        render_runtime_synchronizer_script_stripped,
         write_runtime_synchronizer_asset,
     )
 
@@ -5254,17 +5416,21 @@ def normalize_html_to_porcelain_shell(
         s.strip().replace("'#16a34a'", "'var(--status-positive)'").replace('"#16a34a"', '"var(--status-positive)"')
         for s in trailing_scripts
     ]
+    if not had_runtime_sync and 'id="partner-registration-form"' in inner_main:
+        had_runtime_sync = True
     if had_runtime_sync:
         if dist_dir is not None or had_external_runtime_sync:
             if dist_dir is not None:
                 write_runtime_synchronizer_asset(Path(dist_dir))
             cleaned_scripts.append(render_external_runtime_synchronizer_tag().strip())
-        else:
+        elif extracted_runtime_sync_tags:
             cleaned_scripts.append(
                 extracted_runtime_sync_tags[-1]
                 .replace("'#16a34a'", "'var(--status-positive)'")
                 .replace('"#16a34a"', '"var(--status-positive)"')
             )
+        else:
+            cleaned_scripts.append(render_runtime_synchronizer_script_stripped())
     scripts_tail = ("\n  " + "\n  ".join(cleaned_scripts)) if cleaned_scripts else ""
 
     assembled = (
@@ -5399,15 +5565,24 @@ def _render_governance_document(
         desc = desc[:149].rsplit(" ", 1)[0].rstrip(".,;:") + "."
 
     li_id = str(profile.get("linkedin_company_id") or "").strip()
+    prop_key = str(profile.get("property_id") or "profithelm").strip().lower()
+    wikidata_gov_map = {
+        "lienbond": "https://www.wikidata.org/wiki/Q192161",
+        "prexvo": "https://www.wikidata.org/wiki/Q633315",
+        "gainhelm": "https://www.wikidata.org/wiki/Q166142",
+        "profithelm": "https://www.wikidata.org/wiki/Q8161",
+    }
+    same_as_links: List[str] = [wikidata_gov_map.get(prop_key, "https://www.wikidata.org/wiki/Q8161")]
+    if li_id:
+        same_as_links.append(f"https://www.linkedin.com/company/{li_id}/")
     org_node: Dict[str, Any] = {
         "@type": "Organization",
         "@id": f"{base}/#organization",
         "name": profile["legal_entity"],
         "url": f"{base}/",
         "email": profile["contact_email"],
+        "sameAs": same_as_links,
     }
-    if li_id:
-        org_node["sameAs"] = [f"https://www.linkedin.com/company/{li_id}/"]
 
     doc_date_modified = (
         "2026-10-31"
@@ -5752,6 +5927,99 @@ def build_governance_pages(
         schema_page_type="ContactPage",
     )
 
+    # 7. /partners/ (Dedicated $299 Verified Partner Slot intake route)
+    from pseofactory.pricing import resolve_offer_pricing
+
+    partner_offer = resolve_offer_pricing(prop_id, tier_kind="partner_slot")
+    partner_price_int = int(round(float(partner_offer["price_usd"])))
+    partner_sku = str(partner_offer["sku"])
+    partner_deliverables_li = "".join(
+        f"<li>{html_lib.escape(str(d))}</li>" for d in (partner_offer.get("deliverables") or [])
+    )
+    default_partner_state = "DE" if prop_id == "gainhelm" else "CA"
+    firm_placeholder = (
+        "Vanguard Cyber Assurance CPA LLP"
+        if prop_id == "gainhelm"
+        else ("Summit Student Loan Advisory Group" if prop_id == "prexvo" else "Apex Tax & Advisory LLP")
+    )
+    pages["partners"] = _render_governance_document(
+        profile=profile,
+        route_slug="partners",
+        raw_title=f"Verified Calculator Partner Program | {brand}",
+        h1_text="Verified Calculator Partner Program",
+        meta_desc=(
+            f"Apply for a Verified Calculator Partner Slot (${partner_price_int}) on {brand} "
+            "to receive state-filtered high-intent referrals with transparent FTC disclosure."
+        ),
+        quick_answer_text=(
+            f"{brand} offers a single Verified Calculator Partner Slot (${partner_price_int} one-time activation fee) "
+            "for licensed advisory firms, compliance assessors, lenders, and specialty service providers. "
+            "Partner placements follow FTC 16 CFR Part 255 disclosure standards, provide state-filtered high-intent referrals "
+            "with transparent SubID attribution, and never alter underlying deterministic calculator outputs."
+        ),
+        sections_html=f"""      <section class="card">
+        <h2>Verified Calculator Partner Slot (${partner_price_int} One-Time Activation)</h2>
+        <p class="partner-slot-summary">Qualified providers receive priority contextual placement across relevant {html_lib.escape(brand)} calculator routes grounded in {html_lib.escape(auth)} and empirical datasets including {html_lib.escape(ds)} (BLS and FRED benchmark series), with transparent <code>/r/</code> SubID attribution under FTC 16 CFR Part 255 guidelines.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <div class="table-wrap pseo-table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Program Parameter</th><th scope="col">Verified Standard</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>One-Time Verification &amp; Slot Activation</td><td>${partner_price_int} USD ({html_lib.escape(partner_sku)})</td></tr>
+              <tr><td>Placement Architecture</td><td>1 contextual referral card per matching calculator</td></tr>
+              <tr><td>Attribution &amp; Click Routing</td><td>Transparent <code>/r/</code> redirect with <code>source_tool</code> and <code>subid</code></td></tr>
+              <tr><td>Compliance &amp; Disclosure Standard</td><td>FTC 16 CFR Part 255 editorial separation lock</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Program Eligibility &amp; Attribution FAQ</h2>
+        <h3>Who Is Eligible for Verified Firm Placement?</h3>
+        <p>Licensed advisory practices, compliance auditors, regulated lenders, and specialty service firms operating in active target jurisdictions may apply for placement verification across deterministic {html_lib.escape(brand)} tools powered by primary statutory authority tables.</p>
+        <h3>How Does Referral Routing and Attribution Work?</h3>
+        <p>Each approved firm listing routes through a tracked <code>/r/</code> link with explicit SubID parameters while maintaining strict editorial and mathematical separation from all deterministic statutory schedule calculations.</p>
+        <h3>What Standards Govern Calculator Disclosure Separation?</h3>
+        <p>Every listed referral adheres strictly to FTC 16 CFR Part 255 endorsement disclosure guidelines alongside enacted {html_lib.escape(auth)} statutory provenance and benchmark schedules.</p>
+      </section>
+      <section id="partner-registration-drawer" class="partner-registration-drawer card" data-partners-page="1" data-mechanic="partner_supply_registration" data-property="{html_lib.escape(prop_id)}" data-offer-sku="{html_lib.escape(partner_sku)}" data-offer-price="{partner_price_int}">
+        <h2>Apply for a Verified Partner Slot (${partner_price_int})</h2>
+        <p>Submit your firm details below to register for verification and proceed to Stripe Checkout activation.</p>
+        <form id="partner-registration-form" class="partner-registration-form" action="/api/lead-capture" method="post" data-offer-sku="{html_lib.escape(partner_sku)}" data-offer-price="{partner_price_int}" novalidate>
+          <input type="hidden" name="intent" value="partner_registration">
+          <input type="hidden" name="offer_sku" value="{html_lib.escape(partner_sku)}">
+          <div class="form-group">
+            <label for="partner-reg-firm-name">Advisory / Provider Firm Name</label>
+            <input type="text" id="partner-reg-firm-name" name="firm_name" placeholder="{html_lib.escape(firm_placeholder)}" required class="touch-target">
+          </div>
+          <div class="form-group">
+            <label for="partner-reg-email">Partner Desk Work Email</label>
+            <input type="email" id="partner-reg-email" name="email" placeholder="partners@firm.com" required class="touch-target">
+          </div>
+          <div class="form-group">
+            <label for="quote-intake-partner-reg-state">Primary Jurisdiction</label>
+            <select id="quote-intake-partner-reg-state" name="state" class="touch-target">
+              <option value="CA"{" selected" if default_partner_state == "CA" else ""}>California (CA)</option>
+              <option value="DE"{" selected" if default_partner_state == "DE" else ""}>Delaware (DE)</option>
+              <option value="TX">Texas (TX)</option>
+              <option value="NY">New York (NY)</option>
+              <option value="FL">Florida (FL)</option>
+              <option value="IL">Illinois (IL)</option>
+              <option value="WA">Washington (WA)</option>
+              <option value="MA">Massachusetts (MA)</option>
+            </select>
+          </div>
+          <div class="cf-turnstile-slot" data-turnstile-slot="1"></div>
+          <button type="submit" id="partner-registration-submit-btn" class="btn btn-cta touch-target">Apply &amp; Reserve Partner Slot (${partner_price_int})</button>
+          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite"></div>
+        </form>
+      </section>""",
+        active_tools=tools,
+        gsc_token=token,
+    )
+
     return pages
 
 
@@ -5829,7 +6097,7 @@ def build_porcelain_404_page(
         <span class="badge">Status 404</span>
         <h1>Status 404: Requested Calculator or Page Not Found</h1>
         <p>The URL you requested does not exist or has moved to an updated statutory calculator hub.</p>
-        <div class="above-fold-preset-bar">
+        <div class="hero-actions">
           <a href="/" class="btn btn-cta touch-target">Return to {html_lib.escape(brand)} Home</a>
           <a href="/tools/" class="btn-secondary touch-target">Browse All Calculators</a>
         </div>
@@ -6294,7 +6562,7 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                     "/ai-plugin.json",
                 ):
                     return (2, idx_val)
-                if rp in ("/", "/tools/", "/guides/", "/about/", "/privacy/", "/terms/", "/disclaimers/", "/methodology/", "/contact/"):
+                if rp in ("/", "/tools/", "/guides/", "/about/", "/privacy/", "/terms/", "/disclaimers/", "/methodology/", "/contact/", "/partners/"):
                     return (3, idx_val)
                 depth = len([seg for seg in rp.strip("/").split("/") if seg])
                 if depth <= 2:

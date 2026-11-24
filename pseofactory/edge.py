@@ -3083,7 +3083,7 @@ export async function onRequest(context) {{
  * 2. Sub-Affiliate Aggregator Prohibition: Rejects Sovrn, VigLink, and Skimlinks redirect domains.
  * 3. Honest Routing: A lender click resolves to the approved affiliate contract when one exists,
  *    otherwise to that lender's own site (unmonetized, no tracking contract). A lender click is NEVER
- *    redirected into the paid $39 Decision Audit Kit checkout; that purchase requires explicit checkout
+ *    redirected into the paid $19 Full Workpaper checkout; that purchase requires explicit checkout
  *    intent via /api/lead-capture?checkout=1. Set BLOCK_UNAPPROVED_EXTERNAL_REDIRECTS=true to send
  *    unapproved lender clicks to the free educational calculator instead.
  * 4. SSRF & Open Redirect Protection: Strictly validates schemes and blocks private/loopback CIDRs.
@@ -5519,6 +5519,1205 @@ async function dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSyntheticPr
     return js_block
 
 
+def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
+    """
+    Renders the unified per-tenant canonical pricing catalog (sourced strictly from
+    pseofactory/pricing.py), unique per-buyer lead_id generator, pre-checkout KV/metadata
+    input persistence helpers, and buyer-input-driven Quick vs Full workpaper/CSV/JSON
+    engine with full HTML escaping and zero bank/merchant leaks.
+    Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
+    """
+    from pseofactory.pricing import (
+        PARTNER_SLOT_SKU_BY_PROPERTY,
+        QUICK_SKU_BY_PROPERTY,
+        SKU_ALIASES,
+        TENANT_BRAND_NAMES,
+        TENANT_SKU_PREFIX,
+        get_edge_pricing_table_json,
+    )
+
+    prop_clean = (property_id or "").strip().lower()
+    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        raise ValueError(f"Unsupported property_id for edge pricing engine: {property_id!r}")
+
+    catalog_json = get_edge_pricing_table_json(prop_clean)
+    sku_prefix = TENANT_SKU_PREFIX[prop_clean] + "_"
+    tenant_aliases = {
+        k: v for k, v in SKU_ALIASES.items()
+        if str(k).startswith(sku_prefix) or str(v).startswith(sku_prefix)
+    }
+    aliases_json = json.dumps(tenant_aliases, sort_keys=True)
+    quick_sku = QUICK_SKU_BY_PROPERTY[prop_clean]
+    partner_sku = PARTNER_SLOT_SKU_BY_PROPERTY[prop_clean]
+    brand_name = TENANT_BRAND_NAMES[prop_clean]
+    default_full_sku_map = {
+        "profithelm": "ph_statutory_tax_audit_workpapers",
+        "prexvo": "px_refi_amortization_decision_audit",
+        "gainhelm": "gh_soc2_cmmc_audit_workpapers",
+        "lienbond": "lb_surety_lien_wh347_packet",
+    }
+    default_state_map = {"profithelm": "US", "prexvo": "US", "gainhelm": "US", "lienbond": "CA"}
+    default_buyer_label_map = {
+        "profithelm": "Verified Buyer",
+        "prexvo": "Verified Borrower",
+        "gainhelm": "Verified Buyer",
+        "lienbond": "Verified Contractor",
+    }
+    default_amt_map = {"profithelm": 250000, "prexvo": 85000, "gainhelm": 48500, "lienbond": 125000}
+    default_full_sku = default_full_sku_map[prop_clean]
+    default_state = default_state_map[prop_clean]
+    default_buyer_label = default_buyer_label_map[prop_clean]
+    default_amt = default_amt_map[prop_clean]
+
+    if prop_clean == "prexvo":
+        tenant_compute_js = """
+    let curRatePct = extractEdgeNumericParam(inputs, outputs, ["current_rate", "cur_rate", "federal_rate", "rate"], 6.8, 1, 18);
+    let refiRatePct = extractEdgeNumericParam(inputs, outputs, ["refi_rate", "new_rate", "target_rate", "private_rate"], Math.max(3.5, curRatePct - 1.9), 1, 18);
+    if (refiRatePct >= curRatePct) refiRatePct = Math.max(2.5, curRatePct - 1.5);
+    const termYears = Math.round(extractEdgeNumericParam(inputs, outputs, ["term", "year"], 10, 2, 30));
+    const nMonths = termYears * 12;
+    const calcAmort = (prin, aprPct, months) => {
+      const r = (aprPct / 100) / 12;
+      if (r <= 0) return { pmt: prin / months, totalInt: 0 };
+      const pmt = prin * (r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
+      return { pmt, totalInt: Math.max(0, pmt * months - prin) };
+    };
+    const baseRes = calcAmort(baseAmount, curRatePct, nMonths);
+    const refiRes = calcAmort(baseAmount, refiRatePct, nMonths);
+    const monthlyDelta = Math.max(0, baseRes.pmt - refiRes.pmt);
+    const lifetimeSavings = Math.max(0, baseRes.totalInt - refiRes.totalInt);
+
+    kpis = [
+      { label: "Modeled Loan Principal", value: fmtUsd(baseAmount) },
+      { label: "Monthly Payment Delta", value: `${fmtUsd(baseRes.pmt)} -> ${fmtUsd(refiRes.pmt)}` },
+      { label: "Lifetime Interest Saved", value: fmtUsd(lifetimeSavings) },
+      { label: "Amortization Horizon", value: `${termYears} Years (${nMonths} Months)` },
+    ];
+    reconciliationSchedule = [
+      { line_code: "PX-100", line_item: "Modeled Principal Loan Balance", authority: "Promissory Note Principal", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `${termYears}-Yr Term (${nMonths} mo)` },
+      { line_code: "PX-200", line_item: `Monthly Payment (${fmtPct(curRatePct)} vs ${fmtPct(refiRatePct)} APR)`, authority: "Truth in Lending Act (12 CFR Part 1026)", baseline_value: `${fmtUsd(baseRes.pmt)}/mo`, optimized_value: `${fmtUsd(refiRes.pmt)}/mo`, delta_impact: `-${fmtUsd(monthlyDelta)}/mo Relief` },
+      { line_code: "PX-300", line_item: "Total Cumulative Interest Over Full Term", authority: "20 U.S.C. 1087e & 12 CFR 1026.47", baseline_value: fmtUsd(baseRes.totalInt), optimized_value: fmtUsd(refiRes.totalInt), delta_impact: `-${fmtUsd(lifetimeSavings)} Saved` },
+      { line_code: "PX-400", line_item: "Federal IDR / PSLF Forfeiture Hurdle", authority: "34 CFR 685.209 & 34 CFR 685.219", baseline_value: "Federal Protections Active", optimized_value: "Permanently Waived on Refi", delta_impact: "Verify Zero PSLF / IDR Subsidy Loss" },
+    ];
+    const spreads = [-1.0, -0.5, 0.0, 0.5, 1.0];
+    sensitivityMatrix = spreads.map((bpsDelta) => {
+      const testApr = Math.max(2.0, Math.round((refiRatePct + bpsDelta) * 100) / 100);
+      const testRes = calcAmort(baseAmount, testApr, nMonths);
+      const sav = baseRes.totalInt - testRes.totalInt;
+      const lbl = bpsDelta === 0 ? `Modeled Refi Rate (${fmtPct(testApr)})` : `${bpsDelta > 0 ? "+" : ""}${Math.round(bpsDelta * 100)} bps Refi Rate (${fmtPct(testApr)})`;
+      return {
+        scenario_label: lbl,
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: `${fmtPct(testApr)} (${fmtUsd(testRes.pmt)}/mo)`,
+        estimated_net_benefit: `${sav >= 0 ? "+" : ""}${fmtUsd(sav)} Lifetime vs Baseline`,
+      };
+    });
+    let balRefi = baseAmount;
+    let balBase = baseAmount;
+    let cumIntSaved = 0;
+    const rRefiM = (refiRatePct / 100) / 12;
+    const rBaseM = (curRatePct / 100) / 12;
+    for (let m = 1; m <= nMonths; m++) {
+      const begR = balRefi;
+      const intR = balRefi * rRefiM;
+      const prinR = Math.min(balRefi, refiRes.pmt - intR);
+      balRefi = Math.max(0, balRefi - prinR);
+      const intB = balBase * rBaseM;
+      const prinB = Math.min(balBase, baseRes.pmt - intB);
+      balBase = Math.max(0, balBase - prinB);
+      cumIntSaved += (intB - intR);
+      if (m <= 12) {
+        periodSchedule.push({
+          period: `Month ${m}`,
+          metric_a: fmtUsd(begR),
+          metric_b: fmtUsd(prinR),
+          metric_c: fmtUsd(intR),
+          metric_d: fmtUsd(balRefi),
+          note: `Cum. Interest Saved: ${fmtUsd(cumIntSaved)}`,
+        });
+      } else if (m % 12 === 0 || m === nMonths) {
+        const yrNum = Math.ceil(m / 12);
+        periodSchedule.push({
+          period: `Year ${yrNum} End (Mo ${m})`,
+          metric_a: fmtUsd(refiRes.pmt * 12) + "/yr",
+          metric_b: fmtUsd(baseAmount - balRefi) + " Cum. Prin",
+          metric_c: fmtUsd(intR) + " Mo Int",
+          metric_d: fmtUsd(balRefi),
+          note: `Cum. Interest Saved: ${fmtUsd(cumIntSaved)}`,
+        });
+      }
+    }
+    statutoryTrendTimeseries = [
+      { series_id: "ed_direct_undergrad_rate", metric_label: "Title IV Direct Undergraduate Fixed Rate", statutory_citation: "20 U.S.C. 1087e(b)", unit: "PCT", points: { "2024": 5.5, "2025": 6.53, "2026": 6.39, "2028": 5.95, "2030": 5.8 } },
+      { series_id: "hhs_fpl_single_base", metric_label: "HHS 48-State Single Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15650, "2028": 16600, "2030": 17600 } },
+      { series_id: "fred_dgs10_yield", metric_label: "10-Year U.S. Treasury Benchmark Yield", statutory_citation: "31 U.S.C. 3102 / FRED DGS10", unit: "PCT", points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2028": 3.95, "2030": 3.8 } },
+    ];
+    methodologyNotes = [
+      `Monthly amortization computed using exact level-payment formula M = P * r / (1 - (1 + r)^-n) with P = ${fmtUsd(baseAmount)}, baseline APR = ${fmtPct(curRatePct)}, refi APR = ${fmtPct(refiRatePct)}, n = ${nMonths} months.`,
+      "Refinancing federal Direct Loans into private credit permanently waives Title IV federal protections (IDR/RAP, PSLF, federal forbearance, and statutory discharge under 34 CFR Part 685).",
+    ];
+    statutoryExecutionArtifacts = [
+      {
+        instrument_id: "PX-EXEC-101",
+        instrument_title: "34 CFR 685.209 / 685.219 Federal Protection Forfeiture Audit",
+        controlling_statute: "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219",
+        filing_deadline_rule: "Review Prior to 3-Business-Day TILA Rescission Cutoff",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `FORFEITURE AUDIT (${stateCode}): Refinancing ${fmtUsd(baseAmount)} from ${fmtPct(curRatePct)} to ${fmtPct(refiRatePct)} over ${termYears} years reduces monthly payment by ${fmtUsd(monthlyDelta)} and saves ${fmtUsd(lifetimeSavings)} in lifetime interest. Confirm zero active PSLF qualifying payments (34 CFR 685.219) or RAP/IBR interest subsidies before signing.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($19) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "PX-EXEC-102",
+        instrument_title: "Regulation Z (12 CFR 1026.48) Rate-Match & 3-Day Rescission Calendar",
+        controlling_statute: "12 CFR 1026.47 & 12 CFR 1026.48",
+        filing_deadline_rule: "30-Day Approval Lock / 3-Business-Day Right to Cancel",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `REGULATION Z CHECKLIST: (1) Request competing Approval Disclosures within 30 days under 12 CFR 1026.48(c); (2) Submit lowest competing APR (${fmtPct(refiRatePct)}) for written rate-match credit; (3) Preserve 3-business-day non-disbursement cancellation right under 12 CFR 1026.48(d).`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($19) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "PX-EXEC-103",
+        instrument_title: "Cosigner Release & Death/Disability Discharge Verification Rider",
+        controlling_statute: "15 U.S.C. 1650 & EGRRCPA Section 601",
+        filing_deadline_rule: "Verify in Promissory Note Prior to Closing",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `PROMISSORY NOTE CHECKLIST: Confirm explicit written contractual inclusion of (a) death and total permanent disability discharge parity and (b) cosigner release eligibility after 12 to 24 consecutive on-time payments of ${fmtUsd(refiRes.pmt)}/mo.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($19) to unlock unredacted execution checklists.",
+      },
+    ];
+"""
+    elif prop_clean == "profithelm":
+        tenant_compute_js = """
+    const skuNorm = normalizeEdgeSku((offer && (offer.sku || offer.offerSku)) || "");
+    const is1031 = skuNorm === "ph_1031_boot_replacement_workpapers" || toolSlug.includes("1031") || toolSlug.includes("exchange");
+    const isCapex = !is1031 && (skuNorm === "ph_commercial_capital_audit_toolkit" || toolSlug.includes("179") || toolSlug.includes("equipment") || toolSlug.includes("macrs") || toolSlug.includes("factoring") || toolSlug.includes("tariff"));
+    const margRatePct = extractEdgeNumericParam(inputs, outputs, ["tax_rate", "marginal", "bracket", "rate"], 32, 10, 50);
+    const margRate = margRatePct / 100;
+
+    if (is1031) {
+      const basisInput = extractEdgeNumericParam(inputs, outputs, ["basis", "adjusted_basis", "cost_basis"], 0, 1, baseAmount * 2);
+      const replInput = extractEdgeNumericParam(inputs, outputs, ["replacement", "new_property", "target_price"], baseAmount, 1, baseAmount * 5);
+      const deprInput = extractEdgeNumericParam(inputs, outputs, ["depreciation", "accumulated_depr", "recapture"], 0, 0, baseAmount);
+      const adjustedBasis = basisInput > 0 ? Math.min(basisInput, baseAmount) : Math.round(baseAmount * 0.60);
+      const realizedGain = Math.max(0, baseAmount - adjustedBasis);
+      const deprRecapture = deprInput > 0 ? Math.min(deprInput, realizedGain) : Math.round(realizedGain * 0.25);
+      const capGain = Math.max(0, realizedGain - deprRecapture);
+      const bootAmt = Math.max(0, baseAmount - replInput);
+      const deferredTaxTotal = Math.round((deprRecapture * 0.25 + capGain * 0.238) * 100) / 100;
+      const recognizedBootTax = Math.round(Math.min(bootAmt, realizedGain) * 0.244 * 100) / 100;
+
+      kpis = [
+        { label: "Relinquished Sale Price", value: fmtUsd(baseAmount) },
+        { label: "Modeled Realized Gain", value: fmtUsd(realizedGain) },
+        { label: "Est. Deferred Tax Shield", value: fmtUsd(Math.max(0, deferredTaxTotal - recognizedBootTax)) },
+        { label: "45 / 180-Day Statutory Clock", value: "IRC Section 1031(a)(3)" },
+      ];
+      reconciliationSchedule = [
+        { line_code: "8824-L15", line_item: "Relinquished Property Contract Value", authority: "IRC Section 1031(a) / Form 8824", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(replInput), delta_impact: bootAmt > 0 ? `${fmtUsd(bootAmt)} Boot Exposure` : "Full Equal-or-Greater Reinvestment" },
+        { line_code: "8824-L18", line_item: "Adjusted Basis & Realized Gain", authority: "IRC Section 1011 / Form 8824 L18-19", baseline_value: `${fmtUsd(adjustedBasis)} Basis`, optimized_value: `${fmtUsd(realizedGain)} Gain`, delta_impact: basisInput > 0 ? "Buyer-Supplied Basis" : "60% Default Basis (Override in Inputs)" },
+        { line_code: "8824-L21", line_item: "Section 1250 Unrecaptured Depreciation (25%)", authority: "IRC Section 1(h)(1)(E) & Section 1250", baseline_value: fmtUsd(deprRecapture * 0.25), optimized_value: "$0.00 Recognized", delta_impact: `+${fmtUsd(deprRecapture * 0.25)} Shielded` },
+        { line_code: "8824-L24", line_item: "Federal LTCG + 3.8% NIIT (23.8%) & Boot Tax", authority: "IRC Section 1031(b) & Section 1411", baseline_value: fmtUsd(deferredTaxTotal), optimized_value: fmtUsd(recognizedBootTax), delta_impact: `+${fmtUsd(Math.max(0, deferredTaxTotal - recognizedBootTax))} Deferred` },
+      ];
+      const bootSteps = [0, 0.05, 0.10, 0.20, 1.0];
+      sensitivityMatrix = bootSteps.map((bootFrac) => {
+        const replTarget = Math.round(baseAmount * (1 - bootFrac));
+        const bCash = Math.round(baseAmount * bootFrac);
+        const recTax = Math.round(Math.min(bCash, realizedGain) * 0.244 * 100) / 100;
+        const netDef = Math.max(0, Math.round((deferredTaxTotal - recTax) * 100) / 100);
+        const lbl = bootFrac === 0 ? "100% Reinvestment (Zero Boot)" : (bootFrac === 1.0 ? "Taxable Sale (0% Reinvestment)" : `${Math.round(bootFrac * 100)}% Cash/Mortgage Boot Withdrawal`);
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(replTarget),
+          effective_rate: bootFrac === 0 ? "0.00% Recognized" : `${fmtUsd(recTax)} Est. Tax Due`,
+          estimated_net_benefit: `${fmtUsd(netDef)} Equity Deferred`,
+        };
+      });
+      periodSchedule = [
+        { period: "Day 0 (Closing)", metric_a: fmtUsd(baseAmount), metric_b: "QI Escrow Assignment", metric_c: "Zero Constructive Receipt", metric_d: fmtUsd(adjustedBasis), note: "Execute QI Exchange Agreement before deed transfer" },
+        { period: "Day 15", metric_a: fmtUsd(replInput), metric_b: "Debt Replacement Audit", metric_c: "Equal-or-Greater Debt", metric_d: fmtUsd(realizedGain), note: "Confirm replacement mortgage prevents mortgage boot" },
+        { period: "Day 45 (Hard Cutoff)", metric_a: "3-Property / 200% Rule", metric_b: "Written ID Notice", metric_c: "Midnight Statutory Limit", metric_d: fmtUsd(baseAmount * 2), note: "Deliver unambiguous written ID to Qualified Intermediary" },
+        { period: "Day 90", metric_a: fmtUsd(replInput), metric_b: "Underwriting & Title Lock", metric_c: "Same Taxpayer Entity", metric_d: fmtUsd(deferredTaxTotal), note: "Verify vesting entity matches relinquished taxpayer" },
+        { period: "Day 180 (Hard Cutoff)", metric_a: fmtUsd(replInput), metric_b: "Final Deed Closing", metric_c: "No Extensions Permitted", metric_d: fmtUsd(Math.max(0, deferredTaxTotal - recognizedBootTax)), note: "Close replacement acquisition before Day 180 or tax due date" },
+        { period: "Tax Return Filing", metric_a: "IRS Form 8824", metric_b: "Carryover Basis Schedule", metric_c: stateCode + " Conformity Check", metric_d: fmtUsd(Math.max(0, replInput - realizedGain)), note: "Attach Form 8824 (and CA FTB Form 3840 if applicable)" },
+      ];
+      methodologyNotes = [
+        "IRC Section 1031 defers federal capital gains (20% LTCG + 3.8% NIIT) and Section 1250 depreciation recapture (25%) when replacement property value and debt equal or exceed relinquished net sale proceeds.",
+        "Statutory 45-day identification and 180-day closing clocks under Treas. Reg. 1.1031(k)-1 run concurrently from closing date with no standard extension.",
+      ];
+    } else if (isCapex) {
+      const busUsePct = extractEdgeNumericParam(inputs, outputs, ["business_use", "bus_use", "use_pct"], 100, 50, 100);
+      const qualBasis = Math.round(baseAmount * (busUsePct / 100) * 100) / 100;
+      const cap2026 = 2560000;
+      const phase2026 = 4090000;
+      const phaseReduction = Math.max(0, qualBasis - phase2026);
+      const effCap = Math.max(0, cap2026 - phaseReduction);
+      const sec179 = Math.min(qualBasis, effCap);
+      const remAfter179 = Math.max(0, qualBasis - sec179);
+      const bonus20 = Math.round(remAfter179 * 0.20 * 100) / 100;
+      const yr1MacrsRem = Math.round(Math.max(0, remAfter179 - bonus20) * 0.20 * 100) / 100;
+      const totalYr1 = Math.round((sec179 + bonus20 + yr1MacrsRem) * 100) / 100;
+      const yr1Shield = Math.round(totalYr1 * margRate * 100) / 100;
+      const stdMacrsYr1 = Math.round(qualBasis * 0.20 * 100) / 100;
+
+      kpis = [
+        { label: "Qualifying Equipment Basis", value: fmtUsd(qualBasis) },
+        { label: "2026 Year-1 Total Deduction", value: fmtUsd(totalYr1) },
+        { label: `Year-1 Tax Shield (${fmtPct(margRatePct)})`, value: fmtUsd(yr1Shield) },
+        { label: "Effective After-Tax Cost", value: fmtUsd(Math.max(0, baseAmount - yr1Shield)) },
+      ];
+      reconciliationSchedule = [
+        { line_code: "4562-P1", line_item: `Qualifying Equipment Cost (${busUsePct}% Business Use)`, authority: "IRC Section 179(d) & Form 4562", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(qualBasis), delta_impact: `2026 Cap: ${fmtUsd(cap2026)}` },
+        { line_code: "4562-L12", line_item: "IRC Section 179 First-Year Expense Election", authority: "IRC Section 179(b)(1)-(2) (2026 Rules)", baseline_value: `${fmtUsd(stdMacrsYr1)} (5-Yr MACRS Yr 1)`, optimized_value: fmtUsd(sec179), delta_impact: `+${fmtUsd(Math.max(0, sec179 - stdMacrsYr1))} Accelerated` },
+        { line_code: "4562-L14", line_item: "2026 Section 168(k) 20% Bonus Depreciation", authority: "IRC Section 168(k)(6) Statutory 20% Rate", baseline_value: "$0.00", optimized_value: fmtUsd(bonus20), delta_impact: "Applied to Post-179 Basis" },
+        { line_code: "4562-TAX", line_item: `Estimated Year-1 Cash Tax Shield (${fmtPct(margRatePct)})`, authority: "Form 4562 Part I & Part III", baseline_value: fmtUsd(stdMacrsYr1 * margRate), optimized_value: fmtUsd(yr1Shield), delta_impact: `+${fmtUsd(Math.max(0, yr1Shield - stdMacrsYr1 * margRate))} Liquidity` },
+      ];
+      const scaleFactors = [0.80, 0.90, 1.00, 1.10, 1.20];
+      sensitivityMatrix = scaleFactors.map((sf) => {
+        const scAmt = Math.round(qualBasis * sf);
+        const scCap = Math.max(0, cap2026 - Math.max(0, scAmt - phase2026));
+        const sc179 = Math.min(scAmt, scCap);
+        const scRem = Math.max(0, scAmt - sc179);
+        const scTot = sc179 + scRem * 0.20 + (scRem * 0.80) * 0.20;
+        const scShield = Math.round(scTot * margRate * 100) / 100;
+        const lbl = sf === 1.0 ? "Modeled CapEx Baseline (100%)" : `${sf < 1 ? "-" : "+"}${Math.round(Math.abs(sf - 1) * 100)}% Equipment Spend`;
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(scAmt),
+          effective_rate: `${fmtUsd(scTot)} Yr-1 Writeoff`,
+          estimated_net_benefit: `+${fmtUsd(scShield)} Cash Shield`,
+        };
+      });
+      const macrsRates = [0.20, 0.32, 0.192, 0.1152, 0.1152, 0.0576];
+      const remForMacrs = Math.max(0, qualBasis - sec179 - bonus20);
+      periodSchedule = macrsRates.map((mr, idx) => {
+        const stdDed = Math.round(qualBasis * mr * 100) / 100;
+        const optDed = idx === 0 ? totalYr1 : Math.round(remForMacrs * mr * 100) / 100;
+        return {
+          period: `Year ${idx + 1} (MACRS ${(mr * 100).toFixed(2)}%)`,
+          metric_a: fmtUsd(stdDed),
+          metric_b: fmtUsd(optDed),
+          metric_c: fmtUsd(optDed * margRate),
+          metric_d: `${optDed >= stdDed ? "+" : ""}${fmtUsd((optDed - stdDed) * margRate)}`,
+          note: idx === 0 ? "Sec 179 + 20% Bonus + Yr1 MACRS" : "Remaining MACRS 200% DB Recovery",
+        };
+      });
+      methodologyNotes = [
+        "2026 IRC Section 179 statutory expense cap is $2,560,000 with dollar-for-dollar phase-out beginning at $4,090,000; 2026 IRC Section 168(k) bonus depreciation rate is 20%.",
+        "Standard 5-Year 200% Declining Balance Half-Year MACRS schedule (IRS Pub. 946 Table A-1): 20.00%, 32.00%, 19.20%, 11.52%, 11.52%, 5.76%.",
+      ];
+    } else {
+      const stdDed = extractEdgeNumericParam(inputs, outputs, ["std_ded", "standard_deduction"], baseAmount >= 180000 ? 32200 : 16100, 0, 50000);
+      const qbiEligible = Math.max(0, baseAmount - stdDed);
+      const qbiDed = Math.round(qbiEligible * 0.20 * 100) / 100;
+      const calc2026Fed = (taxable) => {
+        const brackets = [
+          [11925, 0.10], [48475, 0.12], [103350, 0.22], [197300, 0.24],
+          [250525, 0.32], [626350, 0.35], [Infinity, 0.37],
+        ];
+        let tax = 0;
+        let prev = 0;
+        for (const [cap, rate] of brackets) {
+          if (taxable <= prev) break;
+          tax += (Math.min(taxable, cap) - prev) * rate;
+          prev = cap;
+        }
+        return Math.round(tax * 100) / 100;
+      };
+      const fedBase = calc2026Fed(qbiEligible);
+      const fedOpt = calc2026Fed(Math.max(0, qbiEligible - qbiDed));
+      const taxDelta = Math.max(0, Math.round((fedBase - fedOpt) * 100) / 100);
+      const effBaseRate = (fedBase / Math.max(1, baseAmount)) * 100;
+      const effOptRate = (fedOpt / Math.max(1, baseAmount)) * 100;
+
+      kpis = [
+        { label: "Modeled Gross Income / Base", value: fmtUsd(baseAmount) },
+        { label: "2026 OBBBA Baseline Tax", value: fmtUsd(fedBase) },
+        { label: "With Section 199A QBI (20%)", value: fmtUsd(fedOpt) },
+        { label: "Estimated Annual Tax Delta", value: `-${fmtUsd(taxDelta)}` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "1040-L11", line_item: `Modeled Adjusted Gross Income (${stateCode})`, authority: "IRC Section 62 & Rev. Proc. 2025-32", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `2026 Std Ded: ${fmtUsd(stdDed)}` },
+        { line_code: "1040-L13", line_item: "2026 Standard Deduction & IRC Section 199A QBI (20%)", authority: "OBBBA (P.L. 119-21) & IRC Section 199A", baseline_value: fmtUsd(stdDed), optimized_value: fmtUsd(stdDed + qbiDed), delta_impact: `+${fmtUsd(qbiDed)} Deduction Shield` },
+        { line_code: "1040-L16", line_item: "Estimated Federal Progressive Tax Liability", authority: "IRC Section 1 (10%-37% Permanent Brackets)", baseline_value: `${fmtUsd(fedBase)} (${fmtPct(effBaseRate)})`, optimized_value: `${fmtUsd(fedOpt)} (${fmtPct(effOptRate)})`, delta_impact: `-${fmtUsd(taxDelta)} Annual Delta` },
+        { line_code: "2210-SH", line_item: "Quarterly Safe-Harbor Estimated Tax (25% / Qtr)", authority: "IRC Section 6654(d)(1)(B)", baseline_value: `${fmtUsd(fedBase / 4)}/qtr`, optimized_value: `${fmtUsd(fedOpt / 4)}/qtr`, delta_impact: "Prevents Underpayment Penalty" },
+      ];
+      const mults = [0.80, 0.90, 1.00, 1.10, 1.20];
+      sensitivityMatrix = mults.map((m) => {
+        const inc = Math.round(baseAmount * m);
+        const tBase = calc2026Fed(Math.max(0, inc - stdDed));
+        const tOpt = calc2026Fed(Math.max(0, (inc - stdDed) * 0.80));
+        const dlt = Math.max(0, Math.round((tBase - tOpt) * 100) / 100);
+        const lbl = m === 1.0 ? "Modeled Income Baseline (100%)" : `${m < 1 ? "-" : "+"}${Math.round(Math.abs(m - 1) * 100)}% Income Stress-Test`;
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(inc),
+          effective_rate: `${fmtPct((tOpt / Math.max(1, inc)) * 100)} Eff. Rate`,
+          estimated_net_benefit: `+${fmtUsd(dlt)} QBI Tax Shield`,
+        };
+      });
+      const qDates = [["Q1 (Apr 15)", 0.25], ["Q2 (Jun 15)", 0.50], ["Q3 (Sep 15)", 0.75], ["Q4 (Jan 15)", 1.00]];
+      periodSchedule = qDates.map(([qLbl, cumFrac]) => ({
+        period: qLbl,
+        metric_a: fmtUsd(fedBase / 4),
+        metric_b: fmtUsd(fedOpt / 4),
+        metric_c: fmtUsd(fedOpt * cumFrac),
+        metric_d: fmtUsd((fedBase - fedOpt) / 4),
+        note: "IRC Sec 6654 100%/110% Safe-Harbor Installment",
+      }));
+      periodSchedule.push({
+        period: "Annual Reconciliation (Apr 15)",
+        metric_a: fmtUsd(fedBase),
+        metric_b: fmtUsd(fedOpt),
+        metric_c: fmtUsd(fedOpt),
+        metric_d: `+${fmtUsd(taxDelta)} Saved`,
+        note: "Form 1040 / Schedule K-1 / Form 8995 Filing",
+      });
+      methodologyNotes = [
+        "Computed under enacted OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32: permanent 10%-37% progressive brackets, $16,100 Single / $32,200 MFJ 2026 standard deduction, permanent 20% Section 199A QBI deduction, and $184,500 2026 OASDI wage base.",
+        "Quarterly safe-harbor estimates divide annual modeled liability into 4 equal installments under IRC Section 6654(d)(1)(B).",
+      ];
+    }
+    statutoryTrendTimeseries = [
+      { series_id: "irs_sec179_cap", metric_label: "IRC Section 179 Maximum Deduction Cap", statutory_citation: "26 U.S.C. 179(b)(1)", unit: "USD", points: { "2024": 1220000, "2025": 1250000, "2026": 2560000, "2028": 2680000, "2030": 2810000 } },
+      { series_id: "irs_sec199a_qbi", metric_label: "IRC Section 199A QBI Deduction Rate (OBBBA Permanent)", statutory_citation: "26 U.S.C. 199A / P.L. 119-21", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
+      { series_id: "ssa_fica_wage_base", metric_label: "Social Security OASDI Maximum Taxable Wage Base", statutory_citation: "26 U.S.C. 3121", unit: "USD", points: { "2024": 168600, "2025": 176100, "2026": 184500, "2028": 196500, "2030": 209300 } },
+      { series_id: "irs_sec168k_bonus", metric_label: "IRC Section 168(k) First-Year Bonus Depreciation", statutory_citation: "26 U.S.C. 168(k)(6)", unit: "PCT", points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2028": 0.0, "2030": 0.0 } },
+    ];
+    statutoryExecutionArtifacts = [
+      {
+        instrument_id: "PH-EXEC-101",
+        instrument_title: "CPA Binder Election & Statutory Substantiation Summary",
+        controlling_statute: offer.statutory_authority,
+        filing_deadline_rule: "Attach Contemporaneously Prior to Statutory Filing / Closing Cutoff",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `SUBSTANTIATION RECORD (${stateCode}): Pursuant to ${offer.statutory_authority}, modeled transaction/income basis of ${fmtUsd(baseAmount)} (${capitalBand}) for ${toolSlug} is documented for CPA workpaper review under IRC Section 6662 substantial authority standards.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "PH-EXEC-102",
+        instrument_title: "Statutory Election, Placed-in-Service & Safe-Harbor Filing Checklist",
+        controlling_statute: "Treas. Reg. 1.1031(k)-1, IRC Section 179(c) & Section 6654(d)",
+        filing_deadline_rule: "Before Constructive Receipt / Dec 31 Placed-in-Service / Quarterly Dates",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `EXECUTION CHECKLIST (${stateCode}): (1) Lock QI exchange agreement or placed-in-service asset log before statutory cutoff; (2) Reconcile Form 4562 / Form 8824 / Form 8995 line items against general ledger; (3) Schedule quarterly safe-harbor tax remittances to avoid IRC Section 6654 penalties.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "PH-EXEC-103",
+        instrument_title: "State Conformity & Audit Retention Protocol",
+        controlling_statute: "IRC Section 6662 & State Revenue Code Conformity Rules",
+        filing_deadline_rule: "Retain 3 to 6 Years Post-Filing",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `AUDIT RETENTION (${stateCode}): Retain this calculation workpaper, underlying invoices/closing statements, and CPA sign-off for the applicable federal (3-year) and state (4-to-6-year) statutory assessment period.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+    ];
+"""
+    elif prop_clean == "gainhelm":
+        tenant_compute_js = """
+    const blsHourly = 121.67;
+    const headcount = Math.round(extractEdgeNumericParam(inputs, outputs, ["headcount", "employee", "staff"], 75, 5, 10000));
+    const estEngHours = Math.round(Math.max(80, Math.min(600, headcount * 2.4)));
+    const optEngHours = Math.round(estEngHours * 0.30);
+    const laborSavings = Math.round((estEngHours - optEngHours) * blsHourly * 100) / 100;
+    const autoSavings = Math.round(Math.min(baseAmount * 0.42, Math.max(baseAmount * 0.25, laborSavings)) * 100) / 100;
+    const netOptimized = Math.max(10000, Math.round((baseAmount - autoSavings) * 100) / 100);
+    const reuseCredit = Math.round(baseAmount * 0.22 * 100) / 100;
+    const fwLabel = (fwMeta && fwMeta.l100Title) || "Baseline Accredited Audit & Readiness Scope";
+
+    kpis = [
+      { label: "Modeled Audit Scope", value: fmtUsd(baseAmount) },
+      { label: "GRC Automation Savings", value: fmtUsd(autoSavings) },
+      { label: "Optimized Audit Budget", value: fmtUsd(netOptimized) },
+      { label: "Eng. Hours Reclaimed (@$121.67)", value: `${estEngHours - optEngHours} hrs` },
+    ];
+    reconciliationSchedule = [
+      { line_code: "GH-100", line_item: fwLabel, authority: offer.statutory_authority, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(netOptimized), delta_impact: `-${fmtUsd(autoSavings)} Automation Savings` },
+      { line_code: "GH-200", line_item: `Internal Security Engineering Labor (${headcount} Staff @ $121.67/hr BLS SOC 15-1212)`, authority: (fwMeta && fwMeta.l200Auth) || "BLS OEWS SOC 15-1212 & AICPA AT-C 205", baseline_value: `${estEngHours} hrs (${fmtUsd(estEngHours * blsHourly)})`, optimized_value: `${optEngHours} hrs (${fmtUsd(optEngHours * blsHourly)})`, delta_impact: `-${estEngHours - optEngHours} hrs Saved` },
+      { line_code: "GH-300", line_item: (fwMeta && fwMeta.l300Title) || "Regulatory Enforcement & Contract Delay Exposure", authority: (fwMeta && fwMeta.l300Auth) || "32 CFR Part 170 / 45 CFR 160.404 / SEC Item 1.05", baseline_value: fmtUsd(baseAmount * 3.5), optimized_value: fmtUsd(baseAmount * 0.5), delta_impact: "Continuous Evidence Monitoring" },
+      { line_code: "GH-400", line_item: (fwMeta && fwMeta.l400Title) || "Year-2 Cross-Framework Control Reuse Credit", authority: (fwMeta && fwMeta.l400Auth) || "ISO/IEC 27006-1:2024 & AICPA Common Criteria", baseline_value: fmtUsd(baseAmount * 0.78), optimized_value: fmtUsd(Math.max(9500, baseAmount * 0.78 - reuseCredit)), delta_impact: `-${fmtUsd(reuseCredit)} Overlap Credit` },
+    ];
+    const scopeScales = [
+      [0.60, "Lean Enclave (0.6x Scope)"],
+      [0.80, "Focused Core (0.8x Scope)"],
+      [1.00, "Modeled Baseline (1.0x Scope)"],
+      [1.30, "Expanded Multi-Criteria (1.3x Scope)"],
+      [1.60, "Multi-Entity Enterprise (1.6x Scope)"],
+    ];
+    sensitivityMatrix = scopeScales.map(([sc, lbl]) => {
+      const scCost = Math.round(baseAmount * sc);
+      const scSav = Math.round(autoSavings * sc);
+      const scStaff = Math.max(10, Math.round(headcount * sc));
+      return {
+        scenario_label: `${lbl} (~${scStaff} Staff)`,
+        modeled_principal: fmtUsd(scCost),
+        effective_rate: `${fmtUsd(scCost - scSav)} Optimized`,
+        estimated_net_benefit: `-${fmtUsd(scSav)} Net Savings`,
+      };
+    });
+    const phaseWeights = [
+      ["Days 1-30: Scope & Gap Freeze", 0.14, "Lock boundary, asset inventory & baseline controls"],
+      ["Days 31-60: Control Engineering", 0.22, "Remediate priority control gaps & IAM/logging"],
+      ["Days 61-90: Evidence Automation", 0.18, "Connect continuous GRC monitors & policy sign-off"],
+      ["Days 91-120: Readiness / Stage 1", 0.16, "Execute internal audit / pre-assessment walkthrough"],
+      ["Days 121-150: Observation & Closeout", 0.15, "Close open remediation items & sample testing"],
+      ["Days 151-180: Final Assessment", 0.15, "Complete independent accredited final assessment"],
+    ];
+    periodSchedule = phaseWeights.map(([pLbl, wt, note]) => ({
+      period: pLbl,
+      metric_a: fmtUsd(baseAmount * wt),
+      metric_b: fmtUsd(netOptimized * wt),
+      metric_c: `${Math.round(optEngHours * wt)} eng hrs`,
+      metric_d: `-${fmtUsd(autoSavings * wt)}`,
+      note,
+    }));
+    const fwTrendList = fwMeta && Array.isArray(fwMeta.trends) ? fwMeta.trends : [];
+    statutoryTrendTimeseries = [
+      {
+        series_id: "fw_assessment_fee_idx",
+        metric_label: (fwTrendList[0] && fwTrendList[0].metric_name) || "Accredited Compliance Assessment Fee Benchmark",
+        statutory_citation: (fwTrendList[0] && fwTrendList[0].authority_source) || offer.statutory_authority,
+        unit: "USD",
+        points: { "2024": Math.round(baseAmount * 0.84), "2025": Math.round(baseAmount * 0.92), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.09), "2030": Math.round(baseAmount * 1.18) },
+      },
+      {
+        series_id: "bls_infosec_wage_15_1212",
+        metric_label: (fwTrendList[1] && fwTrendList[1].metric_name) || "InfoSec Analyst Loaded Hourly Wage (BLS OEWS 15-1212)",
+        statutory_citation: (fwTrendList[1] && fwTrendList[1].authority_source) || "BLS OEWS 15-1212",
+        unit: "USD/HR",
+        points: { "2024": 112.4, "2025": 117.1, "2026": 121.67, "2028": 131.1, "2030": 141.5 },
+      },
+      {
+        series_id: "fw_regulatory_exposure_idx",
+        metric_label: (fwTrendList[2] && fwTrendList[2].metric_name) || "Regulatory Enforcement & Remediation Exposure Index",
+        statutory_citation: (fwTrendList[2] && fwTrendList[2].authority_source) || offer.statutory_authority,
+        unit: "USD",
+        points: { "2024": Math.round(baseAmount * 2.8), "2025": Math.round(baseAmount * 3.1), "2026": Math.round(baseAmount * 3.5), "2028": Math.round(baseAmount * 3.85), "2030": Math.round(baseAmount * 4.2) },
+      },
+    ];
+    methodologyNotes = [
+      `Engineering labor valued at the signed BLS OEWS 15-1212 mean loaded rate of $121.67/hr ($120,360 median annual wage) scaled to ${headcount} staff.`,
+      "Audit scoping figures are deterministic budgeting models for CISO/CFO planning and do not constitute formal third-party attestation, regulatory certification, or legal advice.",
+    ];
+    statutoryExecutionArtifacts = [
+      {
+        instrument_id: "GH-EXEC-101",
+        instrument_title: (fwMeta && fwMeta.exec101Title) || "CISO / CFO Audit Scope Boundary Declaration",
+        controlling_statute: offer.statutory_authority,
+        filing_deadline_rule: "Day 30 Scope Lock",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `SCOPE DECLARATION (${stateCode}): Modeled compliance boundary for ${toolSlug} (${headcount} staff) establishes unautomated baseline of ${fmtUsd(baseAmount)} and GRC-optimized budget of ${fmtUsd(netOptimized)} under ${offer.statutory_authority}.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "GH-EXEC-102",
+        instrument_title: (fwMeta && fwMeta.exec102Title) || "180-Day Readiness & POA&M Closeout Checklist",
+        controlling_statute: (fwMeta && fwMeta.exec102Auth) || "32 CFR Part 170.21 & ISO/IEC 27006-1:2024",
+        filing_deadline_rule: "Day 30 / Day 90 / Day 180 Milestones",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `READINESS CHECKLIST: ${(fwMeta && fwMeta.exec102Body) || "Day 1-30: Lock SSP & scope; Day 31-90: Automate continuous evidence; Day 91-180: Close POA&M items and complete CPA/C3PAO assessment."}`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "GH-EXEC-103",
+        instrument_title: (fwMeta && fwMeta.exec103Title) || "Multi-Framework Reuse & Recognized Security Practices Memo",
+        controlling_statute: (fwMeta && fwMeta.exec103Auth) || "42 U.S.C. 17941 & 45 CFR 160.404",
+        filing_deadline_rule: "12-Month Continuous Evidence Lookback",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `GOVERNANCE MEMO (${stateCode}): Documented continuous control monitoring over 12 preceding months substantiates ${fmtUsd(reuseCredit)} in multi-framework control overlap and reduces enforcement exposure.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+    ];
+"""
+    else:
+        tenant_compute_js = """
+    const stLien = stateSpec || { cite: `${stateCode} Statutory Mechanics Lien & Miller Act`, prelim: "20-45 Days", record: "90 Days", enforce: "90-365 Days" };
+    const emrVal = extractEdgeNumericParam(inputs, outputs, ["emr", "mod_rate", "experience"], 1.0, 0.5, 2.5);
+    const retainagePct = extractEdgeNumericParam(inputs, outputs, ["retainage"], 10, 0, 20);
+    const stdBondPrem = Math.round(baseAmount * 0.025 * 100) / 100;
+    const prefBondPrem = Math.round(baseAmount * 0.0115 * 100) / 100;
+    const premSavings = Math.max(250, Math.round((stdBondPrem - prefBondPrem) * 100) / 100);
+    const retainageHoldback = Math.round(baseAmount * (retainagePct / 100) * 100) / 100;
+
+    kpis = [
+      { label: "Modeled Contract / Bond Sum", value: fmtUsd(baseAmount) },
+      { label: "Preferred vs Standard Bond Savings", value: fmtUsd(premSavings) },
+      { label: `Protected ${retainagePct}% Retainage`, value: fmtUsd(retainageHoldback) },
+      { label: `${stateCode} Lien Recording Window`, value: stLien.record },
+    ];
+    reconciliationSchedule = [
+      { line_code: "LB-100", line_item: `Modeled Contract / Bond Penal Sum (${stateCode})`, authority: offer.statutory_authority, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `100% Penal / Lien Basis (${stateCode})` },
+      { line_code: "LB-200", line_item: `Surety Tier & NCCI EMR Variance (Modeled EMR: ${emrVal.toFixed(2)})`, authority: "SAA Sliding-Scale Tariff & NCCI Experience Rating Plan", baseline_value: `${fmtUsd(stdBondPrem)} (2.50% Std)`, optimized_value: `${fmtUsd(prefBondPrem)} (1.15% Pref)`, delta_impact: `-${fmtUsd(premSavings)} Savings` },
+      { line_code: "LB-300", line_item: `Statutory ${retainagePct}% Retainage & Mechanics Lien Protection (${stateCode})`, authority: stLien.cite, baseline_value: `${fmtUsd(retainageHoldback)} Unsecured`, optimized_value: `${fmtUsd(retainageHoldback)} Protected`, delta_impact: `Prelim: ${stLien.prelim}` },
+      { line_code: "LB-400", line_item: "Davis-Bacon Fringe Credit & NCCI Overtime Exclusion (1/3 OT)", authority: "29 CFR 5.5(a)(1) & NCCI Basic Manual Rule 2-C-2", baseline_value: fmtUsd(baseAmount * 0.082 * emrVal), optimized_value: fmtUsd(baseAmount * 0.054 * Math.min(emrVal, 1.0)), delta_impact: "Audit-Defensible Payroll Credit" },
+    ];
+    const lbTiers = [
+      ["Tier 1: Preferred Surety (740+ FICO / 0.75 EMR)", 0.0085, 0.75],
+      ["Tier 2: Strong Commercial (700-739 / 0.85 EMR)", 0.0115, 0.85],
+      ["Tier 3: Standard Market (670-699 / 1.00 EMR)", 0.0185, 1.00],
+      ["Tier 4: Sub-Standard (620-669 / 1.15 EMR)", 0.0250, 1.15],
+      ["Tier 5: SBA 13 CFR 115 Guarantee (1.35 EMR)", 0.0310, 1.35],
+    ];
+    sensitivityMatrix = lbTiers.map(([lbl, rate, tierEmr]) => {
+      const prem = Math.round(baseAmount * rate * 100) / 100;
+      const deltaVsStd = Math.round((stdBondPrem - prem) * 100) / 100;
+      return {
+        scenario_label: lbl,
+        modeled_principal: fmtUsd(baseAmount),
+        effective_rate: `${fmtPct(rate * 100)} Bond (${fmtUsd(prem)}) | ${tierEmr.toFixed(2)} EMR`,
+        estimated_net_benefit: `${deltaVsStd >= 0 ? "+" : ""}${fmtUsd(deltaVsStd)} vs Standard 2.50%`,
+      };
+    });
+    periodSchedule = [
+      { period: "Milestone 1: Preliminary Notice", metric_a: stLien.prelim, metric_b: fmtUsd(baseAmount), metric_c: stateCode, metric_d: "Mandatory Preservation", note: stLien.cite },
+      { period: "Milestone 2: Weekly WH-347 Payroll", metric_a: "7 Days Post-Payroll", metric_b: "29 CFR 5.5", metric_c: "Fringe Credit Log", metric_d: "1/3 OT WC Exclusion", note: "Submit signed Statement of Compliance" },
+      { period: "Milestone 3: Progress Waiver", metric_a: "Each Pay App", metric_b: "Conditional Only", metric_c: fmtUsd(retainageHoldback) + " Reserved", metric_d: "AIA G702/G703", note: "Never sign unconditional waiver before funds clear" },
+      { period: "Milestone 4: Miller Act 90-Day Notice", metric_a: "90 Days Last Work", metric_b: "40 U.S.C. 3133", metric_c: "Certified Mail", metric_d: fmtUsd(baseAmount), note: "Applies to 2nd-tier subs/suppliers on federal work" },
+      { period: "Milestone 5: Mechanics Lien Recording", metric_a: stLien.record, metric_b: "County Recorder", metric_c: stateCode, metric_d: fmtUsd(retainageHoldback), note: "Verify Notice of Completion shortening rules" },
+      { period: "Milestone 6: Foreclosure / Bond Suit", metric_a: stLien.enforce, metric_b: "Statutory Cutoff", metric_c: stateCode, metric_d: "100% Claim Principal", note: "File enforcement action before statutory expiration" },
+    ];
+    statutoryTrendTimeseries = [
+      { series_id: "saa_bond_rate", metric_label: "SAA Class B Surety Bond Rate per $1,000", statutory_citation: "SAA Manual & 40 U.S.C. 3131", unit: "USD/$1k", points: { "2024": 14.5, "2025": 14.2, "2026": 13.85, "2028": 13.4, "2030": 13.1 } },
+      { series_id: "ncci_split_point", metric_label: "NCCI Experience Rating Split-Point Cap", statutory_citation: "NCCI Experience Rating Plan", unit: "USD", points: { "2024": 18500, "2025": 19000, "2026": 19500, "2028": 21000, "2030": 22500 } },
+      { series_id: "sba_sbg_ceiling", metric_label: "SBA Surety Bond Guarantee Contract Ceiling", statutory_citation: "13 CFR 115.12(e)", unit: "USD", points: { "2024": 6500000, "2025": 9000000, "2026": 9000000, "2028": 10000000, "2030": 12000000 } },
+    ];
+    methodologyNotes = [
+      `State mechanics lien windows mapped to ${stateCode} (${stLien.cite}): Preliminary Notice ${stLien.prelim}; Recording ${stLien.record}; Enforcement ${stLien.enforce}.`,
+      "Surety premiums and NCCI EMR variances are deterministic contractor underwriting models and do not constitute legal advice or binding surety carrier quotes.",
+    ];
+    statutoryExecutionArtifacts = [
+      {
+        instrument_id: "LB-EXEC-101",
+        instrument_title: `${stateCode} Preliminary Notice & Conditional Progress Waiver Clause`,
+        controlling_statute: stLien.cite,
+        filing_deadline_rule: `Prelim: ${stLien.prelim} | Recording: ${stLien.record}`,
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `CONDITIONAL WAIVER (${stateCode} - ${stLien.cite}): Effective only upon actual bank clearance of payment for modeled claim ${fmtUsd(baseAmount)}. Statutory retainage of ${fmtUsd(retainageHoldback)} and unapproved change orders remain expressly reserved.`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "LB-EXEC-102",
+        instrument_title: "Miller Act (40 U.S.C. 3133) Payment Bond Notice & Underwriting Checklist",
+        controlling_statute: "40 U.S.C. 3131-3133, FAR 28.102 & 13 CFR Part 115",
+        filing_deadline_rule: `90-Day Notice / ${stLien.enforce} Enforcement Cutoff`,
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `PAYMENT BOND NOTICE (${stateCode}): Serve certified written notice of unpaid sum (${fmtUsd(baseAmount)}) within 90 days of last furnishing under 40 U.S.C. 3133(b)(2). Target preferred surety tier (${fmtUsd(prefBondPrem)}) vs standard tariff (${fmtUsd(stdBondPrem)}).`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+      {
+        instrument_id: "LB-EXEC-103",
+        instrument_title: "DOL Form WH-347 Compliance & NCCI Overtime Exclusion Checklist",
+        controlling_statute: "29 CFR 5.5(a)(3)(ii) & NCCI Basic Manual Rule 2-C-2",
+        filing_deadline_rule: "Within 7 Calendar Days After Payroll Payment Date",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `WH-347 & NCCI AUDIT (${stateCode}): Certify full prevailing wage and bona fide fringe disbursement under 29 CFR 5.5(a)(3)(ii). Segregate overtime premium pay (1/3 of 1.5x OT) before applying NCCI class rate and EMR (${emrVal.toFixed(2)}).`
+          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+      },
+    ];
+"""
+
+    datapack_cycle_js = (
+        'vertical: (fwMeta && fwMeta.vertical) || "soc2_grc_automation", '
+        'framework_key: (fwMeta && fwMeta.frameworkKey) || "soc2", '
+        'compliance_cycle_year: "2026", '
+        'framework_jurisdiction: (fwMeta && fwMeta.jurisdiction) || stateCode,'
+        if prop_clean == "gainhelm"
+        else 'effective_tax_year: "2026",'
+    )
+
+    js_engine = f"""
+const CANONICAL_OFFER_CATALOG = {catalog_json};
+const CANONICAL_SKU_ALIASES = {aliases_json};
+const CANONICAL_QUICK_SKU = "{quick_sku}";
+const CANONICAL_DEFAULT_FULL_SKU = "{default_full_sku}";
+const CANONICAL_PARTNER_SLOT_SKU = "{partner_sku}";
+const CANONICAL_BRAND_NAME = "{brand_name}";
+
+function normalizeEdgeSku(rawSku) {{
+  const clean = String(rawSku || "").trim().toLowerCase();
+  if (!clean) return "";
+  return CANONICAL_SKU_ALIASES[clean] || clean;
+}}
+
+function getCanonicalEdgeOffer(rawSku, fallbackSku = CANONICAL_DEFAULT_FULL_SKU) {{
+  const norm = normalizeEdgeSku(rawSku);
+  if (norm && CANONICAL_OFFER_CATALOG[norm]) {{
+    const o = CANONICAL_OFFER_CATALOG[norm];
+    return {{ ...o, deliverables: Array.isArray(o.deliverables) ? [...o.deliverables] : [] }};
+  }}
+  const fb = normalizeEdgeSku(fallbackSku) || CANONICAL_DEFAULT_FULL_SKU;
+  const o = CANONICAL_OFFER_CATALOG[fb] || Object.values(CANONICAL_OFFER_CATALOG)[0];
+  return {{ ...o, deliverables: Array.isArray(o.deliverables) ? [...o.deliverables] : [] }};
+}}
+
+function generateUniqueEdgeLeadId(propId = "{prop_clean}") {{
+  let uid = "";
+  try {{
+    if (typeof crypto !== "undefined" && crypto && typeof crypto.randomUUID === "function") {{
+      uid = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    }}
+  }} catch (_) {{}}
+  if (!uid) {{
+    uid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }}
+  return `lead_${{propId}}_${{uid}}`;
+}}
+
+function resolveCheckoutLeadId(rawLeadId, propId = "{prop_clean}") {{
+  const clean = String(rawLeadId || "").trim();
+  if (!clean || clean.endsWith("_direct")) {{
+    return generateUniqueEdgeLeadId(propId);
+  }}
+  return clean;
+}}
+
+function buildCompactMetadataJson(obj, maxLen = 480) {{
+  if (!obj || typeof obj !== "object") return "";
+  const entries = Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "");
+  if (!entries.length) return "";
+  const compact = {{}};
+  for (const [k, v] of entries) {{
+    const next = {{ ...compact, [String(k).slice(0, 48)]: typeof v === "number" ? v : String(v).slice(0, 80) }};
+    if (JSON.stringify(next).length > maxLen) break;
+    compact[String(k).slice(0, 48)] = next[String(k).slice(0, 48)];
+  }}
+  const raw = JSON.stringify(compact);
+  return raw === "{{}}" ? "" : raw.slice(0, maxLen);
+}}
+
+async function persistPreCheckoutLeadRecord(env, record, offer, toolSlug, isSynth = false) {{
+  if (!record || !record.lead_id) return record;
+  const effInputs =
+    (record.scenario_inputs && typeof record.scenario_inputs === "object" && Object.keys(record.scenario_inputs).length > 0)
+      ? record.scenario_inputs
+      : ((record.calculator_inputs && typeof record.calculator_inputs === "object") ? record.calculator_inputs : {{}});
+  const effOutputs =
+    (record.scenario_outputs && typeof record.scenario_outputs === "object" && Object.keys(record.scenario_outputs).length > 0)
+      ? record.scenario_outputs
+      : ((record.calculator_outputs && typeof record.calculator_outputs === "object") ? record.calculator_outputs : {{}});
+  const preRec = {{
+    ...record,
+    property_id: "{prop_clean}",
+    tool_slug: toolSlug || record.tool_slug || "",
+    offer_sku: (offer && (offer.sku || offer.offerSku)) || record.offer_sku || "",
+    offer_title: (offer && (offer.title || offer.offerTitle)) || record.offer_title || "",
+    offer_price_usd: Number((offer && (offer.price_usd !== undefined ? offer.price_usd : offer.offerPriceUsd)) || record.offer_price_usd || 0),
+    scenario_inputs: effInputs,
+    calculator_inputs: effInputs,
+    scenario_outputs: effOutputs,
+    calculator_outputs: effOutputs,
+    lifecycle_stage: record.settled ? record.lifecycle_stage : "checkout_initiated",
+    captured_at: record.captured_at || record.created_at || new Date().toISOString(),
+  }};
+  const mem = getMemoryBuffer();
+  let updatedMem = false;
+  for (let i = 0; i < mem.length; i++) {{
+    if (mem[i] && mem[i].lead_id === preRec.lead_id) {{
+      mem[i] = preRec;
+      updatedMem = true;
+      break;
+    }}
+  }}
+  if (!updatedMem) {{
+    mem.unshift(preRec);
+  }}
+  if (!isSynth) {{
+    const kv = getLeadsKv(env);
+    if (kv && typeof kv.put === "function") {{
+      try {{
+        await kv.put(preRec.lead_id, JSON.stringify(preRec), {{
+          expirationTtl: 60 * 60 * 24 * 30,
+          metadata: buildEdgeLeadKvMetadata(preRec),
+        }});
+      }} catch (_) {{}}
+    }}
+  }}
+  return preRec;
+}}
+
+function parseMetadataJsonSafe(raw) {{
+  if (!raw) return {{}};
+  if (typeof raw === "object") return raw;
+  try {{
+    const p = JSON.parse(String(raw));
+    return p && typeof p === "object" ? p : {{}};
+  }} catch (_) {{
+    return {{}};
+  }}
+}}
+
+function mergePaymentMetadataInputs(baseRec, payment) {{
+  const recInputs = (baseRec && (baseRec.scenario_inputs || baseRec.calculator_inputs)) || {{}};
+  const recOutputs = (baseRec && (baseRec.scenario_outputs || baseRec.calculator_outputs)) || {{}};
+  const payInputs = parseMetadataJsonSafe(payment && payment.inputs_json);
+  const payOutputs = parseMetadataJsonSafe(payment && payment.outputs_json);
+  const mergedInputs = Object.keys(recInputs).length > 0 ? recInputs : payInputs;
+  const mergedOutputs = Object.keys(recOutputs).length > 0 ? recOutputs : payOutputs;
+  return {{ mergedInputs, mergedOutputs }};
+}}
+
+function resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, fallbackOffer, fmt = "json") {{
+  const paidCents = Number((payment && payment.amount_total_cents) || 0);
+  const metaSku = normalizeEdgeSku((payment && payment.offer_sku) || "");
+  const requestedSku = normalizeEdgeSku(reqSku || "");
+  const quickOffer = getCanonicalEdgeOffer(CANONICAL_QUICK_SKU);
+  const partnerOffer = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+  const fullDefault = getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU);
+
+  let paidSku = metaSku && CANONICAL_OFFER_CATALOG[metaSku] ? metaSku : "";
+  if (!paidSku) {{
+    if (paidCents > 0 && paidCents <= quickOffer.price_cents) {{
+      paidSku = quickOffer.sku;
+    }} else if (paidCents >= partnerOffer.price_cents && requestedSku === partnerOffer.sku) {{
+      paidSku = partnerOffer.sku;
+    }} else if (fallbackOffer && (fallbackOffer.sku || fallbackOffer.offerSku)) {{
+      const fbNorm = normalizeEdgeSku(fallbackOffer.sku || fallbackOffer.offerSku);
+      const fbOffer = CANONICAL_OFFER_CATALOG[fbNorm];
+      if (fbOffer && (paidCents <= 0 || paidCents >= fbOffer.price_cents)) {{
+        paidSku = fbOffer.sku;
+      }} else {{
+        paidSku = fullDefault.sku;
+      }}
+    }} else {{
+      paidSku = fullDefault.sku;
+    }}
+  }}
+
+  let effectiveOffer = getCanonicalEdgeOffer(paidSku);
+  if (paidCents > 0 && paidCents < effectiveOffer.price_cents) {{
+    if (paidCents >= quickOffer.price_cents) {{
+      effectiveOffer = quickOffer;
+    }} else {{
+      return {{ allowed: false, reason: "paid_amount_insufficient_for_tier", paidOffer: quickOffer, paidSku: quickOffer.sku }};
+    }}
+  }}
+
+  const paidTier = String(effectiveOffer.tier_kind || "full").toLowerCase();
+  const fmtClean = String(fmt || "json").toLowerCase();
+
+  if (paidTier === "quick") {{
+    if (fmtClean === "datapack" || fmtClean === "datapack_json") {{
+      return {{ allowed: false, reason: "datapack_requires_full_tier_checkout", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
+    }}
+    if (requestedSku && requestedSku !== effectiveOffer.sku) {{
+      const reqOffer = CANONICAL_OFFER_CATALOG[requestedSku];
+      const reqTier = reqOffer ? String(reqOffer.tier_kind || "full").toLowerCase() : "full";
+      if (reqTier !== "quick") {{
+        return {{ allowed: false, reason: "tier_escalation_requires_full_checkout", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
+      }}
+    }}
+  }}
+  if (paidTier === "full" && requestedSku === partnerOffer.sku) {{
+    return {{ allowed: false, reason: "partner_slot_requires_partner_checkout", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
+  }}
+
+  return {{ allowed: true, reason: "", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
+}}
+
+function extractEdgeNumericParam(inputs, outputs, keySubstrings, fallbackVal, minVal = -Infinity, maxVal = Infinity) {{
+  const sources = [inputs, outputs];
+  for (const src of sources) {{
+    if (!src || typeof src !== "object") continue;
+    for (const [k, v] of Object.entries(src)) {{
+      const kl = String(k || "").toLowerCase();
+      if (!keySubstrings.some((sub) => kl.includes(sub))) continue;
+      const cleaned = Number(String(v === undefined || v === null ? "" : v).replace(/[$,%\\s,]/g, ""));
+      if (Number.isFinite(cleaned) && cleaned >= minVal && cleaned <= maxVal) {{
+        return cleaned;
+      }}
+    }}
+  }}
+  return fallbackVal;
+}}
+
+function csvEscapeCell(val) {{
+  return '"' + String(val === undefined || val === null ? "" : val).replace(/"/g, '""').replace(/[\\r\\n]+/g, " ") + '"';
+}}
+
+function buildCanonicalWorkpaperDeliverable(params) {{
+  const {{
+    propertyId,
+    record,
+    offer,
+    mode = "paid_toolkit",
+    sessionId = "",
+    stateSpec = null,
+    fwMeta = null,
+    actionUrlBuilder = null,
+  }} = params;
+
+  const isPaidMode = mode === "paid_toolkit";
+  const tierKind = String((offer && offer.tier_kind) || "full").toLowerCase();
+  const isQuickTier = tierKind === "quick";
+  const isPartnerSlot = tierKind === "partner_slot";
+  const isFullPaid = isPaidMode && tierKind === "full";
+  const leadId = String((record && record.lead_id) || "lead_" + propertyId + "_session");
+  const toolSlug = String((record && record.tool_slug) || (offer && offer.default_slug) || "general");
+  const stateCode = String((record && record.state) || (fwMeta && fwMeta.jurisdiction) || "{default_state}").toUpperCase();
+  const email = String((record && record.email) || "{default_buyer_label}");
+  const inputs = (record && (record.scenario_inputs || record.calculator_inputs) && typeof (record.scenario_inputs || record.calculator_inputs) === "object")
+    ? (record.scenario_inputs || record.calculator_inputs)
+    : {{}};
+  const outputs = (record && (record.scenario_outputs || record.calculator_outputs) && typeof (record.scenario_outputs || record.calculator_outputs) === "object")
+    ? (record.scenario_outputs || record.calculator_outputs)
+    : {{}};
+
+  const defaultAmt = {default_amt};
+  const rawAmt = Number((record && record.calculated_amount) || 0);
+  const inputDerivedAmt = extractEdgeNumericParam(
+    inputs,
+    outputs,
+    ["amount", "balance", "principal", "cost", "price", "income", "agi", "contract", "payroll", "budget", "sale"],
+    0,
+    100,
+    1000000000
+  );
+  const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : (inputDerivedAmt > 0 ? inputDerivedAmt : defaultAmt);
+  const capitalBand = String((record && record.capital_band) || (typeof deriveCapitalBand === "function" ? deriveCapitalBand(baseAmount) : "standard"));
+  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
+  const fmtPct = (n) => Number(n || 0).toFixed(2) + "%";
+
+  let reconciliationSchedule = [];
+  let sensitivityMatrix = [];
+  let periodSchedule = [];
+  let statutoryTrendTimeseries = [];
+  let statutoryExecutionArtifacts = [];
+  let methodologyNotes = [];
+  let kpis = [];
+
+{tenant_compute_js}
+
+  const offerSku = String((offer && (offer.sku || offer.offerSku)) || CANONICAL_DEFAULT_FULL_SKU);
+  const offerTitle = String((offer && (offer.title || offer.offerTitle)) || (CANONICAL_BRAND_NAME + " Workpaper"));
+  const offerPriceUsd = Number((offer && (offer.price_usd !== undefined ? offer.price_usd : offer.offerPriceUsd)) || 29);
+  const offerAuth = String((offer && (offer.statutory_authority || offer.statutoryAuthority)) || "");
+  const offerDeliverables = Array.isArray(offer && offer.deliverables) ? offer.deliverables : [];
+
+  const verifiedSessionId = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
+  const buildUrl = (flagName, extraParams = {{}}) => {{
+    if (typeof actionUrlBuilder === "function") {{
+      return actionUrlBuilder(flagName, extraParams);
+    }}
+    const qs = new URLSearchParams({{
+      [flagName]: "1",
+      lead_id: leadId,
+      sku: extraParams.sku || offerSku,
+      tool_slug: toolSlug,
+      amount: String(baseAmount),
+      state: stateCode,
+    }});
+    if (flagName === "fulfill" && verifiedSessionId) {{
+      qs.set("session_id", verifiedSessionId);
+    }}
+    const compactInp = buildCompactMetadataJson(inputs, 480);
+    if (compactInp) qs.set("inputs_json", compactInp);
+    if (extraParams.redirect) qs.set("redirect", "1");
+    return `/api/lead-capture?${{qs.toString()}}`;
+  }};
+
+  const fulfillmentUrl = buildUrl("fulfill");
+  const playbookUrl = buildUrl("playbook");
+  const playbookCsvUrl = `${{playbookUrl}}&format=csv`;
+  const playbookDatapackUrl = `${{playbookUrl}}&format=datapack`;
+  const csvFulfillmentUrl = `${{fulfillmentUrl}}&format=csv`;
+  const datapackUrl = `${{fulfillmentUrl}}&format=datapack`;
+  const checkoutUrl = buildUrl("checkout");
+  const quickOffer = getCanonicalEdgeOffer(CANONICAL_QUICK_SKU);
+  const rawFullOffer = getCanonicalEdgeOffer(
+    isQuickTier || isPartnerSlot
+      ? ((fwMeta && fwMeta.offerSku) || CANONICAL_DEFAULT_FULL_SKU)
+      : offerSku
+  );
+  const fullOffer = (fwMeta && fwMeta.title && (isQuickTier || !isPaidMode))
+    ? {{ ...rawFullOffer, title: fwMeta.title }}
+    : rawFullOffer;
+  const quickCheckoutUrl = buildUrl("checkout", {{ sku: quickOffer.sku, redirect: true }});
+  const fullCheckoutUrl = buildUrl("checkout", {{ sku: fullOffer.sku, redirect: true }});
+
+  const estFeeUsd = Math.round((offerPriceUsd * 0.029 + 0.3) * 100) / 100;
+  const netSettledUsd = Math.max(0, Math.round((offerPriceUsd - estFeeUsd) * 100) / 100);
+  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
+
+  // Security: NEVER include merchant_account_id or settlement_bank in public/paid JSON or HTML.
+  const settlementAttribution = {{
+    settlement_id: (record && record.settlement_id) || `stl_${{propertyId}}_${{leadId}}`,
+    settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
+    settlement_rail: (record && record.checkout_mode) || "stripe_direct_settlement_rail",
+    property_id: propertyId,
+    tool_slug: toolSlug,
+    lead_id: leadId,
+    offer_sku: offerSku,
+    offer_title: offerTitle,
+    tier_kind: tierKind,
+    gross_amount_usd: offerPriceUsd,
+    estimated_processor_fee_usd: estFeeUsd,
+    net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
+    attributed_revenue_usd: isPaidSettled ? offerPriceUsd : 0,
+    datapack_delivered: Boolean(isPaidSettled),
+    datapack_pack_id: `dp_${{leadId}}`,
+    datapack_url: datapackUrl,
+    calculated_amount: baseAmount,
+    capital_band: capitalBand,
+    state: stateCode,
+    settled_at: (record && record.settled_at) || new Date().toISOString(),
+  }};
+
+  const customParameterLedger = {{
+    calculated_amount: baseAmount,
+    capital_band: capitalBand,
+    state: stateCode,
+    inputs,
+    outputs,
+  }};
+
+  const csvLines = ["Section,Line Code,Line Item,Authority / Detail,Baseline Value,Optimized / Modeled Value,Delta / Notes"];
+  for (const [k, v] of Object.entries(inputs)) {{
+    csvLines.push(["INPUT", `IN-${{k}}`, `Calculator Input: ${{k}}`, "Buyer Calculator State", String(v), String(v), "Captured"].map(csvEscapeCell).join(","));
+  }}
+  for (const [k, v] of Object.entries(outputs)) {{
+    csvLines.push(["OUTPUT", `OUT-${{k}}`, `Calculator Output: ${{k}}`, "Live Engine Output", String(v), String(v), "Computed"].map(csvEscapeCell).join(","));
+  }}
+  for (const r of reconciliationSchedule) {{
+    csvLines.push(["RECONCILIATION", r.line_code, r.line_item, r.authority, r.baseline_value, r.optimized_value, r.delta_impact].map(csvEscapeCell).join(","));
+  }}
+  if (!isQuickTier && !isPartnerSlot) {{
+    for (let i = 0; i < sensitivityMatrix.length; i++) {{
+      const s = sensitivityMatrix[i];
+      csvLines.push(["SENSITIVITY", `SENS-${{i + 1}}`, s.scenario_label, "Dynamic 5-Point Sensitivity", s.modeled_principal, s.effective_rate, s.estimated_net_benefit].map(csvEscapeCell).join(","));
+    }}
+    for (let i = 0; i < periodSchedule.length; i++) {{
+      const p = periodSchedule[i];
+      csvLines.push(["SCHEDULE", `PER-${{i + 1}}`, p.period, p.note, p.metric_a, `${{p.metric_b}} | ${{p.metric_c}}`, p.metric_d].map(csvEscapeCell).join(","));
+    }}
+    for (const ts of statutoryTrendTimeseries) {{
+      const v24 = ts.points && ts.points["2024"] !== undefined ? ts.points["2024"] : "";
+      const v26 = ts.points && ts.points["2026"] !== undefined ? ts.points["2026"] : "";
+      const v30 = ts.points && ts.points["2030"] !== undefined ? ts.points["2030"] : "";
+      csvLines.push(["BENCHMARK", `TREND-${{ts.series_id}}`, ts.metric_label, ts.statutory_citation, `2024: ${{v24}} ${{ts.unit}}`, `2026: ${{v26}} ${{ts.unit}}`, `2030 Proj: ${{v30}} ${{ts.unit}}`].map(csvEscapeCell).join(","));
+    }}
+  }}
+  const csvContent = csvLines.join("\\n") + "\\n";
+
+  const regulatorName = String((fwMeta && (fwMeta.regulatorName || fwMeta.regulator_name)) || (offer && offer.regulator_name) || "").trim();
+  const statutoryDataPack = {{
+    pack_id: `dp_${{leadId}}`,
+    schema_version: "pseo-datapack-v1",
+    property_id: propertyId,
+    tool_slug: toolSlug,
+    {datapack_cycle_js}
+    ...(regulatorName ? {{ regulator_name: regulatorName }} : {{}}),
+    offer_sku: offerSku,
+    offer_title: offerTitle,
+    tier_kind: tierKind,
+    statutory_authority: offerAuth,
+    buyer_inputs: inputs,
+    buyer_outputs: outputs,
+    modeled_scenario_summary: customParameterLedger,
+    reconciliation_schedule: reconciliationSchedule,
+    ...(isFullPaid || isPartnerSlot ? {{ sensitivity_matrix: sensitivityMatrix, period_schedule: periodSchedule, longitudinal_benchmark_series: statutoryTrendTimeseries }} : {{ sensitivity_matrix: isPaidMode ? sensitivityMatrix.slice(0, 1) : [], period_schedule: [], longitudinal_benchmark_series: [] }}),
+    statutory_execution_artifacts: isFullPaid ? statutoryExecutionArtifacts : [],
+    methodology_notes: methodologyNotes,
+    settlement_attribution: settlementAttribution,
+  }};
+
+  // Build 100% XSS-escaped HTML Workpaper
+  const esc = escapeEdgeHtml;
+  const badgeText = isPaidMode
+    ? (isPartnerSlot ? "VERIFIED PARTNER SLOT CONFIRMATION" : (isQuickTier ? "PAID QUICK WORKSHEET" : "PAID FULL WORKPAPER & DATA PACK"))
+    : "FREE ON-SCREEN SAMPLE PREVIEW";
+  const badgeStyle = isPaidMode
+    ? "background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;"
+    : "background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;";
+
+  const inputRowsHtml = [
+    ...Object.entries(inputs).map(([k, v]) => `<tr><td>Input: <code>${{esc(k)}}</code></td><td><strong>${{esc(v)}}</strong></td></tr>`),
+    ...Object.entries(outputs).map(([k, v]) => `<tr><td>Live Output: <code>${{esc(k)}}</code></td><td><strong>${{esc(v)}}</strong></td></tr>`),
+  ].join("");
+
+  const kpiHtml = kpis.map((k) => `<div class="kpi"><div class="kpi-label">${{esc(k.label)}}</div><div class="kpi-val">${{esc(k.value)}}</div></div>`).join("");
+  const visibleRecon = isPaidMode ? reconciliationSchedule : reconciliationSchedule.slice(0, 2);
+  const reconRowsHtml = visibleRecon.map((r) =>
+    `<tr><td><strong>${{esc(r.line_code)}}</strong></td><td>${{esc(r.line_item)}}<div class="sub">${{esc(r.authority)}}</div></td><td>${{esc(r.baseline_value)}}</td><td><strong>${{esc(r.optimized_value)}}</strong></td><td>${{esc(r.delta_impact)}}</td></tr>`
+  ).join("");
+  const methodHtml = methodologyNotes.map((n) => `<li>${{esc(n)}}</li>`).join("");
+
+  let actionsHtml = "";
+  let bodySectionsHtml = "";
+
+  if (isPartnerSlot) {{
+    actionsHtml = isPaidMode
+      ? `<button class="btn btn-primary" onclick="window.print()">Print / Save Confirmation PDF</button>` +
+        `<a class="btn btn-secondary" href="${{esc(datapackUrl)}}">Download Confirmation Manifest (JSON)</a>`
+      : `<a class="btn btn-primary" href="${{esc(buildUrl("checkout", {{ sku: offerSku, redirect: true }}))}}">Reserve Verified Calculator Partner Slot ($${{esc(offerPriceUsd)}})</a>`;
+    bodySectionsHtml =
+      `<h2>Verified Calculator Partner Slot Onboarding ${{isPaidMode ? "Confirmation" : "Summary"}} ($${{esc(offerPriceUsd)}})</h2>` +
+      `<table><thead><tr><th>Attribute</th><th>Verified Specification</th></tr></thead><tbody>` +
+      `<tr><td>Partner Property</td><td><strong>${{esc(CANONICAL_BRAND_NAME)}}</strong></td></tr>` +
+      `<tr><td>Placement Fee</td><td><strong>$${{esc(offerPriceUsd)}}</strong></td></tr>` +
+      `<tr><td>Target Calculator Route</td><td><code>${{esc(toolSlug)}}</code></td></tr>` +
+      `<tr><td>Settlement Status</td><td><strong>${{esc(settlementAttribution.settlement_status)}}</strong></td></tr>` +
+      `<tr><td>Included Deliverables</td><td><ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul></td></tr>` +
+      `</tbody></table>`;
+  }} else if (!isPaidMode) {{
+    actionsHtml =
+      `<a class="btn btn-primary" href="${{esc(quickCheckoutUrl)}}">Unlock Quick Worksheet ($${{esc(quickOffer.price_usd)}})</a>` +
+      `<a class="btn btn-secondary" href="${{esc(fullCheckoutUrl)}}">Unlock Full Workpaper &amp; Data Pack ($${{esc(fullOffer.price_usd)}})</a>`;
+    bodySectionsHtml =
+      `<div class="banner"><strong>On-Screen Sample Preview:</strong> Showing headline summary rows below. Full computed schedules, CSV export, JSON Data Pack, and unredacted execution checklists unlock after checkout.</div>` +
+      `<div class="kpi-grid">${{kpiHtml}}</div>` +
+      (inputRowsHtml ? `<h2>Your Captured Calculator Inputs &amp; Outputs</h2><table><thead><tr><th>Parameter</th><th>Value</th></tr></thead><tbody>${{inputRowsHtml}}</tbody></table>` : "") +
+      `<h2>1. Headline Reconciliation Preview (2 of ${{reconciliationSchedule.length}} Rows)</h2>` +
+      `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline</th><th>Optimized</th><th>Impact</th></tr></thead><tbody>${{reconRowsHtml}}</tbody></table>` +
+      `<div class="locked-box"><h3>Locked Paid Deliverables</h3><ul>` +
+      `<li><strong>Quick Worksheet ($${{esc(quickOffer.price_usd)}}):</strong> Full print/PDF executive workpaper with all ${{reconciliationSchedule.length}} reconciliation rows, methodology notes, and Summary CSV download.</li>` +
+      `<li><strong>Full Workpaper &amp; Data Pack ($${{esc(fullOffer.price_usd)}}):</strong> Everything in Quick plus dynamic 5-point sensitivity table, ${{periodSchedule.length}}-row multi-period schedule, full multi-row CSV export, structured JSON Data Pack, and unredacted execution checklist clauses.</li>` +
+      `</ul></div>`;
+  }} else if (isQuickTier) {{
+    actionsHtml =
+      `<button class="btn btn-primary" onclick="window.print()">Print / Save Worksheet as PDF</button>` +
+      `<a class="btn btn-secondary" href="${{esc(csvFulfillmentUrl)}}">Download Summary CSV</a>`;
+    bodySectionsHtml =
+      `<div class="kpi-grid">${{kpiHtml}}</div>` +
+      (inputRowsHtml ? `<h2>Your Calculator Inputs &amp; Live Outputs</h2><table><thead><tr><th>Parameter</th><th>Recorded Value</th></tr></thead><tbody>${{inputRowsHtml}}</tbody></table>` : "") +
+      `<h2>1. Executive Reconciliation Schedule</h2>` +
+      `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline</th><th>Optimized</th><th>Impact</th></tr></thead><tbody>${{reconRowsHtml}}</tbody></table>` +
+      `<h2>2. Formula Methodology &amp; Compliance Notes</h2><ul>${{methodHtml}}</ul>` +
+      `<h2>3. Included Quick Worksheet Deliverables</h2><ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul>` +
+      `<div class="banner"><strong>Need Multi-Period Schedules &amp; JSON Data Pack?</strong> Upgrade to the <a href="${{esc(fullCheckoutUrl)}}">${{esc(fullOffer.title)}} ($${{esc(fullOffer.price_usd)}})</a> for the 5-point sensitivity matrix, ${{periodSchedule.length}}-row dynamic schedule, full CSV, JSON Data Pack, and unredacted execution checklist.</div>`;
+  }} else {{
+    actionsHtml =
+      `<button class="btn btn-primary" onclick="window.print()">Print / Save Full Workpaper as PDF</button>` +
+      `<a class="btn btn-secondary" href="${{esc(csvFulfillmentUrl)}}">Download Full CSV Schedule</a>` +
+      `<a class="btn btn-secondary" href="${{esc(datapackUrl)}}">Download Data Pack (JSON)</a>`;
+    const sensHtml = sensitivityMatrix.map((s) =>
+      `<tr><td>${{esc(s.scenario_label)}}</td><td>${{esc(s.modeled_principal)}}</td><td>${{esc(s.effective_rate)}}</td><td><strong>${{esc(s.estimated_net_benefit)}}</strong></td></tr>`
+    ).join("");
+    const periodHtml = periodSchedule.map((p) =>
+      `<tr><td><strong>${{esc(p.period)}}</strong></td><td>${{esc(p.metric_a)}}</td><td>${{esc(p.metric_b)}}</td><td>${{esc(p.metric_c)}}</td><td><strong>${{esc(p.metric_d)}}</strong></td><td>${{esc(p.note)}}</td></tr>`
+    ).join("");
+    const trendHtml = statutoryTrendTimeseries.map((ts) =>
+      `<tr><td><strong>${{esc(ts.metric_label)}}</strong><div class="sub">${{esc(ts.statutory_citation)}}</div></td><td>${{esc(ts.points["2024"])}} ${{esc(ts.unit)}}</td><td>${{esc(ts.points["2025"])}} ${{esc(ts.unit)}}</td><td><strong>${{esc(ts.points["2026"])}} ${{esc(ts.unit)}}</strong></td><td>${{esc(ts.points["2028"])}} ${{esc(ts.unit)}}</td><td>${{esc(ts.points["2030"])}} ${{esc(ts.unit)}}</td></tr>`
+    ).join("");
+    const execHtml = statutoryExecutionArtifacts.map((a) =>
+      `<tr><td><strong>${{esc(a.instrument_id)}}</strong><div class="sub">${{esc(a.execution_status)}}</div></td><td><strong>${{esc(a.instrument_title)}}</strong><div class="sub">${{esc(a.controlling_statute)}} | ${{esc(a.filing_deadline_rule)}}</div></td><td style="font-family:monospace;font-size:12px;">${{esc(a.statutory_clause_body)}}</td></tr>`
+    ).join("");
+    bodySectionsHtml =
+      `<div class="kpi-grid">${{kpiHtml}}</div>` +
+      (inputRowsHtml ? `<h2>Your Calculator Inputs &amp; Live Outputs</h2><table><thead><tr><th>Parameter</th><th>Recorded Value</th></tr></thead><tbody>${{inputRowsHtml}}</tbody></table>` : "") +
+      `<h2>1. Full Statutory Reconciliation Schedule</h2>` +
+      `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline</th><th>Optimized</th><th>Impact</th></tr></thead><tbody>${{reconRowsHtml}}</tbody></table>` +
+      `<h2>2. Dynamic 5-Point Sensitivity Table (Derived From Your Inputs)</h2>` +
+      `<table><thead><tr><th>Scenario Case</th><th>Modeled Basis</th><th>Rate / Metric</th><th>Net Variance</th></tr></thead><tbody>${{sensHtml}}</tbody></table>` +
+      `<h2>3. Multi-Period Computed Schedule (${{periodSchedule.length}} Rows)</h2>` +
+      `<table><thead><tr><th>Period / Milestone</th><th>Baseline / Start</th><th>Primary Allocation</th><th>Secondary Metric</th><th>Ending / Net</th><th>Compliance Note</th></tr></thead><tbody>${{periodHtml}}</tbody></table>` +
+      `<h2>4. Multi-Year Statutory Benchmarks (2024 to 2030)</h2>` +
+      `<table><thead><tr><th>Metric &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${{trendHtml}}</tbody></table>` +
+      `<h2>5. Methodology, Deliverables &amp; Unredacted Execution Checklist</h2>` +
+      `<ul>${{methodHtml}}</ul>` +
+      `<ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul>` +
+      `<table><thead><tr><th>Clause ID</th><th>Checklist Item &amp; Cutoff</th><th>Execution Clause</th></tr></thead><tbody>${{execHtml}}</tbody></table>`;
+  }}
+
+  const htmlReport = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${{esc(offerTitle)}} (${{esc(leadId)}})</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; background: #f8fafc; margin: 0; padding: 24px 16px; line-height: 1.55; }}
+  .sheet {{ max-width: 960px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 28px; box-shadow: 0 8px 20px rgba(15,23,42,0.05); }}
+  .badge {{ display: inline-block; ${{badgeStyle}} font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em; }}
+  h1 {{ font-size: 22px; margin: 10px 0 6px; color: #0f172a; }}
+  h2 {{ font-size: 16px; margin: 22px 0 10px; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; }}
+  .meta {{ font-size: 12.5px; color: #475569; margin-bottom: 16px; }}
+  .sub {{ font-size: 11px; color: #64748b; }}
+  .kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 16px 0; }}
+  .kpi {{ background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
+  .kpi-label {{ font-size: 11px; color: #475569; text-transform: uppercase; font-weight: 600; }}
+  .kpi-val {{ font-size: 19px; font-weight: 800; color: #0f172a; margin-top: 4px; }}
+  table {{ width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 13px; }}
+  th, td {{ border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: top; }}
+  th {{ background: #f1f5f9; font-weight: 700; color: #1e293b; }}
+  .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }}
+  .btn {{ display: inline-block; padding: 9px 15px; border-radius: 8px; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; border: none; }}
+  .btn-primary {{ background: #0f766e; color: #ffffff; }}
+  .btn-secondary {{ background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }}
+  .banner {{ background: #fffbeb; border: 1px solid #f59e0b; color: #92400e; padding: 12px 14px; border-radius: 8px; font-size: 13px; margin: 14px 0; }}
+  .locked-box {{ background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px; padding: 14px 16px; margin: 16px 0; font-size: 13px; }}
+  @media print {{ body {{ background: #fff; padding: 0; }} .sheet {{ border: none; box-shadow: none; }} .actions, .banner {{ display: none !important; }} }}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <span class="badge">${{esc(badgeText)}}</span>
+  <h1>${{esc(offerTitle)}}</h1>
+  <div class="meta">
+    Reference: <strong>${{esc(leadId)}}</strong> | Prepared For: <strong>${{esc(email)}}</strong> | Tool: <code>${{esc(toolSlug)}}</code> | Jurisdiction: <strong>${{esc(stateCode)}}</strong> | Authority: <strong>${{esc(offerAuth)}}</strong>
+  </div>
+  <div class="actions">${{actionsHtml}}</div>
+  ${{bodySectionsHtml}}
+  <p class="meta" style="margin-top:20px;">Generated deterministically by ${{esc(CANONICAL_BRAND_NAME)}} (${{esc(new Date().toISOString())}}).</p>
+</div>
+</body>
+</html>`;
+
+  return {{
+    workpaper_id: `wp_${{leadId}}`,
+    lead_id: leadId,
+    property_id: propertyId,
+    tool_slug: toolSlug,
+    ...(fwMeta && fwMeta.vertical ? {{ vertical: fwMeta.vertical, framework_key: fwMeta.frameworkKey }} : {{}}),
+    ...(regulatorName ? {{ regulator_name: regulatorName }} : {{}}),
+    state: stateCode,
+    mode,
+    tier_kind: tierKind,
+    offer_sku: offerSku,
+    offer_title: offerTitle,
+    offer_price_usd: offerPriceUsd,
+    statutory_authority: offerAuth,
+    deliverables: offerDeliverables,
+    calculated_amount: baseAmount,
+    modeled_amount_usd: baseAmount,
+    capital_band: capitalBand,
+    scenario_inputs: inputs,
+    scenario_outputs: outputs,
+    custom_parameter_ledger: customParameterLedger,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    period_schedule: periodSchedule,
+    statutory_trend_timeseries: statutoryTrendTimeseries,
+    statutory_execution_artifacts: statutoryExecutionArtifacts,
+    statutory_data_pack: statutoryDataPack,
+    settlement_attribution: settlementAttribution,
+    fulfillment_url: fulfillmentUrl,
+    playbook_url: playbookUrl,
+    playbook_csv_url: playbookCsvUrl,
+    playbook_datapack_url: playbookDatapackUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
+    checkout_url: checkoutUrl,
+    csv_content: csvContent,
+    html_report: htmlReport,
+  }};
+}}
+"""
+    assert_no_forbidden_dashes(js_engine, f"_render_edge_pricing_and_workpaper_engine_js({prop_clean})")
+    return js_engine
+
+
 def _render_edge_paid_fulfillment_and_exports_js(property_id: str) -> str:
     """
     Renders the tenant-isolated paid-fulfillment email helper and ES-module exports
@@ -5578,7 +6777,7 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
       message_id: null,
     }};
   }}
-  if (sid && record && record.paid_fulfillment_email_session_id === sid) {{
+  if (sid && record && record.paid_fulfillment_email_session_id === sid && record.paid_fulfillment_email_dispatched === true) {{
     return {{
       dispatched: false,
       status: "already_dispatched_for_session",
@@ -5593,7 +6792,7 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
       const lockRaw = await kv.get("stripe_session_fulfilled:" + sid);
       if (lockRaw) {{
         const lockObj = typeof lockRaw === "string" ? JSON.parse(lockRaw) : lockRaw;
-        if (lockObj && (lockObj.email_dispatched === true || lockObj.email_attempted === true)) {{
+        if (lockObj && (lockObj.email_dispatched === true || lockObj.email_sent === true)) {{
           return {{
             dispatched: false,
             status: "already_dispatched_kv_lock",
@@ -5750,8 +6949,8 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
   if (record && record.lead_id) {{
     const updatedRecord = {{
       ...record,
-      paid_fulfillment_email_session_id: sid || record.paid_fulfillment_email_session_id || null,
-      paid_fulfillment_email_dispatched: Boolean(dispatched),
+      paid_fulfillment_email_session_id: dispatched ? (sid || record.paid_fulfillment_email_session_id || null) : (record.paid_fulfillment_email_session_id || null),
+      paid_fulfillment_email_dispatched: Boolean(dispatched || record.paid_fulfillment_email_dispatched),
       paid_fulfillment_email_status: status,
       paid_fulfillment_email_sent_at: dispatched ? new Date().toISOString() : (record.paid_fulfillment_email_sent_at || null),
     }};
@@ -5774,6 +6973,20 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
           metadata: buildEdgeLeadKvMetadata(updatedRecord),
         }});
       }} catch (_) {{}}
+      if (dispatched && sid) {{
+        try {{
+          await kv.put("stripe_session_fulfilled:" + sid, JSON.stringify({{
+            session_id: sid,
+            lead_id: updatedRecord.lead_id,
+            property_id: "{prop_clean}",
+            settled_at: updatedRecord.settled_at || new Date().toISOString(),
+            email_sent: true,
+            email_dispatched: true,
+            email_status: status,
+            fulfilled_at: new Date().toISOString(),
+          }}), {{ expirationTtl: 60 * 60 * 24 * 90 }});
+        }} catch (_) {{}}
+      }}
     }}
   }}
 
@@ -5821,8 +7034,8 @@ def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
         lead_js = """/**
  * Cloudflare Pages Function: LienBond Commercial Surety, Workers' Comp & Mechanics Lien Intake (/api/lead-capture)
  * Captures TCPA-consented contractor quote requests ($25,000+ surety bond / contract threshold)
- * and statutory filing packet checkouts ($69 50-State Mechanics Lien & Waiver Packet, $59 Federal
- * Davis-Bacon WH-347 Certified Payroll Packet, $49 Surety Bond Underwriting & NCCI EMR Audit Kits),
+ * and statutory workpaper checkouts ($15 Quick Worksheet, $29 Full Workpaper & Data Pack,
+ * and $299 Verified Calculator Partner Slot),
  * keeps sub-threshold calculations frictionless, persists CPL records in LIENBOND_LEADS KV,
  * and routes to verified commercial surety, contractor insurance, and lien filing partners.
  * Zero AI slop. Zero em-dashes. Zero en-dashes.
@@ -5873,129 +7086,6 @@ function getStateLienSpec(stateCode) {
   };
 }
 
-const LIENBOND_TOOLKIT_OFFERS = {
-  lb_mechanics_lien_waiver_packet: {
-    sku: "lb_mechanics_lien_waiver_packet",
-    title: "LienBond 50-State Mechanics Lien, Preliminary Notice & Statutory Waiver Filing Packet",
-    price_usd: 69,
-    price_cents: 6900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "Cal. Civ. Code 8132-8414, Tex. Prop. Code Ch. 53, Fla. Stat. 713.06-713.20 & 40 U.S.C. 3131 (Miller Act)",
-    deliverables: [
-      "State-Specific Preliminary Notice, Notice of Intent & Claim of Lien Deadline Calendar (HTML/PDF)",
-      "4 Statutory Lien Waiver Instruments: Conditional/Unconditional Progress & Final Payment Waivers (HTML/PDF)",
-      "AIA G702 / G703 Pay-Application Retainage & Joint-Check Reconciliation Schedule (CSV)",
-      "Signed Statutory Mechanics Lien & Payment Bond Claim Execution Manifest (JSON)",
-    ],
-  },
-  lb_surety_bond_underwriting_kit: {
-    sku: "lb_surety_bond_underwriting_kit",
-    title: "LienBond Contractor Surety Bond & Indemnity Underwriting Workpaper Kit",
-    price_usd: 49,
-    price_cents: 4900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "40 U.S.C. 3131 (Miller Act), FAR 28.102, 13 CFR Part 115 (SBA Surety Bond Guarantee) & SAA Class Rates",
-    deliverables: [
-      "Tiered Surety Bond Premium & Working Capital Underwriting Reconciliation Workpaper (HTML/PDF)",
-      "WIP Over/Under-Billing & 10x Net Working Capital Aggregate Backlog Schedule (CSV)",
-      "General Agreement of Indemnity (GAI) Spousal & Corporate Asset Protection Checklist (HTML/PDF)",
-      "Signed Surety Underwriting Submission & Broker Rate-Match Manifest (JSON)",
-    ],
-  },
-  lb_wh347_certified_payroll_packet: {
-    sku: "lb_wh347_certified_payroll_packet",
-    title: "LienBond Federal Davis-Bacon Form WH-347 & Prevailing Wage Fringe Packet",
-    price_usd: 59,
-    price_cents: 5900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "40 U.S.C. 3141-3148 (Davis-Bacon Act), 29 CFR 5.5(a)(3)(ii) & 40 U.S.C. 3702 (CWHSSA)",
-    deliverables: [
-      "DOL Form WH-347 Weekly Certified Payroll & Bona Fide Fringe Credit Reconciliation Workpaper (HTML/PDF)",
-      "29 CFR 5.5 Statement of Compliance & Subcontractor Flow-Down Audit Schedule (CSV)",
-      "Regular-Rate vs Prevailing Base-Rate Overtime (1.5x) & Fringe Offset Matrix (CSV/HTML)",
-      "Signed Davis-Bacon Prevailing Wage & Fringe Substantiation Manifest (JSON)",
-    ],
-  },
-  lb_workers_comp_emr_audit_kit: {
-    sku: "lb_workers_comp_emr_audit_kit",
-    title: "LienBond NCCI Workers' Comp Class Code & EMR Experience Modification Audit Kit",
-    price_usd: 49,
-    price_cents: 4900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "NCCI Basic Manual, NCCI Experience Rating Plan (ERP) & ISO CG 00 01 Commercial GL Standards",
-    deliverables: [
-      "NCCI Governing Class Code & Payroll Separation Audit Defense Workpaper (HTML/PDF)",
-      "3-Year Experience Modification Rate (EMR) Primary vs Excess Loss Sensitivity Schedule (CSV)",
-      "Overtime Premium Payroll Deduction (1/3 vs 1/2 Credit) & Subcontractor COI Audit Checklist (HTML/PDF)",
-      "Signed Workers' Comp Premium Audit & Experience Rating Verification Manifest (JSON)",
-    ],
-  },
-  lb_instant_lien_bond_worksheet_19: {
-    sku: "lb_instant_lien_bond_worksheet_19",
-    title: "LienBond Instant Surety Bond, Workers' Comp & Lien Deadline Worksheet (PDF/CSV)",
-    price_usd: 19,
-    price_cents: 1900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "40 U.S.C. 3131 (Miller Act), State Mechanics Lien Statutes, 29 CFR 5.5 & NCCI Manual",
-    deliverables: [
-      "Personalized Surety Premium, Workers' Comp Rate or State Lien Deadline Worksheet (Print-Ready HTML/PDF)",
-      "Retainage, Bond Capacity & Payroll Class Code Reconciliation Schedule (CSV)",
-      "State Preliminary Notice & Statutory Waiver Deadline Checklist (HTML/PDF)",
-      "Machine-Readable Contractor Compliance Scenario Pack (JSON)",
-    ],
-  },
-  lb_surety_lien_wh347_packet: {
-    sku: "lb_surety_lien_wh347_packet",
-    title: "LienBond 50-State Mechanics Lien, AIA A312 Surety & Davis-Bacon WH-347 Master Packet",
-    price_usd: 79,
-    price_cents: 7900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "40 U.S.C. 3131-3148 (Miller & Davis-Bacon Acts), 29 CFR 5.5, Cal. Civ. Code 8132-8414 & Tex. Prop. Code Ch. 53",
-    deliverables: [
-      "50-State Preliminary Notice, Notice of Intent & Statutory Lien Waiver Master Filing Packet (HTML/PDF)",
-      "AIA A312 Performance/Payment Bond & SBA 13 CFR Part 115 Surety Underwriting Workpaper (HTML/PDF)",
-      "DOL Form WH-347 Weekly Certified Payroll & Bona Fide Fringe Credit Reconciliation Schedule (CSV)",
-      "Signed Multi-Statute Construction Compliance & Retainage Protection Manifest (JSON)",
-    ],
-  },
-  lb_workers_comp_emr_audit_packet: {
-    sku: "lb_workers_comp_emr_audit_packet",
-    title: "LienBond NCCI Workers' Comp Class Code & EMR Audit Defense Packet",
-    price_usd: 49,
-    price_cents: 4900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "NCCI Basic Manual Rule 2-C-2, NCCI Experience Rating Plan (ERP) & ISO CG 00 01 Commercial GL Standards",
-    deliverables: [
-      "NCCI Governing Class Code & Payroll Separation Audit Defense Workpaper (HTML/PDF)",
-      "3-Year Experience Modification Rate (EMR) Primary vs Excess Loss Sensitivity Schedule (CSV)",
-      "Overtime Premium Payroll Deduction (1/3 vs 1/2 Credit) & Subcontractor COI Audit Checklist (HTML/PDF)",
-      "Signed Workers' Comp Premium Audit & Experience Rating Verification Manifest (JSON)",
-    ],
-  },
-  lb_verified_partner_slot: {
-    sku: "lb_verified_partner_slot",
-    title: "Verified Calculator Partner Slot",
-    price_usd: 299,
-    price_cents: 29900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
-    deliverables: [
-      "Verified Commercial Partner Desk Placement on Target Calculator Route",
-      "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
-      "Direct Calculator CTA & Partner Matrix Priority Slot",
-      "Monthly Partner Attribution & Conversion Reconciliation Digest",
-    ],
-  },
-};
-
 function getLeadsKv(env) {
   if (!env) return null;
   return env.LIENBOND_LEADS || env.LEADS_KV || env.LEADS || null;
@@ -6017,20 +7107,24 @@ function deriveCapitalBand(amount) {
 }
 
 function selectOfferForSlug(toolSlug, reqSku) {
-  if (reqSku && LIENBOND_TOOLKIT_OFFERS[reqSku]) {
-    return LIENBOND_TOOLKIT_OFFERS[reqSku];
+  const normSku = normalizeEdgeSku(reqSku);
+  if (normSku && CANONICAL_OFFER_CATALOG[normSku]) {
+    return getCanonicalEdgeOffer(normSku);
   }
   const s = String(toolSlug || "").toLowerCase();
-  if (s.includes("lien") || s.includes("waiver") || s.includes("retainage")) {
-    return LIENBOND_TOOLKIT_OFFERS.lb_mechanics_lien_waiver_packet;
+  if (s.includes("lien") || s.includes("waiver") || s.includes("retainage") || s.includes("preliminary-notice")) {
+    return getCanonicalEdgeOffer("lb_mechanics_lien_waiver_packet");
   }
   if (s.includes("prevailing-wage") || s.includes("davis-bacon") || s.includes("wh-347")) {
-    return LIENBOND_TOOLKIT_OFFERS.lb_wh347_certified_payroll_packet;
+    return getCanonicalEdgeOffer("lb_wh347_certified_payroll_packet");
   }
   if (s.includes("workers-comp") || s.includes("emr") || s.includes("general-liability")) {
-    return LIENBOND_TOOLKIT_OFFERS.lb_workers_comp_emr_audit_kit;
+    return getCanonicalEdgeOffer("lb_workers_comp_emr_audit_packet");
   }
-  return LIENBOND_TOOLKIT_OFFERS.lb_surety_bond_underwriting_kit;
+  if (s.includes("license-bond") || s.includes("surety-bond") || s.includes("bid-bond")) {
+    return getCanonicalEdgeOffer("lb_surety_bond_underwriting_kit");
+  }
+  return getCanonicalEdgeOffer("lb_surety_lien_wh347_packet");
 }
 
 function selectPartnerForSlug(toolSlug, reqPartner) {
@@ -6094,354 +7188,16 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
   };
 }
 
-function buildLienBondWorkpaperBundle(record, offer, mode = "paid_toolkit") {
-  const leadId = String((record && record.lead_id) || "lead_lienbond_direct");
-  const toolSlug = String((record && record.tool_slug) || "contractor-license-bond-cost-calculator-by-credit-score");
+function buildLienBondWorkpaperBundle(record, offer, mode = "paid_toolkit", sessionId = "") {
   const stateCode = String((record && record.state) || "CA").toUpperCase();
-  const baseAmount = Math.max(10000, Number((record && record.calculated_amount) || 125000));
-  const stateLien = getStateLienSpec(stateCode);
-  const stdBondPrem = Math.round(baseAmount * 0.025 * 100) / 100;
-  const prefBondPrem = Math.round(baseAmount * 0.0115 * 100) / 100;
-  const premSavings = Math.max(250, Math.round((stdBondPrem - prefBondPrem) * 100) / 100);
-  const retainageHoldback = Math.round(baseAmount * 0.1 * 100) / 100;
-  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const customInputs = (record && record.calculator_inputs && typeof record.calculator_inputs === "object") ? record.calculator_inputs : {};
-  const customOutputs = (record && record.calculator_outputs && typeof record.calculator_outputs === "object") ? record.calculator_outputs : {};
-
-  const reconciliationSchedule = [
-    {
-      line_code: "LB-100",
-      line_item: `Modeled Contract / Penal Bond Sum & Statutory Exposure (${stateCode})`,
-      authority: offer.statutory_authority,
-      baseline_value: fmtUsd(baseAmount),
-      optimized_value: fmtUsd(baseAmount),
-      delta_impact: `100% Penal / Lien Coverage (${stateCode})`,
-    },
-    {
-      line_code: "LB-200",
-      line_item: "Surety Underwriting Tier & Workers' Comp EMR Premium Variance",
-      authority: "SAA Class B Sliding-Scale Tariff & NCCI Experience Rating Plan",
-      baseline_value: `${fmtUsd(stdBondPrem)} (Standard 2.50% / 1.15 EMR)`,
-      optimized_value: `${fmtUsd(prefBondPrem)} (Preferred 1.15% / 0.85 EMR)`,
-      delta_impact: `-${fmtUsd(premSavings)} Direct Underwriting Savings`,
-    },
-    {
-      line_code: "LB-300",
-      line_item: `Statutory Retainage & Mechanics Lien Security (${stateCode})`,
-      authority: stateLien.cite,
-      baseline_value: `${fmtUsd(retainageHoldback)} Unsecured 10% Retainage`,
-      optimized_value: `${fmtUsd(retainageHoldback)} Secured via ${stateLien.prelim}`,
-      delta_impact: `${stateLien.record} Recording Window Protected`,
-    },
-    {
-      line_code: "LB-400",
-      line_item: "Bona Fide Fringe Credit & Overtime Premium Audit Deduction",
-      authority: "29 CFR 5.5(a)(1) & NCCI Basic Manual Rule 2-C-2",
-      baseline_value: `${fmtUsd(baseAmount * 0.082)} Unadjusted Payroll Tax/WC Burden`,
-      optimized_value: `${fmtUsd(baseAmount * 0.054)} Fringes & OT Premium Excluded`,
-      delta_impact: `-${fmtUsd(baseAmount * 0.028)} FICA / WC Audit Savings`,
-    },
-  ];
-  const sensitivityMatrix = [
-    {
-      scenario_label: "Preferred Treasury-Listed Surety & Sub-1.00 EMR Tier (720+ FICO)",
-      modeled_principal: fmtUsd(baseAmount),
-      effective_rate: "0.75% - 1.15% Bond / 0.85 EMR",
-      estimated_net_benefit: fmtUsd(premSavings * 1.25),
-    },
-    {
-      scenario_label: "Standard Commercial Market Tier (670-719 FICO / 1.00 Unity EMR)",
-      modeled_principal: fmtUsd(baseAmount),
-      effective_rate: "1.50% - 2.25% Bond / 1.00 EMR",
-      estimated_net_benefit: fmtUsd(premSavings),
-    },
-    {
-      scenario_label: "SBA 13 CFR Part 115 Prior-Approval Bond Guarantee / High-Risk Pool",
-      modeled_principal: fmtUsd(baseAmount * 1.25),
-      effective_rate: "2.50% - 3.60% + 0.60% SBA Fee",
-      estimated_net_benefit: `${fmtUsd(retainageHoldback)} Protected Receivable`,
-    },
-  ];
-  const statutoryTrendTimeseries = [
-    {
-      metric_name: "Surety Association of America (SAA) Class B Performance/Payment Bond Rate per $1,000",
-      authority_source: "SAA Manual & 40 U.S.C. 3131 Miller Act Thresholds",
-      y2024: "$14.50 / $1k",
-      y2025: "$14.20 / $1k",
-      y2026: "$13.85 / $1k",
-      y2028_proj: "$13.40 / $1k",
-      y2030_proj: "$13.10 / $1k",
-    },
-    {
-      metric_name: "NCCI Construction Split-Point Primary Loss Cap (Experience Rating Plan)",
-      authority_source: "NCCI Experience Rating Plan Manual (State-Specific Split Point)",
-      y2024: "$18,500",
-      y2025: "$19,000",
-      y2026: "$19,500",
-      y2028_proj: "$21,000",
-      y2030_proj: "$22,500",
-    },
-    {
-      metric_name: "SBA Surety Bond Guarantee (13 CFR Part 115) Statutory Contract Ceiling",
-      authority_source: "13 CFR 115.12(e) Federal & Public Works Bond Guarantee Limit",
-      y2024: "$6,500,000",
-      y2025: "$9,000,000",
-      y2026: "$9,000,000 ($14M Federal)",
-      y2028_proj: "$10,000,000",
-      y2030_proj: "$12,000,000",
-    },
-  ];
-  const fulfillQs = new URLSearchParams({
-    fulfill: "1",
-    lead_id: leadId,
-    sku: offer.sku,
-    tool_slug: toolSlug,
-    amount: String(baseAmount),
-    state: stateCode,
+  return buildCanonicalWorkpaperDeliverable({
+    propertyId: "lienbond",
+    record,
+    offer,
+    mode,
+    sessionId,
+    stateSpec: getStateLienSpec(stateCode),
   });
-  const playQs = new URLSearchParams({
-    playbook: "1",
-    lead_id: leadId,
-    sku: offer.sku,
-    tool_slug: toolSlug,
-    amount: String(baseAmount),
-    state: stateCode,
-  });
-  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
-  const playbookUrl = `/api/lead-capture?${playQs.toString()}`;
-  const playbookCsvUrl = `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = `${playbookUrl}&format=datapack`;
-  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
-  const activeCsvUrl = mode === "paid_toolkit" ? csvFulfillmentUrl : playbookCsvUrl;
-  const activeDatapackUrl = mode === "paid_toolkit" ? datapackUrl : playbookDatapackUrl;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}&state=${encodeURIComponent(stateCode)}`;
-  const grossPriceUsd = Number(offer.price_usd || 69);
-  const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
-  const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
-  const settlementAttribution = {
-    settlement_id: (record && record.settlement_id) || `stl_lienbond_${leadId}`,
-    settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
-    settlement_rail: (record && record.checkout_mode) || "stripe_direct_settlement_rail",
-    merchant_account_id: "acct_1T6fSTIq0ckFsf5j",
-    settlement_bank: "CHOICE BANK COMMERCIAL SETTLEMENT (****1395)",
-    property_id: "lienbond",
-    tool_slug: toolSlug,
-    lead_id: leadId,
-    offer_sku: offer.sku,
-    offer_title: offer.title,
-    gross_amount_usd: grossPriceUsd,
-    estimated_processor_fee_usd: estFeeUsd,
-    net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
-    attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: Boolean(isPaidSettled),
-    datapack_pack_id: `dp_${leadId}`,
-    datapack_url: datapackUrl,
-    calculated_amount: baseAmount,
-    state: stateCode,
-    settled_at: (record && record.settled_at) || new Date().toISOString(),
-  };
-  const isUnredactedPaid = mode === "paid_toolkit";
-  const statutoryExecutionArtifacts = [
-    {
-      instrument_id: "LB-EXEC-101",
-      instrument_title: `${stateCode} Statutory Preliminary Notice & Conditional Progress Lien Waiver Instrument`,
-      controlling_statute: stateLien.cite,
-      filing_deadline_rule: `Prelim: ${stateLien.prelim} | Lien Recording: ${stateLien.record}`,
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `CONDITIONAL WAIVER AND RELEASE ON PROGRESS PAYMENT (${stateCode} - ${stateLien.cite}): Upon receipt by the undersigned claimant of a check or ACH transfer in the sum of ${fmtUsd(baseAmount)} payable to Claimant, and when the check has been properly endorsed and has been paid by the bank on which it is drawn, this document becomes effective to release any mechanic's lien, stop payment notice, or payment bond right the claimant has on the job to the extent of the payment specified. Retention of ${fmtUsd(retainageHoldback)} and pending change orders are expressly reserved.`
-        : `STATUTORY WAIVER & PRELIM NOTICE PREVIEW (${stateCode} - ${stateLien.cite}): Modeled claim ${fmtUsd(baseAmount)} | Prelim window: ${stateLien.prelim}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "LB-EXEC-102",
-      instrument_title: "Miller Act (40 U.S.C. 3133) / Little Miller Act Payment Bond Claim & Surety Underwriting Schedule",
-      controlling_statute: "40 U.S.C. 3131-3133, FAR 28.102 & SBA 13 CFR Part 115",
-      filing_deadline_rule: `90-Day Bond Claim Notice Window / ${stateLien.enforce} Enforcement Action Cutoff`,
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `STATUTORY PAYMENT BOND NOTICE & SURETY SUBMISSION (${stateCode}): Pursuant to 40 U.S.C. 3133(b)(2) and ${stateLien.cite}, written notice of unpaid labor/materials totaling ${fmtUsd(baseAmount)} must be served via certified mail return-receipt requested within 90 days of last furnishing. Surety underwriting workpaper establishes preferred bond premium target of ${fmtUsd(prefBondPrem)} vs standard tariff ${fmtUsd(stdBondPrem)}.`
-        : `PAYMENT BOND & SURETY SCHEDULE PREVIEW (${stateCode}): 90-Day Miller Act Notice & ${fmtUsd(prefBondPrem)} preferred bond benchmark. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "LB-EXEC-103",
-      instrument_title: "DOL Form WH-347 Statement of Compliance & NCCI Overtime Payroll Exclusion Worksheet",
-      controlling_statute: "29 CFR 5.5(a)(3)(ii), 40 U.S.C. 3142 & NCCI Basic Manual Rule 2-C-2",
-      filing_deadline_rule: "Submit Signed WH-347 Within 7 Calendar Days After Regular Payment Date of Payroll Period",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `WH-347 STATEMENT OF COMPLIANCE & NCCI AUDIT SCHEDULE (${stateCode}): Pursuant to 29 CFR 5.5(a)(3)(ii), signatory certifies that all laborers and mechanics employed on the project have been paid the full weekly prevailing wages and bona fide fringe benefits under 40 U.S.C. 3142 without impermissible rebate. For NCCI Workers' Comp audit defense, deduct one-third (1/3) of 1.5x overtime payroll prior to applying governing class rate and EMR factor.`
-        : `WH-347 & NCCI AUDIT PREVIEW (${stateCode}): 7-Day Certified Payroll filing rule & NCCI 1/3 overtime deduction schedule. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-  ];
-  const statutoryDataPack = {
-    pack_id: `dp_${leadId}`,
-    schema_version: "pseo-datapack-v1",
-    property_id: "lienbond",
-    tool_slug: toolSlug,
-    offer_sku: offer.sku,
-    offer_title: offer.title,
-    statutory_authority: offer.statutory_authority,
-    regulator_name: "U.S. Treasury Circular 570, U.S. DOL Wage and Hour Division, NCCI & State Lien Statutes",
-    effective_tax_year: "2026",
-    modeled_scenario_summary: {
-      calculated_amount: baseAmount,
-      state: stateCode,
-      state_lien_statute: stateLien,
-      inputs: customInputs,
-      outputs: customOutputs,
-    },
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    longitudinal_benchmark_series: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    settlement_attribution: settlementAttribution,
-  };
-  const csvRows = [
-    "Line Code,Statutory Line Item,Authority,Baseline Value,Optimized Value,Delta Impact",
-    ...reconciliationSchedule.map(
-      (r) => `"${r.line_code}","${r.line_item.replace(/"/g, '""')}","${r.authority.replace(/"/g, '""')}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`
-    ),
-    ...sensitivityMatrix.map(
-      (s, i) => `"SENS-${i + 1}","${s.scenario_label.replace(/"/g, '""')}","Sensitivity Scenario","${s.modeled_principal}","${s.effective_rate}","${s.estimated_net_benefit}"`
-    ),
-  ];
-  const csvContent = csvRows.join("\\n") + "\\n";
-
-  const customParamRows = [
-    ...Object.entries(customInputs).map(([k, v]) => `<tr><td>Input: <code>${k}</code></td><td><strong>${String(v)}</strong></td></tr>`),
-    ...Object.entries(customOutputs).map(([k, v]) => `<tr><td>Output: <code>${k}</code></td><td><strong>${String(v)}</strong></td></tr>`),
-  ].join("");
-  const execArtifactsHtml = statutoryExecutionArtifacts.map(
-    (a) =>
-      `<tr><td><strong>${a.instrument_id}</strong><div style="font-size:11px;color:#64748b;">${a.execution_status}</div></td>` +
-      `<td><strong>${a.instrument_title}</strong><div style="font-size:11px;color:#475569;">${a.controlling_statute} | ${a.filing_deadline_rule}</div></td>` +
-      `<td style="font-family:monospace;font-size:12px;">${a.statutory_clause_body}</td></tr>`
-  ).join("");
-  const upgradeBannerHtml = isUnredactedPaid
-    ? ""
-    : `<div class="actions" style="background:#fffbeb;border:1px solid #f59e0b;padding:14px;border-radius:8px;justify-content:space-between;align-items:center;">` +
-      `<div style="font-size:13px;color:#92400e;"><strong>Preview Mode:</strong> Statutory execution clauses are redacted in the free playbook. Unlock the full unredacted statutory filing packet ($${offer.price_usd}).</div>` +
-      `<a class="btn btn-primary" href="${checkoutUrl}&redirect=1">Unlock Unredacted Filing Packet ($${offer.price_usd})</a></div>`;
-
-  const htmlReport = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${offer.title} - Statutory Execution Workpaper (${leadId})</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; background: #f8fafc; margin: 0; padding: 32px 16px; line-height: 1.55; }
-  .sheet { max-width: 960px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 32px; box-shadow: 0 10px 25px rgba(15,23,42,0.06); }
-  .badge { display: inline-block; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em; }
-  h1 { font-size: 24px; margin: 12px 0 6px; color: #0f172a; }
-  h2 { font-size: 17px; margin: 26px 0 10px; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
-  .meta { font-size: 13px; color: #475569; margin-bottom: 20px; }
-  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 20px 0; }
-  .kpi { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
-  .kpi-label { font-size: 12px; color: #475569; text-transform: uppercase; font-weight: 600; }
-  .kpi-val { font-size: 22px; font-weight: 800; color: #0f172a; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13.5px; }
-  th, td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: left; }
-  th { background: #f1f5f9; font-weight: 700; color: #1e293b; }
-  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-  .btn { display: inline-block; padding: 10px 16px; border-radius: 8px; font-weight: 700; font-size: 13.5px; text-decoration: none; cursor: pointer; border: none; }
-  .btn-primary { background: #0f766e; color: #ffffff; }
-  .btn-secondary { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-  @media print { body { background: #fff; padding: 0; } .sheet { border: none; box-shadow: none; } .actions { display: none; } }
-</style>
-</head>
-<body>
-<div class="sheet">
-  <span class="badge">${mode === "playbook" ? "Personalized Contractor Statutory Playbook" : "Verified Statutory Filing & Audit Packet"}</span>
-  <h1>${offer.title}</h1>
-  <div class="meta">
-    Workpaper Reference: <strong>${leadId}</strong> | Source Tool: <code>${toolSlug}</code> | Jurisdiction: <strong>${stateCode} (${stateLien.cite})</strong> | Controlling Authority: <strong>${offer.statutory_authority}</strong>
-  </div>
-  <div class="actions">
-    <button class="btn btn-primary" onclick="window.print()">Print / Save Packet as PDF</button>
-    <a class="btn btn-secondary" href="${activeCsvUrl}">Download CSV Reconciliation Schedule</a>
-    <a class="btn btn-secondary" href="${activeDatapackUrl}">Download Statutory Data Pack (JSON)</a>
-  </div>
-  ${upgradeBannerHtml}
-  <div class="kpi-grid">
-    <div class="kpi"><div class="kpi-label">Contract / Bond Exposure</div><div class="kpi-val">${fmtUsd(baseAmount)}</div></div>
-    <div class="kpi"><div class="kpi-label">Preferred Surety Savings</div><div class="kpi-val" style="color:#047857;">${fmtUsd(premSavings)}</div></div>
-    <div class="kpi"><div class="kpi-label">Protected 10% Retainage</div><div class="kpi-val">${fmtUsd(retainageHoldback)}</div></div>
-    <div class="kpi"><div class="kpi-label">State Recording Window</div><div class="kpi-val" style="font-size:15px;">${stateLien.record}</div></div>
-  </div>
-  <h2>1. Statutory Line-Item Reconciliation Schedule</h2>
-  <table>
-    <thead><tr><th>Code</th><th>Statutory Line Item</th><th>Authority</th><th>Baseline</th><th>Optimized</th><th>Delta Impact</th></tr></thead>
-    <tbody>
-      ${reconciliationSchedule.map((r) => `<tr><td><strong>${r.line_code}</strong></td><td>${r.line_item}</td><td>${r.authority}</td><td>${r.baseline_value}</td><td><strong>${r.optimized_value}</strong></td><td>${r.delta_impact}</td></tr>`).join("")}
-    </tbody>
-  </table>
-  <h2>2. Underwriting Tier & EMR Sensitivity Matrix</h2>
-  <table>
-    <thead><tr><th>Underwriting Tier</th><th>Modeled Bond / Contract Sum</th><th>Effective Rate / EMR Band</th><th>Estimated Net Benefit</th></tr></thead>
-    <tbody>
-      ${sensitivityMatrix.map((s) => `<tr><td>${s.scenario_label}</td><td>${s.modeled_principal}</td><td>${s.effective_rate}</td><td><strong>${s.estimated_net_benefit}</strong></td></tr>`).join("")}
-    </tbody>
-  </table>
-  <h2>3. Multi-Year Surety, NCCI & SBA Statutory Benchmarks (2024 to 2030)</h2>
-  <table>
-    <thead><tr><th>Benchmark Metric</th><th>Authority Source</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead>
-    <tbody>
-      ${statutoryTrendTimeseries.map((t) => `<tr><td><strong>${t.metric_name}</strong></td><td>${t.authority_source}</td><td>${t.y2024}</td><td>${t.y2025}</td><td><strong>${t.y2026}</strong></td><td>${t.y2028_proj}</td><td>${t.y2030_proj}</td></tr>`).join("")}
-    </tbody>
-  </table>
-  ${customParamRows ? `<h2>Custom Calculator Parameter Ledger</h2><table><thead><tr><th>Parameter</th><th>Recorded Value</th></tr></thead><tbody>${customParamRows}</tbody></table>` : ""}
-  <h2>4. Included Audit Deliverables & Verification Checklist</h2>
-  <ul>
-    ${offer.deliverables.map((d) => `<li>${d}</li>`).join("")}
-  </ul>
-  <h2>5. Statutory Execution Instruments & Filing Packet</h2>
-  <table>
-    <thead><tr><th>Instrument ID</th><th>Statutory Instrument & Deadline Rule</th><th>Execution Clause / Filing Text</th></tr></thead>
-    <tbody>${execArtifactsHtml}</tbody>
-  </table>
-  <p class="meta" style="margin-top:24px;">Generated deterministically by LienBond Commercial Surety & Construction Statutory Engine (${new Date().toISOString()}). Retain this workpaper alongside ${stateLien.cite}, 40 U.S.C. 3131-3133, 29 CFR 5.5, and NCCI Experience Rating Plan documentation.</p>
-</div>
-</body>
-</html>`;
-
-  return {
-    workpaper_id: `wp_${leadId}`,
-    lead_id: leadId,
-    property_id: "lienbond",
-    tool_slug: toolSlug,
-    state: stateCode,
-    offer_sku: offer.sku,
-    offer_title: offer.title,
-    offer_price_usd: offer.price_usd,
-    statutory_authority: offer.statutory_authority,
-    deliverables: offer.deliverables,
-    calculated_amount: baseAmount,
-    modeled_amount_usd: baseAmount,
-    estimated_underwriting_savings_usd: premSavings,
-    protected_retainage_usd: retainageHoldback,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    statutory_trend_timeseries: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    statutory_data_pack: statutoryDataPack,
-    settlement_attribution: settlementAttribution,
-    custom_parameter_ledger: {
-      inputs: customInputs,
-      outputs: customOutputs,
-    },
-    fulfillment_url: fulfillmentUrl,
-    playbook_url: playbookUrl,
-    playbook_csv_url: playbookCsvUrl,
-    playbook_datapack_url: playbookDatapackUrl,
-    csv_fulfillment_url: csvFulfillmentUrl,
-    datapack_url: datapackUrl,
-    checkout_url: checkoutUrl,
-    csv_content: csvContent,
-    html_report: htmlReport,
-  };
 }
 
 const EDGE_PROPERTY_ID = "lienbond";
@@ -6645,6 +7401,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     const meta = (data && data.metadata) || {};
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
+    out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.inputs_json = meta.inputs_json || null;
+    out.outputs_json = meta.outputs_json || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -6739,10 +7498,10 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
       : baseRec.state;
-  const resolvedSku =
-    payment.offer_sku && !baseRec.offer_sku
-      ? String(payment.offer_sku).trim().toLowerCase()
-      : baseRec.offer_sku;
+  const resolvedSku = payment.offer_sku
+    ? normalizeEdgeSku(payment.offer_sku)
+    : normalizeEdgeSku(baseRec.offer_sku || "");
+  const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
     (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
@@ -6768,6 +7527,8 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
+    ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
@@ -6817,7 +7578,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   return settledRecord;
 }
 
-function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 69) {
+function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 29) {
   const byCalc = {};
   for (const item of leads || []) {
     if (!item || typeof item !== "object") continue;
@@ -6905,7 +7666,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "line_items[0][price_data][currency]": offer.currency,
         "line_items[0][price_data][unit_amount]": String(offer.price_cents),
         "line_items[0][price_data][product_data][name]": offer.title,
-        "line_items[0][price_data][product_data][description]": `LienBond Construction Statutory Filing & Audit Packet (${offer.statutory_authority})`,
+        "line_items[0][price_data][product_data][description]": offer.description || `LienBond ${offer.title}`,
         "line_items[0][quantity]": "1",
         "branding_settings[display_name]": "LienBond",
         "payment_intent_data[statement_descriptor_suffix]": "LIENBOND",
@@ -6919,6 +7680,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 125000),
         "metadata[state]": String((bundle && bundle.state) || "CA"),
         "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+        ...(buildCompactMetadataJson(bundle && bundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(bundle.scenario_inputs, 480) } : {}),
+        ...(buildCompactMetadataJson(bundle && bundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(bundle.scenario_outputs, 480) } : {}),
       };
       if (!isPlaceholderCheckoutEmail(candidateEmail)) {
         paramsObj.customer_email = candidateEmail;
@@ -7309,18 +8072,31 @@ export async function onRequestGet(context) {
     modeParam === "playbook"
   ) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
-    const { record, offer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
+    const { record, offer: initialOffer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
+    let offer = initialOffer;
     let gatedRecord = record;
-    if (reqSku && gatedRecord) {
-      gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+    if (!isFulfill && reqSku && gatedRecord) {
+      gatedRecord = { ...gatedRecord, offer_sku: normalizeEdgeSku(reqSku) };
     }
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (!isFulfill && (fmt === "csv" || fmt === "datapack" || fmt === "datapack_json")) {
+      return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId);
+    }
+    let verifiedSid = "";
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, gatedRecord, payment, isSynth);
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialOffer, fmt);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      verifiedSid = String(payment.session_id || "");
+      offer = selectOfferForSlug((gatedRecord && gatedRecord.tool_slug) || rawToolSlug, tierGuard.paidSku);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
+      }
     }
-    const bundle = buildLienBondWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "playbook");
-    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    const bundle = buildLienBondWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "free_playbook", verifiedSid);
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
         status: 200,
@@ -7373,9 +8149,12 @@ export async function onRequestGet(context) {
   }
 
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
-    const { record, toolSlug, offer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
+    const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "lienbond");
+    const { record, toolSlug, offer } = await resolveLienBondGetContext(env, reqUrl, checkoutLeadId, rawToolSlug, reqSku, email);
+    record.lead_id = checkoutLeadId;
+    await persistPreCheckoutLeadRecord(env, record, offer, toolSlug, isSynth);
     const bundle = buildLienBondWorkpaperBundle(record, offer, "free_playbook");
-    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email || (record && record.email) || "", toolSlug, offer, isSynth, bundle);
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, checkoutLeadId, email || (record && record.email) || "", toolSlug, offer, isSynth, bundle);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -7402,7 +8181,7 @@ export async function onRequestGet(context) {
         synthetic_test: isSynth,
         status: stripeOffer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "lienbond",
-        lead_id: leadId,
+        lead_id: checkoutLeadId,
         tool_slug: toolSlug,
         ...stripeOffer,
       }),
@@ -7595,9 +8374,12 @@ export async function onRequestPost(context) {
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
       const effFulfillSku = reqPostSku || String((storedRecord && storedRecord.offer_sku) || "").trim().toLowerCase();
-      const effFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, effFulfillSku);
-      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
-      const ffBundle = buildLienBondWorkpaperBundle(settledRecord, effFulfillOffer, "paid_toolkit");
+      const initialFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, effFulfillSku);
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqPostSku, initialFulfillOffer, String(body.format || reqUrl.searchParams.get("format") || "json"));
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      const effFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, tierGuard.paidSku);
+      const settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      const ffBundle = buildLienBondWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, effFulfillOffer, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -7830,6 +8612,7 @@ export async function onRequestPost(context) {
 }
 """
         lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json("lienbond"))
+        lead_js = lead_js + _render_edge_pricing_and_workpaper_engine_js("lienbond")
         lead_js = lead_js + _render_edge_lead_abuse_guard_js("lienbond")
         lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js("lienbond")
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(lienbond)")
@@ -7839,7 +8622,7 @@ export async function onRequestPost(context) {
         lead_js = """/**
  * Cloudflare Pages Function: GainHelm Enterprise Cyber Compliance & Audit Quote Intake (/api/lead-capture)
  * Captures TCPA-consented CISO/CFO audit readiness quote requests ($25,000+ audit budget threshold)
- * and digital workpaper kit checkouts ($79 SOC 2/CMMC Workpapers, $49 ISO 27001/HIPAA Kit),
+ * and digital workpaper checkouts ($15 Quick Worksheet, $29 Full Workpaper & Data Pack, $299 Verified Partner Slot),
  * keeps sub-threshold calculations frictionless, persists CPL records in GAINHELM_LEADS KV,
  * and routes to verified GRC / C3PAO / CPA partners (Vanta, Drata, Sprinto, Thoropass, Coalition, Cobalt).
  * Zero AI slop. Zero em-dashes. Zero en-dashes.
@@ -7860,69 +8643,6 @@ const PARTNER_ROUTES = {
   thoropass_audit: "https://www.thoropass.com/solutions",
   coalition_cyber_insurance: "https://www.coalitioninc.com/cyber-insurance",
   cobalt_pentest: "https://www.cobalt.io/",
-};
-
-const GAINHELM_TOOLKIT_OFFERS = {
-  gh_soc2_cmmc_audit_workpapers: {
-    sku: "gh_soc2_cmmc_audit_workpapers",
-    title: "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite",
-    price_usd: 79,
-    price_cents: 7900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) & 32 CFR Part 170",
-    deliverables: [
-      "JSON + CSV Control Scoping Matrix (AICPA Trust Services Criteria, NIST 800-171 & ISO 27001 Annex A)",
-      "Auditor-Day Rate & Readiness Gap Worksheet (Type I vs Type II observation window sensitivity)",
-      "CISO & CFO Board Budget Approval Template with GRC automation ROI comparison",
-      "3-Year Audit, Penetration Testing & Compliance Staffing Total Cost of Ownership (TCO) Schedule",
-    ],
-  },
-  gh_hipaa_iso27001_governance_kit: {
-    sku: "gh_hipaa_iso27001_governance_kit",
-    title: "GainHelm HIPAA Penalty, ISO 27001 & Cyber Breach Audit Workpaper Kit",
-    price_usd: 49,
-    price_cents: 4900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "45 CFR 160.404, ISO/IEC 27006-1:2024 & SEC Item 1.05 Form 8-K",
-    deliverables: [
-      "ISO/IEC 27006-1 Stage 1 & Stage 2 Auditor-Day Calculation & Annex A Control Matrix",
-      "45 CFR 160.404 Tier 1-4 Civil Monetary Penalty Cap & Breach Notification Schedule",
-      "SEC Item 1.05 Materiality & Cyber Liability Retention Stress-Test Workpaper",
-      "Accredited Certification Body & QSA Scoping Checklist (CSV & Print-Ready Audit HTML)",
-    ],
-  },
-  gh_instant_compliance_worksheet_19: {
-    sku: "gh_instant_compliance_worksheet_19",
-    title: "GainHelm Instant Compliance Budget & Control Scoping Worksheet (PDF/CSV)",
-    price_usd: 19,
-    price_cents: 1900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "AICPA SSAE 18 (AT-C 205), ISO/IEC 27006-1:2024, 32 CFR Part 170 & 45 CFR 160.404",
-    deliverables: [
-      "Personalized Audit Readiness & Auditor-Day Scoping Worksheet (Print-Ready HTML/PDF)",
-      "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
-      "Multi-Framework Overlap & Evidence Readiness Checklist (HTML/PDF)",
-      "Machine-Readable Security Governance Scenario Pack (JSON)",
-    ],
-  },
-  gh_verified_partner_slot: {
-    sku: "gh_verified_partner_slot",
-    title: "Verified Calculator Partner Slot",
-    price_usd: 299,
-    price_cents: 29900,
-    currency: "usd",
-    billing_mode: "payment",
-    statutory_authority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
-    deliverables: [
-      "Verified Commercial Partner Desk Placement on Target Calculator Route",
-      "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
-      "Direct Calculator CTA & Partner Matrix Priority Slot",
-      "Monthly Partner Attribution & Conversion Reconciliation Digest",
-    ],
-  },
 };
 
 function getLeadsKv(env) {
@@ -8383,41 +9103,39 @@ for (const [fwKey, fwSpec] of Object.entries(GAINHELM_FRAMEWORK_BUNDLE_SPECS)) {
 function selectOfferForSlug(toolSlug, reqSku, vertical = "") {
   const fw = classifyGainHelmFramework(toolSlug, vertical);
   const spec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fw];
+  const normReqSku = normalizeEdgeSku(reqSku);
   let baseOffer = null;
-  if (reqSku && GAINHELM_TOOLKIT_OFFERS[reqSku]) {
-    baseOffer = GAINHELM_TOOLKIT_OFFERS[reqSku];
+  if (normReqSku && CANONICAL_OFFER_CATALOG[normReqSku]) {
+    baseOffer = getCanonicalEdgeOffer(normReqSku);
   } else if (spec) {
-    baseOffer = GAINHELM_TOOLKIT_OFFERS[spec.offerSku] || GAINHELM_TOOLKIT_OFFERS.gh_hipaa_iso27001_governance_kit;
+    baseOffer = getCanonicalEdgeOffer(spec.offerSku, "gh_hipaa_iso27001_governance_kit");
   } else {
-    baseOffer = GAINHELM_TOOLKIT_OFFERS.gh_soc2_cmmc_audit_workpapers;
+    baseOffer = getCanonicalEdgeOffer("gh_soc2_cmmc_audit_workpapers");
   }
-  if (reqSku === "gh_instant_compliance_worksheet_19") {
+  if (normReqSku === "gh_instant_compliance_worksheet_19") {
     if (fw !== "soc2" && spec) {
       return {
         ...baseOffer,
         statutory_authority: spec.statutoryAuthority,
         regulator_name: spec.regulatorName,
-        deliverables: [
-          "Personalized Compliance Readiness & Scoping Worksheet (Print-Ready HTML/PDF)",
-          "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
-          `${spec.regulatorName} Evidence & Checklist Summary (HTML/PDF)`,
-          "Machine-Readable Security Governance Scenario Pack (JSON)",
-        ],
       };
     }
     const hasFrameworkContext = !isGenericGainHelmToolSlug(toolSlug) || isExplicitGainHelmVertical(vertical);
     if (hasFrameworkContext) {
       return {
         ...baseOffer,
-        statutory_authority: GAINHELM_TOOLKIT_OFFERS.gh_soc2_cmmc_audit_workpapers.statutory_authority,
+        statutory_authority: getCanonicalEdgeOffer("gh_soc2_cmmc_audit_workpapers").statutory_authority,
       };
     }
     return baseOffer;
   }
+  if (baseOffer.tier_kind === "partner_slot") {
+    return baseOffer;
+  }
   const hasExplicitMismatch =
-    Boolean(reqSku) &&
+    Boolean(normReqSku) &&
     spec &&
-    reqSku !== spec.offerSku;
+    normReqSku !== spec.offerSku;
   if (!spec || hasExplicitMismatch) {
     return baseOffer;
   }
@@ -8426,10 +9144,7 @@ function selectOfferForSlug(toolSlug, reqSku, vertical = "") {
     title: spec.title,
     statutory_authority: spec.statutoryAuthority,
     regulator_name: spec.regulatorName,
-    deliverables:
-      Array.isArray(spec.deliverables) && spec.deliverables.length
-        ? spec.deliverables
-        : baseOffer.deliverables,
+    ...(Array.isArray(spec.deliverables) && spec.deliverables.length ? { deliverables: [...spec.deliverables] } : {}),
   };
 }
 
@@ -8551,6 +9266,9 @@ function buildGainHelmActionUrl(modeName, record, offer, extras = {}) {
   if (extras.state) {
     qs.set("state", String(extras.state));
   }
+  if (extras.session_id) {
+    qs.set("session_id", String(extras.session_id));
+  }
   if (extras.redirect) {
     qs.set("redirect", "1");
   }
@@ -8586,8 +9304,7 @@ function resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, r
   return { effSlug, effVert, effSku, offer, explicitVert, explicitSku, paymentRequiredCtx };
 }
 
-function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
-  const leadId = String((record && record.lead_id) || "lead_gainhelm_direct");
+function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit", sessionId = "") {
   const recVert = String((record && record.vertical) || "").trim().toLowerCase();
   const hasExplicitSlugProp = Boolean(record && Object.prototype.hasOwnProperty.call(record, "tool_slug"));
   const toolSlug = hasExplicitSlugProp
@@ -8596,445 +9313,35 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit") {
   const fwKey = classifyGainHelmFramework(toolSlug, recVert);
   const fwJurisdiction = resolveGainHelmDefaultJurisdiction(fwKey, toolSlug);
   const stateCode = String((record && record.state) || fwJurisdiction).toUpperCase();
-  const baseAmount = Math.max(25000, Number((record && record.calculated_amount) || 48500));
-  const autoSavings = Math.round(baseAmount * 0.34 * 100) / 100;
-  const netOptimized = Math.max(12000, Math.round((baseAmount - autoSavings) * 100) / 100);
-  const crossFrameworkReuse = Math.round(baseAmount * 0.22 * 100) / 100;
-  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const customInputs = (record && record.calculator_inputs && typeof record.calculator_inputs === "object") ? record.calculator_inputs : {};
-  const customOutputs = (record && record.calculator_outputs && typeof record.calculator_outputs === "object") ? record.calculator_outputs : {};
-
   const fwSpec = GAINHELM_FRAMEWORK_BUNDLE_SPECS[fwKey] || null;
   const fwVertical = (fwSpec && fwSpec.vertical) || GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || "soc2_grc_automation";
-  const reconciliationSchedule = fwSpec ? [
-    {
-      line_code: "GH-100",
-      line_item: fwSpec.l100Title,
-      authority: offer.statutory_authority,
-      baseline_value: fmtUsd(baseAmount),
-      optimized_value: fmtUsd(netOptimized),
-      delta_impact: `-${fmtUsd(autoSavings)} GRC Automation Savings`,
+  const verifiedSid = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
+  const effRecord = { ...(record || {}), tool_slug: toolSlug, state: stateCode, vertical: fwVertical };
+  return buildCanonicalWorkpaperDeliverable({
+    propertyId: "gainhelm",
+    record: effRecord,
+    offer,
+    mode,
+    sessionId: verifiedSid,
+    fwMeta: {
+      ...(fwSpec || {}),
+      regulatorName: (fwSpec && fwSpec.regulatorName) || "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
+      vertical: fwVertical,
+      frameworkKey: fwKey,
+      jurisdiction: fwJurisdiction,
     },
-    {
-      line_code: "GH-200",
-      line_item: fwSpec.l200Title,
-      authority: fwSpec.l200Auth,
-      baseline_value: "320 hrs ($46,400.00)",
-      optimized_value: "75 hrs ($10,875.00)",
-      delta_impact: "-245 Engineering Hours Saved",
+    actionUrlBuilder: (flagName, extraParams = {}) => {
+      const targetOffer = extraParams.sku ? getCanonicalEdgeOffer(extraParams.sku) : offer;
+      return buildGainHelmActionUrl(flagName, effRecord, targetOffer, {
+        tool_slug: toolSlug,
+        vertical: fwVertical,
+        amount: effRecord.calculated_amount || 48500,
+        state: stateCode,
+        ...(flagName === "fulfill" && verifiedSid ? { session_id: verifiedSid } : {}),
+        ...(extraParams.redirect ? { redirect: true } : {}),
+      });
     },
-    {
-      line_code: "GH-300",
-      line_item: fwSpec.l300Title,
-      authority: fwSpec.l300Auth,
-      baseline_value: fmtUsd(baseAmount * 4.5),
-      optimized_value: fmtUsd(baseAmount * 0.5),
-      delta_impact: "Continuous Control Monitoring Active",
-    },
-    {
-      line_code: "GH-400",
-      line_item: fwSpec.l400Title,
-      authority: fwSpec.l400Auth,
-      baseline_value: fmtUsd(baseAmount * 0.78),
-      optimized_value: fmtUsd(Math.max(9500, baseAmount * 0.78 - crossFrameworkReuse)),
-      delta_impact: `-${fmtUsd(crossFrameworkReuse)} Cross-Framework Control Overlap Credit`,
-    },
-  ] : [
-    {
-      line_code: "GH-100",
-      line_item: "Baseline Unautomated CPA / C3PAO / QSA Audit & Readiness Cost",
-      authority: offer.statutory_authority,
-      baseline_value: fmtUsd(baseAmount),
-      optimized_value: fmtUsd(netOptimized),
-      delta_impact: `-${fmtUsd(autoSavings)} GRC Automation Savings`,
-    },
-    {
-      line_code: "GH-200",
-      line_item: "Internal Engineering Evidence Collection Hours (At $145/hr Fully Burdened)",
-      authority: "AICPA AT-C 205 / NIST SP 800-171A Assessment Procedures",
-      baseline_value: "320 hrs ($46,400.00)",
-      optimized_value: "75 hrs ($10,875.00)",
-      delta_impact: "-245 Engineering Hours Saved",
-    },
-    {
-      line_code: "GH-300",
-      line_item: "Statutory Penalty / Contract Holdback Risk Exposure",
-      authority: "32 CFR Part 170 / 45 CFR 160.404 / SEC Item 1.05 Form 8-K",
-      baseline_value: fmtUsd(baseAmount * 4.5),
-      optimized_value: fmtUsd(baseAmount * 0.5),
-      delta_impact: "Continuous Control Attestation Active",
-    },
-    {
-      line_code: "GH-400",
-      line_item: "Year-2 Surveillance & Multi-Framework Control Reuse Credit (SOC 2 + ISO 27001 / CMMC / HIPAA)",
-      authority: "ISO/IEC 27006-1:2024 Clause 9.1.3 & AICPA Common Criteria Mapping",
-      baseline_value: fmtUsd(baseAmount * 0.78),
-      optimized_value: fmtUsd(Math.max(9500, baseAmount * 0.78 - crossFrameworkReuse)),
-      delta_impact: `-${fmtUsd(crossFrameworkReuse)} Cross-Framework Control Overlap Credit`,
-    },
-  ];
-  const sensitivityMatrix = [
-    {
-      scenario_label: "Lean Cloud-Native Scope (Single AWS/GCP Prod Enclave, <=50 Staff)",
-      modeled_principal: fmtUsd(baseAmount * 0.72),
-      effective_rate: "82.0% Automated Evidence Coverage",
-      estimated_net_benefit: fmtUsd(autoSavings * 0.8),
-    },
-    {
-      scenario_label: "Baseline Enterprise Multi-Criteria Scope (75-150 Staff)",
-      modeled_principal: fmtUsd(baseAmount),
-      effective_rate: "76.0% Automated Evidence Coverage",
-      estimated_net_benefit: fmtUsd(autoSavings),
-    },
-    {
-      scenario_label: fwSpec ? fwSpec.s3Title : "High-Complexity Multi-Cloud + CUI / ePHI Enclave (250+ Staff)",
-      modeled_principal: fmtUsd(baseAmount * 1.65),
-      effective_rate: "68.0% Automated Evidence Coverage",
-      estimated_net_benefit: fmtUsd(autoSavings * 1.55),
-    },
-  ];
-  const statutoryTrendTimeseries = fwSpec ? [
-    {
-      metric_name: fwSpec.trends[0].metric_name,
-      authority_source: fwSpec.trends[0].authority_source,
-      y2024: fmtUsd(Math.round(baseAmount * 0.84)),
-      y2025: fmtUsd(Math.round(baseAmount * 0.92)),
-      y2026: fmtUsd(baseAmount),
-      y2028_proj: fmtUsd(Math.round(baseAmount * 1.09)),
-      y2030_proj: fmtUsd(Math.round(baseAmount * 1.18)),
-    },
-    {
-      metric_name: fwSpec.trends[1].metric_name,
-      authority_source: fwSpec.trends[1].authority_source,
-      y2024: fmtUsd(Math.round(baseAmount * 0.42)),
-      y2025: fmtUsd(Math.round(baseAmount * 0.46)),
-      y2026: fmtUsd(Math.round(baseAmount * 0.50)),
-      y2028_proj: fmtUsd(Math.round(baseAmount * 0.55)),
-      y2030_proj: fmtUsd(Math.round(baseAmount * 0.61)),
-    },
-    {
-      metric_name: fwSpec.trends[2].metric_name,
-      authority_source: fwSpec.trends[2].authority_source,
-      y2024: "$112.40/hr",
-      y2025: "$117.10/hr",
-      y2026: "$121.67/hr",
-      y2028_proj: "$131.10/hr",
-      y2030_proj: "$141.50/hr",
-    },
-  ] : [
-    {
-      metric_name: "AICPA SOC 2 Type II & ISO 27001:2022 Combined CPA/CB Fee Index",
-      authority_source: "AICPA Peer Review & ISO/IEC 27006-1:2024 Auditor-Day Tables",
-      y2024: "$41,500",
-      y2025: "$45,200",
-      y2026: fmtUsd(baseAmount),
-      y2028_proj: fmtUsd(baseAmount * 1.09),
-      y2030_proj: fmtUsd(baseAmount * 1.18),
-    },
-    {
-      metric_name: "DoD CMMC 2.0 Level 2 C3PAO Assessment & SPRS 110-Control Readiness",
-      authority_source: "32 CFR Part 170.17 & DoD CIO Cost Estimate",
-      y2024: "$52,000",
-      y2025: "$56,800",
-      y2026: "$61,450",
-      y2028_proj: "$68,200",
-      y2030_proj: "$74,900",
-    },
-    {
-      metric_name: "HHS OCR HIPAA 45 CFR 160.404 Tier 3/4 Annual Penalty Cap (Inflation Adjusted)",
-      authority_source: "45 CFR Part 102 Civil Monetary Penalty Inflation Adjustment",
-      y2024: "$2,003,947",
-      y2025: "$2,067,813",
-      y2026: "$2,067,813",
-      y2028_proj: "$2,193,742",
-      y2030_proj: "$2,327,341",
-    },
-  ];
-  const fulfillmentUrl = buildGainHelmActionUrl("fulfill", record, offer, {
-    tool_slug: toolSlug,
-    vertical: fwVertical,
-    amount: baseAmount,
-    state: stateCode,
   });
-  const playbookUrl = buildGainHelmActionUrl("playbook", record, offer, {
-    tool_slug: toolSlug,
-    vertical: fwVertical,
-    amount: baseAmount,
-    state: stateCode,
-  });
-  const playbookCsvUrl = `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = `${playbookUrl}&format=datapack`;
-  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
-  const activeCsvUrl = mode === "paid_toolkit" ? csvFulfillmentUrl : playbookCsvUrl;
-  const activeDatapackUrl = mode === "paid_toolkit" ? datapackUrl : playbookDatapackUrl;
-  const checkoutUrl = buildGainHelmActionUrl("checkout", record, offer, {
-    tool_slug: toolSlug,
-    vertical: fwVertical,
-    amount: baseAmount,
-    state: stateCode,
-  });
-  const grossPriceUsd = Number(offer.price_usd || 79);
-  const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
-  const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
-  const settlementAttribution = {
-    settlement_id: (record && record.settlement_id) || `stl_gainhelm_${leadId}`,
-    settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
-    settlement_rail: (record && record.checkout_mode) || "stripe_direct_settlement_rail",
-    merchant_account_id: "acct_1T6fSTIq0ckFsf5j",
-    settlement_bank: "CHOICE BANK COMMERCIAL SETTLEMENT (****1395)",
-    property_id: "gainhelm",
-    tool_slug: toolSlug,
-    lead_id: leadId,
-    offer_sku: offer.sku,
-    offer_title: offer.title,
-    gross_amount_usd: grossPriceUsd,
-    estimated_processor_fee_usd: estFeeUsd,
-    net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
-    attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: Boolean(isPaidSettled),
-    datapack_pack_id: `dp_${leadId}`,
-    datapack_url: datapackUrl,
-    calculated_amount: baseAmount,
-    state: stateCode,
-    settled_at: (record && record.settled_at) || new Date().toISOString(),
-  };
-  const isUnredactedPaid = mode === "paid_toolkit";
-  const statutoryExecutionArtifacts = fwSpec ? [
-    {
-      instrument_id: "GH-EXEC-101",
-      instrument_title: fwSpec.exec101Title,
-      controlling_statute: offer.statutory_authority,
-      filing_deadline_rule: "90-Day Readiness Control Freeze & Continuous Evidence Collection",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `ATTESTATION OF REGULATORY BOUNDARY (${stateCode}): Pursuant to ${fwSpec.exec101Scope}, the undersigned entity certifies that the scope for ${toolSlug} encompasses a modeled baseline budget of ${fmtUsd(baseAmount)} and an optimized automated control budget of ${fmtUsd(netOptimized)} (${fmtUsd(autoSavings)} GRC automation variance).`
-        : `ATTESTATION PREVIEW (${stateCode}): Modeled readiness scope ${fmtUsd(baseAmount)} -> ${fmtUsd(netOptimized)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "GH-EXEC-102",
-      instrument_title: fwSpec.exec102Title,
-      controlling_statute: fwSpec.exec102Auth,
-      filing_deadline_rule: "Day 30 Scope Lock / Day 90 Evidence Review / Day 180 Final Sign-Off",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `STATUTORY REMEDIATION SCHEDULE: ${fwSpec.exec102Body}, substantiating ${fmtUsd(crossFrameworkReuse)} in shared control overlap.`
-        : `REMEDIATION CALENDAR PREVIEW: Day 30 Scope Freeze / Day 90 Evidence Lock / Day 180 Closeout. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "GH-EXEC-103",
-      instrument_title: fwSpec.exec103Title,
-      controlling_statute: fwSpec.exec103Auth,
-      filing_deadline_rule: "12-Month Continuous Control Monitoring Lookback Window",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `REGULATORY SUBSTANTIATION (${stateCode}): Entity maintains continuous control monitoring under ${fwSpec.exec103Auth}, mitigating statutory enforcement exposure from ${fmtUsd(baseAmount * 4.5)} to ${fmtUsd(baseAmount * 0.5)} and capturing ${fmtUsd(crossFrameworkReuse)} in control reuse.`
-        : `SUBSTANTIATION MEMO PREVIEW: Mitigates regulatory penalty exposure from ${fmtUsd(baseAmount * 4.5)} to ${fmtUsd(baseAmount * 0.5)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-  ] : [
-    {
-      instrument_id: "GH-EXEC-101",
-      instrument_title: "CISO / CPA Audit Scope Attestation & Enclave Boundary Declaration",
-      controlling_statute: offer.statutory_authority,
-      filing_deadline_rule: "90-Day Pre-Assessment Readiness Lock & 180-Day POA&M Closure",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `ATTESTATION OF AUDIT BOUNDARY (${stateCode}): Pursuant to ${offer.statutory_authority}, the undersigned entity certifies that the production enclave for ${toolSlug} encompasses a modeled baseline audit scope of ${fmtUsd(baseAmount)} and an optimized automated control budget of ${fmtUsd(netOptimized)} (${fmtUsd(autoSavings)} GRC automation variance). Continuous control monitoring is bound across 110 NIST SP 800-171A / AICPA TSC criteria.`
-        : `ATTESTATION PREVIEW (${stateCode}): Modeled audit scope ${fmtUsd(baseAmount)} -> ${fmtUsd(netOptimized)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "GH-EXEC-102",
-      instrument_title: "180-Day POA&M & Continuous Control Surveillance Defense Calendar",
-      controlling_statute: "32 CFR Part 170.21 & ISO/IEC 27006-1:2024 Clause 9.1.3",
-      filing_deadline_rule: "Day 30 System Security Plan (SSP) Freeze / Day 90 Stage-1 Readiness / Day 180 Final Closeout",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `STATUTORY REMEDIATION SCHEDULE: (1) Day 1-30: Lock System Security Plan (SSP) and Trust Services Criteria matrix; (2) Day 31-90: Remediate all >1-point SPRS controls and collect 90-day continuous evidence artifacts; (3) Day 91-180: Close conditional POA&M items under 32 CFR 170.21 and execute Year-2 cross-framework reuse credit (${fmtUsd(crossFrameworkReuse)}).`
-        : `REMEDIATION CALENDAR PREVIEW: Day 30 SSP Freeze / Day 90 Evidence Lock / Day 180 POA&M Closeout. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "GH-EXEC-103",
-      instrument_title: "Multi-Framework Control Reuse & Penalty Safe-Harbor Substantiation Memo",
-      controlling_statute: "45 CFR 160.404, HITECH Act Recognized Security Practices (42 U.S.C. 17941) & SEC Item 1.05",
-      filing_deadline_rule: "12-Month Continuous Recognized Security Practices Lookback Window",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `SAFE-HARBOR SUBSTANTIATION (${stateCode}): Entity maintains documented Recognized Security Practices under 42 U.S.C. 17941 and continuous control attestation for 12 preceding months, mitigating statutory penalty exposure from ${fmtUsd(baseAmount * 4.5)} to ${fmtUsd(baseAmount * 0.5)} and substantiating ${fmtUsd(crossFrameworkReuse)} in multi-framework audit reuse.`
-        : `SAFE-HARBOR MEMO PREVIEW: Mitigates statutory penalty exposure from ${fmtUsd(baseAmount * 4.5)} to ${fmtUsd(baseAmount * 0.5)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-  ];
-  const statutoryDataPack = {
-    pack_id: `dp_${leadId}`,
-    schema_version: "pseo-datapack-v1",
-    property_id: "gainhelm",
-    tool_slug: toolSlug,
-    vertical: fwVertical,
-    framework_key: fwKey,
-    offer_sku: offer.sku,
-    offer_title: offer.title,
-    statutory_authority: offer.statutory_authority,
-    regulator_name: (fwSpec && fwSpec.regulatorName) || offer.regulator_name || "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
-    compliance_cycle_year: "2026",
-    framework_jurisdiction: fwJurisdiction,
-    modeled_scenario_summary: {
-      calculated_amount: baseAmount,
-      state: stateCode,
-      inputs: customInputs,
-      outputs: customOutputs,
-    },
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    longitudinal_benchmark_series: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    settlement_attribution: settlementAttribution,
-  };
-  const csvRows = [
-    "Line Code,Statutory Line Item,Authority,Baseline Value,Optimized Value,Delta Impact",
-    ...reconciliationSchedule.map(
-      (r) => `"${r.line_code}","${r.line_item.replace(/"/g, '""')}","${r.authority.replace(/"/g, '""')}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`
-    ),
-    ...sensitivityMatrix.map(
-      (s, i) => `"SENS-${i + 1}","${s.scenario_label.replace(/"/g, '""')}","Sensitivity Scenario","${s.modeled_principal}","${s.effective_rate}","${s.estimated_net_benefit}"`
-    ),
-  ];
-  const csvContent = csvRows.join("\\n") + "\\n";
-
-  const customParamRows = [
-    ...Object.entries(customInputs).map(([k, v]) => `<tr><td>Input: <code>${k}</code></td><td><strong>${String(v)}</strong></td></tr>`),
-    ...Object.entries(customOutputs).map(([k, v]) => `<tr><td>Output: <code>${k}</code></td><td><strong>${String(v)}</strong></td></tr>`),
-  ].join("");
-  const execArtifactsHtml = statutoryExecutionArtifacts.map(
-    (a) =>
-      `<tr><td><strong>${a.instrument_id}</strong><div style="font-size:11px;color:#64748b;">${a.execution_status}</div></td>` +
-      `<td><strong>${a.instrument_title}</strong><div style="font-size:11px;color:#475569;">${a.controlling_statute} | ${a.filing_deadline_rule}</div></td>` +
-      `<td style="font-family:monospace;font-size:12px;">${a.statutory_clause_body}</td></tr>`
-  ).join("");
-  const upgradeBannerHtml = isUnredactedPaid
-    ? ""
-    : `<div class="actions" style="background:#fffbeb;border:1px solid #f59e0b;padding:14px;border-radius:8px;justify-content:space-between;align-items:center;">` +
-      `<div style="font-size:13px;color:#92400e;"><strong>Preview Mode:</strong> Statutory execution clauses are redacted in the free playbook. Unlock the full unredacted statutory filing packet ($${offer.price_usd}).</div>` +
-      `<a class="btn btn-primary" href="${checkoutUrl}&redirect=1">Unlock Unredacted Filing Packet ($${offer.price_usd})</a></div>`;
-
-  const htmlReport = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${offer.title} - Personalized Audit Workpaper (${leadId})</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; background: #f8fafc; margin: 0; padding: 32px 16px; line-height: 1.55; }
-  .sheet { max-width: 960px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 32px; box-shadow: 0 10px 25px rgba(15,23,42,0.06); }
-  .badge { display: inline-block; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em; }
-  h1 { font-size: 24px; margin: 12px 0 6px; color: #0f172a; }
-  h2 { font-size: 17px; margin: 26px 0 10px; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
-  .meta { font-size: 13px; color: #475569; margin-bottom: 20px; }
-  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 20px 0; }
-  .kpi { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
-  .kpi-label { font-size: 12px; color: #475569; text-transform: uppercase; font-weight: 600; }
-  .kpi-val { font-size: 22px; font-weight: 800; color: #0f172a; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13.5px; }
-  th, td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: left; }
-  th { background: #f1f5f9; font-weight: 700; color: #1e293b; }
-  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-  .btn { display: inline-block; padding: 10px 16px; border-radius: 8px; font-weight: 700; font-size: 13.5px; text-decoration: none; cursor: pointer; border: none; }
-  .btn-primary { background: #0f766e; color: #ffffff; }
-  .btn-secondary { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-  @media print { body { background: #fff; padding: 0; } .sheet { border: none; box-shadow: none; } .actions { display: none; } }
-</style>
-</head>
-<body>
-<div class="sheet">
-  <span class="badge">${mode === "playbook" ? "Personalized Audit Readiness Playbook" : "Verified Statutory Audit Workpaper"}</span>
-  <h1>${offer.title}</h1>
-  <div class="meta">
-    Workpaper Reference: <strong>${leadId}</strong> | Source Tool: <code>${toolSlug}</code> | Jurisdiction: <strong>${stateCode}</strong> | Controlling Authority: <strong>${offer.statutory_authority}</strong>
-  </div>
-  <div class="actions">
-    <button class="btn btn-primary" onclick="window.print()">Print / Save Workpaper as PDF</button>
-    <a class="btn btn-secondary" href="${activeCsvUrl}">Download CSV Reconciliation Schedule</a>
-    <a class="btn btn-secondary" href="${activeDatapackUrl}">Download Statutory Data Pack (JSON)</a>
-  </div>
-  ${upgradeBannerHtml}
-  <div class="kpi-grid">
-    <div class="kpi"><div class="kpi-label">Unautomated Audit Scope</div><div class="kpi-val">${fmtUsd(baseAmount)}</div></div>
-    <div class="kpi"><div class="kpi-label">GRC Automation Savings</div><div class="kpi-val" style="color:#047857;">${fmtUsd(autoSavings)}</div></div>
-    <div class="kpi"><div class="kpi-label">Net Optimized Audit Budget</div><div class="kpi-val">${fmtUsd(netOptimized)}</div></div>
-    <div class="kpi"><div class="kpi-label">Cross-Framework Reuse Credit</div><div class="kpi-val">${fmtUsd(crossFrameworkReuse)}</div></div>
-  </div>
-  <h2>1. Statutory Line-Item Reconciliation Schedule</h2>
-  <table>
-    <thead><tr><th>Code</th><th>Statutory Line Item</th><th>Authority</th><th>Baseline</th><th>Optimized</th><th>Delta Impact</th></tr></thead>
-    <tbody>
-      ${reconciliationSchedule.map((r) => `<tr><td><strong>${r.line_code}</strong></td><td>${r.line_item}</td><td>${r.authority}</td><td>${r.baseline_value}</td><td><strong>${r.optimized_value}</strong></td><td>${r.delta_impact}</td></tr>`).join("")}
-    </tbody>
-  </table>
-  <h2>2. Scope & Enclave Sensitivity Matrix</h2>
-  <table>
-    <thead><tr><th>Enclave Scenario</th><th>Modeled Audit Scope</th><th>Automated Evidence Rate</th><th>Estimated Net Savings</th></tr></thead>
-    <tbody>
-      ${sensitivityMatrix.map((s) => `<tr><td>${s.scenario_label}</td><td>${s.modeled_principal}</td><td>${s.effective_rate}</td><td><strong>${s.estimated_net_benefit}</strong></td></tr>`).join("")}
-    </tbody>
-  </table>
-  <h2>3. Multi-Year Statutory & Cyber Compliance Trend Benchmarks (2024 to 2030)</h2>
-  <table>
-    <thead><tr><th>Benchmark Metric</th><th>Authority Source</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead>
-    <tbody>
-      ${statutoryTrendTimeseries.map((t) => `<tr><td><strong>${t.metric_name}</strong></td><td>${t.authority_source}</td><td>${t.y2024}</td><td>${t.y2025}</td><td><strong>${t.y2026}</strong></td><td>${t.y2028_proj}</td><td>${t.y2030_proj}</td></tr>`).join("")}
-    </tbody>
-  </table>
-  ${customParamRows ? `<h2>Custom Calculator Parameter Ledger</h2><table><thead><tr><th>Parameter</th><th>Recorded Value</th></tr></thead><tbody>${customParamRows}</tbody></table>` : ""}
-  <h2>4. Included Audit Deliverables & Verification Checklist</h2>
-  <ul>
-    ${offer.deliverables.map((d) => `<li>${d}</li>`).join("")}
-  </ul>
-  <h2>5. Statutory Execution Instruments & Filing Packet</h2>
-  <table>
-    <thead><tr><th>Instrument ID</th><th>Statutory Instrument & Deadline Rule</th><th>Execution Clause / Filing Text</th></tr></thead>
-    <tbody>${execArtifactsHtml}</tbody>
-  </table>
-  <p class="meta" style="margin-top:24px;">Generated deterministically by GainHelm Enterprise Compliance Engine (${new Date().toISOString()}). ${(fwSpec && fwSpec.footerComplianceDoc) || "Retain this workpaper alongside AICPA SSAE 18, NIST SP 800-171A, ISO/IEC 27006-1:2024, and 45 CFR 160.404 governance documentation."}</p>
-</div>
-</body>
-</html>`;
-
-  return {
-    workpaper_id: `wp_${leadId}`,
-    lead_id: leadId,
-    property_id: "gainhelm",
-    tool_slug: toolSlug,
-    vertical: fwVertical,
-    framework_key: fwKey,
-    state: stateCode,
-    offer_sku: offer.sku,
-    offer_title: offer.title,
-    offer_price_usd: offer.price_usd,
-    statutory_authority: offer.statutory_authority,
-    deliverables: offer.deliverables,
-    calculated_amount: baseAmount,
-    modeled_amount_usd: baseAmount,
-    estimated_automation_savings_usd: autoSavings,
-    net_optimized_audit_budget_usd: netOptimized,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    statutory_trend_timeseries: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    statutory_data_pack: statutoryDataPack,
-    settlement_attribution: settlementAttribution,
-    custom_parameter_ledger: {
-      inputs: customInputs,
-      outputs: customOutputs,
-    },
-    fulfillment_url: fulfillmentUrl,
-    playbook_url: playbookUrl,
-    playbook_csv_url: playbookCsvUrl,
-    playbook_datapack_url: playbookDatapackUrl,
-    csv_fulfillment_url: csvFulfillmentUrl,
-    datapack_url: datapackUrl,
-    checkout_url: checkoutUrl,
-    csv_content: csvContent,
-    html_report: htmlReport,
-  };
 }
 
 const EDGE_PROPERTY_ID = "gainhelm";
@@ -9241,6 +9548,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     const meta = (data && data.metadata) || {};
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
+    out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.inputs_json = meta.inputs_json || null;
+    out.outputs_json = meta.outputs_json || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -9341,10 +9651,10 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
       : baseRec.state;
-  const resolvedSku =
-    payment.offer_sku && !baseRec.offer_sku
-      ? String(payment.offer_sku).trim().toLowerCase()
-      : baseRec.offer_sku;
+  const resolvedSku = payment.offer_sku
+    ? normalizeEdgeSku(payment.offer_sku)
+    : normalizeEdgeSku(baseRec.offer_sku || "");
+  const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
     (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
@@ -9370,6 +9680,8 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
+    ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
@@ -9419,7 +9731,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   return settledRecord;
 }
 
-function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 79) {
+function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 29) {
   const byCalc = {};
   for (const item of leads || []) {
     if (!item || typeof item !== "object") continue;
@@ -9472,8 +9784,8 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSyntheticProbe = false, bundle = null, vertical = "", explicitSku = "") {
   const callerVert = String(vertical || "").trim().toLowerCase();
   const hasExplicitVertical = isExplicitGainHelmVertical(callerVert);
-  const callerSku = String(explicitSku || "").trim().toLowerCase();
-  const hasExplicitSku = Boolean(callerSku && Object.prototype.hasOwnProperty.call(GAINHELM_TOOLKIT_OFFERS, callerSku));
+  const callerSku = normalizeEdgeSku(explicitSku);
+  const hasExplicitSku = Boolean(callerSku && Object.prototype.hasOwnProperty.call(CANONICAL_OFFER_CATALOG, callerSku));
   const effVert = hasExplicitVertical ? callerVert : String((bundle && bundle.vertical) || "").trim();
   const fallbackRec = {
     lead_id: leadId,
@@ -9532,7 +9844,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "line_items[0][price_data][currency]": offer.currency,
         "line_items[0][price_data][unit_amount]": String(offer.price_cents),
         "line_items[0][price_data][product_data][name]": offer.title,
-        "line_items[0][price_data][product_data][description]": `GainHelm Statutory Workpaper & Execution Packet (${offer.statutory_authority})`,
+        "line_items[0][price_data][product_data][description]": offer.description || `GainHelm ${offer.title}`,
         "line_items[0][quantity]": "1",
         "branding_settings[display_name]": "GainHelm",
         "payment_intent_data[statement_descriptor_suffix]": "GAINHELM",
@@ -9547,6 +9859,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 48500),
         "metadata[state]": String((bundle && bundle.state) || resolveGainHelmDefaultJurisdiction(classifyGainHelmFramework(toolSlug, fwVertical), toolSlug)),
         "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+        ...(buildCompactMetadataJson(bundle && bundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(bundle.scenario_inputs, 480) } : {}),
+        ...(buildCompactMetadataJson(bundle && bundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(bundle.scenario_outputs, 480) } : {}),
       };
       if (!isPlaceholderCheckoutEmail(candidateEmail)) {
         paramsObj.customer_email = candidateEmail;
@@ -9933,15 +10247,27 @@ export async function onRequestGet(context) {
       verticalParam
     );
     const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
-    const offer = effState.offer;
+    let offer = effState.offer;
     let gatedRecord = record;
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (!isFulfill && (fmt === "csv" || fmt === "datapack" || fmt === "datapack_json")) {
+      return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId, effState.paymentRequiredCtx);
+    }
+    let verifiedSid = "";
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId, effState.paymentRequiredCtx);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, record, payment, isSynth);
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, effState.offer, fmt);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId, effState.paymentRequiredCtx);
+      verifiedSid = String(payment.session_id || "");
+      offer = selectOfferForSlug(effState.effSlug, tierGuard.paidSku, effState.effVert);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(record || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
+      }
     }
-    const bundle = buildGainHelmWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "playbook");
-    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    const bundle = buildGainHelmWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "free_playbook", verifiedSid);
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
         status: 200,
@@ -9994,9 +10320,10 @@ export async function onRequestGet(context) {
   }
 
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
+    const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "gainhelm");
     const record = await lookupEdgeLeadRecord(
       env,
-      leadId,
+      checkoutLeadId,
       toolSlug,
       amountParam,
       stateParam,
@@ -10005,12 +10332,14 @@ export async function onRequestGet(context) {
       outputsJsonParam,
       verticalParam
     );
+    record.lead_id = checkoutLeadId;
     const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
     const offer = effState.offer;
+    await persistPreCheckoutLeadRecord(env, record, offer, effState.effSlug, isSynth);
     const bundle = buildGainHelmWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(
       env,
-      leadId,
+      checkoutLeadId,
       email || record.email || "",
       effState.effSlug,
       offer,
@@ -10045,7 +10374,7 @@ export async function onRequestGet(context) {
         synthetic_test: isSynth,
         status: stripeOffer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "gainhelm",
-        lead_id: leadId,
+        lead_id: checkoutLeadId,
         tool_slug: effState.effSlug,
         ...stripeOffer,
       }),
@@ -10208,9 +10537,9 @@ export async function onRequestPost(context) {
       ? ""
       : String(rawToolSlugCandidate);
     const toolSlug = sanitizeEdgeToolSlug(fallbackSlugVal, "");
-    const reqPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const reqPostSku = normalizeEdgeSku(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "");
     const hasExplicitVertical = isExplicitGainHelmVertical(reqVertical);
-    const hasExplicitSku = Boolean(reqPostSku && Object.prototype.hasOwnProperty.call(GAINHELM_TOOLKIT_OFFERS, reqPostSku));
+    const hasExplicitSku = Boolean(reqPostSku && Object.prototype.hasOwnProperty.call(CANONICAL_OFFER_CATALOG, reqPostSku));
     const isBareRoot = Boolean(isGenericGainHelmToolSlug(toolSlug) && !hasExplicitVertical && !hasExplicitSku);
     const fwKey = classifyGainHelmFramework(toolSlug, reqVertical);
     const state = rawStateInput || resolveGainHelmDefaultJurisdiction(fwKey, toolSlug);
@@ -10262,8 +10591,11 @@ export async function onRequestPost(context) {
       const effFulfillState = resolveGainHelmEffectiveRequestState(storedRecord, toolSlug, reqVertical, reqPostSku);
       const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId, effFulfillState.paymentRequiredCtx);
-      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSynth);
-      const ffBundle = buildGainHelmWorkpaperBundle(settledRecord, effFulfillState.offer, "paid_toolkit");
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqPostSku, effFulfillState.offer, String(body.format || reqUrl.searchParams.get("format") || "json"));
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId, effFulfillState.paymentRequiredCtx);
+      const pinnedOffer = selectOfferForSlug(effFulfillState.effSlug, tierGuard.paidSku, effFulfillState.effVert);
+      const settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      const ffBundle = buildGainHelmWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, pinnedOffer, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -10511,6 +10843,7 @@ export async function onRequestPost(context) {
             "__GAINHELM_FRAMEWORK_ROUTING_JS__",
             _render_gainhelm_framework_routing_js(include_deliverables=True),
         )
+        lead_js = lead_js + _render_edge_pricing_and_workpaper_engine_js("gainhelm")
         lead_js = lead_js + _render_edge_lead_abuse_guard_js("gainhelm")
         lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js("gainhelm")
         assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function(gainhelm)")
@@ -10552,65 +10885,8 @@ const PARTNER_ROUTES = {
   juno: "https://joinjuno.com/",
 };
 
-const PREXVO_TOOLKIT_OFFER = {
-  sku: "px_refi_amortization_decision_audit",
-  title: "Prexvo Private Refinance vs Federal Protections Decision Audit Kit",
-  price_usd: 39,
-  price_cents: 3900,
-  currency: "usd",
-  billing_mode: "payment",
-  statutory_authority: "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219",
-  deliverables: [
-    "Weighted-Average Loan Tranche Amortization Reconciliation Schedule",
-    "Federal IDR & PSLF Forfeiture Present-Value Stress-Test Matrix",
-    "Cosigner Release & State Consumer Protection Verification Checklist",
-    "Lender Rate-Match Underwriting Intake Sheet (CSV & Print-Ready Audit HTML)",
-  ],
-};
-
 function resolvePrexvoOfferSpec(rawSku) {
-  const cleanSku = String(rawSku || "").trim().toLowerCase();
-  if (cleanSku === "px_verified_partner_slot") {
-    return {
-      sku: "px_verified_partner_slot",
-      title: "Verified Calculator Partner Slot",
-      price_usd: 299,
-      price_cents: 29900,
-      currency: "usd",
-      statutory_authority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
-      deliverables: [
-        "Verified Commercial Partner Desk Placement on Target Calculator Route",
-        "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
-        "Direct Calculator CTA & Partner Matrix Priority Slot",
-        "Monthly Partner Attribution & Conversion Reconciliation Digest",
-      ],
-    };
-  }
-  if (cleanSku === "px_instant_repayment_worksheet_19") {
-    return {
-      sku: "px_instant_repayment_worksheet_19",
-      title: "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
-      price_usd: 19,
-      price_cents: 1900,
-      currency: "usd",
-      statutory_authority: "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026) & 34 CFR 685.209",
-      deliverables: [
-        "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
-        "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
-        "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
-        "Machine-Readable Borrower Refinance Scenario Pack (JSON)",
-      ],
-    };
-  }
-  return {
-    sku: PREXVO_TOOLKIT_OFFER.sku,
-    title: PREXVO_TOOLKIT_OFFER.title,
-    price_usd: Number(PREXVO_TOOLKIT_OFFER.price_usd || 39),
-    price_cents: Number(PREXVO_TOOLKIT_OFFER.price_cents || 3900),
-    currency: PREXVO_TOOLKIT_OFFER.currency || "usd",
-    statutory_authority: PREXVO_TOOLKIT_OFFER.statutory_authority,
-    deliverables: Array.isArray(PREXVO_TOOLKIT_OFFER.deliverables) ? [...PREXVO_TOOLKIT_OFFER.deliverables] : [],
-  };
+  return getCanonicalEdgeOffer(rawSku, "px_refi_amortization_decision_audit");
 }
 
 function getLeadsKv(env) {
@@ -10654,347 +10930,16 @@ function extractScenarioAmount(body, scenarioInputs, blueprintState) {
   return maxVal;
 }
 
-function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit") {
-  const leadId = String((record && record.lead_id) || "lead_prexvo_direct");
-  const toolSlug = String((record && record.tool_slug) || "student-loan-refinance-break-even-calculator");
-  const stateCode = String((record && record.state) || "US").toUpperCase();
-  const email = String((record && record.email) || "Verified Borrower");
-  const rawAmt = Number(record && record.calculated_amount ? record.calculated_amount : 0);
-  const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : 85000;
-  const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
-  const inputs = (record && record.scenario_inputs && typeof record.scenario_inputs === "object") ? record.scenario_inputs : {};
-  const outputs = (record && record.scenario_outputs && typeof record.scenario_outputs === "object") ? record.scenario_outputs : {};
-
-  let curRate = 0.068;
-  let refiRate = 0.049;
-  let termYears = 10;
-  for (const [k, v] of Object.entries(inputs)) {
-    const kl = String(k).toLowerCase();
-    const fv = Number(String(v || "").replace(/[$,%\\s,]/g, ""));
-    if (!Number.isFinite(fv)) continue;
-    if (kl.includes("rate") && fv >= 1 && fv <= 18) {
-      if (kl.includes("new") || kl.includes("refi") || kl.includes("target")) {
-        refiRate = fv / 100;
-      } else {
-        curRate = fv / 100;
-      }
-    } else if ((kl.includes("term") || kl.includes("year")) && fv >= 1 && fv <= 30) {
-      termYears = Math.round(fv);
-    }
-  }
-
-  const nMonths = Math.max(12, termYears * 12);
-  const rCur = curRate / 12;
-  const rRefi = refiRate / 12;
-  const pmtCur = baseAmount * (rCur * Math.pow(1 + rCur, nMonths)) / (Math.pow(1 + rCur, nMonths) - 1);
-  const pmtRefi = baseAmount * (rRefi * Math.pow(1 + rRefi, nMonths)) / (Math.pow(1 + rRefi, nMonths) - 1);
-  const interestCur = Math.max(0, pmtCur * nMonths - baseAmount);
-  const interestRefi = Math.max(0, pmtRefi * nMonths - baseAmount);
-  const lifetimeSavings = Math.max(0, interestCur - interestRefi);
-  const monthlyDelta = Math.max(0, pmtCur - pmtRefi);
-
-  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const reconciliationSchedule = [
-    {
-      line_code: "PX-100",
-      line_item: "Modeled Principal Loan Tranche Balance",
-      authority: "Promissory Note Principal",
-      baseline_value: fmtUsd(baseAmount),
-      optimized_value: fmtUsd(baseAmount),
-      delta_impact: "$0.00 (Unchanged Principal)",
-    },
-    {
-      line_code: "PX-200",
-      line_item: `Monthly Amortization Payment (${termYears}-Year Term)`,
-      authority: `${(curRate * 100).toFixed(2)}% Baseline vs ${(refiRate * 100).toFixed(2)}% Refi APR`,
-      baseline_value: `${fmtUsd(pmtCur)}/mo`,
-      optimized_value: `${fmtUsd(pmtRefi)}/mo`,
-      delta_impact: `-${fmtUsd(monthlyDelta)}/mo Cash-Flow Relief`,
-    },
-    {
-      line_code: "PX-300",
-      line_item: "Cumulative Lifetime Interest Expense",
-      authority: "Truth in Lending Act (12 CFR Part 1026)",
-      baseline_value: fmtUsd(interestCur),
-      optimized_value: fmtUsd(interestRefi),
-      delta_impact: `-${fmtUsd(lifetimeSavings)} Interest Saved`,
-    },
-    {
-      line_code: "PX-400",
-      line_item: "Federal IDR / PSLF Forgiveness Forfeiture Threshold",
-      authority: "34 CFR 685.209 / 685.219",
-      baseline_value: "Retained (Federal Direct)",
-      optimized_value: "Waived Upon Private Refi",
-      delta_impact: `Requires >${fmtUsd(lifetimeSavings * 0.35)} Net PV Advantage`,
-    },
-  ];
-  const sensitivityMatrix = [
-    {
-      scenario_label: "Conservative (-75 bps Rate Spread)",
-      modeled_principal: fmtUsd(baseAmount),
-      effective_rate: `${(Math.max(0.03, curRate - 0.0075) * 100).toFixed(2)}%`,
-      estimated_net_benefit: fmtUsd(lifetimeSavings * 0.42),
-    },
-    {
-      scenario_label: "Baseline Modeled Refinance Spread",
-      modeled_principal: fmtUsd(baseAmount),
-      effective_rate: `${(refiRate * 100).toFixed(2)}%`,
-      estimated_net_benefit: fmtUsd(lifetimeSavings),
-    },
-    {
-      scenario_label: "Accelerated 7-Year Payoff + Autopay (-25 bps)",
-      modeled_principal: fmtUsd(baseAmount),
-      effective_rate: `${(Math.max(0.025, refiRate - 0.0025) * 100).toFixed(2)}%`,
-      estimated_net_benefit: fmtUsd(lifetimeSavings * 1.28),
-    },
-  ];
-
+function buildEdgePersonalizedWorkpaperBundle(record, mode = "paid_toolkit", sessionId = "") {
   const rawPxSku = String((record && record.offer_sku) || "").trim().toLowerCase();
   const activePxOffer = resolvePrexvoOfferSpec(rawPxSku);
-  const activePxSku = activePxOffer.sku;
-  const activePxTitle = activePxOffer.title;
-  const grossPriceUsd = Number(activePxOffer.price_usd || 39);
-
-  const playbookQs = new URLSearchParams({
-    playbook: "1",
-    lead_id: leadId,
-    sku: activePxSku,
-    tool_slug: toolSlug,
-    amount: String(baseAmount),
-    state: stateCode,
-  });
-  const fulfillQs = new URLSearchParams({
-    fulfill: "1",
-    lead_id: leadId,
-    sku: activePxSku,
-    tool_slug: toolSlug,
-    amount: String(baseAmount),
-    state: stateCode,
-  });
-  if (Object.keys(inputs).length > 0) {
-    const inpStr = JSON.stringify(inputs).slice(0, 600);
-    playbookQs.set("inputs_json", inpStr);
-    fulfillQs.set("inputs_json", inpStr);
-  }
-  const playbookUrl = `/api/lead-capture?${playbookQs.toString()}`;
-  const playbookCsvUrl = `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = `${playbookUrl}&format=datapack`;
-  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
-  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
-  const activeCsvUrl = mode === "paid_toolkit" ? csvFulfillmentUrl : playbookCsvUrl;
-  const activeDatapackUrl = mode === "paid_toolkit" ? datapackUrl : playbookDatapackUrl;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activePxSku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
-
-  const statutoryTrendTimeseries = [
-    {
-      series_id: "ed_direct_undergrad_rate",
-      metric_label: "Title IV Direct Undergraduate Statutory Fixed Interest Rate",
-      statutory_citation: "20 U.S.C. 1087e(b)",
-      unit: "PCT",
-      points: { "2024": 5.5, "2025": 6.53, "2026": 6.39, "2027": 6.15, "2028": 5.95, "2029": 5.85, "2030": 5.8 },
-    },
-    {
-      series_id: "hhs_fpl_single_base",
-      metric_label: "HHS 48-State Single-Person Federal Poverty Guideline Base",
-      statutory_citation: "42 U.S.C. 9902(2)",
-      unit: "USD",
-      points: { "2024": 15060.0, "2025": 15650.0, "2026": 16120.0, "2027": 16600.0, "2028": 17100.0, "2029": 17610.0, "2030": 18140.0 },
-    },
-    {
-      series_id: "fred_dgs10_yield",
-      metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
-      statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
-      unit: "PCT",
-      points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
-    },
-  ];
-  const customParameterLedger = {
-    calculated_amount: baseAmount,
-    capital_band: capitalBand,
-    state: stateCode,
-    inputs,
-    outputs,
-  };
-
-  const csvLines = ["Line Code,Statutory Line Item,Authority,Baseline Scenario,Optimized Scenario,Delta Impact"];
-  for (const r of reconciliationSchedule) {
-    csvLines.push(`"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`);
-  }
-  for (const ts of statutoryTrendTimeseries) {
-    const v24 = ts.points["2024"] || "";
-    const v26 = ts.points["2026"] || "";
-    const v30 = ts.points["2030"] || "";
-    csvLines.push(`"TREND-${ts.series_id}","${ts.metric_label} (2024-2030)","${ts.statutory_citation}","2024: ${v24} ${ts.unit}","2026: ${v26} ${ts.unit}","2030 Proj: ${v30} ${ts.unit}"`);
-  }
-  for (const [k, v] of Object.entries(inputs)) {
-    csvLines.push(`"INPUT-${k}","Visitor Calculator Input (${k})","Live Workbench","${String(v).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}","Captured"`);
-  }
-  const csvContent = csvLines.join("\\n") + "\\n";
-
-  const rowsHtml = reconciliationSchedule.map((r) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;">${r.line_code}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${r.line_item}<div style="font-size:11px;color:#64748b;">${r.authority}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${r.baseline_value}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${r.optimized_value}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#1d4ed8;">${r.delta_impact}</td></tr>`
-  ).join("");
-  const sensHtml = sensitivityMatrix.map((s) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${s.scenario_label}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.modeled_principal}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.effective_rate}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#15803d;">${s.estimated_net_benefit}</td></tr>`
-  ).join("");
-  const trendHtml = statutoryTrendTimeseries.map((ts) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;">${ts.metric_label}<div style="font-size:11px;color:#64748b;">${ts.statutory_citation}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2024"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2025"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${ts.points["2026"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2028"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2030"]} ${ts.unit}</td></tr>`
-  ).join("");
-  const delivHtml = (activePxOffer.deliverables || []).map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
-  const isUnredactedPaid = mode === "paid_toolkit";
-  const statutoryExecutionArtifacts = [
-    {
-      instrument_id: "PX-EXEC-101",
-      instrument_title: "34 CFR 685.209 / 685.219 Federal IDR & PSLF Forfeiture Waiver Acknowledgment",
-      controlling_statute: "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219",
-      filing_deadline_rule: "Execute Prior to Private Promissory Note Rescission Window (3-Day TILA Right to Cancel)",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `STATUTORY FORFEITURE AUDIT (${stateCode}): Borrower acknowledges that refinancing ${fmtUsd(baseAmount)} of Title IV Direct Loans into a private credit facility permanently waives statutory access to Income-Driven Repayment (34 CFR 685.209) and Public Service Loan Forgiveness (34 CFR 685.219). Modeled lifetime interest savings of ${fmtUsd(lifetimeSavings)} (${(curRate * 100).toFixed(2)}% to ${(refiRate * 100).toFixed(2)}% APR over ${termYears} years) exceeds the 35% present-value forfeiture hurdle.`
-        : `FORFEITURE AUDIT PREVIEW (${stateCode}): Modeled balance ${fmtUsd(baseAmount)} | Lifetime interest delta ${fmtUsd(lifetimeSavings)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "PX-EXEC-102",
-      instrument_title: "Truth in Lending Act (12 CFR 1026.48) Private Education Loan Rate-Match & Rescission Calendar",
-      controlling_statute: "12 CFR 1026.47 & 12 CFR 1026.48 (Regulation Z Private Education Loans)",
-      filing_deadline_rule: "30-Day Approval Acceptance Window / 3-Business-Day Post-Consummation Cancel Window",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `REGULATION Z TIMELINE: (1) Lock competing lender Approval Disclosures within 30 calendar days under 12 CFR 1026.48(c); (2) Submit lowest competing APR (${(refiRate * 100).toFixed(2)}%) to primary underwriting desk for rate-match credit; (3) Preserve 3-business-day non-disbursement cancellation right under 12 CFR 1026.48(d).`
-        : `REGULATION Z TIMELINE PREVIEW: 30-Day Approval Lock & 3-Business-Day Right to Cancel. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "PX-EXEC-103",
-      instrument_title: "Cosigner Release & Death/Disability Discharge Contract Verification Rider",
-      controlling_statute: "15 U.S.C. 1650 & Economic Growth, Regulatory Relief, and Consumer Protection Act Section 601",
-      filing_deadline_rule: "12-to-36 Consecutive On-Time Principal & Interest Payment Milestone",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `PROMISSORY NOTE RIDER VERIFICATION: Confirm explicit contractual inclusion of (a) death and total permanent disability discharge parity with 20 U.S.C. 1087, and (b) written cosigner release eligibility after 12 to 24 consecutive monthly payments of ${fmtUsd(pmtRefi)}/mo without forbearance.`
-        : `PROMISSORY NOTE RIDER PREVIEW: Monthly payment ${fmtUsd(pmtRefi)}/mo cosigner release verification. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-  ];
-  const execArtifactsHtml = statutoryExecutionArtifacts.map((a) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;">${a.instrument_id}<div style="font-size:10px;color:#64748b;">${a.execution_status}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;"><strong>${a.instrument_title}</strong><div style="font-size:11px;color:#64748b;">${a.controlling_statute} | ${a.filing_deadline_rule}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-size:12px;">${a.statutory_clause_body}</td></tr>`
-  ).join("");
-  const upgradeBannerHtml = isUnredactedPaid
-    ? ""
-    : `<div class="no-print" style="background:#fffbeb;border:1px solid #f59e0b;padding:12px 16px;border-radius:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">` +
-      `<div style="font-size:12.5px;color:#92400e;"><strong>Preview Mode:</strong> Statutory execution clauses are redacted in the free playbook. Unlock the full unredacted statutory filing packet ($${activePxOffer.price_usd}).</div>` +
-      `<a href="${checkoutUrl}&redirect=1" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Unlock Unredacted Filing Packet ($${activePxOffer.price_usd})</a></div>`;
-  const badgeLabel = mode === "paid_toolkit" ? "PAID DECISION AUDIT WORKPAPER PACKAGE" : "PERSONALIZED REFINANCE PLAYBOOK & WORKSHEET";
-  const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${activePxOffer.title} (${leadId})</title>` +
-    `<style>body{font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px;}.sheet{max-width:920px;margin:0 auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:28px;}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;}th{text-align:left;padding:10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:11px;text-transform:uppercase;color:#334155;}@media print{body{background:#fff;padding:0;}.sheet{border:none;}.no-print{display:none!important;}}</style></head>` +
-    `<body><div class="sheet"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:18px;">` +
-    `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${activePxOffer.title}</h1>` +
-    `<div style="font-size:12px;color:#475569;">Authority: ${activePxOffer.statutory_authority} | Tool: ${toolSlug} | State: ${stateCode}</div></div>` +
-    `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
-    `<a href="${activeCsvUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a>` +
-    `<a href="${activeDatapackUrl}" style="background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download Statutory Data Pack (JSON)</a></div></div>` +
-    upgradeBannerHtml +
-    `<div style="font-size:13px;color:#334155;margin-bottom:14px;">Reference ID: <strong>${leadId}</strong> | Borrower: <strong>${email}</strong> | Modeled Balance: <strong>${fmtUsd(baseAmount)}</strong> (Band: <strong>${capitalBand}</strong>)</div>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">1. Personalized Amortization &amp; Protection Reconciliation Schedule</h2>` +
-    `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">2. Rate-Spread &amp; Payoff Sensitivity Matrix</h2>` +
-    `<table><thead><tr><th>Scenario Case</th><th>Modeled Principal</th><th>Effective APR</th><th>Estimated Lifetime Savings</th></tr></thead><tbody>${sensHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Multi-Year Statutory &amp; Macroeconomic Trend Benchmarks (2024 to 2030)</h2>` +
-    `<table><thead><tr><th>Statutory Benchmark &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${trendHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">4. Included Audit Deliverables &amp; Verification Checklist</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">5. Statutory Execution Instruments &amp; Filing Packet</h2>` +
-    `<table><thead><tr><th>Instrument ID</th><th>Statutory Instrument &amp; Deadline Rule</th><th>Execution Clause / Filing Text</th></tr></thead><tbody>${execArtifactsHtml}</tbody></table>` +
-    `</div></body></html>`;
-
-  const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
-  const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
-  const settlementAttribution = {
-    settlement_id: (record && record.settlement_id) || `stl_prexvo_${leadId}`,
-    settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
-    settlement_rail: (record && record.checkout_mode) || "stripe_direct_settlement_rail",
-    merchant_account_id: "acct_1T6fSTIq0ckFsf5j",
-    settlement_bank: "CHOICE BANK COMMERCIAL SETTLEMENT (****1395)",
-    property_id: "prexvo",
-    tool_slug: toolSlug,
-    lead_id: leadId,
-    offer_sku: activePxSku,
-    offer_title: activePxTitle,
-    gross_amount_usd: grossPriceUsd,
-    estimated_processor_fee_usd: estFeeUsd,
-    net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
-    attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: Boolean(isPaidSettled),
-    datapack_pack_id: `dp_${leadId}`,
-    datapack_url: datapackUrl,
-    calculated_amount: baseAmount,
-    capital_band: capitalBand,
-    state: stateCode,
-    settled_at: (record && record.settled_at) || new Date().toISOString(),
-  };
-
-  const statutoryDataPack = {
-    pack_id: `dp_${leadId}`,
-    schema_version: "pseo-datapack-v1",
-    property_id: "prexvo",
-    tool_slug: toolSlug,
-    offer_sku: activePxSku,
-    statutory_authority: activePxOffer.statutory_authority,
-    effective_tax_year: "2026",
-    modeled_scenario_summary: customParameterLedger,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    longitudinal_benchmark_series: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    settlement_attribution: settlementAttribution,
-  };
-
-  return {
-    workpaper_id: `wp_${leadId}`,
-    property_id: "prexvo",
-    tool_slug: toolSlug,
-    lead_id: leadId,
+  return buildCanonicalWorkpaperDeliverable({
+    propertyId: "prexvo",
+    record,
+    offer: activePxOffer,
     mode,
-    offer_sku: activePxSku,
-    offer_title: activePxTitle,
-    offer_price_usd: grossPriceUsd,
-    statutory_authority: activePxOffer.statutory_authority,
-    calculated_amount: baseAmount,
-    capital_band: capitalBand,
-    state: stateCode,
-    scenario_inputs: inputs,
-    scenario_outputs: outputs,
-    custom_parameter_ledger: customParameterLedger,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    statutory_trend_timeseries: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    statutory_data_pack: statutoryDataPack,
-    settlement_attribution: settlementAttribution,
-    deliverables: activePxOffer.deliverables,
-    playbook_url: playbookUrl,
-    playbook_csv_url: playbookCsvUrl,
-    playbook_datapack_url: playbookDatapackUrl,
-    fulfillment_url: fulfillmentUrl,
-    csv_fulfillment_url: csvFulfillmentUrl,
-    datapack_url: datapackUrl,
-    checkout_url: checkoutUrl,
-    csv_content: csvContent,
-    html_report: htmlReport,
-  };
+    sessionId,
+  });
 }
 
 const EDGE_PROPERTY_ID = "prexvo";
@@ -11198,6 +11143,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     const meta = (data && data.metadata) || {};
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
+    out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.inputs_json = meta.inputs_json || null;
+    out.outputs_json = meta.outputs_json || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -11292,10 +11240,10 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
       : baseRec.state;
-  const resolvedSku =
-    payment.offer_sku && !baseRec.offer_sku
-      ? String(payment.offer_sku).trim().toLowerCase()
-      : baseRec.offer_sku;
+  const resolvedSku = payment.offer_sku
+    ? normalizeEdgeSku(payment.offer_sku)
+    : normalizeEdgeSku(baseRec.offer_sku || "");
+  const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
     (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
@@ -11321,6 +11269,8 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
+    ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
@@ -11370,7 +11320,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   return settledRecord;
 }
 
-function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 39) {
+function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 19) {
   const byCalc = {};
   for (const item of leads || []) {
     if (!item || typeof item !== "object") continue;
@@ -11379,7 +11329,7 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
       byCalc[slug] = {
         property_id: propertyId,
         tool_slug: slug,
-        offer_sku: item.offer_sku || PREXVO_TOOLKIT_OFFER.sku,
+        offer_sku: item.offer_sku || "px_refi_amortization_decision_audit",
         offer_price_usd: Number(item.offer_price_usd || defaultPriceUsd),
         deliverable_requests_count: 0,
         qualified_quote_requests_count: 0,
@@ -11596,7 +11546,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "line_items[0][price_data][currency]": activeOffer.currency,
       "line_items[0][price_data][unit_amount]": String(activeOffer.price_cents),
       "line_items[0][price_data][product_data][name]": activeOffer.title,
-      "line_items[0][price_data][product_data][description]": `Prexvo Statutory Decision Audit & Execution Packet (${activeOffer.statutory_authority})`,
+      "line_items[0][price_data][product_data][description]": activeOffer.description || `Prexvo ${activeOffer.title}`,
       "line_items[0][quantity]": "1",
       "branding_settings[display_name]": "Prexvo",
       "payment_intent_data[statement_descriptor_suffix]": "PREXVO",
@@ -11610,6 +11560,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 85000),
       "metadata[state]": String((customRecord && customRecord.state) || "US"),
       "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+      ...(buildCompactMetadataJson(customBundle && customBundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(customBundle.scenario_inputs, 480) } : {}),
+      ...(buildCompactMetadataJson(customBundle && customBundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(customBundle.scenario_outputs, 480) } : {}),
     };
     if (!isPlaceholderCheckoutEmail(candidateEmail)) {
       paramsObj.customer_email = candidateEmail;
@@ -12020,16 +11972,28 @@ export async function onRequestGet(context) {
       }
       const { leadId, reqSku, storedRecord, isSynth } = ctx;
       let gatedRecord = storedRecord;
-      if (reqSku && gatedRecord) {
-        gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+      if (!isFulfill && reqSku && gatedRecord) {
+        gatedRecord = { ...gatedRecord, offer_sku: normalizeEdgeSku(reqSku) };
       }
+      const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+      if (!isFulfill && (fmt === "csv" || fmt === "datapack" || fmt === "datapack_json")) {
+        return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId);
+      }
+      let verifiedSid = "";
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, gatedRecord, payment, isSynth);
+      const initialPxOffer = resolvePrexvoOfferSpec(reqSku || (gatedRecord && gatedRecord.offer_sku) || "");
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialPxOffer, fmt);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      verifiedSid = String(payment.session_id || "");
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
+      }
     }
-    const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, isFulfill ? "paid_toolkit" : "free_playbook");
-    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, isFulfill ? "paid_toolkit" : "free_playbook", verifiedSid);
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
         status: 200,
@@ -12092,8 +12056,12 @@ export async function onRequestGet(context) {
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
-    const { leadId, email, reqSku, toolSlug, storedRecord: customRecord, isSynth } = ctx;
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSynth, customRecord, reqSku);
+    const { email, reqSku, toolSlug, storedRecord: customRecord, isSynth } = ctx;
+    const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "prexvo");
+    const preRec = { ...(customRecord || {}), lead_id: checkoutLeadId, tool_slug: toolSlug, offer_sku: normalizeEdgeSku(reqSku) || (customRecord && customRecord.offer_sku) || "" };
+    const resolvedPxOffer = resolvePrexvoOfferSpec(preRec.offer_sku);
+    await persistPreCheckoutLeadRecord(env, preRec, resolvedPxOffer, toolSlug, isSynth);
+    const offer = await resolveEdgeStripeCheckoutOffer(env, checkoutLeadId, email, toolSlug, isSynth, preRec, reqSku);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -12107,7 +12075,7 @@ export async function onRequestGet(context) {
         headers: {
           Location: targetCheckoutLoc,
           "X-Edge-Checkout-Mode": offer.checkout_mode || "stripe_live_session",
-          "X-Edge-Offer-Sku": offer.offer_sku || PREXVO_TOOLKIT_OFFER.sku,
+          "X-Edge-Offer-Sku": offer.offer_sku || "px_refi_amortization_decision_audit",
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
           ...CORS_HEADERS,
         },
@@ -12120,7 +12088,7 @@ export async function onRequestGet(context) {
         synthetic_test: isSynth,
         status: offer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "prexvo",
-        lead_id: leadId,
+        lead_id: checkoutLeadId,
         tool_slug: toolSlug,
         ...offer,
       }),
@@ -12275,9 +12243,12 @@ export async function onRequestPost(context) {
         body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
-      if (reqSku) storedRecord.offer_sku = reqSku;
+      const initialPxOffer = resolvePrexvoOfferSpec(reqSku || (storedRecord && storedRecord.offer_sku) || "");
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialPxOffer, String(body.format || reqUrl.searchParams.get("format") || "json"));
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      storedRecord.offer_sku = tierGuard.paidSku;
       const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
-      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, "paid_toolkit");
+      const bundle = buildEdgePersonalizedWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -12768,8 +12739,26 @@ function inferStateFromToolSlug(toolSlug, stateParam) {
 
 function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
   const s = (toolSlug || "").toLowerCase();
-  const skuClean = String(reqSku || "").trim().toLowerCase();
+  const skuClean = normalizeEdgeSku(reqSku);
   const pClean = String(reqPartner || "").trim().toLowerCase();
+  const buildSpecFromCanonical = (skuKey, vertical, thresholdUsd, partnerKey, partnerRepDesk, liveBase) => {
+    const o = getCanonicalEdgeOffer(skuKey);
+    return {
+      vertical,
+      thresholdUsd,
+      partnerKey,
+      partnerRepDesk,
+      liveBase,
+      offerSku: o.sku,
+      offerTitle: o.title,
+      offerDescription: o.description,
+      tierKind: o.tier_kind,
+      offerPriceUsd: o.price_usd,
+      offerPriceCents: o.price_cents,
+      statutoryAuthority: o.statutory_authority,
+      deliverables: o.deliverables,
+    };
+  };
   if (skuClean === "ph_instant_statutory_worksheet_19") {
     let qPartner = pClean || "xendoo";
     if (!pClean) {
@@ -12777,48 +12766,27 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
       else if (s.includes("crypto") || s.includes("1099-da")) qPartner = "coinledger";
       else if (s.includes("prediction-market") || s.includes("kalshi") || s.includes("polymarket")) qPartner = "kalshi";
     }
-    return {
-      vertical: "instant_statutory_worksheet",
-      thresholdUsd: 50000,
-      partnerKey: qPartner,
-      partnerRepDesk: "ProfitHelm Statutory Tax & Depreciation Desk",
-      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
-      offerSku: "ph_instant_statutory_worksheet_19",
-      offerTitle: "ProfitHelm Instant 2026-2027 Statutory Tax & Depreciation Worksheet (PDF/CSV)",
-      offerPriceUsd: 19,
-      offerPriceCents: 1900,
-      statutoryAuthority: "IRC Statutory Schedules, Rev. Proc. 2025-32, Section 179 & Section 1031 Rules",
-      deliverables: [
-        "Personalized Federal & State Statutory Tax or Depreciation Worksheet (Print-Ready HTML/PDF)",
-        "Line-Item Marginal vs Effective Rate & Deduction Reconciliation Schedule (CSV)",
-        "Quarterly Safe-Harbor Estimated Tax & Statutory Cutoff Checklist (HTML/PDF)",
-        "Machine-Readable Scenario Parameter & Statutory Benchmark Pack (JSON)",
-      ],
-    };
+    return buildSpecFromCanonical(
+      "ph_instant_statutory_worksheet_19",
+      "instant_statutory_worksheet",
+      50000,
+      qPartner,
+      "ProfitHelm Statutory Tax & Depreciation Desk",
+      "https://xendoo.pxf.io/c/7932737/1357375/16354"
+    );
   }
   if (skuClean === "ph_verified_partner_slot") {
-    return {
-      vertical: "b2b_partner_slot",
-      thresholdUsd: 25000,
-      partnerKey: pClean || "xendoo",
-      partnerRepDesk: "ProfitHelm Verified Advisory Desk",
-      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
-      offerSku: "ph_verified_partner_slot",
-      offerTitle: "Verified Calculator Partner Slot",
-      offerPriceUsd: 299,
-      offerPriceCents: 29900,
-      statutoryAuthority: "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol",
-      deliverables: [
-        "Verified Commercial Partner Desk Placement on Target Calculator Route",
-        "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
-        "Direct Calculator CTA & Partner Matrix Priority Slot",
-        "Monthly Partner Attribution & Conversion Reconciliation Digest",
-      ],
-    };
+    return buildSpecFromCanonical(
+      "ph_verified_partner_slot",
+      "b2b_partner_slot",
+      25000,
+      pClean || "xendoo",
+      "ProfitHelm Verified Advisory Desk",
+      "https://xendoo.pxf.io/c/7932737/1357375/16354"
+    );
   }
   if (
     skuClean === "ph_1031_boot_replacement_workpapers" ||
-    skuClean === "ph_1031_boot_waterfall_kit" ||
     (skuClean === "" &&
       (s.includes("1031") ||
         s.includes("like-kind") ||
@@ -12830,27 +12798,14 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
         pClean === "lawdepot" ||
         pClean === "ipx1031"))
   ) {
-    return {
-      vertical: "1031_exchange",
-      thresholdUsd: 100000,
-      partnerKey: pClean && pClean !== "ipx1031" ? pClean : "lawdepot",
-      partnerRepDesk: "LawDepot Commercial Real Estate & Exchange Legal Desk",
-      liveBase: "https://www.jdoqocy.com/click-101906407-16985242",
-      offerSku:
-        skuClean === "ph_1031_boot_waterfall_kit"
-          ? "ph_1031_boot_waterfall_kit"
-          : "ph_1031_boot_replacement_workpapers",
-      offerTitle: "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit",
-      offerPriceUsd: 79,
-      offerPriceCents: 7900,
-      statutoryAuthority: "IRC Section 1031, Treas. Reg. 1.1031(k)-1 & IRS Form 8824",
-      deliverables: [
-        "IRS Form 8824 Part III Realized Gain & Recognized Boot Reconciliation Schedule",
-        "45-Day Identification (Three-Property / 200% Rule) & 180-Day Closing Calendar",
-        "Mortgage Boot vs Cash Boot Offset & Replacement Debt Matrix",
-        "Qualified Intermediary (QI) Constructive Receipt Safe-Harbor Checklist (CSV & Print-Ready Audit HTML)",
-      ],
-    };
+    return buildSpecFromCanonical(
+      "ph_1031_boot_replacement_workpapers",
+      "1031_exchange",
+      100000,
+      pClean && pClean !== "ipx1031" ? pClean : "lawdepot",
+      "LawDepot Commercial Real Estate & Exchange Legal Desk",
+      "https://www.jdoqocy.com/click-101906407-16985242"
+    );
   }
   if (
     (skuClean === "" || skuClean === "ph_commercial_capital_audit_toolkit") &&
@@ -12863,28 +12818,17 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
       s.includes("landed-cost") ||
       pClean === "ramp")
   ) {
-    return {
-      vertical: "invoice_factoring",
-      thresholdUsd: 50000,
-      partnerKey: pClean && pClean !== "otr_solutions_factoring" ? pClean : "ramp",
-      partnerRepDesk: "Ramp Corporate Spend & Working Capital Desk",
-      liveBase: "https://join.ramp.com/c/7932737/3981015/51436",
-      offerSku: "ph_commercial_capital_audit_toolkit",
-      offerTitle: "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
-      offerPriceUsd: 49,
-      offerPriceCents: 4900,
-      statutoryAuthority: "IRC Section 179, Section 168(k) & Commercial APR Equivalency",
-      deliverables: [
-        "Effective Annualized APR & Factoring Reserve Holdback Reconciliation Schedule",
-        "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
-        "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
-        "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
-      ],
-    };
+    return buildSpecFromCanonical(
+      "ph_commercial_capital_audit_toolkit",
+      "invoice_factoring",
+      50000,
+      pClean && pClean !== "otr_solutions_factoring" ? pClean : "ramp",
+      "Ramp Corporate Spend & Working Capital Desk",
+      "https://join.ramp.com/c/7932737/3981015/51436"
+    );
   }
   if (
     skuClean === "ph_commercial_capital_audit_toolkit" ||
-    skuClean === "ph_section179_macrs_audit_kit" ||
     (skuClean === "" &&
       (s.includes("179") ||
         s.includes("equipment") ||
@@ -12896,51 +12840,28 @@ function resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku = "") {
         pClean === "xendoo" ||
         pClean === "crest_capital"))
   ) {
-    return {
-      vertical: "capex_section_179",
-      thresholdUsd: 100000,
-      partnerKey: pClean && pClean !== "crest_capital" ? pClean : "xendoo",
-      partnerRepDesk: "Xendoo Commercial CPA & Section 179 Tax Desk",
-      liveBase: "https://xendoo.pxf.io/c/7932737/1357375/16354",
-      offerSku:
-        skuClean === "ph_section179_macrs_audit_kit"
-          ? "ph_section179_macrs_audit_kit"
-          : "ph_commercial_capital_audit_toolkit",
-      offerTitle: "ProfitHelm Commercial Capital & Section 179 Depreciation Workpapers",
-      offerPriceUsd: 49,
-      offerPriceCents: 4900,
-      statutoryAuthority: "IRC Section 179, Section 168(k) & IRS Form 4562",
-      deliverables: [
-        "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
-        "Effective Annualized APR & Commercial Equipment Financing Reconciliation Schedule",
-        "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
-        "Institutional Lender & CapEx Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
-      ],
-    };
+    return buildSpecFromCanonical(
+      "ph_commercial_capital_audit_toolkit",
+      "capex_section_179",
+      100000,
+      pClean && pClean !== "crest_capital" ? pClean : "xendoo",
+      "Xendoo Commercial CPA & Section 179 Tax Desk",
+      "https://xendoo.pxf.io/c/7932737/1357375/16354"
+    );
   }
   let resolvedPartnerKey = pClean && pClean !== "turbotax" && pClean !== "taxslayer" ? pClean : "efile_com";
   if (!pClean || pClean === "turbotax" || pClean === "taxslayer") {
     if (s.includes("crypto") || s.includes("1099-da")) resolvedPartnerKey = "koinly";
     else if (s.includes("prediction-market") || s.includes("kalshi") || s.includes("polymarket")) resolvedPartnerKey = "kalshi";
   }
-  return {
-    vertical: "b2b_tax_advisory",
-    thresholdUsd: 100000,
-    partnerKey: resolvedPartnerKey,
-    partnerRepDesk: "E-file.com & Xendoo Statutory Tax Desk",
-    liveBase: "https://www.jdoqocy.com/click-101906407-11917161",
-    offerSku: "ph_statutory_tax_audit_workpapers",
-    offerTitle: "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite",
-    offerPriceUsd: 49,
-    offerPriceCents: 4900,
-    statutoryAuthority: "IRC Statutory Schedules, Rev. Proc. 2025-32 & State Conformity Rules",
-    deliverables: [
-      "Personalized Federal & State Statutory Tax Reconciliation Workpaper",
-      "Effective vs Marginal Bracket & Phase-Out Sensitivity Matrix",
-      "Quarterly Safe-Harbor Estimated Tax & Penalty Avoidance Schedule",
-      "CPA Substantiation & Audit Defense Documentation Checklist (CSV & Print-Ready Audit HTML)",
-    ],
-  };
+  return buildSpecFromCanonical(
+    "ph_statutory_tax_audit_workpapers",
+    "b2b_tax_advisory",
+    100000,
+    resolvedPartnerKey,
+    "E-file.com & Xendoo Statutory Tax Desk",
+    "https://www.jdoqocy.com/click-101906407-11917161"
+  );
 }
 
 function deriveCapitalBand(amount) {
@@ -12972,547 +12893,17 @@ function extractScenarioAmount(body, scenarioInputs, blueprintState) {
   return maxVal;
 }
 
-function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit") {
-  const leadId = String((record && record.lead_id) || "lead_profithelm_direct");
+function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit", sessionId = "") {
   const toolSlug = String((record && record.tool_slug) || "section-1031-calculator");
-  const stateCode = String((record && record.state) || "US").toUpperCase();
-  const email = String((record && record.email) || "Verified Subscriber");
-  const rawAmt = Number(record && record.calculated_amount ? record.calculated_amount : 0);
-  const baseAmount = Number.isFinite(rawAmt) && rawAmt > 0 ? rawAmt : 250000;
-  const capitalBand = String((record && record.capital_band) || deriveCapitalBand(baseAmount));
-  const inputs = (record && record.scenario_inputs && typeof record.scenario_inputs === "object") ? record.scenario_inputs : {};
-  const outputs = (record && record.scenario_outputs && typeof record.scenario_outputs === "object") ? record.scenario_outputs : {};
   const effSpec = spec || resolveVerticalAndThreshold(toolSlug, "", (record && record.offer_sku) || "");
-  const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  let reconciliationSchedule = [];
-  let sensitivityMatrix = [];
-  if (
-    effSpec.offerSku === "ph_1031_boot_replacement_workpapers" ||
-    effSpec.offerSku === "ph_1031_boot_waterfall_kit"
-  ) {
-    const adjustedBasis = baseAmount * 0.58;
-    const realizedGain = Math.max(0, baseAmount - adjustedBasis);
-    const deprRecapture = realizedGain * 0.28;
-    const capGainPortion = Math.max(0, realizedGain - deprRecapture);
-    const deferredShield = deprRecapture * 0.25 + capGainPortion * 0.238;
-    reconciliationSchedule = [
-      {
-        line_code: "8824-L15",
-        line_item: "Relinquished Property Contract Valuation",
-        authority: "IRC Section 1031(a) / Form 8824 Line 15",
-        baseline_value: fmtUsd(baseAmount),
-        optimized_value: fmtUsd(baseAmount),
-        delta_impact: "Minimum Replacement Target",
-      },
-      {
-        line_code: "8824-L18",
-        line_item: "Adjusted Basis & Realized Capital Gain",
-        authority: "IRC Section 1011 / Form 8824 Line 18-19",
-        baseline_value: `${fmtUsd(adjustedBasis)} Basis`,
-        optimized_value: `${fmtUsd(realizedGain)} Gain`,
-        delta_impact: "100% Deferrable via QI Safe Harbor",
-      },
-      {
-        line_code: "8824-L21",
-        line_item: "Section 1250 Unrecaptured Depreciation (25% Cap)",
-        authority: "IRC Section 1(h)(1)(E) & Section 1250",
-        baseline_value: `${fmtUsd(deprRecapture * 0.25)} Tax Due`,
-        optimized_value: "$0.00 Recognized",
-        delta_impact: `+${fmtUsd(deprRecapture * 0.25)} Recapture Shielded`,
-      },
-      {
-        line_code: "8824-L24",
-        line_item: "Combined Federal + NIIT (23.8%) & Boot Liability",
-        authority: "IRC Section 1031(b) & Section 1411",
-        baseline_value: `${fmtUsd(deferredShield)} Tax Due`,
-        optimized_value: "$0.00 Cash/Debt Boot",
-        delta_impact: `+${fmtUsd(deferredShield)} Equity Preserved`,
-      },
-    ];
-    sensitivityMatrix = [
-      {
-        scenario_label: "Full Equal-or-Greater Replacement (Zero Boot)",
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: "0.00% Recognized",
-        estimated_net_benefit: `${fmtUsd(deferredShield)} Deferred`,
-      },
-      {
-        scenario_label: "10% Partial Cash/Mortgage Boot Withdrawal",
-        modeled_principal: fmtUsd(baseAmount * 0.9),
-        effective_rate: "23.8% - 25.0% on Boot",
-        estimated_net_benefit: `${fmtUsd(Math.max(0, deferredShield - baseAmount * 0.1 * 0.244))} Deferred`,
-      },
-      {
-        scenario_label: "Taxable Sale Baseline (No QI Assignment)",
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: "24.4% Blended Tax",
-        estimated_net_benefit: `-${fmtUsd(deferredShield)} Immediate Tax`,
-      },
-    ];
-  } else if (
-    effSpec.offerSku === "ph_commercial_capital_audit_toolkit" ||
-    effSpec.offerSku === "ph_section179_macrs_audit_kit"
-  ) {
-    const sec179Ded = Math.min(baseAmount, 1250000);
-    const bonusDepr = Math.max(0, baseAmount - sec179Ded) * 0.4;
-    const yr1Writeoff = sec179Ded + bonusDepr;
-    const taxSavings = yr1Writeoff * 0.296;
-    const factoringFee = baseAmount * 0.025;
-    reconciliationSchedule = [
-      {
-        line_code: "4562-P1",
-        line_item: "Modeled Qualifying Equipment / Working Capital Basis",
-        authority: "IRC Section 179(d) / Commercial Invoice Ledger",
-        baseline_value: fmtUsd(baseAmount),
-        optimized_value: fmtUsd(baseAmount),
-        delta_impact: `Capital Band: ${capitalBand}`,
-      },
-      {
-        line_code: "4562-L12",
-        line_item: "Immediate IRC Section 179 Expense Election",
-        authority: "IRC Section 179(b)(1)-(2) Statutory Cap",
-        baseline_value: `${fmtUsd(baseAmount * 0.2)} (5-Yr MACRS Yr 1)`,
-        optimized_value: fmtUsd(sec179Ded),
-        delta_impact: `+${fmtUsd(Math.max(0, sec179Ded - baseAmount * 0.2))} Accelerated`,
-      },
-      {
-        line_code: "4562-L14",
-        line_item: "Section 168(k) Special Depreciation & Year-1 Tax Shield",
-        authority: "IRC Section 168(k)(6) Phase-Down Schedule",
-        baseline_value: `${fmtUsd(baseAmount * 0.2 * 0.296)} Cash Shield`,
-        optimized_value: `${fmtUsd(taxSavings)} Cash Shield`,
-        delta_impact: `+${fmtUsd(Math.max(0, taxSavings - baseAmount * 0.2 * 0.296))} Liquidity`,
-      },
-      {
-        line_code: "CAP-APR",
-        line_item: "30-Day Working Capital / Factoring Discount Benchmark",
-        authority: "2.50% 30-Day Discount vs Non-Recourse Line",
-        baseline_value: `${fmtUsd(factoringFee)} (30.4% Annualized)`,
-        optimized_value: `${fmtUsd(factoringFee * 0.68)} (1.70% Tiered)`,
-        delta_impact: `-${fmtUsd(factoringFee * 0.32)} Fee Reduction`,
-      },
-    ];
-    sensitivityMatrix = [
-      {
-        scenario_label: "100% Business-Use Section 179 + Section 168(k)",
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: "29.6% Combined Tax Rate",
-        estimated_net_benefit: `${fmtUsd(taxSavings)} Year-1 Shield`,
-      },
-      {
-        scenario_label: "75% Business-Use Listed Property Allocation",
-        modeled_principal: fmtUsd(baseAmount * 0.75),
-        effective_rate: "29.6% Combined Tax Rate",
-        estimated_net_benefit: `${fmtUsd(taxSavings * 0.75)} Year-1 Shield`,
-      },
-      {
-        scenario_label: "Standard 5-Year 200% DB MACRS (No Election)",
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: "20.0% Year-1 Recovery",
-        estimated_net_benefit: `${fmtUsd(baseAmount * 0.2 * 0.296)} Year-1 Shield`,
-      },
-    ];
-  } else {
-    const stdDed = baseAmount >= 150000 ? 30000 : 15000;
-    const qbiDed = Math.max(0, (baseAmount - stdDed) * 0.2);
-    const estBase = Math.max(0, baseAmount - stdDed) * 0.24;
-    const estOpt = Math.max(0, baseAmount - stdDed - qbiDed) * 0.22;
-    const taxDelta = Math.max(0, estBase - estOpt);
-    const stateTaxBase = Math.round(Math.max(0, baseAmount - stdDed) * 0.0685 * 100) / 100;
-    const ptetShield = Math.round(stateTaxBase * 0.32 * 100) / 100;
-    const stateTaxOpt = Math.max(0, Math.round((stateTaxBase - ptetShield) * 100) / 100);
-    reconciliationSchedule = [
-      {
-        line_code: "1040-L11",
-        line_item: `Modeled Adjusted Gross Income / Statutory Base (${stateCode})`,
-        authority: "IRC Section 62 & Rev. Proc. 2025-32",
-        baseline_value: fmtUsd(baseAmount),
-        optimized_value: fmtUsd(baseAmount),
-        delta_impact: `Capital Band: ${capitalBand}`,
-      },
-      {
-        line_code: "1040-L13",
-        line_item: "Standard Deduction & IRC Section 199A QBI Pass-Through",
-        authority: "IRC Section 63(c) & Section 199A",
-        baseline_value: fmtUsd(stdDed),
-        optimized_value: fmtUsd(stdDed + qbiDed),
-        delta_impact: `+${fmtUsd(qbiDed)} Statutory Shield`,
-      },
-      {
-        line_code: "1040-L16",
-        line_item: "Estimated Federal Statutory Tax Liability",
-        authority: "IRC Section 1 Progressive Bracket Table",
-        baseline_value: fmtUsd(estBase),
-        optimized_value: fmtUsd(estOpt),
-        delta_impact: `-${fmtUsd(taxDelta)} Annual Tax Delta`,
-      },
-      {
-        line_code: "STATE-PTET",
-        line_item: `State Marginal Bracket & Notice 2020-75 PTET SALT Shield (${stateCode})`,
-        authority: "IRC Section 164(b)(6) & IRS Notice 2020-75",
-        baseline_value: fmtUsd(stateTaxBase),
-        optimized_value: fmtUsd(stateTaxOpt),
-        delta_impact: `-${fmtUsd(ptetShield)} PTET SALT Deduction Shield`,
-      },
-      {
-        line_code: "W4-L4C",
-        line_item: `IRS Form W-4 Line 4(c) Biweekly Paycheck Withholding Adjustment (${stateCode})`,
-        authority: "IRC Section 3402 & IRS Publication 15-T",
-        baseline_value: `${fmtUsd((estBase + stateTaxBase) / 26)}/paycheck`,
-        optimized_value: `${fmtUsd((estOpt + stateTaxOpt) / 26)}/paycheck`,
-        delta_impact: `+${fmtUsd(((estBase + stateTaxBase) - (estOpt + stateTaxOpt)) / 26)}/paycheck Take-Home`,
-      },
-      {
-        line_code: "2210-SH",
-        line_item: "Quarterly Estimated Safe-Harbor Installment (25% / Qtr)",
-        authority: "IRC Section 6654(d)(1)(B) (100% / 110% Rule)",
-        baseline_value: `${fmtUsd(estBase / 4)}/qtr`,
-        optimized_value: `${fmtUsd(estOpt / 4)}/qtr`,
-        delta_impact: "Eliminates Underpayment Penalty",
-      },
-    ];
-    sensitivityMatrix = [
-      {
-        scenario_label: "Baseline Unoptimized Filing Posture",
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: `${((estBase / Math.max(1, baseAmount)) * 100).toFixed(2)}%`,
-        estimated_net_benefit: "$0.00 Baseline",
-      },
-      {
-        scenario_label: "Optimized Section 199A + Retirement Deferral",
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: `${((estOpt / Math.max(1, baseAmount)) * 100).toFixed(2)}%`,
-        estimated_net_benefit: `+${fmtUsd(taxDelta)} Tax Saved`,
-      },
-      {
-        scenario_label: "+15% Revenue / Income Expansion Stress-Test",
-        modeled_principal: fmtUsd(baseAmount * 1.15),
-        effective_rate: `${(((estOpt * 1.16) / Math.max(1, baseAmount * 1.15)) * 100).toFixed(2)}%`,
-        estimated_net_benefit: `+${fmtUsd(taxDelta * 1.15)} Tax Saved`,
-      },
-    ];
-  }
-
-  const playbookQs = new URLSearchParams({
-    playbook: "1",
-    lead_id: leadId,
-    sku: effSpec.offerSku,
-    tool_slug: toolSlug,
-    amount: String(baseAmount),
-    state: stateCode,
-  });
-  const fulfillQs = new URLSearchParams({
-    fulfill: "1",
-    lead_id: leadId,
-    sku: effSpec.offerSku,
-    tool_slug: toolSlug,
-    amount: String(baseAmount),
-    state: stateCode,
-  });
-  if (Object.keys(inputs).length > 0) {
-    const inpStr = JSON.stringify(inputs).slice(0, 600);
-    playbookQs.set("inputs_json", inpStr);
-    fulfillQs.set("inputs_json", inpStr);
-  }
-  const playbookUrl = `/api/lead-capture?${playbookQs.toString()}`;
-  const playbookCsvUrl = `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = `${playbookUrl}&format=datapack`;
-  const fulfillmentUrl = `/api/lead-capture?${fulfillQs.toString()}`;
-  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
-  const activeCsvUrl = mode === "paid_toolkit" ? csvFulfillmentUrl : playbookCsvUrl;
-  const activeDatapackUrl = mode === "paid_toolkit" ? datapackUrl : playbookDatapackUrl;
-  const checkoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(effSpec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&amount=${encodeURIComponent(String(baseAmount))}`;
-
-  let statutoryTrendTimeseries = [];
-  if (
-    effSpec.offerSku === "ph_1031_boot_replacement_workpapers" ||
-    effSpec.offerSku === "ph_1031_boot_waterfall_kit"
-  ) {
-    statutoryTrendTimeseries = [
-      {
-        series_id: "fred_dgs10_yield",
-        metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
-        statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
-        unit: "PCT",
-        points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
-      },
-      {
-        series_id: "fred_cpilfesl_inflation",
-        metric_label: "Core CPI Less Food and Energy Annualized Index Adjustment",
-        statutory_citation: "BLS / FRED CPILFESL",
-        unit: "PCT",
-        points: { "2024": 3.4, "2025": 3.1, "2026": 2.8, "2027": 2.5, "2028": 2.3, "2029": 2.2, "2030": 2.1 },
-      },
-      {
-        series_id: "irs_sec199a_qbi",
-        metric_label: "IRC Section 199A Qualified Business Income Deduction Rate",
-        statutory_citation: "26 U.S.C. 199A",
-        unit: "PCT",
-        points: { "2024": 20.0, "2025": 20.0, "2026": 0.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
-      },
-      {
-        series_id: "irs_sec168k_bonus",
-        metric_label: "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
-        statutory_citation: "26 U.S.C. 168(k)(6)",
-        unit: "PCT",
-        points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
-      },
-    ];
-  } else if (
-    effSpec.offerSku === "ph_commercial_capital_audit_toolkit" ||
-    effSpec.offerSku === "ph_section179_macrs_audit_kit"
-  ) {
-    statutoryTrendTimeseries = [
-      {
-        series_id: "irs_sec179_cap",
-        metric_label: "IRC Section 179 Maximum Deduction Cap",
-        statutory_citation: "26 U.S.C. 179(b)(1)",
-        unit: "USD",
-        points: { "2024": 1220000.0, "2025": 1250000.0, "2026": 1290000.0, "2027": 1330000.0, "2028": 1370000.0, "2029": 1410000.0, "2030": 1450000.0 },
-      },
-      {
-        series_id: "irs_sec179_phaseout",
-        metric_label: "IRC Section 179 Investment Phaseout Threshold",
-        statutory_citation: "26 U.S.C. 179(b)(2)",
-        unit: "USD",
-        points: { "2024": 3050000.0, "2025": 3130000.0, "2026": 3220000.0, "2027": 3320000.0, "2028": 3420000.0, "2029": 3520000.0, "2030": 3630000.0 },
-      },
-      {
-        series_id: "irs_sec168k_bonus",
-        metric_label: "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
-        statutory_citation: "26 U.S.C. 168(k)(6)",
-        unit: "PCT",
-        points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
-      },
-      {
-        series_id: "fred_dgs10_yield",
-        metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
-        statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
-        unit: "PCT",
-        points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
-      },
-    ];
-  } else {
-    statutoryTrendTimeseries = [
-      {
-        series_id: "irs_sec199a_qbi",
-        metric_label: "IRC Section 199A Qualified Business Income Deduction Rate",
-        statutory_citation: "26 U.S.C. 199A",
-        unit: "PCT",
-        points: { "2024": 20.0, "2025": 20.0, "2026": 0.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
-      },
-      {
-        series_id: "ssa_fica_wage_base",
-        metric_label: "Social Security OASDI Maximum Taxable Wage Base",
-        statutory_citation: "26 U.S.C. 3121",
-        unit: "USD",
-        points: { "2024": 168600.0, "2025": 176100.0, "2026": 184500.0, "2027": 190500.0, "2028": 196500.0, "2029": 202800.0, "2030": 209300.0 },
-      },
-      {
-        series_id: "irs_sec168k_bonus",
-        metric_label: "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
-        statutory_citation: "26 U.S.C. 168(k)(6)",
-        unit: "PCT",
-        points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2027": 0.0, "2028": 0.0, "2029": 0.0, "2030": 0.0 },
-      },
-      {
-        series_id: "fred_dgs10_yield",
-        metric_label: "10-Year U.S. Treasury Constant Maturity Yield Benchmark",
-        statutory_citation: "31 U.S.C. 3102 / FRED DGS10",
-        unit: "PCT",
-        points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2027": 4.1, "2028": 3.95, "2029": 3.85, "2030": 3.8 },
-      },
-    ];
-  }
-  const customParameterLedger = {
-    calculated_amount: baseAmount,
-    capital_band: capitalBand,
-    state: stateCode,
-    inputs,
-    outputs,
-  };
-
-  const csvLines = ["Line Code,Statutory Line Item,Authority,Baseline Scenario,Optimized Scenario,Delta Impact"];
-  for (const r of reconciliationSchedule) {
-    csvLines.push(`"${r.line_code}","${r.line_item}","${r.authority}","${r.baseline_value}","${r.optimized_value}","${r.delta_impact}"`);
-  }
-  for (const ts of statutoryTrendTimeseries) {
-    const v24 = ts.points["2024"] !== undefined ? ts.points["2024"] : "";
-    const v26 = ts.points["2026"] !== undefined ? ts.points["2026"] : "";
-    const v30 = ts.points["2030"] !== undefined ? ts.points["2030"] : "";
-    csvLines.push(`"TREND-${ts.series_id}","${ts.metric_label} (2024-2030)","${ts.statutory_citation}","2024: ${v24} ${ts.unit}","2026: ${v26} ${ts.unit}","2030 Proj: ${v30} ${ts.unit}"`);
-  }
-  for (const [k, v] of Object.entries(inputs)) {
-    csvLines.push(`"INPUT-${k}","Visitor Calculator Input (${k})","Live Workbench","${String(v).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}","Captured"`);
-  }
-  const csvContent = csvLines.join("\\n") + "\\n";
-
-  const rowsHtml = reconciliationSchedule.map((r) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;">${r.line_code}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${r.line_item}<div style="font-size:11px;color:#64748b;">${r.authority}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${r.baseline_value}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${r.optimized_value}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#1d4ed8;">${r.delta_impact}</td></tr>`
-  ).join("");
-  const sensHtml = sensitivityMatrix.map((s) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${s.scenario_label}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.modeled_principal}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${s.effective_rate}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#15803d;">${s.estimated_net_benefit}</td></tr>`
-  ).join("");
-  const trendHtml = statutoryTrendTimeseries.map((ts) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;">${ts.metric_label}<div style="font-size:11px;color:#64748b;">${ts.statutory_citation}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2024"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2025"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;color:#0f766e;">${ts.points["2026"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2028"]} ${ts.unit}</td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;">${ts.points["2030"]} ${ts.unit}</td></tr>`
-  ).join("");
-  const delivHtml = (effSpec.deliverables || []).map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("");
-  const isUnredactedPaid = mode === "paid_toolkit";
-  const statutoryExecutionArtifacts = [
-    {
-      instrument_id: "PH-EXEC-101",
-      instrument_title: "IRC Section 1031 / Section 179 / Tax Election Statutory Substantiation Instrument",
-      controlling_statute: effSpec.statutoryAuthority,
-      filing_deadline_rule: "45-Day Identification / 180-Day Exchange Closing or Timely Tax Return Filing Deadline",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `STATUTORY ELECTION & SUBSTANTIATION (${stateCode}): Pursuant to ${effSpec.statutoryAuthority}, taxpayer / entity substantiates a modeled transaction basis of ${fmtUsd(baseAmount)} (${capitalBand}) for ${toolSlug}. All Form 8824 / Form 4562 / Section 199A line-item reconciliations are locked for CPA workpaper binder attachment.`
-        : `ELECTION SUBSTANTIATION PREVIEW (${stateCode}): Modeled basis ${fmtUsd(baseAmount)} (${capitalBand}). [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "PH-EXEC-102",
-      instrument_title: "Constructive Receipt Safe-Harbor & Statutory Deadline Defense Calendar",
-      controlling_statute: "Treas. Reg. 1.1031(k)-1(g)(4), IRC Section 179(c) & IRC Section 6654(d)",
-      filing_deadline_rule: "Pre-Closing QI Assignment / Placed-in-Service Year-End Cutoff / Quarterly Safe-Harbor Dates",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `STATUTORY DEADLINE CALENDAR (${stateCode}): (1) Execute Qualified Intermediary exchange agreement or capital election prior to constructive receipt; (2) Deliver written 45-day identification notice or placed-in-service certification by statutory cutoff; (3) Remit quarterly safe-harbor installments under IRC Section 6654(d)(1)(B) to eliminate underpayment penalties.`
-        : `DEADLINE CALENDAR PREVIEW (${stateCode}): 45-Day / 180-Day & Placed-in-Service Statutory Cutoffs. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-    {
-      instrument_id: "PH-EXEC-103",
-      instrument_title: "State Conformity & Audit Defense Penalty Protection Memorandum",
-      controlling_statute: "IRC Section 6662 Substantial Authority & State Revenue Code Conformity Schedules",
-      filing_deadline_rule: "Retain for 3-to-6 Year Federal and State Statutory Audit Assessment Window",
-      execution_status: isUnredactedPaid ? "UNREDACTED_READY_FOR_FILING" : "PREVIEW_REDACTED_PENDING_CHECKOUT",
-      statutory_clause_body: isUnredactedPaid
-        ? `AUDIT DEFENSE MEMORANDUM (${stateCode}): Contemporaneous calculation workpaper documenting substantial authority under IRC Section 6662(d)(2)(B) and state conformity rules for ${stateCode} on a modeled principal of ${fmtUsd(baseAmount)}.`
-        : `AUDIT DEFENSE MEMO PREVIEW (${stateCode}): Substantial authority documentation for ${fmtUsd(baseAmount)}. [STATUTORY EXECUTION CLAUSE REDACTED IN FREE PLAYBOOK - UNLOCK FULL FILING PACKET VIA STRIPE CHECKOUT]`,
-    },
-  ];
-  const execArtifactsHtml = statutoryExecutionArtifacts.map((a) =>
-    `<tr><td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-weight:700;">${a.instrument_id}<div style="font-size:10px;color:#64748b;">${a.execution_status}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;"><strong>${a.instrument_title}</strong><div style="font-size:11px;color:#64748b;">${a.controlling_statute} | ${a.filing_deadline_rule}</div></td>` +
-    `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-size:12px;">${a.statutory_clause_body}</td></tr>`
-  ).join("");
-  const upgradeBannerHtml = isUnredactedPaid
-    ? ""
-    : `<div class="no-print" style="background:#fffbeb;border:1px solid #f59e0b;padding:12px 16px;border-radius:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">` +
-      `<div style="font-size:12.5px;color:#92400e;"><strong>Preview Mode:</strong> Statutory execution clauses are redacted in the free playbook. Unlock the full unredacted statutory filing packet ($${effSpec.offerPriceUsd}).</div>` +
-      `<a href="${checkoutUrl}&redirect=1" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Unlock Unredacted Filing Packet ($${effSpec.offerPriceUsd})</a></div>`;
-  const badgeLabel = mode === "paid_toolkit" ? "PAID STATUTORY AUDIT WORKPAPER PACKAGE" : "PERSONALIZED SCENARIO PLAYBOOK & WORKSHEET";
-  const htmlReport = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${effSpec.offerTitle} (${leadId})</title>` +
-    `<style>body{font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px;}.sheet{max-width:920px;margin:0 auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:28px;}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;}th{text-align:left;padding:10px;background:#f1f5f9;border-bottom:2px solid #cbd5e1;font-size:11px;text-transform:uppercase;color:#334155;}@media print{body{background:#fff;padding:0;}.sheet{border:none;}.no-print{display:none!important;}}</style></head>` +
-    `<body><div class="sheet"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:18px;">` +
-    `<div><div style="font-size:11px;font-weight:800;color:#1d4ed8;">${badgeLabel}</div><h1 style="margin:4px 0 6px;font-size:22px;">${effSpec.offerTitle}</h1>` +
-    `<div style="font-size:12px;color:#475569;">Authority: ${effSpec.statutoryAuthority} | Tool: ${toolSlug} | Jurisdiction: ${stateCode}</div></div>` +
-    `<div class="no-print" style="display:flex;gap:8px;"><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Print / Save PDF</button>` +
-    `<a href="${activeCsvUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download CSV Schedule</a>` +
-    `<a href="${activeDatapackUrl}" style="background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;">Download Statutory Data Pack (JSON)</a></div></div>` +
-    upgradeBannerHtml +
-    `<div style="font-size:13px;color:#334155;margin-bottom:14px;">Reference ID: <strong>${leadId}</strong> | Prepared For: <strong>${email}</strong> | Modeled Principal: <strong>${fmtUsd(baseAmount)}</strong> (Band: <strong>${capitalBand}</strong>)</div>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">1. Personalized Statutory Reconciliation Schedule</h2>` +
-    `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead><tbody>${rowsHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">2. Multi-Scenario Stress-Test &amp; Sensitivity Matrix</h2>` +
-    `<table><thead><tr><th>Scenario Case</th><th>Modeled Principal</th><th>Effective Rate / Treatment</th><th>Estimated Net Benefit</th></tr></thead><tbody>${sensHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">3. Multi-Year Statutory &amp; Macroeconomic Trend Benchmarks (2024 to 2030)</h2>` +
-    `<table><thead><tr><th>Statutory Benchmark &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${trendHtml}</tbody></table>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">4. Included Audit Workpaper Deliverables &amp; Next Actions</h2><ul style="font-size:13px;color:#334155;line-height:1.6;">${delivHtml}</ul>` +
-    `<h2 style="font-size:16px;margin:18px 0 8px;">5. Statutory Execution Instruments &amp; Filing Packet</h2>` +
-    `<table><thead><tr><th>Instrument ID</th><th>Statutory Instrument &amp; Deadline Rule</th><th>Execution Clause / Filing Text</th></tr></thead><tbody>${execArtifactsHtml}</tbody></table>` +
-    `</div></body></html>`;
-
-  const grossPriceUsd = Number(effSpec.offerPriceUsd || 49);
-  const estFeeUsd = Math.round((grossPriceUsd * 0.029 + 0.3) * 100) / 100;
-  const netSettledUsd = Math.max(0, Math.round((grossPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
-  const settlementAttribution = {
-    settlement_id: (record && record.settlement_id) || `stl_profithelm_${leadId}`,
-    settlement_status: isPaidSettled ? "settled" : "reserved_pending_settlement",
-    settlement_rail: (record && record.checkout_mode) || "stripe_direct_settlement_rail",
-    merchant_account_id: "acct_1T6fSTIq0ckFsf5j",
-    settlement_bank: "CHOICE BANK COMMERCIAL SETTLEMENT (****1395)",
-    property_id: "profithelm",
-    tool_slug: toolSlug,
-    lead_id: leadId,
-    offer_sku: effSpec.offerSku,
-    offer_title: effSpec.offerTitle,
-    gross_amount_usd: grossPriceUsd,
-    estimated_processor_fee_usd: estFeeUsd,
-    net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
-    attributed_revenue_usd: isPaidSettled ? grossPriceUsd : 0,
-    datapack_delivered: Boolean(isPaidSettled),
-    datapack_pack_id: `dp_${leadId}`,
-    datapack_url: datapackUrl,
-    calculated_amount: baseAmount,
-    capital_band: capitalBand,
-    state: stateCode,
-    settled_at: (record && record.settled_at) || new Date().toISOString(),
-  };
-
-  const statutoryDataPack = {
-    pack_id: `dp_${leadId}`,
-    schema_version: "pseo-datapack-v1",
-    property_id: "profithelm",
-    tool_slug: toolSlug,
-    offer_sku: effSpec.offerSku,
-    statutory_authority: effSpec.statutoryAuthority,
-    effective_tax_year: "2026",
-    modeled_scenario_summary: customParameterLedger,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    longitudinal_benchmark_series: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    settlement_attribution: settlementAttribution,
-  };
-
-  return {
-    workpaper_id: `wp_${leadId}`,
-    property_id: "profithelm",
-    tool_slug: toolSlug,
-    lead_id: leadId,
+  const canonOffer = getCanonicalEdgeOffer(effSpec.offerSku);
+  return buildCanonicalWorkpaperDeliverable({
+    propertyId: "profithelm",
+    record,
+    offer: canonOffer,
     mode,
-    offer_sku: effSpec.offerSku,
-    offer_title: effSpec.offerTitle,
-    offer_price_usd: effSpec.offerPriceUsd,
-    statutory_authority: effSpec.statutoryAuthority,
-    calculated_amount: baseAmount,
-    capital_band: capitalBand,
-    state: stateCode,
-    scenario_inputs: inputs,
-    scenario_outputs: outputs,
-    custom_parameter_ledger: customParameterLedger,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    statutory_trend_timeseries: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    statutory_data_pack: statutoryDataPack,
-    settlement_attribution: settlementAttribution,
-    deliverables: effSpec.deliverables,
-    playbook_url: playbookUrl,
-    playbook_csv_url: playbookCsvUrl,
-    playbook_datapack_url: playbookDatapackUrl,
-    fulfillment_url: fulfillmentUrl,
-    csv_fulfillment_url: csvFulfillmentUrl,
-    datapack_url: datapackUrl,
-    checkout_url: checkoutUrl,
-    csv_content: csvContent,
-    html_report: htmlReport,
-  };
+    sessionId,
+  });
 }
 
 const EDGE_PROPERTY_ID = "profithelm";
@@ -13716,6 +13107,9 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     const meta = (data && data.metadata) || {};
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
+    out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.inputs_json = meta.inputs_json || null;
+    out.outputs_json = meta.outputs_json || null;
     const ref = String(data.client_reference_id || meta.lead_id || "");
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
@@ -13810,10 +13204,10 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     payment.state && (!baseRec.state || baseRec.state === "US")
       ? payment.state
       : baseRec.state;
-  const resolvedSku =
-    payment.offer_sku && !baseRec.offer_sku
-      ? String(payment.offer_sku).trim().toLowerCase()
-      : baseRec.offer_sku;
+  const resolvedSku = payment.offer_sku
+    ? normalizeEdgeSku(payment.offer_sku)
+    : normalizeEdgeSku(baseRec.offer_sku || "");
+  const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
     (record.stripe_checkout_session_id === payment.session_id && record.settled_at) ||
@@ -13839,6 +13233,8 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     email: resolvedEmail,
     calculated_amount: resolvedAmount,
     state: resolvedState,
+    ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
+    ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
@@ -13888,7 +13284,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   return settledRecord;
 }
 
-function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 49) {
+function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPriceUsd = 29) {
   const byCalc = {};
   for (const item of leads || []) {
     if (!item || typeof item !== "object") continue;
@@ -14100,7 +13496,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "line_items[0][price_data][currency]": "usd",
       "line_items[0][price_data][unit_amount]": String(spec.offerPriceCents),
       "line_items[0][price_data][product_data][name]": spec.offerTitle,
-      "line_items[0][price_data][product_data][description]": `ProfitHelm Statutory Tax & Capital Workpaper Packet (${spec.statutoryAuthority})`,
+      "line_items[0][price_data][product_data][description]": spec.offerDescription || `ProfitHelm ${spec.offerTitle}`,
       "line_items[0][quantity]": "1",
       "branding_settings[display_name]": "ProfitHelm",
       "payment_intent_data[statement_descriptor_suffix]": "PROFITHELM",
@@ -14114,6 +13510,8 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 250000),
       "metadata[state]": String((customRecord && customRecord.state) || "US"),
       "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+      ...(buildCompactMetadataJson(customBundle && customBundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(customBundle.scenario_inputs, 480) } : {}),
+      ...(buildCompactMetadataJson(customBundle && customBundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(customBundle.scenario_outputs, 480) } : {}),
     };
     if (!isPlaceholderCheckoutEmail(candidateEmail)) {
       paramsObj.customer_email = candidateEmail;
@@ -14517,19 +13915,32 @@ export async function onRequestGet(context) {
   ) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
     const ctx = await resolveProfitHelmGetContext(env, reqUrl);
-    const { leadId, email, reqSku, spec, storedRecord } = ctx;
+    const { leadId, email, reqSku, storedRecord } = ctx;
+    let spec = ctx.spec;
     const isSynth = isSyntheticProbeRequest(request, null, email);
     let gatedRecord = storedRecord;
-    if (reqSku && gatedRecord) {
-      gatedRecord = { ...gatedRecord, offer_sku: reqSku };
+    if (!isFulfill && reqSku && gatedRecord) {
+      gatedRecord = { ...gatedRecord, offer_sku: normalizeEdgeSku(reqSku) };
     }
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (!isFulfill && (fmt === "csv" || fmt === "datapack" || fmt === "datapack_json")) {
+      return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId);
+    }
+    let verifiedSid = "";
     if (isFulfill) {
       const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, gatedRecord, payment, isSynth);
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, spec, fmt);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      verifiedSid = String(payment.session_id || "");
+      spec = resolveVerticalAndThreshold((gatedRecord && gatedRecord.tool_slug) || ctx.toolSlug, "", tierGuard.paidSku);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
+      }
     }
-    const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook");
-    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    const bundle = buildEdgePersonalizedWorkpaperBundle(gatedRecord, spec, isFulfill ? "paid_toolkit" : "free_playbook", verifiedSid);
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
         status: 200,
@@ -14581,9 +13992,12 @@ export async function onRequestGet(context) {
     );
   }
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
-    const { leadId, email, toolSlug, spec, storedRecord: customRecord } = await resolveProfitHelmGetContext(env, reqUrl);
+    const { email, toolSlug, spec, storedRecord: customRecord } = await resolveProfitHelmGetContext(env, reqUrl);
+    const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "profithelm");
+    const preRec = { ...(customRecord || {}), lead_id: checkoutLeadId, tool_slug: toolSlug, offer_sku: spec.offerSku };
     const isSynth = isSyntheticProbeRequest(request, null, email);
-    const offer = await resolveEdgeStripeCheckoutOffer(env, leadId, email || (customRecord && customRecord.email) || "", toolSlug, spec, isSynth, customRecord);
+    await persistPreCheckoutLeadRecord(env, preRec, spec, toolSlug, isSynth);
+    const offer = await resolveEdgeStripeCheckoutOffer(env, checkoutLeadId, email || (preRec && preRec.email) || "", toolSlug, spec, isSynth, preRec);
     const wantsBrowserRedirect =
       reqUrl.searchParams.get("format") !== "json" &&
       (reqUrl.searchParams.get("redirect") === "1" ||
@@ -14610,7 +14024,7 @@ export async function onRequestGet(context) {
         synthetic_test: isSynth,
         status: offer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
         property_id: "profithelm",
-        lead_id: leadId,
+        lead_id: checkoutLeadId,
         tool_slug: toolSlug,
         ...offer,
       }),
@@ -14763,9 +14177,12 @@ export async function onRequestPost(context) {
         body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
       );
       const effPostSku = reqSku || String((storedRecord && storedRecord.offer_sku) || "").trim().toLowerCase();
-      const effFulfillSpec = effPostSku ? resolveVerticalAndThreshold((storedRecord && storedRecord.tool_slug) || toolSlug, reqPartner, effPostSku) : spec;
-      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
-      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, effFulfillSpec, "paid_toolkit");
+      const initialFulfillSpec = effPostSku ? resolveVerticalAndThreshold((storedRecord && storedRecord.tool_slug) || toolSlug, reqPartner, effPostSku) : spec;
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialFulfillSpec, String(body.format || reqUrl.searchParams.get("format") || "json"));
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      const effFulfillSpec = resolveVerticalAndThreshold((storedRecord && storedRecord.tool_slug) || toolSlug, reqPartner, tierGuard.paidSku);
+      const settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSyntheticProbe);
+      const bundle = buildEdgePersonalizedWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, effFulfillSpec, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -15138,6 +14555,7 @@ export async function onRequestPost(context) {
 """
 
     lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json(prop_clean))
+    lead_js = lead_js + _render_edge_pricing_and_workpaper_engine_js(prop_clean)
     lead_js = lead_js + _render_edge_lead_abuse_guard_js(prop_clean)
     lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js(prop_clean)
     assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function")
@@ -15427,9 +14845,17 @@ export async function onRequestPost(context) {{
           : (baseRecord && baseRecord.email) || customerEmail || "",
     }};
 
+    const hasRealEmailCandidate =
+      Boolean(hydratedRecord && hydratedRecord.email) &&
+      !isPlaceholderCheckoutEmail(hydratedRecord.email) &&
+      !isSyntheticTestEmail(hydratedRecord.email);
+    const alreadyEmailed = Boolean(
+      (existingLock && (existingLock.email_dispatched === true || existingLock.email_sent === true)) ||
+      (hydratedRecord && hydratedRecord.paid_fulfillment_email_session_id === sessionId && hydratedRecord.paid_fulfillment_email_dispatched === true)
+    );
     if (
-      existingLock ||
-      (hydratedRecord && hydratedRecord.paid_fulfillment_email_session_id === sessionId)
+      (existingLock && (alreadyEmailed || !hasRealEmailCandidate)) ||
+      alreadyEmailed
     ) {{
       return jsonResponse({{
         ok: true,
@@ -15460,6 +14886,8 @@ export async function onRequestPost(context) {{
           : null,
       state: stateCode || null,
       offer_sku: offerSku || null,
+      inputs_json: meta.inputs_json || null,
+      outputs_json: meta.outputs_json || null,
       settlement_rail: "stripe_webhook_verified",
     }};
 
@@ -15485,7 +14913,7 @@ export async function onRequestPost(context) {{
       lead_id: leadId,
       property_id: EDGE_PROPERTY_ID,
       settled_at: settledRecord.settled_at,
-      email_attempted: hasRealEmail,
+      email_sent: Boolean(emailResult.dispatched),
       email_dispatched: Boolean(emailResult.dispatched),
       email_status: emailResult.status,
       fulfilled_at: new Date().toISOString(),

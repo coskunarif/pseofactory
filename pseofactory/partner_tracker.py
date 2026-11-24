@@ -36,6 +36,16 @@ from pseofactory.lead_classification import (
     revenue_summary,
 )
 from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.pricing import (
+    build_stripe_price_data,
+    classify_sku_tier_kind,
+    get_all_digital_products,
+    get_audience_tier,
+    get_tenant_catalog,
+    get_tier_pricing,
+    normalize_sku,
+    resolve_offer_pricing,
+)
 from pseofactory.affiliates import (
     AffiliatePartner,
     AFFILIATE_REGISTRY,
@@ -1362,29 +1372,23 @@ class PartnerTrackingEngine:
         )
 
         tenant_sellable_skus_map = {
-            "profithelm": [
-                "ph_1031_boot_replacement_workpapers",
-                "ph_commercial_capital_audit_toolkit",
-                "ph_statutory_tax_audit_workpapers",
-            ],
-            "prexvo": [
-                "px_refi_amortization_decision_audit",
-            ],
-            "gainhelm": [
-                "gh_soc2_cmmc_audit_workpapers",
-                "gh_hipaa_iso27001_governance_kit",
-            ],
-            "lienbond": [
-                "lb_instant_lien_bond_worksheet_19",
-                "lb_surety_bond_underwriting_kit",
-                "lb_workers_comp_emr_audit_kit",
-                "lb_workers_comp_emr_audit_packet",
-                "lb_wh347_certified_payroll_packet",
-                "lb_mechanics_lien_waiver_packet",
-                "lb_surety_lien_wh347_packet",
-            ],
+            pid: [
+                sku
+                for sku, item in get_tenant_catalog(pid).items()
+                if item.get("tier_kind") != "partner_slot"
+            ]
+            for pid in ("profithelm", "prexvo", "gainhelm", "lienbond")
         }
-        prop_skus = list(tenant_sellable_skus_map.get(prop_clean, []))
+        prop_skus = list(
+            tenant_sellable_skus_map.get(
+                prop_clean,
+                [
+                    sku
+                    for sku, item in get_tenant_catalog(prop_clean).items()
+                    if item.get("tier_kind") != "partner_slot"
+                ],
+            )
+        )
         has_skus = len(prop_skus) > 0
         prod_score = (
             round(40.0 + readiness_score * 0.6, 1)
@@ -2277,7 +2281,7 @@ class PartnerTrackingEngine:
                 elif prop_id == "profithelm" and p_key == "next_insurance_b2b":
                     delta_note = (
                         "UPDATED: ERGO NEXT Insurance (#14516/#15709) declined Impact.com request in Inbox #1009 "
-                        "(2026-10-22); covered by first-party $49 Commercial Capital Audit Stripe SKU and Sovrn fallback."
+                        "(2026-10-22); covered by first-party $29 Commercial Capital Audit Stripe SKU and Sovrn fallback."
                     )
                 elif prop_id == "profithelm" and p_key == "crest_capital":
                     delta_note = (
@@ -2287,7 +2291,7 @@ class PartnerTrackingEngine:
                 elif prop_id == "prexvo" and p_key == "sofi":
                     delta_note = (
                         "UPDATED: SoFi Partner Team declined Impact.com promotion request in Inbox #1031 "
-                        "(2026-10-26T13:11:59Z); covered by Prexvo first-party $39 Refinance Audit Stripe SKU "
+                        "(2026-10-26T13:11:59Z); covered by Prexvo first-party $19 Refinance Audit Stripe SKU "
                         "and pending Splash Financial (#9516) / LendKey (#3276) applications."
                     )
 
@@ -2333,12 +2337,12 @@ class PartnerTrackingEngine:
                     elif prop_id == "prexvo" and p_key == "sofi":
                         reason = (
                             "Impact.com SoFi (#11190) application declined (Inbox #1031); "
-                            "covered by first-party $39 Refinance Audit Stripe SKU."
+                            "covered by first-party $19 Refinance Audit Stripe SKU."
                         )
                     elif prop_id == "prexvo" and p_key == "earnest":
                         reason = (
                             "Impact.com Earnest (#11739) application declined (Inbox #994); "
-                            "covered by first-party $39 Refinance Audit Stripe SKU."
+                            "covered by first-party $19 Refinance Audit Stripe SKU."
                         )
                     else:
                         reason = (
@@ -4558,10 +4562,14 @@ class PartnerTrackingEngine:
         (13 commercial calculators + 4 YMYL-restricted public-service calculators), and all 3
         GainHelm cyber-compliance topic clusters (10 root calculators).
         Quantifies the trade-off between chasing gated Tier-1 CPA contracts vs. retaining
-        100%-margin first-party Stripe Checkout SKUs ($39, $49, $79) paired with approved
-        direct affiliate contracts.
+        100%-margin first-party Stripe Checkout SKUs sourced from pseofactory.pricing
+        ($9/$19 consumer, $15/$29 business) paired with approved direct affiliate contracts.
         Zero em-dashes. Zero en-dashes.
         """
+        ph_full_usd = float(resolve_offer_pricing("profithelm", tier_kind="full")["price_usd"])
+        px_full_usd = float(resolve_offer_pricing("prexvo", tier_kind="full")["price_usd"])
+        gh_full_usd = float(resolve_offer_pricing("gainhelm", tier_kind="full")["price_usd"])
+        lb_full_usd = float(resolve_offer_pricing("lienbond", tier_kind="full")["price_usd"])
         profithelm_clusters = [
             {
                 "cluster_id": "crypto_tax_and_1099_da",
@@ -4572,7 +4580,7 @@ class PartnerTrackingEngine:
                 "active_direct_partners": ["coinledger", "koinly"],
                 "approved_network_contracts": ["CoinLedger FirstPromoter (25% recurring)", "Koinly Native/FirstPromoter (20%-40% revshare)"],
                 "first_party_stripe_sku": "ph_statutory_tax_audit_workpapers",
-                "first_party_sku_price_usd": 49.0,
+                "first_party_sku_price_usd": ph_full_usd,
                 "coverage_status": "DUAL_COVERED_DIRECT_AFFILIATE_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 2.45,
                 "expected_epc_unapproved_cpa_chase_usd": 0.40,
@@ -4592,7 +4600,7 @@ class PartnerTrackingEngine:
                     "FreeTaxUSA CJ #4526117 (10%-20% revshare)",
                 ],
                 "first_party_stripe_sku": "ph_statutory_tax_audit_workpapers",
-                "first_party_sku_price_usd": 49.0,
+                "first_party_sku_price_usd": ph_full_usd,
                 "coverage_status": "DUAL_COVERED_CJ_DIRECT_UPGRADE_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 1.95,
                 "expected_epc_unapproved_cpa_chase_usd": 0.35,
@@ -4618,7 +4626,7 @@ class PartnerTrackingEngine:
                     "Ramp Impact #51436 ($100-$4,000 Closed Won / $50-$2,000 SQL)",
                 ],
                 "first_party_stripe_sku": "ph_commercial_capital_audit_toolkit",
-                "first_party_sku_price_usd": 49.0,
+                "first_party_sku_price_usd": ph_full_usd,
                 "coverage_status": "DUAL_COVERED_IMPACT_DIRECT_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 3.80,
                 "expected_epc_unapproved_cpa_chase_usd": 0.65,
@@ -4637,11 +4645,11 @@ class PartnerTrackingEngine:
                     "IPX1031 Direct Qualified Intermediary Desk",
                 ],
                 "first_party_stripe_sku": "ph_1031_boot_replacement_workpapers",
-                "first_party_sku_price_usd": 79.0,
-                "coverage_status": "DUAL_COVERED_CJ_LAWDEPOT_PLUS_79_STRIPE_SKU",
+                "first_party_sku_price_usd": ph_full_usd,
+                "coverage_status": "DUAL_COVERED_CJ_LAWDEPOT_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 4.25,
                 "expected_epc_unapproved_cpa_chase_usd": 0.55,
-                "strategic_decision": "PRIORITIZE_79_STRIPE_WORKPAPERS_AND_LAWDEPOT_CJ",
+                "strategic_decision": "PRIORITIZE_STRIPE_WORKPAPERS_AND_LAWDEPOT_CJ",
             },
             {
                 "cluster_id": "saas_runway_payroll_and_scorp_compensation",
@@ -4662,7 +4670,7 @@ class PartnerTrackingEngine:
                     "Xendoo Impact #16354 ($500 CPA)",
                 ],
                 "first_party_stripe_sku": "ph_statutory_tax_audit_workpapers",
-                "first_party_sku_price_usd": 49.0,
+                "first_party_sku_price_usd": ph_full_usd,
                 "coverage_status": "DUAL_COVERED_TIER1_DIRECT_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 4.60,
                 "expected_epc_unapproved_cpa_chase_usd": 0.50,
@@ -4677,7 +4685,7 @@ class PartnerTrackingEngine:
                 "active_direct_partners": ["kalshi"],
                 "approved_network_contracts": ["Kalshi Impact #37770 ($25 CPA Funded Account)"],
                 "first_party_stripe_sku": "ph_statutory_tax_audit_workpapers",
-                "first_party_sku_price_usd": 49.0,
+                "first_party_sku_price_usd": ph_full_usd,
                 "coverage_status": "DUAL_COVERED_KALSHI_IMPACT_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 1.85,
                 "expected_epc_unapproved_cpa_chase_usd": 0.30,
@@ -4696,7 +4704,7 @@ class PartnerTrackingEngine:
                     "Ramp Impact #51436 ($100-$4,000 CPA)",
                 ],
                 "first_party_stripe_sku": "ph_statutory_tax_audit_workpapers",
-                "first_party_sku_price_usd": 49.0,
+                "first_party_sku_price_usd": ph_full_usd,
                 "coverage_status": "DUAL_COVERED_MERCURY_WALLETHUB_RAMP_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 3.10,
                 "expected_epc_unapproved_cpa_chase_usd": 0.45,
@@ -4718,11 +4726,11 @@ class PartnerTrackingEngine:
                     "OTR Solutions Direct Partnership (Under internal review per Wade Fenton Inbox #1030)",
                 ],
                 "first_party_stripe_sku": "ph_commercial_capital_audit_toolkit",
-                "first_party_sku_price_usd": 49.0,
-                "coverage_status": "DUAL_COVERED_RAMP_DIRECT_PLUS_49_STRIPE_SKU",
+                "first_party_sku_price_usd": ph_full_usd,
+                "coverage_status": "DUAL_COVERED_RAMP_DIRECT_PLUS_STRIPE_SKU",
                 "expected_epc_direct_plus_stripe_usd": 2.95,
                 "expected_epc_unapproved_cpa_chase_usd": 0.40,
-                "strategic_decision": "MONETIZE_WITH_RAMP_AND_49_STRIPE_SKU_WHILE_OTR_REVIEWS",
+                "strategic_decision": "MONETIZE_WITH_RAMP_AND_STRIPE_SKU_WHILE_OTR_REVIEWS",
             },
         ]
 
@@ -4740,16 +4748,16 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["splash_financial", "sofi", "credible", "earnest", "lendkey"],
                 "approved_network_contracts": [
-                    "Prexvo First-Party Stripe Checkout ($39 Refinance & Amortization Decision Audit)",
+                    f"Prexvo First-Party Stripe Checkout (${px_full_usd:.0f} Full Amortization Workpaper & Data Pack)",
                     "Splash Financial Impact #9516 ($300 Closed Loan - pending review)",
                     "LendKey Impact #3276 ($150-$300 Funded Loan - pending review)",
                 ],
                 "first_party_stripe_sku": "px_refi_amortization_decision_audit",
-                "first_party_sku_price_usd": 39.0,
-                "coverage_status": "COVERED_BY_FIRST_PARTY_39_STRIPE_SKU_PLUS_GATE1_PARTNER_FUNNEL",
+                "first_party_sku_price_usd": px_full_usd,
+                "coverage_status": "COVERED_BY_FIRST_PARTY_STRIPE_SKU_PLUS_GATE1_PARTNER_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 1.95,
                 "expected_epc_unapproved_cpa_chase_usd": 0.25,
-                "strategic_decision": "PRIMARY_FIRST_PARTY_39_STRIPE_SKU_WITH_ZERO_SUB_AFFILIATE_WRAPPERS",
+                "strategic_decision": "PRIMARY_FIRST_PARTY_STRIPE_SKU_WITH_ZERO_SUB_AFFILIATE_WRAPPERS",
             },
             {
                 "cluster_id": "title_iv_idr_comparison_and_consolidation",
@@ -4766,14 +4774,14 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["splash_financial", "lendkey"],
                 "approved_network_contracts": [
-                    "Prexvo First-Party Stripe Checkout ($39 Refinance & Amortization Decision Audit)",
+                    f"Prexvo First-Party Stripe Checkout (${px_full_usd:.0f} Full Amortization Workpaper & Data Pack)",
                 ],
                 "first_party_stripe_sku": "px_refi_amortization_decision_audit",
-                "first_party_sku_price_usd": 39.0,
-                "coverage_status": "COVERED_BY_FIRST_PARTY_39_STRIPE_SKU_PLUS_CONSOLIDATED_QUOTE_FUNNEL",
+                "first_party_sku_price_usd": px_full_usd,
+                "coverage_status": "COVERED_BY_FIRST_PARTY_STRIPE_SKU_PLUS_CONSOLIDATED_QUOTE_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 1.65,
                 "expected_epc_unapproved_cpa_chase_usd": 0.20,
-                "strategic_decision": "RETAIN_FIRST_PARTY_39_STRIPE_SKU_AND_HIGH_INTENT_QUOTE_INTAKE",
+                "strategic_decision": "RETAIN_FIRST_PARTY_STRIPE_SKU_AND_HIGH_INTENT_QUOTE_INTAKE",
             },
             {
                 "cluster_id": "ymyl_protected_public_service_forgiveness",
@@ -4812,15 +4820,15 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["vanta_security", "drata_compliance", "thoropass_audit", "cobalt_pentest"],
                 "approved_network_contracts": [
-                    "GainHelm First-Party Stripe Checkout ($79 SOC 2 & CMMC 2.0 Audit Readiness Workpapers)",
+                    f"GainHelm First-Party Stripe Checkout (${gh_full_usd:.0f} SOC 2 & CMMC Full Audit Workpaper & Data Pack)",
                     "Vanta / Drata / Thoropass PartnerStack & Direct GRC Referral Funnel",
                 ],
                 "first_party_stripe_sku": "gh_soc2_cmmc_audit_workpapers",
-                "first_party_sku_price_usd": 79.0,
-                "coverage_status": "DUAL_COVERED_FIRST_PARTY_79_STRIPE_SKU_PLUS_GRC_PARTNER_FUNNEL",
+                "first_party_sku_price_usd": gh_full_usd,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_STRIPE_SKU_PLUS_GRC_PARTNER_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 3.45,
                 "expected_epc_unapproved_cpa_chase_usd": 0.50,
-                "strategic_decision": "PRIORITIZE_79_STRIPE_WORKPAPERS_AND_GRC_PARTNER_FUNNEL",
+                "strategic_decision": "PRIORITIZE_STRIPE_WORKPAPERS_AND_GRC_PARTNER_FUNNEL",
             },
             {
                 "cluster_id": "iso27001_hipaa_pci_and_eu_ai_act_governance",
@@ -4835,14 +4843,14 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["vanta_security", "drata_compliance", "thoropass_audit", "secureframe_grc"],
                 "approved_network_contracts": [
-                    "GainHelm First-Party Stripe Checkout ($49 HIPAA, ISO 27001 & AI Governance Control Matrix)",
+                    f"GainHelm First-Party Stripe Checkout (${gh_full_usd:.0f} ISO 27001, HIPAA & Governance Full Workpaper & Data Pack)",
                 ],
                 "first_party_stripe_sku": "gh_hipaa_iso27001_governance_kit",
-                "first_party_sku_price_usd": 49.0,
-                "coverage_status": "DUAL_COVERED_FIRST_PARTY_49_STRIPE_SKU_PLUS_GRC_PARTNER_FUNNEL",
+                "first_party_sku_price_usd": gh_full_usd,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_STRIPE_SKU_PLUS_GRC_PARTNER_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 2.85,
                 "expected_epc_unapproved_cpa_chase_usd": 0.40,
-                "strategic_decision": "RETAIN_49_STRIPE_GOVERNANCE_KIT_AND_GRC_FUNNEL",
+                "strategic_decision": "RETAIN_STRIPE_GOVERNANCE_KIT_AND_GRC_FUNNEL",
             },
             {
                 "cluster_id": "cyber_liability_insurance_and_breach_deductible",
@@ -4854,15 +4862,15 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["coalition_cyber_insurance", "vanta_security"],
                 "approved_network_contracts": [
-                    "GainHelm First-Party Stripe Checkout ($49 HIPAA, ISO 27001 & AI Governance Control Matrix)",
+                    f"GainHelm First-Party Stripe Checkout (${gh_full_usd:.0f} ISO 27001, HIPAA & Governance Full Workpaper & Data Pack)",
                     "Coalition Active Cyber Insurance Producer Funnel",
                 ],
                 "first_party_stripe_sku": "gh_hipaa_iso27001_governance_kit",
-                "first_party_sku_price_usd": 49.0,
-                "coverage_status": "DUAL_COVERED_FIRST_PARTY_49_STRIPE_SKU_PLUS_CYBER_INSURANCE_FUNNEL",
+                "first_party_sku_price_usd": gh_full_usd,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_STRIPE_SKU_PLUS_CYBER_INSURANCE_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 2.65,
                 "expected_epc_unapproved_cpa_chase_usd": 0.35,
-                "strategic_decision": "RETAIN_49_STRIPE_GOVERNANCE_KIT_AND_COALITION_FUNNEL",
+                "strategic_decision": "RETAIN_STRIPE_GOVERNANCE_KIT_AND_COALITION_FUNNEL",
             },
         ]
         lienbond_clusters = [
@@ -4877,15 +4885,15 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["suretybonds_direct"],
                 "approved_network_contracts": [
-                    "LienBond First-Party Stripe Checkout ($49 Surety Bond Underwriting Kit / $79 Statutory Packet)",
+                    f"LienBond First-Party Stripe Checkout (${lb_full_usd:.0f} Surety Bond Full Workpaper & Data Pack)",
                     "SuretyBondsDirect.com Direct Underwriting Desk (pending approval)",
                 ],
                 "first_party_stripe_sku": "lb_surety_bond_underwriting_kit",
-                "first_party_sku_price_usd": 49.0,
-                "coverage_status": "DUAL_COVERED_FIRST_PARTY_49_STRIPE_SKU_PLUS_SURETY_FUNNEL",
+                "first_party_sku_price_usd": lb_full_usd,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_STRIPE_SKU_PLUS_SURETY_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 2.90,
                 "expected_epc_unapproved_cpa_chase_usd": 0.40,
-                "strategic_decision": "PRIORITIZE_49_79_STRIPE_SURETY_PACKETS_AND_SURETY_FUNNEL",
+                "strategic_decision": "PRIORITIZE_STRIPE_SURETY_PACKETS_AND_SURETY_FUNNEL",
             },
             {
                 "cluster_id": "workers_comp_emr_and_certified_payroll",
@@ -4899,15 +4907,15 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["simply_business", "thimble_contractor"],
                 "approved_network_contracts": [
-                    "LienBond First-Party Stripe Checkout ($49 NCCI EMR Audit Packet / $59 WH-347 Certified Payroll Packet)",
+                    f"LienBond First-Party Stripe Checkout (${lb_full_usd:.0f} Workers Comp EMR & WH-347 Full Workpaper & Data Packs)",
                     "Simply Business / Thimble Contractor Insurance Funnel",
                 ],
                 "first_party_stripe_sku": "lb_workers_comp_emr_audit_packet",
-                "first_party_sku_price_usd": 49.0,
-                "coverage_status": "DUAL_COVERED_FIRST_PARTY_49_STRIPE_SKU_PLUS_WC_INSURANCE_FUNNEL",
+                "first_party_sku_price_usd": lb_full_usd,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_STRIPE_SKU_PLUS_WC_INSURANCE_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 2.75,
                 "expected_epc_unapproved_cpa_chase_usd": 0.35,
-                "strategic_decision": "RETAIN_49_59_STRIPE_WC_PACKETS_AND_CONTRACTOR_INSURANCE_FUNNEL",
+                "strategic_decision": "RETAIN_STRIPE_WC_PACKETS_AND_CONTRACTOR_INSURANCE_FUNNEL",
             },
             {
                 "cluster_id": "mechanics_lien_preliminary_notice_and_retainage",
@@ -4920,15 +4928,15 @@ class PartnerTrackingEngine:
                 ],
                 "active_direct_partners": ["levelset_lien_filing", "jobber_field_service"],
                 "approved_network_contracts": [
-                    "LienBond First-Party Stripe Checkout ($69 Mechanics Lien & Preliminary Notice Waiver Packet)",
+                    f"LienBond First-Party Stripe Checkout (${lb_full_usd:.0f} Mechanics Lien & Waiver Full Workpaper & Data Pack)",
                     "Levelset / Jobber Contractor Operations Referral Funnel",
                 ],
                 "first_party_stripe_sku": "lb_mechanics_lien_waiver_packet",
-                "first_party_sku_price_usd": 69.0,
-                "coverage_status": "DUAL_COVERED_FIRST_PARTY_69_STRIPE_SKU_PLUS_LIEN_OPS_FUNNEL",
+                "first_party_sku_price_usd": lb_full_usd,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_STRIPE_SKU_PLUS_LIEN_OPS_FUNNEL",
                 "expected_epc_direct_plus_stripe_usd": 3.10,
                 "expected_epc_unapproved_cpa_chase_usd": 0.40,
-                "strategic_decision": "RETAIN_69_STRIPE_LIEN_PACKET_AND_LEVELSET_JOBBER_FUNNEL",
+                "strategic_decision": "RETAIN_STRIPE_LIEN_PACKET_AND_LEVELSET_JOBBER_FUNNEL",
             },
         ]
         all_commercial = [
@@ -4981,7 +4989,7 @@ class PartnerTrackingEngine:
                 "gated_tier1_cpa_settlement_lag_days": 45,
                 "sub_affiliate_wrapper_commission_haircut_pct": 25.0,
                 "conclusion": (
-                    "Retaining 100%-margin first-party Stripe Checkout SKUs ($39, $49, $79) with T+2 Mercury "
+                    "Retaining 100%-margin first-party Stripe Checkout SKUs ($9/$19 consumer, $15/$29 business) with T+2 Mercury "
                     "settlement alongside the 12 approved direct contracts (PartnerStack Rippling, Impact Kalshi/Xendoo/Gusto/Ramp, "
                     "CJ E-file/ezTaxReturn/FreeTaxUSA/LawDepot/WalletHub, FirstPromoter CoinLedger/Koinly, Mercury Direct) "
                     "delivers 4.8x higher realized expected EPC than chasing low-approval gated CPA programs or surrendering "
@@ -5929,15 +5937,7 @@ def _apply_gainhelm_quick_worksheet_override(
         return default_quick_slug, statutory_authority, deliverables
     out_slug = str(fw_prof["default_sku_slug"])
     out_auth = str(fw_prof["statutory_authority"])
-    out_deliv = deliverables
-    if fw_prof["framework_key"] != "soc2":
-        out_deliv = [
-            "Personalized Compliance Readiness & Scoping Worksheet (Print-Ready HTML/PDF)",
-            "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
-            f"{fw_prof['regulator_name']} Evidence & Checklist Summary (HTML/PDF)",
-            "Machine-Readable Security Governance Scenario Pack (JSON)",
-        ]
-    return out_slug, out_auth, out_deliv
+    return out_slug, out_auth, list(deliverables)
 
 
 def _resolve_gainhelm_offer_fields(
@@ -5967,49 +5967,48 @@ def _resolve_gainhelm_offer_fields(
             if has_framework_context and fw_key in ("soc2", "cmmc", "fedramp", "pentest")
             else get_gainhelm_framework_profile("soc-2-audit-cost-calculator")
         )
+        priced = resolve_offer_pricing("gainhelm", tier_kind="full", sku="gh_soc2_cmmc_audit_workpapers")
         return (
             "gh_soc2_cmmc_audit_workpapers",
-            79.0,
-            7900,
+            float(priced["price_usd"]),
+            int(priced["price_cents"]),
             str(target_prof["offer_title"]),
             str(target_prof["statutory_authority"]),
-            list(target_prof["deliverables"]),
+            list(target_prof.get("deliverables") or priced["deliverables"]),
             str(target_prof["default_sku_slug"]),
         )
     if sku_clean == "gh_hipaa_iso27001_governance_kit" or (
         not sku_clean and fw_prof["offer_sku"] == "gh_hipaa_iso27001_governance_kit"
     ):
+        priced = resolve_offer_pricing("gainhelm", tier_kind="full", sku="gh_hipaa_iso27001_governance_kit")
         if has_framework_context and fw_prof["offer_sku"] == "gh_hipaa_iso27001_governance_kit":
             return (
                 "gh_hipaa_iso27001_governance_kit",
-                49.0,
-                4900,
+                float(priced["price_usd"]),
+                int(priced["price_cents"]),
                 str(fw_prof["offer_title"]),
                 str(fw_prof["statutory_authority"]),
-                list(fw_prof["deliverables"]),
+                list(fw_prof.get("deliverables") or priced["deliverables"]),
                 str(fw_prof["default_sku_slug"]),
             )
         return (
             "gh_hipaa_iso27001_governance_kit",
-            49.0,
-            4900,
-            "GainHelm HIPAA Penalty, ISO 27001 & Cyber Breach Audit Workpaper Kit",
-            "45 CFR 160.404, ISO/IEC 27006-1:2024 & SEC Item 1.05 Form 8-K",
-            [
-                "ISO/IEC 27006-1 Stage 1 & Stage 2 Auditor-Day Calculation & Annex A Control Matrix",
-                "45 CFR 160.404 Tier 1-4 Civil Monetary Penalty Cap & Breach Notification Schedule",
-                "SEC Item 1.05 Materiality & Cyber Liability Retention Stress-Test Workpaper",
-                "Accredited Certification Body & QSA Scoping Checklist (CSV & Print-Ready Audit HTML)",
-            ],
-            "iso-27001-certification-cost-calculator",
+            float(priced["price_usd"]),
+            int(priced["price_cents"]),
+            str(priced["title"]),
+            str(priced["statutory_authority"]),
+            list(priced["deliverables"]),
+            str(priced["default_slug"]),
         )
+    resolved_fw_sku = normalize_sku(str(fw_prof["offer_sku"]))
+    priced = resolve_offer_pricing("gainhelm", tier_kind="full", sku=resolved_fw_sku)
     return (
-        str(fw_prof["offer_sku"]),
-        float(fw_prof["offer_price_usd"]),
-        int(fw_prof["offer_price_cents"]),
+        str(priced["sku"]),
+        float(priced["price_usd"]),
+        int(priced["price_cents"]),
         str(fw_prof["offer_title"]),
         str(fw_prof["statutory_authority"]),
-        list(fw_prof["deliverables"]),
+        list(fw_prof.get("deliverables") or priced["deliverables"]),
         str(fw_prof["default_sku_slug"]),
     )
 
@@ -6115,219 +6114,53 @@ def resolve_lead_monetization_offer(
     prop_clean = (property_id or "profithelm").strip().lower()
     slug_clean = _normalize_offer_tool_slug(tool_slug)
     vert_clean = (vertical or "").strip().lower()
-    sku_clean = (sku or offer_sku or "").strip().lower()
+    sku_clean = normalize_sku(sku or offer_sku or "")
     eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
 
-    if sku_clean in (
-        "ph_instant_statutory_worksheet_19",
-        "px_instant_repayment_worksheet_19",
-        "gh_instant_compliance_worksheet_19",
-        "lb_instant_lien_bond_worksheet_19",
-    ):
-        quick_prefix_map = {
-            "px_instant_repayment_worksheet_19": (
-                "prexvo",
-                "https://prexvo.com",
-                "student-loan-refinance-break-even-calculator",
-                "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
-                "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026) & 34 CFR 685.209",
-                [
-                    "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
-                    "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
-                    "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
-                    "Machine-Readable Borrower Refinance Scenario Pack (JSON)",
-                ],
-            ),
-            "gh_instant_compliance_worksheet_19": (
-                "gainhelm",
-                "https://gainhelm.com",
-                "soc-2-audit-cost-calculator",
-                "GainHelm Instant Compliance Budget & Control Scoping Worksheet (PDF/CSV)",
-                "AICPA SSAE 18 (AT-C 205), ISO/IEC 27006-1:2024, 32 CFR Part 170 & 45 CFR 160.404",
-                [
-                    "Personalized Audit Readiness & Auditor-Day Scoping Worksheet (Print-Ready HTML/PDF)",
-                    "Control Gap & Remediation Cost Reconciliation Schedule (CSV)",
-                    "Multi-Framework Overlap & Evidence Readiness Checklist (HTML/PDF)",
-                    "Machine-Readable Security Governance Scenario Pack (JSON)",
-                ],
-            ),
-            "lb_instant_lien_bond_worksheet_19": (
-                "lienbond",
-                "https://lienbond.com",
-                "contractor-license-bond-cost-calculator-by-credit-score",
-                "LienBond Instant Surety Bond, Workers' Comp & Lien Deadline Worksheet (PDF/CSV)",
-                "40 U.S.C. 3131 (Miller Act), State Mechanics Lien Statutes, 29 CFR 5.5 & NCCI Manual",
-                [
-                    "Personalized Surety Premium, Workers' Comp Rate or State Lien Deadline Worksheet (Print-Ready HTML/PDF)",
-                    "Retainage, Bond Capacity & Payroll Class Code Reconciliation Schedule (CSV)",
-                    "State Preliminary Notice & Statutory Waiver Deadline Checklist (HTML/PDF)",
-                    "Machine-Readable Contractor Compliance Scenario Pack (JSON)",
-                ],
-            ),
-            "ph_instant_statutory_worksheet_19": (
-                "profithelm",
-                "https://profithelm.com",
-                "irs-2027-tax-brackets",
-                "ProfitHelm Instant 2026-2027 Statutory Tax & Depreciation Worksheet (PDF/CSV)",
-                "IRC Statutory Schedules, Rev. Proc. 2025-32, Section 179 & Section 1031 Rules",
-                [
-                    "Personalized Federal & State Statutory Tax or Depreciation Worksheet (Print-Ready HTML/PDF)",
-                    "Line-Item Marginal vs Effective Rate & Deduction Reconciliation Schedule (CSV)",
-                    "Quarterly Safe-Harbor Estimated Tax & Statutory Cutoff Checklist (HTML/PDF)",
-                    "Machine-Readable Scenario Parameter & Statutory Benchmark Pack (JSON)",
-                ],
-            ),
-        }
-        (
-            prop_clean,
-            canonical_domain,
-            default_quick_slug,
-            offer_title,
-            statutory_authority,
-            deliverables,
-        ) = quick_prefix_map[sku_clean]
-        if sku_clean == "gh_instant_compliance_worksheet_19":
-            default_quick_slug, statutory_authority, deliverables = (
-                _apply_gainhelm_quick_worksheet_override(
-                    slug_clean,
-                    vert_clean,
-                    default_quick_slug,
-                    statutory_authority,
-                    deliverables,
-                )
-            )
-        if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
-            raise ValueError(
-                f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
-            )
-        offer_sku = sku_clean
-        offer_price_usd = 19.0
-        offer_price_cents = 1900
-        if slug_clean.endswith("-hub"):
-            eff_slug_for_path = ""
-        elif slug_clean in ("index", "general", "home", "homepage"):
-            eff_slug_for_path = default_quick_slug
-        else:
-            eff_slug_for_path = slug_clean
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
-    elif sku_clean in (
-        "ph_verified_partner_slot",
-        "px_verified_partner_slot",
-        "gh_verified_partner_slot",
-        "lb_verified_partner_slot",
-    ):
-        slot_prefix_map = {
-            "px_verified_partner_slot": ("prexvo", "https://prexvo.com", "student-loan-refinance-break-even-calculator"),
-            "gh_verified_partner_slot": ("gainhelm", "https://gainhelm.com", "soc-2-audit-cost-calculator"),
-            "lb_verified_partner_slot": ("lienbond", "https://lienbond.com", "contractor-license-bond-cost-calculator-by-credit-score"),
-            "ph_verified_partner_slot": ("profithelm", "https://profithelm.com", "section-1031-calculator"),
-        }
-        prop_clean, canonical_domain, default_slot_slug = slot_prefix_map[sku_clean]
-        if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
-            raise ValueError(
-                f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
-            )
-        offer_sku = sku_clean
-        offer_title = "Verified Calculator Partner Slot"
-        offer_price_usd = 299.0
-        offer_price_cents = 29900
-        statutory_authority = "16 CFR Part 255 Commercial Partner Desk Attribution & Placement Protocol"
-        deliverables = [
-            "Verified Commercial Partner Desk Placement on Target Calculator Route",
-            "State-Filtered High-Intent Lead Routing & SubID Attribution Feed",
-            "Direct Calculator CTA & Partner Matrix Priority Slot",
-            "Monthly Partner Attribution & Conversion Reconciliation Digest",
-        ]
-        eff_slug_for_path = slug_clean if slug_clean not in ("index", "general") else default_slot_slug
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
-    elif sku_clean in (
-        "ph_1031_boot_waterfall_kit",
-        "ph_1031_boot_replacement_workpapers",
-        "ph_section179_macrs_audit_kit",
-        "ph_commercial_capital_audit_toolkit",
-        "ph_statutory_tax_audit_workpapers",
-    ):
-        prop_clean = "profithelm"
-        canonical_domain = "https://profithelm.com"
-        if sku_clean in ("ph_1031_boot_waterfall_kit", "ph_1031_boot_replacement_workpapers"):
-            offer_sku = sku_clean
-            offer_title = (
-                "ProfitHelm IRC Section 1031 Boot Waterfall & QI Compliance Workpaper Kit"
-                if sku_clean == "ph_1031_boot_waterfall_kit"
-                else "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit"
-            )
-            offer_price_usd = 79.0
-            offer_price_cents = 7900
-            statutory_authority = "IRC Section 1031, Treas. Reg. 1.1031(k)-1 & IRS Form 8824"
-            deliverables = [
-                "IRS Form 8824 Part III Realized Gain & Recognized Boot Reconciliation Schedule",
-                "45-Day Identification (Three-Property / 200% Rule) & 180-Day Closing Calendar",
-                "Mortgage Boot vs Cash Boot Offset & Replacement Debt Matrix",
-                "Qualified Intermediary (QI) Constructive Receipt Safe-Harbor Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "section-1031-calculator"
-        elif sku_clean in ("ph_section179_macrs_audit_kit", "ph_commercial_capital_audit_toolkit"):
-            offer_sku = sku_clean
-            offer_title = (
-                "ProfitHelm IRC Section 179 & MACRS Depreciation Audit Workpaper Kit"
-                if sku_clean == "ph_section179_macrs_audit_kit"
-                else "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers"
-            )
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "IRC Section 179, Section 168(k) & Truth in Lending / Commercial APR Equivalency"
-            deliverables = [
-                "Effective Annualized APR & Factoring Reserve Holdback Reconciliation Schedule",
-                "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
-                "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
-                "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "section-179-calculator"
-        else:
-            offer_sku = "ph_statutory_tax_audit_workpapers"
-            offer_title = "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "IRC Statutory Schedules, Rev. Proc. 2025-32 & State Conformity Rules"
-            deliverables = [
-                "Personalized Federal & State Statutory Tax Reconciliation Workpaper",
-                "Effective vs Marginal Bracket & Phase-Out Sensitivity Matrix",
-                "Quarterly Safe-Harbor Estimated Tax & Penalty Avoidance Schedule",
-                "CPA Substantiation & Audit Defense Documentation Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "s-corp-reasonable-salary-tax-calculator"
-        eff_slug_for_path = slug_clean if slug_clean not in ("index", "general") else default_sku_slug
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
-    elif prop_clean == "prexvo" or sku_clean == "px_refi_amortization_decision_audit":
-        prop_clean = "prexvo"
-        if is_restricted_public_service_slug(slug_clean, slug_clean):
-            raise ValueError(
-                f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
-            )
-        offer_sku = "px_refi_amortization_decision_audit"
-        offer_title = "Prexvo Private Refinance vs Federal Protections Decision Audit Kit"
-        offer_price_usd = 39.0
-        offer_price_cents = 3900
-        statutory_authority = "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219"
-        deliverables = [
-            "Weighted-Average Loan Tranche Amortization Reconciliation Schedule",
-            "Federal IDR & PSLF Forfeiture Present-Value Stress-Test Matrix",
-            "Cosigner Release & State Consumer Protection Verification Checklist",
-            "Lender Rate-Match Underwriting Intake Sheet (CSV & Print-Ready Audit HTML)",
-        ]
-        canonical_domain = "https://prexvo.com"
-        eff_slug_for_path = (
-            slug_clean
-            if slug_clean not in ("index", "general")
-            else ("student-loan-refinance-break-even-calculator" if sku_clean else "")
+    domain_by_prop = {
+        "profithelm": "https://profithelm.com",
+        "prexvo": "https://prexvo.com",
+        "gainhelm": "https://gainhelm.com",
+        "lienbond": "https://lienbond.com",
+    }
+
+    priced = resolve_offer_pricing(
+        property_id=prop_clean,
+        tier_kind=classify_sku_tier_kind(sku_clean) if sku_clean else "full",
+        slug=slug_clean,
+        vertical=vert_clean,
+        sku=sku_clean,
+    )
+    prop_clean = str(priced["property_id"])
+    canonical_domain = domain_by_prop.get(prop_clean, f"https://{prop_clean}.com")
+
+    if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
+        raise ValueError(
+            f"Restricted public-service asset '{slug_clean}' on Prexvo cannot attach commercial checkout offers."
         )
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
-    elif prop_clean == "gainhelm" or sku_clean in (
-        "gh_instant_compliance_worksheet_19",
-        "gh_soc2_cmmc_audit_workpapers",
-        "gh_hipaa_iso27001_governance_kit",
-    ):
-        prop_clean = "gainhelm"
+
+    offer_sku = str(priced["sku"])
+    offer_title = str(priced["title"])
+    offer_description = str(priced["description"])
+    offer_price_usd = float(priced["price_usd"])
+    offer_price_cents = int(priced["price_cents"])
+    tier_kind = str(priced["tier_kind"])
+    audience_tier = str(priced["audience_tier"])
+    statutory_authority = str(priced["statutory_authority"])
+    deliverables = list(priced["deliverables"])
+    default_sku_slug = str(priced.get("default_slug") or "general")
+
+    if prop_clean == "gainhelm" and tier_kind == "quick":
+        default_sku_slug, statutory_authority, deliverables = (
+            _apply_gainhelm_quick_worksheet_override(
+                slug_clean,
+                vert_clean,
+                default_sku_slug,
+                statutory_authority,
+                deliverables,
+            )
+        )
+    elif prop_clean == "gainhelm" and tier_kind == "full":
         (
             offer_sku,
             offer_price_usd,
@@ -6337,7 +6170,8 @@ def resolve_lead_monetization_offer(
             deliverables,
             default_sku_slug,
         ) = _resolve_gainhelm_offer_fields(slug_clean, vert_clean, sku_clean)
-        canonical_domain = "https://gainhelm.com"
+
+    if prop_clean == "gainhelm" and tier_kind == "full":
         from pseofactory.affiliates import (
             GAINHELM_FRAMEWORK_PROFILES,
             classify_gainhelm_framework,
@@ -6363,163 +6197,34 @@ def resolve_lead_monetization_offer(
             )
         else:
             eff_slug_for_path = slug_clean
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
-    elif prop_clean == "lienbond" or sku_clean in (
-        "lb_surety_bond_underwriting_kit",
-        "lb_workers_comp_emr_audit_kit",
-        "lb_workers_comp_emr_audit_packet",
-        "lb_wh347_certified_payroll_packet",
-        "lb_mechanics_lien_waiver_packet",
-        "lb_surety_lien_wh347_packet",
-    ):
-        prop_clean = "lienbond"
-        if sku_clean == "lb_surety_bond_underwriting_kit":
-            offer_sku = "lb_surety_bond_underwriting_kit"
-            offer_title = "LienBond Contractor Surety Bond & Indemnity Underwriting Workpaper Kit"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "40 U.S.C. 3131 (Miller Act), FAR 28.102, 13 CFR Part 115 (SBA Surety Bond Guarantee) & SAA Class Rates"
-            deliverables = [
-                "Tiered Surety Bond Premium & Working Capital Underwriting Reconciliation Workpaper (HTML/PDF)",
-                "WIP Over/Under-Billing & 10x Net Working Capital Aggregate Backlog Schedule (CSV)",
-                "General Agreement of Indemnity (GAI) Spousal & Corporate Asset Protection Checklist (HTML/PDF)",
-                "Signed Surety Underwriting Submission & Broker Rate-Match Manifest (JSON)",
-            ]
-            default_sku_slug = "contractor-license-bond-cost-calculator-by-credit-score"
-        elif sku_clean == "lb_workers_comp_emr_audit_kit":
-            offer_sku = "lb_workers_comp_emr_audit_kit"
-            offer_title = "LienBond NCCI Workers' Comp Class Code & EMR Experience Modification Audit Kit"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "NCCI Basic Manual, NCCI Experience Rating Plan (ERP) & ISO CG 00 01 Commercial GL Standards"
-            deliverables = [
-                "NCCI Governing Class Code & Payroll Separation Audit Defense Workpaper (HTML/PDF)",
-                "3-Year Experience Modification Rate (EMR) Primary vs Excess Loss Sensitivity Schedule (CSV)",
-                "Overtime Premium Payroll Deduction (1/3 vs 1/2 Credit) & Subcontractor COI Audit Checklist (HTML/PDF)",
-                "Signed Workers' Comp Premium Audit & Experience Rating Verification Manifest (JSON)",
-            ]
-            default_sku_slug = "workers-compensation-class-code-rate-calculator-by-state"
-        elif sku_clean == "lb_wh347_certified_payroll_packet":
-            offer_sku = "lb_wh347_certified_payroll_packet"
-            offer_title = "LienBond Federal Davis-Bacon Form WH-347 & Prevailing Wage Fringe Packet"
-            offer_price_usd = 59.0
-            offer_price_cents = 5900
-            statutory_authority = "40 U.S.C. 3141-3148 (Davis-Bacon Act), 29 CFR 5.5(a)(3)(ii) & 40 U.S.C. 3702 (CWHSSA)"
-            deliverables = [
-                "DOL Form WH-347 Weekly Certified Payroll & Bona Fide Fringe Credit Reconciliation Workpaper (HTML/PDF)",
-                "29 CFR 5.5 Statement of Compliance & Subcontractor Flow-Down Audit Schedule (CSV)",
-                "Regular-Rate vs Prevailing Base-Rate Overtime (1.5x) & Fringe Offset Matrix (CSV/HTML)",
-                "Signed Davis-Bacon Prevailing Wage & Fringe Substantiation Manifest (JSON)",
-            ]
-            default_sku_slug = "prevailing-wage-fringe-benefit-wh-347-calculator"
-        elif sku_clean == "lb_mechanics_lien_waiver_packet":
-            offer_sku = "lb_mechanics_lien_waiver_packet"
-            offer_title = "LienBond 50-State Mechanics Lien, Preliminary Notice & Statutory Waiver Filing Packet"
-            offer_price_usd = 69.0
-            offer_price_cents = 6900
-            statutory_authority = "Cal. Civ. Code 8132-8414, Tex. Prop. Code Ch. 53, Fla. Stat. 713.06-713.20 & 40 U.S.C. 3131 (Miller Act)"
-            deliverables = [
-                "State-Specific Preliminary Notice, Notice of Intent & Claim of Lien Deadline Calendar (HTML/PDF)",
-                "4 Statutory Lien Waiver Instruments: Conditional/Unconditional Progress & Final Payment Waivers (HTML/PDF)",
-                "AIA G702 / G703 Pay-Application Retainage & Joint-Check Reconciliation Schedule (CSV)",
-                "Signed Statutory Mechanics Lien & Payment Bond Claim Execution Manifest (JSON)",
-            ]
-            default_sku_slug = "mechanics-lien-filing-deadline-calculator-by-state"
-        elif sku_clean == "lb_workers_comp_emr_audit_packet" or (
-            not sku_clean
-            and any(
-                t in slug_clean or t in vert_clean
-                for t in ("workers-comp", "emr", "general-liability", "builders-risk", "sdi")
-            )
-        ):
-            offer_sku = "lb_workers_comp_emr_audit_packet"
-            offer_title = "LienBond NCCI Workers Comp Class Code, EMR & Contractor Insurance Audit Packet"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "NCCI Experience Rating Plan Manual, State Workers Comp Codes & ISO CG 00 01"
-            deliverables = [
-                "NCCI Split-Point Primary vs Excess Loss & Experience Modification Rate (EMR) Reconciliation Schedule",
-                "Governing Class Code 8810/5403/5190 Payroll Segregation & Audit Defense Matrix",
-                "ISO CG 20 10 / CG 20 37 Additional Insured & Builders Risk Soft-Cost Coverage Workpaper",
-                "Licensed Commercial Carrier & Surety Underwriting Submission Sheet (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "workers-compensation-class-code-rate-calculator-by-state"
+    elif tier_kind == "quick":
+        if slug_clean.endswith("-hub"):
+            eff_slug_for_path = ""
+        elif slug_clean in ("index", "general", "home", "homepage"):
+            eff_slug_for_path = default_sku_slug
         else:
-            offer_sku = "lb_surety_lien_wh347_packet"
-            offer_title = "LienBond 50-State Statutory Lien Waiver, Surety AIA A312 & WH-347 Filing Packet"
-            offer_price_usd = 79.0
-            offer_price_cents = 7900
-            statutory_authority = "40 U.S.C. 3131 Federal Miller Act, State Mechanics Lien Statutes & 29 CFR 5.5 WH-347"
-            deliverables = [
-                "50-State Preliminary Notice, Mechanics Lien Recording & Statutory Lien Waiver Packet",
-                "40 U.S.C. 3131 Miller Act & AIA A310/A312 Surety Underwriting Working Capital Workpaper",
-                "Davis-Bacon 29 CFR 5.5 Certified Payroll Form WH-347 Statement of Compliance & Fringe Ledger",
-                "Statutory Retainage Release & Payment Bond Notice Deadline Defense Calendar (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "contractor-license-bond-cost-calculator-by-credit-score"
-        canonical_domain = "https://lienbond.com"
-        eff_slug_for_path = (
-            slug_clean
-            if slug_clean not in ("index", "general")
-            else (default_sku_slug if sku_clean else "")
-        )
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+            eff_slug_for_path = slug_clean
+    elif tier_kind == "partner_slot":
+        eff_slug_for_path = slug_clean if slug_clean not in ("index", "general") else default_sku_slug
     else:
-        if sku_clean == "ph_1031_boot_replacement_workpapers" or (
-            not sku_clean
-            and ("1031" in slug_clean or "1031" in vert_clean or "exchange" in slug_clean)
-        ):
-            offer_sku = "ph_1031_boot_replacement_workpapers"
-            offer_title = "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit"
-            offer_price_usd = 79.0
-            offer_price_cents = 7900
-            statutory_authority = "IRC Section 1031, Treas. Reg. 1.1031(k)-1 & IRS Form 8824"
-            deliverables = [
-                "IRS Form 8824 Part III Realized Gain & Recognized Boot Reconciliation Schedule",
-                "45-Day Identification (Three-Property / 200% Rule) & 180-Day Closing Calendar",
-                "Mortgage Boot vs Cash Boot Offset & Replacement Debt Matrix",
-                "Qualified Intermediary (QI) Constructive Receipt Safe-Harbor Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "section-1031-calculator"
-        elif sku_clean == "ph_commercial_capital_audit_toolkit" or (
-            not sku_clean
-            and any(
-                t in slug_clean or t in vert_clean
-                for t in ("factoring", "invoice", "179", "equipment", "capex", "tariff", "301", "landed-cost")
-            )
-        ):
-            offer_sku = "ph_commercial_capital_audit_toolkit"
-            offer_title = "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "IRC Section 179, Section 168(k) & Truth in Lending / Commercial APR Equivalency"
-            deliverables = [
-                "Effective Annualized APR & Factoring Reserve Holdback Reconciliation Schedule",
-                "IRC Section 179 vs Section 168(k) Bonus Depreciation Basis & Phase-Out Workpaper",
-                "Debt-Service vs Lease Present-Value Cash-Flow Sensitivity Matrix",
-                "Institutional Lender & Factoring Term-Sheet Audit Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "section-179-calculator"
-        else:
-            offer_sku = "ph_statutory_tax_audit_workpapers"
-            offer_title = "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite"
-            offer_price_usd = 49.0
-            offer_price_cents = 4900
-            statutory_authority = "IRC Statutory Schedules, Rev. Proc. 2025-32 & State Conformity Rules"
-            deliverables = [
-                "Personalized Federal & State Statutory Tax Reconciliation Workpaper",
-                "Effective vs Marginal Bracket & Phase-Out Sensitivity Matrix",
-                "Quarterly Safe-Harbor Estimated Tax & Penalty Avoidance Schedule",
-                "CPA Substantiation & Audit Defense Documentation Checklist (CSV & Print-Ready Audit HTML)",
-            ]
-            default_sku_slug = "s-corp-reasonable-salary-tax-calculator"
-        canonical_domain = "https://profithelm.com"
         eff_slug_for_path = (
             slug_clean
             if slug_clean not in ("index", "general")
             else (default_sku_slug if sku_clean else "")
         )
-        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+    tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+
+    stripe_price_data = build_stripe_price_data(
+        {
+            "sku": offer_sku,
+            "property_id": prop_clean,
+            "tier_kind": tier_kind,
+            "title": offer_title,
+            "description": offer_description,
+            "price_cents": offer_price_cents,
+            "currency": "usd",
+        }
+    )
 
     assert_no_forbidden_dashes(offer_title, context="offer_title")
     for item in deliverables:
@@ -6573,12 +6278,16 @@ def resolve_lead_monetization_offer(
         "vertical": resolved_vertical,
         "offer_sku": offer_sku,
         "offer_title": offer_title,
+        "offer_description": offer_description,
+        "tier_kind": tier_kind,
+        "audience_tier": audience_tier,
         "offer_price_usd": offer_price_usd,
         "offer_price_cents": offer_price_cents,
         "currency": "usd",
         "billing_mode": "payment",
         "statutory_authority": statutory_authority,
         "deliverables": deliverables,
+        "stripe_price_data": stripe_price_data,
         "stripe_price_id": price_id_env or None,
         "checkout_url": checkout_url,
         "live_checkout_endpoint": f"{canonical_domain}{checkout_url}",
@@ -7167,10 +6876,9 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
                 vertical=vert_clean,
             )
         ]
-    elif prop_clean == "lienbond" or sku_clean in (
+    elif prop_clean == "lienbond" or normalize_sku(sku_clean) in (
         "lb_instant_lien_bond_worksheet_19",
         "lb_surety_bond_underwriting_kit",
-        "lb_workers_comp_emr_audit_kit",
         "lb_workers_comp_emr_audit_packet",
         "lb_wh347_certified_payroll_packet",
         "lb_mechanics_lien_waiver_packet",
@@ -7508,10 +7216,9 @@ def synthesize_personalized_audit_workpaper(
                 "estimated_net_benefit": f"+${net_audit_savings * 1.65:,.2f} Dual-Audit Savings",
             },
         ]
-    elif prop_clean == "lienbond" or offer["offer_sku"] in (
+    elif prop_clean == "lienbond" or normalize_sku(offer["offer_sku"]) in (
         "lb_instant_lien_bond_worksheet_19",
         "lb_surety_bond_underwriting_kit",
-        "lb_workers_comp_emr_audit_kit",
         "lb_workers_comp_emr_audit_packet",
         "lb_wh347_certified_payroll_packet",
         "lb_mechanics_lien_waiver_packet",
@@ -8017,8 +7724,6 @@ def synthesize_personalized_audit_workpaper(
             if isinstance(lead_record, dict)
             else "edge_direct_settlement_rail"
         ),
-        "merchant_account_id": "acct_1T6fSTIq0ckFsf5j",
-        "settlement_bank": "MERCURY, PARTNERING WITH CHOICE BANK (****1395)",
         "property_id": prop_clean,
         "tool_slug": slug_clean,
         "vertical": str(eval_meta.get("vertical") or vert_clean or "general"),
@@ -8082,9 +7787,11 @@ def synthesize_personalized_audit_workpaper(
         "settlement_attribution": settlement_attribution,
     }
 
+    import html as _html_mod
+    esc = lambda v: _html_mod.escape(str(v or ""), quote=True)
     html_report = (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        f"<title>{offer['offer_title']} ({lead_id})</title>"
+        f"<title>{esc(offer['offer_title'])} ({esc(lead_id)})</title>"
         "<style>"
         "body{font-family:system-ui,-apple-system,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px;}"
         ".sheet{max-width:920px;margin:0 auto;background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:28px;box-shadow:0 4px 12px rgba(15,23,42,0.05);}"
@@ -8094,16 +7801,20 @@ def synthesize_personalized_audit_workpaper(
         "</style></head><body><div class='sheet'>"
         "<div style='display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:18px;'>"
         "<div>"
-        f"<div style='font-size:11px;font-weight:800;color:#1d4ed8;letter-spacing:0.06em;'>{badge_label}</div>"
-        f"<h1 style='margin:4px 0 6px;font-size:22px;'>{offer['offer_title']}</h1>"
-        f"<div style='font-size:12px;color:#475569;'>Authority: {offer['statutory_authority']} | Tool: {slug_clean} | Jurisdiction: {state_code}</div>"
+        f"<div style='font-size:11px;font-weight:800;color:#1d4ed8;letter-spacing:0.06em;'>{esc(badge_label)}</div>"
+        f"<h1 style='margin:4px 0 6px;font-size:22px;'>{esc(offer['offer_title'])}</h1>"
+        f"<div style='font-size:12px;color:#475569;'>Authority: {esc(offer['statutory_authority'])} | Tool: {esc(slug_clean)} | Jurisdiction: {esc(state_code)}</div>"
         "</div>"
         "<div class='no-print' style='display:flex;gap:8px;flex-wrap:wrap;'>"
         "<button onclick='window.print()' style='background:#0f172a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;'>Print / Save PDF</button>"
-        f"<a href='{active_csv_url}' style='background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download CSV Schedule</a>"
-        f"<a href='{active_datapack_url}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download Statutory Data Pack (JSON)</a>"
-        "</div></div>"
-        f"<div style='font-size:13px;color:#334155;margin-bottom:14px;'>Reference ID: <strong>{lead_id}</strong> | Prepared For: <strong>{email}</strong> | Modeled Principal: <strong>${base_amount:,.2f}</strong> (Band: <strong>{capital_band}</strong>)</div>"
+        + (
+            f"<a href='{esc(active_csv_url)}' style='background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download CSV Schedule</a>"
+            f"<a href='{esc(active_datapack_url)}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;'>Download Statutory Data Pack (JSON)</a>"
+            if mode == "paid_toolkit"
+            else ""
+        )
+        + "</div></div>"
+        f"<div style='font-size:13px;color:#334155;margin-bottom:14px;'>Reference ID: <strong>{esc(lead_id)}</strong> | Prepared For: <strong>{esc(email)}</strong> | Modeled Principal: <strong>${base_amount:,.2f}</strong> (Band: <strong>{esc(capital_band)}</strong>)</div>"
         f"{inputs_summary_html}"
         "<h2 style='font-size:16px;margin:18px 0 8px;'>1. Personalized Statutory Reconciliation Schedule</h2>"
         "<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline Posture</th><th>Optimized Posture</th><th>Net Variance</th></tr></thead>"
@@ -8117,9 +7828,9 @@ def synthesize_personalized_audit_workpaper(
         "<h2 style='font-size:16px;margin:18px 0 8px;'>4. Included Audit Workpaper Deliverables &amp; Next Actions</h2>"
         f"<ul style='font-size:13px;color:#334155;line-height:1.6;'>{deliverables_html}</ul>"
         "<div class='no-print' style='margin-top:20px;padding:16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>"
-        f"<div><strong style='font-size:14px;color:#1e3a8a;'>Matched Institutional Desk: {eval_meta['partner_rep_desk'] or 'Verified Partner Desk'}</strong>"
+        f"<div><strong style='font-size:14px;color:#1e3a8a;'>Matched Institutional Desk: {esc(eval_meta['partner_rep_desk'] or 'Verified Partner Desk')}</strong>"
         "<div style='font-size:12px;color:#334155;'>Execute binding underwriting or qualified intermediary intake with your workpaper reference ID.</div></div>"
-        f"<a href='{offer['checkout_url']}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:9px 16px;border-radius:6px;font-size:12px;font-weight:700;'>Complete Toolkit Checkout (${offer['offer_price_usd']:.0f})</a>"
+        f"<a href='{esc(offer['checkout_url'])}' style='background:#1d4ed8;color:#fff;text-decoration:none;padding:9px 16px;border-radius:6px;font-size:12px;font-weight:700;'>Complete Toolkit Checkout (${offer['offer_price_usd']:.0f})</a>"
         "</div></div></body></html>"
     )
 
@@ -8672,7 +8383,6 @@ def compute_scenario_demand_and_conversion_metrics(
         "gh_hipaa_iso27001_governance_kit": "iso-27001-certification-cost-calculator",
         "lb_instant_lien_bond_worksheet_19": "contractor-license-bond-cost-calculator-by-credit-score",
         "lb_surety_bond_underwriting_kit": "contractor-license-bond-cost-calculator-by-credit-score",
-        "lb_workers_comp_emr_audit_kit": "experience-modification-rate-emr-workers-comp-penalty-calculator",
         "lb_workers_comp_emr_audit_packet": "experience-modification-rate-emr-workers-comp-penalty-calculator",
         "lb_wh347_certified_payroll_packet": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
         "lb_mechanics_lien_waiver_packet": "california-texas-florida-preliminary-notice-deadline-calculator",
@@ -12657,7 +12367,6 @@ def audit_end_to_end_monetization_and_fulfillment(
         "gh_verified_partner_slot": "soc-2-audit-cost-calculator",
         "lb_instant_lien_bond_worksheet_19": "contractor-license-bond-cost-calculator-by-credit-score",
         "lb_surety_bond_underwriting_kit": "contractor-license-bond-cost-calculator-by-credit-score",
-        "lb_workers_comp_emr_audit_kit": "experience-modification-rate-emr-workers-comp-penalty-calculator",
         "lb_workers_comp_emr_audit_packet": "experience-modification-rate-emr-workers-comp-penalty-calculator",
         "lb_wh347_certified_payroll_packet": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
         "lb_mechanics_lien_waiver_packet": "california-texas-florida-preliminary-notice-deadline-calculator",
@@ -12676,26 +12385,13 @@ def audit_end_to_end_monetization_and_fulfillment(
         canon_slug = canonical_slug_by_sku.get(sku_id, "general")
         sku_matrix.append((sku_id, prop_id, canon_slug, price_usd))
         seen_matrix_skus.add(sku_id)
-    for fallback_entry in (
-        ("ph_1031_boot_replacement_workpapers", "profithelm", "section-1031-calculator", 79.0),
-        ("ph_commercial_capital_audit_toolkit", "profithelm", "section-179-calculator", 49.0),
-        ("ph_statutory_tax_audit_workpapers", "profithelm", "s-corp-reasonable-salary-tax-calculator", 49.0),
-        ("ph_instant_statutory_worksheet_19", "profithelm", "section-179-calculator", 19.0),
-        ("px_refi_amortization_decision_audit", "prexvo", "student-loan-refinance-break-even-calculator", 39.0),
-        ("px_instant_repayment_worksheet_19", "prexvo", "student-loan-refinance-break-even-calculator", 19.0),
-        ("gh_soc2_cmmc_audit_workpapers", "gainhelm", "soc-2-audit-cost-calculator", 79.0),
-        ("gh_hipaa_iso27001_governance_kit", "gainhelm", "iso-27001-certification-cost-calculator", 49.0),
-        ("gh_instant_compliance_worksheet_19", "gainhelm", "soc-2-audit-cost-calculator", 19.0),
-        ("lb_instant_lien_bond_worksheet_19", "lienbond", "contractor-license-bond-cost-calculator-by-credit-score", 19.0),
-        ("lb_surety_bond_underwriting_kit", "lienbond", "contractor-license-bond-cost-calculator-by-credit-score", 49.0),
-        ("lb_workers_comp_emr_audit_packet", "lienbond", "experience-modification-rate-emr-workers-comp-penalty-calculator", 49.0),
-        ("lb_wh347_certified_payroll_packet", "lienbond", "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", 59.0),
-        ("lb_mechanics_lien_waiver_packet", "lienbond", "california-texas-florida-preliminary-notice-deadline-calculator", 69.0),
-        ("lb_surety_lien_wh347_packet", "lienbond", "miller-act-performance-and-payment-bond-premium-calculator", 79.0),
-    ):
-        if fallback_entry[0] not in seen_matrix_skus:
-            sku_matrix.append(fallback_entry)
-            seen_matrix_skus.add(fallback_entry[0])
+    for sku_id, prod_meta in get_all_digital_products().items():
+        if sku_id not in seen_matrix_skus:
+            prop_id = str(prod_meta.get("property_id") or "").strip().lower()
+            price_usd = float(prod_meta.get("price_usd") or 0.0)
+            canon_slug = canonical_slug_by_sku.get(sku_id, "general")
+            sku_matrix.append((sku_id, prop_id, canon_slug, price_usd))
+            seen_matrix_skus.add(sku_id)
 
     catalog_skus: Dict[str, Any] = {}
     all_skus_ok = True
@@ -12982,7 +12678,7 @@ def audit_end_to_end_monetization_and_fulfillment(
             "rationale": (
                 "Unapproved partner slots fail closed onto verified direct partner contracts "
                 "(Impact, CJ, PartnerStack, OTR Solutions) paired with 100%-margin first-party "
-                "Stripe workpaper SKUs ($39, $49, $79), avoiding 20%-30% sub-affiliate wrapper "
+                "Stripe workpaper SKUs ($9/$19 consumer, $15/$29 business), avoiding 20%-30% sub-affiliate wrapper "
                 "revenue haircuts and preserving full attribution telemetry."
             ),
         },

@@ -75,62 +75,54 @@ def test_state_first_hero_and_instant_range_anchor_and_partner_registration_dom(
     assert_no_forbidden_dashes(ph_html, "profithelm compiled html")
     assert_visual_and_ux_contracts(ph_html, context="profithelm compiled html", require_primitives=True)
 
-    assert 'id="hero-range-anchor"' in ph_html
-    assert 'data-mechanic="instant_range_anchor"' in ph_html
-    assert 'data-range-low="20,000"' in ph_html
-    assert 'data-range-baseline="25,000"' in ph_html
-    assert 'data-range-high="30,000"' in ph_html
-    assert 'href="#partner-registration-drawer"' in ph_html
+    assert 'id="hero-range-anchor"' not in ph_html
+    assert 'id="partner-registration-drawer"' not in ph_html
+    assert 'id="partner-registration-form"' not in ph_html
+    assert 'id="workpaper-unlock-card"' in ph_html
+    assert 'id="btn-preview-workpaper"' in ph_html
 
-    assert 'id="state-first-hero-bar"' in ph_html
-    assert 'data-mechanic="state_first_hero_input"' in ph_html
-    assert 'id="quote-intake-hero-state"' in ph_html
-    hero_state_pos = ph_html.find('id="quote-intake-hero-state"')
+    assert 'id="state-first-hero-bar"' not in ph_html
     calc_form_pos = ph_html.find('<form class="calculator-form"')
-    assert 0 < hero_state_pos < calc_form_pos
+    assert calc_form_pos > 0
 
-    assert 'id="partner-registration-drawer"' in ph_html
-    assert 'data-mechanic="partner_supply_registration"' in ph_html
-    assert 'id="partner-registration-form"' in ph_html
-
-    # Verify ProfitHelm state-dependent IRS 2027 tax brackets tool includes hero-state selector
+    # Verify ProfitHelm state-dependent IRS 2027 tax brackets tool includes workpaper unlock card
     ph_tax_res = compile_high_effort_page(
         _build_sample_spec("profithelm", "irs-2027-tax-brackets", "irs 2027 tax brackets")
     )
     ph_tax_html = ph_tax_res["html"]
-    assert 'id="hero-range-anchor"' in ph_tax_html
-    assert 'id="quote-intake-hero-state"' in ph_tax_html
-    assert 'id="state-first-hero-bar"' in ph_tax_html
+    assert 'id="workpaper-unlock-card"' in ph_tax_html
+    assert 'id="partner-registration-form"' not in ph_tax_html
 
-    # Verify GainHelm commercial non-state page suppresses hero state bar while keeping range anchor
+    # Verify GainHelm commercial non-state page suppresses hero state bar and keeps unlock card
     gh_res = compile_high_effort_page(
         _build_sample_spec("gainhelm", "soc-2-audit-cost-calculator", "soc 2 audit cost")
     )
     gh_html = gh_res["html"]
-    assert 'id="hero-range-anchor"' in gh_html
+    assert 'id="hero-range-anchor"' not in gh_html
     assert 'id="quote-intake-hero-state"' not in gh_html
     assert 'id="state-first-hero-bar"' not in gh_html
-    assert 'id="partner-registration-drawer"' in gh_html
+    assert 'id="partner-registration-drawer"' not in gh_html
+    assert 'id="workpaper-unlock-card"' in gh_html
 
-    # Verify Prexvo commercial refinance page has partner registration drawer and hero state selector
+    # Verify Prexvo commercial refinance page has workpaper unlock card and zero partner reg drawer
     px_refi_res = compile_high_effort_page(
         _build_sample_spec("prexvo", "student-loan-refinance-rate-calculator", "student loan refinance rate")
     )
     px_refi_html = px_refi_res["html"]
-    assert 'id="hero-range-anchor"' in px_refi_html
-    assert 'id="quote-intake-hero-state"' in px_refi_html
-    assert 'id="partner-registration-drawer"' in px_refi_html
+    assert 'id="hero-range-anchor"' not in px_refi_html
+    assert 'id="partner-registration-drawer"' not in px_refi_html
+    assert 'id="workpaper-unlock-card"' in px_refi_html
 
-    # Verify Prexvo restricted YMYL federal public-service page suppresses partner registration drawer and hero state bar
+    # Verify Prexvo restricted YMYL federal public-service page suppresses unlock card, drawer, and referrals
     px_pslf_res = compile_high_effort_page(
         _build_sample_spec("prexvo", "pslf-qualifying-payment-simulator", "pslf qualifying payment simulator")
     )
     px_pslf_html = px_pslf_res["html"]
-    assert 'id="hero-range-anchor"' in px_pslf_html
+    assert 'id="hero-range-anchor"' not in px_pslf_html
     assert 'id="quote-intake-hero-state"' not in px_pslf_html
     assert 'id="state-first-hero-bar"' not in px_pslf_html
     assert 'id="partner-registration-drawer"' not in px_pslf_html
-    assert 'href="#partner-registration-drawer"' not in px_pslf_html
+    assert 'id="workpaper-unlock-card"' not in px_pslf_html
 
 
 def test_edge_lead_capture_partner_registration_across_all_three_tenants(tmp_path: Path) -> None:
@@ -335,7 +327,9 @@ def test_p2_autonomous_daily_trend_page_build_and_supervisor_integration(tmp_pat
         tmp_path / "profithelm" / "dist" / "tools" / "qsbs-section-1202-state-conformity-tax-calculator" / "index.html"
     )
     assert ph_built_html.is_file()
-    assert 'id="hero-range-anchor"' in ph_built_html.read_text(encoding="utf-8")
+    built_html_txt = ph_built_html.read_text(encoding="utf-8")
+    assert 'id="workpaper-unlock-card"' in built_html_txt
+    assert 'id="hero-range-anchor"' not in built_html_txt
     assert (tmp_path / "profithelm" / ".agy" / "deployed_voids.json").is_file()
     assert (
         "/tools/qsbs-section-1202-state-conformity-tax-calculator/"
@@ -468,22 +462,16 @@ console.log(JSON.stringify(data));
 </body>
 </html>"""
     normalized_html, actions = normalize_html_visual_primitives(sample_legacy_html)
-    assert 'id="post-calculation-upgrade-drawer"' in normalized_html
-    assert 'href="#post-calculation-upgrade-drawer"' in normalized_html
-    assert 'data-checkout-nav="1"' in normalized_html
-    assert "Export Audit Workpaper ($79)" in normalized_html
+    assert 'id="post-calculation-upgrade-drawer"' not in normalized_html
+    assert 'id="workpaper-unlock-card"' in normalized_html
+    assert 'id="btn-preview-workpaper"' in normalized_html
     assert "Get Pro ($49/mo)" not in normalized_html
-    assert 'id="partner-registration-drawer"' in normalized_html
-    assert 'id="partner-registration-form"' in normalized_html
-    assert 'id="state-first-hero-bar"' in normalized_html
-    assert 'id="quote-intake-hero-state"' in normalized_html
-    assert 'id="hero-range-anchor"' in normalized_html
-    assert 'href="#partner-registration-drawer"' in normalized_html
-    assert "data-focused-target" in normalized_html
-    assert 'data-mechanic="above_fold_packet_sample_unlock"' in normalized_html
-    assert "pro-hook-direct-checkout" in normalized_html
-    assert "pro-hook-quote-jump" in normalized_html
-    assert 'class="post-calc-sample-schedule-preview"' in normalized_html
+    assert 'id="partner-registration-drawer"' not in normalized_html
+    assert 'id="partner-registration-form"' not in normalized_html
+    assert 'id="state-first-hero-bar"' not in normalized_html
+    assert 'id="hero-range-anchor"' not in normalized_html
+    assert 'data-checkout-trigger="1"' in normalized_html
+    assert "$15" in normalized_html and "$29" in normalized_html
 
 
 def test_top_traffic_state_preselection_and_above_fold_conversion_unlock():
@@ -504,13 +492,16 @@ def test_top_traffic_state_preselection_and_above_fold_conversion_unlock():
     assert resolve_state_code_from_slug("texas-construction-lien-deadline-calculator", "lienbond") == "TX"
 
     ny_intake = render_partner_quote_intake_html("irs-2027-tax-brackets-new-york", "profithelm", baseline_amount=150000.0)
-    assert '<option value="NY" selected>New York (NY)</option>' in ny_intake
-    assert "Enter your email address..." in ny_intake
-    assert "Work email address..." not in ny_intake
+    assert ny_intake == ""
 
     ny_drawer = render_post_calculation_upgrade_drawer_html("irs-2027-tax-brackets-new-york", "profithelm", baseline_amount=150000.0)
-    assert 'class="post-calc-sample-schedule-preview"' in ny_drawer
-    assert 'data-sample-unlocked="true"' in ny_drawer
+    assert ny_drawer == ""
+
+    from pseofactory.affiliates import build_workpaper_unlock_card_html
+
+    ny_unlock = build_workpaper_unlock_card_html("profithelm", "irs-2027-tax-brackets-new-york", baseline_amount=150000.0)
+    assert 'id="workpaper-unlock-card"' in ny_unlock
+    assert "$15" in ny_unlock and "$29" in ny_unlock
 
     state_calc_html = """<!DOCTYPE html>
 <html lang="en">
@@ -542,12 +533,9 @@ def test_top_traffic_state_preselection_and_above_fold_conversion_unlock():
 </body>
 </html>"""
     upgraded_html, _ = normalize_html_visual_primitives(state_calc_html)
-    assert '<option value="OK" selected>Oklahoma (OK)</option>' in upgraded_html
-    assert '<option value="CA" selected>' not in upgraded_html
-    assert 'data-mechanic="above_fold_packet_sample_unlock"' in upgraded_html
-    assert "pro-hook-direct-checkout" in upgraded_html
-    assert "pro-hook-quote-jump" in upgraded_html
-    assert 'class="post-calc-sample-schedule-preview"' in upgraded_html
+    assert 'id="workpaper-unlock-card"' in upgraded_html
+    assert 'id="btn-preview-workpaper"' in upgraded_html
+    assert 'id="state-first-hero-bar"' not in upgraded_html
     assert "Work email address..." not in upgraded_html
 
 

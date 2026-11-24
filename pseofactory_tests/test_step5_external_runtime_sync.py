@@ -226,7 +226,8 @@ def test_lienbond_runtime_sync_inside_main_relocated_cleanly_before_body_close(t
     app_pos = norm_html.find("/static/js/app.js")
     rt_pos = norm_html.find('id="pseo-runtime-sync"')
     body_end = norm_html.rfind("</body>")
-    assert footer_end < footer_handler_pos < datasets_pos < app_pos < rt_pos < body_end
+    assert footer_handler_pos == -1
+    assert footer_end < datasets_pos < app_pos < rt_pos < body_end
 
 
 def test_porcelain_shell_content_hashed_js_versioning_headers_and_missing_asset_fail_closed(tmp_path: Path):
@@ -489,11 +490,11 @@ def test_audit_monetization_surfaces_checks_raw_on_disk_runtime_sync_fail_closed
 
     base_html = f"""<!DOCTYPE html>
 <html lang="en"><head><title>Sample</title></head><body><main>
-  <form id="lead-capture-form"><button type="submit">Send</button></form>
-  <form id="partner-quote-intake-form"><button type="submit">Quote</button></form>
   <a href="/r/demo" class="touch-target">Partner</a>
-  <a id="btn-post-calc-upgrade-checkout" data-checkout-trigger="1" class="touch-target" href="/checkout">Unlock</a>
-  <button id="btn-preview-post-calc-workpaper" type="button">Preview</button>
+  <button id="btn-preview-workpaper" data-workpaper-preview="1" type="button">Preview</button>
+  <section id="workpaper-unlock-card">
+    <a id="btn-workpaper-quick-checkout" data-checkout-trigger="1" data-offer-price="15" class="touch-target" href="/api/lead-capture?checkout=1&sku=ph_instant_statutory_worksheet_19">Unlock ($15)</a>
+  </section>
   <button data-blueprint-action="save" type="button">Save</button>
   <button data-blueprint-action="share" type="button">Share</button>
   <button data-blueprint-action="export" type="button">Export</button>

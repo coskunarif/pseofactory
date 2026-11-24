@@ -1158,24 +1158,24 @@ def test_redteam_bug_3_1_suretybondsdirect_brand_alignment_and_bug_4_1_python_sk
     assert sb_cls["3202"].partner_key == "suretybonds_direct"
     assert sb_cls["3202"].partner_name == "SuretyBondsDirect.com"
 
-    # 2. Bug 4.1: Python SKU parity with edge worker (ph_1031_boot_waterfall_kit, ph_section179_macrs_audit_kit, px_verified_partner_slot)
+    # 2. Bug 4.1: Python SKU parity with edge worker (ph_1031_boot_waterfall_kit alias -> ph_1031_boot_replacement_workpapers, ph_section179_macrs_audit_kit, px_verified_partner_slot)
     offer_1031 = resolve_lead_monetization_offer(
         property_id="profithelm",
         tool_slug="1031-exchange-boot-calculator",
         sku="ph_1031_boot_waterfall_kit",
     )
-    assert offer_1031["offer_sku"] == "ph_1031_boot_waterfall_kit"
-    assert offer_1031["offer_price_usd"] == 79.0
-    assert offer_1031["offer_price_cents"] == 7900
+    assert offer_1031["offer_sku"] == "ph_1031_boot_replacement_workpapers"
+    assert offer_1031["offer_price_usd"] == 29.0
+    assert offer_1031["offer_price_cents"] == 2900
 
     offer_179 = resolve_lead_monetization_offer(
         property_id="profithelm",
         tool_slug="section-179-depreciation-calculator",
         sku="ph_section179_macrs_audit_kit",
     )
-    assert offer_179["offer_sku"] == "ph_section179_macrs_audit_kit"
-    assert offer_179["offer_price_usd"] == 49.0
-    assert offer_179["offer_price_cents"] == 4900
+    assert offer_179["offer_sku"] == "ph_commercial_capital_audit_toolkit"
+    assert offer_179["offer_price_usd"] == 29.0
+    assert offer_179["offer_price_cents"] == 2900
 
     offer_px_slot = resolve_lead_monetization_offer(
         property_id="prexvo",

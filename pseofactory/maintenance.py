@@ -6301,7 +6301,9 @@ _PREXVO_WORKBENCH_SLUG_MARKERS: Dict[str, Tuple[str, str]] = {
 
 
 def _prexvo_workbench_needs_refresh(slug_or_url: str, html_content: str) -> bool:
-    """Returns True if a Prexvo bespoke workbench route lacks both its legacy H2 and current Wave 1B statutory ledger intro."""
+    """Returns True if a Prexvo bespoke workbench (when present) lacks both its legacy H2 and current Wave 1B statutory ledger intro."""
+    if 'id="serp-incumbent-depth-workbench"' not in html_content:
+        return False
     target_low = str(slug_or_url or "").lower()
     has_ledger_h2 = (
         "Scenario Sensitivity &amp; Multi-Year Stress Ledger" in html_content
@@ -6861,10 +6863,14 @@ def _needs_page_structure_geo_normalization_impl(
     if "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in html_content:
         return True
 
+    lower_hc = html_content.lower()
+    if "client-side deserializers" in lower_hc or "prevent crawler or user state corruption" in lower_hc:
+        return True
+
     t_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", html_content, re.IGNORECASE)
     is_non_tool_inst = any(
         canon_url.rstrip("/").endswith(sfx)
-        for sfx in ("/disclaimers", "/methodology", "/privacy", "/about", "/terms", "/contact", "/tools")
+        for sfx in ("/disclaimers", "/methodology", "/privacy", "/about", "/terms", "/contact", "/partners", "/tools")
     )
     if t_m:
         raw_t_str = re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
@@ -6880,7 +6886,7 @@ def _needs_page_structure_geo_normalization_impl(
             or ("(pslf)" in raw_t_str.lower() and not any(k in canon_url for k in ("pslf", "public-service")))
             or (
                 is_non_tool_inst
-                and not canon_url.rstrip("/").endswith("/tools")
+                and not canon_url.rstrip("/").endswith(("/tools", "/partners"))
                 and "calculator" in raw_t_str.lower()
             )
             or (
@@ -8282,6 +8288,24 @@ def _normalize_page_structure_and_geo_parity(
         )
         changed = True
 
+    lower_eng_up = updated.lower()
+    if "client-side deserializers" in lower_eng_up or "prevent crawler or user state corruption" in lower_eng_up:
+        cleaned_eng_up = re.sub(
+            r"<p\b[^>]*>(?:(?!</p>).)*(?:client-side deserializers|prevent crawler or user state corruption)(?:(?!</p>).)*</p>",
+            "<p>\n        Adjust inputs below to recalculate baseline outputs immediately with live URL parameter sync.\n      </p>",
+            updated,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        cleaned_eng_up = re.sub(
+            r"Input parameters are validated mechanically with client-side deserializers[\s\S]{0,300}?prevent crawler or user state corruption\.?",
+            "Adjust inputs below to recalculate baseline outputs immediately with live URL parameter sync.",
+            cleaned_eng_up,
+            flags=re.IGNORECASE,
+        )
+        if cleaned_eng_up != updated:
+            updated = cleaned_eng_up
+            changed = True
+
     if 'href="https://profithelm.com/signal/"' in updated and "/static/signal" in (canonical_url or ""):
         updated = updated.replace('https://profithelm.com/signal/', 'https://profithelm.com/static/signal/')
         changed = True
@@ -8300,6 +8324,7 @@ def _normalize_page_structure_and_geo_parity(
         "about",
         "terms",
         "contact",
+        "partners",
         "tools-directory",
         "tools",
     )
@@ -8320,7 +8345,7 @@ def _normalize_page_structure_and_geo_parity(
         }
         misplaced_pslf = "(pslf)" in old_t_raw.lower() and not any(k in slug.lower() for k in ("pslf", "public-service"))
         non_tool_calc_title = (
-            (is_non_tool_slug and slug.lower() not in ("tools-directory", "tools") and "calculator" in old_t_raw.lower())
+            (is_non_tool_slug and slug.lower() not in ("tools-directory", "tools", "partners") and "calculator" in old_t_raw.lower())
             or (slug.lower() in ("tools-directory", "tools") and bool(re.search(r"\bDirectory\s+Calculator\b", old_t_raw, re.IGNORECASE)))
         )
         if (
@@ -8534,6 +8559,7 @@ def _normalize_page_structure_and_geo_parity(
             "terms",
             "disclaimers",
             "contact",
+            "partners",
             "404",
         )
         and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond"))
@@ -10606,7 +10632,7 @@ class RetroReflectionEngine:
             rel = html_path.resolve().relative_to(dist_dir.resolve()).as_posix()
         except Exception:
             rel = html_path.name
-        if rel != "index.html" and is_non_tool_or_governance_route(rel):
+        if rel != "index.html" and (is_non_tool_or_governance_route(rel) or rel == "partners/index.html"):
             return False
         if rel.startswith("tools/") and html_path.suffix == ".html":
             return True
@@ -10840,17 +10866,11 @@ class RetroReflectionEngine:
         if not html_content or not slug:
             return False
         from pseofactory.affiliates import get_gainhelm_framework_profile, has_gainhelm_cross_framework_leak
-        from pseofactory.visual_primitives import (
-            _gainhelm_drawer_has_mismatch,
-            _gainhelm_pro_card_has_mismatch,
-            _iter_balanced_tag_spans,
-        )
+        from pseofactory.visual_primitives import _iter_balanced_tag_spans
 
         fw_prof = get_gainhelm_framework_profile(slug=slug)
         if not fw_prof.get("forbidden_leak_tokens"):
             return False
-        exp_sku = str(fw_prof["offer_sku"]).strip().lower()
-        exp_price = str(int(round(float(fw_prof["offer_price_usd"]))))
         is_strict = bool(fw_prof.get("strict_isolated"))
 
         wb_spans = cls._collect_gainhelm_workbench_spans(html_content)
@@ -10865,29 +10885,19 @@ class RetroReflectionEngine:
                 if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
                     return True
 
-        for id_attr in (
-            "partner-quote-intake-step",
-            "calc-result-quick-unlock-bar",
-        ):
-            for sp_s, sp_e in _iter_balanced_tag_spans(html_content, id_attr, attr_name="id"):
+        for id_attr in ("workpaper-unlock-card",):
+            for sp_s, sp_e in _iter_balanced_tag_spans(html_content, id_attr, tag_name="section", attr_name="id"):
                 if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
                     return True
 
-        for sp_s, sp_e in _iter_balanced_tag_spans(html_content, "post-calculation-upgrade-drawer", attr_name="id"):
-            if _gainhelm_drawer_has_mismatch(html_content[sp_s:sp_e], slug):
-                return True
-
-        for cls_attr in ("calc-inline-cta", "compliance-strip"):
-            for sp_s, sp_e in _iter_balanced_tag_spans(html_content, cls_attr, attr_name="class"):
-                if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
-                    return True
-
-        for sp_s, sp_e in _iter_balanced_tag_spans(html_content, "pro-hook-card", attr_name="class"):
-            if _gainhelm_pro_card_has_mismatch(html_content[sp_s:sp_e], slug, exp_sku, exp_price):
-                return True
+        for cls_attr in ("compliance-strip", "contextual-referral-card"):
+            for tag_n in ("div", "section"):
+                for sp_s, sp_e in _iter_balanced_tag_spans(html_content, cls_attr, tag_name=tag_n, attr_name="class"):
+                    if has_gainhelm_cross_framework_leak(html_content[sp_s:sp_e], slug):
+                        return True
 
         for sec_m in re.finditer(
-            r'<section\b[^>]*class=["\'][^"\']*(?:refinance-partner-section|affiliates?-section|partners-section)[^"\']*["\'][^>]*>[\s\S]*?</section>',
+            r'<section\b[^>]*class=["\'][^"\']*(?:contextual-referral-card|refinance-partner-section|affiliates?-section|partners-section)[^"\']*["\'][^>]*>[\s\S]*?</section>',
             html_content,
             flags=re.IGNORECASE,
         ):
@@ -10951,7 +10961,14 @@ class RetroReflectionEngine:
         ):
             missing.append("multi_dataset_join")
 
-        if 'data-mechanic="compliant_intent_monetization"' not in html_content:
+        if (
+            'data-mechanic="compliant_intent_monetization"' not in html_content
+            and 'data-mechanic="workpaper_unlock_funnel"' not in html_content
+            and 'id="workpaper-unlock-card"' not in html_content
+            and 'class="contextual-referral-card' not in html_content
+            and 'data-restricted-public-service="true"' not in html_content
+            and 'data-commercial-offers="none"' not in html_content
+        ):
             missing.append("compliant_intent_monetization")
 
         if (
@@ -11249,7 +11266,6 @@ class RetroReflectionEngine:
             not cluster_body
             or has_v_pollution
             or 'data-mechanic="on_this_page_jump_nav"' not in html_content
-            or 'href="#serp-incumbent-depth-workbench"' not in html_content
             or "<h2>3-Tier Statutory Topic Cluster" in html_content
             or "<h2>Connected Statutory Topic Cluster and Decision Architecture</h2>" in html_content
             or 'href="#calculator-workspace-anchor"' in html_content
@@ -11345,14 +11361,8 @@ class RetroReflectionEngine:
             )
         )
         if (
-            'data-mechanic="serp_incumbent_depth_upgrade"' not in html_content
-            or 'id="serp-incumbent-depth-workbench"' not in html_content
-            or 'id="multi-year-cliff-visualizer"' not in html_content
-            or 'id="stateful-scenario-comparator"' not in html_content
-            or 'id="saveable-decision-blueprint"' not in html_content
+            has_v_pollution
             or "<title>Interactive Retained Capital versus Statutory Exposure Breakdown</title>" in html_content
-            or has_v_pollution
-            or has_stale_serp_depth
         ):
             missing.append("serp_incumbent_depth_upgrade")
 
@@ -11368,26 +11378,9 @@ class RetroReflectionEngine:
                 not has_ext_rt_sync
                 and (
                     "updateSerpWorkbenchSynchronously" not in html_content
-                    or "updateInteractiveCliffAndComparator" not in html_content
-                    or "emitWorkbenchEngagementBeacon" not in html_content
-                    or "partner-quote-intake-form" not in html_content
                     or "hydrateInputsFromLocationSearch" not in html_content
-                    or "resolveBlueprintStatusNode" not in html_content
-                    or "appendActionLink" not in html_content
-                    or '["input-med_school_loan_balance", "serp-loan-balance"]' not in html_content
-                    or '["input-bond_amount", "serp-b2b-gross"]' not in html_content
-                    or ('id="cg-ordinary-income"' in html_content and "cgTaxGrossEl" not in html_content)
-                    or "renderPlaybookAndFulfillmentDrawer" not in html_content
-                    or "qThreshAmt" not in html_content
-                    or "evalProgressiveFederalTax" not in html_content
-                    or "_lastInteractionScope" not in html_content
-                    or "epochBase" not in html_content
-                    or "data-preset-crit" not in html_content
-                    or "carryShield" not in html_content
-                    or "data-focused-target" not in html_content
                     or "data-checkout-trigger" not in html_content
-                    or "checkout-settlement-attribution-banner" not in html_content
-                    or "playbook_csv_url" not in html_content
+                    or "workpaper-unlock-card" not in html_content
                 )
             )
             or "48350" in html_content
@@ -11395,43 +11388,17 @@ class RetroReflectionEngine:
             or "0.285" in html_content
             or "0.235 : 0.252" in html_content
             or "adjGain * 0.238" in html_content
-            or ('id="partner-quote-intake-step"' in html_content and 'id="lead-capture-form"' not in html_content)
-            or (
-                'id="partner-quote-intake-step"' in html_content
-                and 'data-restricted-public-service="true"' not in html_content
-                and 'data-commercial-offers="none"' not in html_content
-                and 'data-commercial-offers="suppressed-default"' not in html_content
-                and 'id="partner-registration-drawer"' not in html_content
-            )
-            or (
-                'id="partner-quote-intake-step"' in html_content
-                and 'data-restricted-public-service="true"' not in html_content
-                and 'data-commercial-offers="none"' not in html_content
-                and 'data-commercial-offers="suppressed-default"' not in html_content
-                and 'id="post-calculation-upgrade-drawer"' in html_content
-                and (
-                    'id="calc-result-quick-unlock-bar"' not in html_content
-                    or 'id="btn-post-calc-quick-unlock-checkout"' not in html_content
-                )
-            )
-            or (
-                'class="pro-hook-card"' in html_content
-                and 'id="post-calculation-upgrade-drawer"' in html_content
-                and 'data-checkout-nav="1"' not in html_content
-            )
-            or (
-                'id="partner-quote-intake-step"' in html_content
-                and 'id="saveable-decision-blueprint"' in html_content
-                and 'id="post-calculation-upgrade-drawer"' not in html_content
-            )
+            or 'id="partner-quote-intake-step"' in html_content
+            or 'id="partner-registration-drawer"' in html_content
+            or 'id="calc-result-quick-unlock-bar"' in html_content
+            or 'id="post-calculation-upgrade-drawer"' in html_content
+            or 'class="pro-hook-card"' in html_content
+            or 'id="lead-capture-form"' in html_content
+            or 'id="footer-lead-capture-form"' in html_content
+            or 'id="hero-range-anchor"' in html_content
+            or 'id="state-first-hero-bar"' in html_content
             or 'class="calc-matrix-table-wrap"' in html_content
             or "window.location.protocol === 'file:'" in html_content
-            or (
-                "data-calc-preset" in html_content
-                and 'data-above-fold-presets="true"' not in html_content
-                and '<section class="hero-section">' in html_content
-                and (html_content.find("data-calc-preset") - max(0, html_content.find("<main"))) > 2500
-            )
             or bool(re.search(r'<div\s+style=["\']overflow-x:\s*auto;?["\']\s*>', html_content, re.IGNORECASE))
             or _needs_page_structure_geo_normalization(
                 html_content,
@@ -11442,33 +11409,12 @@ class RetroReflectionEngine:
                 and (
                     '"dateModified": "2026-10-27"' in html_content
                     or '"dateModified":"2026-10-27"' in html_content
-                    or 'placeholder="Work email address..."' in html_content
                     or (
                         not has_ext_rt_sync
                         and (
-                            "autoPrevBtn" not in html_content
-                            or "primaryCalcIds" not in html_content
+                            "primaryCalcIds" not in html_content
                             or render_runtime_synchronizer_script_stripped() not in html_content
                         )
-                    )
-                    or (
-                        'id="calc-result-quick-unlock-bar"' in html_content
-                        and 'data-contextual-v2="1"' not in html_content
-                    )
-                    or (
-                        '<div class="calc-inline-cta"' in html_content
-                        and '<div class="kpi-block"' in html_content
-                        and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="kpi-block"')
-                    )
-                    or (
-                        '<div class="calc-inline-cta"' in html_content
-                        and 'id="rap-subsidy-meter"' in html_content
-                        and html_content.find('<div class="calc-inline-cta"') < html_content.find('id="rap-subsidy-meter"')
-                    )
-                    or (
-                        '<div class="calc-inline-cta"' in html_content
-                        and '<div class="calc-metrics-grid"' in html_content
-                        and html_content.find('<div class="calc-inline-cta"') < html_content.find('<div class="calc-metrics-grid"')
                     )
                 )
             )
@@ -12748,16 +12694,12 @@ class RetroReflectionEngine:
                 economic_dataset=econ_ds,
             )
             if "serp_incumbent_depth_upgrade" in missing:
-                existing_wb_spans = cls._collect_gainhelm_workbench_spans(updated)
-                if existing_wb_spans:
-                    first_s, first_e = existing_wb_spans[0]
-                    fresh_wb = winning_blocks["serp_depth_upgrade_html"].strip()
-                    for dup_s, dup_e in reversed(existing_wb_spans[1:]):
-                        updated = updated[:dup_s] + updated[dup_e:]
-                    updated = updated[:first_s] + fresh_wb + updated[first_e:]
-                else:
-                    updated = re.sub(r'\s*<section[^>]+data-mechanic="serp_incumbent_depth_upgrade"[\s\S]*?</section>', "", updated)
-                    injected_parts.append(winning_blocks["serp_depth_upgrade_html"])
+                updated = re.sub(
+                    r'\s*<section[^>]+(?:id=["\']serp-incumbent-depth-workbench["\']|data-mechanic=["\']serp_incumbent_depth_upgrade["\'])[\s\S]*?</section>',
+                    "",
+                    updated,
+                    flags=re.IGNORECASE,
+                )
                 repaired.append("serp_incumbent_depth_upgrade")
             if "instant_edge_case_trap_immediacy" in missing:
                 updated = re.sub(r'\s*<aside[^>]+data-mechanic="instant_edge_case_trap_immediacy"[\s\S]*?</aside>', "", updated)
@@ -12910,52 +12852,14 @@ class RetroReflectionEngine:
             updated = re.sub(r"\bCalculator(?:\s+Calculator)+\b", "Calculator", updated, flags=re.IGNORECASE)
             if "title_dedup" not in repaired:
                 repaired.append("title_dedup")
-        try:
-            from pseofactory.affiliates import has_gainhelm_cross_framework_leak
-            from pseofactory.competitor import render_partner_quote_intake_html
-            from pseofactory.visual_primitives import _find_balanced_div_span
-            quote_intake_html = render_partner_quote_intake_html(
-                slug=slug,
-                property_id=property_id,
-                topic_label=topic_label,
-                statutory_authority=stat_auth,
+        if 'id="partner-quote-intake-step"' in updated:
+            updated = re.sub(
+                r'\s*<div\b[^>]*id=["\']partner-quote-intake-step["\'][\s\S]*?</form>\s*</div>',
+                "",
+                updated,
+                flags=re.IGNORECASE,
             )
-            if quote_intake_html and 'id="partner-quote-intake-step"' not in updated:
-                if '<div id="multi-year-cliff-visualizer"' in updated:
-                    updated = updated.replace(
-                        '      <div id="multi-year-cliff-visualizer"',
-                        f'{quote_intake_html}\n      <div id="multi-year-cliff-visualizer"',
-                        1,
-                    )
-                    repaired.append("partner_quote_intake")
-            elif quote_intake_html and 'id="partner-quote-intake-step"' in updated:
-                from pseofactory.visual_primitives import _iter_balanced_tag_spans
-
-                q_spans = _iter_balanced_tag_spans(updated, "partner-quote-intake-step", attr_name="id")
-                if property_id.lower() == "gainhelm" and q_spans:
-                    q_replaced = False
-                    for qs, qe in reversed(q_spans):
-                        if has_gainhelm_cross_framework_leak(updated[qs:qe], slug):
-                            updated = updated[:qs] + quote_intake_html.strip() + updated[qe:]
-                            q_replaced = True
-                    if q_replaced:
-                        repaired.append("partner_quote_intake")
-                elif "Tier)</h3>" in updated:
-                    updated = re.sub(
-                        r'(<div class="partner-quote-header">[\s\S]{0,300}?)\s+Tier\)</h3>',
-                        r"\1 Threshold)</h3>",
-                        updated,
-                    )
-                    repaired.append("partner_quote_intake")
-            elif not quote_intake_html and 'id="partner-quote-intake-step"' in updated:
-                updated = re.sub(
-                    r'\s*<div id="partner-quote-intake-step"[\s\S]*?</form>\s*</div>',
-                    "",
-                    updated,
-                    flags=re.IGNORECASE,
-                )
-        except Exception:
-            pass
+            repaired.append("strip_legacy_partner_quote_intake")
         try:
             from pseofactory.affiliates import (
                 has_gainhelm_cross_framework_leak,
@@ -15277,35 +15181,8 @@ class RetroReflectionEngine:
             if (
                 _has_stale_pending_status(content, property_id)
                 or 'data-partner="sofi_refi"' in content
-                or bool(re.search(r'<[^>\n]*<div id="partner-registration-drawer"', content))
                 or ("1031" in rel and 'data-partner="ipx1031"' not in content and 'data-partner="lawdepot"' not in content)
                 or ('href="/r/' in content and "source_tool=" not in content)
-                or (
-                    property_id.lower() == "gainhelm"
-                    and 'href="/r/' in content
-                    and 'data-restricted-public-service="true"' not in content
-                    and 'data-commercial-offers="none"' not in content
-                    and 'data-commercial-offers="suppressed-default"' not in content
-                    and (
-                        'data-partner-roster=' not in content
-                        or 'data-cta-slot="calculator_result_inline"' not in content
-                        or "sprinto_compliance" not in content
-                        or "coalition_cyber_insurance" not in content
-                        or "cobalt_pentest" not in content
-                    )
-                )
-                or (
-                    'href="/r/' in content
-                    and 'data-restricted-public-service="true"' not in content
-                    and 'data-commercial-offers="none"' not in content
-                    and 'data-commercial-offers="suppressed-default"' not in content
-                    and rel.startswith("tools/")
-                    and rel.endswith("/index.html")
-                    and rel.count("/") == 2
-                    and re.search(r'class=["\'][^"\']*\b(result-box|result-card|calc-outputs-panel|calc-results-column|results-panel|calc-results|calculator-results)\b', content)
-                    and 'data-cta-slot="calculator_result_inline"' not in content
-                    and 'class="calc-inline-cta"' not in content
-                )
                 or any(
                     "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
                     for m in re.finditer(r'<a\b([^>]*href=["\']/r/[a-z0-9_]+[^"\']*["\'][^>]*)>', content, re.I)
@@ -16077,66 +15954,7 @@ class RetroReflectionEngine:
                         html_file.write_text(content, encoding="utf-8")
                         if rel not in retrofitted_paths:
                             retrofitted_paths.append(rel)
-                if (
-                    rel == "tools/index.html"
-                    and "data-partner-roster=" not in content
-                    and "affiliates-section" not in content
-                    and "refinance-partner-section" not in content
-                    and 'data-first-party-checkout="true"' not in content
-                    and "</main>" in content
-                ):
-                    from pseofactory.affiliates import (
-                        build_first_party_workpaper_cta_html,
-                        load_live_partner_keys_from_vault,
-                    )
-
-                    _live_dir_keys = load_live_partner_keys_from_vault(property_id)
-                    if not _live_dir_keys:
-                        _fp_dir = build_first_party_workpaper_cta_html(
-                            property_id=property_id,
-                            slug="tools-directory",
-                            slot="section",
-                        )
-                        seed_sec = f"\n      {_fp_dir}\n    " if _fp_dir else ""
-                    elif property_id.lower() == "prexvo":
-                        _px_live = next(iter(sorted(_live_dir_keys)))
-                        seed_sec = (
-                            '\n    <section class="refinance-partner-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-                            f'      <a href="/r/{_px_live}" target="_blank" rel="noopener sponsored nofollow">Refinance Partner</a>\n'
-                            '    </section>\n  '
-                        )
-                    elif property_id.lower() == "gainhelm":
-                        _gh_live = next(iter(sorted(_live_dir_keys)))
-                        seed_sec = (
-                            '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
-                            '        <h2>Enterprise GRC &amp; Security Execution Options</h2>\n'
-                            f'        <div class="affiliate-card partner-card"><a href="/r/{_gh_live}" target="_blank" rel="noopener sponsored nofollow">GRC Partner</a></div>\n'
-                            '      </section>\n    '
-                        )
-                    elif property_id.lower() == "lienbond":
-                        _lb_live = next(iter(sorted(_live_dir_keys)))
-                        seed_sec = (
-                            '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
-                            '        <h2>Commercial Surety &amp; Construction Execution Options</h2>\n'
-                            f'        <div class="affiliate-card partner-card"><a href="/r/{_lb_live}" target="_blank" rel="noopener sponsored nofollow">Surety Partner</a></div>\n'
-                            '      </section>\n    '
-                        )
-                    else:
-                        _ph_live = "xendoo" if "xendoo" in _live_dir_keys else next(iter(sorted(_live_dir_keys)))
-                        seed_sec = (
-                            '\n      <section class="affiliate-section affiliates-section" data-partner-roster="1" data-mechanic="compliant_intent_monetization">\n'
-                            '        <h2>Commercial Execution Options</h2>\n'
-                            f'        <div class="affiliate-card partner-card"><a href="/r/{_ph_live}" target="_blank" rel="noopener sponsored nofollow">Verified Partner</a></div>\n'
-                            '      </section>\n    '
-                        )
-                    if seed_sec:
-                        if "</div>\n  </main>" in content:
-                            content = content.replace("</div>\n  </main>", f"{seed_sec}</div>\n  </main>", 1)
-                        else:
-                            content = content.replace("</main>", f"{seed_sec}</main>", 1)
-                        html_file.write_text(content, encoding="utf-8")
-                        if rel not in retrofitted_paths:
-                            retrofitted_paths.append(rel)
+                # Keep tools/index.html directory clean (no checkout cards or legacy partner grids injected onto directory index).
                 if (
                     re.search(r'href\s*=\s*["\']/r/', content, flags=re.I)
                     or "overlay-partner-offer" in content

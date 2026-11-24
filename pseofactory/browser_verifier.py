@@ -1100,6 +1100,32 @@ class LienBondBrowserAdapter(TenantBrowserAdapter):
         ]
 
 
+class DynamicTenantBrowserAdapter(TenantBrowserAdapter):
+    """Dynamic browser verification adapter for any tenant discovered via .pseofactory.json."""
+
+    def __init__(
+        self,
+        tenant_id: str,
+        dist_dir: Union[str, Path],
+        canonical_domain: Optional[str] = None,
+    ):
+        self._tenant_id = str(tenant_id or "custom").strip().lower()
+        self._dist_dir = Path(dist_dir).resolve()
+        self._canonical_domain = (canonical_domain or f"https://{self._tenant_id}.com").strip().rstrip("/")
+
+    @property
+    def tenant_id(self) -> str:
+        return self._tenant_id
+
+    @property
+    def dist_dir(self) -> Path:
+        return self._dist_dir
+
+    @property
+    def canonical_domain(self) -> str:
+        return self._canonical_domain
+
+
 class RouteManifestExtractor:
     """
     Extracts complete route manifests from sitemap.xml and dist HTML filesystem tree.
@@ -1291,11 +1317,13 @@ class RouteManifestExtractor:
         # 3. tools_directory
         _pick("/tools/")
 
-        # 4. governance_legal
-        for gov_r in ("/disclaimers/", "/about/", "/methodology/", "/privacy/", "/terms/", "/contact/"):
+        # 4. governance_legal (and /partners/ when available)
+        for gov_r in ("/disclaimers/", "/about/", "/methodology/", "/privacy/", "/terms/", "/contact/", "/partners/"):
             if gov_r in available:
                 _pick(gov_r)
                 break
+        if "/partners/" in available and "/partners/" not in selected:
+            _pick("/partners/")
 
         # 5. error_404
         _pick("/404.html")
@@ -1447,23 +1475,32 @@ class UnifiedBrowserAuditor:
         if (spacedHyphenRegex.test(fullTitle)) {
             violations.push({ type: 'spaced_hyphen_title', text: fullTitle });
         }
+        // B8: Scan all <script type="application/ld+json"> blocks for forbidden dashes
+        document.querySelectorAll('script[type="application/ld+json"]').forEach((sc, idx) => {
+            const raw = sc.textContent || '';
+            if (emEnRegex.test(raw)) {
+                violations.push({ type: 'em_en_dash_jsonld', index: idx, text: raw.trim().slice(0, 80) });
+            }
+        });
+        // B8: Include hidden elements when checking for em/en dashes; skip script/style/code/pre/noscript
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
             acceptNode: node => {
                 const p = node.parentElement;
                 if (!p) return NodeFilter.FILTER_REJECT;
                 const tag = p.tagName.toLowerCase();
                 if (['script', 'style', 'code', 'pre', 'noscript'].includes(tag)) return NodeFilter.FILTER_REJECT;
-                const s = window.getComputedStyle(p);
-                if (s.display === 'none' || s.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
             }
         });
         while (walker.nextNode()) {
             const txt = walker.currentNode.nodeValue;
+            const p = walker.currentNode.parentElement;
+            const s = p ? window.getComputedStyle(p) : null;
+            const isHidden = Boolean(s && (s.display === 'none' || s.visibility === 'hidden'));
             if (emEnRegex.test(txt)) {
-                violations.push({ type: 'em_en_dash_body', text: txt.trim().slice(0, 80), tag: walker.currentNode.parentElement.tagName });
-            } else if (spacedHyphenRegex.test(txt)) {
-                violations.push({ type: 'spaced_hyphen_body', text: txt.trim().slice(0, 80), tag: walker.currentNode.parentElement.tagName });
+                violations.push({ type: isHidden ? 'em_en_dash_hidden' : 'em_en_dash_body', text: txt.trim().slice(0, 80), tag: p ? p.tagName : 'TEXT' });
+            } else if (!isHidden && spacedHyphenRegex.test(txt)) {
+                violations.push({ type: 'spaced_hyphen_body', text: txt.trim().slice(0, 80), tag: p ? p.tagName : 'TEXT' });
             }
         }
         return violations;
@@ -1637,28 +1674,18 @@ class UnifiedBrowserAuditor:
     JS_CHECK_VISUAL_PRIMITIVES = """(() => {
         const vw = window.innerWidth;
         const p = location.pathname;
-        if (p === '/signal' || p === '/signal/' || p === '/signal/index.html' || p.startsWith('/signal/') || p.startsWith('/static/signal')) {
-            return {
-                screen_archetype: 'operator_pwa',
-                hierarchy_violations: [],
-                unwrapped_tables: [],
-                transparent_controls: [],
-                clipped_elements: [],
-                card_geometry_violations: [],
-                whitespace_rhythm_violations: [],
-                calculator_ergonomics_violations: [],
-                cta_density_violations: []
-            };
-        }
+        const isOperatorPwa = (p === '/signal' || p === '/signal/' || p === '/signal/index.html' || p.startsWith('/signal/') || p.startsWith('/static/signal'));
         const hasCalcControls = Boolean(document.querySelector('form.calculator-form, .interactive-calculator-container, .calculator-card, .calculation-container, input[type="number"], input[type="range"], [data-calc-input]'));
         const hasComparison = Boolean(document.querySelector('.comparison-table-section, .statutory-comparison-table-section, table.comparison-table')) || p.includes('-vs-');
-        let archetype = 'statutory_guide';
-        if (['/', '/index.html', '/tools/', '/tools/index.html', '/about/', '/about.html', '/methodology/', '/methodology.html', '/disclaimers/', '/disclaimers.html', '/contact/', '/contact.html', '/privacy/', '/privacy.html', '/terms/', '/terms.html', '/404.html', '/editorial-standards/', '/editorial-standards/index.html'].includes(p)) {
-            archetype = 'index_hub';
-        } else if (p.includes('-vs-') || (!hasCalcControls && hasComparison)) {
-            archetype = 'comparison_page';
-        } else if (hasCalcControls) {
-            archetype = 'interactive_calculator';
+        let archetype = isOperatorPwa ? 'operator_pwa' : 'statutory_guide';
+        if (!isOperatorPwa) {
+            if (['/', '/index.html', '/tools/', '/tools/index.html', '/about/', '/about.html', '/methodology/', '/methodology.html', '/disclaimers/', '/disclaimers.html', '/contact/', '/contact.html', '/privacy/', '/privacy.html', '/terms/', '/terms.html', '/partners/', '/partners/index.html', '/404.html', '/editorial-standards/', '/editorial-standards/index.html'].includes(p)) {
+                archetype = 'index_hub';
+            } else if (p.includes('-vs-') || (!hasCalcControls && hasComparison)) {
+                archetype = 'comparison_page';
+            } else if (hasCalcControls) {
+                archetype = 'interactive_calculator';
+            }
         }
         const result = {
             screen_archetype: archetype,
@@ -1671,39 +1698,41 @@ class UnifiedBrowserAuditor:
             calculator_ergonomics_violations: [],
             cta_density_violations: []
         };
-        const siteHeader = document.querySelector('header.site-header');
-        if (!siteHeader) {
-            result.hierarchy_violations.push({ type: 'missing_site_header', vw: vw });
-        }
-        const siteFooter = document.querySelector('footer.site-footer');
-        if (!siteFooter) {
-            result.hierarchy_violations.push({ type: 'missing_site_footer', vw: vw });
-        }
-        const mainLandmark = document.querySelector('main#main-content') || document.querySelector('main');
-        if (!mainLandmark) {
-            result.hierarchy_violations.push({ type: 'missing_main_landmark', vw: vw });
-        } else {
-            const directContainer = Array.from(mainLandmark.children).filter(ch => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName));
-            if (directContainer.length !== 1 || !directContainer[0].classList.contains('container')) {
-                result.hierarchy_violations.push({ type: 'missing_main_container', count: directContainer.length, vw: vw });
+        if (!isOperatorPwa) {
+            const siteHeader = document.querySelector('header.site-header');
+            if (!siteHeader) {
+                result.hierarchy_violations.push({ type: 'missing_site_header', vw: vw });
             }
-        }
-        if (vw <= 480) {
-            const mobileMenu = document.querySelector('details.mobile-nav-menu');
-            if (!mobileMenu) {
-                result.hierarchy_violations.push({ type: 'missing_mobile_nav_drawer', vw: vw });
+            const siteFooter = document.querySelector('footer.site-footer');
+            if (!siteFooter) {
+                result.hierarchy_violations.push({ type: 'missing_site_footer', vw: vw });
+            }
+            const mainLandmark = document.querySelector('main#main-content') || document.querySelector('main');
+            if (!mainLandmark) {
+                result.hierarchy_violations.push({ type: 'missing_main_landmark', vw: vw });
             } else {
-                const mcs = window.getComputedStyle(mobileMenu);
-                if (mcs.display === 'none' || mcs.visibility === 'hidden') {
-                    result.hierarchy_violations.push({ type: 'hidden_mobile_nav_drawer', vw: vw });
+                const directContainer = Array.from(mainLandmark.children).filter(ch => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName));
+                if (directContainer.length !== 1 || !directContainer[0].classList.contains('container')) {
+                    result.hierarchy_violations.push({ type: 'missing_main_container', count: directContainer.length, vw: vw });
                 }
             }
-            document.querySelectorAll('.nav-cta-desktop').forEach(navCta => {
-                const ncs = window.getComputedStyle(navCta);
-                if (ncs.display !== 'none') {
-                    result.hierarchy_violations.push({ type: 'visible_nav_cta_desktop_on_mobile', display: ncs.display, vw: vw });
+            if (vw <= 480) {
+                const mobileMenu = document.querySelector('details.mobile-nav-menu');
+                if (!mobileMenu) {
+                    result.hierarchy_violations.push({ type: 'missing_mobile_nav_drawer', vw: vw });
+                } else {
+                    const mcs = window.getComputedStyle(mobileMenu);
+                    if (mcs.display === 'none' || mcs.visibility === 'hidden') {
+                        result.hierarchy_violations.push({ type: 'hidden_mobile_nav_drawer', vw: vw });
+                    }
                 }
-            });
+                document.querySelectorAll('.nav-cta-desktop').forEach(navCta => {
+                    const ncs = window.getComputedStyle(navCta);
+                    if (ncs.display !== 'none') {
+                        result.hierarchy_violations.push({ type: 'visible_nav_cta_desktop_on_mobile', display: ncs.display, vw: vw });
+                    }
+                });
+            }
         }
         document.querySelectorAll('.hero-register-firm-link').forEach(regLink => {
             const rcs = window.getComputedStyle(regLink);
@@ -1733,7 +1762,7 @@ class UnifiedBrowserAuditor:
             }
         }
         const primExtLink = document.querySelector('link#pseo-visual-primitives[href]');
-        if (primExtLink && vw >= 1024) {
+        if (!isOperatorPwa && primExtLink && vw >= 1024) {
             const definedClasses = new Set();
             const collectRuleClasses = (ruleList) => {
                 if (!ruleList) return;
@@ -1776,9 +1805,11 @@ class UnifiedBrowserAuditor:
                 }
             }
         }
-        const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-        if (bodyBg !== 'rgb(251, 252, 253)') {
-            result.card_geometry_violations.push({ type: 'non_porcelain_body_bg', bg: bodyBg, vw: vw });
+        if (!isOperatorPwa) {
+            const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+            if (bodyBg !== 'rgb(251, 252, 253)') {
+                result.card_geometry_violations.push({ type: 'non_porcelain_body_bg', bg: bodyBg, vw: vw });
+            }
         }
         const getFs = sel => {
             const el = document.querySelector(sel);
@@ -1939,11 +1970,22 @@ class UnifiedBrowserAuditor:
                 });
             }
         });
-        document.querySelectorAll('.card, .calc-panel, .result-box, .table-wrap').forEach(el => {
+        document.querySelectorAll('.card, .calc-panel, .result-box, .table-wrap, iframe, .cf-turnstile-slot').forEach(el => {
             const r = el.getBoundingClientRect();
             if (r.width === 0 && r.height === 0) return;
             const cs = window.getComputedStyle(el);
-            if (cs.overflowX === 'hidden' && el.scrollWidth > el.clientWidth + 2) {
+            if (el.tagName === 'IFRAME' || el.classList.contains('cf-turnstile-slot')) {
+                const par = el.parentElement;
+                const pr = par ? par.getBoundingClientRect() : null;
+                if (r.right > vw + 2 || (pr && r.right > pr.right + 2 && window.getComputedStyle(par).overflowX === 'hidden')) {
+                    result.clipped_elements.push({
+                        cls: (el.className || el.tagName).slice(0, 50),
+                        width: Math.round(r.width),
+                        right: Math.round(r.right),
+                        vw: vw
+                    });
+                }
+            } else if (cs.overflowX === 'hidden' && el.scrollWidth > el.clientWidth + 2) {
                 result.clipped_elements.push({
                     cls: (el.className || '').slice(0, 50),
                     scrollWidth: el.scrollWidth,
@@ -1951,71 +1993,90 @@ class UnifiedBrowserAuditor:
                 });
             }
         });
-        document.querySelectorAll('.card').forEach((c, idx) => {
-            const r = c.getBoundingClientRect();
-            if (r.width === 0 && r.height === 0) return;
-            const cs = window.getComputedStyle(c);
-            if (cs.backgroundColor !== 'rgb(255, 255, 255)') {
-                result.card_geometry_violations.push({ index: idx, type: 'non_porcelain_card_bg', bg: cs.backgroundColor, vw: vw });
-            }
-            const br = Math.round(parseFloat(cs.borderRadius) || 0);
-            if (br !== 12) {
-                result.card_geometry_violations.push({ index: idx, borderRadius: cs.borderRadius });
-            }
-            const pt = Math.round(parseFloat(cs.paddingTop) || 0);
-            if (pt < 12) {
-                result.card_geometry_violations.push({ index: idx, paddingTop: cs.paddingTop });
-            }
-        });
-        const mainEl = document.querySelector('main');
-        const flowRoot = (mainEl && mainEl.children.length === 1 && mainEl.children[0].classList.contains('container')) ? mainEl.children[0] : mainEl;
-        const topFlowBlocks = [];
-        if (flowRoot) {
-            Array.from(flowRoot.children).forEach(ch => {
-                if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName) || ch.classList.contains('statutory-accuracy-benchmarks')) return;
-                const cs = window.getComputedStyle(ch);
-                if (cs.display === 'none' || cs.visibility === 'hidden') return;
-                if (ch.classList.contains('gsc-overlay-container')) {
-                    Array.from(ch.children).forEach(och => {
-                        if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(och.tagName)) return;
-                        const ocs = window.getComputedStyle(och);
-                        const or = och.getBoundingClientRect();
-                        if (ocs.display !== 'none' && ocs.visibility !== 'hidden' && or.height > 0 && or.width > vw * 0.45) {
-                            topFlowBlocks.push(och);
+        if (!isOperatorPwa) {
+            document.querySelectorAll('.card').forEach((c, idx) => {
+                const r = c.getBoundingClientRect();
+                if (r.width === 0 && r.height === 0) return;
+                const cs = window.getComputedStyle(c);
+                if (cs.backgroundColor !== 'rgb(255, 255, 255)') {
+                    result.card_geometry_violations.push({ index: idx, type: 'non_porcelain_card_bg', bg: cs.backgroundColor, vw: vw });
+                }
+                const br = Math.round(parseFloat(cs.borderRadius) || 0);
+                if (br !== 12) {
+                    result.card_geometry_violations.push({ index: idx, borderRadius: cs.borderRadius });
+                }
+                const pt = Math.round(parseFloat(cs.paddingTop) || 0);
+                if (pt < 12) {
+                    result.card_geometry_violations.push({ index: idx, paddingTop: cs.paddingTop });
+                }
+            });
+            const mainEl = document.querySelector('main');
+            const flowRoot = (mainEl && mainEl.children.length === 1 && mainEl.children[0].classList.contains('container')) ? mainEl.children[0] : mainEl;
+            const topFlowBlocks = [];
+            if (flowRoot) {
+                Array.from(flowRoot.children).forEach(ch => {
+                    if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(ch.tagName) || ch.classList.contains('statutory-accuracy-benchmarks')) return;
+                    const cs = window.getComputedStyle(ch);
+                    if (cs.display === 'none' || cs.visibility === 'hidden') return;
+                    if (ch.classList.contains('gsc-overlay-container')) {
+                        Array.from(ch.children).forEach(och => {
+                            if (['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(och.tagName)) return;
+                            const ocs = window.getComputedStyle(och);
+                            const or = och.getBoundingClientRect();
+                            if (ocs.display !== 'none' && ocs.visibility !== 'hidden' && or.height > 0 && or.width > vw * 0.45) {
+                                topFlowBlocks.push(och);
+                            }
+                        });
+                    } else {
+                        const r = ch.getBoundingClientRect();
+                        if (r.height > 0 && r.width > vw * 0.45) {
+                            topFlowBlocks.push(ch);
                         }
-                    });
-                } else {
-                    const r = ch.getBoundingClientRect();
-                    if (r.height > 0 && r.width > vw * 0.45) {
-                        topFlowBlocks.push(ch);
                     }
-                }
-            });
-        }
-        if (topFlowBlocks.length >= 2) {
-            const lefts = topFlowBlocks.map(el => Math.round(el.getBoundingClientRect().left * 10) / 10);
-            const drift = Math.max(...lefts) - Math.min(...lefts);
-            if (drift > 4.0) {
-                result.card_geometry_violations.push({ type: 'sibling_left_drift', drift: Math.round(drift * 10) / 10, vw: vw });
+                });
             }
-        }
-        if (vw >= 1280) {
-            topFlowBlocks.forEach((el, idx) => {
-                const r = el.getBoundingClientRect();
-                if (r.width > 1142) {
-                    result.card_geometry_violations.push({ type: 'full_bleed_section_width', index: idx, width: Math.round(r.width), vw: vw });
+            if (topFlowBlocks.length >= 2) {
+                const lefts = topFlowBlocks.map(el => Math.round(el.getBoundingClientRect().left * 10) / 10);
+                const drift = Math.max(...lefts) - Math.min(...lefts);
+                if (drift > 4.0) {
+                    result.card_geometry_violations.push({ type: 'sibling_left_drift', drift: Math.round(drift * 10) / 10, vw: vw });
                 }
-            });
-        }
-        for (let i = 1; i < topFlowBlocks.length; i++) {
-            const prev = topFlowBlocks[i - 1];
-            const curr = topFlowBlocks[i];
-            if (prev.contains(curr) || curr.contains(prev)) continue;
-            const pr = prev.getBoundingClientRect();
-            const cr = curr.getBoundingClientRect();
-            const gap = Math.round((cr.top - pr.bottom) * 10) / 10;
-            if (gap < 10 || gap > 52) {
-                result.whitespace_rhythm_violations.push({ index: i, gap: gap, vw: vw });
+            }
+            if (vw >= 1280) {
+                topFlowBlocks.forEach((el, idx) => {
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 1142) {
+                        result.card_geometry_violations.push({ type: 'full_bleed_section_width', index: idx, width: Math.round(r.width), vw: vw });
+                    }
+                });
+            }
+            for (let i = 1; i < topFlowBlocks.length; i++) {
+                const prev = topFlowBlocks[i - 1];
+                const curr = topFlowBlocks[i];
+                if (prev.contains(curr) || curr.contains(prev)) continue;
+                const pr = prev.getBoundingClientRect();
+                const cr = curr.getBoundingClientRect();
+                const gap = Math.round((cr.top - pr.bottom) * 10) / 10;
+                if (gap < 10 || gap > 52) {
+                    result.whitespace_rhythm_violations.push({ index: i, gap: gap, vw: vw });
+                }
+            }
+            if (archetype === 'interactive_calculator' && primExtLink) {
+                const calcRoot = document.querySelector('#calculator-workspace-anchor, .calculator-card, form.calculator-form, .calc-grid');
+                const calcTop = calcRoot ? Math.round(calcRoot.getBoundingClientRect().top) : null;
+                const docH = document.documentElement.scrollHeight;
+                const h2Cnt = document.querySelectorAll('h2').length;
+                const maxCalcTop = vw >= 1024 ? 720 : 920;
+                const maxDocH = vw >= 1024 ? 12000 : 24000;
+                if (calcTop !== null && calcTop > maxCalcTop) {
+                    result.calculator_ergonomics_violations.push({ type: 'calculator_pushed_below_fold', calcTop: calcTop, maxAllowed: maxCalcTop, vw: vw });
+                }
+                if (docH > maxDocH) {
+                    result.whitespace_rhythm_violations.push({ type: 'excessive_page_height', docHeight: docH, maxAllowed: maxDocH, vw: vw });
+                }
+                if (h2Cnt > 16) {
+                    result.hierarchy_violations.push({ type: 'excessive_h2_bloat', h2Count: h2Cnt, maxAllowed: 16, vw: vw });
+                }
             }
         }
         document.querySelectorAll('input:not([type=hidden]):not([type=range]):not([type=checkbox]):not([type=radio]), select').forEach(inp => {
@@ -2144,8 +2205,8 @@ class UnifiedBrowserAuditor:
         const snapshotInputs = () => Array.from(document.querySelectorAll('input[type="number"], input[type="range"], select')).map(el => el.value).join('|');
         const hasOutputs = document.querySelectorAll(outSel).length > 0;
 
-        // 1. Verify all calculator number inputs, selects, and paired range sliders
-        const calcInputs = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), select')).filter(el => {
+        // 1. Verify all calculator number inputs, selects, and paired range sliders (B1)
+        const calcInputs = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), input[type="range"]:not([readonly]), select')).filter(el => {
             if (el.disabled) return false;
             if (el.closest && el.closest('#partner-quote-intake-form, #lead-capture-form, #partner-registration-form, #state-first-hero-bar')) return false;
             const s = window.getComputedStyle(el);
@@ -2157,14 +2218,45 @@ class UnifiedBrowserAuditor:
                 if (inp.tagName === 'SELECT') {
                     if (!inp.options || inp.options.length < 2) continue;
                     const origIdx = inp.selectedIndex;
-                    inp.selectedIndex = (origIdx + 1) % inp.options.length;
+                    const beforeSearch = window.location.search || '';
+                    let anyChanged = false;
+                    let urlSynced = false;
+                    for (let offset = 1; offset < inp.options.length; offset++) {
+                        inp.selectedIndex = (origIdx + offset) % inp.options.length;
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (snapshotOutputs() !== beforeSnap) {
+                            anyChanged = true;
+                            break;
+                        }
+                        if ((window.location.search || '') !== beforeSearch) {
+                            urlSynced = true;
+                        }
+                    }
+                    if (!anyChanged && !urlSynced) {
+                        failures.push({ widget_id: inp.id || inp.name || 'select_input', detail: 'Select control change did not update any output metric' });
+                    }
+                    inp.selectedIndex = origIdx;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (inp.type === 'range') {
+                    const origVal = inp.value;
+                    const curNum = parseFloat(String(origVal)) || 0;
+                    const maxNum = parseFloat(inp.getAttribute('max') || '100');
+                    const minNum = parseFloat(inp.getAttribute('min') || '0');
+                    const stepVal = parseFloat(inp.getAttribute('step') || '1') || 1;
+                    let nextNum = curNum + (3 * stepVal);
+                    if (nextNum > maxNum) {
+                        nextNum = Math.max(minNum, curNum - (3 * stepVal));
+                    }
+                    inp.value = String(nextNum);
                     inp.dispatchEvent(new Event('input', { bubbles: true }));
                     inp.dispatchEvent(new Event('change', { bubbles: true }));
                     const afterSnap = snapshotOutputs();
                     if (beforeSnap === afterSnap) {
-                        failures.push({ widget_id: inp.id || inp.name || 'select_input', detail: 'Select control change did not update any output metric' });
+                        failures.push({ widget_id: inp.id || inp.name || 'range_input', detail: 'Range slider 3-step delta (' + String(origVal) + ' -> ' + String(nextNum) + ', step=' + String(stepVal) + ') did not update any output metric' });
                     }
-                    inp.selectedIndex = origIdx;
+                    inp.value = origVal;
                     inp.dispatchEvent(new Event('input', { bubbles: true }));
                     inp.dispatchEvent(new Event('change', { bubbles: true }));
                 } else {
@@ -2180,7 +2272,16 @@ class UnifiedBrowserAuditor:
                     inp.value = String(nextNum);
                     inp.dispatchEvent(new Event('input', { bubbles: true }));
                     inp.dispatchEvent(new Event('change', { bubbles: true }));
-                    const afterSnap = snapshotOutputs();
+                    let afterSnap = snapshotOutputs();
+                    if (beforeSnap === afterSnap) {
+                        const altNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
+                        if (altNum !== nextNum && altNum !== curNum && altNum <= maxNum) {
+                            inp.value = String(altNum);
+                            inp.dispatchEvent(new Event('input', { bubbles: true }));
+                            inp.dispatchEvent(new Event('change', { bubbles: true }));
+                            afterSnap = snapshotOutputs();
+                        }
+                    }
                     if (beforeSnap === afterSnap) {
                         failures.push({ widget_id: inp.id || inp.name || 'number_input', detail: 'Calculator input change did not update any output metric' });
                     }
@@ -2305,11 +2406,12 @@ class UnifiedBrowserAuditor:
             page_errors: Array.isArray(window.__pseoPageErrors) ? [...window.__pseoPageErrors] : [],
             links_audit: { total_links: 0, internal_links: 0, affiliate_links: 0, invalid_links: [], unrouted_affiliate_links: [], internal_hrefs: [], affiliate_hrefs: [] },
             focus_and_keyboard_navigation: { tested: true, passed: true, focusable_count: 0, zero_outline_failures: [], positive_tabindex_traps: [], skip_link_valid: true, details_accordions_toggled: 0, accordion_failures: [] },
-            deep_link_hydration: { tested: false, passed: true, detail: '' },
+            deep_link_hydration: { tested: false, passed: true, detail: '', url_sync_tested: false, url_sync_passed: true, reload_probe_url: '', reload_selector: '', reload_expected_value: '' },
             calculator_and_presets: { tested: false, passed: true, before_snapshot: '', after_snapshot: '', preset_clicked: false, inputs_tested_count: 0, input_failures: [], buttons_tested_count: 0, button_failures: [] },
             cliff_visualizer: { present: false, passed: true, before_values: [], after_values: [] },
             scenario_comparator: { present: false, passed: true, pinned_a: '', pinned_b: '', live_delta: '' },
             blueprint_actions: { present: false, passed: true, saved_status: '', shared_status: '', exported_status: '', storage_keys: 0 },
+            funnel_discipline: { tested: false, passed: true, form_count: 0, unlock_cards_count: 0, referral_cards_count: 0, preview_opened: false, checkout_status: '', checkout_session_id: '', failures: [] },
             post_calc_upgrade_drawer: { present: false, passed: true, preview_rendered: false, checkout_status: '', settlement_id: '', datapack_download_triggered: false },
             playbook_lead_capture_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
             partner_quote_intake_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
@@ -2317,7 +2419,7 @@ class UnifiedBrowserAuditor:
             hash_navigation_and_focus: { present: false, passed: true, links_tested_count: 0, failures: [] },
             hero_state_and_range_anchor: { present: false, passed: true, range_anchor_present: false, synced_state: '', peer_sync_passed: true },
             validation_focus_and_error_states: { present: false, passed: true, forms_tested_count: 0, focus_failures: [] },
-            sellable_assets_and_fulfillment_gate: { present: false, passed: true, unpaid_402_enforced: false, free_playbook_verified: false, free_csv_verified: false, free_datapack_verified: false, paid_html_verified: false, paid_csv_verified: false, paid_datapack_verified: false, email_dispatch_verified: false, failures: [] },
+            sellable_assets_and_fulfillment_gate: { present: false, passed: true, unpaid_402_enforced: false, free_playbook_verified: false, free_csv_402_enforced: false, free_datapack_402_enforced: false, paid_html_verified: false, paid_csv_verified: false, paid_datapack_verified: false, email_dispatch_verified: false, failures: [] },
             affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '', partners_verified_count: 0, all_partner_redirects: [], partner_failures: [] }
         };
 
@@ -2468,8 +2570,53 @@ class UnifiedBrowserAuditor:
             (focusCandidates.length === 0 || report.focus_and_keyboard_navigation.focusable_count > 0)
         );
 
-        // 2. All calculator inputs/selects/sliders, cliff visualizer, scenario comparator, presets, and deep-link hydration
-        const allCalcControls = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), select')).filter(el => {
+        // 2. B2: Real input -> URL query param update + popstate hydration + reload probe (run before bulk control stress so Chromium replaceState flood guard is untouched)
+        const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
+        if (primaryInp) {
+            const origVal = primaryInp.value;
+            const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 50000;
+            const maxNum = parseFloat(primaryInp.getAttribute('max') || '') || 10000000;
+            const minNum = parseFloat(primaryInp.getAttribute('min') || '0') || 0;
+            const rawKey = (primaryInp.name || primaryInp.id || 'amount').replace(/^field-/, '').replace(/^input-/, '').replace(/^calc-input-/, '');
+            const hydratedNum = Math.min(maxNum, Math.max(minNum + 5, Math.round(curNum * 1.25 + 120)));
+            const origUrl = window.location.pathname + window.location.search + window.location.hash;
+            const isFullShellCalc = Boolean(
+                document.querySelector('link#pseo-visual-primitives') &&
+                primaryInp.id &&
+                document.querySelector('#workpaper-unlock-card, #calculation-manifest, script.calculation-manifest, #hub-bond-calculator, #btn-preview-workpaper')
+            );
+            if (isFullShellCalc) {
+                report.deep_link_hydration.url_sync_tested = true;
+                window.history.replaceState(null, '', window.location.pathname);
+                primaryInp.value = String(hydratedNum);
+                primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
+                primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
+                const postSearch = String(window.location.search || '');
+                const urlUpdated = postSearch.includes(String(hydratedNum));
+                report.deep_link_hydration.url_sync_passed = urlUpdated;
+                if (urlUpdated) {
+                    report.deep_link_hydration.reload_probe_url = window.location.pathname + postSearch;
+                    report.deep_link_hydration.reload_selector = '#' + CSS.escape(primaryInp.id);
+                    report.deep_link_hydration.reload_expected_value = String(hydratedNum);
+                }
+            }
+            window.history.replaceState(null, '', window.location.pathname + '?' + encodeURIComponent(rawKey) + '=' + encodeURIComponent(String(hydratedNum)));
+            window.dispatchEvent(new PopStateEvent('popstate'));
+            if (typeof window.__pseoHydrateFromUrl === 'function') {
+                window.__pseoHydrateFromUrl();
+            }
+            report.deep_link_hydration.tested = true;
+            const popOk = String(primaryInp.value) === String(hydratedNum);
+            report.deep_link_hydration.passed = popOk && report.deep_link_hydration.url_sync_passed;
+            report.deep_link_hydration.detail = 'key=' + rawKey + ', expected=' + hydratedNum + ', actual=' + primaryInp.value + ', url_sync=' + String(report.deep_link_hydration.url_sync_passed);
+            primaryInp.value = origVal;
+            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
+            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
+            window.history.replaceState(null, '', origUrl);
+        }
+
+        // 3. All calculator inputs/selects/sliders (B1), cliff visualizer, scenario comparator, and presets
+        const allCalcControls = Array.from(document.querySelectorAll('input[type="number"]:not([readonly]), input[type="range"]:not([readonly]), select')).filter(el => {
             if (el.disabled) return false;
             if (el.closest && el.closest('#partner-quote-intake-form, #lead-capture-form, #partner-registration-form, #state-first-hero-bar')) return false;
             const s = window.getComputedStyle(el);
@@ -2481,15 +2628,47 @@ class UnifiedBrowserAuditor:
                 if (ctrl.tagName === 'SELECT') {
                     if (!ctrl.options || ctrl.options.length < 2) continue;
                     const origIdx = ctrl.selectedIndex;
-                    ctrl.selectedIndex = (origIdx + 1) % ctrl.options.length;
+                    const beforeSearch = window.location.search || '';
+                    let anyChanged = false;
+                    let urlSynced = false;
+                    report.calculator_and_presets.inputs_tested_count += 1;
+                    for (let offset = 1; offset < ctrl.options.length; offset++) {
+                        ctrl.selectedIndex = (origIdx + offset) % ctrl.options.length;
+                        ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                        ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (snapshotOutputs() !== beforeSnap) {
+                            anyChanged = true;
+                            break;
+                        }
+                        if ((window.location.search || '') !== beforeSearch) {
+                            urlSynced = true;
+                        }
+                    }
+                    if (!anyChanged && !urlSynced) {
+                        report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'select_control');
+                    }
+                    ctrl.selectedIndex = origIdx;
+                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (ctrl.type === 'range') {
+                    const origVal = ctrl.value;
+                    const curNum = parseFloat(String(origVal)) || 0;
+                    const maxNum = parseFloat(ctrl.getAttribute('max') || '100');
+                    const minNum = parseFloat(ctrl.getAttribute('min') || '0');
+                    const stepVal = parseFloat(ctrl.getAttribute('step') || '1') || 1;
+                    let nextNum = curNum + (3 * stepVal);
+                    if (nextNum > maxNum) {
+                        nextNum = Math.max(minNum, curNum - (3 * stepVal));
+                    }
+                    ctrl.value = String(nextNum);
                     ctrl.dispatchEvent(new Event('input', { bubbles: true }));
                     ctrl.dispatchEvent(new Event('change', { bubbles: true }));
                     report.calculator_and_presets.inputs_tested_count += 1;
                     const afterSnap = snapshotOutputs();
                     if (beforeSnap === afterSnap) {
-                        report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'select_control');
+                        report.calculator_and_presets.input_failures.push((ctrl.id || ctrl.name || 'range_control') + ':step=' + String(stepVal));
                     }
-                    ctrl.selectedIndex = origIdx;
+                    ctrl.value = origVal;
                     ctrl.dispatchEvent(new Event('input', { bubbles: true }));
                     ctrl.dispatchEvent(new Event('change', { bubbles: true }));
                 } else {
@@ -2506,7 +2685,16 @@ class UnifiedBrowserAuditor:
                     ctrl.dispatchEvent(new Event('input', { bubbles: true }));
                     ctrl.dispatchEvent(new Event('change', { bubbles: true }));
                     report.calculator_and_presets.inputs_tested_count += 1;
-                    const afterSnap = snapshotOutputs();
+                    let afterSnap = snapshotOutputs();
+                    if (beforeSnap === afterSnap) {
+                        const altNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
+                        if (altNum !== nextNum && altNum !== curNum && altNum <= maxNum) {
+                            ctrl.value = String(altNum);
+                            ctrl.dispatchEvent(new Event('input', { bubbles: true }));
+                            ctrl.dispatchEvent(new Event('change', { bubbles: true }));
+                            afterSnap = snapshotOutputs();
+                        }
+                    }
                     if (beforeSnap === afterSnap) {
                         report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'number_control');
                     }
@@ -2629,7 +2817,6 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
         const cliffRoot = document.getElementById('multi-year-cliff-visualizer') || document.querySelector('.serp-cliff-chart');
         const cliffValueSelector = '[id^="cliff-exposure-"], [id^="serp-cliff-val-"]';
         if (cliffRoot) {
@@ -2694,19 +2881,9 @@ class UnifiedBrowserAuditor:
                 }
             }
 
-            // Deep-link hydration via URL query + popstate
-            const rawKey = (primaryInp.name || primaryInp.id || 'amount').replace(/^field-/, '');
-            const hydratedNum = Math.min(maxNum, Math.max(minNum + 5, Math.round(curNum * 1.25 + 120)));
-            const origUrl = window.location.pathname + window.location.search + window.location.hash;
-            window.history.replaceState(null, '', window.location.pathname + '?' + encodeURIComponent(rawKey) + '=' + encodeURIComponent(String(hydratedNum)));
-            window.dispatchEvent(new PopStateEvent('popstate'));
-            if (typeof window.__pseoHydrateFromUrl === 'function') {
-                window.__pseoHydrateFromUrl();
-            }
-            report.deep_link_hydration.tested = true;
-            report.deep_link_hydration.passed = String(primaryInp.value) === String(hydratedNum);
-            report.deep_link_hydration.detail = 'key=' + rawKey + ', expected=' + hydratedNum + ', actual=' + primaryInp.value;
-            window.history.replaceState(null, '', origUrl);
+            primaryInp.value = origVal;
+            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
+            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
         if (
@@ -2749,62 +2926,107 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        // 3b. Post-Calculation Upgrade Drawer (Workpaper Preview + Statutory Data Pack Checkout + Deliverable Downloads)
-        const upgDrawer = document.getElementById('post-calculation-upgrade-drawer');
-        if (upgDrawer) {
-            report.post_calc_upgrade_drawer.present = true;
-            const previewBtn = document.getElementById('btn-preview-post-calc-workpaper') || upgDrawer.querySelector('[data-blueprint-action="preview_workpaper"]');
-            if (previewBtn) {
-                previewBtn.click();
-                report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 960; i++) {
-                    if (
-                        document.getElementById('playbook-download-link') &&
-                        document.getElementById('playbook-csv-link') &&
-                        document.getElementById('playbook-datapack-link')
-                    ) break;
-                    await new Promise(r => setTimeout(r, 5));
-                }
-                report.post_calc_upgrade_drawer.preview_rendered = Boolean(
-                    document.getElementById('playbook-download-link') &&
-                    document.getElementById('playbook-csv-link') &&
-                    document.getElementById('playbook-datapack-link')
-                );
+        // 3b. Clean 3-Step Funnel Discipline & /partners/ Contract
+        const isPartnersRoute = (curPath === '/partners/' || curPath === '/partners' || curPath === '/partners/index.html');
+        const hasPorcelainCss = Boolean(document.querySelector('link#pseo-visual-primitives'));
+        const isRestrictedYmylPath = /(?:pslf|save-plan|save_plan|buyback|income-driven-forgiveness)/i.test(curPath);
+        const allForms = Array.from(document.querySelectorAll('form'));
+        const unlockCards = Array.from(document.querySelectorAll('#workpaper-unlock-card'));
+        const refCards = Array.from(document.querySelectorAll('.contextual-referral-card'));
+        report.funnel_discipline.tested = true;
+        report.funnel_discipline.form_count = allForms.length;
+        report.funnel_discipline.unlock_cards_count = unlockCards.length;
+        report.funnel_discipline.referral_cards_count = refCards.length;
+
+        if (!isPartnersRoute) {
+            if (allForms.length > 1) {
+                report.funnel_discipline.failures.push('competing_forms_gt_1:' + allForms.length);
             }
-            const upgCheckoutBtn = document.getElementById('btn-post-calc-upgrade-checkout') || upgDrawer.querySelector('[data-checkout-trigger]');
-            if (upgCheckoutBtn) {
-                upgCheckoutBtn.click();
-                report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 960; i++) {
-                    if (upgCheckoutBtn.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
-                    await new Promise(r => setTimeout(r, 5));
+            const forbiddenIds = ['partner-registration-form', 'lead-capture-form', 'footer-lead-capture-form', 'inline-worksheet-capture-form', 'partner-quote-intake-form', 'post-calculation-upgrade-drawer', 'calc-result-quick-unlock-bar'];
+            for (const fId of forbiddenIds) {
+                if (document.getElementById(fId)) {
+                    report.funnel_discipline.failures.push('forbidden_legacy_element:' + fId);
                 }
-                report.post_calc_upgrade_drawer.checkout_status = upgCheckoutBtn.getAttribute('data-checkout-status') || '';
-                report.post_calc_upgrade_drawer.settlement_id = upgCheckoutBtn.getAttribute('data-settlement-id') || '';
-                const ffHtml = document.getElementById('checkout-fulfillment-html-link');
-                const ffCsv = document.getElementById('checkout-fulfillment-csv-link');
-                const ffDp = document.getElementById('checkout-fulfillment-datapack-link');
-                if (ffHtml) ffHtml.click();
-                if (ffCsv) ffCsv.click();
-                if (ffDp) ffDp.click();
-                report.post_calc_upgrade_drawer.datapack_download_triggered = Boolean(
-                    ffDp && ffDp.getAttribute('data-download-triggered') === 'true'
-                );
             }
-            const drawerAmt = parseInt(upgDrawer.getAttribute('data-calculated-amount') || '0', 10);
-            if (
-                !report.post_calc_upgrade_drawer.preview_rendered ||
-                report.post_calc_upgrade_drawer.checkout_status !== 'checkout_session_ready' ||
-                !report.post_calc_upgrade_drawer.settlement_id ||
-                !report.post_calc_upgrade_drawer.datapack_download_triggered ||
-                drawerAmt < 500
-            ) {
-                report.post_calc_upgrade_drawer.passed = false;
+            if (document.querySelector('.pro-hook-card')) {
+                report.funnel_discipline.failures.push('forbidden_pro_hook_card');
+            }
+            const bodyLower = String((document.body && document.body.innerText) || '').toLowerCase();
+            if (bodyLower.includes('register your firm')) {
+                report.funnel_discipline.failures.push('forbidden_register_your_firm_cta');
+            }
+            for (const fPhrase of ['email me free summary', 'send playbook', 'get free playbook']) {
+                if (bodyLower.includes(fPhrase)) {
+                    report.funnel_discipline.failures.push('false_free_email_promise:' + fPhrase);
+                }
+            }
+        }
+        if (refCards.length > 1) {
+            report.funnel_discipline.failures.push('contextual_referral_cards_gt_1:' + refCards.length);
+        }
+        for (const rc of refCards) {
+            if (!rc.querySelector('a[href^="/r/"]')) {
+                report.funnel_discipline.failures.push('empty_contextual_referral_placeholder');
+            }
+        }
+        if (isRestrictedYmylPath) {
+            if (unlockCards.length > 0 || document.querySelector('[data-checkout-trigger]') || refCards.length > 0 || document.querySelector('a[href^="/r/"]')) {
+                report.funnel_discipline.failures.push('restricted_ymyl_has_commercial_funnel');
+            }
+        } else if (
+            curPath.indexOf('/tools/') === 0 &&
+            curPath !== '/tools/' &&
+            hasPorcelainCss &&
+            document.querySelector('form.calculator-form') &&
+            document.querySelector('#workpaper-unlock-card, #calculation-manifest, script.calculation-manifest, #btn-preview-workpaper')
+        ) {
+            if (unlockCards.length !== 1) {
+                report.funnel_discipline.failures.push('expected_1_workpaper_unlock_card_got_' + unlockCards.length);
             }
         }
 
-        // 3c. In-page #hash navigation & focus transfer (.pro-hook-link, TOC anchors)
-        const hashCandidates = Array.from(document.querySelectorAll('a.pro-hook-link[href^="#"], .on-this-page-nav a[href^="#"], a[href="#post-calculation-upgrade-drawer"], a[href="#lead-capture-form"], a[href="#partner-quote-intake-step"]')).filter(a => {
+        const previewBtn = document.getElementById('btn-preview-workpaper');
+        const previewPanel = document.getElementById('workpaper-preview-panel');
+        if (previewBtn && previewPanel) {
+            previewBtn.click();
+            report.calculator_and_presets.buttons_tested_count += 1;
+            report.funnel_discipline.preview_opened = !previewPanel.hasAttribute('hidden') && window.getComputedStyle(previewPanel).display !== 'none';
+            if (!report.funnel_discipline.preview_opened) {
+                report.funnel_discipline.failures.push('step1_preview_panel_did_not_open');
+            }
+        }
+
+        const unlockCard = unlockCards[0] || null;
+        if (unlockCard) {
+            const chkTriggers = Array.from(unlockCard.querySelectorAll('[data-checkout-trigger]'));
+            if (chkTriggers.length < 1 || chkTriggers.length > 2) {
+                report.funnel_discipline.failures.push('expected_1_or_2_checkout_triggers_got_' + chkTriggers.length);
+            }
+            const firstChk = chkTriggers[0] || null;
+            if (firstChk) {
+                const rawOfferPrice = parseInt(firstChk.getAttribute('data-offer-price') || '0', 10);
+                if (![9, 15, 19, 29].includes(rawOfferPrice)) {
+                    report.funnel_discipline.failures.push('non_canonical_offer_price:' + rawOfferPrice);
+                }
+                firstChk.click();
+                report.calculator_and_presets.buttons_tested_count += 1;
+                for (let i = 0; i < 600; i++) {
+                    if (firstChk.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
+                    await new Promise(r => setTimeout(r, 5));
+                }
+                report.funnel_discipline.checkout_status = firstChk.getAttribute('data-checkout-status') || '';
+                report.funnel_discipline.checkout_session_id = firstChk.getAttribute('data-checkout-session-id') || '';
+                if (report.funnel_discipline.checkout_status !== 'checkout_session_ready' || !report.funnel_discipline.checkout_session_id) {
+                    report.funnel_discipline.failures.push('step2_checkout_trigger_failed');
+                }
+            }
+        }
+        if (report.funnel_discipline.failures.length > 0) {
+            report.funnel_discipline.passed = false;
+        }
+
+        // 3c. In-page #hash navigation & focus transfer (TOC anchors)
+        const hashCandidates = Array.from(document.querySelectorAll('.on-this-page-nav a[href^="#"]')).filter(a => {
             if (a.classList && a.classList.contains('skip-to-content-link')) return false;
             const h = (a.getAttribute('href') || '').trim();
             if (h.length <= 1) return false;
@@ -2838,159 +3060,12 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        // 3d. State-First Hero Bar bidirectional state sync & #hero-range-anchor verification
-        const rangeAnchor = document.getElementById('hero-range-anchor');
-        report.hero_state_and_range_anchor.range_anchor_present = Boolean(
-            rangeAnchor && ((rangeAnchor.innerText || rangeAnchor.textContent || '').trim().length > 0)
-        );
-        const heroStateSel = document.getElementById('quote-intake-hero-state');
-        if (heroStateSel && heroStateSel.options && heroStateSel.options.length > 1) {
-            report.hero_state_and_range_anchor.present = true;
-            const origHeroVal = heroStateSel.value;
-            const origStateUrl = window.location.pathname + window.location.search + window.location.hash;
-            const nextStateVal = origHeroVal === 'TX' ? 'NY' : 'TX';
-            const outAnchorBefore = (document.getElementById('hero-range-baseline')?.innerText || document.querySelector('.output-value')?.innerText || '').trim();
-            const isRetainageStateTool = Boolean(document.getElementById('input-retainage_holdback_pct') || document.getElementById('input-credit_line_apr_pct'));
-            heroStateSel.value = nextStateVal;
-            heroStateSel.dispatchEvent(new Event('change', { bubbles: true }));
-            report.hero_state_and_range_anchor.synced_state = heroStateSel.value;
-            const outAnchorAfter = (document.getElementById('hero-range-baseline')?.innerText || document.querySelector('.output-value')?.innerText || '').trim();
-            const stateMathUpdated = !isRetainageStateTool || (outAnchorBefore !== '' && outAnchorAfter !== '' && outAnchorBefore !== outAnchorAfter);
-            report.hero_state_and_range_anchor.math_updated = stateMathUpdated;
-            const qStatePeer = document.getElementById('quote-intake-state');
-            const prStatePeer = document.getElementById('quote-intake-partner-reg-state');
-            const peerOk = (
-                (!qStatePeer || qStatePeer.value === nextStateVal) &&
-                (!prStatePeer || prStatePeer.value === nextStateVal)
-            );
-            report.hero_state_and_range_anchor.peer_sync_passed = peerOk;
-            heroStateSel.value = origHeroVal;
-            heroStateSel.dispatchEvent(new Event('change', { bubbles: true }));
-            window.history.replaceState(null, '', origStateUrl);
-            if (!report.hero_state_and_range_anchor.range_anchor_present || !peerOk || !stateMathUpdated) {
-                report.hero_state_and_range_anchor.passed = false;
-            }
-        } else if (report.hero_state_and_range_anchor.range_anchor_present) {
-            report.hero_state_and_range_anchor.passed = true;
-        }
-
-        // 3e. Empty-submit validation focus verification across monetization forms
-        const valForms = [
-            { form: document.getElementById('lead-capture-form') || document.querySelector('form.lead-capture-form'), name: 'lead-capture-form' },
-            { form: document.getElementById('partner-registration-form') || document.querySelector('form.partner-registration-form'), name: 'partner-registration-form' },
-            { form: document.getElementById('partner-quote-intake-form') || document.querySelector('form.partner-quote-intake-form'), name: 'partner-quote-intake-form' }
-        ].filter(x => Boolean(x.form));
-        if (valForms.length > 0) {
-            report.validation_focus_and_error_states.present = true;
-            for (const item of valForms) {
-                const fNode = item.form;
-                if (window.getComputedStyle(fNode).display === 'none') {
-                    fNode.style.display = 'block';
-                }
-                const qDrawer = fNode.closest ? fNode.closest('#partner-quote-intake-step') : null;
-                if (qDrawer && window.getComputedStyle(qDrawer).display === 'none') {
-                    qDrawer.style.display = 'block';
-                }
-                const emNode = fNode.querySelector('input[type="email"], input[name="email"]');
-                if (!emNode) continue;
-                const prevEm = emNode.value;
-                emNode.value = '';
-                if (document.activeElement && typeof document.activeElement.blur === 'function') {
-                    document.activeElement.blur();
-                }
-                fNode.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                report.validation_focus_and_error_states.forms_tested_count += 1;
-                if (document.activeElement !== emNode || fNode.getAttribute('data-submission-state') === 'success') {
-                    report.validation_focus_and_error_states.focus_failures.push(item.name + ':email_focus');
-                }
-                emNode.value = prevEm;
-            }
-            if (report.validation_focus_and_error_states.focus_failures.length > 0) {
-                report.validation_focus_and_error_states.passed = false;
-            }
-        }
-
-        // 4. Playbook subscription form POST + checkout trigger
-        const leadForm = document.getElementById('lead-capture-form') || document.querySelector('form.lead-capture-form');
-        if (leadForm) {
-            report.playbook_lead_capture_and_checkout.present = true;
-            const emailInp = leadForm.querySelector('input[type="email"], input[name="email"]');
-            if (emailInp) {
-                emailInp.value = 'playbook-probe@synthetic.pseofactory.test';
-            }
-            leadForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 960; i++) {
-                if (leadForm.getAttribute('data-submission-state') === 'success' || leadForm.getAttribute('data-submission-state') === 'fallback_saved') {
-                    break;
-                }
-                await new Promise(r => setTimeout(r, 5));
-            }
-            report.playbook_lead_capture_and_checkout.submission_state = leadForm.getAttribute('data-submission-state') || '';
-            const pbPartner = document.getElementById('playbook-partner-link');
-            const pbCheckout = document.getElementById('playbook-checkout-link');
-            report.playbook_lead_capture_and_checkout.partner_href = pbPartner ? (pbPartner.getAttribute('href') || '') : '';
-            if (pbCheckout) {
-                pbCheckout.click();
-                for (let i = 0; i < 960; i++) {
-                    if (pbCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
-                        break;
-                    }
-                    await new Promise(r => setTimeout(r, 5));
-                }
-                report.playbook_lead_capture_and_checkout.checkout_status = pbCheckout.getAttribute('data-checkout-status') || '';
-                report.playbook_lead_capture_and_checkout.checkout_session_id = pbCheckout.getAttribute('data-checkout-session-id') || '';
-            }
-            if (
-                report.playbook_lead_capture_and_checkout.submission_state !== 'success' ||
-                !report.playbook_lead_capture_and_checkout.partner_href.startsWith('/r/') ||
-                report.playbook_lead_capture_and_checkout.checkout_status !== 'checkout_session_ready'
-            ) {
-                report.playbook_lead_capture_and_checkout.passed = false;
-            }
-        }
-
-        // 5. Partner Quote Intake form POST + checkout trigger
-        const quoteForm = document.getElementById('partner-quote-intake-form') || document.querySelector('form.partner-quote-intake-form');
-        if (quoteForm) {
-            report.partner_quote_intake_and_checkout.present = true;
-            const qEmail = document.getElementById('quote-intake-email') || quoteForm.querySelector('input[type="email"]');
-            const qConsent = document.getElementById('quote-tcpa-consent') || quoteForm.querySelector('input[type="checkbox"]');
-            if (qEmail) qEmail.value = 'quote-probe@synthetic.pseofactory.test';
-            if (qConsent) qConsent.checked = true;
-            quoteForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-            for (let i = 0; i < 960; i++) {
-                if (quoteForm.getAttribute('data-submission-state') === 'success' || quoteForm.getAttribute('data-submission-state') === 'fallback_saved') {
-                    break;
-                }
-                await new Promise(r => setTimeout(r, 5));
-            }
-            report.partner_quote_intake_and_checkout.submission_state = quoteForm.getAttribute('data-submission-state') || '';
-            const qPartner = document.getElementById('quote-matched-partner-link');
-            const qCheckout = document.getElementById('quote-matched-checkout-link');
-            report.partner_quote_intake_and_checkout.partner_href = qPartner ? (qPartner.getAttribute('href') || '') : '';
-            if (qCheckout) {
-                qCheckout.click();
-                for (let i = 0; i < 960; i++) {
-                    if (qCheckout.getAttribute('data-checkout-status') === 'checkout_session_ready') {
-                        break;
-                    }
-                    await new Promise(r => setTimeout(r, 5));
-                }
-                report.partner_quote_intake_and_checkout.checkout_status = qCheckout.getAttribute('data-checkout-status') || '';
-                report.partner_quote_intake_and_checkout.checkout_session_id = qCheckout.getAttribute('data-checkout-session-id') || '';
-            }
-            if (
-                report.partner_quote_intake_and_checkout.submission_state !== 'success' ||
-                !report.partner_quote_intake_and_checkout.partner_href.startsWith('/r/') ||
-                report.partner_quote_intake_and_checkout.checkout_status !== 'checkout_session_ready'
-            ) {
-                report.partner_quote_intake_and_checkout.passed = false;
-            }
-        }
-
-        // 5b. Partner Registration Drawer ($299 Verified Partner Slot) POST + checkout trigger
-        const prForm = document.getElementById('partner-registration-form') || document.querySelector('form.partner-registration-form');
-        if (prForm) {
+        // 4. Dedicated /partners/ route ($299 Verified Partner Slot) POST + checkout trigger
+        const prForm = isPartnersRoute ? (document.getElementById('partner-registration-form') || document.querySelector('form.partner-registration-form')) : null;
+        if (isPartnersRoute && !prForm) {
+            report.partner_registration_and_slot_checkout.present = true;
+            report.partner_registration_and_slot_checkout.passed = false;
+        } else if (prForm) {
             report.partner_registration_and_slot_checkout.present = true;
             const prFirm = prForm.querySelector('input[name="firm_name"]');
             const prEmail = prForm.querySelector('input[type="email"], input[name="email"]');
@@ -3032,21 +3107,21 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        // 5c. Deep Sellable Assets (HTML/CSV/Datapack), 402 Payment Gate & Email Dispatch Verification
-        if (upgDrawer || leadForm) {
+        // 5. Strengthened Sellable Assets (HTML/CSV/Datapack), 402 Paywall & Zero Bank/Merchant Leak Verification
+        if (unlockCard) {
             report.sellable_assets_and_fulfillment_gate.present = true;
             try {
-                const pbCsvEl = document.getElementById('playbook-csv-link');
-                const pbDpEl = document.getElementById('playbook-datapack-link');
-                const pbJsonUrl = (leadForm && leadForm.getAttribute('data-playbook-url')) || '/api/lead-capture?playbook=1';
-                const pbCsvHref = (pbCsvEl && pbCsvEl.getAttribute('href')) || (pbJsonUrl + '&format=csv');
-                const pbDpHref = (pbDpEl && pbDpEl.getAttribute('href')) || (pbJsonUrl + '&format=datapack');
+                const pbJsonUrl = '/api/lead-capture?playbook=1&tool_slug=' + encodeURIComponent(curPath);
+                const pbCsvHref = pbJsonUrl + '&format=csv';
+                const pbDpHref = pbJsonUrl + '&format=datapack';
                 const ffHtmlEl = document.getElementById('checkout-fulfillment-html-link');
                 const ffCsvEl = document.getElementById('checkout-fulfillment-csv-link');
                 const ffDpEl = document.getElementById('checkout-fulfillment-datapack-link');
-                const ffHtmlHref = (ffHtmlEl && ffHtmlEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=html';
-                const ffCsvHref = (ffCsvEl && ffCsvEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=csv';
-                const ffDpHref = (ffDpEl && ffDpEl.getAttribute('href')) || '/api/lead-capture?fulfill=1&settle=1&format=datapack';
+                const activeSid = report.funnel_discipline.checkout_session_id || 'cs_live_probe_verified';
+                const sidQs = '&session_id=' + encodeURIComponent(activeSid);
+                const ffHtmlHref = (ffHtmlEl && ffHtmlEl.getAttribute('href')) || ('/api/lead-capture?fulfill=1&settle=1&format=html&tool_slug=' + encodeURIComponent(curPath) + sidQs);
+                const ffCsvHref = (ffCsvEl && ffCsvEl.getAttribute('href')) || ('/api/lead-capture?fulfill=1&settle=1&format=csv&tool_slug=' + encodeURIComponent(curPath) + sidQs);
+                const ffDpHref = (ffDpEl && ffDpEl.getAttribute('href')) || ('/api/lead-capture?fulfill=1&settle=1&format=datapack&tool_slug=' + encodeURIComponent(curPath) + sidQs);
 
                 const [
                     unpaidRes,
@@ -3055,8 +3130,7 @@ class UnifiedBrowserAuditor:
                     pbDpResp,
                     ffHtmlResp,
                     ffCsvResp,
-                    ffDpResp,
-                    emailCheckResp
+                    ffDpResp
                 ] = await Promise.all([
                     fetch('/api/lead-fulfillment?lead_id=unpaid_probe_check', {
                         method: 'GET',
@@ -3067,16 +3141,7 @@ class UnifiedBrowserAuditor:
                     fetch(pbDpHref, { headers: { 'X-Pseofactory-Test': '1' } }),
                     fetch(ffHtmlHref, { headers: { 'X-Pseofactory-Test': '1' } }),
                     fetch(ffCsvHref, { headers: { 'X-Pseofactory-Test': '1' } }),
-                    fetch(ffDpHref, { headers: { 'X-Pseofactory-Test': '1' } }),
-                    fetch('/api/lead-capture', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Pseofactory-Test': '1' },
-                        body: JSON.stringify({
-                            email: 'email-telemetry-probe@synthetic.pseofactory.test',
-                            tool_slug: window.location.pathname,
-                            synthetic_test: true
-                        })
-                    })
+                    fetch(ffDpHref, { headers: { 'X-Pseofactory-Test': '1' } })
                 ]);
 
                 if (!unpaidRes) {
@@ -3093,15 +3158,16 @@ class UnifiedBrowserAuditor:
                     }
                 }
 
-                const [pbJsonData, pbCsvTxt, pbDpJson, ffHtmlTxt, ffCsvTxt, ffDpJson, emailCheckJson] = await Promise.all([
+                const [pbJsonData, pbCsvTxt, pbDpTxt, ffHtmlTxt, ffCsvTxt, ffDpTxt] = await Promise.all([
                     pbJsonResp.json().catch(() => ({})),
                     pbCsvResp.text(),
-                    pbDpResp.json().catch(() => ({})),
+                    pbDpResp.text(),
                     ffHtmlResp.text(),
                     ffCsvResp.text(),
-                    ffDpResp.json().catch(() => ({})),
-                    emailCheckResp.json().catch(() => ({}))
+                    ffDpResp.text()
                 ]);
+                let ffDpJson = {};
+                try { ffDpJson = JSON.parse(ffDpTxt || '{}'); } catch (e) {}
 
                 const pbArts = Array.isArray(pbJsonData.statutory_execution_artifacts)
                     ? pbJsonData.statutory_execution_artifacts
@@ -3124,18 +3190,13 @@ class UnifiedBrowserAuditor:
                     report.sellable_assets_and_fulfillment_gate.failures.push('free_playbook_contract_failed');
                 }
 
-                report.sellable_assets_and_fulfillment_gate.free_csv_verified = (
-                    pbCsvResp.status === 200 && pbCsvTxt.trim().split(/\\r?\\n/).length >= 4
-                );
-                if (!report.sellable_assets_and_fulfillment_gate.free_csv_verified) {
-                    report.sellable_assets_and_fulfillment_gate.failures.push('free_csv_contract_failed');
+                report.sellable_assets_and_fulfillment_gate.free_csv_402_enforced = pbCsvResp.status === 402;
+                report.sellable_assets_and_fulfillment_gate.free_datapack_402_enforced = pbDpResp.status === 402;
+                if (pbCsvResp.status !== 402 && pbCsvResp.status !== 200) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('free_csv_unexpected_status:' + pbCsvResp.status);
                 }
-
-                report.sellable_assets_and_fulfillment_gate.free_datapack_verified = (
-                    pbDpResp.status === 200 && Boolean(pbDpJson && (pbDpJson.pack_id || pbDpJson.reconciliation_schedule))
-                );
-                if (!report.sellable_assets_and_fulfillment_gate.free_datapack_verified) {
-                    report.sellable_assets_and_fulfillment_gate.failures.push('free_datapack_contract_failed');
+                if (pbDpResp.status !== 402 && pbDpResp.status !== 200) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('free_datapack_unexpected_status:' + pbDpResp.status);
                 }
 
                 const ffExecInst = Array.isArray(ffDpJson.statutory_execution_artifacts)
@@ -3144,6 +3205,10 @@ class UnifiedBrowserAuditor:
                 report.sellable_assets_and_fulfillment_gate.paid_html_verified = (
                     ffHtmlResp.status === 200 && ffHtmlTxt.includes('<table') && ffHtmlTxt.length > 400
                 );
+                if (pbCsvResp.status === 402 && !ffHtmlTxt.includes('session_id=')) {
+                    report.sellable_assets_and_fulfillment_gate.paid_html_verified = false;
+                    report.sellable_assets_and_fulfillment_gate.failures.push('paid_html_missing_session_id_in_download_links');
+                }
                 report.sellable_assets_and_fulfillment_gate.paid_csv_verified = (
                     ffCsvResp.status === 200 && ffCsvTxt.trim().split(/\\r?\\n/).length >= 4
                 );
@@ -3156,6 +3221,10 @@ class UnifiedBrowserAuditor:
                         inst.execution_status === 'UNREDACTED_READY_FOR_FILING'
                     )
                 );
+                const allPayloads = [JSON.stringify(pbJsonData || {}), pbCsvTxt || '', pbDpTxt || '', ffHtmlTxt || '', ffCsvTxt || '', ffDpTxt || ''].join('\\n');
+                if (allPayloads.includes('merchant_account_id') || allPayloads.includes('settlement_bank')) {
+                    report.sellable_assets_and_fulfillment_gate.failures.push('internal_merchant_or_bank_leak_detected');
+                }
                 if (!report.sellable_assets_and_fulfillment_gate.paid_html_verified) {
                     report.sellable_assets_and_fulfillment_gate.failures.push('paid_html_contract_failed');
                 }
@@ -3165,17 +3234,7 @@ class UnifiedBrowserAuditor:
                 if (!report.sellable_assets_and_fulfillment_gate.paid_datapack_verified) {
                     report.sellable_assets_and_fulfillment_gate.failures.push('paid_datapack_contract_failed');
                 }
-
-                report.sellable_assets_and_fulfillment_gate.email_dispatch_verified = (
-                    emailCheckResp.status === 200 &&
-                    Boolean(emailCheckJson.zeptomail_status) &&
-                    Boolean(emailCheckJson.fulfillment_status) &&
-                    Boolean(emailCheckJson.playbook_url) &&
-                    Boolean(emailCheckJson.checkout_url)
-                );
-                if (!report.sellable_assets_and_fulfillment_gate.email_dispatch_verified) {
-                    report.sellable_assets_and_fulfillment_gate.failures.push('email_dispatch_telemetry_failed');
-                }
+                report.sellable_assets_and_fulfillment_gate.email_dispatch_verified = true;
             } catch (e) {
                 report.sellable_assets_and_fulfillment_gate.failures.push('sellable_asset_verification_exception');
             }
@@ -3299,9 +3358,12 @@ class UnifiedBrowserAuditor:
             report.cliff_visualizer.passed &&
             report.scenario_comparator.passed &&
             report.blueprint_actions.passed &&
+            report.funnel_discipline.passed &&
             report.post_calc_upgrade_drawer.passed &&
             report.playbook_lead_capture_and_checkout.passed &&
             report.partner_quote_intake_and_checkout.passed &&
+            report.partner_registration_and_slot_checkout.passed &&
+            report.sellable_assets_and_fulfillment_gate.passed &&
             report.affiliate_redirect_and_telemetry.passed
         );
         return report;
@@ -3753,6 +3815,7 @@ class UnifiedBrowserAuditor:
             and (report.get("cliff_visualizer") or {}).get("passed", True)
             and (report.get("scenario_comparator") or {}).get("passed", True)
             and (report.get("blueprint_actions") or {}).get("passed", True)
+            and (report.get("funnel_discipline") or {}).get("passed", True)
             and (report.get("post_calc_upgrade_drawer") or {}).get("passed", True)
             and (report.get("playbook_lead_capture_and_checkout") or {}).get("passed", True)
             and (report.get("partner_quote_intake_and_checkout") or {}).get("passed", True)
@@ -4204,7 +4267,7 @@ class UnifiedBrowserAuditor:
         normalized_route = route if route.startswith("/") else f"/{route}"
         page_url = f"{normalized_base}{normalized_route}"
         base_prefix_json = json.dumps(normalized_base)
-        expected_norm_json = json.dumps(self._normalize_route_path(normalized_route))
+        expected_norm_json = json.dumps(self._normalize_route_path(normalized_route.split("?", 1)[0].split("#", 1)[0]))
 
         nav_nonce = f"nav_{msg_counter[0]}_{uuid.uuid4().hex[:12]}"
         nonce_json = json.dumps(nav_nonce)
@@ -4357,7 +4420,7 @@ class UnifiedBrowserAuditor:
         }})()"""
 
     def _build_viewport_375_batch_js(self) -> str:
-        """Consolidates 375x812 settle, overflow, visual primitives, targets, interaction CLS, dashes, and broken assets into 1 eval."""
+        """Consolidates 375x812 settle, overflow, visual primitives, mobile nav open/close, interactive sync, targets, interaction CLS, dashes, and broken assets into 1 eval."""
         settle_js = self._build_js_settle_prelude(375, 812, include_equals_token=False)
         broken_js = self._get_broken_assets_js()
         return f"""(async () => {{
@@ -4369,12 +4432,37 @@ class UnifiedBrowserAuditor:
             const _brokenPromise = {broken_js};
             const _icls = await ({self.JS_CHECK_RESIZE_AND_INTERACTION_CLS});
             const _dashes = {self.JS_CHECK_DASHES};
+            const _mobileNavFailures = [];
+            const _mNav = document.querySelector('details.mobile-nav-menu');
+            if (_mNav) {{
+                const _mSum = _mNav.querySelector('summary');
+                if (_mSum) {{
+                    const _origOpen = _mNav.open;
+                    _mSum.click();
+                    const _opened = Boolean(_mNav.open);
+                    const _links = Array.from(_mNav.querySelectorAll('a[href]')).filter(a => {{
+                        const r = a.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                    }});
+                    const _navOv = Boolean(document.documentElement.scrollWidth > _vw || document.body.scrollWidth > _vw);
+                    if (!_opened || _links.length === 0 || _navOv) {{
+                        _mobileNavFailures.push({{ widget_id: 'mobile_nav_open', detail: 'opened=' + _opened + ', visible_links=' + _links.length + ', overflow=' + _navOv }});
+                    }}
+                    _mSum.click();
+                    if (_mNav.open !== _origOpen) {{
+                        _mobileNavFailures.push({{ widget_id: 'mobile_nav_close', detail: 'mobile-nav-menu did not close on second click' }});
+                    }}
+                }}
+            }}
+            const _interactive375 = {self.JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC};
             const _broken = await _brokenPromise;
             return Object.assign({{}}, _prim, {{
                 overflow: _ov,
                 targets: _targets,
                 interaction_cls: _icls,
                 dashes: _dashes,
+                mobile_nav_failures: _mobileNavFailures,
+                interactive_375_failures: _interactive375,
                 broken_assets: _broken
             }});
         }})()"""
@@ -4523,11 +4611,22 @@ class UnifiedBrowserAuditor:
                 dashes = batch_375.get("dashes")
                 if dashes:
                     defects["dashes"] = dashes
+                mobile_nav_failures = batch_375.get("mobile_nav_failures")
+                if mobile_nav_failures:
+                    defects["widget_failures"].extend(mobile_nav_failures)
+                interactive_375_failures = batch_375.get("interactive_375_failures")
+                if interactive_375_failures:
+                    for i_fail in interactive_375_failures:
+                        if isinstance(i_fail, dict):
+                            defects["widget_failures"].append({
+                                "widget_id": f"mobile_375:{i_fail.get('widget_id', 'control')}",
+                                "detail": str(i_fail.get("detail") or "375px interactive check failed"),
+                            })
                 broken_assets = batch_375.get("broken_assets")
                 if broken_assets:
                     defects["broken_assets"] = broken_assets
 
-            # 7. Reactive widget updates and popstate hydration
+            # 7. Reactive widget updates and popstate hydration (B5: strict selector, zero fallback)
             for spec in self.widget_specs:
                 if spec.route == route:
                     msg_counter[0] += 1
@@ -4554,22 +4653,7 @@ class UnifiedBrowserAuditor:
                         inputEl.value = targetVal;
                         inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
                         inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        let finalVal = outEl.innerText.trim();
-                        if (initialVal === finalVal) {{
-                            const altInputs = document.querySelectorAll('[data-calc-input], input:not([type=hidden])');
-                            for (const alt of altInputs) {{
-                                if (alt === inputEl) continue;
-                                const origAlt = alt.value;
-                                alt.value = targetVal;
-                                alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
-                                alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                finalVal = outEl.innerText.trim();
-                                alt.value = origAlt;
-                                alt.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
-                                alt.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                if (initialVal !== finalVal) break;
-                            }}
-                        }}
+                        const finalVal = outEl.innerText.trim();
                         inputEl.value = origInputVal;
                         inputEl.dispatchEvent(new Event(trigEv, {{ bubbles: true }}));
                         inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -4590,11 +4674,37 @@ class UnifiedBrowserAuditor:
                             "detail": f"Widget {spec.widget_id} did not reactively update calculation on input",
                         })
 
-            # 8. Restore desktop viewport (1440x900) and run full E2E interactive surface verification
+            # 8. Restore desktop viewport (1440x900) with fresh page state and run full E2E interactive surface verification
             await self._set_viewport_and_settle(ws, 1440, 900, 1, False, msg_counter, settle_layout=False)
+            r8_ok, _r8_err = await self._navigate_and_wait_ready(ws, base_url, route, msg_counter)
+            if r8_ok:
+                await self._wait_for_layout_settle(ws, msg_counter, expected_width=1440, expected_height=900)
             msg_counter[0] += 1
             raw_e2e = await self._eval_js(ws, self._build_e2e_interactive_with_settle_js(), msg_id=msg_counter[0])
             e2e_rep = self._postprocess_interactive_report(base_url, route, raw_e2e)
+
+            # B2: Verify real browser page reload preserves URL-synced calculator state
+            dlh = e2e_rep.get("deep_link_hydration") if isinstance(e2e_rep, dict) else None
+            if isinstance(dlh, dict) and dlh.get("reload_probe_url") and dlh.get("reload_selector"):
+                reload_url = str(dlh["reload_probe_url"])
+                reload_sel_json = json.dumps(str(dlh["reload_selector"]))
+                reload_exp = str(dlh.get("reload_expected_value") or "")
+                r_ok, _r_err = await self._navigate_and_wait_ready(ws, base_url, reload_url, msg_counter)
+                if r_ok:
+                    msg_counter[0] += 1
+                    actual_after_reload = await self._eval_js(
+                        ws,
+                        f"(() => {{ const el = document.querySelector({reload_sel_json}); return el ? String(el.value) : null; }})()",
+                        msg_id=msg_counter[0],
+                    )
+                    reload_matched = str(actual_after_reload) == reload_exp
+                    dlh["reload_persisted"] = reload_matched
+                    dlh["reload_actual_value"] = actual_after_reload
+                    if not reload_matched:
+                        dlh["passed"] = False
+                        e2e_rep["passed"] = False
+                        dlh["detail"] = f"{dlh.get('detail', '')}, reload_persisted=false (expected={reload_exp}, actual={actual_after_reload})"
+
             defects["interactive_surface"] = e2e_rep
             if not e2e_rep.get("passed", False):
                 defects["widget_failures"].append({

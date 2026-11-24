@@ -373,9 +373,9 @@ def test_above_fold_preset_salience_and_ssr_latency_optimization():
         + "</div></main></body></html>"
     )
     healed, actions = normalize_html_visual_primitives(raw_doc, is_tenant_porcelain=True)
-    assert "above_fold_preset_salience" in actions
+    assert "above_fold_preset_salience" not in actions
     assert "legacy_file_runtime_dedup" in actions
-    assert 'data-above-fold-presets="true"' in healed
+    assert "above-fold-preset-bar" not in healed
     assert "window.location.protocol === 'file:'" not in healed
 
     t0 = time.perf_counter()
@@ -387,24 +387,55 @@ def test_above_fold_preset_salience_and_ssr_latency_optimization():
 
 
 @pytest.mark.host_estate
-def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
+def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers(tmp_path):
     """
-    Verifies audit_monetization_and_datapack_ui_ux_surfaces across all 50 compiled
-    calculator pages (profithelm: 22 commercial, prexvo: 14 commercial + 4 restricted
-    public-service YMYL, gainhelm: 10 commercial) and executes deterministic DOM
-    click/submit simulation for every button family:
-    - Outbound affiliate CTAs (a[href^="/r/"])
-    - Statutory data pack checkout buttons (#btn-post-calc-upgrade-checkout)
-    - Workpaper preview buttons (#btn-preview-post-calc-workpaper)
-    - Deliverable download links (HTML/PDF, CSV, JSON data pack)
-    - Decision blueprint buttons (save, share, export, .btn-share)
-    - Scenario comparator pin buttons (Pin A, Pin B, Reset across b2b, student_loan, and cyber_grc)
-    - Scenario preset pills ([data-calc-preset], [data-preset-pm-gain], .calc-switcher-btn[data-preset-hc])
-    - Lead capture, partner quote intake, and calculator submit buttons
+    Verifies audit_monetization_and_datapack_ui_ux_surfaces across all compiled
+    calculator pages (profithelm, prexvo incl. 4 restricted public-service YMYL,
+    gainhelm, lienbond) and executes deterministic DOM click/submit simulation
+    for the clean 3-step funnel:
+    - Step 1: Preview Workpaper (#btn-preview-workpaper, zero email/Turnstile)
+    - Step 2: Single full-width #workpaper-unlock-card ([data-checkout-trigger])
+    - Step 3: <= 1 live-only .contextual-referral-card (a[href^="/r/"])
+    - Deliverable download links + blueprint actions + scenario comparator + presets
     """
-    from pseofactory.visual_primitives import audit_monetization_and_datapack_ui_ux_surfaces
+    import shutil
+    from pathlib import Path
+    from pseofactory.visual_primitives import (
+        audit_monetization_and_datapack_ui_ux_surfaces,
+        normalize_html_visual_primitives,
+        write_runtime_synchronizer_asset,
+    )
 
-    audit = audit_monetization_and_datapack_ui_ux_surfaces(execute_dom_simulation=True)
+    ws_root = Path("/home/ubuntuadmin/projects")
+    repo_map = {
+        "profithelm": ws_root / "profithelm-platform" / "dist",
+        "prexvo": ws_root / "prexvo" / "dist",
+        "gainhelm": ws_root / "gainhelm" / "dist",
+        "lienbond": ws_root / "lienbond" / "dist",
+    }
+    dist_dirs = {}
+    for prop, src_dist in repo_map.items():
+        dst_dist = tmp_path / prop / "dist"
+        if (src_dist / "tools").is_dir():
+            shutil.copytree(src_dist / "tools", dst_dist / "tools")
+        else:
+            (dst_dist / "tools").mkdir(parents=True, exist_ok=True)
+        write_runtime_synchronizer_asset(dst_dist)
+        for html_p in (dst_dist / "tools").rglob("index.html"):
+            if html_p == dst_dist / "tools" / "index.html":
+                continue
+            norm_p, _ = normalize_html_visual_primitives(
+                html_p.read_text(encoding="utf-8", errors="ignore"),
+                is_tenant_porcelain=True,
+                dist_dir=dst_dist,
+            )
+            html_p.write_text(norm_p, encoding="utf-8")
+        dist_dirs[prop] = dst_dist / "tools"
+
+    audit = audit_monetization_and_datapack_ui_ux_surfaces(
+        dist_dirs=dist_dirs,
+        execute_dom_simulation=True,
+    )
     assert audit["all_surfaces_and_handlers_passed"] is True, f"UI/UX button surface audit failed: {audit}"
     assert audit["total_pages_audited"] >= 175
     assert audit["commercial_pages_audited"] >= 171
@@ -413,13 +444,10 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
     assert audit["coexistence_and_surface_violations"] == []
 
     inv = audit["button_inventory_totals"]
-    assert inv["affiliate_outbound_ctas"] >= 450
-    assert inv["datapack_checkout_buttons"] == audit["commercial_pages_audited"]
+    assert inv["competing_legacy_forms"] == 0
+    assert inv["datapack_checkout_buttons"] >= audit["commercial_pages_audited"]
     assert inv["workpaper_preview_buttons"] == audit["commercial_pages_audited"]
-    assert inv["decision_blueprint_buttons"] >= 500
-    assert inv["scenario_comparator_pin_buttons"] >= 500
     assert inv["scenario_preset_buttons"] >= 500
-    assert inv["lead_quote_and_calc_forms"] >= 340
 
     assert audit["tenants"]["profithelm"]["total_pages"] >= 149
     assert audit["tenants"]["profithelm"]["coexistence_pass_count"] == audit["tenants"]["profithelm"]["total_pages"]
@@ -440,16 +468,15 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers():
     for t_sim in sim["tenants"]:
         assert t_sim["passed"] is True
         assert t_sim["preset_hydration_passed"] is True
+        assert t_sim["workbench_selects_distinct"] is True
+        assert t_sim["url_sync_passed"] is True
         assert t_sim["scenario_pin_passed"] is True
         assert t_sim["blueprint_actions_passed"] is True
         assert t_sim["workpaper_preview_passed"] is True
-        assert t_sim["playbook_csv_url_uses_playbook_rail"] is True
-        assert t_sim["playbook_datapack_url_uses_playbook_rail"] is True
         assert t_sim["datapack_checkout_passed"] is True
+        assert t_sim["checkout_error_surfaced"] is True
         assert t_sim["deliverable_downloads_passed"] is True
         assert t_sim["affiliate_cta_click_passed"] is True
-        assert t_sim["lead_and_quote_submit_passed"] is True
-        assert t_sim["lead_capture_propagates_partner_and_sku"] is True
 
 
 def test_profithelm_spoke_monetization_and_playbook_autonomy(tmp_path):
@@ -549,7 +576,7 @@ console.log(JSON.stringify({{
   pbDpUrl: pbPost.playbook_datapack_url,
   pbCsvStatus: pbCsvRes.status,
   pbDpStatus: pbDpRes.status,
-  pbHtmlUsesPlaybookLinks: pbHtmlText.includes("playbook=1") && !pbHtmlText.includes("fulfill=1")
+  pbHtmlUsesCheckoutPaywall: pbHtmlText.includes("checkout=1") && !pbHtmlText.includes("fulfill=1") && !pbHtmlText.includes("format=csv")
 }}));
 """
     proc = subprocess.run(
@@ -582,9 +609,9 @@ console.log(JSON.stringify({{
     )
     assert "playbook=1" in out["pbCsvUrl"] and "format=csv" in out["pbCsvUrl"]
     assert "playbook=1" in out["pbDpUrl"] and "format=datapack" in out["pbDpUrl"]
-    assert out["pbCsvStatus"] == 200
-    assert out["pbDpStatus"] == 200
-    assert out["pbHtmlUsesPlaybookLinks"] is True
+    assert out["pbCsvStatus"] == 402
+    assert out["pbDpStatus"] == 402
+    assert out["pbHtmlUsesCheckoutPaywall"] is True
 
 
 

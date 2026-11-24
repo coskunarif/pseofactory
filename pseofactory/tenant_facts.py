@@ -1,8 +1,8 @@
 """
 pseofactory Centralized Tenant Fact & Statutory Truth Store
-Stateless immutable profiles for ProfitHelm and Prexvo with strict tenant boundary isolation.
+Stateless immutable profiles for active tenants with strict tenant boundary isolation.
 Enforces:
-1. Canonical pricing tier verification ($0, $49, $199 for ProfitHelm; $0, $19 for Prexvo).
+1. Canonical pricing tier verification via pseofactory.pricing ($0, $15, $29, $299 business; $0, $9, $19, $299 consumer).
 2. Grounded feature matrix contract verification.
 3. Statutory tax citations (IRS Rev Proc 2024-40) and student loan citations (34 CFR Part 685).
 4. Banned marketing claims rejection.
@@ -127,41 +127,63 @@ class TenantTruthProfile:
         }
 
 
-def _build_profithelm_profile() -> TenantTruthProfile:
-    """Builds the canonical truth profile for ProfitHelm."""
-    pricing = {
+def _build_canonical_pricing_tiers(
+    audience_tier: str,
+    free_features: List[str],
+    quick_features: List[str],
+    full_features: List[str],
+) -> Dict[str, PricingTier]:
+    """Builds canonical TenantTruthProfile pricing_tiers directly from pseofactory.pricing."""
+    from pseofactory.pricing import get_tier_pricing
+
+    tp = get_tier_pricing(audience_tier)
+    return {
         "free": PricingTier(
             name="Free",
             price_usd=0.0,
-            billing_period="month",
-            features=["Core Calculators", "Section 179 Optimizer"],
+            billing_period="one_time",
+            features=list(free_features),
         ),
-        "pro": PricingTier(
-            name="Pro",
-            price_usd=49.0,
-            billing_period="month",
-            features=[
-                "Entity Tax Modeling",
-                "Section 1031 Exchange Matching",
-                "Section 179 Optimizer",
-                "QSBS Stacking Analysis",
-                "Data Export",
-            ],
+        "quick": PricingTier(
+            name="Quick Worksheet",
+            price_usd=float(tp["quick"]["price_usd"]),
+            billing_period="one_time",
+            features=list(quick_features),
         ),
-        "enterprise": PricingTier(
-            name="Enterprise",
-            price_usd=199.0,
-            billing_period="month",
-            features=[
-                "Entity Tax Modeling",
-                "Section 1031 Exchange Matching",
-                "Section 179 Optimizer",
-                "QSBS Stacking Analysis",
-                "Multi-Entity Consolidation",
-                "Priority API",
-            ],
+        "full": PricingTier(
+            name="Full Workpaper & Data Pack",
+            price_usd=float(tp["full"]["price_usd"]),
+            billing_period="one_time",
+            features=list(full_features),
+        ),
+        "partner_slot": PricingTier(
+            name="Verified Calculator Partner Slot",
+            price_usd=float(tp["partner_slot"]["price_usd"]),
+            billing_period="one_time",
+            features=["Verified Commercial Partner Desk Placement", "State-Filtered Lead Routing"],
         ),
     }
+
+
+def _build_profithelm_profile() -> TenantTruthProfile:
+    """Builds the canonical truth profile for ProfitHelm."""
+    pricing = _build_canonical_pricing_tiers(
+        audience_tier="business",
+        free_features=["Core Calculators", "Section 179 Optimizer"],
+        quick_features=[
+            "Executive Scenario Workpaper (HTML/PDF)",
+            "Formula & Statutory Authority Breakdown",
+            "Summary CSV Export",
+        ],
+        full_features=[
+            "Entity Tax Modeling",
+            "Section 1031 Exchange Matching",
+            "Section 179 Optimizer",
+            "QSBS Stacking Analysis",
+            "Multi-Row Sensitivity & Projection Schedules (CSV)",
+            "Structured Statutory Data Pack (JSON)",
+        ],
+    )
 
     features = {
         "Entity Tax Modeling": FeatureContract(
@@ -328,40 +350,23 @@ def _build_profithelm_profile() -> TenantTruthProfile:
 
 def _build_prexvo_profile() -> TenantTruthProfile:
     """Builds the canonical truth profile for Prexvo."""
-    pricing = {
-        "free": PricingTier(
-            name="Free",
-            price_usd=0.0,
-            billing_period="month",
-            features=["RAP vs IBR Modeling", "Tiered Standard Calculation", "ICR Repayment Modeling"],
-        ),
-        "pro": PricingTier(
-            name="Pro",
-            price_usd=19.0,
-            billing_period="month",
-            features=[
-                "RAP vs IBR Modeling",
-                "Tiered Standard Calculation",
-                "PAYE Sunset Analysis",
-                "ICR Repayment Modeling",
-                "PSLF Buyback Estimator",
-                "Scenario Export",
-            ],
-        ),
-        "enterprise": PricingTier(
-            name="Enterprise",
-            price_usd=0.0,
-            billing_period="custom",
-            features=[
-                "RAP vs IBR Modeling",
-                "Tiered Standard Calculation",
-                "PAYE Sunset Analysis",
-                "ICR Repayment Modeling",
-                "PSLF Buyback Estimator",
-                "Institutional Analytics",
-            ],
-        ),
-    }
+    pricing = _build_canonical_pricing_tiers(
+        audience_tier="consumer",
+        free_features=["RAP vs IBR Modeling", "Tiered Standard Calculation", "ICR Repayment Modeling"],
+        quick_features=[
+            "Executive Borrower Worksheet (HTML/PDF)",
+            "Amortization Formula & Title IV Compliance Notes",
+            "Summary CSV Export",
+        ],
+        full_features=[
+            "RAP vs IBR Modeling",
+            "Tiered Standard Calculation",
+            "PAYE Sunset Analysis",
+            "ICR Repayment Modeling",
+            "Multi-Period Amortization & APR Sensitivity Schedules (CSV)",
+            "Structured Borrower Data Pack (JSON)",
+        ],
+    )
 
     features = {
         "RAP vs IBR Modeling": FeatureContract(
@@ -556,45 +561,27 @@ def _build_prexvo_profile() -> TenantTruthProfile:
 
 def _build_gainhelm_profile() -> TenantTruthProfile:
     """Builds the canonical truth profile for GainHelm (Enterprise Cyber Compliance & GRC Governance)."""
-    pricing = {
-        "free": PricingTier(
-            name="Free",
-            price_usd=0.0,
-            billing_period="month",
-            features=[
-                "SOC 2 Audit Cost & CPA Scoping",
-                "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
-                "HHS OCR HIPAA Penalty Tier Modeling",
-            ],
-        ),
-        "pro": PricingTier(
-            name="Pro",
-            price_usd=49.0,
-            billing_period="month",
-            features=[
-                "SOC 2 Audit Cost & CPA Scoping",
-                "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
-                "ISO 27001 Auditor-Day Calculation",
-                "HHS OCR HIPAA Penalty Tier Modeling",
-                "PCI DSS 4.0 QSA & ROC Scoping",
-                "Audit Workpaper Export",
-            ],
-        ),
-        "enterprise": PricingTier(
-            name="Enterprise",
-            price_usd=199.0,
-            billing_period="month",
-            features=[
-                "SOC 2 Audit Cost & CPA Scoping",
-                "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
-                "ISO 27001 Auditor-Day Calculation",
-                "HHS OCR HIPAA Penalty Tier Modeling",
-                "PCI DSS 4.0 QSA & ROC Scoping",
-                "Multi-Framework Governance Consolidation",
-                "Priority GRC API",
-            ],
-        ),
-    }
+    pricing = _build_canonical_pricing_tiers(
+        audience_tier="business",
+        free_features=[
+            "SOC 2 Audit Cost & CPA Scoping",
+            "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+            "HHS OCR HIPAA Penalty Tier Modeling",
+        ],
+        quick_features=[
+            "Executive Compliance Scoping Worksheet (HTML/PDF)",
+            "Methodology & Statutory Authority Breakdown",
+            "Summary CSV Export",
+        ],
+        full_features=[
+            "SOC 2 Audit Cost & CPA Scoping",
+            "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
+            "ISO 27001 Auditor-Day Calculation",
+            "HHS OCR HIPAA Penalty Tier Modeling",
+            "PCI DSS 4.0 QSA & ROC Scoping",
+            "Multi-Phase Readiness Schedule & Data Pack (CSV/JSON)",
+        ],
+    )
 
     features = {
         "SOC 2 Audit Cost & CPA Scoping": FeatureContract(
@@ -781,40 +768,27 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
 
 def _build_lienbond_profile() -> TenantTruthProfile:
     """Builds the canonical truth profile for LienBond (lienbond.com)."""
-    pricing = {
-        "free": PricingTier(
-            name="Free",
-            price_usd=0.0,
-            billing_period="month",
-            features=[
-                "50-State Mechanics Lien Deadline Matrix",
-                "Contractor License & Miller Act Bond Premium Calculators",
-                "Workers Comp Class Code & EMR Rate Calculator",
-            ],
-        ),
-        "pro": PricingTier(
-            name="Pro",
-            price_usd=49.0,
-            billing_period="month",
-            features=[
-                "50-State Statutory Lien Waiver & Preliminary Notice Packet",
-                "Contractor Surety Bond & Underwriting Readiness Dossier",
-                "NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet",
-                "Federal Miller Act (40 U.S.C. 3131) Sliding-Scale Bond Schedule",
-            ],
-        ),
-        "enterprise": PricingTier(
-            name="Enterprise",
-            price_usd=69.0,
-            billing_period="month",
-            features=[
-                "DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet",
-                "ERISA Section 412 (29 U.S.C. 1112) Fidelity Bond Fiduciary Resolution",
-                "State Prompt Payment Act Retainage Penalty Demand Notice",
-                "Multi-State Subcontractor Lien & Bond Compliance Consolidation",
-            ],
-        ),
-    }
+    pricing = _build_canonical_pricing_tiers(
+        audience_tier="business",
+        free_features=[
+            "50-State Mechanics Lien Deadline Matrix",
+            "Contractor License & Miller Act Bond Premium Calculators",
+            "Workers Comp Class Code & EMR Rate Calculator",
+        ],
+        quick_features=[
+            "Executive Contractor Compliance Worksheet (HTML/PDF)",
+            "Surety, EMR & State Statutory Deadline Breakdown",
+            "Summary CSV Export",
+        ],
+        full_features=[
+            "50-State Statutory Lien Waiver & Preliminary Notice Packet",
+            "Contractor Surety Bond & Underwriting Readiness Dossier",
+            "NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet",
+            "Federal Miller Act (40 U.S.C. 3131) Sliding-Scale Bond Schedule",
+            "DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet",
+            "Multi-Tier Sensitivity Schedule & Structured Data Pack (CSV/JSON)",
+        ],
+    )
 
     features = {
         "50-State Mechanics Lien Deadline Matrix": FeatureContract(
@@ -1214,8 +1188,24 @@ class DeclarativeTenantContract:
     primary_partner_url: str = ""
     primary_partner_cta: str = ""
     tools_directory_seed_section_html: str = ""
+    audience_tier: str = "business"
 
     def __post_init__(self) -> None:
+        eff_tier = str(self.audience_tier or "business").strip().lower()
+        if eff_tier not in ("consumer", "business"):
+            eff_tier = "business"
+        if self.repo_root:
+            try:
+                marker_path = Path(self.repo_root) / ".pseofactory.json"
+                if marker_path.is_file():
+                    marker_data = json.loads(marker_path.read_text(encoding="utf-8"))
+                    if isinstance(marker_data, dict):
+                        marker_tier = str(marker_data.get("audience_tier") or "").strip().lower()
+                        if marker_tier in ("consumer", "business"):
+                            eff_tier = marker_tier
+            except Exception:
+                pass
+        object.__setattr__(self, "audience_tier", eff_tier)
         if not self.canonical_base and self.domain:
             object.__setattr__(self, "canonical_base", f"https://{self.domain}")
         if not self.package_name and self.property_id:
@@ -1281,6 +1271,7 @@ class DeclarativeTenantContract:
             "package_name": self.package_name,
             "dist_dir": self.dist_dir,
             "linkedin_company_id": self.linkedin_company_id,
+            "audience_tier": self.audience_tier,
         }
 
 
@@ -1456,6 +1447,7 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
         ),
         "prexvo": DeclarativeTenantContract(
             property_id="prexvo",
+            audience_tier="consumer",
             repo_dir_name="prexvo",
             domain="prexvo.com",
             canonical_base="https://prexvo.com",
@@ -2682,10 +2674,10 @@ class TenantFactStore:
                     "Stale 2026 bonus depreciation rate (60%/80%) detected: 2026 statutory IRC 168(k) bonus depreciation rate is 20%"
                 )
 
-            # Unverified $29 offer fallback in JS
-            if "offer_price_usd || 29" in text:
+            # Unverified legacy $49/$79/$199 offer fallback in JS
+            if "offer_price_usd || 49" in text or "offer_price_usd || 79" in text:
                 violations.append(
-                    "Unverified offer_price_usd fallback '29' detected in runtime script: contradicts ProfitHelm ($49) and Prexvo ($19) canonical pricing tiers"
+                    "Unverified legacy offer_price_usd fallback ('49' or '79') detected in runtime script: contradicts ProfitHelm ($15 quick / $29 full) canonical pricing tiers"
                 )
 
             # Corrupted subtraction syntax from aggressive hyphen replacement
@@ -2916,10 +2908,10 @@ class TenantFactStore:
                     "Incomplete IBR statutory rate '15% Discretionary' in comparison table cell: must specify '10% to 15% Discretionary' covering post-2014 new borrowers (10%) and pre-2014 borrowers (15%) under 34 CFR 685.209"
                 )
 
-            # Unverified $29 offer fallback in JS
-            if "offer_price_usd || 29" in text:
+            # Unverified $29/$39/$49 offer fallback in JS on consumer tenant Prexvo ($9 quick / $19 full)
+            if "offer_price_usd || 29" in text or "offer_price_usd || 39" in text:
                 violations.append(
-                    "Unverified offer_price_usd fallback '29' detected in runtime script: contradicts Prexvo ($19) canonical pricing tier"
+                    "Unverified offer_price_usd fallback ('29' or '39') detected in runtime script: contradicts Prexvo ($9 quick / $19 full) canonical pricing tiers"
                 )
 
             # Plan-specific contradiction: attributing 225% ($35,212.50) to IBR, PAYE, ICR, Tiered Standard, Grad PLUS, Refinance, or institutional pages
@@ -2951,10 +2943,10 @@ class TenantFactStore:
                     "Prexvo institutional/directory page overlay pollution: calculator striking-distance overlay injected onto non-calculator directory or institutional route"
                 )
         elif tenant_norm == "gainhelm":
-            # Unverified $29 offer fallback in JS or JSON-LD
-            if "offer_price_usd || 29" in text or '"price":"29"' in text or '"price": "29"' in text:
+            # Unverified legacy $49/$79 offer fallback in JS on business tenant GainHelm ($15 quick / $29 full)
+            if "offer_price_usd || 49" in text or "offer_price_usd || 79" in text:
                 violations.append(
-                    "Unverified offer_price_usd or price '29' detected: contradicts GainHelm ($49) canonical pricing tier"
+                    "Unverified legacy offer_price_usd fallback ('49' or '79') detected: contradicts GainHelm ($15 quick / $29 full) canonical pricing tiers"
                 )
             # Unhydrated SSR calculator metric placeholders ($0.00 in primary compliance metrics)
             if "$0.00" in text and re.search(
@@ -3219,15 +3211,13 @@ class TruthReconciliationEngine:
         ("remBasis * 0.80", "remBasis * 0.20"),
         ("rem179 * 0.80", "rem179 * 0.20"),
         (
-            "data.offer_price_usd || 29",
-            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+            "data.offer_price_usd || 49",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
         ),
         (
             "data.offer_price_usd || (isPrexvo ? 19 : 49)",
-            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
         ),
-        ('"price":"29"', '"price":"49"'),
-        ('"price": "29"', '"price": "49"'),
         ("$19,125 in self-employment tax ($15,500 OASDI + $3,625 Medicare)", "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)"),
         ("$13,180 in self-employment tax ($10,056 OASDI + $3,124 Medicare)", "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)"),
         ("$13,193 in self-employment tax ($10,056 OASDI + $3,137 Medicare)", "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)"),
@@ -3415,11 +3405,11 @@ class TruthReconciliationEngine:
         ),
         (
             "data.offer_price_usd || 29",
-            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
         ),
         (
             "data.offer_price_usd || (isPrexvo ? 19 : 49)",
-            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
         ),
         # Clarify RAP vs Old IBR 15% baseline in comparison tables
         (
@@ -3522,17 +3512,13 @@ class TruthReconciliationEngine:
 
     GAINHELM_HTML_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
         (
-            "data.offer_price_usd || 29",
-            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+            "data.offer_price_usd || 49",
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
         ),
         (
             "data.offer_price_usd || (isPrexvo ? 19 : 49)",
-            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 49)',
+            'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
         ),
-        ('"price":"29"', '"price":"49"'),
-        ('"price": "29"', '"price": "49"'),
-        ("$29/mo", "$49/mo"),
-        ("$29/month", "$49/month"),
         ("SPRS score of 115", "SPRS score of 110"),
         ("($95/hr)", "($121.67/hr)"),
         ("($61.40/hr)", "($121.67/hr)"),

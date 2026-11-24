@@ -101,52 +101,63 @@
         "ph_instant_statutory_worksheet_19": {
           "sku": "ph_instant_statutory_worksheet_19",
           "property_id": "profithelm",
+          "audience_tier": "business",
+          "tier_kind": "quick",
           "vertical": "b2b_tax_advisory",
-          "title": "ProfitHelm Instant Statutory Tax & CPA Reconciliation Worksheet",
-          "price_usd": 19.0,
-          "price_cents": 1900,
+          "title": "ProfitHelm Quick Tax & Depreciation Worksheet",
+          "description": "ProfitHelm Quick Worksheet - Print/PDF-ready executive workpaper reflecting your actual calculator inputs and outputs, formula breakdown, compliance notes, and summary CSV export",
+          "price_usd": 15.0,
+          "price_cents": 1500,
           "currency": "usd",
-          "statutory_authority": "26 U.S.C. Section 1, IRC Section 199A, and IRS Rev. Proc. 2025-32",
+          "statutory_authority": "26 U.S.C. Section 1, IRC Section 199A, Section 179, and IRS Rev. Proc. 2025-32",
           "trend_timeseries_ids": [
             "irs_sec199a_qbi",
             "ssa_fica_wage_base",
             "fred_cpilfesl_inflation"
           ],
           "deliverables": [
-            "Personalized Statutory Tax & Bracket Reconciliation Worksheet (HTML/PDF)",
-            "5-Point Marginal Rate & Safe-Harbor Sensitivity Schedule (CSV)",
-            "Signed Scenario Calculation Manifest (JSON)"
+            "Print/PDF-ready executive workpaper reflecting your exact calculator inputs and outputs (HTML/PDF)",
+            "Formula, statutory authority, and 2026 compliance methodology breakdown (HTML/PDF)",
+            "Summary reconciliation table export (CSV)"
           ]
         },
         "ph_1031_boot_replacement_workpapers": {
           "sku": "ph_1031_boot_replacement_workpapers",
           "property_id": "profithelm",
+          "audience_tier": "business",
+          "tier_kind": "full",
           "vertical": "1031_exchange",
-          "title": "ProfitHelm IRC Section 1031 Boot & QI Compliance Workpaper Kit",
-          "price_usd": 79.0,
-          "price_cents": 7900,
+          "title": "ProfitHelm Section 1031 Full Workpaper & Data Pack",
+          "description": "ProfitHelm Full Workpaper & Data Pack - Dynamic 5-point boot sensitivity schedule, 45-day/180-day exchange timeline, full multi-row CSV, JSON data pack, and execution checklist",
+          "price_usd": 29.0,
+          "price_cents": 2900,
           "currency": "usd",
-          "statutory_authority": "IRC Section 1031 and IRS Form 8824",
+          "statutory_authority": "IRC Section 1031, Treas. Reg. 1.1031(k)-1, and IRS Form 8824",
           "trend_timeseries_ids": [
             "fred_dgs10_yield",
             "fred_cpilfesl_inflation",
             "irs_sec199a_qbi"
           ],
           "deliverables": [
-            "Personalized IRS Form 8824 Lines 15-25 Boot & Basis Reconciliation Workpaper (HTML/PDF)",
-            "45-Day Identification & 180-Day Closing Statutory Deadline Compliance Schedule (CSV)",
-            "Signed Scenario Audit Manifest & QI Escrow Instruction Checklist (JSON)"
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point boot and replacement equity sensitivity schedule computed from your inputs (HTML/CSV)",
+            "45-day identification and 180-day closing statutory milestone schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and statutory metadata (JSON)",
+            "Unredacted IRC Section 1031 QI assignment and safe-harbor execution checklist clauses (HTML/PDF)"
           ]
         },
         "ph_commercial_capital_audit_toolkit": {
           "sku": "ph_commercial_capital_audit_toolkit",
           "property_id": "profithelm",
+          "audience_tier": "business",
+          "tier_kind": "full",
           "vertical": "commercial_capital",
-          "title": "ProfitHelm Commercial Capital & Debt Cost Audit Workpapers",
-          "price_usd": 49.0,
-          "price_cents": 4900,
+          "title": "ProfitHelm Section 179 & Commercial Capital Full Workpaper & Data Pack",
+          "description": "ProfitHelm Full Workpaper & Data Pack - Dynamic 6-year MACRS depreciation schedule, 5-point CapEx/APR sensitivity table, full multi-row CSV, JSON data pack, and filing checklist",
+          "price_usd": 29.0,
+          "price_cents": 2900,
           "currency": "usd",
-          "statutory_authority": "IRC Section 179, Form 4562, and UCC Article 9",
+          "statutory_authority": "IRC Section 179, Section 168(k), IRS Form 4562, and UCC Article 9",
           "trend_timeseries_ids": [
             "irs_sec179_cap",
             "irs_sec179_phaseout",
@@ -155,18 +166,23 @@
             "fred_dgs10_yield"
           ],
           "deliverables": [
-            "Personalized Section 179 / MACRS & Commercial APR Cost Reconciliation Workpaper (HTML/PDF)",
-            "5-Point Cash-Flow Sensitivity & Debt Service Coverage Schedule (CSV)",
-            "Signed Scenario Audit Manifest & Lender Underwriting Checklist (JSON)"
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 6-year 200% DB MACRS vs Section 179/168(k) depreciation recovery schedule (HTML/CSV)",
+            "Dynamic 5-point equipment basis and business-use sensitivity table computed from your inputs (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and statutory metadata (JSON)",
+            "Unredacted Form 4562 election and lender term-sheet execution checklist clauses (HTML/PDF)"
           ]
         },
         "ph_statutory_tax_audit_workpapers": {
           "sku": "ph_statutory_tax_audit_workpapers",
           "property_id": "profithelm",
+          "audience_tier": "business",
+          "tier_kind": "full",
           "vertical": "b2b_tax_advisory",
-          "title": "ProfitHelm 2026-2027 Statutory Tax & CPA Audit Workpaper Suite",
-          "price_usd": 49.0,
-          "price_cents": 4900,
+          "title": "ProfitHelm 2026-2027 Tax & CPA Full Workpaper & Data Pack",
+          "description": "ProfitHelm Full Workpaper & Data Pack - Dynamic 5-point income/bracket sensitivity table, 4-quarter safe-harbor schedule, full multi-row CSV, JSON data pack, and CPA checklist",
+          "price_usd": 29.0,
+          "price_cents": 2900,
           "currency": "usd",
           "statutory_authority": "26 U.S.C. Section 1, IRC Section 199A, and IRS Rev. Proc. 2025-32",
           "trend_timeseries_ids": [
@@ -176,253 +192,21 @@
             "fred_cpilfesl_inflation"
           ],
           "deliverables": [
-            "Personalized 2026-2027 TCJA Sunset Marginal Bracket & Entity Tax Workpaper (HTML/PDF)",
-            "5-Point Statutory Exposure & Quarterly Safe-Harbor Reconciliation Schedule (CSV)",
-            "Signed Scenario Audit Manifest & CPA Filing Binder Checklist (JSON)"
-          ]
-        },
-        "px_instant_repayment_worksheet_19": {
-          "sku": "px_instant_repayment_worksheet_19",
-          "property_id": "prexvo",
-          "vertical": "student_loan_refinance",
-          "title": "Prexvo Instant Student Loan Refinance & Amortization Worksheet (PDF/CSV)",
-          "price_usd": 19.0,
-          "price_cents": 1900,
-          "currency": "usd",
-          "statutory_authority": "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026) & 34 CFR 685.209",
-          "trend_timeseries_ids": [
-            "ed_direct_undergrad_rate",
-            "ed_idr_discretionary_levy",
-            "hhs_fpl_single_base"
-          ],
-          "deliverables": [
-            "Personalized Loan Tranche Amortization & Monthly Payment Worksheet (Print-Ready HTML/PDF)",
-            "Lifetime Interest Savings & Break-Even Rate Spread Schedule (CSV)",
-            "Federal IDR & Cosigner Release Protection Verification Checklist (HTML/PDF)",
-            "Machine-Readable Borrower Refinance Scenario Pack (JSON)"
-          ]
-        },
-        "px_refi_amortization_decision_audit": {
-          "sku": "px_refi_amortization_decision_audit",
-          "property_id": "prexvo",
-          "vertical": "student_loan_refinance",
-          "title": "Prexvo Private Refinance vs Federal Protections Decision Audit Kit",
-          "price_usd": 39.0,
-          "price_cents": 3900,
-          "currency": "usd",
-          "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
-          "trend_timeseries_ids": [
-            "ed_direct_undergrad_rate",
-            "ed_idr_discretionary_levy",
-            "ed_idr_fpl_multiplier",
-            "hhs_fpl_single_base",
-            "irs_sec108f_tax_free_forgiveness"
-          ],
-          "deliverables": [
-            "Personalized Title IV RAP/IBR vs Private Refinance Break-Even Audit Report (HTML/PDF)",
-            "120-Month Amortization & Federal Protection Forfeiture Sensitivity Schedule (CSV)",
-            "Signed Borrower Scenario Audit Manifest & Cosigner Release Checklist (JSON)"
-          ]
-        },
-        "gh_instant_compliance_worksheet_19": {
-          "sku": "gh_instant_compliance_worksheet_19",
-          "property_id": "gainhelm",
-          "vertical": "b2b_cyber_compliance",
-          "title": "GainHelm Instant Security Control & Audit Cost Worksheet",
-          "price_usd": 19.0,
-          "price_cents": 1900,
-          "currency": "usd",
-          "statutory_authority": "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024",
-          "trend_timeseries_ids": [
-            "dod_32cfr170_cmmc_controls",
-            "iso_27006_stage2_days"
-          ],
-          "deliverables": [
-            "Personalized Security Control & Auditor-Day Cost Worksheet (HTML/PDF)",
-            "5-Point Audit Scope & Remediation Budget Schedule (CSV)",
-            "Signed GRC Scenario Calculation Manifest (JSON)"
-          ]
-        },
-        "gh_soc2_cmmc_audit_workpapers": {
-          "sku": "gh_soc2_cmmc_audit_workpapers",
-          "property_id": "gainhelm",
-          "vertical": "b2b_cyber_compliance",
-          "title": "GainHelm SOC 2 & DoD CMMC 2.0 Audit Readiness Workpaper & SPRS Control Kit",
-          "price_usd": 79.0,
-          "price_cents": 7900,
-          "currency": "usd",
-          "statutory_authority": "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, and NIST SP 800-171 Rev 2",
-          "trend_timeseries_ids": [
-            "dod_32cfr170_cmmc_controls",
-            "nist_800_171_sprs_max",
-            "hhs_ocr_hipaa_tier4_cap",
-            "iso_27006_stage2_days"
-          ],
-          "deliverables": [
-            "Personalized SOC 2 Trust Services Criteria & DoD CMMC 2.0 Level 2 Audit Budget Workpaper (HTML/PDF)",
-            "110-Control NIST SP 800-171 Rev 2 SPRS Scoring & 180-Day POA&M Remediation Schedule (CSV)",
-            "Signed CISO/CFO Audit Scope Manifest & C3PAO / CPA RFP Checklist (JSON)"
-          ]
-        },
-        "gh_hipaa_iso27001_governance_kit": {
-          "sku": "gh_hipaa_iso27001_governance_kit",
-          "property_id": "gainhelm",
-          "vertical": "b2b_cyber_compliance",
-          "title": "GainHelm ISO 27001:2022 & HHS OCR HIPAA Civil Penalty Governance Workpaper Suite",
-          "price_usd": 49.0,
-          "price_cents": 4900,
-          "currency": "usd",
-          "statutory_authority": "ISO/IEC 27006-1:2024, 45 CFR 160.404 (HITECH Act), and PCI DSS v4.0.1",
-          "trend_timeseries_ids": [
-            "iso_27006_stage2_days",
-            "hhs_ocr_hipaa_tier4_cap",
-            "dod_32cfr170_cmmc_controls"
-          ],
-          "deliverables": [
-            "Personalized ISO/IEC 27006-1:2024 Auditor-Day & 45 CFR 160.404 Penalty Exposure Workpaper (HTML/PDF)",
-            "5-Point Breach Notification, Forensics & Multi-Framework Control Overlap Schedule (CSV)",
-            "Signed Enterprise Security Governance Audit Manifest (JSON)"
-          ]
-        },
-        "lb_instant_lien_bond_worksheet_19": {
-          "sku": "lb_instant_lien_bond_worksheet_19",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond Instant Statutory Bond, EMR & Lien Deadline Worksheet",
-          "price_usd": 19.0,
-          "price_cents": 1900,
-          "currency": "usd",
-          "statutory_authority": "40 U.S.C. Section 3131, U.S. Treasury Circular 570, and NCCI Experience Rating Plan",
-          "trend_timeseries_ids": [
-            "sfaa_surety_loss_ratio",
-            "ncci_emr_split_point"
-          ],
-          "deliverables": [
-            "Personalized Statutory Surety Bond, Workers Comp EMR & Lien Deadline Worksheet (HTML/PDF)",
-            "5-Point Indemnity & Payroll Sensitivity Schedule (CSV)",
-            "Signed Construction Compliance Calculation Manifest (JSON)"
-          ]
-        },
-        "lb_surety_bond_underwriting_kit": {
-          "sku": "lb_surety_bond_underwriting_kit",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond Federal Miller Act & State License Surety Bond Underwriting Kit",
-          "price_usd": 49.0,
-          "price_cents": 4900,
-          "currency": "usd",
-          "statutory_authority": "40 U.S.C. Section 3131 (Miller Act), FAR 28.102, and U.S. Treasury Circular 570",
-          "trend_timeseries_ids": [
-            "sfaa_surety_loss_ratio",
-            "census_vip_construction"
-          ],
-          "deliverables": [
-            "Personalized AIA Document A312 & Treasury Circular 570 Underwriting Workpaper (HTML/PDF)",
-            "Sliding-Scale Bond Penal Sum & Working Capital Indemnity Schedule (CSV)",
-            "Signed Surety Broker Submission & WIP Schedule Manifest (JSON)"
-          ]
-        },
-        "lb_workers_comp_emr_audit_kit": {
-          "sku": "lb_workers_comp_emr_audit_kit",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond NCCI Workers Compensation Class Code & EMR Audit Workpaper Kit",
-          "price_usd": 49.0,
-          "price_cents": 4900,
-          "currency": "usd",
-          "statutory_authority": "NCCI Experience Rating Plan Manual and Basic Manual for Workers Compensation",
-          "trend_timeseries_ids": [
-            "ncci_emr_split_point",
-            "bls_construction_injury_rate"
-          ],
-          "deliverables": [
-            "Personalized NCCI 4-Digit Class Code Payroll Allocation & EMR Split-Point Workpaper (HTML/PDF)",
-            "3-Year Experience Period Loss Sensitivity & Premium Audit Schedule (CSV)",
-            "Signed Ghost-Policy / Subcontractor COI Verification Checklist (JSON)"
-          ]
-        },
-        "lb_workers_comp_emr_audit_packet": {
-          "sku": "lb_workers_comp_emr_audit_packet",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond NCCI Class Code & EMR Audit Packet",
-          "price_usd": 49.0,
-          "price_cents": 4900,
-          "currency": "usd",
-          "statutory_authority": "NCCI Experience Rating Plan Manual and State Workers Compensation Rating Bureaus",
-          "trend_timeseries_ids": [
-            "ncci_emr_split_point",
-            "bls_construction_injury_rate"
-          ],
-          "deliverables": [
-            "Personalized NCCI Class Code Rate & EMR Surcharge Reconciliation Packet (HTML/PDF)",
-            "5-Point Payroll & Experience Modification Factor Schedule (CSV)",
-            "Signed Carrier Audit Defense & Subcontractor COI Manifest (JSON)"
-          ]
-        },
-        "lb_wh347_certified_payroll_packet": {
-          "sku": "lb_wh347_certified_payroll_packet",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond Federal Davis-Bacon Form WH-347 Certified Payroll & Fringe Packet",
-          "price_usd": 59.0,
-          "price_cents": 5900,
-          "currency": "usd",
-          "statutory_authority": "40 U.S.C. Section 3141 (Davis-Bacon Act) and 29 CFR Part 5",
-          "trend_timeseries_ids": [
-            "dol_whd_prevailing_wage",
-            "bls_eci_construction"
-          ],
-          "deliverables": [
-            "Personalized DOL Form WH-347 Statement of Compliance & Annualized Fringe Offset Workpaper (HTML/PDF)",
-            "Weekly Trade Classification Base Rate, Fringe Credit & Overtime Schedule (CSV)",
-            "Signed Contracting Officer Certified Payroll Audit Manifest (JSON)"
-          ]
-        },
-        "lb_mechanics_lien_waiver_packet": {
-          "sku": "lb_mechanics_lien_waiver_packet",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond 50-State Statutory Mechanics Lien Deadline & Waiver Filing Packet",
-          "price_usd": 69.0,
-          "price_cents": 6900,
-          "currency": "usd",
-          "statutory_authority": "Cal. Civ. Code Sections 8132-8416, Tex. Prop. Code Ch. 53, and Fla. Stat. Section 713.06",
-          "trend_timeseries_ids": [
-            "census_vip_construction",
-            "sfaa_surety_loss_ratio"
-          ],
-          "deliverables": [
-            "Personalized 50-State Preliminary Notice, Lien Recording Window & Statutory Waiver Matrix (HTML/PDF)",
-            "Project Milestone Furnishing Date, Retainage Interest & County Recorder Deadline Schedule (CSV)",
-            "Signed Conditional / Unconditional Progress & Final Waiver Checklist (JSON)"
-          ]
-        },
-        "lb_surety_lien_wh347_packet": {
-          "sku": "lb_surety_lien_wh347_packet",
-          "property_id": "lienbond",
-          "vertical": "commercial_surety_insurance",
-          "title": "LienBond Complete 50-State Mechanics Lien, AIA A312 Surety & WH-347 Master Packet",
-          "price_usd": 79.0,
-          "price_cents": 7900,
-          "currency": "usd",
-          "statutory_authority": "40 U.S.C. Sections 3131 & 3141, U.S. Treasury Circular 570, and 50-State Mechanics Lien Statutes",
-          "trend_timeseries_ids": [
-            "sfaa_surety_loss_ratio",
-            "ncci_emr_split_point",
-            "census_vip_construction"
-          ],
-          "deliverables": [
-            "Personalized 50-State Mechanics Lien Waiver, AIA A312 Penal Sum & WH-347 Compliance Master Workpaper (HTML/PDF)",
-            "Integrated Surety Indemnity, NCCI EMR & Prevailing Wage Reconciliation Schedule (CSV)",
-            "Signed General Contractor & Subcontractor Statutory Filing Binder (JSON)"
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point income and marginal rate sensitivity schedule computed from your inputs (HTML/CSV)",
+            "4-quarter IRC Section 6654 estimated tax safe-harbor installment schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and statutory metadata (JSON)",
+            "Unredacted CPA substantiation and statutory filing checklist clauses (HTML/PDF)"
           ]
         },
         "ph_verified_partner_slot": {
           "sku": "ph_verified_partner_slot",
           "property_id": "profithelm",
+          "audience_tier": "business",
+          "tier_kind": "partner_slot",
           "vertical": "b2b_partner_slot",
           "title": "Verified Calculator Partner Slot",
+          "description": "ProfitHelm Verified Calculator Partner Slot - Direct high-intent partner placement on ProfitHelm calculator routes, state-filtered lead routing, and SubID attribution feed",
           "price_usd": 299.0,
           "price_cents": 29900,
           "currency": "usd",
@@ -439,11 +223,64 @@
             "Monthly Partner Attribution & Conversion Reconciliation Digest"
           ]
         },
+        "px_instant_repayment_worksheet_19": {
+          "sku": "px_instant_repayment_worksheet_19",
+          "property_id": "prexvo",
+          "audience_tier": "consumer",
+          "tier_kind": "quick",
+          "vertical": "student_loan_refinance",
+          "title": "Prexvo Quick Repayment & Refinance Worksheet",
+          "description": "Prexvo Quick Worksheet - Print/PDF-ready executive borrower worksheet reflecting your actual loan inputs and outputs, formula breakdown, Title IV compliance notes, and summary CSV export",
+          "price_usd": 9.0,
+          "price_cents": 900,
+          "currency": "usd",
+          "statutory_authority": "20 U.S.C. 1087e, Truth in Lending Act (12 CFR Part 1026), and 34 CFR 685.209",
+          "trend_timeseries_ids": [
+            "ed_direct_undergrad_rate",
+            "ed_idr_discretionary_levy",
+            "hhs_fpl_single_base"
+          ],
+          "deliverables": [
+            "Print/PDF-ready executive borrower worksheet reflecting your exact loan inputs and outputs (HTML/PDF)",
+            "Amortization formula, APR comparison, and Title IV federal protection notes (HTML/PDF)",
+            "Summary loan comparison table export (CSV)"
+          ]
+        },
+        "px_refi_amortization_decision_audit": {
+          "sku": "px_refi_amortization_decision_audit",
+          "property_id": "prexvo",
+          "audience_tier": "consumer",
+          "tier_kind": "full",
+          "vertical": "student_loan_refinance",
+          "title": "Prexvo Full Amortization Workpaper & Data Pack",
+          "description": "Prexvo Full Workpaper & Data Pack - Dynamic multi-period loan amortization schedule, 5-point APR sensitivity table, full multi-row CSV, JSON data pack, and Title IV checklist",
+          "price_usd": 19.0,
+          "price_cents": 1900,
+          "currency": "usd",
+          "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.) and 34 CFR Part 685",
+          "trend_timeseries_ids": [
+            "ed_direct_undergrad_rate",
+            "ed_idr_discretionary_levy",
+            "ed_idr_fpl_multiplier",
+            "hhs_fpl_single_base",
+            "irs_sec108f_tax_free_forgiveness"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact loan inputs and outputs (HTML/PDF)",
+            "Dynamic multi-period amortization schedule (Month 1-12 detail + Year 1-N annual balance/interest rollups) computed from your inputs (HTML/CSV)",
+            "Dynamic 5-point APR spread sensitivity table computed from your loan principal and term (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and Title IV metadata (JSON)",
+            "Unredacted 34 CFR 685 forfeiture waiver, TILA rescission, and cosigner release checklist clauses (HTML/PDF)"
+          ]
+        },
         "px_verified_partner_slot": {
           "sku": "px_verified_partner_slot",
           "property_id": "prexvo",
+          "audience_tier": "consumer",
+          "tier_kind": "partner_slot",
           "vertical": "student_loan_partner_slot",
           "title": "Verified Calculator Partner Slot",
+          "description": "Prexvo Verified Calculator Partner Slot - Direct high-intent partner placement on Prexvo refinance calculator routes, state-filtered lead routing, and SubID attribution feed",
           "price_usd": 299.0,
           "price_cents": 29900,
           "currency": "usd",
@@ -460,11 +297,86 @@
             "Monthly Partner Attribution & Conversion Reconciliation Digest"
           ]
         },
+        "gh_instant_compliance_worksheet_19": {
+          "sku": "gh_instant_compliance_worksheet_19",
+          "property_id": "gainhelm",
+          "audience_tier": "business",
+          "tier_kind": "quick",
+          "vertical": "b2b_cyber_compliance",
+          "title": "GainHelm Quick Compliance Budget & Scoping Worksheet",
+          "description": "GainHelm Quick Worksheet - Print/PDF-ready executive audit scoping workpaper reflecting your actual calculator inputs and outputs, methodology breakdown, statutory notes, and summary CSV export",
+          "price_usd": 15.0,
+          "price_cents": 1500,
+          "currency": "usd",
+          "statutory_authority": "AICPA SSAE 18 (AT-C 205), DoD 32 CFR Part 170, ISO/IEC 27006-1:2024, and 45 CFR 160.404",
+          "trend_timeseries_ids": [
+            "dod_32cfr170_cmmc_controls",
+            "iso_27006_stage2_days"
+          ],
+          "deliverables": [
+            "Print/PDF-ready executive audit scoping workpaper reflecting your exact calculator inputs and outputs (HTML/PDF)",
+            "Audit cost methodology, statutory authority, and compliance scoping notes (HTML/PDF)",
+            "Summary budget reconciliation table export (CSV)"
+          ]
+        },
+        "gh_soc2_cmmc_audit_workpapers": {
+          "sku": "gh_soc2_cmmc_audit_workpapers",
+          "property_id": "gainhelm",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "b2b_cyber_compliance",
+          "title": "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite",
+          "description": "GainHelm Full Workpaper & Data Pack - Dynamic 5-point audit scope sensitivity table, 6-phase 180-day readiness/POA&M schedule, full multi-row CSV, JSON data pack, and execution checklist",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) & 32 CFR Part 170",
+          "trend_timeseries_ids": [
+            "dod_32cfr170_cmmc_controls",
+            "nist_800_171_sprs_max",
+            "hhs_ocr_hipaa_tier4_cap",
+            "iso_27006_stage2_days"
+          ],
+          "deliverables": [
+            "JSON + CSV Control Scoping Matrix (AICPA Trust Services Criteria, NIST 800-171 & ISO 27001 Annex A)",
+            "Auditor-Day Rate & Readiness Gap Worksheet (Type I vs Type II observation window sensitivity)",
+            "CISO & CFO Board Budget Approval Template with GRC automation ROI comparison",
+            "3-Year Audit, Penetration Testing & Compliance Staffing Total Cost of Ownership (TCO) Schedule"
+          ]
+        },
+        "gh_hipaa_iso27001_governance_kit": {
+          "sku": "gh_hipaa_iso27001_governance_kit",
+          "property_id": "gainhelm",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "b2b_cyber_compliance",
+          "title": "GainHelm ISO 27001, HIPAA & Governance Full Workpaper & Data Pack",
+          "description": "GainHelm Full Workpaper & Data Pack - Dynamic 5-point governance and penalty exposure sensitivity table, 6-phase 180-day readiness schedule, full multi-row CSV, JSON data pack, and execution checklist",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "ISO/IEC 27006-1:2024, 45 CFR 160.404 (HITECH Act), and PCI DSS v4.0.1",
+          "trend_timeseries_ids": [
+            "iso_27006_stage2_days",
+            "hhs_ocr_hipaa_tier4_cap",
+            "dod_32cfr170_cmmc_controls"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point compliance scope, penalty mitigation, and multi-framework reuse sensitivity table (HTML/CSV)",
+            "Dynamic 6-phase 180-day certification and governance milestone schedule scaled to your scope (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and regulatory metadata (JSON)",
+            "Unredacted governance scope attestation, remediation calendar, and safe-harbor clauses (HTML/PDF)"
+          ]
+        },
         "gh_verified_partner_slot": {
           "sku": "gh_verified_partner_slot",
           "property_id": "gainhelm",
+          "audience_tier": "business",
+          "tier_kind": "partner_slot",
           "vertical": "b2b_cyber_partner_slot",
           "title": "Verified Calculator Partner Slot",
+          "description": "GainHelm Verified Calculator Partner Slot - Direct high-intent partner placement on GainHelm compliance calculator routes, state-filtered lead routing, and SubID attribution feed",
           "price_usd": 299.0,
           "price_cents": 29900,
           "currency": "usd",
@@ -481,11 +393,157 @@
             "Monthly Partner Attribution & Conversion Reconciliation Digest"
           ]
         },
+        "lb_instant_lien_bond_worksheet_19": {
+          "sku": "lb_instant_lien_bond_worksheet_19",
+          "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "quick",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Quick Surety, EMR & Lien Worksheet",
+          "description": "LienBond Quick Worksheet - Print/PDF-ready executive construction compliance workpaper reflecting your actual calculator inputs and outputs, formula breakdown, state statutory notes, and summary CSV export",
+          "price_usd": 15.0,
+          "price_cents": 1500,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Section 3131, U.S. Treasury Circular 570, and NCCI Experience Rating Plan",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "ncci_emr_split_point"
+          ],
+          "deliverables": [
+            "Print/PDF-ready executive contractor workpaper reflecting your exact calculator inputs and outputs (HTML/PDF)",
+            "Surety rate, NCCI EMR, and state statutory lien deadline methodology breakdown (HTML/PDF)",
+            "Summary compliance reconciliation table export (CSV)"
+          ]
+        },
+        "lb_surety_bond_underwriting_kit": {
+          "sku": "lb_surety_bond_underwriting_kit",
+          "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Surety Bond Full Workpaper & Data Pack",
+          "description": "LienBond Full Workpaper & Data Pack - Dynamic 5-point credit/underwriting tier sensitivity table, state statutory bond/lien milestone schedule, full multi-row CSV, JSON data pack, and filing clauses",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Section 3131 (Miller Act), FAR 28.102, and U.S. Treasury Circular 570",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "census_vip_construction"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point credit-tier surety bond premium and working capital capacity sensitivity table (HTML/CSV)",
+            "State statutory Miller Act / notice / recording milestone timeline schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and statutory metadata (JSON)",
+            "Unredacted payment bond notice, waiver, and surety submission execution clauses (HTML/PDF)"
+          ]
+        },
+        "lb_workers_comp_emr_audit_packet": {
+          "sku": "lb_workers_comp_emr_audit_packet",
+          "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Workers Comp & EMR Full Workpaper & Data Pack",
+          "description": "LienBond Full Workpaper & Data Pack - Dynamic 5-point EMR/payroll sensitivity table, statutory audit compliance milestone schedule, full multi-row CSV, JSON data pack, and execution clauses",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "NCCI Experience Rating Plan Manual and State Workers Compensation Rating Bureaus",
+          "trend_timeseries_ids": [
+            "ncci_emr_split_point",
+            "bls_construction_injury_rate"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point EMR factor and payroll audit surcharge sensitivity table computed from your inputs (HTML/CSV)",
+            "Workers compensation audit defense and state compliance milestone schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and NCCI metadata (JSON)",
+            "Unredacted NCCI overtime deduction and carrier audit execution checklist clauses (HTML/PDF)"
+          ]
+        },
+        "lb_wh347_certified_payroll_packet": {
+          "sku": "lb_wh347_certified_payroll_packet",
+          "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Davis-Bacon WH-347 Full Workpaper & Data Pack",
+          "description": "LienBond Full Workpaper & Data Pack - Dynamic 5-point prevailing wage/fringe sensitivity table, certified payroll milestone schedule, full multi-row CSV, JSON data pack, and WH-347 compliance clauses",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Section 3141 (Davis-Bacon Act) and 29 CFR Part 5",
+          "trend_timeseries_ids": [
+            "dol_whd_prevailing_wage",
+            "bls_eci_construction"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point prevailing wage, overtime, and fringe offset sensitivity table computed from your inputs (HTML/CSV)",
+            "DOL Form WH-347 weekly compliance and payroll audit milestone schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and 29 CFR Part 5 metadata (JSON)",
+            "Unredacted 29 CFR 5.5 Statement of Compliance and NCCI audit execution clauses (HTML/PDF)"
+          ]
+        },
+        "lb_mechanics_lien_waiver_packet": {
+          "sku": "lb_mechanics_lien_waiver_packet",
+          "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Mechanics Lien & Waiver Full Workpaper & Data Pack",
+          "description": "LienBond Full Workpaper & Data Pack - Dynamic 5-point retainage/exposure sensitivity table, state statutory preliminary notice and recording calendar, full CSV, JSON data pack, and waiver clauses",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "Cal. Civ. Code Sections 8132-8416, Tex. Prop. Code Ch. 53, and Fla. Stat. Section 713.06",
+          "trend_timeseries_ids": [
+            "census_vip_construction",
+            "sfaa_surety_loss_ratio"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point retainage holdback and surety exposure sensitivity table computed from your inputs (HTML/CSV)",
+            "State-specific preliminary notice, lien recording, and enforcement deadline schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and state statute metadata (JSON)",
+            "Unredacted conditional progress waiver and payment bond claim execution clauses (HTML/PDF)"
+          ]
+        },
+        "lb_surety_lien_wh347_packet": {
+          "sku": "lb_surety_lien_wh347_packet",
+          "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "full",
+          "vertical": "commercial_surety_insurance",
+          "title": "LienBond Master Surety, Lien & WH-347 Full Workpaper & Data Pack",
+          "description": "LienBond Full Workpaper & Data Pack - Dynamic 5-point underwriting/EMR/retainage sensitivity table, state statutory deadline calendar, full multi-row CSV, JSON data pack, and execution clauses",
+          "price_usd": 29.0,
+          "price_cents": 2900,
+          "currency": "usd",
+          "statutory_authority": "40 U.S.C. Sections 3131 & 3141, U.S. Treasury Circular 570, and State Mechanics Lien Statutes",
+          "trend_timeseries_ids": [
+            "sfaa_surety_loss_ratio",
+            "ncci_emr_split_point",
+            "census_vip_construction"
+          ],
+          "deliverables": [
+            "Everything in the Quick Worksheet populated with your exact calculator inputs and outputs (HTML/PDF)",
+            "Dynamic 5-point surety bond, EMR, and retainage exposure sensitivity table computed from your inputs (HTML/CSV)",
+            "State statutory preliminary notice, lien recording, and WH-347 compliance milestone schedule (HTML/CSV)",
+            "Complete structured JSON data pack with inputs, outputs, schedules, and statutory metadata (JSON)",
+            "Unredacted lien waiver, Miller Act notice, and WH-347 compliance execution clauses (HTML/PDF)"
+          ]
+        },
         "lb_verified_partner_slot": {
           "sku": "lb_verified_partner_slot",
           "property_id": "lienbond",
+          "audience_tier": "business",
+          "tier_kind": "partner_slot",
           "vertical": "commercial_surety_partner_slot",
           "title": "Verified Calculator Partner Slot",
+          "description": "LienBond Verified Calculator Partner Slot - Direct high-intent partner placement on LienBond contractor calculator routes, state-filtered lead routing, and SubID attribution feed",
           "price_usd": 299.0,
           "price_cents": 29900,
           "currency": "usd",

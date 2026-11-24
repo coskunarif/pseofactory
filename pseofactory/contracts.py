@@ -9465,31 +9465,24 @@ def detect_asset_partner_roster_and_slot_issues(
                 )
         return issues
 
-    if not found_partner_keys:
-        issues.append(f"Page {rel_path}: Commercial page binds 0 affiliate partners")
+    has_workpaper_unlock = (
+        'id="workpaper-unlock-card"' in html_text
+        or "id='workpaper-unlock-card'" in html_text
+        or 'class="workpaper-unlock-card' in html_text
+    )
+    referral_cards = re.findall(r'class=["\'][^"\']*\bcontextual-referral-card\b[^"\']*["\']', html_text, flags=re.I)
+    if len(referral_cards) > 1:
+        issues.append(
+            f"Page {rel_path}: Clean 3-step funnel allows at most 1 .contextual-referral-card (found {len(referral_cards)})"
+        )
+
+    if not found_partner_keys and not has_workpaper_unlock:
+        issues.append(
+            f"Page {rel_path}: Commercial page binds 0 live affiliate partners and lacks #workpaper-unlock-card"
+        )
         return issues
 
-    if require_multi_company:
-        distinct_brands = {
-            COMPANY_BRAND_BY_PARTNER_KEY.get(k, k)
-            for k in found_partner_keys
-            if k in registry
-        }
-        live_brand_cap = len(
-            {
-                COMPANY_BRAND_BY_PARTNER_KEY.get(k, k)
-                for k in live_vault_keys
-                if k in registry
-            }
-        )
-        min_req = min(6 if prop == "gainhelm" else 3, max(1, live_brand_cap))
-        if len(found_partner_keys) < min_req or len(distinct_brands) < min_req:
-            issues.append(
-                f"Page {rel_path}: Multi-company partner roster violation: found {len(found_partner_keys)} partner keys "
-                f"({found_partner_keys}) and {len(distinct_brands)} distinct companies ({sorted(distinct_brands)}), minimum {min_req} required"
-            )
-
-    # Check conversion slot coverage on interactive calculators
+    # Check conversion slot coverage on interactive calculators (clean 3-step funnel: #workpaper-unlock-card below .calc-grid)
     is_leaf_route = "/" in slug.strip("/") or rel_path.count("/") >= 3
     has_calc = (
         not is_leaf_route
@@ -9501,14 +9494,18 @@ def detect_asset_partner_roster_and_slot_issues(
         )
     )
     if has_calc and require_multi_company:
-        if 'data-cta-slot="calculator_result_inline"' not in html_text and 'class="calc-inline-cta"' not in html_text:
+        has_legacy_inline = (
+            'data-cta-slot="calculator_result_inline"' in html_text
+            or 'class="calc-inline-cta"' in html_text
+        )
+        if not has_workpaper_unlock and not has_legacy_inline:
             issues.append(
-                f"Page {rel_path}: Interactive calculator page missing above-the-fold 'calculator_result_inline' (.calc-inline-cta) conversion slot"
+                f"Page {rel_path}: Interactive calculator page missing primary #workpaper-unlock-card conversion slot"
             )
 
     # Check FTC & YMYL disclosure compliance
     low_html = html_text.lower()
-    if "ftc" not in low_html and "commission" not in low_html and "sponsored" not in low_html:
+    if found_partner_keys and "ftc" not in low_html and "commission" not in low_html and "sponsored" not in low_html:
         issues.append(f"Page {rel_path}: Commercial page missing required FTC affiliate disclosure")
     if prop == "prexvo":
         if not any(t in low_html for t in ("waives", "forfeit", "title iv", "pslf", "income-driven")):

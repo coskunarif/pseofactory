@@ -722,6 +722,48 @@ def _format_human_readable_formula(formula_str: str) -> str:
     return re.sub(r"\s+-\s+", " minus ", formatted)
 
 
+def _format_plain_prose_formula(formula_str: str, readable_formula: str, input_keys: Optional[List[str]] = None) -> str:
+    """Formats complex min/max code-like formulas into clean user-facing prose."""
+    rf = str(readable_formula or "").strip()
+    if not rf:
+        return ""
+    if "min(" in rf.lower() or "max(" in rf.lower():
+        labels = [_format_formula_variable_label(k) for k in (input_keys or []) if str(k).strip()]
+        if labels:
+            if len(labels) == 1:
+                return f"tiered statutory schedule based on {labels[0]}"
+            return f"tiered statutory schedule combining {', '.join(labels[:-1])} and {labels[-1]}"
+        return "tiered statutory schedule with statutory caps and thresholds"
+    return rf
+
+
+def _format_clean_input_val(val: Any) -> str:
+    """Formats integer-like floats without a trailing .0 for clean HTML input values."""
+    if isinstance(val, bool):
+        return str(val)
+    if isinstance(val, (int, float)):
+        f = float(val)
+        return str(int(round(f))) if abs(f - round(f)) < 1e-9 else str(f)
+    return str(val)
+
+
+def _compute_proportional_range_step(val_num: float, max_num: float, is_float_val: bool) -> str:
+    """Computes a proportional slider step so large-scale sliders never step by 0.01."""
+    if max_num >= 1_000_000.0:
+        return "10000"
+    if max_num >= 100_000.0:
+        return "1000"
+    if max_num >= 10_000.0:
+        return "100"
+    if max_num >= 1_000.0:
+        return "10"
+    if max_num >= 100.0:
+        if is_float_val and 0.0 < val_num < 10.0:
+            return "0.1"
+        return "1"
+    return "0.01" if is_float_val else "1"
+
+
 def _sanitize_visible_sample_calculation(sample_calc: str) -> str:
     """Replaces any leaked raw Python `round((...))` calls in visible prose with readable math."""
     text = str(sample_calc or "").strip()
@@ -1193,181 +1235,44 @@ def _render_compiler_monetization_and_guardrail_html(
         )
 
     def _build_partner_registration_drawer_html() -> str:
-        default_reg_state = "DE" if is_gainhelm else "CA"
-        firm_placeholder = (
-            "Vanguard Cyber Assurance CPA LLP"
-            if is_gainhelm
-            else ("Summit Student Loan Advisory Group" if is_prexvo else "Apex Tax & Advisory LLP")
+        # Step 4: #partner-registration-form lives strictly on dedicated /partners/, never on calculator pages.
+        return ""
+
+    from pseofactory.affiliates import (
+        build_contextual_referral_card_html,
+        is_restricted_public_service_slug,
+        resolve_optimal_partner_for_slug,
+    )
+
+    def _build_affiliate_route_meta(prop_val: str) -> Optional[Dict[str, Any]]:
+        partner_obj = resolve_optimal_partner_for_slug(
+            property_id=prop_val,
+            slug=slug,
+            engagement_metrics=engagement_metrics,
         )
-        return (
-            f'      <div id="partner-registration-drawer" class="partner-registration-drawer" '
-            f'data-mechanic="partner_supply_registration" data-property="{prop_id}" data-tool-slug="{html_lib.escape(slug_id)}" '
-            f'style="margin-top: 14px; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated);">\n'
-            f'        <div style="font-weight: 700; font-size: 14px; margin-bottom: 8px;">\n'
-            f'          Register Your Firm: Claim a Verified Partner Slot on This Calculator\n'
-            f'        </div>\n'
-            f'        <form id="partner-registration-form" class="partner-registration-form" action="/api/lead-capture" method="POST" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;" novalidate>\n'
-            f'          <input type="hidden" name="intent" value="partner_registration" />\n'
-            f'          <div style="flex: 1; min-width: 180px;">\n'
-            f'            <label for="partner-reg-firm-name" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Advisory / Provider Firm Name</label>\n'
-            f'            <input type="text" id="partner-reg-firm-name" name="firm_name" placeholder="{firm_placeholder}" aria-label="Advisory or Provider Firm Name" required class="touch-target" style="width: 100%; min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border);" />\n'
-            f'          </div>\n'
-            f'          <div style="flex: 1; min-width: 200px;">\n'
-            f'            <label for="partner-reg-email" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Partner Desk Work Email</label>\n'
-            f'            <input type="email" id="partner-reg-email" name="email" placeholder="partners@firm.com" aria-label="Partner Desk Work Email" required class="touch-target" style="width: 100%; min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border);" />\n'
-            f'          </div>\n'
-            f'          <div style="min-width: 150px;">\n'
-            f'            <label for="quote-intake-partner-reg-state" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Primary Jurisdiction</label>\n'
-            f'            <select id="quote-intake-partner-reg-state" name="state" aria-label="Primary Jurisdiction" class="touch-target" style="width: 100%; min-height: 44px; min-width: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border);">\n'
-            f'              <option value="CA"{" selected" if default_reg_state == "CA" else ""}>California (CA)</option>\n'
-            f'              <option value="DE"{" selected" if default_reg_state == "DE" else ""}>Delaware (DE)</option>\n'
-            f'              <option value="TX">Texas (TX)</option>\n'
-            f'              <option value="NY">New York (NY)</option>\n'
-            f'              <option value="FL">Florida (FL)</option>\n'
-            f'              <option value="IL">Illinois (IL)</option>\n'
-            f'              <option value="WA">Washington (WA)</option>\n'
-            f'              <option value="MA">Massachusetts (MA)</option>\n'
-            f'            </select>\n'
-            f'          </div>\n'
-            f'          <button type="submit" id="partner-registration-submit-btn" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 16px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 700; border: none; cursor: pointer;">Register Firm</button>\n'
-            f'          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite" style="width: 100%; font-size: 13px; font-weight: 600; margin-top: 6px;"></div>\n'
-            f'        </form>\n'
-            f'      </div>\n'
-        )
+        if partner_obj is None:
+            return None
+        return {
+            "partner_key": str(partner_obj.key),
+            "partner_name": str(partner_obj.name),
+            "company_brand": str(getattr(partner_obj, "company_brand", "") or ""),
+            "partnership_model": str(getattr(partner_obj, "partnership_model", "") or ""),
+        }
 
     if not is_prexvo:
-        default_slug = (
-            "soc-2-audit-cost-calculator"
-            if is_gainhelm
-            else ("contractor-license-bond-cost-calculator-by-credit-score" if is_lienbond else "section-179-deduction-calculator")
-        )
-        default_pk = (
-            "vanta_security"
-            if is_gainhelm
-            else ("suretybonds_direct" if is_lienbond else "xendoo")
-        )
-        try:
-            route = get_affiliate_route(prop_id, slug)
-        except ValueError:
-            route = get_affiliate_route(prop_id, default_slug, partner_key=default_pk)
-
-        primary_offer = roster_info.get("primary_offer") or {}
-        is_greenfield_vertical_mismatch = (
-            route.get("partner_key") in ("turbotax", "efile_com", "eztaxreturn_com", "freetaxusa", "taxslayer")
-            and roster_info.get("vertical_family") not in ("federal_state_tax_brackets", "sales_tax_1099_nexus")
-        )
-        if primary_offer.get("partner_key") and (
-            (gsc_metrics and slot_plan.get("gsc_repositioned"))
-            or is_greenfield_vertical_mismatch
-        ):
-            partner_key = str(primary_offer["partner_key"])
-            try:
-                route = get_affiliate_route(prop_id, slug, partner_key=partner_key)
-            except ValueError:
-                pass
-            partner_name = str(primary_offer.get("name") or route.get("partner_name", "Vanta" if is_gainhelm else ("SuretyBondsDirect" if is_lienbond else "Xendoo")))
-            cta_text = str(primary_offer.get("cta_text") or route.get("cta_text", "Explore Partner"))
-            raw_url = str(primary_offer.get("default_url") or route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.suretybondsdirect.com/" if is_lienbond else "https://www.xendoo.com/")))
-        else:
-            partner_key = route.get("partner_key", default_pk)
-            partner_name = route.get("partner_name", "Vanta Automated GRC" if is_gainhelm else ("SuretyBondsDirect Commercial Surety Desk" if is_lienbond else "Xendoo Section 179 & Business Tax Accounting"))
-            cta_text = route.get("cta_text", "Automate Audit Readiness with Vanta" if is_gainhelm else ("Bind Instant Surety Bond Quote" if is_lienbond else "Optimize Section 179 Accounting with Xendoo"))
-            raw_url = route.get("url", "https://www.vanta.com/" if is_gainhelm else ("https://www.suretybondsdirect.com/" if is_lienbond else "https://www.xendoo.com/"))
-        url = (
-            raw_url
-            if route.get("status") in ("live", "active_direct") and not str(raw_url).startswith("/r/")
-            else f"/r/{partner_key}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
-        )
-        if str(url).startswith("/r/") and "?" not in str(url):
-            url = f"{url}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
-        rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
-        disc_dict = GAINHELM_DISCLOSURES if is_gainhelm else (LIENBOND_DISCLOSURES if is_lienbond else PROFITHELM_DISCLOSURES)
-        ftc_disc = disc_dict.get("ftc_disclosure", "")
-        roster_keys_csv = html_lib.escape(",".join(roster_info.get("roster_keys") or []))
-        companies_csv = html_lib.escape(",".join(roster_info.get("distinct_companies") or []))
-        models_csv = html_lib.escape(",".join(roster_info.get("partnership_models_represented") or []))
-        primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "HYBRID_CPA_REVSHARE"))
-        inline_calc_html, table_cta_html = _build_inline_and_table_slots()
-        roster_grid_html = _build_roster_cards_grid_html()
-        partner_reg_drawer_html = _build_partner_registration_drawer_html()
-
-        if not is_partner_live_in_vault(prop_id, partner_key):
-            live_alt = next(
-                (
-                    o
-                    for o in (roster_info.get("roster_offers") or [])
-                    if isinstance(o, dict) and is_partner_live_in_vault(prop_id, str(o.get("partner_key") or ""))
-                ),
-                None,
-            )
-            if live_alt:
-                partner_key = str(live_alt["partner_key"])
-                partner_name = str(live_alt.get("name") or partner_key)
-                cta_text = str(live_alt.get("cta_text") or "Explore Partner")
-                url = f"/r/{partner_key}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
-            else:
-                block_html = "    " + build_first_party_workpaper_cta_html(
-                    property_id=prop_id,
-                    slug=slug,
-                    query=query,
-                    slot="section",
-                    reg_drawer_html="\n" + partner_reg_drawer_html,
-                )
-                return {
-                    "html": block_html,
-                    "inline_calc_cta_html": "",
-                    "comparison_table_cta_html": "",
-                    "affiliate_route": route,
-                    "partner_roster": roster_info,
-                    "slot_plan": slot_plan,
-                    "commercial_offers_allowed": True,
-                    "restricted_public_service": False,
-                }
-        if is_gainhelm:
-            from pseofactory.affiliates import get_gainhelm_framework_profile
-
-            gh_fw_key = get_gainhelm_framework_profile(slug=slug)["framework_key"]
-            partner_lead_copy = (
-                "Execute your modeled compliance or audit readiness scenario with a vetted GRC automation, CPA audit, or security assurance partner matched to this calculation:"
-                if gh_fw_key in ("soc2", "cmmc")
-                else "Execute your modeled regulatory readiness scenario with a vetted GRC automation or independent security assurance partner matched to this calculation:"
-            )
-        else:
-            partner_lead_copy = (
-                "Execute your modeled surety bond, workers compensation, or statutory mechanics lien scenario with a vetted Treasury Circular 570 underwriter or commercial carrier matched to this calculation:"
-                if is_lienbond
-                else "Execute your modeled scenario with a vetted B2B or tax infrastructure partner matched to this calculation:"
-            )
-
-        block_html = (
-            f'    <section class="affiliate-cta-section affiliates-section card pseo-card" data-property="{prop_id}" '
-            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" '
-            f'data-partner-models="{models_csv}" data-partner-roster="{roster_keys_csv}" '
-            f'data-partner-companies="{companies_csv}" data-conversion-slot="{html_lib.escape(str(slot_plan.get("primary_slot") or "calculator_result_inline"))}" '
-            f'data-mechanic="compliant_intent_monetization">\n'
-            f'      <h2>Verified Commercial Execution Partner: {partner_name}</h2>\n'
-            f'      <p>{partner_lead_copy}</p>\n'
-            f'      <p style="margin-top: 12px;">\n'
-            f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
-            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" data-cta-slot="standalone_primary_cta" '
-            f'class="affiliate-cta-link touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; '
-            f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
-            f'background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">'
-            f'{cta_text}</a>\n'
-            f'      </p>\n'
-            f'{roster_grid_html}'
-            f'{partner_reg_drawer_html}'
-            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
-            f'        {ftc_disc}\n'
-            f'      </p>\n'
-            f'    </section>'
+        referral_html = build_contextual_referral_card_html(
+            property_id=prop_id,
+            slug=slug,
+            query=query,
+            gsc_metrics=gsc_metrics,
+            engagement_metrics=engagement_metrics,
+            page_archetype=page_archetype,
         )
         return {
-            "html": block_html,
-            "inline_calc_cta_html": inline_calc_html,
-            "comparison_table_cta_html": table_cta_html,
-            "affiliate_route": route,
+            "html": ("    " + referral_html) if referral_html else "",
+            "inline_calc_cta_html": "",
+            "comparison_table_cta_html": "",
+            "affiliate_route": _build_affiliate_route_meta(prop_id),
             "partner_roster": roster_info,
             "slot_plan": slot_plan,
             "commercial_offers_allowed": True,
@@ -1404,88 +1309,19 @@ def _render_compiler_monetization_and_guardrail_html(
         }
 
     if is_explicit_refinance:
-        route = get_affiliate_route("prexvo", slug)
-        partner_key = route.get("partner_key", "splash_financial")
-        partner_name = route.get("partner_name", "Splash Financial")
-        cta_text = route.get("cta_text", "Compare Student Loan Refinance Rates")
-        url = route.get("url", "https://www.splashfinancial.com/student-loan-refinance")
-        if str(url).startswith("/r/") and "?" not in str(url):
-            url = f"{url}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
-        rel_attrs = route.get("rel_attributes", "noopener sponsored nofollow")
-        ymyl_disc = PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", "")
-        ftc_disc = PREXVO_DISCLOSURES.get("ftc_disclosure", "")
-        roster_keys_csv = html_lib.escape(",".join(roster_info.get("roster_keys") or []))
-        companies_csv = html_lib.escape(",".join(roster_info.get("distinct_companies") or []))
-        models_csv = html_lib.escape(",".join(roster_info.get("partnership_models_represented") or []))
-        primary_model_attr = html_lib.escape(str(route.get("partnership_model") or roster_info.get("primary_partnership_model") or "CPA_BOUNTY"))
-        inline_calc_html, table_cta_html = _build_inline_and_table_slots()
-        roster_grid_html = _build_roster_cards_grid_html()
-        partner_reg_drawer_html = _build_partner_registration_drawer_html()
-
-        if not is_partner_live_in_vault(prop_id, partner_key):
-            live_alt = next(
-                (
-                    o
-                    for o in (roster_info.get("roster_offers") or [])
-                    if isinstance(o, dict) and is_partner_live_in_vault(prop_id, str(o.get("partner_key") or ""))
-                ),
-                None,
-            )
-            if live_alt:
-                partner_key = str(live_alt["partner_key"])
-                partner_name = str(live_alt.get("name") or partner_key)
-                cta_text = str(live_alt.get("cta_text") or "Explore Partner")
-                url = f"/r/{partner_key}?source_tool={slug_id}&subid={slug_id}_primary&cta_slot=standalone_primary_cta"
-            else:
-                block_html = "    " + build_first_party_workpaper_cta_html(
-                    property_id=prop_id,
-                    slug=slug,
-                    query=query,
-                    slot="section",
-                    reg_drawer_html="\n" + partner_reg_drawer_html,
-                )
-                return {
-                    "html": block_html,
-                    "inline_calc_cta_html": "",
-                    "comparison_table_cta_html": "",
-                    "affiliate_route": route,
-                    "partner_roster": roster_info,
-                    "slot_plan": slot_plan,
-                    "commercial_offers_allowed": True,
-                    "restricted_public_service": False,
-                }
-
-        block_html = (
-            f'    <section class="affiliate-cta-section refinance-partner-section ymyl-refinance-guardrail card pseo-card" data-property="prexvo" '
-            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" '
-            f'data-partner-models="{models_csv}" data-partner-roster="{roster_keys_csv}" '
-            f'data-partner-companies="{companies_csv}" data-commercial-offers="compliant-refinance" '
-            f'data-restricted-public-service="false" data-mechanic="compliant_intent_monetization">\n'
-            f'      <h2>Private Student Loan Refinance Comparison: {partner_name}</h2>\n'
-            f'      <p class="ymyl-statutory-warning" style="font-size: 13px; color: var(--text-muted);">\n'
-            f'        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685. {ymyl_disc}\n'
-            f'      </p>\n'
-            f'      <p style="margin-top: 12px;">\n'
-            f'        <a href="{url}" rel="{rel_attrs}" target="_blank" '
-            f'data-partner="{partner_key}" data-partnership-model="{primary_model_attr}" data-cta-slot="standalone_primary_cta" '
-            f'class="affiliate-cta-link touch-target" '
-            f'style="display: inline-flex; align-items: center; justify-content: center; '
-            f'min-height: 44px; min-width: 44px; padding: 12px 18px; border-radius: 8px; '
-            f'background: var(--accent); color: var(--cta-fg); font-weight: 600; text-decoration: none;">'
-            f'{cta_text}</a>\n'
-            f'      </p>\n'
-            f'{roster_grid_html}'
-            f'{partner_reg_drawer_html}'
-            f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">\n'
-            f'        {ftc_disc}\n'
-            f'      </p>\n'
-            f'    </section>'
+        referral_html = build_contextual_referral_card_html(
+            property_id="prexvo",
+            slug=slug,
+            query=query,
+            gsc_metrics=gsc_metrics,
+            engagement_metrics=engagement_metrics,
+            page_archetype=page_archetype,
         )
         return {
-            "html": block_html,
-            "inline_calc_cta_html": inline_calc_html,
-            "comparison_table_cta_html": table_cta_html,
-            "affiliate_route": route,
+            "html": ("    " + referral_html) if referral_html else "",
+            "inline_calc_cta_html": "",
+            "comparison_table_cta_html": "",
+            "affiliate_route": _build_affiliate_route_meta("prexvo"),
             "partner_roster": roster_info,
             "slot_plan": slot_plan,
             "commercial_offers_allowed": True,
@@ -1565,13 +1401,14 @@ def _build_compiler_faq_entities(
 ) -> List[Dict[str, Any]]:
     """Builds conversational FAQPage entities tailored to tenant and tool cluster."""
     readable_formula = _format_human_readable_formula(formula)
+    plain_faq_formula = _format_plain_prose_formula(formula, readable_formula)
     faq_entities: List[Dict[str, Any]] = [
         {
             "@type": "Question",
             "name": f"How is {title} determined under statutory authority guidelines?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": f"The deterministic calculation model evaluates {readable_formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}.",
+                "text": f"The deterministic calculation model evaluates {plain_faq_formula} based on statutory rules from {statutory_authority} and empirical indicators from {economic_dataset}.",
             },
         },
         {
@@ -2002,74 +1839,12 @@ def _build_hero_range_and_state_bar_html(
     slug: str = "",
     property_id: str = "",
 ) -> tuple[str, str]:
-    """Renders the above-the-fold Instant Range Anchor and Step 1 State Selector bar."""
-    conservative_range_str = _format_scenario_number(published_output * 0.8)
-    aggressive_range_str = _format_scenario_number(published_output * 1.2)
-    has_partner_reg_drawer = 'id="partner-registration-drawer"' in monetization_section_html
-    hero_register_firm_link_html = (
-        ""
-        if not has_partner_reg_drawer
-        else (
-            '\n        <a href="#partner-registration-drawer" class="touch-target hero-register-firm-link" '
-            'style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; '
-            'padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); '
-            'color: var(--accent); font-weight: 600; text-decoration: none; font-size: 13px;">Register Your Firm</a>'
-        )
-    )
-    hero_range_anchor_html = (
-        f'      <div id="hero-range-anchor" class="hero-range-anchor" data-mechanic="instant_range_anchor" '
-        f'data-range-low="{conservative_range_str}" data-range-baseline="{display_output}" data-range-high="{aggressive_range_str}" '
-        f'style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; background: var(--bg-elevated); '
-        f'border: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">\n'
-        f'        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 14px; font-variant-numeric: tabular-nums;">\n'
-        f'          <span><strong>Instant Statutory Range:</strong></span>\n'
-        f'          <span>Conservative (0.8x): <strong id="hero-range-low">{conservative_range_str}</strong></span>\n'
-        f'          <span>Baseline (1.0x): <strong id="hero-range-baseline">{display_output}</strong></span>\n'
-        f'          <span>Aggressive (1.2x): <strong id="hero-range-high">{aggressive_range_str}</strong></span>\n'
-        f'        </div>{hero_register_firm_link_html}\n'
-        f'      </div>'
-    )
-    if slug and not is_state_jurisdiction_tool(slug, property_id):
-        return hero_range_anchor_html, ""
-    default_hero_state = "DE" if is_gainhelm else "CA"
-    hero_us_states = (
-        ("CA", "California (CA)"),
-        ("DE", "Delaware (DE)"),
-        ("TX", "Texas (TX)"),
-        ("NY", "New York (NY)"),
-        ("FL", "Florida (FL)"),
-        ("IL", "Illinois (IL)"),
-        ("PA", "Pennsylvania (PA)"),
-        ("OH", "Ohio (OH)"),
-        ("GA", "Georgia (GA)"),
-        ("NC", "North Carolina (NC)"),
-        ("MI", "Michigan (MI)"),
-        ("NJ", "New Jersey (NJ)"),
-        ("VA", "Virginia (VA)"),
-        ("WA", "Washington (WA)"),
-        ("AZ", "Arizona (AZ)"),
-        ("MA", "Massachusetts (MA)"),
-        ("TN", "Tennessee (TN)"),
-        ("CO", "Colorado (CO)"),
-        ("MN", "Minnesota (MN)"),
-        ("DC", "District of Columbia (DC)"),
-    )
-    hero_state_options_str = "\n".join(
-        f'          <option value="{st_c}"{" selected" if st_c == default_hero_state else ""}>{st_lbl}</option>'
-        for st_c, st_lbl in hero_us_states
-    )
-    state_first_hero_bar_html = (
-        '      <div id="state-first-hero-bar" class="state-first-hero-bar" data-mechanic="state_first_hero_input" '
-        'style="margin-bottom: 16px; padding: 12px 16px; border-radius: 8px; background: var(--bg-elevated); '
-        'border: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">\n'
-        '        <label for="quote-intake-hero-state" style="font-weight: 600; font-size: 14px;">Step 1: Select Filing State / Jurisdiction</label>\n'
-        '        <select id="quote-intake-hero-state" name="state" class="touch-target" aria-label="Step 1: Select Filing State / Jurisdiction" '
-        'style="min-height: 44px; min-width: 220px; padding: 8px 12px; font-size: 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);">\n'
-        f'{hero_state_options_str}\n'
-        '        </select>\n'
-        '      </div>'
-    )
-    return hero_range_anchor_html, state_first_hero_bar_html
+    """
+    Deprecated: Hero range anchor, Register Your Firm link, and state-first hero bar are removed
+    to keep .hero-section strictly H1 + subtitle + 40-60w .quick-answer above the fold.
+    """
+    _ = published_output, display_output, monetization_section_html, is_gainhelm, slug, property_id
+    return "", ""
 
 
 def _clamp_candidate_inputs(raw_inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -2150,6 +1925,401 @@ def _extract_candidate_metadata(candidate_spec: Dict[str, Any]) -> tuple:
     economic_dataset = str(candidate_spec.get("economic_dataset") or candidate_spec.get("economic_source") or manifest_source.get("economic_dataset") or manifest_source.get("economic_source") or "").strip()
     sample_calc = str(candidate_spec.get("sample_calculation") or candidate_spec.get("sample") or manifest_source.get("sample_calculation") or manifest_source.get("sample") or "").strip()
     return manifest_source, query, raw_slug, title, model_name, formula, raw_inputs, statutory_authority, economic_dataset, sample_calc
+
+
+def _render_compiled_calculator_runtime_js(
+    slug: str,
+    calc_js_body: str,
+    is_lienbond_currency: bool,
+) -> str:
+    """Renders the inline calculator runtime script with URL query-param sync and checkout passthrough."""
+    currency_prefix = "$" if is_lienbond_currency else ""
+    min_frac_js = "2" if is_lienbond_currency else "(Number.isInteger(val) ? 0 : 2)"
+    return f"""  <script>
+  (function() {{
+    var form = document.getElementById("{slug}-calculator");
+    if (!form) return;
+    var outputElem = document.querySelector(".output-value");
+    var slug = "{slug}";
+    var currencyPrefix = "{currency_prefix}";
+    function formatNumber(val) {{
+      if (isNaN(val) || !isFinite(val)) return currencyPrefix + "0";
+      if (Math.abs(val) > 0 && Math.abs(val) < 1 && Number(val.toFixed(4)) !== Number(val.toFixed(2))) {{
+        return currencyPrefix + new Intl.NumberFormat("en-US", {{
+          minimumFractionDigits: 4,
+          maximumFractionDigits: 4
+        }}).format(val);
+      }}
+      return currencyPrefix + new Intl.NumberFormat("en-US", {{
+        minimumFractionDigits: {min_frac_js},
+        maximumFractionDigits: 2
+      }}).format(val);
+    }}
+
+    function getInputs() {{
+      var inputs = {{}};
+      var elements = form.querySelectorAll("input[type='number'], select");
+      for (var i = 0; i < elements.length; i++) {{
+        var el = elements[i];
+        var name = el.name || el.id;
+        if (!name) continue;
+        var cleanName = name.replace(/^input-/, "");
+        var rawVal = String(el.value == null ? "" : el.value).trim();
+        if (el.tagName && el.tagName.toUpperCase() === "SELECT" && rawVal && !/^-?\\d+(?:\\.\\d+)?$/.test(rawVal)) {{
+          inputs[cleanName] = rawVal;
+        }} else {{
+          var v = parseFloat(rawVal);
+          inputs[cleanName] = isNaN(v) ? 0 : Math.max(0, v);
+        }}
+      }}
+      return inputs;
+    }}
+
+    function syncDualControls(e) {{
+      var target = e.target;
+      if (!target) return;
+      if (target.type === "range") {{
+        var numId = target.id.replace(/^range-/, "input-");
+        var numEl = document.getElementById(numId);
+        if (numEl) numEl.value = target.value;
+      }} else if (target.type === "number") {{
+        var rangeId = target.id.replace(/^input-/, "range-");
+        var rangeEl = document.getElementById(rangeId);
+        if (rangeEl) rangeEl.value = target.value;
+      }}
+    }}
+
+    var debounceTimer = null;
+    function updateQueryParams(inputs, immediate) {{
+      if (!window.history || !window.history.replaceState) return;
+      if (debounceTimer) {{
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }}
+      function _applyQueryParams() {{
+        try {{
+          var url = new URL(window.location.href);
+          for (var k in inputs) {{
+            url.searchParams.set(k, inputs[k]);
+          }}
+          window.history.replaceState({{}}, "", url.toString());
+        }} catch (e) {{}}
+      }}
+      if (immediate) {{
+        _applyQueryParams();
+        return;
+      }}
+      debounceTimer = setTimeout(_applyQueryParams, 150);
+    }}
+
+    function syncInputsFromParams() {{
+      if (!window.location || !window.location.search) return;
+      try {{
+        var params = new URLSearchParams(window.location.search);
+        var elements = form.querySelectorAll("input, select");
+        for (var i = 0; i < elements.length; i++) {{
+          var el = elements[i];
+          var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
+          if (params.has(name)) {{
+            el.value = params.get(name);
+          }}
+        }}
+      }} catch (e) {{}}
+    }}
+
+    function calculate(inputs) {{
+{calc_js_body}
+    }}
+
+    function handleRecompute(immediate, skipUrlSync) {{
+      var inputs = getInputs();
+      if (!skipUrlSync) {{
+        updateQueryParams(inputs, immediate);
+      }} else if (debounceTimer) {{
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }}
+      var result = calculate(inputs);
+      var formattedResult = formatNumber(result);
+      if (outputElem) {{
+        outputElem.textContent = formattedResult;
+      }}
+      var wpHeadline = document.getElementById("workpaper-preview-headline");
+      if (wpHeadline) wpHeadline.textContent = formattedResult;
+      var checkoutIds = ["btn-workpaper-quick-checkout", "btn-workpaper-full-checkout"];
+      for (var ci = 0; ci < checkoutIds.length; ci++) {{
+        var ckEl = document.getElementById(checkoutIds[ci]);
+        if (ckEl && ckEl.href) {{
+          try {{
+            var ckUrl = new URL(ckEl.href, window.location.origin);
+            ckUrl.searchParams.set("amount", String(Math.round(result)));
+            for (var ik in inputs) {{
+              ckUrl.searchParams.set(ik, String(inputs[ik]));
+            }}
+            ckEl.href = ckUrl.pathname + ckUrl.search;
+          }} catch (err) {{}}
+        }}
+      }}
+    }}
+
+    syncInputsFromParams();
+    handleRecompute(false, true);
+    window.addEventListener("popstate", function() {{
+      syncInputsFromParams();
+      handleRecompute(false, true);
+    }});
+    form.addEventListener("input", function(e) {{
+      syncDualControls(e);
+      handleRecompute();
+    }});
+    form.addEventListener("change", function(e) {{
+      syncDualControls(e);
+      handleRecompute();
+    }});
+    form.addEventListener("submit", function(e) {{
+      e.preventDefault();
+      handleRecompute(true);
+      return false;
+    }});
+  }})();
+  </script>"""
+
+
+def _build_compiled_disclosures_funnel_and_seo(
+    *,
+    candidate_spec: Dict[str, Any],
+    slug: str,
+    title: str,
+    query: str,
+    formula: str,
+    clamped_inputs: Dict[str, Any],
+    published_output: float,
+    display_output: str,
+    sample_calc: str,
+    safe_model_h2: str,
+    statutory_authority: str,
+    economic_dataset: str,
+    canonical_base: str,
+    cluster: Any,
+    resolved_tenant: str,
+    is_prexvo: bool,
+    is_gainhelm: bool,
+    is_lienbond: bool,
+) -> Dict[str, Any]:
+    """Builds regulatory disclosures, Step 1/2 funnel blocks, normalized meta description, and 40-60w takeaway."""
+    regulatory_disclosures_html: List[str] = []
+    if is_gainhelm:
+        from pseofactory.affiliates import get_gainhelm_statutory_disclaimer
+
+        gh_disc = (
+            get_gainhelm_statutory_disclaimer(slug)
+            or GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer")
+            or GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer")
+            or ""
+        ).strip()
+        if gh_disc:
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                f'        {gh_disc}\n'
+                '      </p>'
+            )
+    elif is_lienbond:
+        lb_disc = (
+            LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer")
+            or LIENBOND_DISCLOSURES.get("statutory_compliance_disclaimer")
+            or ""
+        ).strip()
+        if lb_disc:
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                f'        {lb_disc}\n'
+                '      </p>'
+            )
+    elif not is_prexvo:
+        if cluster == PROFITHELM_TAX_CLUSTER or "tax" in slug.lower() or "tax" in query.lower() or "179" in slug:
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                '        Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.\n'
+                '      </p>'
+            )
+    else:
+        if "refinance" in slug.lower() or "refinance" in query.lower() or "refinancing" in slug.lower() or "refinancing" in query.lower():
+            regulatory_disclosures_html.append(
+                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                '        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685.\n'
+                '      </p>'
+            )
+
+    for disc in candidate_spec.get("mandatory_disclosures") or []:
+        if not any(disc.lower() in d.lower() for d in regulatory_disclosures_html):
+            regulatory_disclosures_html.append(
+                f'      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
+                f'        {disc}\n'
+                f'      </p>'
+            )
+
+    from pseofactory.affiliates import (
+        build_step1_preview_controls_html,
+        build_workpaper_unlock_card_html,
+        is_restricted_public_service_slug,
+    )
+
+    is_restricted_asset = bool(is_prexvo and is_restricted_public_service_slug(slug, title))
+    readable_formula = _format_human_readable_formula(formula)
+    plain_prose_formula = _format_plain_prose_formula(
+        formula,
+        readable_formula,
+        list(clamped_inputs.keys()) if isinstance(clamped_inputs, dict) else None,
+    )
+    is_complex_formula = "min(" in readable_formula.lower() or "max(" in readable_formula.lower()
+    formula_html_inline = (
+        _html.escape(plain_prose_formula)
+        if is_complex_formula
+        else f"<code>{readable_formula}</code>"
+    )
+    is_lienbond_currency = bool(
+        is_lienbond
+        and not any(
+            tok in slug.lower()
+            for tok in ("deadline", "emr", "experience-modification", "notice-window", "days-to-")
+        )
+    )
+    eff_display_output = f"${display_output}" if (is_lienbond_currency and not str(display_output).startswith("$")) else display_output
+    visible_sample_calc = _sanitize_visible_sample_calculation(sample_calc)
+
+    step1_preview_html = (
+        ""
+        if is_restricted_asset
+        else build_step1_preview_controls_html(
+            property_id=resolved_tenant,
+            slug=slug,
+            query=query,
+            baseline_output=published_output,
+            display_output=eff_display_output,
+            statutory_authority=statutory_authority,
+        )
+    )
+    workpaper_unlock_card_html = build_workpaper_unlock_card_html(
+        property_id=resolved_tenant,
+        slug=slug,
+        query=query,
+        topic_label=title,
+        statutory_authority=statutory_authority,
+        baseline_amount=published_output,
+    )
+    disclosures_html_block = ("\n" + "\n".join(regulatory_disclosures_html)) if regulatory_disclosures_html else ""
+    default_gsc_token = (
+        "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
+        if is_lienbond
+        else (
+            "Elwe-MFi7Z8hEE7ybiGr8xXBqSv87dF_ZMpqkhCDlQ8"
+            if is_gainhelm
+            else (
+                "At5f9a2APEkZhsFx0LICFC5R-TNKsXxzNsbG5YhUoIA"
+                if "prexvo" in str(canonical_base or "").lower()
+                else "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
+            )
+        )
+    )
+    gsc_token = (
+        str(candidate_spec.get("gsc_verification_token") or "").strip()
+        or os.environ.get("GSC_VERIFICATION_TOKEN", default_gsc_token)
+    )
+    raw_meta_desc = (
+        str(candidate_spec.get("description") or "").strip()
+        or f"Verified quantitative calculation engine evaluating {title} deterministically under {statutory_authority}."
+    )
+    if len(raw_meta_desc) < 55:
+        raw_meta_desc = f"{raw_meta_desc.rstrip('.')} grounded in {statutory_authority} and {economic_dataset}."
+    if len(raw_meta_desc) > 155:
+        short_t = re.sub(r"\s+and\s+Statutory\s+Analysis$", "", title, flags=re.IGNORECASE).strip()
+        short_t = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", short_t, flags=re.IGNORECASE)
+        if is_lienbond:
+            primary_stat_auth = statutory_authority.split(",")[0].strip() or statutory_authority
+            raw_meta_desc = f"Calculate {short_t} deterministically under {primary_stat_auth}."
+        else:
+            raw_meta_desc = f"Verified quantitative calculation engine evaluating {short_t} deterministically under {statutory_authority}."
+    if len(raw_meta_desc) > 155:
+        from pseofactory.contracts import detect_malformed_statutory_citations
+
+        words_m = raw_meta_desc.rstrip(".!?").split()
+        while len(words_m) > 6 and (
+            len(" ".join(words_m).rstrip(".,;:") + ".") > 155
+            or words_m[-1].lower().rstrip(".,;:") in ("under", "and", "or", "with", "for", "of", "in", "to", "by", "from", "the", "a", "an", "section", "sec", "part", "u.s.c", "usc", "cfr", "c.f.r", "irc", "i.r.c", "40", "29", "26", "31", "32", "34")
+            or bool(detect_malformed_statutory_citations(" ".join(words_m).rstrip(".,;:") + "."))
+        ):
+            words_m.pop()
+        raw_meta_desc = " ".join(words_m).rstrip(".,;:") + "."
+    if is_gainhelm:
+        from pseofactory.gsc_remediation import _normalize_meta_120_155
+
+        raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "gainhelm", title, slug=slug)
+    if is_lienbond:
+        from pseofactory.gsc_remediation import _normalize_meta_120_155
+
+        if len(raw_meta_desc) < 120:
+            primary_stat_auth = statutory_authority.split(",")[0].strip() or statutory_authority
+            if primary_stat_auth.lower() not in raw_meta_desc.lower():
+                cand_lb_desc = f"{raw_meta_desc.rstrip('.')} Grounded in {primary_stat_auth}."
+                if len(cand_lb_desc) <= 155:
+                    raw_meta_desc = cand_lb_desc
+        if len(raw_meta_desc) < 120 or len(raw_meta_desc) > 155:
+            raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "lienbond", title, slug=slug)
+
+    brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
+    default_takeaway_html = (
+        f"The {safe_model_h2} produces a baseline output of <strong>{eff_display_output}</strong>.\n"
+        f"          Executive operators evaluate deterministic calculations derived from {formula_html_inline}\n"
+        f"          joined with statutory rules from {statutory_authority} and empirical economic benchmarks from {economic_dataset}\n"
+        f"          to compute exact quantitative projections and variance across multi-tier planning scenarios."
+    )
+    takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
+    if takeaway_wc > 60:
+        default_takeaway_html = (
+            f"The {safe_model_h2} produces a baseline output of <strong>{eff_display_output}</strong> "
+            f"from {formula_html_inline} under {statutory_authority} and {economic_dataset}."
+        )
+        takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
+        pad_tokens = [
+            "Operators", "verify", "deterministic", "schedules,", "5-point",
+            "sensitivity", "bounds,", "and", "statutory", "compliance",
+            "thresholds", "across", "multi-tier", "planning", "scenarios.",
+        ]
+        idx_p = 0
+        while takeaway_wc < 43 and idx_p < len(pad_tokens):
+            default_takeaway_html = default_takeaway_html.rstrip(".") + " " + pad_tokens[idx_p]
+            idx_p += 1
+            takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
+        if not default_takeaway_html.endswith("."):
+            default_takeaway_html += "."
+
+    if is_prexvo:
+        compact_disclosure_text = "Educational Title IV model estimate under 34 CFR Part 685; not financial or legal advice."
+    elif is_gainhelm:
+        compact_disclosure_text = "Readiness cost estimate for planning; not an accredited third-party audit attestation."
+    elif is_lienbond:
+        compact_disclosure_text = "Planning estimate only; final bond premiums and deadlines depend on underwriting and state law."
+    else:
+        compact_disclosure_text = "Deterministic model estimate only; not formal tax, legal, or investment advice."
+    compliance_disclosure_inline_html = (
+        f'    <p class="compliance-disclosure-inline" style="font-size: 12.5px; color: var(--text-muted); margin: 8px 0 18px 0; line-height: 1.45;">'
+        f'{_html.escape(compact_disclosure_text)}</p>\n'
+    )
+
+    return {
+        "disclosures_html_block": disclosures_html_block,
+        "formula_html_inline": formula_html_inline,
+        "display_output": eff_display_output,
+        "is_lienbond_currency": is_lienbond_currency,
+        "visible_sample_calc": visible_sample_calc,
+        "step1_preview_html": step1_preview_html,
+        "workpaper_unlock_card_html": workpaper_unlock_card_html,
+        "gsc_token": gsc_token,
+        "raw_meta_desc": raw_meta_desc,
+        "brand_org_name": brand_org_name,
+        "default_takeaway_html": default_takeaway_html,
+        "compliance_disclosure_inline_html": compliance_disclosure_inline_html,
+    }
 
 
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -2243,26 +2413,29 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     # 6. Render Obsidian dark-theme HTML asset
+    is_prexvo, is_gainhelm, is_lienbond = _resolve_candidate_tenant_flags(candidate_spec, slug)
     form_inputs_html = []
     table_rows_html = []
     for var_name, var_val in clamped_inputs.items():
         label_text = var_name.replace("_", " ").title()
         val_num = float(var_val) if isinstance(var_val, (int, float)) else 0.0
         max_num = max(100.0, val_num * 2.0 if val_num > 0 else 100.0)
-        step_attr = "0.01" if isinstance(var_val, float) else "1"
+        clean_val_str = _format_clean_input_val(var_val)
+        clean_max_str = _format_clean_input_val(max_num)
+        step_attr = _compute_proportional_range_step(val_num, max_num, isinstance(var_val, float))
         form_inputs_html.append(
             f'        <div class="form-group" style="margin-bottom: 16px;">\n'
             f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
             f'          <input type="number" step="any" min="0" id="input-{var_name}" name="{var_name}" '
-            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;" />\n'
-            f'          <input type="range" min="0" max="{max_num}" step="{step_attr}" id="range-{var_name}" '
-            f'value="{var_val}" class="touch-target" style="min-height: 44px; min-width: 44px; width: 100%; margin-top: 8px;" />\n'
+            f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;" />\n'
+            f'          <input type="range" min="0" max="{clean_max_str}" step="{step_attr}" id="range-{var_name}" '
+            f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; width: 100%; margin-top: 8px;" />\n'
             f'        </div>'
         )
         table_rows_html.append(
             f'            <tr>\n'
             f'              <td>{label_text}</td>\n'
-            f'              <td>{var_val}</td>\n'
+            f'              <td>{clean_val_str}</td>\n'
             f'              <td>{statutory_authority}</td>\n'
             f'              <td>{economic_dataset}</td>\n'
             f'            </tr>'
@@ -2277,7 +2450,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         display_output = f"{round(published_output, 4):.4f}"
     else:
         display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
-
+    if is_lienbond and not display_output.startswith("$"):
+        display_output = f"${display_output}"
     # Pre-render SSR 5-Point Scenario Comparison Table
     scenario_table_html = _render_5point_sensitivity_table_html(
         published_output=published_output,
@@ -2288,8 +2462,6 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         formula=formula,
         inputs=clamped_inputs,
     )
-
-    is_prexvo, is_gainhelm, is_lienbond = _resolve_candidate_tenant_flags(candidate_spec, slug)
     default_base = (
         "https://prexvo.com"
         if is_prexvo
@@ -2481,167 +2653,38 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     calc_js_body = f"""      {dynamic_return_js}"""
 
-    regulatory_disclosures_html = []
-    if is_gainhelm:
-        from pseofactory.affiliates import get_gainhelm_statutory_disclaimer
-
-        gh_disc = (
-            get_gainhelm_statutory_disclaimer(slug)
-            or GAINHELM_DISCLOSURES.get("statutory_compliance_disclaimer")
-            or GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer")
-            or ""
-        ).strip()
-        if gh_disc:
-            regulatory_disclosures_html.append(
-                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-                f'        {gh_disc}\n'
-                '      </p>'
-            )
-    elif is_lienbond:
-        lb_disc = (
-            LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer")
-            or LIENBOND_DISCLOSURES.get("statutory_compliance_disclaimer")
-            or ""
-        ).strip()
-        if lb_disc:
-            regulatory_disclosures_html.append(
-                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-                f'        {lb_disc}\n'
-                '      </p>'
-            )
-    elif not is_prexvo:
-        if cluster == PROFITHELM_TAX_CLUSTER or "tax" in slug.lower() or "tax" in query.lower() or "179" in slug:
-            regulatory_disclosures_html.append(
-                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-                '        Circular 230 tax modeling disclaimer: Information generated is for deterministic computational modeling purposes and does not constitute formal tax, legal, or investment advice under Treasury Department Circular No. 230.\n'
-                '      </p>'
-            )
-    else:
-        if "refinance" in slug.lower() or "refinance" in query.lower() or "refinancing" in slug.lower() or "refinancing" in query.lower():
-            regulatory_disclosures_html.append(
-                '      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-                '        Refinancing federal student loans permanently waives federal protections, including income-driven repayment and Public Service Loan Forgiveness (PSLF) eligibility under Title IV 34 CFR Part 685.\n'
-                '      </p>'
-            )
-
-    spec_disclosures = candidate_spec.get("mandatory_disclosures") or []
-    for disc in spec_disclosures:
-        if not any(disc.lower() in d.lower() for d in regulatory_disclosures_html):
-            regulatory_disclosures_html.append(
-                f'      <p class="regulatory-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">\n'
-                f'        {disc}\n'
-                f'      </p>'
-            )
-
-    from pseofactory.affiliates import is_restricted_public_service_slug
-    is_restricted_asset = bool(is_prexvo and is_restricted_public_service_slug(slug, title))
-    hero_range_anchor_html, state_first_hero_bar_html = _build_hero_range_and_state_bar_html(
+    meta_bundle = _build_compiled_disclosures_funnel_and_seo(
+        candidate_spec=candidate_spec,
+        slug=slug,
+        title=title,
+        query=query,
+        formula=formula,
+        clamped_inputs=clamped_inputs,
         published_output=published_output,
         display_output=display_output,
-        monetization_section_html=monetization_section_html,
+        sample_calc=sample_calc,
+        safe_model_h2=safe_model_h2,
+        statutory_authority=statutory_authority,
+        economic_dataset=economic_dataset,
+        canonical_base=canonical_base,
+        cluster=cluster,
+        resolved_tenant=resolved_tenant,
+        is_prexvo=is_prexvo,
         is_gainhelm=is_gainhelm,
-        slug=slug,
-        property_id=resolved_tenant,
+        is_lienbond=is_lienbond,
     )
-    readable_formula = _format_human_readable_formula(formula)
-    visible_sample_calc = _sanitize_visible_sample_calculation(sample_calc)
-    playbook_footer_html = (
-        ""
-        if is_restricted_asset
-        else (
-            '      <div class="playbook-capture-card" style="margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated);">\n'
-            '        <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">Personalized Calculation Playbook &amp; Statutory Workpaper</div>\n'
-            '        <form id="lead-capture-form" class="lead-capture-form" action="/api/lead-capture" method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">\n'
-            '          <input type="email" name="email" placeholder="Work email for personalized playbook" aria-label="Work email for personalized playbook" required class="touch-target" style="padding:10px 14px;border-radius:6px;border:1px solid var(--border);min-height:44px;flex:1;min-width:220px;" />\n'
-            '          <button type="submit" class="touch-target" style="padding:10px 16px;border-radius:6px;background:var(--brand-primary);color:var(--cta-fg);font-weight:700;border:none;min-height:44px;cursor:pointer;">Get Free Playbook</button>\n'
-            '        </form>\n'
-            '      </div>\n'
-        )
-    )
-    disclosures_html_block = ("\n" + "\n".join(regulatory_disclosures_html)) if regulatory_disclosures_html else ""
-    default_gsc_token = (
-        "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q"
-        if is_lienbond
-        else (
-            "Elwe-MFi7Z8hEE7ybiGr8xXBqSv87dF_ZMpqkhCDlQ8"
-            if is_gainhelm
-            else (
-                "At5f9a2APEkZhsFx0LICFC5R-TNKsXxzNsbG5YhUoIA"
-                if "prexvo" in str(canonical_base or "").lower()
-                else "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
-            )
-        )
-    )
-    gsc_token = (
-        str(candidate_spec.get("gsc_verification_token") or "").strip()
-        or os.environ.get("GSC_VERIFICATION_TOKEN", default_gsc_token)
-    )
-    raw_meta_desc = (
-        str(candidate_spec.get("description") or "").strip()
-        or f"Verified quantitative calculation engine evaluating {title} deterministically under {statutory_authority}."
-    )
-    if len(raw_meta_desc) < 55:
-        raw_meta_desc = f"{raw_meta_desc.rstrip('.')} grounded in {statutory_authority} and {economic_dataset}."
-    if len(raw_meta_desc) > 155:
-        short_t = re.sub(r"\s+and\s+Statutory\s+Analysis$", "", title, flags=re.IGNORECASE).strip()
-        short_t = re.sub(r"\bCalculator\s+Calculator\b", "Calculator", short_t, flags=re.IGNORECASE)
-        if is_lienbond:
-            primary_stat_auth = statutory_authority.split(",")[0].strip() or statutory_authority
-            raw_meta_desc = f"Calculate {short_t} deterministically under {primary_stat_auth}."
-        else:
-            raw_meta_desc = f"Verified quantitative calculation engine evaluating {short_t} deterministically under {statutory_authority}."
-    if len(raw_meta_desc) > 155:
-        from pseofactory.contracts import detect_malformed_statutory_citations
-        words_m = raw_meta_desc.rstrip(".!?").split()
-        while len(words_m) > 6 and (
-            len(" ".join(words_m).rstrip(".,;:") + ".") > 155
-            or words_m[-1].lower().rstrip(".,;:") in ("under", "and", "or", "with", "for", "of", "in", "to", "by", "from", "the", "a", "an", "section", "sec", "part", "u.s.c", "usc", "cfr", "c.f.r", "irc", "i.r.c", "40", "29", "26", "31", "32", "34")
-            or bool(detect_malformed_statutory_citations(" ".join(words_m).rstrip(".,;:") + "."))
-        ):
-            words_m.pop()
-        raw_meta_desc = " ".join(words_m).rstrip(".,;:") + "."
-    if is_gainhelm:
-        from pseofactory.gsc_remediation import _normalize_meta_120_155
-
-        raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "gainhelm", title, slug=slug)
-    if is_lienbond:
-        from pseofactory.gsc_remediation import _normalize_meta_120_155
-
-        if len(raw_meta_desc) < 120:
-            primary_stat_auth = statutory_authority.split(",")[0].strip() or statutory_authority
-            if primary_stat_auth.lower() not in raw_meta_desc.lower():
-                cand_lb_desc = f"{raw_meta_desc.rstrip('.')} Grounded in {primary_stat_auth}."
-                if len(cand_lb_desc) <= 155:
-                    raw_meta_desc = cand_lb_desc
-        if len(raw_meta_desc) < 120 or len(raw_meta_desc) > 155:
-            raw_meta_desc = _normalize_meta_120_155(raw_meta_desc, "lienbond", title, slug=slug)
-
-    brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
-    default_takeaway_html = (
-        f"The {safe_model_h2} produces a baseline output of <strong>{display_output}</strong>.\n"
-        f"          Executive operators evaluate deterministic calculations derived from formula <code>{readable_formula}</code>\n"
-        f"          joined with statutory rules from {statutory_authority} and empirical economic benchmarks from {economic_dataset}\n"
-        f"          to compute exact quantitative projections and variance across multi-tier planning scenarios."
-    )
-    takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
-    if takeaway_wc > 60:
-        default_takeaway_html = (
-            f"The {safe_model_h2} produces a baseline output of <strong>{display_output}</strong> "
-            f"from formula <code>{readable_formula}</code> under {statutory_authority} and {economic_dataset}."
-        )
-        takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
-        pad_tokens = [
-            "Operators", "verify", "deterministic", "schedules,", "5-point",
-            "sensitivity", "bounds,", "and", "statutory", "compliance",
-            "thresholds", "across", "multi-tier", "planning", "scenarios.",
-        ]
-        idx_p = 0
-        while takeaway_wc < 43 and idx_p < len(pad_tokens):
-            default_takeaway_html = default_takeaway_html.rstrip(".") + " " + pad_tokens[idx_p]
-            idx_p += 1
-            takeaway_wc = len(re.sub(r"<[^>]+>", " ", default_takeaway_html).split())
-        if not default_takeaway_html.endswith("."):
-            default_takeaway_html += "."
+    disclosures_html_block = meta_bundle["disclosures_html_block"]
+    formula_html_inline = meta_bundle["formula_html_inline"]
+    display_output = meta_bundle["display_output"]
+    is_lienbond_currency = meta_bundle["is_lienbond_currency"]
+    visible_sample_calc = meta_bundle["visible_sample_calc"]
+    step1_preview_html = meta_bundle["step1_preview_html"]
+    workpaper_unlock_card_html = meta_bundle["workpaper_unlock_card_html"]
+    gsc_token = meta_bundle["gsc_token"]
+    raw_meta_desc = meta_bundle["raw_meta_desc"]
+    brand_org_name = meta_bundle["brand_org_name"]
+    default_takeaway_html = meta_bundle["default_takeaway_html"]
+    compliance_disclosure_inline_html = meta_bundle["compliance_disclosure_inline_html"]
 
     json_ld_graph_str = _build_compiled_json_ld_graph(
         canonical_base=canonical_base,
@@ -2678,6 +2721,11 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     esc_title_attr = _html.escape(str(title), quote=True)
     esc_title_text = _html.escape(str(title), quote=False)
     esc_canonical_url = _html.escape(f"{canonical_base}/tools/{slug}/", quote=True)
+    calc_runtime_script_html = _render_compiled_calculator_runtime_js(
+        slug=slug,
+        calc_js_body=calc_js_body,
+        is_lienbond_currency=is_lienbond_currency,
+    )
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2954,16 +3002,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
           {default_takeaway_html}
         </p>
       </aside>
-{hero_range_anchor_html}
     </header>
 
     <div id="calculator-workspace-anchor" class="calculation-container card" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}" data-gsc-trajectory="{gsc_trajectory}" data-gsc-coverage-state="{gsc_coverage_state}">
       <h2>Interactive Quantitative Model: {safe_model_h2}</h2>
       <p>
-        Input parameters are validated mechanically with client-side deserializers clamping numeric metrics to non-negative values
-        (greater than or equal to zero) under strict statutory boundary validation to prevent crawler or user state corruption.
+        Adjust inputs below to recalculate baseline outputs immediately with live URL parameter sync.
       </p>
-{state_first_hero_bar_html}
 {scenario_presets_bar_html}
 {edge_case_trap_html}
       <form class="calculator-form" id="{slug}-calculator" method="post" action="javascript:void(0);">
@@ -2972,13 +3017,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </form>
       <div class="result-box" style="min-height: 110px; margin-top: 20px;">
         <h3>Published Baseline Calculation</h3>
-        <p>Formula: <code>{readable_formula}</code></p>
+        <p>Formula: {formula_html_inline}</p>
         <p>Evaluated Output Result: <strong class="output-value">{display_output}</strong></p>
         <p>Sample Calculation Methodology: {visible_sample_calc}</p>
         <div class="calculation-variant" id="variant-baseline" style="font-size: 13px; margin-top: 8px;">Baseline Statutory Schedule (= {display_output}, 100.0% baseline{"; Title IV RAP $65k AGI benchmark: $248.23/mo, $59,575.20 total" if is_prexvo else ""}) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Compare Accelerated Stress Variant</a>)</div>
-        <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress{"; Title IV RAP $95k AGI benchmark: $498.23/mo" if is_prexvo else ""}) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>{inline_calc_cta_html}
+        <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress{"; Title IV RAP $95k AGI benchmark: $498.23/mo" if is_prexvo else ""}) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>
       </div>
 
+{step1_preview_html}
       <figure>
         <div class="table-wrap">
           <table class="calculation-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">
@@ -3001,6 +3047,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       </figure>
     </div>
 
+{workpaper_unlock_card_html}
+{compliance_disclosure_inline_html}
+{monetization_section_html}
+
 {serp_depth_upgrade_html}
 
 {on_this_page_nav_html}
@@ -3021,8 +3071,6 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 
 {statutory_compliance_html}
 
-{monetization_section_html}
-
     <section class="methodology card">
       <h2>Statutory Analysis and Computational Methodology: {safe_model_h2}</h2>
       <p>
@@ -3033,7 +3081,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         Governing statutory authority {statutory_authority} establishes the exact legal formulas, phaseout rates, and deduction caps, while empirical dataset series from {economic_dataset} validate inflation adjustments and cost basis indices:
       </p>
       <ul style="padding-left: 20px; margin-top: 10px; margin-bottom: 0;">
-        <li style="margin-bottom: 6px;"><strong>Deterministic Formula Execution:</strong> Evaluates <code>{readable_formula}</code> with non-negative parameter clamping to produce the verified baseline output of <strong>{display_output}</strong>.</li>
+        <li style="margin-bottom: 6px;"><strong>Deterministic Formula Execution:</strong> Evaluates {formula_html_inline} with non-negative parameter clamping to produce the verified baseline output of <strong>{display_output}</strong>.</li>
         <li style="margin-bottom: 6px;"><strong>Statutory Authority Grounding:</strong> Enforces regulatory thresholds, phaseout schedules, and compliance limits established under {statutory_authority}.</li>
         <li style="margin-bottom: 6px;"><strong>Empirical Benchmark Corroboration:</strong> Anchors macroeconomic and inflation assumptions to {economic_dataset} alongside the <a href="{canonical_base}/tools/{secondary_sibling_slug}/" class="touch-target" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px;">{secondary_sibling_title}</a>.</li>
       </ul>
@@ -3049,7 +3097,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 {three_tier_cluster_html}
 
     <nav class="cluster-nav card" aria-label="{cluster_title}">
-      <h2>{cluster_title}</h2>
+      <h3 class="section-subtitle">{cluster_title}</h3>
       <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
         Explore verified peer computational models in this specialized quantitative cluster:
       </p>
@@ -3059,7 +3107,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     </nav>
 
     <footer class="card" style="text-align: center;">
-{playbook_footer_html}      <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
+      <a href="{canonical_base}/tools/{slug}/" class="canonical-tool-link touch-target" style="min-height: 44px; min-width: 44px;">
         Launch Full {title} Engine
       </a>
       <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">
@@ -3080,142 +3128,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 {manifest_json_str}
   </script>
 
-  <script>
-  (function() {{
-    var form = document.getElementById("{slug}-calculator");
-    if (!form) return;
-    var outputElem = document.querySelector(".output-value");
-    var slug = "{slug}";
-    function formatNumber(val) {{
-      if (isNaN(val) || !isFinite(val)) return "0";
-      if (Math.abs(val) > 0 && Math.abs(val) < 1 && Number(val.toFixed(4)) !== Number(val.toFixed(2))) {{
-        return new Intl.NumberFormat("en-US", {{
-          minimumFractionDigits: 4,
-          maximumFractionDigits: 4
-        }}).format(val);
-      }}
-      return new Intl.NumberFormat("en-US", {{
-        minimumFractionDigits: Number.isInteger(val) ? 0 : 2,
-        maximumFractionDigits: 2
-      }}).format(val);
-    }}
-
-    function getInputs() {{
-      var inputs = {{}};
-      var elements = form.querySelectorAll("input[type='number'], select");
-      for (var i = 0; i < elements.length; i++) {{
-        var el = elements[i];
-        var name = el.name || el.id;
-        if (!name) continue;
-        var cleanName = name.replace(/^input-/, "");
-        var rawVal = String(el.value == null ? "" : el.value).trim();
-        if (el.tagName && el.tagName.toUpperCase() === "SELECT" && rawVal && !/^-?\\d+(?:\\.\\d+)?$/.test(rawVal)) {{
-          inputs[cleanName] = rawVal;
-        }} else {{
-          var v = parseFloat(rawVal);
-          inputs[cleanName] = isNaN(v) ? 0 : Math.max(0, v);
-        }}
-      }}
-      return inputs;
-    }}
-
-    function syncDualControls(e) {{
-      var target = e.target;
-      if (!target) return;
-      if (target.type === "range") {{
-        var numId = target.id.replace(/^range-/, "input-");
-        var numEl = document.getElementById(numId);
-        if (numEl) numEl.value = target.value;
-      }} else if (target.type === "number") {{
-        var rangeId = target.id.replace(/^input-/, "range-");
-        var rangeEl = document.getElementById(rangeId);
-        if (rangeEl) rangeEl.value = target.value;
-      }}
-    }}
-
-    var debounceTimer = null;
-    function updateQueryParams(inputs, immediate) {{
-      if (!window.history || !window.history.replaceState) return;
-      if (debounceTimer) {{
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
-      }}
-      function _applyQueryParams() {{
-        try {{
-          var url = new URL(window.location.href);
-          for (var k in inputs) {{
-            url.searchParams.set(k, inputs[k]);
-          }}
-          window.history.replaceState({{}}, "", url.toString());
-        }} catch (e) {{}}
-      }}
-      if (immediate) {{
-        _applyQueryParams();
-        return;
-      }}
-      debounceTimer = setTimeout(_applyQueryParams, 150);
-    }}
-
-    function syncInputsFromParams() {{
-      if (!window.location || !window.location.search) return;
-      try {{
-        var params = new URLSearchParams(window.location.search);
-        var elements = form.querySelectorAll("input, select");
-        for (var i = 0; i < elements.length; i++) {{
-          var el = elements[i];
-          var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
-          if (params.has(name)) {{
-            el.value = params.get(name);
-          }}
-        }}
-      }} catch (e) {{}}
-    }}
-
-    function calculate(inputs) {{
-{calc_js_body}
-    }}
-
-    function handleRecompute(immediate, skipUrlSync) {{
-      var inputs = getInputs();
-      if (!skipUrlSync) {{
-        updateQueryParams(inputs, immediate);
-      }} else if (debounceTimer) {{
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
-      }}
-      var result = calculate(inputs);
-      if (outputElem) {{
-        outputElem.textContent = formatNumber(result);
-      }}
-      var hrBase = document.getElementById("hero-range-baseline");
-      var hrLow = document.getElementById("hero-range-low");
-      var hrHigh = document.getElementById("hero-range-high");
-      if (hrBase) hrBase.textContent = formatNumber(result);
-      if (hrLow) hrLow.textContent = formatNumber(result * 0.8);
-      if (hrHigh) hrHigh.textContent = formatNumber(result * 1.2);
-    }}
-
-    syncInputsFromParams();
-    handleRecompute(false, true);
-    window.addEventListener("popstate", function() {{
-      syncInputsFromParams();
-      handleRecompute(false, true);
-    }});
-    form.addEventListener("input", function(e) {{
-      syncDualControls(e);
-      handleRecompute();
-    }});
-    form.addEventListener("change", function(e) {{
-      syncDualControls(e);
-      handleRecompute();
-    }});
-    form.addEventListener("submit", function(e) {{
-      e.preventDefault();
-      handleRecompute(true);
-      return false;
-    }});
-  }})();
-  </script>
+{calc_runtime_script_html}
 </body>
 </html>
 """
@@ -3773,7 +3686,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 
     hub_sensitivity_table_html = _render_5point_sensitivity_table_html(
         published_output=375.0,
-        display_output="375.00",
+        display_output="$375.00",
         statutory_authority=home_manifest_dict["statutory_authority"],
         economic_dataset=home_manifest_dict["economic_dataset"],
         model_name=home_manifest_dict["model_name"],
@@ -3781,7 +3694,34 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         inputs=home_manifest_dict["inputs"],
     )
 
-    from pseofactory.affiliates import is_partner_live_in_vault as _lb_is_live
+    from pseofactory.affiliates import (
+        build_contextual_referral_card_html as _lb_build_referral,
+        build_step1_preview_controls_html as _lb_build_preview,
+        build_workpaper_unlock_card_html as _lb_build_unlock,
+        is_partner_live_in_vault as _lb_is_live,
+    )
+
+    lb_hub_preview_html = _lb_build_preview(
+        property_id="lienbond",
+        slug="contractor-license-bond-cost-calculator-by-credit-score",
+        query="contractor license bond cost calculator by credit score",
+        baseline_output=375.0,
+        display_output="$375.00",
+        statutory_authority=home_manifest_dict["statutory_authority"],
+    )
+    lb_hub_unlock_html = _lb_build_unlock(
+        property_id="lienbond",
+        slug="contractor-license-bond-cost-calculator-by-credit-score",
+        query="contractor license bond cost calculator by credit score",
+        topic_label="Contractor License & Performance Bond Workpaper",
+        statutory_authority=home_manifest_dict["statutory_authority"],
+        baseline_amount=375.0,
+    )
+    lb_hub_referral_html = _lb_build_referral(
+        property_id="lienbond",
+        slug="contractor-license-bond-cost-calculator-by-credit-score",
+        query="contractor license bond cost calculator by credit score",
+    )
 
     _lb_home_partner_specs = [
         (
@@ -3880,14 +3820,14 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       <h1>Construction Surety Bond, Workers Comp &amp; Statutory Lien Calculators</h1>
       <aside class="takeaway quick-answer">
         <p class="takeaway">
-          The Contractor License Bond Credit Tier Underwriting Model produces a baseline output of <strong>375.00</strong> from formula <code>{hub_readable_formula}</code> under 40 U.S.C. Section 3131 and U.S. Treasury Circular 570. Operators model surety bonds, NCCI workers comp EMR, and 50-state mechanics lien deadlines.
+          The Contractor License Bond Credit Tier Underwriting Model produces a baseline output of <strong>$375.00</strong> from a multiplicative statutory bond schedule based on bond amount, credit tier rate, and term under 40 U.S.C. Section 3131 and U.S. Treasury Circular 570. Operators model surety bonds, NCCI workers comp EMR, and 50-state mechanics lien deadlines.
         </p>
       </aside>
     </header>
 
     <div id="calculator-workspace-anchor" class="calculation-container card">
       <h2>Interactive Contractor License &amp; Performance Bond Premium Calculator</h2>
-      <p>Evaluate contractor license and AIA A312 performance bond premiums with non-negative numeric parameter clamping under strict statutory boundary validation.</p>
+      <p>Estimate contractor license and AIA A312 performance bond premiums with instant URL-synced calculations.</p>
       <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
         <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=20000&amp;credit_tier_rate_pct=1.2&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="conservative" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Conservative ($20k Bond)</a>
         <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=25000&amp;credit_tier_rate_pct=1.5&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="baseline" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Baseline ($25k Bond)</a>
@@ -3913,12 +3853,17 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       </form>
       <div class="result-box">
         <h3>Published Baseline Calculation</h3>
-        <p>Formula: <code>{hub_readable_formula}</code></p>
-        <p>Evaluated Output Result: <strong class="output-value">375.00</strong></p>
+        <p>Formula: Bond Amount x Credit Tier Rate % x Term Years</p>
+        <p>Evaluated Output Result: <strong class="output-value">$375.00</strong></p>
         <div class="calculation-variant" id="variant-baseline" style="font-size:13px;margin-top:8px;">Preferred Credit Tier Schedule ($375.00 = 1.5% rate) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;color:var(--accent);">Compare Standard Market Variant</a>)</div>
         <div class="calculation-variant" id="variant-accelerated" style="font-size:13px;margin-top:4px;">Standard Market Indemnity Variant ($750.00 = 3.0% rate) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;color:var(--accent);">Return to Preferred Schedule</a>)</div>
       </div>
+{lb_hub_preview_html}
     </div>
+
+{lb_hub_unlock_html}
+    <p class="compliance-disclosure-inline" style="font-size: 12.5px; color: var(--text-muted); margin: 8px 0 18px 0; line-height: 1.45;">Estimates are for planning only; final bond premiums depend on underwriting and state statutory schedules.</p>
+{lb_hub_referral_html}
 
     <div class="multi-dataset-join card" data-statutory-source="U.S. Treasury Department Circular 570 and 40 U.S.C. Section 3131" data-economic-source="Surety and Fidelity Association of America (SFAA) Loss Ratio Benchmark and U.S. Census Bureau Construction Spending (VIP) Series">
       <h2>Dual Dataset Provenance and Statutory Surety Corroboration</h2>
@@ -3931,7 +3876,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       <ol class="procedure-steps">
         <li id="step-1"><strong>Select Statutory Bond, Class Code, or State Lien Jurisdiction:</strong> Identify your required contractor license penal sum, NCCI 4-digit governing class code, or state mechanics lien filing tier.</li>
         <li id="step-2"><strong>Enter Payroll, Contract Sum, or Furnishing Dates:</strong> Input project contract value, gross trade payroll, Experience Modification Rate (EMR), or calendar days since completion.</li>
-        <li id="step-3"><strong>Export Statutory Filing Packet or Bind Underwriting Quote:</strong> Review the 5-point sensitivity schedule, download the 50-State Mechanics Lien, AIA A312 &amp; WH-347 Compliance Packet ($79), or request an instant Treasury Circular 570 surety quote.</li>
+        <li id="step-3"><strong>Export Statutory Filing Packet or Bind Underwriting Quote:</strong> Review the 5-point sensitivity schedule, unlock the 50-State Mechanics Lien, AIA A312 &amp; WH-347 Compliance Packet, or request a Treasury Circular 570 surety quote.</li>
       </ol>
     </section>
 
@@ -3962,14 +3907,6 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 {tool_cards_html}
       </div>
     </section>
-
-    <aside class="card partner-cta-section" data-mechanic="compliant_intent_monetization" aria-label="Vetted Surety, Workers Comp &amp; Lien Resources">
-      <h2>Statutory Surety Bond, Workers Comp &amp; Mechanics Lien Workpaper Packets</h2>
-{lb_partner_table_html}      <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
-        <a href="/api/lead-capture?checkout=1&amp;sku=lb_surety_lien_wh347_packet&amp;tool_slug=contractor-license-bond-cost-calculator-by-credit-score&amp;redirect=1" class="btn-cta touch-target">Download 50-State Lien, AIA A312 &amp; WH-347 Packet ($79)</a>
-        <a href="/api/lead-capture?checkout=1&amp;sku=lb_workers_comp_emr_audit_packet&amp;tool_slug=workers-compensation-class-code-rate-calculator-by-state&amp;redirect=1" class="btn-secondary touch-target">Download NCCI Class Code &amp; EMR Audit Packet ($49)</a>
-      </div>
-    </aside>
 
     <section class="faq-section card">
       <h2>Frequently Asked Questions: Construction Surety, EMR &amp; Mechanics Liens</h2>
@@ -4010,15 +3947,122 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     var form = document.getElementById("hub-bond-calculator");
     if (!form) return;
     var out = document.querySelector(".output-value");
-    function recalc() {{
-      var b = parseFloat((document.getElementById("input-bond_amount") || {{}}).value) || 0;
-      var r = parseFloat((document.getElementById("input-credit_tier_rate_pct") || {{}}).value) || 0;
-      var t = parseFloat((document.getElementById("input-term_years") || {{}}).value) || 0;
-      var val = Math.round(((Math.max(0, b) * Math.max(0, r) / 100.0) * Math.max(0, t)) * 100) / 100;
-      if (out) out.textContent = val.toFixed(2);
+    function formatCurrency(val) {{
+      if (isNaN(val) || !isFinite(val)) return "$0.00";
+      return "$" + new Intl.NumberFormat("en-US", {{
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }}).format(val);
     }}
-    form.addEventListener("input", recalc);
-    form.addEventListener("change", recalc);
+    function getInputs() {{
+      var inputs = {{}};
+      var elements = form.querySelectorAll("input[type='number'], select");
+      for (var i = 0; i < elements.length; i++) {{
+        var el = elements[i];
+        var name = (el.name || el.id || "").replace(/^input-/, "");
+        if (!name) continue;
+        var v = parseFloat(el.value);
+        inputs[name] = isNaN(v) ? 0 : Math.max(0, v);
+      }}
+      return inputs;
+    }}
+    function syncDualControls(e) {{
+      var target = e && e.target;
+      if (!target) return;
+      if (target.type === "range") {{
+        var numEl = document.getElementById(target.id.replace(/^range-/, "input-"));
+        if (numEl) numEl.value = target.value;
+      }} else if (target.type === "number") {{
+        var rangeEl = document.getElementById(target.id.replace(/^input-/, "range-"));
+        if (rangeEl) rangeEl.value = target.value;
+      }}
+    }}
+    var debounceTimer = null;
+    function updateQueryParams(inputs, immediate) {{
+      if (!window.history || !window.history.replaceState) return;
+      if (debounceTimer) {{
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }}
+      function _applyQueryParams() {{
+        try {{
+          var url = new URL(window.location.href);
+          for (var k in inputs) {{
+            url.searchParams.set(k, inputs[k]);
+          }}
+          window.history.replaceState({{}}, "", url.toString());
+        }} catch (err) {{}}
+      }}
+      if (immediate) {{
+        _applyQueryParams();
+        return;
+      }}
+      debounceTimer = setTimeout(_applyQueryParams, 150);
+    }}
+    function syncInputsFromParams() {{
+      if (!window.location || !window.location.search) return;
+      try {{
+        var params = new URLSearchParams(window.location.search);
+        var elements = form.querySelectorAll("input, select");
+        for (var i = 0; i < elements.length; i++) {{
+          var el = elements[i];
+          var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
+          if (params.has(name)) {{
+            el.value = params.get(name);
+          }}
+        }}
+      }} catch (err) {{}}
+    }}
+    function recalc(immediate, skipUrlSync) {{
+      var inputs = getInputs();
+      if (!skipUrlSync) {{
+        updateQueryParams(inputs, immediate);
+      }} else if (debounceTimer) {{
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }}
+      var b = inputs.bond_amount || 0;
+      var r = inputs.credit_tier_rate_pct || 0;
+      var t = inputs.term_years || 0;
+      var val = Math.round(((Math.max(0, b) * Math.max(0, r) / 100.0) * Math.max(0, t)) * 100) / 100;
+      var formattedVal = formatCurrency(val);
+      if (out) out.textContent = formattedVal;
+      var wpHeadline = document.getElementById("workpaper-preview-headline");
+      if (wpHeadline) wpHeadline.textContent = formattedVal;
+      var checkoutIds = ["btn-workpaper-quick-checkout", "btn-workpaper-full-checkout"];
+      for (var ci = 0; ci < checkoutIds.length; ci++) {{
+        var ckEl = document.getElementById(checkoutIds[ci]);
+        if (ckEl && ckEl.href) {{
+          try {{
+            var ckUrl = new URL(ckEl.href, window.location.origin);
+            ckUrl.searchParams.set("amount", String(Math.round(val)));
+            for (var ik in inputs) {{
+              ckUrl.searchParams.set(ik, String(inputs[ik]));
+            }}
+            ckEl.href = ckUrl.pathname + ckUrl.search;
+          }} catch (err) {{}}
+        }}
+      }}
+    }}
+    syncInputsFromParams();
+    recalc(false, true);
+    window.addEventListener("popstate", function() {{
+      syncInputsFromParams();
+      recalc(false, true);
+    }});
+    form.addEventListener("input", function(e) {{
+      syncDualControls(e);
+      recalc(false, false);
+    }});
+    form.addEventListener("change", function(e) {{
+      syncDualControls(e);
+      recalc(false, false);
+    }});
+    form.addEventListener("submit", function(e) {{
+      e.preventDefault();
+      recalc(true, false);
+      return false;
+    }});
   }})();
   </script>
 </body>

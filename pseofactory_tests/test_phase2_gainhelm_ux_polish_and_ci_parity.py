@@ -125,8 +125,9 @@ def test_gainhelm_core_tools_ux_polish_partner_cards_serp_and_overlay_pruning(tm
             assert "CMMC + HITRUST" not in html, f"Generic workbench fallback preset on {slug}"
 
     iso_html = (dist / "tools" / "iso-27001-certification-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    assert "Primary Jurisdiction / Operating Region" in iso_html
-    assert '<option value="EU">' in iso_html and '<option value="US" selected>' in iso_html
+    assert 'id="workpaper-unlock-card"' in iso_html
+    assert 'data-offer-sku="gh_hipaa_iso27001_governance_kit"' in iso_html
+    assert 'data-offer-price="29"' in iso_html
 
     for intl_slug in (
         "dora-ict-third-party-risk-compliance-cost-calculator",
@@ -134,10 +135,10 @@ def test_gainhelm_core_tools_ux_polish_partner_cards_serp_and_overlay_pruning(tm
         "nis2-directive-compliance-cost-calculator",
         "gdpr-article-83-fine-exposure-calculator",
     ):
-        intake = render_partner_quote_intake_html(intl_slug, property_id="gainhelm")
-        assert "Primary Jurisdiction / Operating Region" in intake
-        assert '<option value="EU" selected>' in intake
-        assert "Organization Operating State (US)" not in intake
+        assert render_partner_quote_intake_html(intl_slug, property_id="gainhelm") == ""
+        intl_wp = synthesize_personalized_audit_workpaper("gainhelm", intl_slug, mode="free_playbook")
+        assert intl_wp["state"] == "EU"
+        assert intl_wp["statutory_data_pack"]["framework_jurisdiction"] == "EU"
 
     dora_cards = _build_partners_matrix_section("dora-ict-third-party-risk-compliance-cost-calculator")
     euai_cards = _build_partners_matrix_section("eu-ai-act-high-risk-conformity-assessment-cost-calculator")
@@ -207,20 +208,29 @@ def test_gainhelm_datapack_edge_metadata_and_ci_temp_build_parity(tmp_path: Path
 
     node_script = f"""
 import {{ onRequestGet, onRequestPost }} from {json.dumps(edge_file.as_uri())};
-const r1 = await onRequestGet({{
+const r1FreeDp = await onRequestGet({{
   request: new Request("https://gainhelm.com/api/lead-capture?playbook=1&format=datapack&tool_slug={dora_slug}"),
   env: {{}}
 }});
+if (r1FreeDp.status !== 402) throw new Error("expected 402 paywall on free format=datapack, got " + r1FreeDp.status);
+
+const r1 = await onRequestGet({{
+  request: new Request("https://gainhelm.com/api/lead-capture?playbook=1&format=json&tool_slug={dora_slug}"),
+  env: {{}}
+}});
+if (r1.status !== 200) throw new Error("expected 200 on playbook json, got " + r1.status);
 const d1 = await r1.json();
-if (d1.compliance_cycle_year !== "2026" || "effective_tax_year" in d1) throw new Error("cycle mismatch");
-if (d1.framework_jurisdiction !== "EU" || d1.modeled_scenario_summary.state !== "EU") throw new Error("eu state mismatch");
+const dp1 = d1.statutory_data_pack || {{}};
+if (dp1.compliance_cycle_year !== "2026" || "effective_tax_year" in d1 || "effective_tax_year" in dp1) throw new Error("cycle mismatch");
+if (dp1.framework_jurisdiction !== "EU" || dp1.modeled_scenario_summary.state !== "EU") throw new Error("eu state mismatch");
 
 const r2 = await onRequestGet({{
-  request: new Request("https://gainhelm.com/api/lead-capture?playbook=1&format=datapack&tool_slug=soc-2-audit-cost-calculator&state=WA"),
+  request: new Request("https://gainhelm.com/api/lead-capture?playbook=1&format=json&tool_slug=soc-2-audit-cost-calculator&state=WA"),
   env: {{}}
 }});
 const d2 = await r2.json();
-if (d2.modeled_scenario_summary.state !== "WA") throw new Error("explicit override lost");
+const dp2 = d2.statutory_data_pack || {{}};
+if (dp2.modeled_scenario_summary.state !== "WA") throw new Error("explicit override lost");
 
 const r3 = await onRequestPost({{
   request: new Request("https://gainhelm.com/api/lead-capture", {{
@@ -548,8 +558,8 @@ def test_gainhelm_legacy_de_baseline_retrofit_healing_and_idempotency() -> None:
         "Statutory Bracket",
     ):
         assert stale not in pass1, f"Stale copy {stale!r} survived retrofit pass 1"
-    assert "Pentest Baseline" in pass1
-    assert "gainhelm_framework_isolation" in rep1
+    assert 'class="pro-hook-card"' not in pass1
+    assert "compliant_intent_monetization" in rep1
     assert pass2 == pass1
     assert rep2 == []
 
@@ -618,14 +628,12 @@ def test_gainhelm_full_page_chromium_script1_and_script2_parity(tmp_path: Path) 
 
                 def _assert_parity(stage: str) -> tuple[str, str, str]:
                     kpi_txt = page.locator(f"#{kpi_id}").inner_text().strip()
-                    hb_txt = page.locator("#hero-range-baseline").inner_text().strip()
                     ov_txt = page.locator(".output-value:not(.overlay-preset-readout)").first.inner_text().strip()
                     sav_txt = page.locator("#metric-soc2_automation_savings").inner_text().strip()
                     sub_txt = page.locator("#meter-sub-val").inner_text().strip()
                     assert sav_txt == f"{sub_txt}/yr", f"[{slug}:{stage}] {sav_txt!r} != {sub_txt!r}/yr"
-                    assert abs(_parse_num(hb_txt) - _parse_num(kpi_txt)) < 1e-4, f"[{slug}:{stage}] {hb_txt!r} != {kpi_txt!r}"
                     assert abs(_parse_num(ov_txt) - _parse_num(kpi_txt)) < 1e-4, f"[{slug}:{stage}] {ov_txt!r} != {kpi_txt!r}"
-                    return kpi_txt, hb_txt, sav_txt
+                    return kpi_txt, ov_txt, sav_txt
 
                 _assert_parity("init")
                 presets = page.locator(".calc-switcher-btn")
@@ -650,7 +658,7 @@ def test_gainhelm_full_page_chromium_script1_and_script2_parity(tmp_path: Path) 
                 after_submit = _assert_parity("submit_400")
                 if slug == "iso-27001-certification-cost-calculator":
                     assert after_submit[0] == "$114,077.92"
-                    assert after_submit[1] == "$114,077.92"
+                    assert after_submit[1] == "114,077.92"
                 if slug == "nist-800-171-sprs-score-calculator":
                     assert after_submit[0] == "42 pts"
                     assert after_submit[1] == "42"

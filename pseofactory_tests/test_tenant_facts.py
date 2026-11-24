@@ -51,9 +51,11 @@ def test_profithelm_pricing_and_features():
 
     # Pricing verification
     assert store.verify_price("profithelm", 0.0) is True
-    assert store.verify_price("profithelm", 49.0) is True
-    assert store.verify_price("profithelm", 199.0) is True
-    assert store.verify_price("profithelm", 29.0) is False
+    assert store.verify_price("profithelm", 15.0) is True
+    assert store.verify_price("profithelm", 29.0) is True
+    assert store.verify_price("profithelm", 299.0) is True
+    assert store.verify_price("profithelm", 49.0) is False
+    assert store.verify_price("profithelm", 199.0) is False
     assert store.verify_price("profithelm", 19.0) is False
 
     # Feature verification
@@ -74,9 +76,12 @@ def test_prexvo_pricing_and_features():
 
     # Pricing verification
     assert store.verify_price("prexvo", 0.0) is True
+    assert store.verify_price("prexvo", 9.0) is True
     assert store.verify_price("prexvo", 19.0) is True
+    assert store.verify_price("prexvo", 299.0) is True
     assert store.verify_price("prexvo", 49.0) is False
     assert store.verify_price("prexvo", 199.0) is False
+    assert store.verify_price("prexvo", 29.0) is False
 
     # Feature verification
     assert store.verify_feature("prexvo", "RAP vs IBR Modeling") is True
@@ -196,15 +201,15 @@ def test_pricing_contradictions_detection():
     # Hallucinated ProfitHelm price
     valid, violations = store.verify_claim(
         "profithelm",
-        "Upgrade to ProfitHelm Pro for only $29/mo today.",
+        "Upgrade to ProfitHelm Pro for only $49/mo today.",
     )
     assert valid is False
-    assert any("$29" in v for v in violations)
+    assert any("49" in v for v in violations)
 
     # Clean ProfitHelm price
     valid, violations = store.verify_claim(
         "profithelm",
-        "ProfitHelm Pro is available at $49/mo with full Section 179 modeling.",
+        "ProfitHelm Pro is available at $29/mo with full Section 179 modeling.",
     )
     assert valid is True
     assert len(violations) == 0

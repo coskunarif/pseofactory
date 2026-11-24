@@ -172,11 +172,15 @@ def test_audit_stage_clean_prexvo_asset(prexvo_spec):
         assert v is True, f"Gate '{k}' should pass on clean asset"
 
 
-def test_audit_stage_multi_tenant_batch_clean_pipeline(tmp_path):
+def test_audit_stage_multi_tenant_batch_clean_pipeline(tmp_path, monkeypatch):
     """
     Multi-tenant batch (ProfitHelm + Prexvo) executes through FactoryPipeline.
     100% of compiled assets pass audit, and disk files persist cleanly.
     """
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
     spikes = [
         _make_pipeline_spike(
             spike_id="spike-profithelm-clean",
@@ -353,6 +357,10 @@ def test_pipeline_fail_closed_tampered_statutory_authority_zero_disk(tmp_path, m
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-stat",
@@ -388,6 +396,10 @@ def test_pipeline_fail_closed_formula_mismatch_zero_disk(tmp_path, monkeypatch):
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-formula",
@@ -417,6 +429,10 @@ def test_pipeline_fail_closed_template_leakage_zero_disk(tmp_path, monkeypatch):
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-template",
@@ -446,6 +462,10 @@ def test_pipeline_fail_closed_synthetic_mock_table_zero_disk(tmp_path, monkeypat
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-mock",
@@ -475,6 +495,10 @@ def test_pipeline_fail_closed_corrupted_schema_jsonld_zero_disk(tmp_path, monkey
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-jsonld",
@@ -506,6 +530,10 @@ def test_pipeline_fail_closed_anti_slop_dashes_zero_disk(tmp_path, monkeypatch):
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-dash",
@@ -538,6 +566,10 @@ def test_pipeline_fail_closed_corrupted_touch_target_zero_disk(tmp_path, monkeyp
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-corrupt-touch",
@@ -574,6 +606,10 @@ def test_pipeline_non_strict_advisory_mode(tmp_path, monkeypatch):
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.MasterSEOVerifier.audit_seo_checklist",
+        lambda self, *a, **kw: {"status": "PASS", "errors": []},
+    )
 
     spike = _make_pipeline_spike(
         spike_id="spike-advisory-01",

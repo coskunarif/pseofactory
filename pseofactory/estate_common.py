@@ -1342,17 +1342,15 @@ def build_partners_matrix_section(
             "</div>"
         )
     if not cards:
-        return (
-            '\n    <section class="partners-section" data-mechanic="compliant_intent_monetization">\n'
-            f'      <h2 class="section-title">{html.escape(section_title)}</h2>\n'
-            f'      <p class="partners-desc">{html.escape(section_desc_empty)}</p>\n'
-            "    </section>"
-        )
+        return ""
+    # Step 3: single compact contextual referral section rendered ONLY when live partner(s) exist.
+    ftc_default = "FTC 16 CFR Part 255 Disclosure: We may earn a referral fee from matched partners at no additional cost to you."
     return (
-        '\n    <section class="partners-section" data-mechanic="compliant_intent_monetization">\n'
-        f'      <h2 class="section-title">{html.escape(section_title)}</h2>\n'
+        '\n    <section class="contextual-referral-card partners-section card" data-mechanic="compliant_intent_monetization">\n'
+        f'      <h3 class="section-title">{html.escape(section_title)}</h3>\n'
         f'      <p class="partners-desc">{html.escape(section_desc_with_cards)}</p>\n'
-        f'      <div class="card-grid">{"".join(cards)}</div>\n'
+        f'      <div class="card-grid">{"".join(cards[:2])}</div>\n'
+        f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 8px; margin-bottom: 0;">{ftc_default}</p>\n'
         "    </section>"
     )
 
@@ -1398,14 +1396,7 @@ def build_partner_cta(
         if live_fallback is not None:
             ref_partner = live_fallback
         else:
-            return (
-                '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-                '      <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
-                f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">{html.escape(fallback_badge)}</span>\n'
-                f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html.escape(fallback_title)}</h3>\n'
-                f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html.escape(fallback_body)}</p>\n'
-                "      </div>\n    </section>"
-            )
+            return ""
     p_key = ref_partner.key
     ctx_copy = resolve_contextual_partner_offer_copy(
         partner_key=p_key,
@@ -1413,15 +1404,18 @@ def build_partner_cta(
         slug=slug,
         property_id=getattr(ref_partner, "property_id", "profithelm"),
     )
+    ftc_default = "FTC 16 CFR Part 255 Disclosure: We may earn a referral fee when you engage a matched partner at no additional cost to you."
     return (
-        '\n    <section class="refinance-partner-section" data-mechanic="compliant_intent_monetization" style="margin: 1.5rem 0;">\n'
-        '      <div class="partner-card" style="padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">\n'
+        f'\n    <section class="contextual-referral-card refinance-partner-section card" data-mechanic="compliant_intent_monetization" data-partner="{html.escape(p_key)}" style="margin: 1.25rem 0;">\n'
+        '      <div class="partner-card">\n'
         f'        <span class="partner-badge" style="font-size: 0.75rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase;">{html.escape(ctx_copy.get("badge") or ref_partner.badge or default_featured_badge)}</span>\n'
         f'        <h3 class="partner-title" style="margin-top: 0.25rem; font-size: 1.125rem;">{html.escape(ctx_copy.get("name") or ref_partner.name)}</h3>\n'
-        f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 1rem 0;">{html.escape(ctx_copy.get("description") or ref_partner.description)}</p>\n'
-        f'        <a href="/r/{html.escape(p_key)}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-cta touch-target" data-partner="{html.escape(p_key)}" data-cta-slot="calculator_primary_cta" style="display: inline-block; padding: 0.625rem 1.25rem; background: var(--brand-primary); color: #fff; border-radius: 6px; text-decoration: none; font-weight: 600;">\n'
+        f'        <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0.5rem 0 0.75rem 0;">{html.escape(ctx_copy.get("description") or ref_partner.description)}</p>\n'
+        f'        <a href="/r/{html.escape(p_key)}" target="_blank" rel="noopener sponsored nofollow" class="partner-btn btn-secondary touch-target" data-partner="{html.escape(p_key)}" data-cta-slot="contextual_referral">\n'
         f'          {html.escape(ctx_copy.get("cta_text") or ref_partner.cta_text or default_cta_text)} &rarr;\n'
-        "        </a>\n      </div>\n    </section>"
+        "        </a>\n"
+        f'        <p class="affiliate-disclosure" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.625rem; margin-bottom: 0;">{ftc_default}</p>\n'
+        "      </div>\n    </section>"
     )
 
 
@@ -1454,38 +1448,16 @@ def build_retro_reflection_block(
         r = round(float(v), 2)
         return f"{r:,.0f}" if r.is_integer() else f"{r:,.2f}"
 
-    base_href = canonical_url.split("?")[0]
-    preset_links = []
-    for label, mult, p_key in (("Conservative (0.8x)", 0.8, "conservative"), ("Baseline (1.0x)", 1.0, "baseline"), ("Aggressive (1.2x)", 1.2, "aggressive")):
-        params = [
-            f"{k}={int(round(float(v) * mult, 2)) if round(float(v) * mult, 2).is_integer() else round(float(v) * mult, 2)}"
-            for k, v in spec_payload["inputs"].items()
-            if isinstance(v, (int, float))
-        ]
-        href = f"{base_href}?{'&amp;'.join(params)}" if params else base_href
-        preset_links.append(
-            f'        <a href="{href}" data-preset="{p_key}" class="touch-target scenario-preset-link" '
-            'style="display: inline-flex; align-items: center; justify-content: center; '
-            'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
-            f'text-decoration: none; font-size: 14px; font-weight: 600;">{label}</a>'
-        )
+    _ = canonical_url
     manifest_json = json.dumps(spec_payload, ensure_ascii=False, indent=2)
     return f"""
-    <section class="multi-dataset-join" data-statutory-source="{stat_auth}" data-economic-source="{econ_ds}" style="margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">
+    <section class="multi-dataset-join" data-statutory-source="{stat_auth}" data-economic-source="{econ_ds}" style="margin: 1.25rem 0; padding: 1rem 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">
       <h2 class="section-title">Dual Dataset Provenance &amp; Statutory Corroboration</h2>
       <p>Primary statutory authority: <strong>{stat_auth}</strong> defines {html.escape(statutory_detail_label)}.</p>
       <p>Empirical economic dataset: <strong>{econ_ds}</strong> provides {html.escape(economic_detail_label)}.</p>
     </section>
 
-    <section class="scenario-presets-section" style="margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">
-      <h2 class="section-title">Parameterized Scenario Presets &amp; Baseline Verification</h2>
-      <p>Verified baseline model calculation output: <strong class="output-value" data-baseline-output="{pub_out}">{display_out}</strong>. Select a parameterized preset below:</p>
-      <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;">
-{chr(10).join(preset_links)}
-      </div>
-    </section>
-
-    <section class="comparison-table-section" data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid" style="margin: 1.5rem 0;">
+    <section class="comparison-table-section" data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid" style="margin: 1.25rem 0;">
       <h2 class="section-title">Sensitivity Scenario Modeling (5-Point SSR Matrix)</h2>
       <p class="section-lead">SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>
       <div class="table-wrap">

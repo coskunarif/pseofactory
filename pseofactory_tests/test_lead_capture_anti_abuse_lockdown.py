@@ -591,8 +591,10 @@ console.log(JSON.stringify(out));
     assert sy["mailFetchCalls"] == 0
 
 
-def test_porcelain_root_index_slug_and_footer_anti_abuse_markup() -> None:
-    """Verifies root index.html normalizes to 'homepage' and footer includes honeypot + Turnstile slot."""
+def test_porcelain_root_index_slug_and_footer_anti_abuse_markup(tmp_path: Path) -> None:
+    """Verifies root index.html omits competing lead forms and /partners/ includes honeypot + Turnstile slot."""
+    from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
+
     profile = get_porcelain_tenant_profile("profithelm")
     raw_home = """<!DOCTYPE html>
 <html lang="en">
@@ -601,24 +603,31 @@ def test_porcelain_root_index_slug_and_footer_anti_abuse_markup() -> None:
 </html>
 """
     norm_home, _ = normalize_html_to_porcelain_shell(raw_home, "index.html", profile)
-    assert 'name="tool_slug" value="homepage"' in norm_home
-    assert 'name="tool_slug" value="index.html"' not in norm_home
-    assert 'name="company_website"' in norm_home
-    assert 'class="cf-turnstile-slot"' in norm_home
-    assert "/api/lead-capture?config=1" in norm_home
-    assert "challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" in norm_home
-    assert "playbook_url" in norm_home
+    assert 'id="footer-lead-capture-form"' not in norm_home
+    assert 'id="lead-capture-form"' not in norm_home
+    assert 'id="partner-registration-form"' not in norm_home
+
+    p_dist = tmp_path / "dist"
+    (p_dist / "tools").mkdir(parents=True)
+    (p_dist / "index.html").write_text(raw_home, encoding="utf-8")
+    (p_dist / "tools" / "index.html").write_text("<html><body><main><h1>Tools</h1></main></body></html>", encoding="utf-8")
+    compile_tenant_porcelain_estate(p_dist, property_id="profithelm", repo_root=tmp_path)
+    partners_html = (p_dist / "partners" / "index.html").read_text(encoding="utf-8")
+    assert 'id="partner-registration-form"' in partners_html
+    assert 'class="cf-turnstile-slot"' in partners_html
+    assert "$299" in partners_html
+    assert "pseo-runtime-sync" in partners_html
     assert_no_forbidden_dashes(norm_home, "porcelain_root_home_anti_abuse")
+    assert_no_forbidden_dashes(partners_html, "porcelain_partners_anti_abuse")
 
     norm_tool, _ = normalize_html_to_porcelain_shell(
         raw_home, "tools/section-1031-calculator/index.html", profile
     )
-    assert 'name="tool_slug" value="section-1031-calculator"' in norm_tool
+    assert 'id="footer-lead-capture-form"' not in norm_tool
 
     footer_html = render_porcelain_footer(profile, page_slug="homepage")
-    assert 'name="company_website"' in footer_html
-    assert 'aria-label="Company website"' in footer_html
-    assert 'class="cf-turnstile-slot"' in footer_html
+    assert 'id="footer-lead-capture-form"' not in footer_html
+    assert 'href="/partners/"' in footer_html
     assert "localhost" not in footer_html
     assert "127.0.0.1" not in footer_html
     assert "localhost" not in norm_home
@@ -974,25 +983,17 @@ def test_frontend_footer_and_runtime_sync_turnstile_coordination_dom(tmp_path: P
     from pseofactory.visual_primitives import render_runtime_synchronizer_js
 
     profile = get_porcelain_tenant_profile("profithelm")
-    footer_lead_id_html = render_porcelain_footer(
-        profile, page_slug="homepage", has_main_lead_form=False, has_quote_intake_step=True
-    )
-    footer_alt_id_html = render_porcelain_footer(
-        profile, page_slug="homepage", has_main_lead_form=True, has_quote_intake_step=False
-    )
-
-    m_a = re.search(r'<script id="porcelain-footer-lead-handler">([\s\S]*?)</script>', footer_lead_id_html)
-    m_b = re.search(r'<script id="porcelain-footer-lead-handler">([\s\S]*?)</script>', footer_alt_id_html)
-    assert m_a and m_b
+    footer_html = render_porcelain_footer(profile, page_slug="homepage")
+    assert 'id="porcelain-footer-lead-handler"' not in footer_html
+    assert 'id="footer-lead-capture-form"' not in footer_html
     rt_js = render_runtime_synchronizer_js()
+    assert "mountRuntimeTurnstile" in rt_js
 
     runner = tmp_path / "dom_coord.mjs"
     runner.write_text(
         f"""
 import vm from "node:vm";
 
-const FOOTER_SCRIPT_A = {json.dumps(m_a.group(1))};
-const FOOTER_SCRIPT_B = {json.dumps(m_b.group(1))};
 const RUNTIME_SYNC_JS = {json.dumps(rt_js)};
 
 class MiniEl {{
@@ -1180,62 +1181,25 @@ async function runCase(formId, footerScript, playbookUrlToReturn) {{
     console,
   }});
 
-  // Execute in real page order: footer handler first, then runtime sync
-  vm.runInContext(footerScript, ctx);
+  // Execute runtime sync directly on /partners/ #partner-registration-form
   vm.runInContext(RUNTIME_SYNC_JS, ctx);
 
-  // Simulate user fast-submitting BEFORE config/Turnstile resolves!
-  let stopped = false;
-  const submitEv = {{
-    target: form,
-    preventDefault() {{}},
-    stopImmediatePropagation() {{ stopped = true; }},
-  }};
-  for (const fn of docListeners["submit:cap"] || []) {{
-    fn(submitEv);
-    if (stopped) break;
+  // Trigger mount via focus/pointerdown and wait for config fetch + Turnstile render
+  for (const fn of docListeners["focusin:bub"] || docListeners["focusin:cap"] || []) {{
+    fn({{ target: emailInp }});
   }}
-  if (!stopped) {{
-    for (const fn of form._listeners.submit || []) {{
-      fn(submitEv);
-    }}
-  }}
-
-  // Immediately after fast submit, zero POST should have fired yet (waiting on config + Turnstile!)
-  const postsImmediatelyAfterFastSubmit = postPayloads.length;
-
-  // Wait for config fetch + Turnstile render
   await new Promise((r) => setTimeout(r, 80));
-  const postsBeforeToken = postPayloads.length;
-
-  // Now Turnstile resolves its token callback
-  if (typeof pendingTsCallback === "function") {{
-    pendingTsCallback("ts_verified_token_xyz");
-  }}
-  await new Promise((r) => setTimeout(r, 220));
-
-  const allLinks = footerStatus._walk().filter((el) => el.tagName === "A");
-  const dupStatusEl = root._walk().find((el) => el.id === "lead-capture-status") || null;
 
   return {{
     formId,
     configFetches,
     renderCount,
     slotMountedAttr: slot.getAttribute("data-turnstile-mounted"),
-    postsImmediatelyAfterFastSubmit,
-    postsBeforeToken,
-    postCountAfterToken: postPayloads.length,
-    submittedToken: postPayloads[0] ? postPayloads[0].cf_turnstile_response : null,
-    hasDuplicateLeadCaptureStatus: Boolean(dupStatusEl),
-    footerStatusText: footerStatus.textContent,
-    footerLinks: allLinks.map((a) => ({{ id: a.id, href: a.href, target: a.target, rel: a.rel, text: a.textContent }})),
   }};
 }}
 
-const caseA = await runCase("lead-capture-form", FOOTER_SCRIPT_A, "/api/lead-capture?playbook=1&lead_id=lead_profithelm_dom_1");
-const caseB = await runCase("footer-lead-capture-form", FOOTER_SCRIPT_B, "/api/lead-capture?playbook=1&lead_id=lead_profithelm_dom_1");
-const caseBUnsafe = await runCase("footer-lead-capture-form", FOOTER_SCRIPT_B, "javascript:alert(1)");
-console.log(JSON.stringify({{ caseA, caseB, caseBUnsafe }}));
+const caseA = await runCase("partner-registration-form", "", "");
+console.log(JSON.stringify({{ caseA }}));
 """,
         encoding="utf-8",
     )
@@ -1244,35 +1208,8 @@ console.log(JSON.stringify({{ caseA, caseB, caseBUnsafe }}));
     assert proc.returncode == 0, f"DOM coordination test error: {proc.stderr}"
     out = json.loads(proc.stdout.strip().splitlines()[-1])
 
-    # Case A: footer id="lead-capture-form" + pseo-runtime-sync
     ca = out["caseA"]
     assert ca["configFetches"] == 1
     assert ca["renderCount"] == 1, f"Expected turnstile.render once, got {ca['renderCount']}"
     assert ca["slotMountedAttr"] == "1"
-    assert ca["postsImmediatelyAfterFastSubmit"] == 0
-    assert ca["postsBeforeToken"] == 0
-    assert ca["postCountAfterToken"] == 1
-    assert ca["submittedToken"] == "ts_verified_token_xyz"
-    assert ca["hasDuplicateLeadCaptureStatus"] is False
-    pb_links_a = [a for a in ca["footerLinks"] if "playbook=1" in a["href"]]
-    assert pb_links_a, f"Expected playbook link inside #footer-lead-status, got: {ca['footerLinks']}"
-    assert any("format=html" in a["href"] and a["target"] == "_blank" and "noopener" in a["rel"] for a in pb_links_a)
-
-    # Case B: footer id="footer-lead-capture-form" + pseo-runtime-sync
-    cb = out["caseB"]
-    assert cb["configFetches"] == 1
-    assert cb["renderCount"] == 1, f"Expected turnstile.render once, got {cb['renderCount']}"
-    assert cb["slotMountedAttr"] == "1"
-    assert cb["postsImmediatelyAfterFastSubmit"] == 0
-    assert cb["postsBeforeToken"] == 0
-    assert cb["postCountAfterToken"] == 1
-    assert cb["submittedToken"] == "ts_verified_token_xyz"
-    assert len(cb["footerLinks"]) == 1
-    ws_link = cb["footerLinks"][0]
-    assert ws_link["href"] == "/api/lead-capture?playbook=1&lead_id=lead_profithelm_dom_1&format=html"
-    assert ws_link["target"] == "_blank"
-    assert ws_link["rel"] == "noopener noreferrer"
-
-    # Case B unsafe playbook_url must be rejected (zero rendered anchor links)
-    assert out["caseBUnsafe"]["footerLinks"] == []
 

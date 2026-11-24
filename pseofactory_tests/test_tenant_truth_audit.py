@@ -94,11 +94,11 @@ def test_gate_11_clean_assets_pass(clean_profithelm_spec, clean_prexvo_spec):
 
 def test_gate_11_hallucinated_pricing_rejected(clean_profithelm_spec, clean_prexvo_spec):
     """Hallucinated pricing claims contradict tenant pricing tiers and fail Gate 11."""
-    # ProfitHelm Pro claiming $29/mo instead of $49/mo
+    # ProfitHelm Pro claiming hallucinated $79/mo instead of $15/$29/mo
     res_ph = compile_high_effort_page(clean_profithelm_spec)
     dirty_html_ph = res_ph["html"].replace(
         "<h1>",
-        "<h1><!-- Pricing: $29/mo Pro Tier -->",
+        "<h1><!-- Pricing: $79/mo Pro Tier -->",
     )
     report_ph = audit_rendered_asset(
         html_content=dirty_html_ph,
@@ -107,7 +107,7 @@ def test_gate_11_hallucinated_pricing_rejected(clean_profithelm_spec, clean_prex
     )
     assert report_ph.passed is False
     assert report_ph.gate_results.get("tenant_fact_parity") is False
-    assert any("unverified price claim '$29.0'" in v.lower() for v in report_ph.violations)
+    assert any("unverified price claim '$79.0'" in v.lower() for v in report_ph.violations)
 
     # Prexvo Pro claiming $49/mo instead of $19/mo
     res_px = compile_high_effort_page(clean_prexvo_spec)
@@ -226,7 +226,7 @@ def test_asset_integrity_evaluator_flags_truth_contradiction(tmp_path):
 
     dirty_file = dist_dir / "bad_price.html"
     dirty_file.write_text(
-        "<html><body><h1>Pricing</h1><p>ProfitHelm Pro is only $29/mo!</p></body></html>",
+        "<html><body><h1>Pricing</h1><p>ProfitHelm Pro is only $79/mo!</p></body></html>",
         encoding="utf-8",
     )
 
@@ -235,7 +235,7 @@ def test_asset_integrity_evaluator_flags_truth_contradiction(tmp_path):
 
     assert rec is not None
     assert DriftReason.TRUTH_CONTRADICTION in rec.reasons
-    assert any("unverified price claim '$29.0'" in d.lower() for d in rec.details)
+    assert any("unverified price claim '$79.0'" in d.lower() for d in rec.details)
 
 
 # =====================================================================

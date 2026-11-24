@@ -509,10 +509,7 @@ def test_compiler_embeds_statutory_matrix_and_interactive_workbench_assets(tmp_p
     assert "statutory_economic_matrix" in manifest
     assert manifest["statutory_economic_matrix"]["series_count"] >= 1
     assert manifest["corroborating_sources"] == ["statutory_economic_dataset", "google_suggest"]
-    assert 'id="multi-year-cliff-visualizer"' in html_out
-    assert 'id="stateful-scenario-comparator"' in html_out
-    assert 'id="saveable-decision-blueprint"' in html_out
-    assert "updateInteractiveCliffAndComparator" in html_out
+    assert 'id="serp-incumbent-depth-workbench"' not in html_out
     assert "collectWorkbenchBlueprintState" in html_out
     assert "emitWorkbenchEngagementBeacon" in html_out
 

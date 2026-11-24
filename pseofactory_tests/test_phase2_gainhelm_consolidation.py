@@ -262,9 +262,9 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     for fname in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml", "robots.txt", "_headers", "_redirects", "feed.xml", "llms.txt", "llms-full.txt", "catalog.json", "media-kit.json"):
         assert (dist_dir / fname).is_file(), f"Missing dist/{fname}"
 
-    # All 21 sitemap URLs resolve cleanly to built HTML files
+    # All 22 sitemap URLs (including /partners/) resolve cleanly to built HTML files
     sitemap_urls = re.findall(r"<loc>(.*?)</loc>", (dist_dir / "sitemap.xml").read_text(encoding="utf-8"))
-    assert len(sitemap_urls) == 21
+    assert len(sitemap_urls) == 22
     for url in sitemap_urls:
         rel = url.replace("https://gainhelm.com", "").strip("/")
         target_html = (dist_dir / "index.html") if not rel else (dist_dir / rel / "index.html")
@@ -355,25 +355,18 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     )
     assert wt_probe.returncode == 0, wt_probe.stderr
 
-    # SSR #serp-incumbent-depth-workbench on DORA, EU AI Act, and SEC 8-K omits SOC 2 defaults before any clicks
-    void_ssr_expected = {
-        "dora-ict-third-party-risk-compliance-cost-calculator": ("$57,590", "$82,000", "$24,410", "$433,073"),
-        "eu-ai-act-high-risk-conformity-assessment-cost-calculator": ("$59,105", "$79,000", "$19,895", "$417,229"),
-        "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": ("$104,650", "$135,000", "$30,350", "$641,688"),
-    }
-    for v_slug, expected_vals in void_ssr_expected.items():
+    # SSR calculator leaf pages on DORA, EU AI Act, and SEC 8-K omit SOC 2 defaults and carry clean 3-step funnel
+    void_ssr_expected = (
+        "dora-ict-third-party-risk-compliance-cost-calculator",
+        "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
+        "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",
+    )
+    for v_slug in void_ssr_expected:
         v_html = (dist_dir / "tools" / v_slug / "index.html").read_text(encoding="utf-8")
-        wb_m = re.search(
-            r'<section[^>]*id=["\']serp-incumbent-depth-workbench["\'][\s\S]*?</section>',
-            v_html,
-            re.IGNORECASE,
-        )
-        assert wb_m is not None, f"Missing #serp-incumbent-depth-workbench on {v_slug}"
-        wb_html = wb_m.group(0)
+        assert 'id="serp-incumbent-depth-workbench"' not in v_html, f"Retired calc-page workbench on {v_slug}"
+        assert 'id="workpaper-unlock-card"' in v_html, f"Missing #workpaper-unlock-card on {v_slug}"
         for soc2_default in ("$84,000", "$58,200", "$25,800", "$488,000", 'value="84000"', 'value="25800"'):
-            assert soc2_default not in wb_html, f"SOC 2 default {soc2_default!r} leaked in SSR workbench of {v_slug}"
-        for val_tok in expected_vals:
-            assert val_tok in wb_html, f"Expected preset-1 SSR value {val_tok!r} missing in workbench of {v_slug}"
+            assert soc2_default not in v_html, f"SOC 2 default {soc2_default!r} leaked in SSR of {v_slug}"
 
     # Headless Chromium browser check: widgets recompute cleanly, .commentary-title == 20px, zero console/page errors
     from playwright.sync_api import sync_playwright

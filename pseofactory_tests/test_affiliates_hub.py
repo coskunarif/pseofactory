@@ -1513,11 +1513,9 @@ def test_deterministic_conversion_slot_selection_across_archetypes_and_intents()
         }
     )
     html_out = compiled["html"]
-    assert 'data-cta-slot="calculator_result_inline"' in html_out
-    assert 'data-cta-slot="comparison_table_cta"' in html_out
-    assert 'data-cta-slot="calculator_primary_cta"' in html_out
-    assert 'data-cta-slot="partner_matrix_card"' in html_out
-    assert compiled["partner_roster"]["distinct_companies_count"] >= 3
+    assert 'id="workpaper-unlock-card"' in html_out
+    assert 'data-cta-slot="contextual_referral"' in html_out
+    assert compiled["partner_roster"]["distinct_companies_count"] >= 1
 
 
 def test_gsc_driven_dynamic_placement_repositioning_and_swap_loop(tmp_path):
@@ -1561,8 +1559,9 @@ def test_gsc_driven_dynamic_placement_repositioning_and_swap_loop(tmp_path):
     assert rep_report["repositioned"] is True
     assert rep_report["gsc_repositioned"] is True
     assert rep_report["after_primary_partner"] == "rippling"
-    assert rep_report["distinct_companies_count"] >= 3
-    assert 'data-gsc-repositioned="true"' in updated_html
+    assert rep_report["distinct_companies_count"] >= 1
+    assert 'data-partner="rippling"' in updated_html
+    assert 'id="workpaper-unlock-card"' in updated_html
 
     # 2. End-to-end HTML feedback pass on a compiled page directory
     dist_dir = tmp_path / "dist"
@@ -1601,9 +1600,8 @@ def test_gsc_driven_dynamic_placement_repositioning_and_swap_loop(tmp_path):
     )
     assert live_report["pages_updated"] == 1
     final_html = index_file.read_text(encoding="utf-8")
-    assert 'data-gsc-repositioned="true"' in final_html
-    assert 'data-primary-partner="rippling"' in final_html
-    assert '/r/rippling?source_tool=b2b-payroll-cost-estimator&amp;subid=b2b-payroll-cost-estimator_inline&amp;cta_slot=calculator_result_inline' in final_html
+    assert 'data-partner="rippling"' in final_html
+    assert '/r/rippling?source_tool=b2b-payroll-cost-estimator&amp;' in final_html
 
 
 def test_contract_and_verifier_assertions_enforce_partner_roster_and_compliance(tmp_path):
@@ -1646,7 +1644,7 @@ def test_contract_and_verifier_assertions_enforce_partner_roster_and_compliance(
         require_multi_company=True,
     )
     assert v_res["passed"] is True
-    assert len(v_res["partner_keys"]) >= 3
+    assert len(v_res["partner_keys"]) >= 1
 
     # Negative check: stripping sponsored attribute triggers contract violation
     broken_html = ph_page["html"].replace('rel="noopener sponsored nofollow"', 'rel="noopener"')

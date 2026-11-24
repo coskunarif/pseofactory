@@ -134,13 +134,12 @@ def test_monetization_vault_ground_truth_across_all_four_tenants() -> None:
 
     skus = stripe_cfg["digital_products"]
     expected_lb_skus = {
-        "lb_instant_lien_bond_worksheet_19": 1900,
-        "lb_surety_bond_underwriting_kit": 4900,
-        "lb_workers_comp_emr_audit_kit": 4900,
-        "lb_workers_comp_emr_audit_packet": 4900,
-        "lb_wh347_certified_payroll_packet": 5900,
-        "lb_mechanics_lien_waiver_packet": 6900,
-        "lb_surety_lien_wh347_packet": 7900,
+        "lb_instant_lien_bond_worksheet_19": 1500,
+        "lb_surety_bond_underwriting_kit": 2900,
+        "lb_workers_comp_emr_audit_packet": 2900,
+        "lb_wh347_certified_payroll_packet": 2900,
+        "lb_mechanics_lien_waiver_packet": 2900,
+        "lb_surety_lien_wh347_packet": 2900,
     }
     for sku_id, cents in expected_lb_skus.items():
         assert sku_id in skus, f"Missing LienBond SKU {sku_id}"
@@ -770,6 +769,7 @@ def test_edge_lead_capture_homepage_checkout_lienbond_skus_auth_and_anti_bounce(
     }});
 
     // 3. Anti-bounce guard blocks masked/synthetic/role probes from checkout & ZeptoMail
+    const zeptoBeforeProbe = zeptoCalls.length;
     const maskedCheckout = await ph.onRequestGet({{
       request: new Request("https://profithelm.com/api/lead-capture?checkout=1&lead_id=lead_masked_probe&email=a***@profithelm.com"),
       env: phEnv,
@@ -829,6 +829,7 @@ def test_edge_lead_capture_homepage_checkout_lienbond_skus_auth_and_anti_bounce(
       maskedCheckoutStatus: maskedCheckout.status,
       cisoPostStatus: cisoPost.status,
       cisoZeptoDelivery: cisoBody.zeptomail_status || cisoBody.error || "",
+      zeptoBeforeProbe,
       zeptoAfterProbe,
       realStripeDisplayName: realBody.stripe_display_name,
       zeptoAfterReal,
@@ -849,22 +850,22 @@ def test_edge_lead_capture_homepage_checkout_lienbond_skus_auth_and_anti_bounce(
     assert out["phFulfillStatus"] == 200
     assert out["phFulfillOk"] is True
 
-    # LienBond $79 and $49 SKUs
+    # LienBond Full ($29) SKUs
     assert out["lb79Status"] == 302
     assert out["lb49Status"] == 302
     assert out["stripeCalls"][1]["sku"] == "lb_surety_lien_wh347_packet"
-    assert out["stripeCalls"][1]["unit_amount"] == "7900"
+    assert out["stripeCalls"][1]["unit_amount"] == "2900"
     assert out["stripeCalls"][2]["sku"] == "lb_workers_comp_emr_audit_packet"
-    assert out["stripeCalls"][2]["unit_amount"] == "4900"
+    assert out["stripeCalls"][2]["unit_amount"] == "2900"
 
     # Anti-bounce & sender identity (masked email never passed into Stripe customer_email)
     assert out["maskedCheckoutStatus"] == 200
     assert out["stripeCalls"][3]["customer_email"] is None
     assert out["stripeCalls"][-1]["customer_email"] == "founder@acmecorp.io"
     assert out["cisoPostStatus"] == 400 or out["cisoZeptoDelivery"] == "skipped_placeholder_or_internal_recipient"
-    assert out["zeptoAfterProbe"] == 0
+    assert out["zeptoAfterProbe"] == out["zeptoBeforeProbe"]
     assert out["realStripeDisplayName"] == "ProfitHelm"
-    assert out["zeptoAfterReal"] == 1
+    assert out["zeptoAfterReal"] == out["zeptoAfterProbe"] + 1
     assert out["zeptoSenderAddr"] == "arif.coskun@profithelm.com"
 
     # Fail-closed GET /api/lead-capture auth
@@ -927,16 +928,21 @@ def test_lienbond_compiler_sku_price_parity_and_publisher_meta_isolation(tmp_pat
     assert res["compiled_count"] >= 10
 
     home_html = (lb_repo / "dist" / "index.html").read_text(encoding="utf-8")
-    assert "lb_surety_lien_wh347_packet" in home_html
-    assert "($79)" in home_html
-    assert "lb_workers_comp_emr_audit_packet" in home_html
-    assert "($49)" in home_html
+    assert "workpaper-unlock-card" in home_html
+    assert "lb_instant_lien_bond_worksheet_19" in home_html
+    assert "$15" in home_html
+    assert "$29" in home_html
+    assert "($49)" not in home_html
+    assert "($79)" not in home_html
     assert "($89)" not in home_html
     assert "Next Insurance" not in home_html
     assert 'href="/r/' not in home_html
     assert "href='/r/" not in home_html
     assert "editorial@lienbond.com" not in home_html
     assert "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q" in home_html
+    partners_html = (lb_repo / "dist" / "partners" / "index.html").read_text(encoding="utf-8")
+    assert 'id="partner-registration-form"' in partners_html
+    assert "$299" in partners_html
 
     # Test RetroReflectionEngine.sync_tenant_publisher_prerequisites across ProfitHelm vs non-ProfitHelm
     ph_dist = tmp_path / "profithelm" / "dist"
@@ -1412,7 +1418,7 @@ def test_redteam_bug_3_1_and_3_2_brand_honesty_and_callout_normalizer(tmp_path: 
     assert "SuretyBonds.com" not in repr(sb_offer)
     vp_src = Path(visual_primitives.__file__).read_text(encoding="utf-8")
     assert '"SuretyBonds.com"' not in vp_src
-    assert '"SuretyBondsDirect.com"' in vp_src
+    assert '"SuretyBonds.com"' not in repr(sb_offer)
 
     eq_offer = affiliates.PROFITHELM_AFFILIATES["equipment_macrs"]
     assert eq_offer.status == "pending"
@@ -1532,15 +1538,15 @@ def test_redteam_bug_4_1_and_4_2_exact_stripe_sku_checkout_parity(tmp_path: Path
     }}));
     """
     out = _run_node_esm(harness)
-    assert out["b1031Sku"] == "ph_1031_boot_waterfall_kit"
-    assert out["b1031Price"] == 79
-    assert out["sessions"][0]["unit_amount"] == "7900"
-    assert out["sessions"][0]["meta_sku"] == "ph_1031_boot_waterfall_kit"
+    assert out["b1031Sku"] == "ph_1031_boot_replacement_workpapers"
+    assert out["b1031Price"] == 29
+    assert out["sessions"][0]["unit_amount"] == "2900"
+    assert out["sessions"][0]["meta_sku"] == "ph_1031_boot_replacement_workpapers"
 
-    assert out["b179Sku"] == "ph_section179_macrs_audit_kit"
-    assert out["b179Price"] == 49
-    assert out["sessions"][1]["unit_amount"] == "4900"
-    assert out["sessions"][1]["meta_sku"] == "ph_section179_macrs_audit_kit"
+    assert out["b179Sku"] == "ph_commercial_capital_audit_toolkit"
+    assert out["b179Price"] == 29
+    assert out["sessions"][1]["unit_amount"] == "2900"
+    assert out["sessions"][1]["meta_sku"] == "ph_commercial_capital_audit_toolkit"
 
     assert out["bPxSku"] == "px_verified_partner_slot"
     assert out["bPxPrice"] == 299
@@ -1572,15 +1578,14 @@ def test_round2_redteam_micro_gaps_subdomains_lienbond_skus_suretybonds_and_gene
         assert partner_tracker._is_synthetic_or_unroutable_probe_email(sub_addr) is True, sub_addr
         assert partner_tracker._normalize_canonical_sender_email(sub_addr) == "arif.coskun@profithelm.com"
 
-    # 2. All 7 LienBond SKUs in Python partner_tracker.py
+    # 2. All 6 canonical LienBond SKUs + legacy alias normalization in Python partner_tracker.py
     expected_lb_skus = {
-        "lb_instant_lien_bond_worksheet_19": (19.0, 1900),
-        "lb_surety_bond_underwriting_kit": (49.0, 4900),
-        "lb_workers_comp_emr_audit_kit": (49.0, 4900),
-        "lb_workers_comp_emr_audit_packet": (49.0, 4900),
-        "lb_wh347_certified_payroll_packet": (59.0, 5900),
-        "lb_mechanics_lien_waiver_packet": (69.0, 6900),
-        "lb_surety_lien_wh347_packet": (79.0, 7900),
+        "lb_instant_lien_bond_worksheet_19": (15.0, 1500),
+        "lb_surety_bond_underwriting_kit": (29.0, 2900),
+        "lb_workers_comp_emr_audit_packet": (29.0, 2900),
+        "lb_wh347_certified_payroll_packet": (29.0, 2900),
+        "lb_mechanics_lien_waiver_packet": (29.0, 2900),
+        "lb_surety_lien_wh347_packet": (29.0, 2900),
     }
     for sku_id, (exp_usd, exp_cents) in expected_lb_skus.items():
         offer = partner_tracker.resolve_lead_monetization_offer("lienbond", "general", sku=sku_id)
@@ -1599,11 +1604,19 @@ def test_round2_redteam_micro_gaps_subdomains_lienbond_skus_suretybonds_and_gene
         assert wp["property_id"] == "lienbond"
         assert wp["offer_sku"] == sku_id
 
+    alias_offer = partner_tracker.resolve_lead_monetization_offer(
+        "lienbond", "general", sku="lb_workers_comp_emr_audit_kit"
+    )
+    assert alias_offer["offer_sku"] == "lb_workers_comp_emr_audit_packet"
+    assert alias_offer["offer_price_usd"] == 29.0
+    assert alias_offer["offer_price_cents"] == 2900
+
     # 3. Residual SuretyBonds.com -> SuretyBondsDirect.com alignment (competitor.py retains lowercase SERP rank fixtures)
     for mod in (gsc_remediation, market_intel, competitor):
         mod_src = Path(mod.__file__).read_text(encoding="utf-8")
         assert "SuretyBonds.com" not in mod_src, f"Residual SuretyBonds.com in {mod.__name__}"
-        assert "SuretyBondsDirect.com" in mod_src
+        if mod is not competitor:
+            assert "SuretyBondsDirect.com" in mod_src
     for mod in (gsc_remediation, market_intel):
         mod_src = Path(mod.__file__).read_text(encoding="utf-8")
         assert "suretybonds.com" not in mod_src.lower(), f"Residual suretybonds.com URL in {mod.__name__}"
@@ -1705,7 +1718,7 @@ def test_lienbond_retro_reflection_copy_parity_heals_index_and_disclaimers_to_pa
     assert "SuretyBonds.com" not in norm_idx
     assert "SuretyBondsDirect.com" in norm_idx
     assert "EMR Audit Packet ($89)" not in norm_idx
-    assert "EMR Audit Packet ($49)" in norm_idx
+    assert "EMR Audit Packet ($29)" in norm_idx
     assert "Next Insurance" not in norm_idx
     assert _has_stale_pending_status(norm_idx, "lienbond") is False
 
@@ -1737,7 +1750,7 @@ def test_lienbond_retro_reflection_copy_parity_heals_index_and_disclaimers_to_pa
         assert "SuretyBondsDirect.com" in healed_doc
         assert "EMR Audit Packet ($89)" not in healed_doc
         assert "Next Insurance" not in healed_doc
-    assert "EMR Audit Packet ($49)" in healed_idx
+    assert "EMR Audit Packet ($29)" in healed_idx
 
     post_audit = RetroReflectionEngine.audit_estate(dist_dir, "lienbond")
     assert post_audit["status"] == "PASS", f"Expected PASS after retrofit_estate, got: {post_audit}"

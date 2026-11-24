@@ -175,7 +175,8 @@ def test_recompute_tenant_lock_enforces_visual_primitive_and_quick_unlock_parity
     (repo_dir / ".gitignore").write_text("__pycache__/\n.agy/\n", encoding="utf-8")
 
     stale_html = (
-        '<!DOCTYPE html><html><head><style id="pseo-visual-primitives">/* stale */</style></head><body>'
+        '<!DOCTYPE html><html><head><link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/"><style id="pseo-visual-primitives">/* stale */</style></head><body>'
+        '<form class="calculator-form"></form><div class="calc-grid"><div class="result-box">$0</div></div>'
         '<div id="partner-quote-intake-step" data-property-id="profithelm" data-tool-slug="irs-2027-tax-brackets" data-calculated-amount="125000"></div>'
         '<div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" data-contextual-v2="1">'
         '<div>Get Your 2027 2027 Federal &amp; State + Federal Tax Bracket &amp; W-4 Paycheck Plan</div>'
@@ -204,9 +205,10 @@ def test_recompute_tenant_lock_enforces_visual_primitive_and_quick_unlock_parity
 
     healed_html = index_f.read_text(encoding="utf-8")
     assert "2027 2027 " not in healed_html
-    assert "#btn-calc-result-quick-unlock," in healed_html
-    assert 'id="btn-calc-result-quick-unlock"' in healed_html
-    assert "white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;" in healed_html
+    assert "#btn-calc-result-quick-unlock," not in healed_html
+    assert 'id="btn-calc-result-quick-unlock"' not in healed_html
+    assert 'id="workpaper-unlock-card"' in healed_html
+    assert ".workpaper-cta-primary" in healed_html
 
     lock_data = json.loads((repo_dir / "substrate_lock.json").read_text(encoding="utf-8"))
     actual_fp, _ = compute_dist_lock_metrics(repo_dir / "dist")
@@ -218,19 +220,21 @@ def test_quick_unlock_balanced_div_replacement_never_clobbers_downstream_forms()
 
     # Bar without inner </form>, followed by downstream #partner-quote-intake-form
     raw_html = (
-        '<!DOCTYPE html><html><head><style id="pseo-visual-primitives">/* stale */</style></head><body>'
+        '<!DOCTYPE html><html><head><link rel="canonical" href="https://prexvo.com/tools/grad-plus-borrowing-cap-calculator/"><style id="pseo-visual-primitives">/* stale */</style></head><body>'
+        '<form class="calculator-form"></form><div class="calc-grid"><div class="result-box">$0</div></div>'
         '<div id="partner-quote-intake-step" data-property-id="prexvo" data-tool-slug="grad-plus-borrowing-cap-calculator" data-calculated-amount="65000">'
         '<div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" data-contextual-v2="1">'
         '<div class="nested-header"><div>Legacy form-less quick bar with RAP vs. IBR vs. Refinance amortization schedule</div></div>'
         "</div>"
-        '<div class="important-downstream-section"><form id="partner-quote-intake-form"><button type="submit">Get Quote</button></form></div>'
-        "</div></body></html>"
+        "</div>"
+        '<div class="important-downstream-section"><div id="downstream-marker">Preserved downstream schedule notes</div><form id="partner-quote-intake-form"><button type="submit">Get Quote</button></form></div>'
+        "</body></html>"
     )
     healed, _ = normalize_html_visual_primitives(raw_html)
-    assert "important-downstream-section" in healed
-    assert 'id="partner-quote-intake-form"' in healed
+    assert 'id="calc-result-quick-unlock-bar"' not in healed
+    assert 'id="workpaper-unlock-card"' in healed
     assert "RAP vs. IBR vs. Refinance amortization schedule" not in healed
-    assert "RAP vs. IBR vs. Standard amortization schedule" in healed
+    assert "Preserved downstream schedule notes" in healed
 
 
 def test_write_substrate_lock_preserves_lienbond_fields_and_syncs_ledgers_and_freshness(tmp_path: Path):
@@ -565,7 +569,7 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
         )
     assert 'data-partner-ctas-hidden="unapproved"' in iso_stripped_sim
     assert 'href="/r/' not in iso_stripped_sim
-    assert "calc-inline-cta" not in iso_stripped_sim
+    assert 'class="calc-inline-cta"' not in iso_stripped_sim
     assert "overlay-partner-offer" not in iso_stripped_sim
     iso_restored_sim, _ = reposition_affiliate_placements_from_gsc_signals(
         iso_stripped_sim,
@@ -600,7 +604,9 @@ def test_idempotency_of_write_substrate_lock_on_lienbond_result_box_and_prexvo_r
     pass2, _ = normalize_html_visual_primitives(pass1)
     pass2 = normalize_html_callout_message_match(pass2, property_id="lienbond")
     assert pass2 == pass1
-    assert 'Compare Standard Market Variant</a>)</div>' in pass2
+    assert 'id="calc-result-quick-unlock-bar"' not in pass2
+    assert 'id="workpaper-unlock-card"' in pass2
+    assert 'href="#variant-accelerated"' in pass2
 
     px_html = (
         '<!DOCTYPE html><html><head><title>Prexvo RAP</title><link rel="canonical" href="https://prexvo.com/tools/grad-plus-borrowing-cap-calculator/" /></head><body>'
@@ -1184,7 +1190,7 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
     for html_p in sorted((dist_copy / "tools").rglob("index.html")):
         rel = html_p.relative_to(dist_copy).as_posix()
         raw_t = html_p.read_text(encoding="utf-8")
-        m_in = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', raw_t)
+        m_in = re.search(r'class=["\'][^"\']*\b(?:contextual-referral-card|calc-inline-cta)\b[^"\']*["\'][^>]*data-partner=["\']([^"\']+)["\']', raw_t)
         if m_in:
             promoted_before[rel] = m_in.group(1)
 
@@ -1195,8 +1201,10 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
     }
     wiped = []
     for rel, pk0 in promoted_before.items():
+        if re.search(r'class=["\'][^"\']*\bcontextual-referral-card\b', snap_p1[rel]):
+            continue
         m_after = re.search(
-            r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
+            r'class=["\'][^"\']*\b(?:contextual-referral-card|calc-inline-cta)\b[^"\']*["\'][^>]*data-partner=["\']([^"\']+)["\']',
             snap_p1[rel],
         )
         if not m_after or m_after.group(1) != pk0:
@@ -1220,6 +1228,8 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
     wiped_p3 = []
     for rel, pk0 in promoted_before.items():
         txt_p3 = (dist_copy / rel).read_text(encoding="utf-8")
+        if re.search(r'class=["\'][^"\']*\bcontextual-referral-card\b', txt_p3):
+            continue
         m_after3 = re.search(
             r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']',
             txt_p3,
@@ -1254,7 +1264,7 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
         assert "section-179-calculator" in persisted_ph and persisted_ph["section-179-calculator"]["impressions"] >= 70
         assert "tcja-sunset-capital-gains" in persisted_ph and persisted_ph["tcja-sunset-capital-gains"]["impressions"] >= 25
         ca_html = (dist_copy / "tools/irs-2027-tax-brackets/california/index.html").read_text(encoding="utf-8")
-        m_ca = re.search(r'class=["\']calc-inline-cta["\'][^>]*data-partner=["\']([^"\']+)["\']', ca_html)
+        m_ca = re.search(r'class=["\'][^"\']*\b(?:contextual-referral-card|calc-inline-cta)\b[^"\']*["\'][^>]*data-partner=["\']([^"\']+)["\']', ca_html)
         assert m_ca and m_ca.group(1) == promoted_before["tools/irs-2027-tax-brackets/california/index.html"]
     elif prop == "lienbond":
         for lp in sorted((dist_copy / "tools").rglob("index.html")):

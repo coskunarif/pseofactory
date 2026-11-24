@@ -1168,6 +1168,8 @@ def _render_calculator_widget(
         </div>
       </div>
 
+      {__import__("pseofactory.affiliates", fromlist=["build_step1_preview_controls_html"]).build_step1_preview_controls_html("gainhelm", slug_low, baseline_output=meter_bd["pay"], display_output=meter_pay_val, statutory_authority=meter_header)}
+
       <div class="calc-geo-answer-box">
         <div class="calc-geo-answer-title">Statutory Verification &amp; Audit Readiness Summary</div>
         <p class="calc-geo-answer-text">{html.escape(quick_ans)}</p>
@@ -2005,6 +2007,8 @@ def _build_home_html(benchmarks: Dict[str, Dict[str, Any]], all_tools: Sequence[
 
     {_render_calculator_widget(benchmarks, tool_slug="soc-2-audit-cost-calculator")}
 
+    {__import__("pseofactory.affiliates", fromlist=["build_workpaper_unlock_card_html"]).build_workpaper_unlock_card_html("gainhelm", "soc-2-audit-cost-calculator", topic_label="SOC 2 & Compliance Audit", statutory_authority="AICPA SSAE 18 (AT-C 205), 32 CFR Part 170, ISO/IEC 27006-1:2024", baseline_amount=benchmarks["soc2"]["total_cost"])}
+
     {_build_partners_matrix_section()}
 
     <section class="benchmark-table-section">
@@ -2316,21 +2320,19 @@ def _build_core_tool_html(
 
     <section class="tool-header hero-section">
       <h1 class="hero-title">{html.escape(tool["title"])}</h1>
+      <p class="hero-desc">{html.escape(tool["description"])}</p>
       <aside class="quick-answer">
         <p>{html.escape(quick_answer)}</p>
       </aside>
-      <p class="hero-desc">{html.escape(tool["description"])}</p>
-      <p class="hero-desc" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
-        Verified Engine: <code>{html.escape(manifest_spec["model_name"])}</code> | {html.escape(manifest_spec["statutory_authority"])}
-      </p>
     </section>
 
-    <div class="ymyl-disclaimer-banner" style="margin-bottom: 1.5rem;">
-      <p><strong>Statutory Warning:</strong> {stat_disc}</p>
-      <p><strong>Publisher Disclosure:</strong> {aff_disc}</p>
-    </div>
-
     {_render_calculator_widget(benchmarks, tool_slug=slug)}
+
+    {__import__("pseofactory.affiliates", fromlist=["build_workpaper_unlock_card_html"]).build_workpaper_unlock_card_html("gainhelm", slug, topic_label=tool["title"], statutory_authority=manifest_spec["statutory_authority"], baseline_amount=manifest_spec.get("published_output"))}
+
+    <p class="compliance-disclosure-inline" style="font-size: 0.8125rem; color: var(--text-muted); margin: 0.75rem 0 1.25rem 0;">
+      <strong>Compliance Notice:</strong> {stat_disc} {aff_disc}
+    </p>
 
     {_build_partner_cta(slug=slug)}
 

@@ -235,10 +235,10 @@ def test_tenant_fact_store_and_truth_reconciliation_for_gainhelm() -> None:
     assert ok_missing_disc is False
     assert any("disclaimer" in v.lower() or "attestation" in v.lower() for v in viol_missing_disc)
 
-    # Invalid $29 pricing fallback and SPRS 115 out-of-bounds should fail
+    # Invalid $79 pricing and SPRS 115 out-of-bounds should fail
     ok_bad_facts, viol_bad_facts = store.verify_claim(
         "gainhelm",
-        "GainHelm Pro Plan starts at $29/mo with an SPRS score of 115. "
+        "GainHelm Pro Plan starts at $79/mo with an SPRS score of 115. "
         "Informational estimates only - does not constitute formal CPA or C3PAO attestation.",
     )
     assert ok_bad_facts is False
@@ -247,7 +247,7 @@ def test_tenant_fact_store_and_truth_reconciliation_for_gainhelm() -> None:
     # Valid GainHelm claim passes
     ok_valid, viol_valid = store.verify_claim(
         "gainhelm",
-        "GainHelm Pro Plan starts at $49/mo with a maximum NIST SP 800-171 SPRS score of 110. "
+        "GainHelm Pro Plan starts at $29/mo with a maximum NIST SP 800-171 SPRS score of 110. "
         "Informational estimates only - does not constitute formal CPA or C3PAO attestation.",
     )
     assert ok_valid is True
@@ -257,7 +257,7 @@ def test_tenant_fact_store_and_truth_reconciliation_for_gainhelm() -> None:
     reconciler = TruthReconciliationEngine()
     dirty_html = (
         "<html><head><title>GainHelm Audit Signal</title></head>"
-        "<body><p>Upgrade for $29/mo to reach an SPRS score of 115.</p></body></html>"
+        "<body><p>Upgrade for $29/mo to reach an SPRS score of 115 ($95/hr).</p></body></html>"
     )
     clean_html, repairs = reconciler.reconcile_html_truth(
         dirty_html,
@@ -265,7 +265,8 @@ def test_tenant_fact_store_and_truth_reconciliation_for_gainhelm() -> None:
         rel_path="signal/index.html",
         slug="signal",
     )
-    assert "$49/mo" in clean_html
+    assert "$29/mo" in clean_html
+    assert "($121.67/hr)" in clean_html
     assert "SPRS score of 110" in clean_html
     assert "https://gainhelm.com/signal/" in clean_html
     assert "gainhelm_statutory_truth_reconciled" in repairs

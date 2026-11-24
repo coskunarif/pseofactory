@@ -100,7 +100,7 @@ def test_porcelain_shell_preserves_scripts_governance_and_tenant_substrate(tmp_p
     )
     inner_main, _ = _strip_legacy_shell_chrome(body_with_inner_header_and_playbook)
     assert "<h2>Schedule A</h2>" in inner_main
-    assert 'id="rescued-playbook"' in inner_main
+    assert 'id="rescued-playbook"' not in inner_main
 
     repo_dir = tmp_path / "lienbond"
     dist_dir = repo_dir / "dist"
@@ -172,28 +172,25 @@ def test_visual_primitives_never_clobbers_exact_calculator_math_and_fixes_hero_r
         us_jurisdictions=[("DE", "Delaware (DE)")],
         actions=actions,
     )
-    assert 'id="hero-range-baseline">$14,800</strong>' in retro
+    assert "hero-range-baseline" not in retro
 
     # GainHelm #metric-* result container must sit ABOVE .calc-inline-cta
     gh_html = (
+        '<html><head><link rel="canonical" href="https://gainhelm.com/tools/soc-2-audit-cost-calculator/"></head><body><main>'
         '<div id="partner-quote-intake-step" data-calculated-amount="74000"></div>'
         '<div class="result-box">'
         '<div class="calc-inline-cta"><a href="/r/vanta_security" data-cta-slot="calculator_result_inline">Vanta</a></div>'
         '<div class="metrics-grid" id="gainhelm-metrics"><div class="metric-card"><span id="metric-soc2_total_cost">$74,000</span></div></div>'
         '<div class="lead-capture-card">Lead</div>'
-        '</div>'
+        '</div></main></body></html>'
     )
-    gh_actions: list[str] = []
-    gh_retro = _retrofit_partner_reg_and_quick_unlock(
-        gh_html,
-        prop_id="gainhelm",
-        tool_slug="soc-2-audit-cost-calculator",
-        default_state="DE",
-        has_quote_intake=True,
-        q_tag='<div id="partner-quote-intake-step" data-calculated-amount="74000">',
-        actions=gh_actions,
-    )
-    assert gh_retro.index('id="metric-soc2_total_cost"') < gh_retro.index('class="calc-inline-cta"')
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    gh_retro, _ = normalize_html_visual_primitives(gh_html, is_tenant_porcelain=True)
+    assert 'id="metric-soc2_total_cost"' in gh_retro
+    assert 'class="calc-inline-cta"' not in gh_retro
+    assert 'id="workpaper-unlock-card"' in gh_retro
+    assert gh_retro.index('id="metric-soc2_total_cost"') < gh_retro.index('id="workpaper-unlock-card"')
 
 
 def test_gsc_remediation_compiler_and_signals_content_integrity(tmp_path: Path) -> None:

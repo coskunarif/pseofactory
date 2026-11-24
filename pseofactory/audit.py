@@ -1088,6 +1088,44 @@ def _audit_template_and_structure_gates(
     if "Statutory analysis and compliance guidelines for " in html_content:
         g8_ok = False
         violations.append("Gate 8 (Structural Components): body contains tautological overlay heading filler")
+    lower_html = html_content.lower()
+    for leaked_phrase in (
+        "client-side deserializers",
+        "prevent crawler or user state corruption",
+    ):
+        if leaked_phrase in lower_html:
+            g8_ok = False
+            violations.append(f"Gate 8 (Copy Hygiene): leaked engineering copy '{leaked_phrase}' detected")
+    for email_promise in ("email me free summary", "send playbook", "get free playbook"):
+        if email_promise in lower_html:
+            g8_ok = False
+            violations.append(f"Gate 8 (Funnel Discipline): false free-email promise '{email_promise}' detected")
+    if "register your firm" in lower_html and 'id="partner-registration-form"' not in html_content:
+        g8_ok = False
+        violations.append("Gate 8 (Funnel Discipline): 'Register Your Firm' CTA leaked onto calculator page")
+    for leg_id in (
+        "partner-registration-form",
+        "lead-capture-form",
+        "footer-lead-capture-form",
+        "inline-worksheet-capture-form",
+        "partner-quote-intake-form",
+        "post-calculation-upgrade-drawer",
+        "calc-result-quick-unlock-bar",
+    ):
+        if re.search(rf'\bid=["\']{re.escape(leg_id)}["\']', html_content, re.I):
+            g8_ok = False
+            violations.append(f"Gate 8 (Funnel Discipline): competing legacy monetization element #{leg_id} present")
+    if re.search(r'\bclass=["\'][^"\']*\bpro-hook-card\b', html_content, re.I):
+        g8_ok = False
+        violations.append("Gate 8 (Funnel Discipline): competing legacy .pro-hook-card present")
+    forms_cnt = len(re.findall(r"<form\b", html_content, re.I))
+    if forms_cnt > 1:
+        g8_ok = False
+        violations.append(f"Gate 8 (Funnel Discipline): expected <= 1 <form> on calculator page, got {forms_cnt}")
+    ref_card_cnt = len(re.findall(r'class=["\'][^"\']*\bcontextual-referral-card\b', html_content, re.I))
+    if ref_card_cnt > 1:
+        g8_ok = False
+        violations.append(f"Gate 8 (Funnel Discipline): expected <= 1 .contextual-referral-card, got {ref_card_cnt}")
     if "&amp;amp;" in html_content:
         g8_ok = False
         violations.append("Gate 8 (Structural Components): HTML contains double-escaped entity (&amp;amp;)")
@@ -2440,6 +2478,16 @@ def audit_estate_accuracy(
         estate_porcelain_v = audit_porcelain_estate_structure(d, tenant_norm)
         if estate_porcelain_v:
             violations_by_surface["__porcelain_estate__"] = estate_porcelain_v
+            non_html_failed += 1
+        from pseofactory.verifier import verify_estate_monetization_and_funnel_hygiene
+
+        funnel_res = verify_estate_monetization_and_funnel_hygiene(
+            dist_dir=d,
+            property_id=tenant_norm,
+            repo_root=d.parent,
+        )
+        if funnel_res.get("issues"):
+            violations_by_surface["__monetization_funnel_hygiene__"] = list(funnel_res["issues"])
             non_html_failed += 1
 
     for html_page in sorted(d.rglob("*.html")):

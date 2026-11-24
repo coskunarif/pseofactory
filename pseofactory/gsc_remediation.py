@@ -7794,7 +7794,7 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
             if spec.get("hub_links") and not merged.get("hub_links"):
                 merged["hub_links"] = list(spec["hub_links"])
 
-            # Merge h2_headings
+            # Merge h2_headings (bounded to avoid vertical heading bloat)
             merged_h2 = list(merged.get("h2_headings") or [])
             seen_h2 = {str(h).strip().lower() for h in merged_h2 if h}
             for h in spec.get("h2_headings") or []:
@@ -7803,9 +7803,9 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                     merged_h2.append(h_str)
                     seen_h2.add(h_str.lower())
             if merged_h2:
-                merged["h2_headings"] = merged_h2
+                merged["h2_headings"] = merged_h2[:3]
 
-            # Merge and deduplicate preset_scenarios
+            # Merge and deduplicate preset_scenarios (bounded to concise max 2)
             merged_sc: List[Dict[str, Any]] = []
             seen_sc: set = set()
             for sc in list(merged.get("preset_scenarios") or []) + list(spec.get("preset_scenarios") or []):
@@ -7818,9 +7818,9 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                         merged_sc.append(sc)
                         seen_sc.add(sc_key)
             if merged_sc:
-                merged["preset_scenarios"] = merged_sc
+                merged["preset_scenarios"] = merged_sc[:2]
 
-            # Merge and deduplicate faq_entries / faq_additions / faq_schema
+            # Merge and deduplicate faq_entries / faq_additions / faq_schema (bounded to max 5)
             for faq_key in ("faq_entries", "faq_additions"):
                 existing_val = merged.get(faq_key)
                 incoming_val = spec.get(faq_key)
@@ -7835,7 +7835,7 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
                             cur_faqs.append(f)
                             seen_q.add(fq)
                 if cur_faqs:
-                    merged[faq_key] = cur_faqs
+                    merged[faq_key] = cur_faqs[:5]
 
             inc_schema = spec.get("faq_schema")
             cur_schema = merged.get("faq_schema")
@@ -11084,11 +11084,28 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             )
             injected_sections.append(assertions_section_markup)
 
-    # 4a. Injected H2 Headings
+    # 4a. Injected H2 Headings (deduplicated & capped to max 1 concise block per page)
     h2_headings = overlay_data.get("h2_headings") or overlay_data.get("h2_blocks") or []
     h2_section_markup = ""
     if h2_headings:
+        html_outside_ov_headings = re.sub(
+            r'<section\s+class=["\']overlay-section\s+overlay-headings\b[^>]*>.*?</section>',
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        existing_heading_norms = {
+            re.sub(
+                r"[^a-z0-9]+",
+                " ",
+                html_lib.unescape(re.sub(r"<[^>]+>", " ", hm)).lower(),
+            ).strip()
+            for hm in re.findall(r"<h[123][^>]*>(.*?)</h[123]>", html_outside_ov_headings, flags=re.DOTALL | re.IGNORECASE)
+        }
+        heading_tag = "h3"
+        heading_cls = "section-subtitle"
         h2_parts = ['<section class="overlay-section overlay-headings card pseo-card">']
+        rendered_h2_count = 0
         for idx, h2 in enumerate(h2_headings):
             h2_val = h2.get("heading", "") if isinstance(h2, dict) else str(h2)
             h2_norm = _strip_forbidden_dashes(str(h2_val))
@@ -11101,14 +11118,22 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             h2_norm = re.sub(r"([A-Za-z0-9]+)\s+([B-HJ-Z])(?![.\w-])", r"\1-\2", h2_norm)
             h2_norm = h2_norm.replace("31-U.S.C.", "31 U.S.C.").replace("Audit-Ready-S-Corp", "Audit-Ready S-Corp")
             h2_norm = normalize_statutory_acronym_casing(h2_norm)
+            dedup_key = re.sub(r"[^a-z0-9]+", " ", h2_norm.lower()).strip()
+            if not dedup_key or dedup_key in existing_heading_norms:
+                continue
+            existing_heading_norms.add(dedup_key)
             clean_h2 = html_lib.escape(h2_norm)
-            h2_parts.append(f'  <h2 class="section-title">{clean_h2}</h2>')
+            h2_parts.append(f'  <{heading_tag} class="{heading_cls}">{clean_h2}</{heading_tag}>')
             h2_parts.append(_build_overlay_heading_guidance_html(clean_h2, idx, overlay_data))
-        h2_parts.append("</section>")
-        h2_section_markup = "\n".join(h2_parts)
-        injected_sections.append(h2_section_markup)
+            rendered_h2_count += 1
+            if rendered_h2_count >= 1:
+                break
+        if rendered_h2_count > 0:
+            h2_parts.append("</section>")
+            h2_section_markup = "\n".join(h2_parts)
+            injected_sections.append(h2_section_markup)
 
-    # 4b. Injected Interactive Preset Scenarios (with data-calc-preset)
+    # 4b. Injected Interactive Preset Scenarios (capped to max 2 concise presets per page)
     scenarios = overlay_data.get("preset_scenarios", [])
     sc_section_markup = ""
     if scenarios:
@@ -11142,6 +11167,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 f'style="margin-top: 0.5rem; min-height: 44px; min-width: 44px; padding: 10px 16px;">Load Preset Scenario</button>'
             )
             sc_parts.append("    </div>")
+            if rendered_sc_count >= 2:
+                break
         if rendered_sc_count > 0:
             sc_parts.append("  </div>")
             sc_parts.append("</section>")
@@ -11168,7 +11195,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             "      </thead>",
             "      <tbody>",
         ]
-        for row in comparison_rows:
+        for row in comparison_rows[:4]:
             if not isinstance(row, dict):
                 continue
             sc_col = html_lib.escape(_strip_forbidden_dashes(str(row.get("scenario", ""))))
@@ -11210,7 +11237,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             "      <tbody>",
         ]
         ov_tenant = str(overlay_data.get("tenant_id") or overlay_data.get("property_id") or "").strip().lower()
-        for mrow in ai_matrix:
+        for mrow in ai_matrix[:4]:
             if not isinstance(mrow, dict):
                 continue
             prof_raw = _strip_forbidden_dashes(str(mrow.get("profile", "")))
@@ -11570,6 +11597,8 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             )
             new_faq_cards: List[str] = []
             for f in faq_items:
+                if len(new_faq_cards) >= 3:
+                    break
                 q_norm = _norm_overlay_faq_key(f["question"])
                 if q_norm and q_norm in existing_q_norms:
                     continue
@@ -11641,7 +11670,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 faq_parts = ['<section class="overlay-section overlay-faqs">']
                 faq_parts.append('  <h3 class="section-subtitle">Frequently Asked Questions</h3>')
                 faq_parts.append('  <div class="faq-list">')
-                for f in standalone_faqs:
+                for f in standalone_faqs[:3]:
                     q = f["question"]
                     a = f["answer"]
                     faq_parts.append('    <details class="faq-item faq-card" data-overlay-faq="true" style="margin-bottom: 1rem; border: 1px solid var(--border);">')

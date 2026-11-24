@@ -5764,252 +5764,11 @@ def render_partner_quote_intake_html(
     baseline_amount: Optional[float] = None,
 ) -> str:
     """
-    Renders the native, TCPA-compliant partner-quote intake step (#partner-quote-intake-step)
-    capturing email, borrower/company state, capital_band, and explicit partner_sharing_consent
-    whenever a visitor's calculation crosses high-value thresholds:
-      - $100,000+ on 1031 Exchange or CapEx / Section 179
-      - $50,000+ on Invoice Factoring
-      - $50,000+ on Prexvo Student Loan Refinance
-    Strictly returns an empty string on restricted YMYL public-service pages (PSLF, IBR hardship,
-    SAVE litigation, disclaimers, methodology) so public-service pages stay 100% free of commercial
-    private refinance offers.
-    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    Step 4 cleanup: inline lead/quote intake forms (#partner-quote-intake-form) are removed
+    from calculator and home templates. Returns empty string; partner referrals use the single
+    secondary contextual referral card only when a live partner matches.
     """
-    from pseofactory.partner_tracker import evaluate_lead_quote_threshold
-
-    prop_clean = str(property_id or "profithelm").strip().lower()
-    slug_clean = str(slug or "index").strip().strip("/").lower() or "index"
-
-    default_amt = baseline_amount
-    if default_amt is None:
-        default_amt = _resolve_default_workbench_amount(prop_clean, slug_clean)
-
-    eval_info = evaluate_lead_quote_threshold(
-        property_id=prop_clean,
-        tool_slug=slug_clean,
-        calculated_amount=float(default_amt),
-    )
-    if not eval_info.get("eligible"):
-        return ""
-
-    threshold_int = int(round(float(eval_info["threshold_usd"])))
-    threshold_fmt = f"${threshold_int:,}"
-    amt_int = int(round(float(eval_info["calculated_amount"])))
-    vertical = str(eval_info["vertical"])
-    partner_key = str(eval_info["primary_partner_key"])
-    default_band = str(eval_info["capital_band"])
-    is_active = bool(eval_info["qualifies_for_quote_intake"])
-    active_attr = "true" if is_active else "false"
-    frictionless_attr = "false" if is_active else "true"
-    form_display = "block" if is_active else "none"
-    note_display = "none" if is_active else "block"
-
-    is_intl_tool = any(
-        tok in slug_clean
-        for tok in ("philippines", "eu-ai-act", "dora-ict", "eu-dora", "nis2", "iso-27001", "iso27001", "gdpr")
-    ) or "dora" in slug_clean.split("-")
-    is_eu_intl = (
-        any(tok in slug_clean for tok in ("eu-ai-act", "dora-ict", "eu-dora", "nis2", "gdpr"))
-        or "dora" in slug_clean.split("-")
-    )
-    selected_state_code = resolve_state_code_from_slug(slug_clean, prop_clean)
-    jurisdiction_options: Tuple[Tuple[str, str], ...] = tuple(US_51_JURISDICTIONS)
-    if prop_clean == "gainhelm" and is_intl_tool:
-        jurisdiction_options = (
-            ("EU", "European Union / EEA (EU)"),
-            ("UK", "United Kingdom (UK)"),
-            ("US", "United States (US)"),
-        ) + jurisdiction_options
-        selected_state_code = "EU" if is_eu_intl else "US"
-    state_options_html = "\n".join(
-        f'              <option value="{st_code}"{" selected" if st_code == selected_state_code else ""}>{st_label}</option>'
-        for st_code, st_label in jurisdiction_options
-    )
-
-    bands = (
-        ("50k_100k", "$50,000 to $99,999"),
-        ("100k_250k", "$100,000 to $249,999"),
-        ("250k_500k", "$250,000 to $499,999"),
-        ("500k_plus", "$500,000+ Institutional Tier"),
-    )
-    band_options_html = "\n".join(
-        f'              <option value="{b_code}"{" selected" if b_code == default_band else ""}>{b_label}</option>'
-        for b_code, b_label in bands
-    )
-
-    from pseofactory.contracts import is_state_jurisdiction_tool
-
-    is_state_tool = is_state_jurisdiction_tool(slug_clean, prop_clean)
-
-    if prop_clean == "prexvo":
-        is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
-        heading_text = f"Qualified Borrower Rate-Match Intake ({threshold_fmt}+ Balance Threshold)"
-        sub_text = (
-            f"Calculations at or above {threshold_fmt} qualify for direct institutional rate-table matching "
-            f"with pre-filled loan parameters. Calculations below {threshold_fmt} remain 100% frictionless with zero registration."
-        )
-        email_label = "Borrower Email Address"
-        state_label = "Borrower Residence State"
-        if is_explicit_refi:
-            band_label = "Refinance Loan Balance Tier"
-            consent_copy = (
-                "I provide explicit TCPA partner_sharing_consent authorizing Prexvo to share my email, residence state, "
-                "and loan balance tier with matched student loan refinance marketplace partners (including Splash Financial) "
-                "to generate a pre-filled rate quote. Refinancing federal student loans permanently waives federal protections."
-            )
-            btn_text = "Unlock Matched Refinance Rate Quote & Continue"
-        else:
-            band_label = "Student Loan Balance Tier"
-            consent_copy = (
-                "I provide explicit TCPA partner_sharing_consent authorizing Prexvo to share my email, residence state, "
-                "and loan balance tier with matched student loan marketplace partners (including Splash Financial) "
-                "to generate a pre-filled rate-table quote."
-            )
-            btn_text = "Unlock Matched Rate-Table Quote & Continue"
-    elif prop_clean == "gainhelm":
-        from pseofactory.affiliates import get_gainhelm_framework_profile
-
-        fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
-        heading_text = f"{fw_prof['quote_heading_prefix']} ({threshold_fmt}+ TCO Threshold)"
-        sub_text = fw_prof["quote_sub_template"].format(threshold_fmt=threshold_fmt)
-        email_label = "Work or Security Operations Email Address"
-        state_label = (
-            "Primary Jurisdiction / Operating Region"
-            if is_intl_tool
-            else ("Corporate Headquarters State" if is_state_tool else "Organization Billing / HQ State")
-        )
-        jurisdiction_noun = "primary jurisdiction" if is_intl_tool else "headquarters state"
-        band_label = "Annual Compliance & Audit Budget Band"
-        consent_copy = (
-            f"I provide explicit TCPA partner_sharing_consent authorizing GainHelm to share my work email, "
-            f"{jurisdiction_noun}, and compliance budget band with {fw_prof['quote_consent_scope']} to prepare "
-            f"a customized readiness quote."
-        )
-        btn_text = fw_prof["quote_btn_text"]
-    elif prop_clean == "lienbond":
-        if is_intl_tool:
-            heading_text = f"Commercial Surety Bond Underwriting Quote Intake ({threshold_fmt}+ Project Threshold)"
-            sub_text = (
-                f"Construction bond penalties and contract values at or above {threshold_fmt} qualify for "
-                f"commercial surety underwriting and carrier rate matching. Sub-threshold calculations stay 100% frictionless."
-            )
-            state_label = "Underwriting Contact State (US Billing)"
-            consent_copy = (
-                "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
-                "contact state, and bond/contract band with matched surety underwriters and commercial insurance partners "
-                "(including SuretyBondsDirect.com, Simply Business, and Thimble) to prepare a customized underwriting quote."
-            )
-        else:
-            heading_text = f"Commercial Surety Bond, Workers Comp & Lien Filing Quote Intake ({threshold_fmt}+ Project Threshold)"
-            sub_text = (
-                f"Construction bond penalties, payroll exposures, and contract values at or above {threshold_fmt} qualify for "
-                f"instant Treasury Circular 570 surety underwriting, NCCI class-code rate matching, and statutory lien filing quotes. "
-                f"Sub-threshold calculations stay 100% frictionless."
-            )
-            state_label = "Project & License Jurisdiction State" if is_state_tool else "Company / Contracting State"
-            consent_copy = (
-                "I provide explicit TCPA partner_sharing_consent authorizing LienBond to share my work email, "
-                "project jurisdiction state, and bond/payroll band with matched Treasury-listed surety underwriters, "
-                "commercial workers compensation carriers, and statutory lien service partners (including SuretyBondsDirect.com, "
-                "Simply Business, Thimble, and Levelset) to prepare a customized underwriting quote."
-            )
-        email_label = "Contractor or Project Accounting Email Address"
-        band_label = "Bond Penalty / Annual Payroll / Contract Band"
-        btn_text = "Request Instant Surety & Insurance Quote"
-    else:
-        if vertical == "1031_exchange":
-            heading_text = f"Qualified Intermediary & Tax Advisory Quote Intake ({threshold_fmt}+ Exchange Threshold)"
-            sub_text = (
-                f"Exchange deferrals at or above {threshold_fmt} qualify for priority Qualified Intermediary escrow "
-                f"fee quotes and multi-state CPA boot reconciliation. Sub-threshold calculations stay 100% frictionless."
-            )
-            band_label = "Relinquished Property / Exchange Capital Band"
-        elif vertical == "invoice_factoring":
-            heading_text = f"Commercial Factoring & Working Capital Quote Intake ({threshold_fmt}+ Volume Threshold)"
-            sub_text = (
-                f"Monthly receivable volume at or above {threshold_fmt} qualifies for direct non-recourse factoring "
-                f"advance rates and same-day funding quotes. Sub-threshold calculations stay 100% frictionless."
-            )
-            band_label = "Monthly Invoice / Working Capital Band"
-        elif vertical == "capex_section_179":
-            heading_text = f"Commercial Equipment & Section 179 Tax Quote Intake ({threshold_fmt}+ CapEx Threshold)"
-            sub_text = (
-                f"Capital equipment acquisitions at or above {threshold_fmt} qualify for direct equipment financing "
-                f"rate sheets and CPA depreciation audit schedules. Sub-threshold calculations stay 100% frictionless."
-            )
-            band_label = "Equipment CapEx / Deduction Capital Band"
-        else:
-            heading_text = f"Commercial CPA & Advisory Quote Intake ({threshold_fmt}+ Exposure Threshold)"
-            sub_text = (
-                f"Commercial calculations at or above {threshold_fmt} qualify for direct CPA tax preparation "
-                f"and entity structuring fee quotes. Sub-threshold calculations stay 100% frictionless."
-            )
-            band_label = "Annual Exposure / Capital Band"
-
-        email_label = "Personal or Work Email Address"
-        state_label = "Taxpayer or Company Filing State"
-        consent_copy = (
-            "I provide explicit TCPA partner_sharing_consent authorizing ProfitHelm to share my email, "
-            "filing state, and capital band with matched commercial finance, tax, or exchange partners "
-            "(including OTR Solutions, E-file, and IPX1031) to prepare a customized quote and route me to the partner portal."
-        )
-        btn_text = "Request Matched Partner Quote & Continue"
-
-    vertical_attr = vertical
-    if prop_clean == "prexvo" and not ("refinance" in slug_clean or "refinancing" in slug_clean):
-        vertical_attr = "student_loan_rate_match"
-
-    return (
-        f'      <div id="partner-quote-intake-step" class="partner-quote-intake-drawer" '
-        f'data-mechanic="partner_quote_intake" '
-        f'data-property-id="{prop_clean}" '
-        f'data-tool-slug="{slug_clean}" '
-        f'data-vertical="{vertical_attr}" '
-        f'data-partner-key="{partner_key}" '
-        f'data-quote-threshold="{threshold_int}" '
-        f'data-calculated-amount="{amt_int}" '
-        f'data-threshold-active="{active_attr}" '
-        f'data-frictionless-mode="{frictionless_attr}">\n'
-        f'        <div class="partner-quote-header">\n'
-        f'          <span class="partner-quote-badge">High-Value Threshold Quote Desk ({threshold_fmt}+)</span>\n'
-        f'          <h3 style="margin: 6px 0 6px 0; font-size: 1.08rem;">{heading_text}</h3>\n'
-        f'          <p style="font-size: 13.5px; color: var(--text-secondary); margin: 0 0 10px 0;">{sub_text}</p>\n'
-        f'        </div>\n'
-        f'        <div id="partner-quote-frictionless-note" class="partner-quote-frictionless-note" aria-live="polite" style="display: {note_display}; font-size: 13px; color: var(--text-secondary); padding: 8px 12px; border-radius: 6px; background: var(--bg-inset);">\n'
-        f'          Frictionless Calculator Mode Active: Your current calculation is below the {threshold_fmt} institutional quote threshold. Instant results remain 100% unlocked with zero registration required.\n'
-        f'        </div>\n'
-        f'        <form id="partner-quote-intake-form" class="partner-quote-form-body" action="/api/lead-capture" method="POST" style="display: {form_display};" novalidate>\n'
-        f'          <div class="serp-sub-inputs-grid" style="margin-bottom: 12px;">\n'
-        f'            <div class="serp-input-cell">\n'
-        f'              <label for="quote-intake-email">{email_label}</label>\n'
-        f'              <input type="email" id="quote-intake-email" name="email" class="touch-target calc-number-input" placeholder="Enter your email address..." required autocomplete="email" aria-label="{email_label}">\n'
-        f'            </div>\n'
-        f'            <div class="serp-input-cell">\n'
-        f'              <label for="quote-intake-state">{state_label}</label>\n'
-        f'              <select id="quote-intake-state" name="state" class="touch-target serp-select-input" required aria-label="{state_label}">\n'
-        f'{state_options_html}\n'
-        f'              </select>\n'
-        f'            </div>\n'
-        f'            <div class="serp-input-cell">\n'
-        f'              <label for="quote-intake-capital-band">{band_label}</label>\n'
-        f'              <select id="quote-intake-capital-band" name="capital_band" class="touch-target serp-select-input" required aria-label="{band_label}">\n'
-        f'{band_options_html}\n'
-        f'              </select>\n'
-        f'            </div>\n'
-        f'          </div>\n'
-        f'          <div class="partner-quote-consent-row" style="margin-bottom: 12px;">\n'
-        f'            <label for="quote-intake-consent" class="touch-target partner-quote-consent-label" style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; min-width: 44px; padding: 6px 0; cursor: pointer; font-size: 12.5px; line-height: 1.45; color: var(--text-secondary);">\n'
-        f'              <input type="checkbox" id="quote-intake-consent" name="partner_sharing_consent" value="true" required class="touch-target" aria-label="Explicit TCPA Partner Sharing Consent" style="min-width: 44px; min-height: 44px; margin: 0; flex-shrink: 0; accent-color: var(--accent);">\n'
-        f'              <span>{consent_copy}</span>\n'
-        f'            </label>\n'
-        f'          </div>\n'
-        f'          <div class="partner-quote-actions" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">\n'
-        f'            <button type="submit" id="btn-submit-partner-quote" class="touch-target btn-primary partner-quote-submit-btn" data-cta-slot="partner_quote_intake_cta" style="min-height: 48px; min-width: 48px; padding: 12px 20px; font-size: 16px; font-weight: 700; cursor: pointer;">{btn_text}</button>\n'
-        f'          </div>\n'
-        f'          <div id="partner-quote-intake-status" class="partner-quote-status" aria-live="polite" style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">Ready to route pre-filled {threshold_fmt}+ quote parameters upon explicit consent.</div>\n'
-        f'        </form>\n'
-        f'      </div>'
-    )
+    return ""
 
 
 def render_post_calculation_upgrade_drawer_html(
@@ -6021,179 +5780,34 @@ def render_post_calculation_upgrade_drawer_html(
     baseline_amount: Optional[float] = None,
 ) -> str:
     """
-    Renders the unified, non-intrusive Post-Calculation Workpaper Export & Tailored Statutory Data Pack
-    upgrade drawer (#post-calculation-upgrade-drawer) inside the post-calculation Decision Blueprint.
-    Strictly returns an empty string on restricted YMYL public-service pages (PSLF, IBR hardship,
-    SAVE litigation, disclaimers, methodology) so public-service pages stay 100% free of commercial
-    checkout triggers.
-    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    Deprecated: Replaced by the single full-width #workpaper-unlock-card directly below .calc-grid
+    (Step 2 of the 3-step funnel) so there are zero duplicate checkout drawers further down the page.
+    Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.partner_tracker import resolve_post_calculation_upgrade_spec
-
-    prop_clean = str(property_id or "profithelm").strip().lower()
-    slug_clean = str(slug or "index").strip().strip("/").lower() or "index"
-    spec = resolve_post_calculation_upgrade_spec(
-        property_id=prop_clean,
-        tool_slug=slug_clean,
-        statutory_authority=statutory_authority,
-        economic_dataset=economic_dataset,
-    )
-    if not spec:
-        return ""
-
-    default_amt = baseline_amount
-    if default_amt is None:
-        default_amt = _resolve_default_workbench_amount(prop_clean, slug_clean)
-
-    amt_int = int(round(float(default_amt)))
-    amt_fmt = f"${amt_int:,}"
-    offer_sku = str(spec["offer_sku"])
-    offer_title = str(spec["offer_title"])
-    price_int = int(round(float(spec["offer_price_usd"])))
-    quick_sku = str(spec.get("quick_unlock_sku") or "ph_instant_statutory_worksheet_19")
-    quick_price_int = int(round(float(spec.get("quick_unlock_price_usd") or 19)))
-    eff_stat = str(spec["statutory_authority"])
-    regulator_name = str(spec["regulator_name"])
-    trend_count = int(spec["trend_series_count"])
-    trend_labels = [lbl for lbl in spec.get("trend_series_labels", []) if lbl]
-    trend_preview = ", ".join(trend_labels[:2]) if trend_labels else "2024 to 2030 Statutory Benchmark Series"
-    checkout_url = (
-        f'/api/lead-capture?checkout=1&amp;sku={offer_sku}'
-        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
-    )
-    quick_checkout_url = (
-        f'/api/lead-capture?checkout=1&amp;sku={quick_sku}'
-        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
-    )
-    datapack_url = (
-        f'/api/lead-capture?fulfill=1&amp;sku={offer_sku}'
-        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;format=datapack'
-    )
-    deliverables = list(spec.get("deliverables") or [])
-    deliv_1 = deliverables[0] if len(deliverables) > 0 else "Line-coded statutory reconciliation schedule (HTML/PDF & CSV)"
-    deliv_2 = deliverables[1] if len(deliverables) > 1 else "Multi-scenario stress-test sensitivity matrix"
-
-    if prop_clean == "prexvo":
-        is_explicit_refi = "refinance" in slug_clean or "refinancing" in slug_clean
-        if not is_explicit_refi:
-            offer_title = "Prexvo Title IV Repayment & Amortization Decision Audit Kit"
-        badge_text = "Post-Calculation Borrower & Advisor Deliverable"
-        pillar_1_title = "1. Personalized Loan Audit Workpaper (HTML/PDF + CSV)"
-        pillar_2_title = f"2. Tailored Title IV & Rate Data Pack ({trend_count} Series, 2024 to 2030)"
-    elif prop_clean == "gainhelm":
-        from pseofactory.affiliates import get_gainhelm_framework_profile
-
-        fw_prof = get_gainhelm_framework_profile(slug=slug_clean)
-        fw_key = fw_prof["framework_key"]
-        badge_text = (
-            "Post-Calculation Board, CISO & Assessor Deliverable"
-            if fw_key in ("soc2", "cmmc")
-            else "Post-Calculation Board, CISO & Regulatory Deliverable"
-        )
-        pillar_1_title = (
-            "1. Personalized Audit Readiness Workpaper (HTML/PDF + CSV)"
-            if fw_key in ("soc2", "cmmc")
-            else "1. Personalized Regulatory Readiness Workpaper (HTML/PDF + CSV)"
-        )
-        pillar_2_title = (
-            f"2. Tailored Multi-Framework Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
-            if fw_key in ("soc2", "cmmc")
-            else f"2. Tailored Statutory Benchmark Data Pack ({trend_count} Series, 2024 to 2030)"
-        )
-    elif prop_clean == "lienbond":
-        badge_text = "Post-Calculation Contractor, CFO & Surety Underwriter Deliverable"
-        pillar_1_title = "1. 50-State Statutory Lien Waiver, AIA A312 & WH-347 Packet (HTML/PDF + CSV)"
-        pillar_2_title = f"2. Tailored Surety, NCCI EMR & Prevailing Wage Data Pack ({trend_count} Series, 2024 to 2030)"
-    else:
-        badge_text = "Post-Calculation CPA, CFO & Tax Committee Deliverable"
-        pillar_1_title = "1. Personalized Statutory Tax Workpaper (HTML/PDF + CSV)"
-        pillar_2_title = f"2. Tailored IRS & Macroeconomic Data Pack ({trend_count} Series, 2024 to 2030)"
-
-    ctx_q = resolve_quick_unlock_contextual_copy(
-        slug=slug_clean,
-        property_id=prop_clean,
-        quick_price_int=quick_price_int,
-        full_price_int=price_int,
-    )
-    summary_target_phrase = (
-        "servicer-ready repayment, forgiveness, and tax-exclusion workpaper"
-        if prop_clean == "prexvo"
-        else "board-ready audit workpaper"
-    )
-
-    return (
-        f'        <div id="post-calculation-upgrade-drawer" class="post-calc-upgrade-drawer" '
-        f'data-mechanic="post_calculation_workpaper_upgrade" '
-        f'data-property-id="{prop_clean}" '
-        f'data-tool-slug="{slug_clean}" '
-        f'data-offer-sku="{offer_sku}" '
-        f'data-offer-price="{price_int}" '
-        f'data-quick-unlock-sku="{quick_sku}" '
-        f'data-quick-unlock-price="{quick_price_int}" '
-        f'data-calculated-amount="{amt_int}" '
-        f'data-datapack-url="{datapack_url}">\n'
-        f'          <div class="post-calc-upgrade-header">\n'
-        f'            <span class="post-calc-upgrade-badge">{badge_text}</span>\n'
-        f'            <h4 class="post-calc-upgrade-title">{offer_title} (${price_int} One-Time Package)</h4>\n'
-        f'            <p id="post-calc-upgrade-live-summary" class="post-calc-upgrade-summary">'
-        f'Package your active <strong>{amt_fmt}</strong> scenario into a {summary_target_phrase} and machine-readable '
-        f'statutory data pack cited to <strong>{eff_stat}</strong> ({regulator_name}).</p>\n'
-        f'          </div>\n'
-        f'          <div class="post-calc-upgrade-pillars">\n'
-        f'            <div class="post-calc-upgrade-pillar">\n'
-        f'              <div class="post-calc-pillar-heading">{pillar_1_title}</div>\n'
-        f'              <p class="post-calc-pillar-copy">{deliv_1}; {deliv_2}; bound directly to your live calculator inputs.</p>\n'
-        f'            </div>\n'
-        f'            <div class="post-calc-upgrade-pillar">\n'
-        f'              <div class="post-calc-pillar-heading">{pillar_2_title}</div>\n'
-        f'              <p class="post-calc-pillar-copy">Structured JSON and CSV statutory tables covering {trend_preview} for offline spreadsheet modeling.</p>\n'
-        f'            </div>\n'
-        f'          </div>\n'
-        f'          <div class="post-calc-sample-schedule-preview" data-sample-unlocked="true" style="margin-top: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; border: 1px dashed var(--border); background: var(--bg-inset); font-size: 13px; line-height: 1.45;">\n'
-        f'            <div style="font-weight: 700; margin-bottom: 4px;">Unlocked Sample Packet Lines ({amt_fmt} Baseline):</div>\n'
-        f'            <div>1. [UNLOCKED] {deliv_1} cited to {eff_stat}</div>\n'
-        f'            <div>2. [UNLOCKED] {deliv_2} (0.8x / 1.0x / 1.2x sensitivity tiers)</div>\n'
-        f'            <div>3. [LOCKED: ${price_int}] Signed Audit Readiness Checklist, CSV Worksheet &amp; {trend_count}-Series JSON Data Pack</div>\n'
-        f'          </div>\n'
-        f'          <div class="post-calc-upgrade-actions" role="group" aria-label="Post-Calculation Workpaper and Data Pack Actions">\n'
-        f'            <a id="btn-post-calc-quick-unlock-checkout" rel="nofollow" href="{quick_checkout_url}" '
-        f'class="touch-target btn-secondary post-calc-quick-unlock-btn" '
-        f'data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" '
-        f'data-cta-slot="post_calc_quick_unlock_cta" '
-        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; padding: 10px 16px; border-radius: 8px; background: var(--status-positive); color: var(--cta-fg); font-weight: 700; font-size: 13.5px; text-decoration: none; cursor: pointer;">'
-        f'{ctx_q["drawer_quick_btn_label"]}</a>\n'
-        f'            <a id="btn-post-calc-upgrade-checkout" rel="nofollow" href="{checkout_url}" '
-        f'class="touch-target btn-primary post-calc-upgrade-btn" '
-        f'data-checkout-trigger="1" data-offer-sku="{offer_sku}" data-offer-price="{price_int}" '
-        f'data-cta-slot="post_calc_workpaper_upgrade_cta" '
-        f'style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 48px; padding: 10px 18px; border-radius: 8px; font-weight: 700; font-size: 14px; text-decoration: none; cursor: pointer;">'
-        f'Export Audit Workpaper &amp; Statutory Data Pack (${price_int})</a>\n'
-        f'            <button type="button" id="btn-preview-post-calc-workpaper" '
-        f'class="touch-target btn-preset serp-blueprint-btn" '
-        f'data-blueprint-action="preview_workpaper" data-cta-slot="preview_workpaper_cta" '
-        f'style="min-height: 48px; min-width: 48px; padding: 10px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer;">'
-        f'Preview Personalized Schedule &amp; Data Pack</button>\n'
-        f'          </div>\n'
-        f'          <div id="post-calc-workpaper-preview-slot" class="post-calc-preview-slot" aria-live="polite"></div>\n'
-        f'        </div>'
-    )
+    _ = slug, property_id, topic_label, statutory_authority, economic_dataset, baseline_amount
+    return ""
 
 
 def resolve_quick_unlock_contextual_copy(
     slug: str,
     property_id: str = "profithelm",
-    quick_price_int: int = 19,
-    full_price_int: int = 49,
+    quick_price_int: Optional[int] = None,
+    full_price_int: Optional[int] = None,
 ) -> Dict[str, str]:
     """
-    Resolves intent-matched, state-aware copy for #calc-result-quick-unlock-bar and
-    #btn-post-calc-quick-unlock-checkout so visitors see the exact W-4 / Form 4562 /
-    Form 8824 / Form 8949 / Form 982 / SAVE-to-RAP deliverable they unlock for $19,
-    clearly differentiated from the free email summary.
+    Resolves intent-matched, state-aware copy for Step 2 (#workpaper-unlock-card) using
+    canonical prices from pseofactory.pricing (zero hardcoded prices, zero false free-email copy).
     Zero em-dashes. Zero en-dashes.
     """
     prop = (property_id or "profithelm").strip().lower()
     s_low = (slug or "index").strip().strip("/").lower().replace("_", "-")
+    if quick_price_int is None or full_price_int is None:
+        from pseofactory.pricing import resolve_offer_pricing
+
+        if quick_price_int is None:
+            quick_price_int = int(round(float(resolve_offer_pricing(prop, tier_kind="quick", slug=s_low)["price_usd"])))
+        if full_price_int is None:
+            full_price_int = int(round(float(resolve_offer_pricing(prop, tier_kind="full", slug=s_low)["price_usd"])))
 
     state_label = ""
     s_padded = f"-{s_low.replace('/', '-')}-"
@@ -6208,30 +5822,26 @@ def resolve_quick_unlock_contextual_copy(
     if prop == "prexvo":
         if "tax-bomb" in s_low or "insolvency" in s_low:
             return {
-                "heading": "Get Your Filled IRS Form 982 Insolvency &amp; 1099-C Tax-Bomb Exclusion Pack",
-                "badge": "IRS Form 982 PDF/CSV + Free Email Summary",
+                "heading": "IRS Form 982 Insolvency &amp; 1099-C Tax-Bomb Exclusion Workpaper",
+                "badge": "Print-Ready HTML/PDF + CSV",
                 "summary": (
                     "Unlocks line-by-line IRS Form 982 Part I &amp; Insolvency Asset vs. Liability Worksheet "
                     "to exclude forgiven student debt from federal and state income tax."
                 ),
-                "email_label": "Email Address for Free Tax-Bomb Calculation Summary",
-                "email_btn": "Email Me Free Summary",
-                "quick_btn_label": f"Download IRS Form 982 Insolvency Pack (${quick_price_int}) &rarr;",
-                "drawer_quick_btn_label": f"Download IRS Form 982 Insolvency Pack (${quick_price_int})",
-                "full_link_label": f"Or Full Title IV Audit Kit (${full_price_int})",
+                "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+                "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+                "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
             }
         return {
-            "heading": "Get Your Custom 2026 SAVE-to-RAP vs. IBR Payment &amp; Forgiveness Plan",
-            "badge": "Month-by-Month PDF/CSV + Free Email Summary",
+            "heading": "2026 SAVE-to-RAP vs. IBR Payment &amp; Forgiveness Workpaper",
+            "badge": "Month-by-Month PDF/CSV + Data Pack",
             "summary": (
                 "Unlocks month-by-month RAP vs. IBR vs. Standard amortization schedule, "
                 "Married Filing Separately (MFS) tax break-even table, and servicer switch checklist."
             ),
-            "email_label": "Email Address for Free Payment Calculation Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download 2026 RAP vs. IBR &amp; Refi Plan (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download 2026 RAP vs. IBR &amp; Refi Plan (${quick_price_int})",
-            "full_link_label": f"Or Full Title IV Audit Kit (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     if prop == "gainhelm":
@@ -6240,20 +5850,17 @@ def resolve_quick_unlock_contextual_copy(
         fw_prof = get_gainhelm_framework_profile(slug=s_low)
         fw_key = fw_prof["framework_key"]
         badge_copy = (
-            "Auditor PDF/CSV + Free Email Summary"
+            "Auditor PDF/CSV + Data Pack"
             if fw_key in ("soc2", "cmmc")
-            else "Regulatory PDF/CSV + Free Email Summary"
+            else "Regulatory PDF/CSV + Data Pack"
         )
-        quick_lbl = fw_prof["quick_btn_text"]
         return {
             "heading": fw_prof["quick_unlock_heading"],
             "badge": badge_copy,
             "summary": fw_prof["quick_unlock_summary"],
-            "email_label": "Email Address for Free Compliance Cost Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"{quick_lbl} (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"{quick_lbl} (${quick_price_int})",
-            "full_link_label": f"Or Full GRC Evidence Package (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     if prop == "lienbond":
@@ -6261,115 +5868,86 @@ def resolve_quick_unlock_contextual_copy(
 
         if state_label:
             loc_prefix = f"{state_label} "
-        elif "philippines" in s_low:
-            loc_prefix = "Commercial Surety Bond "
         elif not is_state_jurisdiction_tool(s_low, prop):
-            loc_prefix = "Federal & Commercial Surety "
+            loc_prefix = "Federal &amp; Commercial Surety "
         else:
             loc_prefix = "50-State "
-        if "philippines" in s_low:
-            return {
-                "heading": "Get Your Surety Bond Premium &amp; Indemnity Underwriting Worksheet",
-                "badge": "Underwriting PDF/CSV + Free Email Summary",
-                "summary": (
-                    "Unlocks surety bond rate tier comparison, collateral requirement worksheet, "
-                    "and contractor underwriting checklist."
-                ),
-                "email_label": "Email Address for Free Surety Bond Summary",
-                "email_btn": "Email Me Free Summary",
-                "quick_btn_label": f"Download Surety Bond Worksheet (${quick_price_int}) &rarr;",
-                "drawer_quick_btn_label": f"Download Surety Bond Worksheet (${quick_price_int})",
-                "full_link_label": f"Or Full Surety &amp; Underwriting Packet (${full_price_int})",
-            }
         return {
-            "heading": f"Get Your {loc_prefix}Statutory Lien Waiver, Notice &amp; Bond Packet",
-            "badge": "Statutory PDF/CSV + Free Email Summary",
+            "heading": f"{loc_prefix}Statutory Lien Waiver, Notice &amp; Bond Workpaper",
+            "badge": "Statutory PDF/CSV + Data Pack",
             "summary": (
                 f"Unlocks {loc_prefix}conditional and unconditional waiver templates, preliminary notice "
                 "recording deadline calendar, and surety underwriting checklist."
             ),
-            "email_label": "Email Address for Free Bond &amp; Lien Deadline Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download {loc_prefix}Lien &amp; Bond Worksheet (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download {loc_prefix}Lien &amp; Bond Worksheet (${quick_price_int})",
-            "full_link_label": f"Or Full Surety &amp; Lien Packet (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     if "tax-bracket" in s_low or "tax-rate" in s_low:
         loc = state_label if state_label else "Federal &amp; State"
         return {
-            "heading": f"Get Your 2027 {loc} + Federal Tax Bracket &amp; W-4 Paycheck Plan",
-            "badge": "W-4 &amp; 1040-ES PDF/CSV + Free Email Summary",
+            "heading": f"2027 {loc} + Federal Tax Bracket &amp; W-4 Workpaper",
+            "badge": "W-4 &amp; 1040-ES PDF/CSV + Data Pack",
             "summary": (
                 f"Unlocks your exact 2027 {loc} + Federal marginal/effective bracket table, "
-                "IRS Form W-4 Line 4(c) paycheck withholding adjustment, 4-quarter Form 1040-ES safe-harbor dates, "
-                f"and {loc} PTET / deduction shields to drop a bracket."
+                "IRS Form W-4 Line 4(c) paycheck withholding adjustment, and 4-quarter Form 1040-ES safe-harbor dates."
             ),
-            "email_label": f"Email Address for Free 2027 {loc} Tax Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download 2027 {loc} W-4 &amp; Tax Plan (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download 2027 {loc} W-4 &amp; Tax Plan (${quick_price_int})",
-            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     if any(tok in s_low for tok in ("section-179", "179", "depreciation", "macrs", "equipment", "vehicle")):
         return {
-            "heading": "Get Your Filled IRS Form 4562 Section 179 &amp; Bonus Depreciation Schedule",
-            "badge": "IRS Form 4562 PDF/CSV + Free Email Summary",
+            "heading": "IRS Form 4562 Section 179 &amp; Bonus Depreciation Workpaper",
+            "badge": "IRS Form 4562 PDF/CSV + Data Pack",
             "summary": (
                 "Unlocks line-by-line IRS Form 4562 Part I &amp; V entries, 5-year MACRS recapture table, "
                 "business-use log template, and CPA deduction sign-off checklist."
             ),
-            "email_label": "Email Address for Free Section 179 Deduction Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download IRS Form 4562 &amp; MACRS Schedule (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download IRS Form 4562 &amp; MACRS Schedule (${quick_price_int})",
-            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     if any(tok in s_low for tok in ("1031", "like-kind", "8824", "boot", "dst")):
         loc_prefix = f"{state_label} " if state_label else ""
         return {
-            "heading": f"Get Your Filled {loc_prefix}IRS Form 8824 Like-Kind Exchange &amp; Boot Worksheet",
-            "badge": "IRS Form 8824 PDF/CSV + Free Email Summary",
+            "heading": f"{loc_prefix}IRS Form 8824 Like-Kind Exchange &amp; Boot Workpaper",
+            "badge": "IRS Form 8824 PDF/CSV + Data Pack",
             "summary": (
                 "Unlocks line-by-line IRS Form 8824 net boot reconciliation, 45-day / 180-day statutory "
                 "deadline calendar, and Qualified Intermediary (QI) escrow checklist."
             ),
-            "email_label": "Email Address for Free 1031 Exchange Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download IRS Form 8824 &amp; 1031 Boot Pack (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download IRS Form 8824 &amp; 1031 Boot Pack (${quick_price_int})",
-            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     if any(tok in s_low for tok in ("crypto", "8949", "staking", "token")):
         return {
-            "heading": "Get Your IRS Form 8949, Schedule D &amp; Staking Tax Reconciliation Pack",
-            "badge": "IRS Form 8949 PDF/CSV + Free Email Summary",
+            "heading": "IRS Form 8949, Schedule D &amp; Staking Tax Reconciliation Pack",
+            "badge": "IRS Form 8949 PDF/CSV + Data Pack",
             "summary": (
                 "Unlocks short-term vs. long-term capital gains lot worksheet, 3.8% NIIT surtax calculation, "
                 "and quarterly Form 1040-ES safe-harbor payment voucher."
             ),
-            "email_label": "Email Address for Free Crypto Tax Summary",
-            "email_btn": "Email Me Free Summary",
-            "quick_btn_label": f"Download Form 8949 Crypto Tax Pack (${quick_price_int}) &rarr;",
-            "drawer_quick_btn_label": f"Download Form 8949 Crypto Tax Pack (${quick_price_int})",
-            "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+            "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+            "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
         }
 
     return {
-        "heading": "Get Your Personalized Statutory Tax &amp; Accounting Schedule (PDF + CSV)",
-        "badge": "Instant PDF/CSV + Free Email Summary",
+        "heading": "Personalized Statutory Tax &amp; Accounting Workpaper (PDF + CSV)",
+        "badge": "Instant PDF/CSV + Data Pack",
         "summary": (
             "Unlocks your line-coded IRS and state statutory calculation worksheet, sensitivity matrix, "
             "and quarterly safe-harbor compliance checklist."
         ),
-        "email_label": "Email Address for Free Personalized Calculation Summary",
-        "email_btn": "Email Me Free Summary",
-        "quick_btn_label": f"Download Complete PDF/CSV Worksheet (${quick_price_int}) &rarr;",
-        "drawer_quick_btn_label": f"Download Complete PDF/CSV Worksheet (${quick_price_int})",
-        "full_link_label": f"Or Full CPA Audit Package (${full_price_int})",
+        "quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+        "drawer_quick_btn_label": f"Quick Worksheet (${quick_price_int})",
+        "full_link_label": f"Full Workpaper &amp; Data Pack (${full_price_int})",
     }
 
 
@@ -6379,68 +5957,12 @@ def render_calc_result_quick_unlock_bar_html(
     baseline_amount: Optional[float] = None,
 ) -> str:
     """
-    Renders the above-the-fold Instant Statutory Worksheet Quick-Unlock ($19) and
-    1-Click Free Worksheet Email Capture bar (#calc-result-quick-unlock-bar) directly
-    inside .calc-outputs-panel / .result-box on commercial calculator pages.
-    Strictly returns an empty string on restricted YMYL public-service pages.
+    Deprecated: Removed from inside .result-box so .calc-grid stays strictly inputs + live outputs
+    with zero email capture forms or competing checkout bars inside .result-box.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.partner_tracker import resolve_post_calculation_upgrade_spec
-
-    prop_clean = str(property_id or "profithelm").strip().lower()
-    slug_clean = str(slug or "index").strip().strip("/").lower() or "index"
-    spec = resolve_post_calculation_upgrade_spec(
-        property_id=prop_clean,
-        tool_slug=slug_clean,
-    )
-    if not spec:
-        return ""
-
-    default_amt = baseline_amount
-    if default_amt is None:
-        default_amt = _resolve_default_workbench_amount(prop_clean, slug_clean)
-
-    amt_int = int(round(float(default_amt)))
-    full_sku = str(spec["offer_sku"])
-    full_price_int = int(round(float(spec["offer_price_usd"])))
-    quick_sku = str(spec.get("quick_unlock_sku") or "ph_instant_statutory_worksheet_19")
-    quick_price_int = int(round(float(spec.get("quick_unlock_price_usd") or 19)))
-    quick_checkout_url = (
-        f'/api/lead-capture?checkout=1&amp;sku={quick_sku}'
-        f'&amp;tool_slug={slug_clean}&amp;amount={amt_int}&amp;redirect=1'
-    )
-    ctx_q = resolve_quick_unlock_contextual_copy(
-        slug=slug_clean,
-        property_id=prop_clean,
-        quick_price_int=quick_price_int,
-        full_price_int=full_price_int,
-    )
-    return (
-        f'          <div id="calc-result-quick-unlock-bar" class="calc-result-quick-unlock-bar" '
-        f'data-mechanic="instant_result_quick_unlock" data-property-id="{prop_clean}" '
-        f'data-tool-slug="{slug_clean}" data-offer-sku="{quick_sku}" '
-        f'data-offer-price="{quick_price_int}" data-full-offer-sku="{full_sku}" '
-        f'data-full-offer-price="{full_price_int}" data-contextual-v2="1" '
-        f'style="margin-top: 12px; margin-bottom: 12px; padding: 14px 16px; border-radius: 8px; '
-        f'background: var(--bg-elevated); border: 1px solid var(--border); '
-        f'border-left: 4px solid var(--status-positive);">\n'
-        f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px;">\n'
-        f'              <div style="font-size: 13.5px; font-weight: 700; color: var(--text);">{ctx_q["heading"]}</div>\n'
-        f'              <span style="font-size: 11.5px; font-weight: 700; color: var(--status-positive); background: var(--status-positive-bg); padding: 3px 8px; border-radius: 4px;">{ctx_q["badge"]}</span>\n'
-        f'            </div>\n'
-        f'            <div class="quick-unlock-value-summary" style="font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin-bottom: 8px;">{ctx_q["summary"]}</div>\n'
-        f'            <form id="inline-worksheet-capture-form" class="lead-capture-form inline-worksheet-capture-form" action="/api/lead-capture" method="POST" data-offer-sku="{quick_sku}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px;" novalidate>\n'
-        f'              <label for="inline-worksheet-email" style="display: block; width: 100%; font-size: 12px; font-weight: 600; margin-bottom: 2px; color: var(--text);">{ctx_q["email_label"]}</label>\n'
-        f'              <input type="email" id="inline-worksheet-email" name="email" placeholder="Enter email for free calculation summary..." aria-label="{ctx_q["email_label"]}" required class="touch-target" style="flex: 1; min-width: 190px; min-height: 44px; padding: 8px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text);" />\n'
-        f'              <button type="submit" id="btn-inline-worksheet-submit" class="touch-target btn-secondary" data-cta-slot="inline_free_worksheet_email_cta" style="min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 6px; background: var(--accent); color: var(--cta-fg); font-weight: 700; font-size: 13.5px; border: none; cursor: pointer; white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;">{ctx_q["email_btn"]}</button>\n'
-        f'              <div id="inline-worksheet-capture-status" class="lead-capture-status-readout" role="status" aria-live="polite" style="width: 100%; font-size: 12.5px; font-weight: 600;"></div>\n'
-        f'            </form>\n'
-        f'            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border);">\n'
-        f'              <a id="btn-calc-result-quick-unlock" rel="nofollow" href="{quick_checkout_url}" class="touch-target btn-primary" data-checkout-trigger="1" data-offer-sku="{quick_sku}" data-offer-price="{quick_price_int}" data-cta-slot="calc_result_quick_unlock_cta" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 8px 14px; border-radius: 6px; background: var(--status-positive); color: var(--cta-fg); font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: normal; text-align: center; max-width: 100%; box-sizing: border-box;">{ctx_q["quick_btn_label"]}</a>\n'
-        f'              <a href="#post-calculation-upgrade-drawer" class="pro-hook-link touch-target" data-checkout-nav="1" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12.5px; font-weight: 600; background-color: var(--bg-surface); border: 1px solid var(--brand-border); border-radius: 6px; color: var(--accent); text-decoration: underline; white-space: normal; max-width: 100%; box-sizing: border-box;">{ctx_q["full_link_label"]}</a>\n'
-        f'            </div>\n'
-        f'          </div>\n'
-    )
+    _ = slug, property_id, baseline_amount
+    return ""
 
 
 def _render_saveable_decision_blueprint_html(
@@ -6685,19 +6207,25 @@ def render_serp_incumbent_depth_upgrade_block(
         f'{cliff_html}\n'
         f'{comparator_html}\n'
         f'{blueprint_html}\n'
-        f'      <h3 id="serp-statutory-reference-schedule" style="margin-top: 22px; margin-bottom: 10px;">{spec["table_h3"]}</h3>\n'
-        f'      <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">The following primary statutory schedule reconciles official rate tiers, deduction caps, phaseout thresholds, and filing forms under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>:</p>\n'
-        f'      <div class="table-wrap pseo-table-wrap">\n'
-        f'        <table class="comparison-table serp-statutory-reference-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
-        f'          <thead>\n'
-        f'            <tr>\n'
+        f'      <div class="serp-reference-details" style="margin-top: 18px;">\n'
+        f'        <h3 id="serp-statutory-reference-schedule" style="margin: 0 0 8px 0;">{spec["table_h3"]}</h3>\n'
+        f'        <button type="button" class="btn-secondary touch-target" aria-expanded="false" aria-controls="serp-reference-table-panel" '
+        f'onclick="var p=document.getElementById(\'serp-reference-table-panel\');if(p){{var h=p.hasAttribute(\'hidden\');if(h){{p.removeAttribute(\'hidden\');this.setAttribute(\'aria-expanded\',\'true\');}}else{{p.setAttribute(\'hidden\',\'hidden\');this.setAttribute(\'aria-expanded\',\'false\');}}}}">View Statutory Reference Schedule</button>\n'
+        f'        <div id="serp-reference-table-panel" hidden style="margin-top: 10px;">\n'
+        f'          <p style="font-size: 14px; color: var(--text-secondary); margin: 0 0 12px 0;">The following primary statutory schedule reconciles official rate tiers, deduction caps, phaseout thresholds, and filing forms under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>:</p>\n'
+        f'          <div class="table-wrap pseo-table-wrap">\n'
+        f'            <table class="comparison-table serp-statutory-reference-table" data-statutory-source="{statutory_authority}" data-economic-source="{economic_dataset}">\n'
+        f'              <thead>\n'
+        f'                <tr>\n'
         f'{th_html}\n'
-        f'            </tr>\n'
-        f'          </thead>\n'
-        f'          <tbody>\n'
+        f'                </tr>\n'
+        f'              </thead>\n'
+        f'              <tbody>\n'
         f'{tr_html}\n'
-        f'          </tbody>\n'
-        f'        </table>\n'
+        f'              </tbody>\n'
+        f'            </table>\n'
+        f'          </div>\n'
+        f'        </div>\n'
         f'      </div>\n'
         f'    </section>'
     )
@@ -6842,7 +6370,7 @@ def render_competitor_winning_pattern_blocks(
     three_tier_cluster_html = (
         f'    <section id="topic-cluster-hub" class="three-tier-cluster-section card pseo-card" '
         f'data-mechanic="three_tier_topic_cluster_nav">\n'
-        f'      <h2>Connected Statutory Topic Cluster: {topic_label} Decision Architecture</h2>\n'
+        f'      <h3>Connected Statutory Topic Cluster: {topic_label} Decision Architecture</h3>\n'
         f'      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 14px;">Navigate connected pillar models, side-by-side comparative matrices, and jurisdiction/entity compliance calculators:</p>\n'
         f'{joined_tiers}\n'
         f'    </section>'
@@ -6856,7 +6384,7 @@ def render_competitor_winning_pattern_blocks(
     vetted_handoff_html = (
         f'    <section id="vetted-commercial-handoff" class="commercial-handoff-vetting card pseo-card" '
         f'data-mechanic="vetted_commercial_handoff_framing">\n'
-        f'      <h2>{safe_handoff_h2}: {topic_label}</h2>\n'
+        f'      <h3>{safe_handoff_h2}: {topic_label}</h3>\n'
         f'      <ol style="padding-left: 18px; margin: 0;">\n'
         f'{handoff_li}\n'
         f'      </ol>\n'

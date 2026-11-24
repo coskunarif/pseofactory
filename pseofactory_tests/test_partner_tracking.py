@@ -1633,8 +1633,8 @@ def test_automated_readiness_audit_flags_unwired_vault_links_and_missing_payouts
         if os.path.exists(broken_vault_path):
             os.remove(broken_vault_path)
 
-    # 5. Verify compiled tenant placement parity across profithelm-platform and prexvo
-    assert ph_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 671
+    # 5. Verify compiled tenant placement parity across profithelm-platform and prexvo (capped <= 1 contextual referral card per calc page)
+    assert ph_audit["compiled_dom_parity"]["total_outbound_r_links"] >= 150
     assert ph_audit["compiled_dom_parity"]["network_tracked_click_share_pct"] >= 75.0
     # ipx1031 stays on its own qualified-intermediary site (never swapped to Xendoo), so it is no
     # longer counted as an edge-upgraded click.
@@ -3319,7 +3319,7 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
     ph_spec = resolve_post_calculation_upgrade_spec("profithelm", "section-1031-calculator")
     assert ph_spec is not None
     assert ph_spec["offer_sku"] == "ph_1031_boot_replacement_workpapers"
-    assert ph_spec["offer_price_usd"] == 79.0
+    assert ph_spec["offer_price_usd"] == 29.0
     assert ph_spec["trend_series_count"] >= 3
     assert "format=datapack" in ph_spec["datapack_url"]
 
@@ -3328,13 +3328,13 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
     )
     assert px_spec is not None
     assert px_spec["offer_sku"] == "px_refi_amortization_decision_audit"
-    assert px_spec["offer_price_usd"] == 39.0
+    assert px_spec["offer_price_usd"] == 19.0
     assert px_spec["trend_series_count"] >= 3
 
     gh_spec = resolve_post_calculation_upgrade_spec("gainhelm", "soc-2-audit-cost-calculator")
     assert gh_spec is not None
     assert gh_spec["offer_sku"] == "gh_soc2_cmmc_audit_workpapers"
-    assert gh_spec["offer_price_usd"] == 79.0
+    assert gh_spec["offer_price_usd"] == 29.0
     assert gh_spec["trend_series_count"] >= 3
 
     for restricted_slug in (
@@ -3384,22 +3384,23 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
     assert "lb_surety_bond_underwriting_kit" in e2e_audit["catalog_skus"]
     assert "ph_instant_statutory_worksheet_19" in e2e_audit["catalog_skus"]
 
-    # 3. Verify workbench HTML rendering, zero-signup compliance, and RetroReflection retrofit
+    # 3. Verify 3-step #workpaper-unlock-card rendering, zero-signup compliance, and RetroReflection self-heal
+    from pseofactory.affiliates import build_workpaper_unlock_card_html
     for prop_id, slug, domain in (
         ("profithelm", "section-1031-calculator", "https://profithelm.com"),
         ("prexvo", "student-loan-refinance-break-even-calculator", "https://prexvo.com"),
         ("gainhelm", "soc-2-audit-cost-calculator", "https://gainhelm.com"),
     ):
-        wb_html = render_serp_incumbent_depth_upgrade_block(
-            slug=slug,
-            title=f"{slug} Calculator",
+        wb_html = build_workpaper_unlock_card_html(
             property_id=prop_id,
-            canonical_base=domain,
+            slug=slug,
+            topic_label=f"{slug} Calculator",
+            baseline_amount=24500.0,
         )
-        assert 'id="post-calculation-upgrade-drawer"' in wb_html
-        assert 'data-mechanic="post_calculation_workpaper_upgrade"' in wb_html
-        assert 'id="btn-post-calc-upgrade-checkout"' in wb_html
-        assert 'id="btn-preview-post-calc-workpaper"' in wb_html
+        assert 'id="workpaper-unlock-card"' in wb_html
+        assert 'data-mechanic="workpaper_unlock_funnel"' in wb_html
+        assert 'id="btn-workpaper-quick-checkout"' in wb_html
+        assert 'id="btn-workpaper-full-checkout"' in wb_html
         assert_no_forbidden_dashes(wb_html, context=f"wb_{prop_id}")
 
         parser = ZeroSignupInstantResultHTMLParser()
@@ -3409,25 +3410,18 @@ def test_post_calculation_workpaper_and_statutory_data_pack_upgrade_e2e(tmp_path
         assert not parser.has_required_email_in_primary_form
         assert _count_max_consecutive_cta_callouts(wb_html) <= 2
 
-        # Strip #post-calculation-upgrade-drawer and verify RetroReflectionEngine + normalize_html_visual_primitives self-heals it
-        stripped_wb = re.sub(
-            r'\s*<div id="post-calculation-upgrade-drawer"[\s\S]*?<div id="post-calc-workpaper-preview-slot"[^>]*></div>\s*</div>',
-            "",
-            wb_html,
-        )
         stripped_doc = (
-            f"<!DOCTYPE html><html><head><title>Test</title></head><body><main>"
-            f'<div class="result-box"><div class="output-value">$24,500</div></div>'
-            + stripped_wb
+            f"<!DOCTYPE html><html><head><title>Test</title>"
+            f'<link rel="canonical" href="{domain}/tools/{slug}/"></head><body><main>'
+            f'<div class="calc-grid"><div class="result-box"><div class="output-value">$24,500</div></div></div>'
             + "</main></body></html>"
         )
-        assert 'id="post-calculation-upgrade-drawer"' not in stripped_doc
+        assert 'id="workpaper-unlock-card"' not in stripped_doc
         missing_mechs = RetroReflectionEngine.audit_html_mechanics(stripped_doc)
         assert "deterministic_visual_primitives" in missing_mechs
 
-        healed_doc, repairs = normalize_html_visual_primitives(stripped_doc)
-        assert "post_calculation_workpaper_upgrade" in repairs
-        assert 'id="post-calculation-upgrade-drawer"' in healed_doc
+        healed_doc, _ = normalize_html_visual_primitives(stripped_doc)
+        assert 'id="workpaper-unlock-card"' in healed_doc
         healed_again, repairs_second = normalize_html_visual_primitives(healed_doc)
         assert repairs_second == []
         assert healed_again == healed_doc
@@ -3600,7 +3594,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         calculated_amount=450000.0,
         state="CA",
         leads_ledger_path=ledger_path,
-        verified_payment=_paid("profithelm", 7900),
+        verified_payment=_paid("profithelm", 2900),
     )
     px_settled = settle_post_calculation_datapack_upgrade(
         property_id="prexvo",
@@ -3609,7 +3603,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         calculated_amount=165000.0,
         state="NY",
         leads_ledger_path=ledger_path,
-        verified_payment=_paid("prexvo", 3900),
+        verified_payment=_paid("prexvo", 1900),
     )
     gh_settled = settle_post_calculation_datapack_upgrade(
         property_id="gainhelm",
@@ -3618,13 +3612,13 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
         calculated_amount=58200.0,
         state="DE",
         leads_ledger_path=ledger_path,
-        verified_payment=_paid("gainhelm", 7900),
+        verified_payment=_paid("gainhelm", 2900),
     )
 
     for res, exp_prop, exp_sku, exp_price in (
-        (ph_settled, "profithelm", "ph_1031_boot_replacement_workpapers", 79.0),
-        (px_settled, "prexvo", "px_refi_amortization_decision_audit", 39.0),
-        (gh_settled, "gainhelm", "gh_soc2_cmmc_audit_workpapers", 79.0),
+        (ph_settled, "profithelm", "ph_1031_boot_replacement_workpapers", 29.0),
+        (px_settled, "prexvo", "px_refi_amortization_decision_audit", 19.0),
+        (gh_settled, "gainhelm", "gh_soc2_cmmc_audit_workpapers", 29.0),
     ):
         assert res["status"] == "settled_and_delivered"
         assert res["property_id"] == exp_prop
@@ -3646,13 +3640,13 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
     assert totals["total_deliverable_requests"] == 3
     assert totals["total_settled_upgrades"] == 3
     assert totals["total_datapack_deliveries"] == 3
-    assert totals["total_attributed_revenue_usd"] == 197.0
+    assert totals["total_attributed_revenue_usd"] == 77.0
     assert totals["fleet_deliverable_to_settled_rate"] == 1.0
     assert len(metrics["scenario_demand_ranking"]) >= 3
     assert len(metrics["per_calculator_metrics"]) >= 3
 
     mon_summary = get_lead_monitoring_summary(leads_ledger_path=ledger_path)
-    assert mon_summary["attributed_settled_revenue_usd"] == 197.0
+    assert mon_summary["attributed_settled_revenue_usd"] == 77.0
     assert "scenario_demand_attribution" in mon_summary
     assert len(mon_summary["per_calculator_metrics"]) >= 3
 
@@ -3692,7 +3686,7 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
       const pxLead = await import({json.dumps(px_lc)});
       const ghLead = await import({json.dumps(gh_lc)});
 
-      const priceByLead = {{ lead_profithelm_stl_test: 7900, lead_prexvo_stl_test: 3900, lead_gainhelm_stl_test: 7900 }};
+      const priceByLead = {{ lead_profithelm_stl_test: 2900, lead_prexvo_stl_test: 1900, lead_gainhelm_stl_test: 2900 }};
       const origFetch = globalThis.fetch;
       globalThis.fetch = async (url, init) => {{
         const m = String(url).match(/api\\.stripe\\.com\\/v1\\/checkout\\/sessions\\/cs_live_PAIDFOR_([A-Za-z0-9_]+)$/);
@@ -3708,9 +3702,9 @@ def test_direct_checkout_settlement_and_scenario_demand_attribution_e2e(tmp_path
       const authJsonHeaders = {{ "Accept": "application/json", "x-telemetry-secret": "tel_sec_stl" }};
 
       const cases = [
-        [phLead, "profithelm", "ph_1031_boot_replacement_workpapers", "section-1031-calculator", "lead_profithelm_stl_test", 450000, 79],
-        [pxLead, "prexvo", "px_refi_amortization_decision_audit", "student-loan-refinance-break-even-calculator", "lead_prexvo_stl_test", 142000, 39],
-        [ghLead, "gainhelm", "gh_soc2_cmmc_audit_workpapers", "soc-2-audit-cost-calculator", "lead_gainhelm_stl_test", 58200, 79],
+        [phLead, "profithelm", "ph_1031_boot_replacement_workpapers", "section-1031-calculator", "lead_profithelm_stl_test", 450000, 29],
+        [pxLead, "prexvo", "px_refi_amortization_decision_audit", "student-loan-refinance-break-even-calculator", "lead_prexvo_stl_test", 142000, 19],
+        [ghLead, "gainhelm", "gh_soc2_cmmc_audit_workpapers", "soc-2-audit-cost-calculator", "lead_gainhelm_stl_test", 58200, 29],
       ];
 
       for (const [mod, prop, sku, slug, leadId, amount, expPrice] of cases) {{
@@ -4053,18 +4047,17 @@ def test_autonomous_production_monetization_zero_nag_and_followup_idempotency(tm
     live_dash = live_tracker.sync_and_evaluate(force_mail_poll=False)
     pending_live_ids = {it.action_id for it in live_dash.all_action_items if it.status == "PENDING_OPERATOR"}
     assert "act-lienbond-suretybonds-direct-partner-approval" in pending_live_ids
-    assert "act-profithelm-eztaxreturn-com-application-approved" in pending_live_ids
-    assert len(pending_live_ids) == 2
+    assert len(pending_live_ids) == 1
 
-    assert live_dash.profithelm.sellable_assets_live_count == 3
+    assert live_dash.profithelm.sellable_assets_live_count == 4
     assert live_dash.profithelm.edge_redirect_coverage_pct == 100.0
     assert live_dash.profithelm.monetization_readiness_score > 40.0
     assert live_dash.profithelm.production_monetization_score > 60.0
 
     for zero_aff_rep, exp_sku_cnt, exp_mode in (
-        (live_dash.prexvo, 1, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
-        (live_dash.gainhelm, 2, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
-        (live_dash.lienbond, 7, "AWAITING_OPERATOR_ACTION"),
+        (live_dash.prexvo, 2, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
+        (live_dash.gainhelm, 3, "FIRST_PARTY_CHECKOUT_ONLY_AWAITING_PARTNER_APPROVALS"),
+        (live_dash.lienbond, 6, "AWAITING_OPERATOR_ACTION"),
     ):
         assert zero_aff_rep.monetization_readiness_score == 0.0
         assert zero_aff_rep.production_monetization_ready is False
@@ -4110,12 +4103,13 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
     )
 
     expected_skus = [
-        ("profithelm", "irs-2027-tax-brackets", "ph_instant_statutory_worksheet_19"),
-        ("prexvo", "student-loan-refinance-calculator", "px_instant_repayment_worksheet_19"),
-        ("gainhelm", "soc-2-cost-calculator", "gh_instant_compliance_worksheet_19"),
-        ("lienbond", "miller-act-bond-cost-calculator", "lb_instant_lien_bond_worksheet_19"),
+        ("profithelm", "irs-2027-tax-brackets", "ph_instant_statutory_worksheet_19", 15.0, 1500),
+        ("prexvo", "student-loan-refinance-calculator", "px_instant_repayment_worksheet_19", 9.0, 900),
+        ("gainhelm", "soc-2-cost-calculator", "gh_instant_compliance_worksheet_19", 15.0, 1500),
+        ("lienbond", "miller-act-bond-cost-calculator", "lb_instant_lien_bond_worksheet_19", 15.0, 1500),
     ]
-    for prop, slug, quick_sku in expected_skus:
+    from pseofactory.affiliates import build_workpaper_unlock_card_html
+    for prop, slug, quick_sku, exp_usd, exp_cents in expected_skus:
         offer = resolve_lead_monetization_offer(
             property_id=prop,
             tool_slug=slug,
@@ -4123,27 +4117,22 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
         )
         assert offer is not None
         assert offer["offer_sku"] == quick_sku
-        assert offer["offer_price_usd"] == 19.0
-        assert offer["offer_price_cents"] == 1900
+        assert offer["offer_price_usd"] == exp_usd
+        assert offer["offer_price_cents"] == exp_cents
 
         upg_spec = resolve_post_calculation_upgrade_spec(property_id=prop, tool_slug=slug)
         assert upg_spec is not None
         assert upg_spec["quick_unlock_sku"] == quick_sku
-        assert upg_spec["quick_unlock_price_usd"] == 19.0
-        assert upg_spec["quick_unlock_price_cents"] == 1900
+        assert upg_spec["quick_unlock_price_usd"] == exp_usd
+        assert upg_spec["quick_unlock_price_cents"] == exp_cents
         assert f"sku={quick_sku}" in upg_spec["quick_unlock_checkout_url"]
 
-        render_calc_result_quick_unlock_bar_html = getattr(comp_mod, "render_calc_result_quick_unlock_bar_html", None)
-        assert callable(render_calc_result_quick_unlock_bar_html)
-        bar_html = render_calc_result_quick_unlock_bar_html(slug=slug, property_id=prop, baseline_amount=125000.0)
-        assert 'id="calc-result-quick-unlock-bar"' in bar_html
-        assert 'id="inline-worksheet-capture-form"' in bar_html
-        assert f'data-offer-sku="{quick_sku}"' in bar_html
-        assert 'id="btn-calc-result-quick-unlock"' in bar_html
-
-        drawer_html = render_post_calculation_upgrade_drawer_html(slug=slug, property_id=prop, baseline_amount=125000.0)
-        assert 'id="btn-post-calc-quick-unlock-checkout"' in drawer_html
-        assert f'data-quick-unlock-sku="{quick_sku}"' in drawer_html
+        card_html = build_workpaper_unlock_card_html(property_id=prop, slug=slug, baseline_amount=125000.0)
+        assert 'id="workpaper-unlock-card"' in card_html
+        assert f'data-quick-sku="{quick_sku}"' in card_html
+        assert f'data-offer-sku="{quick_sku}"' in card_html
+        assert 'id="btn-workpaper-quick-checkout"' in card_html
+        assert 'id="btn-workpaper-full-checkout"' in card_html
 
     # Strict YMYL public-service exclusion on Prexvo
     with pytest.raises(ValueError, match="Restricted public-service asset"):
@@ -4153,7 +4142,7 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
             sku="px_instant_repayment_worksheet_19",
         )
     assert resolve_post_calculation_upgrade_spec(property_id="prexvo", tool_slug="pslf-buyback-calculator") is None
-    assert render_calc_result_quick_unlock_bar_html(slug="pslf-buyback-calculator", property_id="prexvo") == ""
+    assert build_workpaper_unlock_card_html(property_id="prexvo", slug="pslf-buyback-calculator") == ""
 
     # Edge worker JS SKU presence across all 4 tenants
     assert "ph_instant_statutory_worksheet_19" in generate_edge_lead_capture_function(property_id="profithelm")
@@ -4174,7 +4163,8 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
             gsc_metrics={"impressions": 450, "clicks": 3, "ctr": 0.0067, "position": 8.4},
         )
         assert roster["primary_offer"]["partner_key"] == exp_pk
-        assert roster["slot_plan"]["slot_bindings"]["calculator_result_inline"]["partner_key"] == exp_pk
+        slot_bindings = roster["slot_plan"]["slot_bindings"]
+        assert slot_bindings["calculator_result_inline"]["partner_key"] == exp_pk
 
     # Contextual partner offer copy: state tax brackets must never show Section 179 copy
     ny_roster = bind_asset_partner_roster(
@@ -4218,16 +4208,19 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
     assert "Tax Bomb" in insolv_roster["primary_offer"]["badge"]
     assert "Lower Fixed Refi Rates" in insolv_roster["primary_offer"]["cta_text"]
 
-    ny_bar = render_calc_result_quick_unlock_bar_html(
-        slug="irs-2027-tax-brackets/new-york",
+    ny_card = build_workpaper_unlock_card_html(
         property_id="profithelm",
+        slug="irs-2027-tax-brackets/new-york",
+        topic_label="New York State Tax Bracket & W-4 Withholding Plan",
         baseline_amount=79557.0,
     )
-    assert 'data-contextual-v2="1"' in ny_bar
-    assert "New York" in ny_bar
-    assert "W-4" in ny_bar
+    assert 'id="workpaper-unlock-card"' in ny_card
+    assert "New York" in ny_card
+    assert "W-4" in ny_card
 
-    assert "W4-L4C" in generate_edge_lead_capture_function(property_id="profithelm")
+    ph_lc_js = generate_edge_lead_capture_function(property_id="profithelm")
+    assert "1040-L16" in ph_lc_js
+    assert "2210-SH" in ph_lc_js
 
 
 

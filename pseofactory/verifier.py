@@ -2157,6 +2157,7 @@ class MasterSEOVerifier:
                 "/terms/",
                 "/disclaimers/",
                 "/contact/",
+                "/partners/",
             ]
         self._file_cache: Dict[str, Tuple[float, int, str]] = MasterSEOVerifier._GLOBAL_FILE_CACHE
         self._audit_target_key: Optional[str] = None
@@ -4920,6 +4921,13 @@ class MasterSEOVerifier:
                     if jargon.lower() in content_lower:
                         issues.append(f"Forbidden jargon or placeholder '{jargon}' detected in {rel}")
                         break
+                for leaked_phrase in (
+                    "client-side deserializers",
+                    "prevent crawler or user state corruption",
+                ):
+                    if leaked_phrase in content_lower:
+                        issues.append(f"Leaked engineering copy '{leaked_phrase}' detected in {rel}")
+                        break
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -4928,6 +4936,41 @@ class MasterSEOVerifier:
             "violations_count": len(issues),
             "issues": issues,
         }
+
+    # 26b. Monetization Pricing Truth, 3-Step Funnel Discipline & Live-Only Referral Gate
+    def check_monetization_and_funnel_hygiene_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """
+        Enforces Single Pricing Truth parity (pricing.py SSOT vs HTML, vault, partner_tracker,
+        and functions/api/lead-capture.js), 3-step funnel form discipline, /partners/ ($299)
+        presence and footer link, live-only /r/<key> referrals, and leaked engineering copy bans.
+        Zero em-dashes. Zero en-dashes.
+        """
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        resolved_meta = _resolve_pseofactory_tenant_meta(
+            dist_dir=target if target.exists() else None,
+            repo_root=self.repo_root,
+            domain=self.domain,
+            brand_name=self.brand_name,
+        )
+        prop_id = str(resolved_meta.get("property_id") or "").strip().lower()
+        if not prop_id:
+            dom_low = str(self.domain or "").lower()
+            dir_low = (target.parent.name if target.name == "dist" else target.name).lower()
+            for cand in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+                if cand in dom_low or cand in dir_low:
+                    prop_id = cand
+                    break
+        repo_root_hint = self.repo_root or (target.parent if target.name == "dist" else None)
+        return verify_estate_monetization_and_funnel_hygiene(
+            dist_dir=target,
+            property_id=prop_id or "profithelm",
+            repo_root=repo_root_hint,
+            html_files=self._iter_html_files(target) if target.exists() else None,
+            read_html_fn=self._read_cached_html,
+        )
 
     # 27. Instant Indexing Gate (Auxiliary)
     def check_indexing_gate(self, dist_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -5738,6 +5781,7 @@ class MasterSEOVerifier:
                 ("g_snippet", "check_snippet_gate", False),
                 ("g_citability", "check_citability_gate", False),
                 ("g_cleanliness", "check_cleanliness_gate", False),
+                ("g_monetization_funnel_hygiene", "check_monetization_and_funnel_hygiene_gate", False),
                 ("g_indexing", "check_indexing_gate", False),
                 ("g_host_hygiene", "check_host_hygiene_gate", True),
                 ("g_edge_cache_policy", "check_edge_cache_policy_gate", False),
@@ -5823,6 +5867,7 @@ class MasterSEOVerifier:
             g_schema = dict(g_schema_markup, gate="Schema Validation Gate")
             g_citability = gate_results["g_citability"]
             g_cleanliness = gate_results["g_cleanliness"]
+            g_monetization_funnel = gate_results["g_monetization_funnel_hygiene"]
             g_indexing = gate_results["g_indexing"]
             g_host_hygiene = gate_results["g_host_hygiene"]
             g_edge_cache_policy = gate_results["g_edge_cache_policy"]
@@ -5927,6 +5972,7 @@ class MasterSEOVerifier:
             "schema_gate": g_schema,
             "citability_gate": g_citability,
             "cleanliness_gate": g_cleanliness,
+            "check_monetization_and_funnel_hygiene_gate": g_monetization_funnel,
             "indexing_gate": g_indexing,
             "check_indexing_gate": g_indexing,
         }
@@ -5972,6 +6018,7 @@ class MasterSEOVerifier:
             "check_ai_mode_manifest_gate",
             "check_source_keyword_inflation_gate",
             "check_cohort_reflection_gate",
+            "check_monetization_and_funnel_hygiene_gate",
             "check_indexing_gate",
         ]
         try:
@@ -7618,6 +7665,22 @@ def verify_html_tool_utility_contract(
         }
 
     detected = detect_tool_utility_issues(html_content, rel_path=rel_path)
+    # Reactive 3-step funnel calculators (with inputs + interactive buttons/workpaper CTA and zero legacy email forms)
+    # no longer carry legacy <button type="submit"> lead-capture forms; suppress only that legacy CTA check when reactive controls + CTA exist.
+    if detected:
+        has_reactive_calc = bool(
+            re.search(r"<input\b|<select\b", html_content, re.IGNORECASE)
+            and re.search(
+                r'id=["\'](?:workpaper-unlock-card|btn-preview-workpaper|calculator-workspace-anchor|pseo-runtime-sync)["\']|<button\b|class=["\'][^"\']*(?:workpaper-cta|btn-cta|preset-btn)',
+                html_content,
+                re.IGNORECASE,
+            )
+        )
+        if has_reactive_calc:
+            detected = [
+                d for d in detected
+                if "Missing submit CTA button" not in d
+            ]
     issues.extend(detected)
     for ssr_err in detect_uninitialized_ssr_calculator_metrics(html_content, context=f"Page {rel_path}"):
         if ssr_err not in issues:
@@ -11054,4 +11117,293 @@ def evaluate_x_like_2109835011772035193_capability_matrix(
         "rubric_reports": rubric_reports,
         "status": "PASS" if all_passed else "FAIL",
         "passed": all_passed,
+    }
+
+
+def verify_estate_monetization_and_funnel_hygiene(
+    dist_dir: Union[str, Path],
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    html_files: Optional[List[Path]] = None,
+    read_html_fn: Optional[Callable[[Union[str, Path]], str]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic monetization truth, 3-step funnel discipline, /partners/ ($299) presence,
+    live-only /r/<key> referral, and engineering copy hygiene gate.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import (
+        is_restricted_public_service_slug,
+        load_live_partner_keys_from_vault,
+    )
+    from pseofactory.partner_tracker import resolve_lead_monetization_offer
+    from pseofactory.pricing import (
+        get_all_digital_products,
+        get_tenant_catalog,
+        resolve_offer_pricing,
+    )
+
+    target = Path(dist_dir)
+    prop = str(property_id or "profithelm").strip().lower()
+    if prop == "profithelm-platform":
+        prop = "profithelm"
+    eff_repo_root = Path(repo_root) if repo_root else (target.parent if target.name == "dist" else None)
+
+    issues: List[str] = []
+    pages_checked = 0
+
+    quick_offer = resolve_offer_pricing(prop, tier_kind="quick", repo_root=eff_repo_root)
+    full_offer = resolve_offer_pricing(prop, tier_kind="full", repo_root=eff_repo_root)
+    partner_offer = resolve_offer_pricing(prop, tier_kind="partner_slot", repo_root=eff_repo_root)
+    quick_price_int = int(round(float(quick_offer["price_usd"])))
+    full_price_int = int(round(float(full_offer["price_usd"])))
+    partner_price_int = int(round(float(partner_offer["price_usd"])))
+    allowed_page_prices = {str(quick_price_int), str(full_price_int)}
+
+    # 1a. monetization_vault.json parity with pricing.py
+    vault_path = Path(__file__).resolve().parent / "monetization_vault.json"
+    vault_data: Dict[str, Any] = {}
+    if vault_path.is_file():
+        try:
+            vault_data = json.loads(vault_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            issues.append(f"Failed to parse monetization_vault.json: {exc}")
+
+    vault_products = vault_data.get("digital_products") if isinstance(vault_data, dict) else None
+    if isinstance(vault_products, dict):
+        ssot_products = get_all_digital_products()
+        for sku_k, ssot_spec in ssot_products.items():
+            v_item = vault_products.get(sku_k)
+            if not isinstance(v_item, dict):
+                issues.append(f"monetization_vault.json missing canonical SKU '{sku_k}'")
+                continue
+            if int(v_item.get("price_cents") or -1) != int(ssot_spec["price_cents"]):
+                issues.append(
+                    f"Pricing parity drift in monetization_vault.json for '{sku_k}': "
+                    f"got {v_item.get('price_cents')} cents, expected {ssot_spec['price_cents']}"
+                )
+
+    # 1b. partner_tracker.py parity with pricing.py
+    tenant_catalog = get_tenant_catalog(prop, repo_root=eff_repo_root)
+    for sku_k, sku_spec in tenant_catalog.items():
+        if sku_spec.get("tier_kind") == "partner_slot":
+            continue
+        try:
+            pt_offer = resolve_lead_monetization_offer(
+                property_id=prop,
+                tool_slug=str(sku_spec.get("default_slug") or "general"),
+                sku=sku_k,
+            )
+            if int(pt_offer.get("offer_price_cents") or -1) != int(sku_spec["price_cents"]):
+                issues.append(
+                    f"Pricing parity drift in partner_tracker.py for '{sku_k}': "
+                    f"got {pt_offer.get('offer_price_cents')} cents, expected {sku_spec['price_cents']}"
+                )
+        except Exception:
+            pass
+
+    # 1c. Compiled functions/api/lead-capture.js unit_amount & catalog parity
+    if eff_repo_root is not None:
+        edge_lc_path = eff_repo_root / "functions" / "api" / "lead-capture.js"
+        if edge_lc_path.is_file():
+            lc_txt = edge_lc_path.read_text(encoding="utf-8", errors="ignore")
+            cat_m = re.search(
+                r"const\s+CANONICAL_OFFER_CATALOG\s*=\s*(\{[\s\S]*?\n\})\s*;",
+                lc_txt,
+            )
+            if cat_m:
+                try:
+                    edge_cat = json.loads(cat_m.group(1))
+                    for sku_k, sku_spec in tenant_catalog.items():
+                        e_item = edge_cat.get(sku_k)
+                        if not isinstance(e_item, dict):
+                            issues.append(f"lead-capture.js missing canonical SKU '{sku_k}'")
+                            continue
+                        if int(e_item.get("price_cents") or -1) != int(sku_spec["price_cents"]):
+                            issues.append(
+                                f"lead-capture.js price_cents drift for '{sku_k}': "
+                                f"got {e_item.get('price_cents')}, expected {sku_spec['price_cents']}"
+                            )
+                except Exception as exc:
+                    issues.append(f"Failed to parse CANONICAL_OFFER_CATALOG in lead-capture.js: {exc}")
+            for unit_m in re.finditer(
+                r'"line_items\[0\]\[price_data\]\[unit_amount\]"\s*:\s*String\(\s*([^)]+)\s*\)',
+                lc_txt,
+            ):
+                expr = unit_m.group(1).strip()
+                if expr.isdigit() and int(expr) not in {
+                    int(quick_offer["price_cents"]),
+                    int(full_offer["price_cents"]),
+                    int(partner_offer["price_cents"]),
+                }:
+                    issues.append(
+                        f"lead-capture.js hardcodes non-canonical Stripe unit_amount '{expr}'"
+                    )
+
+    if not target.exists():
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_monetization_and_funnel_hygiene_gate",
+            "pages_checked": 0,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    has_full_porcelain_estate = (
+        (target / "index.html").is_file()
+        and (target / "tools" / "index.html").is_file()
+        and ((target / "about" / "index.html").is_file() or (target / "methodology" / "index.html").is_file())
+    )
+
+    live_keys = load_live_partner_keys_from_vault(property_id=prop)
+    vault_props = vault_data.get("properties") if isinstance(vault_data, dict) else {}
+    vault_has_prop = isinstance(vault_props, dict) and prop in vault_props
+
+    # 2. Dedicated /partners/ route & footer link on full porcelain estates
+    if has_full_porcelain_estate:
+        partners_file = target / "partners" / "index.html"
+        if not partners_file.is_file():
+            issues.append("Missing dedicated /partners/ route (partners/index.html)")
+        else:
+            p_html = read_html_fn(partners_file) if read_html_fn else partners_file.read_text(encoding="utf-8", errors="ignore")
+            if 'id="partner-registration-form"' not in p_html and "id='partner-registration-form'" not in p_html:
+                issues.append("partners/index.html missing #partner-registration-form")
+            if f"${partner_price_int}" not in p_html and f'data-offer-price="{partner_price_int}"' not in p_html:
+                issues.append(f"partners/index.html missing canonical ${partner_price_int} partner slot price")
+        idx_html = (
+            read_html_fn(target / "index.html")
+            if read_html_fn
+            else (target / "index.html").read_text(encoding="utf-8", errors="ignore")
+        )
+        footer_m = re.search(r"<footer\b[\s\S]*?</footer>", idx_html, re.I)
+        footer_txt = footer_m.group(0) if footer_m else idx_html
+        if 'href="/partners/"' not in footer_txt and "href='/partners/'" not in footer_txt:
+            issues.append("index.html footer missing link to /partners/")
+
+    scanned_files = html_files if html_files is not None else sorted(target.glob("**/*.html"))
+    banned_copy_phrases = (
+        "client-side deserializers",
+        "prevent crawler or user state corruption",
+    )
+    banned_free_email_phrases = (
+        "email me free summary",
+        "send playbook",
+        "get free playbook",
+    )
+    banned_legacy_ids = (
+        "partner-registration-form",
+        "lead-capture-form",
+        "footer-lead-capture-form",
+        "inline-worksheet-capture-form",
+        "partner-quote-intake-form",
+        "post-calculation-upgrade-drawer",
+        "calc-result-quick-unlock-bar",
+    )
+
+    for html_path in scanned_files:
+        if not html_path.is_file():
+            continue
+        rel = html_path.relative_to(target).as_posix()
+        if rel.startswith(".") or "syndication/" in rel:
+            continue
+        pages_checked += 1
+        content = read_html_fn(html_path) if read_html_fn else html_path.read_text(encoding="utf-8", errors="ignore")
+        content_lower = content.lower()
+        is_partners_page = (
+            rel == "partners/index.html"
+            or rel == "partners.html"
+            or rel.endswith("/partners/index.html")
+            or rel.endswith("/partners.html")
+        )
+
+        # 4. Copy & dash hygiene (entire HTML including JSON-LD and hidden blocks)
+        if "\u2014" in content or "\u2013" in content:
+            issues.append(f"Forbidden em-dash or en-dash detected in {rel}")
+        for b_phrase in banned_copy_phrases:
+            if b_phrase in content_lower:
+                issues.append(f"Leaked engineering copy '{b_phrase}' detected in {rel}")
+
+        # 2. Form & funnel discipline
+        if not is_partners_page:
+            forms_found = re.findall(r"<form\b", content, re.I)
+            if len(forms_found) > 1:
+                issues.append(f"{rel}: expected <= 1 <form> element, found {len(forms_found)}")
+            for leg_id in banned_legacy_ids:
+                if re.search(rf'\bid=["\']{re.escape(leg_id)}["\']', content, re.I):
+                    issues.append(f"{rel}: forbidden legacy monetization element #{leg_id} present")
+            if re.search(r'\bclass=["\'][^"\']*\bpro-hook-card\b', content, re.I):
+                issues.append(f"{rel}: forbidden legacy .pro-hook-card present")
+            if "register your firm" in content_lower:
+                issues.append(f"{rel}: forbidden 'Register Your Firm' CTA leaked outside /partners/")
+            for email_promise in banned_free_email_phrases:
+                if email_promise in content_lower:
+                    issues.append(f"{rel}: false free-email promise copy '{email_promise}' present")
+
+        # 1d. HTML data-offer-price & rendered button price parity
+        for op_m in re.finditer(r'\bdata-offer-price=["\']([^"\']+)["\']', content, re.I):
+            op_val = op_m.group(1).strip()
+            if is_partners_page:
+                if op_val != str(partner_price_int):
+                    issues.append(f"{rel}: data-offer-price '{op_val}' != expected '{partner_price_int}'")
+            elif op_val not in allowed_page_prices:
+                issues.append(
+                    f"{rel}: data-offer-price '{op_val}' not in canonical tier prices {sorted(allowed_page_prices)}"
+                )
+
+        unlock_cards = re.findall(r'<section\b[^>]*id=["\']workpaper-unlock-card["\'][^>]*>', content, re.I)
+        is_tool_leaf = rel.startswith("tools/") and rel != "tools/index.html" and rel.endswith("/index.html")
+        tool_slug = rel[len("tools/") : -len("/index.html")].strip("/") if is_tool_leaf else ""
+        is_restricted = bool(is_tool_leaf and is_restricted_public_service_slug(tool_slug))
+
+        if is_restricted:
+            if unlock_cards:
+                issues.append(f"{rel}: restricted public-service YMYL page must have 0 #workpaper-unlock-card")
+            if re.search(r'\bdata-checkout-trigger=["\'](?:1|true)["\']', content, re.I):
+                issues.append(f"{rel}: restricted public-service YMYL page must have 0 checkout triggers")
+            if re.search(r'href=["\']/r/[^"\']+["\']', content, re.I):
+                issues.append(f"{rel}: restricted public-service YMYL page must have 0 /r/ referral links")
+        elif is_tool_leaf and has_full_porcelain_estate and "<form" in content_lower:
+            if len(unlock_cards) != 1:
+                issues.append(f"{rel}: commercial calculator expected 1 #workpaper-unlock-card, got {len(unlock_cards)}")
+
+        for chk_m in re.finditer(
+            r'<(?:a|button)\b([^>]*data-checkout-trigger=["\'](?:1|true)["\'][^>]*)>([\s\S]*?)</(?:a|button)>',
+            content,
+            re.I,
+        ):
+            attrs, label = chk_m.group(1), chk_m.group(2)
+            attr_p_m = re.search(r'\bdata-offer-price=["\'](\d+)["\']', attrs, re.I)
+            txt_p_m = re.search(r'\$(\d+(?:\.\d+)?)', label)
+            if attr_p_m and txt_p_m:
+                txt_p_int = int(round(float(txt_p_m.group(1))))
+                if str(txt_p_int) != attr_p_m.group(1):
+                    issues.append(
+                        f"{rel}: checkout button text '${txt_p_int}' != data-offer-price '{attr_p_m.group(1)}'"
+                    )
+
+        # 3. Live-only /r/<key> referral gate + <= 1 contextual-referral-card + zero empty placeholders
+        if vault_has_prop or has_full_porcelain_estate:
+            for r_m in re.finditer(r'href=["\']/r/([a-z0-9_.-]+)', content, re.I):
+                r_key = r_m.group(1).strip().lower()
+                if r_key not in live_keys:
+                    issues.append(f"{rel}: non-live or unapproved referral link '/r/{r_key}' for '{prop}'")
+
+        ref_cards = re.findall(
+            r'<section\b[^>]*class=["\'][^"\']*\bcontextual-referral-card\b[^"\']*["\'][^>]*>([\s\S]*?)</section>',
+            content,
+            re.I,
+        )
+        if len(ref_cards) > 1:
+            issues.append(f"{rel}: expected <= 1 .contextual-referral-card, got {len(ref_cards)}")
+        for rc_body in ref_cards:
+            if not re.search(r'href=["\']/r/[a-z0-9_.-]+', rc_body, re.I):
+                issues.append(f"{rel}: empty .contextual-referral-card placeholder without live /r/ link")
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "gate": "check_monetization_and_funnel_hygiene_gate",
+        "property_id": prop,
+        "pages_checked": pages_checked,
+        "violations_count": len(issues),
+        "issues": issues,
     }
