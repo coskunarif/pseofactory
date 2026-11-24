@@ -15,8 +15,10 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import urllib.parse
 import urllib.robotparser
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -28,6 +30,10 @@ import xml.etree.ElementTree as ET
 from html import unescape as html_unescape
 import functools
 from html.parser import HTMLParser
+try:
+    from selectolax.parser import HTMLParser as _SelectolaxHTMLParser
+except ImportError:
+    _SelectolaxHTMLParser = None  # type: ignore[assignment,misc]
 try:
     from bs4 import BeautifulSoup  # noqa: F401
 except ImportError:
@@ -46,6 +52,19 @@ _RE_BOILERPLATE_BLOCKS = re.compile(
 _RE_BODY_EXTRACT = re.compile(r"<body\b[^>]*>(.*?)</body\s*>", re.IGNORECASE | re.DOTALL)
 _RE_ALL_TAGS = re.compile(r"<[^>]+>")
 _RE_WORDS = re.compile(r"\b\w+\b")
+_RE_SOFT_404 = re.compile(r"\b(not found|discontinued|404 not found|page not found)\b", re.IGNORECASE)
+_RE_FILE_EXT = re.compile(r"\.[a-zA-Z0-9]{2,5}$")
+_RE_CANONICAL_LINK_HDR = re.compile(r'<([^>]+)>;\s*rel="canonical"', re.IGNORECASE)
+
+
+@dataclass
+class _PreflightHTMLMeta:
+    """Extracted preflight metadata compatible with _FastPreflightHTMLParser."""
+    canonical_hrefs: List[Optional[str]]
+    meta_robots: Optional[str]
+    meta_viewport: Optional[str]
+    h1_count: int
+    has_early_answer: bool
 
 
 class _FastPreflightHTMLParser(HTMLParser):
@@ -88,10 +107,39 @@ class _FastPreflightHTMLParser(HTMLParser):
 
 
 @functools.lru_cache(maxsize=512)
-def _parse_html_preflight_fast(html_content: str) -> Tuple[_FastPreflightHTMLParser, int]:
+def _parse_html_preflight_fast(html_content: str) -> Tuple[Any, int]:
     stripped = _RE_SCRIPT_STYLE_SVG.sub(" ", html_content)
-    parser = _FastPreflightHTMLParser()
-    parser.feed(stripped)
+    if _SelectolaxHTMLParser is not None:
+        tree = _SelectolaxHTMLParser(stripped)
+        canonical_hrefs: List[Optional[str]] = []
+        for node in tree.css("link[rel]"):
+            rel_val = node.attributes.get("rel") or ""
+            rel_tokens = [tok.lower() for tok in rel_val.split()]
+            if "canonical" in rel_tokens or "canonical" in rel_val.lower():
+                href_raw = node.attributes.get("href")
+                canonical_hrefs.append(href_raw.strip() if href_raw else None)
+        meta_robots: Optional[str] = None
+        meta_viewport: Optional[str] = None
+        for node in tree.css("meta[name]"):
+            m_name = (node.attributes.get("name") or "").lower()
+            if m_name == "robots" and meta_robots is None:
+                meta_robots = node.attributes.get("content") or ""
+            elif m_name == "viewport" and meta_viewport is None:
+                meta_viewport = node.attributes.get("content") or ""
+        h1_count = len(tree.css("h1"))
+        has_early_answer = bool(
+            tree.css_first('#quick-answer, [class*="quick-answer"], [class*="answer-box"]')
+        )
+        parser: Any = _PreflightHTMLMeta(
+            canonical_hrefs=canonical_hrefs,
+            meta_robots=meta_robots,
+            meta_viewport=meta_viewport,
+            h1_count=h1_count,
+            has_early_answer=has_early_answer,
+        )
+    else:
+        parser = _FastPreflightHTMLParser()
+        parser.feed(stripped)
     m_body = _RE_BODY_EXTRACT.search(stripped)
     body_slice = m_body.group(1) if m_body else stripped
     cleaned = _RE_BOILERPLATE_BLOCKS.sub(" ", body_slice)
@@ -171,12 +219,14 @@ class IndexingPreflightEngine:
     """
     _memo_cache: Dict[Any, PreflightURLRecord] = {}
     _dist_memo_cache: Dict[Any, PreflightReport] = {}
+    _cache_lock: threading.RLock = threading.RLock()
 
     @classmethod
     def clear_cache(cls) -> None:
-        cls._memo_cache.clear()
-        cls._dist_memo_cache.clear()
-        _parse_html_preflight_fast.cache_clear()
+        with cls._cache_lock:
+            cls._memo_cache.clear()
+            cls._dist_memo_cache.clear()
+            _parse_html_preflight_fast.cache_clear()
 
     def __init__(
         self,
@@ -380,8 +430,10 @@ class IndexingPreflightEngine:
                 self.fail_closed,
                 cfg_sigs,
             )
-            if cache_key in self._memo_cache:
-                return self._memo_cache[cache_key]
+            with self._cache_lock:
+                cached_rec = self._memo_cache.get(cache_key)
+            if cached_rec is not None:
+                return cached_rec
         except OSError:
             cache_key = None
 
@@ -415,7 +467,8 @@ class IndexingPreflightEngine:
             rec = self.inspect_url(url=url, html_content=raw)
 
         if cache_key is not None:
-            self._memo_cache[cache_key] = rec
+            with self._cache_lock:
+                self._memo_cache[cache_key] = rec
         return rec
 
     def inspect_url(
@@ -458,7 +511,7 @@ class IndexingPreflightEngine:
 
         # Trailing slash normalization check on directory routes
         path = parsed.path or "/"
-        has_file_ext = bool(re.search(r"\.[a-zA-Z0-9]{2,5}$", path))
+        has_file_ext = bool(_RE_FILE_EXT.search(path))
         if status == PreflightStatus.PASS and not has_file_ext and not path.endswith("/"):
             # Directory route missing trailing slash triggers 301 redirect
             status = PreflightStatus.BLOCKED_REDIRECT
@@ -530,7 +583,7 @@ class IndexingPreflightEngine:
                     or ""
                 )
             if body_check:
-                if re.search(r'\b(not found|discontinued|404 not found|page not found)\b', body_check, re.IGNORECASE):
+                if _RE_SOFT_404.search(body_check):
                     status = PreflightStatus.BLOCKED_404
                     issues.append("Soft 404 detected: HTTP 200 response contains 'not found' or 'discontinued' text")
 
@@ -586,7 +639,7 @@ class IndexingPreflightEngine:
                     link_hdr = edge_headers.get("link", "")
                     header_canonical = None
                     if link_hdr:
-                        m = re.search(r'<([^>]+)>;\s*rel="canonical"', link_hdr, re.I)
+                        m = _RE_CANONICAL_LINK_HDR.search(link_hdr)
                         if m:
                             header_canonical = m.group(1).strip()
 
@@ -777,14 +830,18 @@ class IndexingPreflightEngine:
         self, urls: List[Union[str, Dict[str, Any]]]
     ) -> PreflightReport:
         """Inspects an iterable of URLs or fixture dictionary records."""
-        records: List[PreflightURLRecord] = []
-        for item in urls:
+        def _inspect_one(item: Union[str, Dict[str, Any]]) -> PreflightURLRecord:
             if isinstance(item, dict):
                 url = item.get("url", "")
-                record = self.inspect_url(url=url, fixture_record=item)
-            else:
-                record = self.inspect_url(url=str(item))
-            records.append(record)
+                return self.inspect_url(url=url, fixture_record=item)
+            return self.inspect_url(url=str(item))
+
+        if len(urls) > 1:
+            max_workers = min(8, max(2, os.cpu_count() or 4), len(urls))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                records = list(executor.map(_inspect_one, urls))
+        else:
+            records = [_inspect_one(item) for item in urls]
 
         push_eligible, sitemap_eligible, blocked_urls = self.partition_urls(records)
 
@@ -870,8 +927,10 @@ class IndexingPreflightEngine:
             config_sigs,
             tuple(file_signatures),
         )
-        if dist_cache_key in self._dist_memo_cache:
-            return self._dist_memo_cache[dist_cache_key]
+        with self._cache_lock:
+            cached_dist = self._dist_memo_cache.get(dist_cache_key)
+        if cached_dist is not None:
+            return cached_dist
 
         urls: List[str] = []
         # Check sitemap.xml first if present
@@ -922,7 +981,8 @@ class IndexingPreflightEngine:
         self._load_offline_configs()
         try:
             report = self.inspect_urls(urls)
-            self._dist_memo_cache[dist_cache_key] = report
+            with self._cache_lock:
+                self._dist_memo_cache[dist_cache_key] = report
             return report
         finally:
             self.dist_dir = prev_dist

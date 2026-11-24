@@ -215,6 +215,7 @@ class TrendHistoryDB:
             "idx_crawl_cycles_status_executed",
             "idx_property_assignments_cycle",
             "idx_treg_snapshots_cycle",
+            "idx_treg_snapshots_poisoned",
         )
     )
 
@@ -830,6 +831,9 @@ class TrendHistoryDB:
                 "ON property_assignments(cycle_id);",
                 "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_cycle "
                 "ON treg_metric_snapshots(cycle_id);",
+                "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_poisoned "
+                "ON treg_metric_snapshots(snapshot_id) "
+                "WHERE search_volume = 0 AND cpc_usd = 0.0 AND keyword_difficulty = 50.0;",
             ):
                 conn.execute(perf_idx_sql)
 
@@ -1005,16 +1009,23 @@ class TrendHistoryDB:
             rows,
         )
 
-    def get_past_velocities(self, normalized_query: str, current_cycle_id: str) -> List[float]:
+    def get_past_velocities(
+        self,
+        normalized_query: str,
+        current_cycle_id: str,
+        limit: int = 50,
+    ) -> List[float]:
         """Returns past observed velocities for query ordered by most recent first via covering index."""
+        effective_limit = max(1, int(limit))
         conn = self.get_connection()
         cursor = conn.execute(
             """
             SELECT cycle_id, observed_velocity FROM raw_crawl_observations
             WHERE normalized_query = ?
-            ORDER BY observed_at DESC;
+            ORDER BY observed_at DESC
+            LIMIT ?;
             """,
-            (normalized_query,),
+            (normalized_query, effective_limit),
         )
         seen_cycles: set = set()
         velocities: List[float] = []

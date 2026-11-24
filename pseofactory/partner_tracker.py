@@ -22,6 +22,7 @@ import hmac
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta, timezone
@@ -539,6 +540,8 @@ class PartnerTrackingEngine:
         monetization_hub: Optional[MonetizationHub] = None,
         hub: Optional[MonetizationHub] = None,
     ):
+        if not _MONETIZATION_BOOTSTRAP_DONE and not _MONETIZATION_BOOTSTRAP_ACTIVE:
+            ensure_canonical_agy_monetization_state()
         if "PYTEST_CURRENT_TEST" not in os.environ:
             _load_local_env()
         self.email_engine = email_engine or EmailIngestionEngine()
@@ -13099,6 +13102,8 @@ def run_autonomous_partner_lifecycle_sync(
 
 
 _MONETIZATION_BOOTSTRAP_ACTIVE: bool = False
+_MONETIZATION_BOOTSTRAP_DONE: bool = False
+_MONETIZATION_BOOTSTRAP_LOCK = threading.RLock()
 
 
 def ensure_canonical_agy_monetization_state() -> None:
@@ -13108,72 +13113,78 @@ def ensure_canonical_agy_monetization_state() -> None:
     inter-process file lock so clean CI checkouts and legacy worktrees are deterministic
     without invoking live network IMAP/API calls.
     """
-    global _MONETIZATION_BOOTSTRAP_ACTIVE
-    if _MONETIZATION_BOOTSTRAP_ACTIVE:
-        return
-
-    import fcntl
-    from pathlib import Path
-
-    agy_dir = Path(__file__).resolve().parent.parent / ".agy"
-    personal_p = agy_dir / "personal_inbox.json"
-    bus_p = agy_dir / "human_action_bus.json"
-    earnings_p = agy_dir / "partner_earnings_ledger.json"
-
-    try:
-        personal_ok = personal_p.is_file() and personal_p.stat().st_size <= 5
-        earnings_ok = earnings_p.is_file() and earnings_p.stat().st_size > 10
-        bus_ok = False
-        if bus_p.is_file() and bus_p.stat().st_size > 10:
-            raw_bus = bus_p.read_text(encoding="utf-8")
-            bus_ok = (
-                '"pers-' not in raw_bus
-                and '"act-email-pers-' not in raw_bus
-                and '"act-lienbond-suretybonds-direct-partner-approval"' in raw_bus
-                and '"act-profithelm-eztaxreturn-com-application-approved"' in raw_bus
-            )
-        if personal_ok and earnings_ok and bus_ok:
+    global _MONETIZATION_BOOTSTRAP_ACTIVE, _MONETIZATION_BOOTSTRAP_DONE
+    with _MONETIZATION_BOOTSTRAP_LOCK:
+        if _MONETIZATION_BOOTSTRAP_ACTIVE:
             return
-    except Exception:
-        pass
 
-    _MONETIZATION_BOOTSTRAP_ACTIVE = True
-    try:
-        agy_dir.mkdir(parents=True, exist_ok=True)
-        lock_p = agy_dir / ".monetization_bootstrap.lock"
-        with open(lock_p, "w", encoding="utf-8") as lf:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            try:
-                EmailIngestionEngine._decommission_default_personal_inbox_split_brain()
-                offline_email_engine = EmailIngestionEngine()
-                offline_email_engine.ingest_zoho = lambda *a, **kw: [  # type: ignore[method-assign]
-                    EmailMessage(**m)
-                    for m in offline_email_engine.load_cache().get("messages", {}).values()
-                    if isinstance(m, dict) and m.get("account") == "zoho"
-                ]
-                tracker = PartnerTrackingEngine(email_engine=offline_email_engine)
-                bus_needs_sync = not bus_p.is_file() or not tracker.action_bus.items
-                if not bus_needs_sync:
-                    raw_bus_txt = bus_p.read_text(encoding="utf-8")
-                    if (
-                        '"pers-' in raw_bus_txt
-                        or '"act-email-pers-' in raw_bus_txt
-                        or "act-lienbond-suretybonds-direct-partner-approval" not in tracker.action_bus.items
-                        or "act-profithelm-eztaxreturn-com-application-approved" not in tracker.action_bus.items
-                    ):
-                        bus_needs_sync = True
-                if bus_needs_sync:
-                    tracker.sync_and_evaluate(force_mail_poll=False)
-                if not earnings_p.is_file() or earnings_p.stat().st_size <= 10:
-                    tracker.sync_partner_earnings_and_balances(fetch_live_api=False)
-            finally:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
-    except Exception:
-        pass
-    finally:
-        _MONETIZATION_BOOTSTRAP_ACTIVE = False
+        import fcntl
+        from pathlib import Path
 
+        agy_dir = Path(__file__).resolve().parent.parent / ".agy"
+        personal_p = agy_dir / "personal_inbox.json"
+        bus_p = agy_dir / "human_action_bus.json"
+        earnings_p = agy_dir / "partner_earnings_ledger.json"
 
-ensure_canonical_agy_monetization_state()
+        try:
+            personal_ok = personal_p.is_file() and personal_p.stat().st_size <= 5
+            earnings_ok = earnings_p.is_file() and earnings_p.stat().st_size > 10
+            bus_ok = False
+            if bus_p.is_file() and bus_p.stat().st_size > 10:
+                raw_bus = bus_p.read_text(encoding="utf-8")
+                bus_ok = (
+                    '"pers-' not in raw_bus
+                    and '"act-email-pers-' not in raw_bus
+                    and '"act-lienbond-suretybonds-direct-partner-approval"' in raw_bus
+                    and '"act-profithelm-eztaxreturn-com-application-approved"' in raw_bus
+                )
+            if personal_ok and earnings_ok and bus_ok:
+                _MONETIZATION_BOOTSTRAP_DONE = True
+                return
+        except Exception:
+            pass
+
+        _MONETIZATION_BOOTSTRAP_ACTIVE = True
+        saved_pytest_current_test = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            agy_dir.mkdir(parents=True, exist_ok=True)
+            lock_p = agy_dir / ".monetization_bootstrap.lock"
+            with open(lock_p, "w", encoding="utf-8") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    EmailIngestionEngine._decommission_default_personal_inbox_split_brain()
+                    offline_email_engine = EmailIngestionEngine()
+                    offline_email_engine.ingest_zoho = lambda *a, **kw: [  # type: ignore[method-assign]
+                        EmailMessage(**m)
+                        for m in offline_email_engine.load_cache().get("messages", {}).values()
+                        if isinstance(m, dict) and m.get("account") == "zoho"
+                    ]
+                    tracker = PartnerTrackingEngine(email_engine=offline_email_engine)
+                    bus_needs_sync = not bus_p.is_file() or not tracker.action_bus.items
+                    if not bus_needs_sync:
+                        raw_bus_txt = bus_p.read_text(encoding="utf-8")
+                        if (
+                            '"pers-' in raw_bus_txt
+                            or '"act-email-pers-' in raw_bus_txt
+                            or "act-lienbond-suretybonds-direct-partner-approval" not in tracker.action_bus.items
+                            or "act-profithelm-eztaxreturn-com-application-approved" not in tracker.action_bus.items
+                        ):
+                            bus_needs_sync = True
+                    if bus_needs_sync:
+                        tracker.sync_and_evaluate(force_mail_poll=False)
+                    if not earnings_p.is_file() or earnings_p.stat().st_size <= 10:
+                        tracker.sync_partner_earnings_and_balances(
+                            ledger_path=str(earnings_p),
+                            fetch_live_api=False,
+                        )
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        finally:
+            if saved_pytest_current_test is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = saved_pytest_current_test
+            _MONETIZATION_BOOTSTRAP_ACTIVE = False
+            _MONETIZATION_BOOTSTRAP_DONE = True
 
 

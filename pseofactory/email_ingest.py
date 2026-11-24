@@ -21,8 +21,10 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
@@ -431,6 +433,7 @@ class EmailIngestionEngine:
         self.min_poll_interval = min_poll_interval
         self.himalaya_bin = himalaya_bin
         self._last_envelope_fetch_ok = False
+        self._thread_local = threading.local()
         if not (
             os.environ.get("PYTEST_CURRENT_TEST")
             and os.path.abspath(self.cache_path) == self.DEFAULT_CACHE_PATH
@@ -599,7 +602,11 @@ class EmailIngestionEngine:
         extra_args: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Fetches envelopes from himalaya Zoho account with rate limiting."""
-        self._last_envelope_fetch_ok = False
+        defer_poll = bool(getattr(self._thread_local, "defer_poll_recording", False))
+        if defer_poll:
+            self._thread_local.last_envelope_fetch_ok = False
+        else:
+            self._last_envelope_fetch_ok = False
         allowed, remaining = self.can_poll("zoho", force=force)
         if not allowed:
             return []
@@ -616,17 +623,28 @@ class EmailIngestionEngine:
 
         code, stdout, stderr = self.run_himalaya_command(cmd_args)
         if code != 0:
-            self.record_poll("zoho", success=False, error=stderr)
+            if defer_poll:
+                self._thread_local.last_poll_result = (False, stderr)
+            else:
+                self.record_poll("zoho", success=False, error=stderr)
             return []
 
         try:
             data = json.loads(stdout)
             envelopes = data.get("envelopes", [])
-            self._last_envelope_fetch_ok = True
-            self.record_poll("zoho", success=True)
+            if defer_poll:
+                self._thread_local.last_envelope_fetch_ok = True
+                self._thread_local.last_poll_result = (True, "")
+            else:
+                self._last_envelope_fetch_ok = True
+                self.record_poll("zoho", success=True)
             return envelopes
         except Exception as exc:
-            self.record_poll("zoho", success=False, error=f"JSON parse error: {exc}")
+            err_msg = f"JSON parse error: {exc}"
+            if defer_poll:
+                self._thread_local.last_poll_result = (False, err_msg)
+            else:
+                self.record_poll("zoho", success=False, error=err_msg)
             return []
 
     def read_message_body(
@@ -666,8 +684,46 @@ class EmailIngestionEngine:
             ]
 
         page_sz = int(limit) if limit and limit > 0 else 200
-        envelopes = self.fetch_zoho_envelopes(mailbox="Inbox", page_size=page_sz, force=True)
-        if not envelopes and cached_dict and not self._last_envelope_fetch_ok:
+
+        def _fetch_folder_worker(
+            folder_name: str,
+        ) -> Tuple[str, List[Dict[str, Any]], bool, Optional[Tuple[bool, str]]]:
+            self._thread_local.defer_poll_recording = True
+            self._thread_local.last_envelope_fetch_ok = False
+            self._thread_local.last_poll_result = None
+            try:
+                folder_envs = self.fetch_zoho_envelopes(
+                    mailbox=folder_name, page_size=page_sz, force=True
+                )
+                ok = bool(getattr(self._thread_local, "last_envelope_fetch_ok", False))
+                poll_res = getattr(self._thread_local, "last_poll_result", None)
+                return folder_name, folder_envs, ok, poll_res
+            finally:
+                self._thread_local.defer_poll_recording = False
+
+        with ThreadPoolExecutor(max_workers=len(ZOHO_POLL_MAILBOXES)) as executor:
+            folder_fetch_results = list(executor.map(_fetch_folder_worker, ZOHO_POLL_MAILBOXES))
+
+        folder_envelopes_map: Dict[str, List[Dict[str, Any]]] = {}
+        inbox_ok = False
+        poll_outcomes: List[Tuple[bool, str]] = []
+        for fname, fenvs, fok, fpoll in folder_fetch_results:
+            folder_envelopes_map[fname] = fenvs
+            if fname == "Inbox":
+                inbox_ok = fok if fpoll is not None else bool(self._last_envelope_fetch_ok)
+            if fpoll is not None:
+                poll_outcomes.append(fpoll)
+
+        if poll_outcomes:
+            if any(ok for ok, _ in poll_outcomes):
+                self.record_poll("zoho", success=True)
+            else:
+                first_err = next((err for _, err in poll_outcomes if err), "")
+                self.record_poll("zoho", success=False, error=first_err)
+            self._last_envelope_fetch_ok = inbox_ok
+
+        envelopes = folder_envelopes_map.get("Inbox", [])
+        if not envelopes and cached_dict and not inbox_ok:
             # On fetch failure or offline test guard, preserve and return cached messages intact
             return [
                 EmailMessage(**m) for m in cached_dict.values()
@@ -864,7 +920,7 @@ class EmailIngestionEngine:
             "advisory@studentloaninquiry.org",
             "wade.fenton@otrsolutions.com",
         )
-        sent_envelopes = self.fetch_zoho_envelopes(mailbox="Sent", page_size=page_sz, force=True)
+        sent_envelopes = folder_envelopes_map.get("Sent", [])
         _mark_batch_fb_collisions("Sent", sent_envelopes, use_to=True)
         for env in sent_envelopes:
             date_str = env.get("date") or ""
@@ -915,7 +971,7 @@ class EmailIngestionEngine:
             ("Newsletter", "news"),
             ("Spam", "spam"),
         ):
-            folder_envelopes = self.fetch_zoho_envelopes(mailbox=folder_name, page_size=page_sz, force=True)
+            folder_envelopes = folder_envelopes_map.get(folder_name, [])
             _mark_batch_fb_collisions(folder_name, folder_envelopes, use_to=False)
             for env in folder_envelopes:
                 date_str = env.get("date") or ""
