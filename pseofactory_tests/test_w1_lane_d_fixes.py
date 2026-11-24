@@ -167,10 +167,10 @@ def test_item_17_revenue_truth_realized_stripe_slots_no_6_to_37_and_dynamic_tena
 def test_item_18_firstpromoter_v2_attaches_session_credential(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cl_secret = "fprom_cl_session_secret_xyz"
-    xn_secret = "_fprom_session=fprom_xn_cookie_secret_abc"
-    monkeypatch.setenv("FIRSTPROMOTER_COINLEDGER_SESSION", cl_secret)
-    monkeypatch.setenv("FIRSTPROMOTER_XENDOO_SESSION", xn_secret)
+    cl_session_val = "fprom_cl_session_fixture_xyz"
+    xn_cookie_val = "_fprom_session=fprom_xn_cookie_fixture_abc"
+    monkeypatch.setenv("FIRSTPROMOTER_COINLEDGER_SESSION", cl_session_val)
+    monkeypatch.setenv("FIRSTPROMOTER_XENDOO_SESSION", xn_cookie_val)
     monkeypatch.setenv("PSEUFACTORY_LIVE_NETWORK", "1")
     monkeypatch.delenv("PARTNERSTACK_API_KEY", raising=False)
     monkeypatch.delenv("IMPACT_ACCOUNT_SID", raising=False)
@@ -186,13 +186,13 @@ def test_item_18_firstpromoter_v2_attaches_session_credential(
         if "api.fprom.io/api/affiliate/v1/me" in url:
             host = hdrs.get("company_host", "")
             if host == "affiliates.coinledger.io":
-                assert cl_secret in hdrs.get("cookie", "")
-                assert hdrs.get("authorization") == f"Bearer {cl_secret}"
+                assert cl_session_val in hdrs.get("cookie", "")
+                assert hdrs.get("authorization") == f"Bearer {cl_session_val}"
                 return _FakeHTTPResponse(
                     {"promoter": {"stats": {"clicks_count": 42, "referrals_count": 3, "customers_count": 1}}}
                 )
             if host == "xendoo.firstpromoter.com":
-                assert hdrs.get("cookie") == xn_secret
+                assert hdrs.get("cookie") == xn_cookie_val
                 return _FakeHTTPResponse(
                     {"promoter": {"stats": {"clicks_count": 9, "referrals_count": 2, "sales_count": 1}}}
                 )
@@ -225,8 +225,8 @@ def test_item_18_firstpromoter_v2_attaches_session_credential(
     assert xn_state["portal_verified_clicks"] == 9
 
     serialized = json.dumps(ledger)
-    assert cl_secret not in serialized
-    assert xn_secret not in serialized
+    assert cl_session_val not in serialized
+    assert xn_cookie_val not in serialized
 
 
 def test_item_19_email_ingest_firstpromoter_routing(tmp_path: Path) -> None:
