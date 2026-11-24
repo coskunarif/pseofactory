@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import json
 import hashlib
+from contextlib import nullcontext
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Union, Set
@@ -106,9 +107,9 @@ class TrendCronRunner:
         if treg_checker is not None:
             self.treg_checker = treg_checker
             if getattr(self.treg_checker, "db", None) is None:
-                self.treg_checker.db = TrendHistoryDB(self.db_path)
+                self.treg_checker.db = TrendHistoryDB(self.db_path, read_only=True)
         else:
-            self.treg_checker = TregChecker(db=TrendHistoryDB(self.db_path))
+            self.treg_checker = TregChecker(db=TrendHistoryDB(self.db_path, read_only=True))
         self.jev_engine = jev_engine or JevEngine(min_build_yield=self.min_yield)
         self.noise_filter = noise_filter or NoiseFilter()
         self.scanner = scanner or CrossPropertyContaminationScanner()
@@ -283,10 +284,10 @@ class TrendCronRunner:
         import time as _time
 
         cycle_deadline = _time.monotonic() + 180.0
-        db = TrendHistoryDB(self.db_path)
+        db = TrendHistoryDB(self.db_path, read_only=dry_run)
 
-        # Acquire atomic advisory lock on <db_path>.lock with bounded wait for concurrent fleet/timer execution
-        with db.acquire_lock(non_blocking=True, timeout=lock_timeout):
+        # Acquire atomic advisory lock on <db_path>.lock with bounded wait for live runs; skip mutating lock files on dry_run
+        with (nullcontext() if dry_run else db.acquire_lock(non_blocking=True, timeout=lock_timeout)):
             # 1. Start cycle in DB
             sources_crawled = [
                 "google_suggest",
@@ -311,9 +312,9 @@ class TrendCronRunner:
             if fixture_path:
                 spikes = self.load_fixture(fixture_path)
             else:
-                collector = MultiSourceCollector()
+                collector = MultiSourceCollector(dry_run=dry_run)
                 collector.collectors.append(GSCSearchConsoleCollector(db_path=self.db_path))
-                spikes = collector.harvest(seed_list)
+                spikes = collector.harvest(seed_list, dry_run=dry_run)
 
             # 3. Preload existing tools and persisted GSC telemetry for cannibalization & ceiling checks
             tenant_ids = tuple(CANONICAL_TENANT_IDS)
@@ -919,9 +920,12 @@ class TrendCronRunner:
                             "revenue_priority_bonus": float(rev_signal.get("revenue_priority_bonus", 0.0) or 0.0),
                         }
                 if assigned_property in CANONICAL_TENANT_IDS:
-                    cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
-                        assigned_property, clean_q
-                    )
+                    try:
+                        cand.metadata["statutory_economic_matrix"] = db.compile_statutory_economic_matrix(
+                            assigned_property, clean_q
+                        )
+                    except Exception:
+                        pass
                 if ceiling_by_prop.get(assigned_property):
                     cand.metadata["ceiling_status"] = ceiling_by_prop[assigned_property]
                 eff_site_impr = site_impressions_by_prop.get(assigned_property, total_site_impressions)
@@ -1248,6 +1252,7 @@ class TrendCronRunner:
                     except Exception:
                         pass
 
+            db.close()
             return {
                 "cycle_id": cycle_id,
                 "executed_at": now_iso,

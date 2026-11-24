@@ -7,6 +7,7 @@ Zero AI slop. 100% minimal, sleek, quantitative tone. No em-dashes.
 
 import json
 import html
+import logging
 import re
 from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
@@ -22,6 +23,8 @@ import uuid
 import time
 import tempfile
 from datetime import datetime, timezone
+
+_logger = logging.getLogger(__name__)
 
 _REGISTERED_TEST_TEMP_PATHS: set[Path] = set()
 
@@ -386,6 +389,7 @@ class SyndicationWALQueue:
         property_id: str = "profithelm",
         queues_dir: Optional[Union[str, Path]] = None,
         max_attempts: int = 3,
+        backoff_schedule: Optional[List[float]] = None,
     ):
         raw_pid = (property_id or "profithelm").strip().lower()
         self.property_id = _normalize_property_id(raw_pid)
@@ -399,9 +403,12 @@ class SyndicationWALQueue:
             self.queues_dir = self.DEFAULT_QUEUES_DIR
         self.queues_dir.mkdir(parents=True, exist_ok=True)
         self.max_attempts = max_attempts
+        self.backoff_schedule = list(backoff_schedule) if backoff_schedule is not None else None
         self.queue_file = self.queues_dir / f"{self.property_id}_distribution_queue.jsonl"
         self.dlq_file = self.queues_dir / f"{self.property_id}_dlq.jsonl"
         self.lock_file = self.queues_dir / f".{self.property_id}_distribution_queue.lock"
+        self.dlq_lock_file = self.queues_dir / f".{self.property_id}_dlq.lock"
+        self.process_lock_file = self.queues_dir / f".{self.property_id}_distribution_process.lock"
 
     def enqueue(self, payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
         """Appends event to WAL with atomic flush and os.fsync."""
@@ -547,74 +554,159 @@ class SyndicationWALQueue:
         return reconciled
 
     def quarantine_to_dlq(self, record: Dict[str, Any], error: Optional[str] = None) -> None:
-        """Quarantines exhausted event to Dead Letter Queue."""
+        """Quarantines exhausted event to Dead Letter Queue under flock."""
         dlq_record = dict(record)
         dlq_record["status"] = "QUARANTINED"
         dlq_record["quarantined_at"] = datetime.now(timezone.utc).isoformat()
         dlq_record["error"] = error or "Max distribution retry attempts exceeded"
         line = json.dumps(dlq_record) + "\n"
-        with open(self.dlq_file, "a", encoding="utf-8") as f:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+        self.dlq_lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.dlq_lock_file, "a+") as dlf:
+            fcntl.flock(dlf.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(self.dlq_file, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+                    os.fsync(f.fileno())
+            finally:
+                fcntl.flock(dlf.fileno(), fcntl.LOCK_UN)
 
     def get_backoff_schedule(self) -> List[float]:
-        if os.environ.get("PSEUFACTORY_FAST_BACKOFF") == "1":
+        if self.backoff_schedule is not None:
+            return list(self.backoff_schedule)
+        fast_backoff_env = os.environ.get("PSEUFACTORY_FAST_BACKOFF")
+        if fast_backoff_env == "1" or (
+            fast_backoff_env != "0" and os.environ.get("PSEUFACTORY_FAST_MODE") == "1"
+        ):
             return [0.05, 0.1, 0.2]
         return [1.0, 2.0, 4.0]
 
-    def process_queue(self, handler: Any) -> Dict[str, Any]:
-        """Processes WAL entries with bounded retry backoff and DLQ quarantine."""
-        import time
-        if not self.queue_file.exists():
-            return {"processed": 0, "quarantined": 0, "remaining": 0}
+    def process_queue(
+        self,
+        handler: Any,
+        backoff_schedule: Optional[List[float]] = None,
+        sleep_fn: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Processes WAL entries with flock synchronization, bounded retry backoff, and DLQ quarantine."""
+        import time as _time
 
-        backoff = self.get_backoff_schedule()
-        lines = self.queue_file.read_text(encoding="utf-8").splitlines()
-        remaining_lines = []
-        processed_count = 0
-        quarantined_count = 0
+        backoff = list(backoff_schedule) if backoff_schedule is not None else self.get_backoff_schedule()
+        sleeper = sleep_fn if sleep_fn is not None else _time.sleep
+        skip_statuses = frozenset({"COMPLETED", "RECONCILED_SUPERSEDED", "QUARANTINED"})
 
-        for line in lines:
-            line_str = line.strip()
-            if not line_str:
-                continue
+        self.process_lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.process_lock_file, "a+") as plf:
+            fcntl.flock(plf.fileno(), fcntl.LOCK_EX)
             try:
-                rec = json.loads(line_str)
-            except Exception:
-                continue
+                with open(self.lock_file, "a+") as lf:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                    try:
+                        if not self.queue_file.exists():
+                            return {"processed": 0, "quarantined": 0, "remaining": 0}
+                        snapshot_lines = self.queue_file.read_text(encoding="utf-8").splitlines()
+                    finally:
+                        fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
-            attempts = rec.get("attempts", 0)
-            success = False
-            last_err = None
+                if not snapshot_lines:
+                    return {"processed": 0, "quarantined": 0, "remaining": 0}
 
-            while attempts < self.max_attempts:
-                try:
-                    success = handler(rec.get("payload", {}))
-                    if success:
-                        processed_count += 1
-                        break
-                except Exception as ex:
-                    last_err = str(ex)
+                processed_count = 0
+                quarantined_count = 0
+                handled_event_ids: set[str] = set()
+                handled_anonymous_lines: Dict[str, int] = {}
 
-                delay = backoff[min(attempts, len(backoff) - 1)]
-                time.sleep(delay)
-                attempts += 1
-                rec["attempts"] = attempts
+                for line in snapshot_lines:
+                    line_str = line.strip()
+                    if not line_str:
+                        continue
+                    try:
+                        rec = json.loads(line_str)
+                    except Exception:
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
 
-            if not success:
-                self.quarantine_to_dlq(rec, error=last_err)
-                quarantined_count += 1
+                    status = str(rec.get("status", "PENDING")).strip().upper()
+                    if status in skip_statuses:
+                        continue
 
-        tmp_q = self.queue_file.with_suffix(".tmp")
-        tmp_q.write_text("\n".join(remaining_lines) + ("\n" if remaining_lines else ""), encoding="utf-8")
-        tmp_q.replace(self.queue_file)
+                    attempts = int(rec.get("attempts", 0) or 0)
+                    item_max_attempts = max(1, int(rec.get("max_attempts", self.max_attempts) or self.max_attempts))
+                    success = False
+                    last_err = None
 
-        return {
-            "processed": processed_count,
-            "quarantined": quarantined_count,
-            "remaining": len(remaining_lines),
-        }
+                    while attempts < item_max_attempts:
+                        try:
+                            success = bool(handler(rec.get("payload", {})))
+                            if success:
+                                processed_count += 1
+                                break
+                        except Exception as ex:
+                            last_err = str(ex)
+
+                        attempts += 1
+                        rec["attempts"] = attempts
+                        if attempts < item_max_attempts and backoff:
+                            delay = float(backoff[min(attempts - 1, len(backoff) - 1)])
+                            if delay > 0.0:
+                                sleeper(delay)
+
+                    if not success:
+                        self.quarantine_to_dlq(rec, error=last_err)
+                        quarantined_count += 1
+
+                    eid = rec.get("event_id")
+                    if eid:
+                        handled_event_ids.add(str(eid))
+                    else:
+                        handled_anonymous_lines[line_str] = handled_anonymous_lines.get(line_str, 0) + 1
+
+                with open(self.lock_file, "a+") as lf:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                    try:
+                        current_lines = (
+                            self.queue_file.read_text(encoding="utf-8").splitlines()
+                            if self.queue_file.exists()
+                            else []
+                        )
+                        remaining_lines: List[str] = []
+                        anon_to_drop = dict(handled_anonymous_lines)
+                        for line in current_lines:
+                            s = line.strip()
+                            if not s:
+                                continue
+                            try:
+                                cur_rec = json.loads(s)
+                            except Exception:
+                                continue
+                            if not isinstance(cur_rec, dict):
+                                continue
+                            cur_eid = cur_rec.get("event_id")
+                            if cur_eid is not None and str(cur_eid) in handled_event_ids:
+                                continue
+                            if cur_eid is None and anon_to_drop.get(s, 0) > 0:
+                                anon_to_drop[s] -= 1
+                                continue
+                            remaining_lines.append(s)
+
+                        tmp_q = self.queue_file.with_name(
+                            f".{self.queue_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                        )
+                        with open(tmp_q, "w", encoding="utf-8") as tf:
+                            tf.write("\n".join(remaining_lines) + ("\n" if remaining_lines else ""))
+                            tf.flush()
+                            os.fsync(tf.fileno())
+                        os.replace(tmp_q, self.queue_file)
+                    finally:
+                        fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+                return {
+                    "processed": processed_count,
+                    "quarantined": quarantined_count,
+                    "remaining": len(remaining_lines),
+                }
+            finally:
+                fcntl.flock(plf.fileno(), fcntl.LOCK_UN)
 
 
 DistributionQueue = SyndicationWALQueue
@@ -11864,11 +11956,15 @@ def dispatch_to_distribution_lead(
                 b_ledger_path.parent.mkdir(parents=True, exist_ok=True)
                 existing_entries: List[Dict[str, Any]] = []
                 seen_slugs = set()
+                ledger_corrupt = False
                 if b_ledger_path.is_file():
                     try:
                         raw_b = json.loads(b_ledger_path.read_text(encoding="utf-8"))
-                        if isinstance(raw_b, list):
-                            for e in raw_b:
+                        if not isinstance(raw_b, list):
+                            raise ValueError(
+                                f"Expected JSON list in {b_ledger_path}, got {type(raw_b).__name__}"
+                            )
+                        for e in raw_b:
                                 if not isinstance(e, dict):
                                     continue
                                 e_slug = str(e.get("slug", ""))
@@ -11980,9 +12076,24 @@ def dispatch_to_distribution_lead(
                                 }
                                 seen_slugs.add(e_slug)
                                 existing_entries.append(e)
-                    except Exception:
-                        existing_entries = []
-                        seen_slugs = set()
+                    except Exception as exc:
+                        ledger_corrupt = True
+                        _logger.error(
+                            "Failed to parse broadcast ledger %s; preserving file without overwriting: %s",
+                            b_ledger_path,
+                            exc,
+                        )
+                        try:
+                            quarantine_path = b_ledger_path.with_name(
+                                f"{b_ledger_path.stem}.corrupt.{int(time.time())}.{os.getpid()}{b_ledger_path.suffix}"
+                            )
+                            shutil.copy2(b_ledger_path, quarantine_path)
+                        except Exception as q_exc:
+                            _logger.error(
+                                "Failed to quarantine copy of corrupt broadcast ledger %s: %s",
+                                b_ledger_path,
+                                q_exc,
+                            )
 
                 for slug, pack_obj in all_assets.items():
                     if slug not in seen_slugs:
@@ -12078,8 +12189,13 @@ def dispatch_to_distribution_lead(
                             new_entry["youtube_url"] = u_info.get("video_url")
                         existing_entries.append(new_entry)
                         seen_slugs.add(slug)
-                existing_entries.sort(key=lambda item: (-float(item.get("priority_score", 0.0) or 0.0), str(item.get("slug", ""))))
-                b_ledger_path.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
+                if not ledger_corrupt:
+                    existing_entries.sort(key=lambda item: (-float(item.get("priority_score", 0.0) or 0.0), str(item.get("slug", ""))))
+                    tmp_bl = b_ledger_path.with_name(
+                        f".{b_ledger_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                    )
+                    tmp_bl.write_text(json.dumps(existing_entries[-200:], indent=2), encoding="utf-8")
+                    os.replace(tmp_bl, b_ledger_path)
 
                 # Sync corporate LinkedIn schedule queue (strictly property_id-scoped, verified admins only)
                 li_queue_path = (

@@ -457,9 +457,11 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
         db_path: Optional[Any] = None,
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = MAX_RETRIES,
+        dry_run: bool = False,
     ):
         super().__init__("statutory_economic_feed", timeout=timeout, retries=retries)
         self.db_path = db_path
+        self.dry_run = bool(dry_run)
 
     def build_canonical_timeseries_records(self) -> List[Any]:
         """Builds longitudinal statutory and macroeconomic time-series records (2024 to 2030)."""
@@ -702,6 +704,9 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
         """Persists canonical longitudinal statutory and economic time-series into TrendHistoryDB."""
         from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
 
+        if self.dry_run or (db is not None and bool(getattr(db, "read_only", False))):
+            return 0
+
         records = self.build_canonical_timeseries_records()
         target_db = db
         close_after = False
@@ -719,14 +724,20 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
             if close_after and target_db is not None:
                 target_db.close()
 
-    def fetch_suggestions(self, seed_query: str = "") -> List[str]:
+    def fetch_suggestions(self, seed_query: str = "", dry_run: Optional[bool] = None) -> List[str]:
         """Returns high-intent statutory cliff queries matching seed_query."""
-        spikes = self.harvest_statutory_spikes(seed_query)
+        spikes = self.harvest_statutory_spikes(seed_query, dry_run=dry_run)
         return [s.query for s in spikes]
 
-    def harvest_statutory_spikes(self, seed_filter: str = "") -> List[FeedSpike]:
+    def harvest_statutory_spikes(
+        self,
+        seed_filter: str = "",
+        dry_run: Optional[bool] = None,
+    ) -> List[FeedSpike]:
         """Emits statutory cliff and high-monetization regulatory search void spikes."""
-        self.sync_to_db()
+        effective_dry_run = self.dry_run if dry_run is None else bool(dry_run)
+        if not effective_dry_run:
+            self.sync_to_db()
         now = datetime.now(timezone.utc).isoformat()
         seed_low = str(seed_filter or "").strip().lower()
         statutory_voids = [
@@ -895,9 +906,11 @@ class MultiSourceCollector:
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = MAX_RETRIES,
         collectors: Optional[List[BaseSuggestCollector]] = None,
+        dry_run: bool = False,
     ):
         self.timeout = min(float(timeout), 5.0)
         self.retries = min(int(retries), 2)
+        self.dry_run = bool(dry_run)
         if collectors is not None:
             self.collectors = collectors
         else:
@@ -907,7 +920,11 @@ class MultiSourceCollector:
                 RedditSuggestCollector(timeout=self.timeout, retries=self.retries),
                 HackerNewsCollector(timeout=self.timeout, retries=self.retries),
                 GoogleTrendsRSSCollector(timeout=self.timeout, retries=self.retries),
-                StatutoryEconomicDatasetCollector(timeout=self.timeout, retries=self.retries),
+                StatutoryEconomicDatasetCollector(
+                    timeout=self.timeout,
+                    retries=self.retries,
+                    dry_run=self.dry_run,
+                ),
             ]
 
     @staticmethod
@@ -944,8 +961,9 @@ class MultiSourceCollector:
             existing.z_score = round(min(8.0, existing.z_score + 0.4), 2)
             existing.raw_payload = payload
 
-    def harvest(self, seed_queries: List[str]) -> List[FeedSpike]:
+    def harvest(self, seed_queries: List[str], dry_run: Optional[bool] = None) -> List[FeedSpike]:
         """Harvests spikes across all configured collectors for the given seed queries."""
+        effective_dry_run = self.dry_run if dry_run is None else bool(dry_run)
         all_spikes: List[FeedSpike] = []
         spikes_by_query: Dict[str, FeedSpike] = {}
 
@@ -960,7 +978,7 @@ class MultiSourceCollector:
 
             if isinstance(collector, StatutoryEconomicDatasetCollector):
                 try:
-                    for s in collector.harvest_statutory_spikes():
+                    for s in collector.harvest_statutory_spikes(dry_run=effective_dry_run):
                         self._merge_or_append_spike(s, spikes_by_query, all_spikes)
                 except Exception:
                     pass

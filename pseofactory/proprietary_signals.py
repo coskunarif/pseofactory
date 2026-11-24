@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pseofactory.contracts import safe_eval_mathematical_formula
 
@@ -209,26 +209,39 @@ _STATE_TAX_PROFILES: Dict[str, Tuple[str, str, float, str]] = {
 }
 
 
-def _load_trend_db_cache() -> Dict[str, Any]:
-    """Loads statutory_economic_timeseries and keyword/TREG/JEV telemetry from trend_history.db."""
+def _load_trend_db_cache(db_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """Loads statutory_economic_timeseries and keyword/TREG/JEV telemetry from trend_history.db (strictly read-only)."""
     global _TREND_DB_CACHE
-    if _TREND_DB_CACHE is not None:
+    use_global_cache = db_path is None
+    if use_global_cache and _TREND_DB_CACHE is not None:
         return _TREND_DB_CACHE
 
-    candidate_db_paths = [
-        Path(__file__).resolve().parent / "trends" / "data" / "trend_history.db",
-        Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db"),
-    ]
-    db_path = next((p for p in candidate_db_paths if p.is_file()), candidate_db_paths[0])
+    if db_path is not None:
+        resolved_db_path = Path(db_path).resolve()
+    else:
+        candidate_db_paths = [
+            Path(__file__).resolve().parent / "trends" / "data" / "trend_history.db",
+            Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db"),
+        ]
+        resolved_db_path = next((p for p in candidate_db_paths if p.is_file()), candidate_db_paths[0]).resolve()
     series_by_id: Dict[str, Dict[str, Any]] = {}
     keywords_by_prop: Dict[str, List[Dict[str, Any]]] = {}
     keyword_tokens_by_prop: Dict[str, List[Tuple[str, Any, Any, float]]] = {}
     _kw_stop_tokens = frozenset({"calculator", "tax", "2026", "2027", "and", "vs", "by", "for", "of", "the", "in", "to"})
 
-    if db_path.is_file():
+    if resolved_db_path.is_file():
+        conn: Optional[sqlite3.Connection] = None
         try:
-            conn = sqlite3.connect(str(db_path))
+            wal_path = Path(f"{resolved_db_path}-wal")
+            has_non_empty_wal = wal_path.is_file() and wal_path.stat().st_size > 0
+            ro_query = "mode=ro" if has_non_empty_wal else "mode=ro&immutable=1"
+            conn = sqlite3.connect(
+                f"{resolved_db_path.as_uri()}?{ro_query}",
+                uri=True,
+                timeout=30.0,
+            )
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only = ON;")
             cur = conn.cursor()
             rows = cur.execute(
                 """
@@ -261,24 +274,6 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                 entry["points"][str(yr)] = val
                 entry["timeline"].append({"epoch": yr, "value": val})
 
-            try:
-                existing_idx = {
-                    str(row[0])
-                    for row in cur.execute(
-                        "SELECT name FROM sqlite_master WHERE type='index' "
-                        "AND name IN ('idx_jev_eval_query_slug', 'idx_treg_snapshots_slug_metrics');"
-                    ).fetchall()
-                }
-                if "idx_jev_eval_query_slug" not in existing_idx:
-                    cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_jev_eval_query_slug ON jev_evaluations(query_slug, jev_score, composite_profit_yield);"
-                    )
-                if "idx_treg_snapshots_slug_metrics" not in existing_idx:
-                    cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_treg_snapshots_slug_metrics ON treg_metric_snapshots(query_slug, search_volume, cpc_usd, keyword_difficulty, historical_stability);"
-                    )
-            except Exception:
-                pass
             kw_rows = cur.execute(
                 """
                 WITH tm_agg AS (
@@ -362,9 +357,14 @@ def _load_trend_db_cache() -> Dict[str, Any]:
                         float(kw_entry["composite_profit_yield"] or 0.0) / 1000.0,
                     )
                 )
-            conn.close()
         except Exception:
             pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     try:
         from pseofactory.trends.collectors import StatutoryEconomicDatasetCollector
@@ -394,12 +394,14 @@ def _load_trend_db_cache() -> Dict[str, Any]:
     except Exception:
         pass
 
-    _TREND_DB_CACHE = {
+    cache_payload = {
         "series_by_id": series_by_id,
         "keywords_by_prop": keywords_by_prop,
         "keyword_tokens_by_prop": keyword_tokens_by_prop,
     }
-    return _TREND_DB_CACHE
+    if use_global_cache:
+        _TREND_DB_CACHE = cache_payload
+    return cache_payload
 
 
 def _load_scenario_attribution_cache() -> Dict[str, Any]:
