@@ -7270,7 +7270,11 @@ def reconcile_workspace_tracking_state(
                 discovered_pids.add(_normalize_property_id(tr_p.name))
 
     allowed_production_props: Set[str] = set(CANONICAL_PRODUCTION_PROPERTIES) | discovered_pids | discovered_slugs
-    canonical_queue_Owner_ids = set(CANONICAL_PRODUCTION_PROPERTIES) | discovered_pids | {"pseofactory", "factory", "default"}
+    canonical_queue_Owner_ids = (
+        {_normalize_property_id(p) for p in CANONICAL_PRODUCTION_PROPERTIES}
+        | {_normalize_property_id(p) for p in discovered_pids}
+        | {"pseofactory", "factory", "default"}
+    )
     pruned_queue_files = 0
     reconciled_wal_events = 0
     pruned_ledger_tokens = 0
