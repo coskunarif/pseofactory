@@ -6,12 +6,15 @@ IndexNow (Bing/Copilot/Perplexity), WebSub Hubs, Ping-O-Matic, and Google Search
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
+import fcntl
+import logging
 import re
 import os
 import sys
 import json
 import shutil
 import subprocess
+import tempfile
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -21,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 GSC_QUOTA_TIMEZONE = ZoneInfo("America/Los_Angeles")
 
@@ -1473,6 +1478,27 @@ class PushIndexer:
             _default_base = Path("/home/ubuntuadmin/projects/lienbond")
         else:
             _default_base = DEFAULT_BASE_DIR
+            try:
+                from pseofactory.impact_planner import discover_active_tenants
+
+                want_tid = str(tenant_id or "").strip().lower()
+                want_dom = str(self.domain or "").strip().lower().removeprefix("www.")
+                for dyn_tid, dyn_repo in discover_active_tenants(Path("/home/ubuntuadmin/projects")):
+                    if want_tid and dyn_tid.strip().lower() == want_tid and dyn_repo.is_dir():
+                        _default_base = dyn_repo
+                        break
+                    if want_dom:
+                        cfg_p = dyn_repo / ".pseofactory.json"
+                        if cfg_p.is_file():
+                            try:
+                                cfg_d = json.loads(cfg_p.read_text(encoding="utf-8"))
+                                if str(cfg_d.get("domain") or "").strip().lower().removeprefix("www.") == want_dom:
+                                    _default_base = dyn_repo
+                                    break
+                            except Exception:
+                                pass
+            except Exception:
+                pass
         self.base_dir = Path(base_dir) if base_dir else _default_base
         self.dist_dir = Path(dist_dir) if dist_dir else (self.base_dir / "dist")
         if (
@@ -1787,7 +1813,6 @@ class PushIndexer:
                 elif "/home/ubuntuadmin/projects" not in str(self.quarantine_ledger_path):
                     ledger_targets = [self.quarantine_ledger_path]
                 else:
-                    import tempfile
                     ledger_targets = [Path(tempfile.gettempdir()) / f"pseofactory_pytest_quarantine_{os.getpid()}.json"]
             else:
                 ledger_targets = [
@@ -1799,36 +1824,29 @@ class PushIndexer:
                 if run_dir.exists():
                     ledger_targets.append(run_dir / "quarantine_ledger.json")
 
+            from pseofactory.indexing.preflight import update_quarantine_ledger_atomic
+
+            seen_targets = set()
             for target in ledger_targets:
                 if not target:
                     continue
                 try:
-                    target = Path(target)
-                    if not quarantined and not target.exists():
+                    target_p = Path(target)
+                    target_key = str(target_p.resolve())
+                    if target_key in seen_targets:
                         continue
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    existing_data: Dict[str, Any] = {}
-                    if target.exists():
-                        try:
-                            existing_data = json.loads(target.read_text(encoding="utf-8"))
-                            if not isinstance(existing_data, dict):
-                                existing_data = {}
-                        except Exception:
-                            existing_data = {}
-
-                    changed = False
-                    for u_valid in valid_urls:
-                        if u_valid in existing_data:
-                            del existing_data[u_valid]
-                            changed = True
-                    for item in quarantined:
-                        existing_data[item["url"]] = item
-                        changed = True
-
-                    if changed or quarantined:
-                        target.write_text(json.dumps(existing_data, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
+                    seen_targets.add(target_key)
+                    if not quarantined and not target_p.exists():
+                        continue
+                    update_quarantine_ledger_atomic(
+                        target_p,
+                        add_entries=quarantined,
+                        remove_urls=valid_urls,
+                        default_schema="dict",
+                        write_if_empty=bool(quarantined),
+                    )
+                except Exception as q_err:
+                    logger.warning("Failed updating quarantine ledger %s: %s", target, q_err)
 
         return AirlockResult(valid_urls, quarantined)
 
@@ -1952,11 +1970,33 @@ class PushIndexer:
             if engine:
                 engine_entry = prev_entry.get("engines", {}).get(engine)
                 if engine_entry and engine_entry.get("hash") == curr_hash:
-                    skipped.append(u)
+                    if engine == "google" and prev_entry.get("google_rollover_queued"):
+                        to_push.append(u)
+                    else:
+                        skipped.append(u)
                 else:
                     to_push.append(u)
             else:
-                if prev_entry.get("hash") == curr_hash:
+                prev_engines = prev_entry.get("engines")
+                has_engine_map = isinstance(prev_engines, dict) and len(prev_engines) > 0
+                google_eng = prev_engines.get("google") if isinstance(prev_engines, dict) else None
+                google_missing_or_stale = has_engine_map and (
+                    not isinstance(google_eng, dict)
+                    or google_eng.get("hash") != curr_hash
+                )
+                indexnow_eng = prev_engines.get("indexnow") if isinstance(prev_engines, dict) else None
+                indexnow_stale = (
+                    has_engine_map
+                    and isinstance(indexnow_eng, dict)
+                    and indexnow_eng.get("hash") is not None
+                    and indexnow_eng.get("hash") != curr_hash
+                )
+                if (
+                    prev_entry.get("hash") == curr_hash
+                    and not prev_entry.get("google_rollover_queued")
+                    and not google_missing_or_stale
+                    and not indexnow_stale
+                ):
                     skipped.append(u)
                 else:
                     to_push.append(u)
@@ -2790,6 +2830,32 @@ class PushIndexer:
             return Path("/home/ubuntuadmin/projects/.agy/gsc_quota_governor.json")
         return repo_root / ".agy" / "gsc_quota_governor.json"
 
+    @staticmethod
+    def _atomic_write_json_locked(target_path: Path, payload: Dict[str, Any]) -> None:
+        """Writes JSON payload to target_path via temp file + fsync + os.replace (caller holds flock)."""
+        tmp_path: Optional[str] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(target_path.parent),
+                prefix=f".{target_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp_fh:
+                tmp_path = tmp_fh.name
+                tmp_fh.write(json.dumps(payload, indent=2))
+                tmp_fh.flush()
+                os.fsync(tmp_fh.fileno())
+            os.replace(tmp_path, target_path)
+            tmp_path = None
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
     def trip_gsc_quota_breaker(self, bucket: str = "indexing", reason: str = "") -> Dict[str, Any]:
         """
         Immediately trips the shared daily GSC quota governor breaker when HTTP 429
@@ -2809,28 +2875,34 @@ class PushIndexer:
             "inspection_by_tenant": {},
             "per_tenant_indexing_floor": self.GSC_PER_TENANT_INDEXING_FLOOR,
         }
-        try:
-            if gov_path.is_file():
-                loaded = json.loads(gov_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict) and loaded.get("date") == today_str:
-                    state.update(loaded)
-        except Exception:
-            pass
+        gov_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = gov_path.with_name(f"{gov_path.name}.lock")
+        with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            try:
+                try:
+                    if gov_path.is_file():
+                        loaded = json.loads(gov_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded, dict) and loaded.get("date") == today_str:
+                            state.update(loaded)
+                except Exception as read_err:
+                    logger.warning("Failed reading GSC quota governor %s: %s", gov_path, read_err)
 
-        key = "inspection_used" if bucket == "inspection" else "indexing_used"
-        limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
-        state[key] = max(int(state.get(key, 0) or 0), limit)
-        state["timezone"] = "America/Los_Angeles"
-        state["quota_exhausted"] = True
-        state["exhausted_bucket"] = bucket
-        state["last_429_at"] = now_utc.isoformat()
-        if reason:
-            state["last_429_reason"] = str(reason)[:500]
-        try:
-            gov_path.parent.mkdir(parents=True, exist_ok=True)
-            gov_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+                key = "inspection_used" if bucket == "inspection" else "indexing_used"
+                limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
+                state[key] = max(int(state.get(key, 0) or 0), limit)
+                state["timezone"] = "America/Los_Angeles"
+                state["quota_exhausted"] = True
+                state["exhausted_bucket"] = bucket
+                state["last_429_at"] = now_utc.isoformat()
+                if reason:
+                    state["last_429_reason"] = str(reason)[:500]
+                try:
+                    self._atomic_write_json_locked(gov_path, state)
+                except Exception as write_err:
+                    logger.warning("Failed writing GSC quota governor %s: %s", gov_path, write_err)
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
         return state
 
     def check_and_consume_gsc_quota(
@@ -2854,82 +2926,91 @@ class PushIndexer:
             .strip()
             .lower()
         )
-        state: Dict[str, Any] = {
-            "date": today_str,
-            "timezone": "America/Los_Angeles",
-            "inspection_used": 0,
-            "indexing_used": 0,
-            "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
-            "indexing_quota_limit": GOOGLE_INDEXING_DAILY_QUOTA,
-            "indexing_by_tenant": {},
-            "inspection_by_tenant": {},
-            "per_tenant_indexing_floor": self.GSC_PER_TENANT_INDEXING_FLOOR,
-        }
-        try:
-            if gov_path.is_file():
-                loaded = json.loads(gov_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict) and loaded.get("date") == today_str:
-                    state.update(loaded)
-        except Exception:
-            pass
-
-        if not isinstance(state.get("indexing_by_tenant"), dict):
-            state["indexing_by_tenant"] = {}
-        if not isinstance(state.get("inspection_by_tenant"), dict):
-            state["inspection_by_tenant"] = {}
-
+        discovered_tenants = self._discover_active_quota_tenants() if bucket == "indexing" else set()
+        limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
         key = "inspection_used" if bucket == "inspection" else "indexing_used"
         by_tenant_key = "inspection_by_tenant" if bucket == "inspection" else "indexing_by_tenant"
-        by_tenant: Dict[str, int] = {
-            str(k).strip().lower(): int(v or 0)
-            for k, v in state[by_tenant_key].items()
-        }
-        limit = self.GSC_DAILY_INSPECTION_QUOTA if bucket == "inspection" else GOOGLE_INDEXING_DAILY_QUOTA
-        used = int(state.get(key, 0) or 0)
-        if state.get("quota_exhausted") and state.get("exhausted_bucket") == bucket:
-            used = max(used, limit)
-            state[key] = used
-
         req_units = max(0, int(units))
-        global_remaining = max(0, limit - used)
-        tenant_used = int(by_tenant.get(eff_tenant, 0))
-        tenant_floor = 0
-        reserved_for_others = 0
-        if bucket == "indexing":
-            active_tenants = self._discover_active_quota_tenants() | set(by_tenant.keys())
-            if eff_tenant:
-                active_tenants.add(eff_tenant)
-            tenant_floor = min(
-                int(state.get("per_tenant_indexing_floor") or self.GSC_PER_TENANT_INDEXING_FLOOR),
-                limit // max(1, len(active_tenants)),
-            )
-            reserved_for_others = sum(
-                max(0, tenant_floor - int(by_tenant.get(other_t, 0)))
-                for other_t in active_tenants
-                if other_t != eff_tenant
-            )
-            effective_remaining = max(0, global_remaining - reserved_for_others)
-            allowed = req_units <= effective_remaining
-        else:
-            effective_remaining = global_remaining
-            allowed = (used + req_units) <= limit
 
-        if allowed and req_units > 0:
-            state[key] = used + req_units
-            by_tenant[eff_tenant] = tenant_used + req_units
-            state[by_tenant_key] = by_tenant
-            tenant_used = by_tenant[eff_tenant]
-            global_remaining = max(0, limit - int(state[key]))
-            effective_remaining = (
-                max(0, global_remaining - reserved_for_others)
-                if bucket == "indexing"
-                else global_remaining
-            )
+        gov_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = gov_path.with_name(f"{gov_path.name}.lock")
+        with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
             try:
-                gov_path.parent.mkdir(parents=True, exist_ok=True)
-                gov_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+                state: Dict[str, Any] = {
+                    "date": today_str,
+                    "timezone": "America/Los_Angeles",
+                    "inspection_used": 0,
+                    "indexing_used": 0,
+                    "quota_limit": self.GSC_DAILY_INSPECTION_QUOTA,
+                    "indexing_quota_limit": GOOGLE_INDEXING_DAILY_QUOTA,
+                    "indexing_by_tenant": {},
+                    "inspection_by_tenant": {},
+                    "per_tenant_indexing_floor": self.GSC_PER_TENANT_INDEXING_FLOOR,
+                }
+                try:
+                    if gov_path.is_file():
+                        loaded = json.loads(gov_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded, dict) and loaded.get("date") == today_str:
+                            state.update(loaded)
+                except Exception as read_err:
+                    logger.warning("Failed reading GSC quota governor %s: %s", gov_path, read_err)
+
+                if not isinstance(state.get("indexing_by_tenant"), dict):
+                    state["indexing_by_tenant"] = {}
+                if not isinstance(state.get("inspection_by_tenant"), dict):
+                    state["inspection_by_tenant"] = {}
+
+                by_tenant: Dict[str, int] = {
+                    str(k).strip().lower(): int(v or 0)
+                    for k, v in state[by_tenant_key].items()
+                }
+                used = int(state.get(key, 0) or 0)
+                if state.get("quota_exhausted") and state.get("exhausted_bucket") == bucket:
+                    used = max(used, limit)
+                    state[key] = used
+
+                global_remaining = max(0, limit - used)
+                tenant_used = int(by_tenant.get(eff_tenant, 0))
+                tenant_floor = 0
+                reserved_for_others = 0
+                if bucket == "indexing":
+                    active_tenants = set(discovered_tenants) | set(by_tenant.keys())
+                    if eff_tenant:
+                        active_tenants.add(eff_tenant)
+                    tenant_floor = min(
+                        int(state.get("per_tenant_indexing_floor") or self.GSC_PER_TENANT_INDEXING_FLOOR),
+                        limit // max(1, len(active_tenants)),
+                    )
+                    reserved_for_others = sum(
+                        max(0, tenant_floor - int(by_tenant.get(other_t, 0)))
+                        for other_t in active_tenants
+                        if other_t != eff_tenant
+                    )
+                    effective_remaining = max(0, global_remaining - reserved_for_others)
+                    allowed = req_units <= effective_remaining
+                else:
+                    effective_remaining = global_remaining
+                    allowed = (used + req_units) <= limit
+
+                if allowed and req_units > 0:
+                    state[key] = used + req_units
+                    by_tenant[eff_tenant] = tenant_used + req_units
+                    state[by_tenant_key] = by_tenant
+                    tenant_used = by_tenant[eff_tenant]
+                    global_remaining = max(0, limit - int(state[key]))
+                    effective_remaining = (
+                        max(0, global_remaining - reserved_for_others)
+                        if bucket == "indexing"
+                        else global_remaining
+                    )
+                    try:
+                        self._atomic_write_json_locked(gov_path, state)
+                    except Exception as write_err:
+                        logger.warning("Failed writing GSC quota governor %s: %s", gov_path, write_err)
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
         return {
             "allowed": allowed,
             "date": today_str,
@@ -3551,13 +3632,13 @@ class PushIndexer:
                 }
                 inspections.append(insp)
 
+        db_upsert_error: Optional[str] = None
         if live and inspections:
             try:
                 from pseofactory.trends.db import DEFAULT_DB_PATH, GSCUrlInspectionRecord, TrendHistoryDB
                 prop_id = (
-                    "prexvo"
-                    if "prexvo" in (self.domain or "").lower()
-                    else ("gainhelm" if "gainhelm" in (self.domain or "").lower() else ("lienbond" if "lienbond" in (self.domain or "").lower() else "profithelm"))
+                    str(getattr(self, "tenant_id", "") or "").strip().lower()
+                    or ((self.domain or "").split(".")[0].strip().lower() if self.domain else "profithelm")
                 )
                 db_records = []
                 for item in inspections:
@@ -3597,14 +3678,20 @@ class PushIndexer:
                 if db_records and target_db.parent.is_dir():
                     with TrendHistoryDB(target_db) as tdb:
                         tdb.upsert_gsc_url_inspection_states(db_records)
-            except Exception:
-                pass
+            except Exception as err:
+                db_upsert_error = str(err)
+                logger.warning(
+                    "GSC URL inspection DB upsert failed for %s: %s",
+                    target_site,
+                    err,
+                    exc_info=True,
+                )
 
         indexed_count = sum(1 for item in inspections if item.get("is_indexed", False))
         total = len(inspections)
         pct = (indexed_count / total * 100.0) if total > 0 else 0.0
 
-        return {
+        result = {
             "site": target_site,
             "mode": "LIVE" if live else "SIMULATED",
             "total_inspected": total,
@@ -3614,6 +3701,9 @@ class PushIndexer:
             "oracle_verdict": "CERTIFIED_INDEXED" if (indexed_count == total or not live) else "PENDING_INDEXATION",
             "inspections": inspections,
         }
+        if db_upsert_error is not None:
+            result["db_upsert_error"] = db_upsert_error
+        return result
 
     def load_gsc_rollover_queue(self) -> List[str]:
         try:

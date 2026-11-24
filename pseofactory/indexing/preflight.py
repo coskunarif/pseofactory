@@ -9,8 +9,12 @@ reputation and commercial spend (HWL-1087, HWL-1088).
 
 from __future__ import annotations
 
+import fcntl
 import json
+import logging
+import os
 import re
+import tempfile
 import urllib.parse
 import urllib.robotparser
 from dataclasses import asdict, dataclass, field
@@ -28,6 +32,8 @@ try:
     from bs4 import BeautifulSoup  # noqa: F401
 except ImportError:
     BeautifulSoup = None  # type: ignore[assignment,misc]
+
+logger = logging.getLogger(__name__)
 
 _RE_SCRIPT_STYLE_SVG = re.compile(
     r"<(script|style|svg)\b[^>]*>.*?</\1>",
@@ -182,10 +188,12 @@ class IndexingPreflightEngine:
         live: bool = False,
         require_viewport: bool = False,
         fail_closed: bool = False,
+        workspace_root: Optional[Union[str, Path]] = None,
     ):
         self.domain = domain.lower().strip()
         self.property_id = property_id.lower().strip()
         self.dist_dir = Path(dist_dir).resolve() if dist_dir else None
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
         self.min_words = min_words
         self.tier1_cap = tier1_cap
         self.live = live
@@ -204,15 +212,19 @@ class IndexingPreflightEngine:
 
         if self.dist_dir and self.dist_dir.exists():
             self._load_offline_configs()
-            try:
-                self._has_html_files = any(self.dist_dir.glob("**/*.html"))
-            except Exception:
-                self._has_html_files = False
 
     def _load_offline_configs(self) -> None:
         """Parses _redirects, _headers, and robots.txt from dist_dir if present."""
-        if not self.dist_dir:
+        self._redirect_rules = []
+        self._header_rules = []
+        self._robot_parser = None
+        self._has_html_files = False
+        if not self.dist_dir or not self.dist_dir.exists():
             return
+        try:
+            self._has_html_files = any(self.dist_dir.glob("**/*.html"))
+        except Exception:
+            self._has_html_files = False
 
         # 1. _redirects
         redirects_file = self.dist_dir / "_redirects"
@@ -357,7 +369,17 @@ class IndexingPreflightEngine:
 
         try:
             st = path_obj.stat()
-            cache_key = (str(path_obj), st.st_mtime, st.st_size, url or "", self.min_words, self.require_viewport)
+            cfg_sigs = self._get_offline_config_sigs(self.dist_dir, names=("_headers", "robots.txt"))
+            cache_key = (
+                str(path_obj),
+                st.st_mtime,
+                st.st_size,
+                url or "",
+                self.min_words,
+                self.require_viewport,
+                self.fail_closed,
+                cfg_sigs,
+            )
             if cache_key in self._memo_cache:
                 return self._memo_cache[cache_key]
         except OSError:
@@ -835,7 +857,19 @@ class IndexingPreflightEngine:
             except OSError:
                 pass
 
-        dist_cache_key = (str(target), self.domain, sitemap_sig, tuple(file_signatures))
+        config_sigs = self._get_offline_config_sigs(target)
+        dist_cache_key = (
+            str(target),
+            self.domain,
+            self.property_id,
+            self.min_words,
+            self.tier1_cap,
+            self.require_viewport,
+            self.fail_closed,
+            sitemap_sig,
+            config_sigs,
+            tuple(file_signatures),
+        )
         if dist_cache_key in self._dist_memo_cache:
             return self._dist_memo_cache[dist_cache_key]
 
@@ -880,43 +914,86 @@ class IndexingPreflightEngine:
                 urls.append(page_url)
 
         prev_dist = self.dist_dir
+        prev_redirects = self._redirect_rules
+        prev_headers = self._header_rules
+        prev_robots = self._robot_parser
+        prev_has_html = self._has_html_files
         self.dist_dir = target
+        self._load_offline_configs()
         try:
             report = self.inspect_urls(urls)
             self._dist_memo_cache[dist_cache_key] = report
             return report
         finally:
             self.dist_dir = prev_dist
+            self._redirect_rules = prev_redirects
+            self._header_rules = prev_headers
+            self._robot_parser = prev_robots
+            self._has_html_files = prev_has_html
 
-    def quarantine_blocked_urls(
-        self,
-        blocked_urls: List[Any],
-        ledger_path: Optional[Union[str, Path]] = None,
-        stage: str = "PREFLIGHT",
-        error: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Quarantines defective or blocked URLs into indexing_quarantine_ledger.json.
-        Preserves existing quarantine entries and writes updated ledger.
-        """
-        import os
-        if ledger_path is not None:
-            target_path = Path(ledger_path).resolve()
-        elif os.environ.get("PYTEST_CURRENT_TEST") and (
-            not self.dist_dir or "/home/ubuntuadmin/projects" in str(self.dist_dir)
-        ):
-            import tempfile
-            target_path = Path(tempfile.gettempdir()) / f"pseofactory_pytest_quarantine_{os.getpid()}.json"
-        elif self.dist_dir:
-            target_path = Path(self.dist_dir).parent / ".agy" / "indexing_quarantine_ledger.json"
-        else:
-            tenant_repo_dir: Optional[Path] = None
+    @staticmethod
+    def _get_offline_config_sigs(
+        dist_path: Optional[Path],
+        names: Tuple[str, ...] = ("_redirects", "_headers", "robots.txt"),
+    ) -> Tuple[Tuple[str, Optional[Tuple[float, int]]], ...]:
+        if not dist_path:
+            return tuple((n, None) for n in names)
+        sigs: List[Tuple[str, Optional[Tuple[float, int]]]] = []
+        for name in names:
+            cfg_file = dist_path / name
+            sig = None
+            if cfg_file.is_file():
+                try:
+                    st = cfg_file.stat()
+                    sig = (st.st_mtime, st.st_size)
+                except OSError:
+                    sig = None
+            sigs.append((name, sig))
+        return tuple(sigs)
+
+    def _resolve_tenant_repo_dir(self) -> Optional[Path]:
+        """Dynamically resolves tenant repository directory for 50+ tenants via .pseofactory.json."""
+        pid_key = str(self.property_id or "").strip().lower()
+        dom_key = str(self.domain or "").strip().lower().removeprefix("www.")
+        ws_root = self.workspace_root or Path("/home/ubuntuadmin/projects")
+
+        if ws_root.is_dir():
             try:
-                from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+                from pseofactory.impact_planner import discover_active_tenants
 
-                pid_key = str(self.property_id or "").strip().lower()
-                decl = CANONICAL_TENANT_DECLARATIONS.get(pid_key)
-                if decl is not None:
+                for tid, repo_dir in discover_active_tenants(ws_root):
+                    if pid_key and tid.strip().lower() == pid_key and repo_dir.is_dir():
+                        return repo_dir
+                    if dom_key:
+                        cfg_file = repo_dir / ".pseofactory.json"
+                        if cfg_file.is_file():
+                            try:
+                                cfg_data = json.loads(cfg_file.read_text(encoding="utf-8"))
+                                cfg_dom = str(cfg_data.get("domain") or "").strip().lower().removeprefix("www.")
+                                if cfg_dom == dom_key and repo_dir.is_dir():
+                                    return repo_dir
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+            if pid_key:
+                for cand_name in (pid_key, f"{pid_key}-platform"):
+                    cand_dir = ws_root / cand_name
+                    if cand_dir.is_dir() and ((cand_dir / ".pseofactory.json").is_file() or (cand_dir / ".git").exists()):
+                        return cand_dir
+
+        if self.workspace_root is None:
+            try:
+                from pseofactory.tenant_facts import (
+                    CANONICAL_TENANT_DECLARATIONS,
+                    SPAWNED_TENANT_DECLARATIONS,
+                )
+
+                for decl_map in (CANONICAL_TENANT_DECLARATIONS, SPAWNED_TENANT_DECLARATIONS):
+                    decl = decl_map.get(pid_key)
+                    if decl is None:
+                        continue
                     repo_ref = (
                         decl.get("repo_root_path")
                         or decl.get("repo_root")
@@ -933,30 +1010,49 @@ class IndexingPreflightEngine:
                         cand_repo = (
                             Path(repo_ref)
                             if (isinstance(repo_ref, Path) or str(repo_ref).startswith("/"))
-                            else (Path("/home/ubuntuadmin/projects") / str(repo_ref))
+                            else (ws_root / str(repo_ref))
                         )
                         if cand_repo.is_dir():
-                            tenant_repo_dir = cand_repo
+                            return cand_repo
             except Exception:
-                tenant_repo_dir = None
+                pass
+
+        return None
+
+    def _resolve_quarantine_ledger_path(
+        self,
+        ledger_path: Optional[Union[str, Path]] = None,
+    ) -> Path:
+        if ledger_path is not None:
+            return Path(ledger_path).resolve()
+
+        ws_root = self.workspace_root or Path("/home/ubuntuadmin/projects")
+        if self.dist_dir:
+            candidate = Path(self.dist_dir).parent / ".agy" / "indexing_quarantine_ledger.json"
+        else:
+            tenant_repo_dir = self._resolve_tenant_repo_dir()
             if tenant_repo_dir is not None:
-                target_path = tenant_repo_dir / ".agy" / "indexing_quarantine_ledger.json"
+                candidate = tenant_repo_dir / ".agy" / "indexing_quarantine_ledger.json"
             else:
-                target_path = Path("/home/ubuntuadmin/projects/.agy/indexing_quarantine_ledger.json")
+                pid_key = re.sub(r"[^a-z0-9_.-]+", "_", str(self.property_id or "").strip().lower()).strip("_") or "default"
+                candidate = ws_root / ".agy" / "tenants" / pid_key / "indexing_quarantine_ledger.json"
 
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if os.environ.get("PYTEST_CURRENT_TEST") and str(candidate.resolve()).startswith("/home/ubuntuadmin/projects"):
+            return Path(tempfile.gettempdir()) / f"pseofactory_pytest_quarantine_{os.getpid()}.json"
+        return candidate
 
-        existing_entries: List[Dict[str, Any]] = []
-        if target_path.exists():
-            try:
-                content = target_path.read_text(encoding="utf-8")
-                loaded = json.loads(content)
-                if isinstance(loaded, list):
-                    existing_entries = loaded
-                elif isinstance(loaded, dict) and "quarantined" in loaded:
-                    existing_entries = loaded.get("quarantined", [])
-            except Exception:
-                existing_entries = []
+    def quarantine_blocked_urls(
+        self,
+        blocked_urls: List[Any],
+        ledger_path: Optional[Union[str, Path]] = None,
+        stage: str = "PREFLIGHT",
+        error: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Quarantines defective or blocked URLs into indexing_quarantine_ledger.json.
+        Preserves existing quarantine entries across list and dict schemas and writes atomically.
+        """
+        target_path = self._resolve_quarantine_ledger_path(ledger_path=ledger_path)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         new_entries: List[Dict[str, Any]] = []
@@ -974,8 +1070,13 @@ class IndexingPreflightEngine:
             }
             new_entries.append(entry)
 
-        all_entries = existing_entries + new_entries
-        target_path.write_text(json.dumps(all_entries, indent=2), encoding="utf-8")
+        update_quarantine_ledger_atomic(
+            target_path,
+            add_entries=new_entries,
+            remove_urls=[],
+            default_schema="list",
+            write_if_empty=True,
+        )
         return new_entries
 
     def inspect_fixture(
@@ -1047,6 +1148,134 @@ def run_indexing_preflight(
     return engine.inspect_dist()
 
 
+def update_quarantine_ledger_atomic(
+    ledger_path: Union[str, Path],
+    add_entries: Optional[List[Dict[str, Any]]] = None,
+    remove_urls: Optional[List[str]] = None,
+    default_schema: str = "list",
+    write_if_empty: bool = False,
+) -> Dict[str, Any]:
+    """
+    Atomically reads, merges, and writes indexing_quarantine_ledger.json under fcntl.flock,
+    preserving both list and URL-keyed dict schemas so callers never wipe each other's entries.
+    """
+    target = Path(ledger_path)
+    add_list = list(add_entries or [])
+    remove_set = {str(u).strip() for u in (remove_urls or []) if u}
+    if not add_list and not target.exists() and not write_if_empty:
+        return {"changed": False, "schema": default_schema, "count": 0}
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(f"{target.name}.lock")
+    with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        try:
+            schema = "dict" if default_schema == "dict" else "list"
+            records: Dict[str, Dict[str, Any]] = {}
+            raw_loaded: Any = None
+            if target.exists():
+                try:
+                    raw_text = target.read_text(encoding="utf-8")
+                    if raw_text.strip():
+                        raw_loaded = json.loads(raw_text)
+                except Exception as read_err:
+                    logger.warning("Failed to parse quarantine ledger %s: %s", target, read_err)
+                    raw_loaded = None
+
+            if isinstance(raw_loaded, list):
+                schema = "list"
+                for item in raw_loaded:
+                    if isinstance(item, dict) and item.get("url"):
+                        u_key = str(item["url"]).strip()
+                        if u_key:
+                            entry_copy = dict(item)
+                            entry_copy["url"] = u_key
+                            records[u_key] = entry_copy
+                    elif isinstance(item, str) and item.strip():
+                        u_key = item.strip()
+                        records[u_key] = {"url": u_key}
+            elif isinstance(raw_loaded, dict):
+                wrapped = raw_loaded.get("quarantined")
+                if isinstance(wrapped, list) and all(
+                    k in ("quarantined", "updated_at", "schema_version") for k in raw_loaded.keys()
+                ):
+                    schema = "list"
+                    for item in wrapped:
+                        if isinstance(item, dict) and item.get("url"):
+                            u_key = str(item["url"]).strip()
+                            if u_key:
+                                entry_copy = dict(item)
+                                entry_copy["url"] = u_key
+                                records[u_key] = entry_copy
+                        elif isinstance(item, str) and item.strip():
+                            u_key = item.strip()
+                            records[u_key] = {"url": u_key}
+                else:
+                    schema = "dict"
+                    for k, v in raw_loaded.items():
+                        if k == "quarantined" and isinstance(v, list):
+                            for item in v:
+                                if isinstance(item, dict) and item.get("url"):
+                                    u_key = str(item["url"]).strip()
+                                    if u_key:
+                                        entry_copy = dict(item)
+                                        entry_copy["url"] = u_key
+                                        records[u_key] = entry_copy
+                            continue
+                        u_key = str(v.get("url", k) if isinstance(v, dict) else k).strip()
+                        if not u_key:
+                            continue
+                        entry_copy = dict(v) if isinstance(v, dict) else {"url": u_key, "details": v}
+                        entry_copy.setdefault("url", u_key)
+                        records[u_key] = entry_copy
+
+            changed = False
+            for u_rem in remove_set:
+                if u_rem in records:
+                    del records[u_rem]
+                    changed = True
+
+            for item in add_list:
+                if not isinstance(item, dict):
+                    continue
+                u_add = str(item.get("url") or "").strip()
+                if not u_add:
+                    continue
+                entry_copy = dict(item)
+                entry_copy["url"] = u_add
+                records[u_add] = entry_copy
+                changed = True
+
+            if changed or add_list or (write_if_empty and not target.exists()):
+                payload: Any = list(records.values()) if schema == "list" else records
+                tmp_path: Optional[str] = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        encoding="utf-8",
+                        dir=str(target.parent),
+                        prefix=f".{target.name}.",
+                        suffix=".tmp",
+                        delete=False,
+                    ) as tmp_fh:
+                        tmp_path = tmp_fh.name
+                        tmp_fh.write(json.dumps(payload, indent=2))
+                        tmp_fh.flush()
+                        os.fsync(tmp_fh.fileno())
+                    os.replace(tmp_path, target)
+                    tmp_path = None
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
+
+            return {"changed": changed, "schema": schema, "count": len(records)}
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
+
 def prune_stale_cross_domain_quarantine_entries(
     ledger_path: Union[str, Path],
     tenant_dist_dirs: Optional[Dict[str, Path]] = None,
@@ -1073,40 +1302,63 @@ def prune_stale_cross_domain_quarantine_entries(
     domain_to_dist: Dict[str, Path] = {}
     known_domains: Set[str] = set()
     try:
-        from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+        from pseofactory.tenant_facts import (
+            CANONICAL_TENANT_DECLARATIONS,
+            SPAWNED_TENANT_DECLARATIONS,
+        )
 
-        for _pid, decl in CANONICAL_TENANT_DECLARATIONS.items():
-            dom = str(
-                (decl.get("domain") if isinstance(decl, dict) else getattr(decl, "domain", None)) or ""
-            ).strip().lower().removeprefix("www.")
-            repo_ref = (
-                decl.get("repo_root_path")
-                or decl.get("repo_root")
-                or decl.get("repo_dir_name")
-                or decl.get("repo_dir")
-                if isinstance(decl, dict)
-                else (
-                    getattr(decl, "repo_root_path", None)
-                    or getattr(decl, "repo_root", None)
-                    or getattr(decl, "repo_dir_name", None)
-                )
-            )
-            dist_rel = str(
-                (decl.get("dist_dir") if isinstance(decl, dict) else getattr(decl, "dist_dir", None)) or "dist"
-            ).strip()
-            if dom:
-                known_domains.add(dom)
-                if repo_ref:
-                    cand_repo = (
-                        Path(repo_ref)
-                        if (isinstance(repo_ref, Path) or str(repo_ref).startswith("/"))
-                        else (Path("/home/ubuntuadmin/projects") / str(repo_ref))
+        for decl_map in (CANONICAL_TENANT_DECLARATIONS, SPAWNED_TENANT_DECLARATIONS):
+            for _pid, decl in decl_map.items():
+                dom = str(
+                    (decl.get("domain") if isinstance(decl, dict) else getattr(decl, "domain", None)) or ""
+                ).strip().lower().removeprefix("www.")
+                repo_ref = (
+                    decl.get("repo_root_path")
+                    or decl.get("repo_root")
+                    or decl.get("repo_dir_name")
+                    or decl.get("repo_dir")
+                    if isinstance(decl, dict)
+                    else (
+                        getattr(decl, "repo_root_path", None)
+                        or getattr(decl, "repo_root", None)
+                        or getattr(decl, "repo_dir_name", None)
                     )
-                    cand_dist = cand_repo / dist_rel
-                    if cand_dist.is_dir():
-                        domain_to_dist[dom] = cand_dist
+                )
+                dist_rel = str(
+                    (decl.get("dist_dir") if isinstance(decl, dict) else getattr(decl, "dist_dir", None)) or "dist"
+                ).strip()
+                if dom:
+                    known_domains.add(dom)
+                    if repo_ref:
+                        cand_repo = (
+                            Path(repo_ref)
+                            if (isinstance(repo_ref, Path) or str(repo_ref).startswith("/"))
+                            else (Path("/home/ubuntuadmin/projects") / str(repo_ref))
+                        )
+                        cand_dist = cand_repo / dist_rel
+                        if cand_dist.is_dir():
+                            domain_to_dist[dom] = cand_dist
     except Exception:
         known_domains = {"profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com"}
+
+    try:
+        from pseofactory.impact_planner import discover_active_tenants
+
+        for _pid, repo_dir in discover_active_tenants(Path("/home/ubuntuadmin/projects")):
+            cfg_file = repo_dir / ".pseofactory.json"
+            if cfg_file.is_file():
+                try:
+                    cfg_data = json.loads(cfg_file.read_text(encoding="utf-8"))
+                    dom = str(cfg_data.get("domain") or "").strip().lower().removeprefix("www.")
+                    if dom:
+                        known_domains.add(dom)
+                        cand_dist = repo_dir / str(cfg_data.get("dist_dir") or "dist").strip()
+                        if cand_dist.is_dir() and dom not in domain_to_dist:
+                            domain_to_dist[dom] = cand_dist
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     if isinstance(tenant_dist_dirs, dict):
         for dom_k, d_val in tenant_dist_dirs.items():
