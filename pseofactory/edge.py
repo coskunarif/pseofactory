@@ -1993,6 +1993,80 @@ function evaluateEdgeRedirectGate(request, reqUrl) {
 }"""
 
 
+def _render_edge_ssrf_guard_js(
+    fn_name: str = "isSafeAndCompliantUrl",
+    include_forbidden_aggregators: bool = True,
+) -> str:
+    """
+    Renders the shared JavaScript SSRF and open-redirect validation guard
+    used across generated functions/r/[partner].js edge redirect handlers.
+    Zero em-dashes. Zero en-dashes.
+    """
+    agg_block = ""
+    if include_forbidden_aggregators:
+        agg_block = (
+            "    for (const forbidden of FORBIDDEN_AGGREGATOR_DOMAINS) {\n"
+            "      if (hostname === forbidden || hostname.endsWith(`.${forbidden}`)) {\n"
+            "        return false;\n"
+            "      }\n"
+            "    }\n"
+        )
+    return (
+        f"function {fn_name}(urlStr) {{\n"
+        "  try {\n"
+        "    const parsed = new URL(urlStr);\n"
+        '    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {\n'
+        "      return false;\n"
+        "    }\n"
+        "    const hostname = parsed.hostname.toLowerCase();\n"
+        f"{agg_block}"
+        "    if (\n"
+        '      hostname === "localhost" ||\n'
+        '      hostname === "127.0.0.1" ||\n'
+        '      hostname === "::1" ||\n'
+        '      hostname === "0.0.0.0" ||\n'
+        '      hostname === "169.254.169.254" ||\n'
+        '      hostname === "metadata.google.internal" ||\n'
+        '      hostname === "instance-data"\n'
+        "    ) {\n"
+        "      return false;\n"
+        "    }\n"
+        "    if (/^\\d+$/.test(hostname) || /^0x[0-9a-f]+$/i.test(hostname)) {\n"
+        "      return false;\n"
+        "    }\n"
+        "    const ipv4Regex = /^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$/;\n"
+        "    const match = hostname.match(ipv4Regex);\n"
+        "    if (match) {\n"
+        "      const [_, o1, o2, o3, o4] = match.map(Number);\n"
+        "      if (o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255) return false;\n"
+        "      if (o1 === 0) return false;\n"
+        "      if (o1 === 127) return false;\n"
+        "      if (o1 === 10) return false;\n"
+        "      if (o1 === 172 && o2 >= 16 && o2 <= 31) return false;\n"
+        "      if (o1 === 192 && o2 === 168) return false;\n"
+        "      if (o1 === 169 && o2 === 254) return false;\n"
+        "    }\n"
+        '    if (hostname.startsWith("[") && hostname.endsWith("]")) {\n'
+        "      const ipv6 = hostname.slice(1, -1).toLowerCase();\n"
+        "      if (\n"
+        '        ipv6 === "::1" ||\n'
+        '        ipv6 === "::" ||\n'
+        '        ipv6.startsWith("fc") ||\n'
+        '        ipv6.startsWith("fd") ||\n'
+        '        ipv6.startsWith("fe80") ||\n'
+        '        ipv6.startsWith("::ffff:")\n'
+        "      ) {\n"
+        "        return false;\n"
+        "      }\n"
+        "    }\n"
+        "    return true;\n"
+        "  } catch {\n"
+        "    return false;\n"
+        "  }\n"
+        "}"
+    )
+
+
 def generate_edge_redirect_function(
     property_id: str = "profithelm",
     hub: Optional[Any] = None,
@@ -2020,6 +2094,8 @@ def generate_edge_redirect_function(
 
     active_hub = hub if hub is not None else MonetizationHub()
     human_gate_js = _render_edge_redirect_human_gate_js()
+    safe_compliant_guard_js = _render_edge_ssrf_guard_js("isSafeAndCompliantUrl", include_forbidden_aggregators=True)
+    ssrf_guard_js = _render_edge_ssrf_guard_js("isSsrfSafe", include_forbidden_aggregators=False)
 
     if prop_clean == "lienbond":
         lb_vault = getattr(active_hub, "_vault", {}).get("lienbond", {}) if active_hub else {}
@@ -2223,34 +2299,7 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
   }} catch (_) {{}}
 }}
 
-function isSafeAndCompliantUrl(urlStr) {{
-  try {{
-    const parsed = new URL(urlStr);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
-      return false;
-    }}
-    const hostname = parsed.hostname.toLowerCase();
-    for (const forbidden of FORBIDDEN_AGGREGATOR_DOMAINS) {{
-      if (hostname === forbidden || hostname.endsWith(`.${{forbidden}}`)) {{
-        return false;
-      }}
-    }}
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "0.0.0.0" ||
-      hostname === "169.254.169.254" ||
-      hostname === "metadata.google.internal" ||
-      hostname === "instance-data"
-    ) {{
-      return false;
-    }}
-    return true;
-  }} catch {{
-    return false;
-  }}
-}}
+{safe_compliant_guard_js}
 
 {human_gate_js}
 
@@ -2303,7 +2352,7 @@ export async function onRequest(context) {{
   const forceNative = normParams.get("mode") === "native";
   const hasDirectContract = Boolean(
     !hasDirectConfig &&
-      !forceNative &&
+      (!forceNative || effectiveStatus === "live" || Boolean(partnerConfig.isDirect)) &&
       partnerConfig.directContractUrl &&
       partnerConfig.directContractUrl.trim().length > 0
   );
@@ -2688,34 +2737,7 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
   }} catch (_) {{}}
 }}
 
-function isSafeAndCompliantUrl(urlStr) {{
-  try {{
-    const parsed = new URL(urlStr);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
-      return false;
-    }}
-    const hostname = parsed.hostname.toLowerCase();
-    for (const forbidden of FORBIDDEN_AGGREGATOR_DOMAINS) {{
-      if (hostname === forbidden || hostname.endsWith(`.${{forbidden}}`)) {{
-        return false;
-      }}
-    }}
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "0.0.0.0" ||
-      hostname === "169.254.169.254" ||
-      hostname === "metadata.google.internal" ||
-      hostname === "instance-data"
-    ) {{
-      return false;
-    }}
-    return true;
-  }} catch {{
-    return false;
-  }}
-}}
+{safe_compliant_guard_js}
 
 {human_gate_js}
 
@@ -2768,7 +2790,7 @@ export async function onRequest(context) {{
   const forceNative = normParams.get("mode") === "native";
   const hasDirectContract = Boolean(
     !hasDirectConfig &&
-      !forceNative &&
+      (!forceNative || effectiveStatus === "live" || Boolean(partnerConfig.isDirect)) &&
       partnerConfig.directContractUrl &&
       partnerConfig.directContractUrl.trim().length > 0
   );
@@ -3173,67 +3195,7 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
   }} catch (_) {{}}
 }}
 
-function isSafeAndCompliantUrl(urlStr) {{
-  try {{
-    const parsed = new URL(urlStr);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
-      return false;
-    }}
-    const hostname = parsed.hostname.toLowerCase();
-
-    for (const forbidden of FORBIDDEN_AGGREGATOR_DOMAINS) {{
-      if (hostname === forbidden || hostname.endsWith(`.${{forbidden}}`)) {{
-        return false;
-      }}
-    }}
-
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "0.0.0.0" ||
-      hostname === "169.254.169.254" ||
-      hostname === "metadata.google.internal" ||
-      hostname === "instance-data"
-    ) {{
-      return false;
-    }}
-
-    if (/^\\d+$/.test(hostname) || /^0x[0-9a-f]+$/i.test(hostname)) {{
-      return false;
-    }}
-
-    const ipv4Regex = /^(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})$/;
-    const match = hostname.match(ipv4Regex);
-    if (match) {{
-      const [_, o1, o2, o3, o4] = match.map(Number);
-      if (o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255) return false;
-      if (o1 === 0) return false;
-      if (o1 === 127) return false;
-      if (o1 === 10) return false;
-      if (o1 === 172 && o2 >= 16 && o2 <= 31) return false;
-      if (o1 === 192 && o2 === 168) return false;
-      if (o1 === 169 && o2 === 254) return false;
-    }}
-
-    if (hostname.startsWith("[") && hostname.endsWith("]")) {{
-      const ipv6 = hostname.slice(1, -1).toLowerCase();
-      if (
-        ipv6 === "::1" ||
-        ipv6 === "::" ||
-        ipv6.startsWith("fc") ||
-        ipv6.startsWith("fd") ||
-        ipv6.startsWith("fe80")
-      ) {{
-        return false;
-      }}
-    }}
-
-    return true;
-  }} catch {{
-    return false;
-  }}
-}}
+{safe_compliant_guard_js}
 
 function makeRedirectResponse(locationUrl, extraHeaders = {{}}) {{
   return new Response(null, {{
@@ -3832,65 +3794,7 @@ async function persistEdgeRedirectTelemetry(context, eventPayload) {{
 /**
  * Validates that a destination URL is strictly safe against SSRF and open redirect attacks.
  */
-function isSsrfSafe(urlStr) {{
-  try {{
-    const parsed = new URL(urlStr);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
-      return false;
-    }}
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Loopback, cloud metadata hostnames
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "0.0.0.0" ||
-      hostname === "169.254.169.254" ||
-      hostname === "metadata.google.internal" ||
-      hostname === "instance-data"
-    ) {{
-      return false;
-    }}
-
-    // Decimal or hex encoded single-integer hostnames
-    if (/^\\d+$/.test(hostname) || /^0x[0-9a-f]+$/i.test(hostname)) {{
-      return false;
-    }}
-
-    // IPv4 private, loopback, link-local CIDRs
-    const ipv4Regex = /^(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})\\.(\\d{{1,3}})$/;
-    const match = hostname.match(ipv4Regex);
-    if (match) {{
-      const [_, o1, o2, o3, o4] = match.map(Number);
-      if (o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255) return false;
-      if (o1 === 0) return false; // 0.0.0.0/8
-      if (o1 === 127) return false; // 127.0.0.0/8 Loopback
-      if (o1 === 10) return false; // 10.0.0.0/8 Private
-      if (o1 === 172 && o2 >= 16 && o2 <= 31) return false; // 172.16.0.0/12 Private
-      if (o1 === 192 && o2 === 168) return false; // 192.168.0.0/16 Private
-      if (o1 === 169 && o2 === 254) return false; // 169.254.0.0/16 Link-local / Metadata
-    }}
-
-    // IPv6 private, loopback, link-local
-    if (hostname.startsWith("[") && hostname.endsWith("]")) {{
-      const ipv6 = hostname.slice(1, -1).toLowerCase();
-      if (
-        ipv6 === "::1" ||
-        ipv6 === "::" ||
-        ipv6.startsWith("fc") ||
-        ipv6.startsWith("fd") ||
-        ipv6.startsWith("fe80")
-      ) {{
-        return false;
-      }}
-    }}
-
-    return true;
-  }} catch {{
-    return false;
-  }}
-}}
+{ssrf_guard_js}
 
 {human_gate_js}
 
@@ -4267,7 +4171,16 @@ def resolve_canonical_partner_redirect(
     )
 
     if resolved_prop in ("prexvo", "gainhelm", "lienbond"):
-        has_direct_contract = bool(not has_direct_config and not force_native and direct_contract_url)
+        has_direct_contract = bool(
+            not has_direct_config
+            and (
+                not force_native
+                or effective_status == "live"
+                or bool(partner_config.get("isDirect"))
+                or resolved_prop == "prexvo"
+            )
+            and direct_contract_url
+        )
         if not has_direct_config and not has_direct_contract and effective_status != "live" and block_unapproved:
             return {
                 "partner": raw_partner,

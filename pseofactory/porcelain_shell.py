@@ -6137,15 +6137,22 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         if cur_p is not None:
             parsed_blocks.append((cur_p, cur_h, cur_c))
 
+        hdrs_changed = False
         deduped_blocks: List[List[Any]] = []
         block_index: Dict[str, int] = {}
         for bp_path, bp_hdrs, bp_comm in parsed_blocks:
             if bp_path in block_index:
+                existing_blk = deduped_blocks[block_index[bp_path]]
+                existing_hdrs: List[str] = existing_blk[1]
+                for h in bp_hdrs:
+                    if h not in existing_hdrs:
+                        existing_hdrs.append(h)
+                if not bp_comm and existing_blk[2]:
+                    existing_blk[2] = False
+                hdrs_changed = True
                 continue
             block_index[bp_path] = len(deduped_blocks)
             deduped_blocks.append([bp_path, list(bp_hdrs), bp_comm])
-
-        hdrs_changed = False
 
         def _ensure_block(
             route: str,

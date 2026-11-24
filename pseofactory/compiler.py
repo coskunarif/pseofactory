@@ -16,6 +16,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import hashlib
+import html as _html
 import os
 import json
 import re
@@ -445,7 +446,7 @@ def compile_ast_to_js(
         raise ValueError("Formula must be a non-empty string")
 
     clean_f = formula_str.strip()
-    clean_f = re.sub(r'(\d+(?:\.\d+)?)\s*%', r'(\1 / 100.0)', clean_f)
+    clean_f = re.sub(r'(\d+(?:\.\d+)?)\s*%(?!\s*[A-Za-z0-9_.(])', r'(\1 / 100.0)', clean_f)
     clean_f = clean_f.replace("$", "")
     clean_f = re.sub(r'(?<=\d),(?=\d)', '', clean_f)
 
@@ -2669,30 +2670,39 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     _impact_uuid = IMPACT_VERIFICATION_UUID_BY_TENANT[_compiler_prop_id]
     _cj_pid = CJ_PROPERTY_ID_BY_TENANT[_compiler_prop_id]
 
+    esc_gsc_token = _html.escape(str(gsc_token), quote=True)
+    esc_impact_uuid = _html.escape(str(_impact_uuid), quote=True)
+    esc_cj_pid = _html.escape(str(_cj_pid), quote=True)
+    esc_brand_org_name = _html.escape(str(brand_org_name), quote=True)
+    esc_meta_desc = _html.escape(str(raw_meta_desc), quote=True)
+    esc_title_attr = _html.escape(str(title), quote=True)
+    esc_title_text = _html.escape(str(title), quote=False)
+    esc_canonical_url = _html.escape(f"{canonical_base}/tools/{slug}/", quote=True)
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="content-language" content="en-US" />
-  <meta name="google-site-verification" content="{gsc_token}" />
-  <meta name='impact-site-verification' value='{_impact_uuid}'>
-  <meta name="cj-promotional-property-id" content="{_cj_pid}">
-  <meta name="author" content="{brand_org_name} Quantitative Research Group" />
-  <meta name="description" content="{raw_meta_desc}" />
+  <meta name="google-site-verification" content="{esc_gsc_token}" />
+  <meta name='impact-site-verification' value='{esc_impact_uuid}'>
+  <meta name="cj-promotional-property-id" content="{esc_cj_pid}">
+  <meta name="author" content="{esc_brand_org_name} Quantitative Research Group" />
+  <meta name="description" content="{esc_meta_desc}" />
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
-  <meta property="og:title" content="{title}" />
-  <meta property="og:description" content="{raw_meta_desc}" />
-  <meta property="og:url" content="{canonical_base}/tools/{slug}/" />
+  <meta property="og:title" content="{esc_title_attr}" />
+  <meta property="og:description" content="{esc_meta_desc}" />
+  <meta property="og:url" content="{esc_canonical_url}" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="{title}" />
-  <meta name="twitter:description" content="{raw_meta_desc}" />
-  <title>{title}</title>
-  <link rel="canonical" href="{canonical_base}/tools/{slug}/" />
-  <link rel="alternate" hreflang="en-US" href="{canonical_base}/tools/{slug}/" />
-  <link rel="alternate" hreflang="x-default" href="{canonical_base}/tools/{slug}/" />
-  <link rel="alternate" type="application/rss+xml" title="{brand_org_name} RSS Feed" href="/feed.xml" />
+  <meta name="twitter:title" content="{esc_title_attr}" />
+  <meta name="twitter:description" content="{esc_meta_desc}" />
+  <title>{esc_title_text}</title>
+  <link rel="canonical" href="{esc_canonical_url}" />
+  <link rel="alternate" hreflang="en-US" href="{esc_canonical_url}" />
+  <link rel="alternate" hreflang="x-default" href="{esc_canonical_url}" />
+  <link rel="alternate" type="application/rss+xml" title="{esc_brand_org_name} RSS Feed" href="/feed.xml" />
   <link rel="publisher-media-kit" type="application/json" href="/media-kit.json" />
   <link rel="tool-catalog" type="application/json" title="Machine-Readable Tool Catalog" href="/catalog.json" />
   <style>
@@ -3078,6 +3088,12 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     var slug = "{slug}";
     function formatNumber(val) {{
       if (isNaN(val) || !isFinite(val)) return "0";
+      if (Math.abs(val) > 0 && Math.abs(val) < 1 && Number(val.toFixed(4)) !== Number(val.toFixed(2))) {{
+        return new Intl.NumberFormat("en-US", {{
+          minimumFractionDigits: 4,
+          maximumFractionDigits: 4
+        }}).format(val);
+      }}
       return new Intl.NumberFormat("en-US", {{
         minimumFractionDigits: Number.isInteger(val) ? 0 : 2,
         maximumFractionDigits: 2
@@ -3159,9 +3175,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 {calc_js_body}
     }}
 
-    function handleRecompute(immediate) {{
+    function handleRecompute(immediate, skipUrlSync) {{
       var inputs = getInputs();
-      updateQueryParams(inputs, immediate);
+      if (!skipUrlSync) {{
+        updateQueryParams(inputs, immediate);
+      }} else if (debounceTimer) {{
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }}
       var result = calculate(inputs);
       if (outputElem) {{
         outputElem.textContent = formatNumber(result);
@@ -3175,10 +3196,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     }}
 
     syncInputsFromParams();
-    handleRecompute();
+    handleRecompute(false, true);
     window.addEventListener("popstate", function() {{
       syncInputsFromParams();
-      handleRecompute();
+      handleRecompute(false, true);
     }});
     form.addEventListener("input", function(e) {{
       syncDualControls(e);
