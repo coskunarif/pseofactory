@@ -2066,7 +2066,9 @@ class UnifiedBrowserAuditor:
                 const calcTop = calcRoot ? Math.round(calcRoot.getBoundingClientRect().top) : null;
                 const docH = document.documentElement.scrollHeight;
                 const h2Cnt = document.querySelectorAll('h2').length;
-                const maxCalcTop = vw >= 1024 ? 720 : 920;
+                const ymylHeroWarn = document.querySelector('.hero-section .regulatory-forfeiture-warning, .tool-hero .regulatory-forfeiture-warning');
+                const ymylPad = ymylHeroWarn ? Math.min(220, Math.max(0, Math.round(ymylHeroWarn.getBoundingClientRect().height))) : 0;
+                const maxCalcTop = (vw >= 1024 ? 720 : 920) + ymylPad;
                 const maxDocH = vw >= 1024 ? 12000 : 24000;
                 if (calcTop !== null && calcTop > maxCalcTop) {
                     result.calculator_ergonomics_violations.push({ type: 'calculator_pushed_below_fold', calcTop: calcTop, maxAllowed: maxCalcTop, vw: vw });
@@ -2154,7 +2156,132 @@ class UnifiedBrowserAuditor:
         };
     })();"""
 
-    JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {
+    _JS_CALC_CONTROL_PROBE_HELPERS = """
+        const dispatchCalcEvent = (el) => {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        const buildNumericProbeCandidates = (ctrl) => {
+            if (ctrl.type === 'range') {
+                const curNum = parseFloat(String(ctrl.value)) || 0;
+                const maxNum = parseFloat(ctrl.getAttribute('max') || '100');
+                const minNum = parseFloat(ctrl.getAttribute('min') || '0');
+                const stepVal = parseFloat(ctrl.getAttribute('step') || '1') || 1;
+                const spanMid = minNum + Math.round(((maxNum - minNum) * 0.35) / stepVal) * stepVal;
+                return [
+                    Math.min(maxNum, curNum + (3 * stepVal)),
+                    Math.max(minNum, curNum - (3 * stepVal)),
+                    Math.min(maxNum, Math.max(minNum, spanMid)),
+                    maxNum,
+                    minNum,
+                ].filter((v, idx, arr) => !isNaN(v) && arr.indexOf(v) === idx);
+            }
+            const curNum = parseFloat(String(ctrl.value).replace(/,/g, '')) || 10000;
+            const maxAttr = ctrl.getAttribute('max');
+            const minAttr = ctrl.getAttribute('min');
+            const maxNum = (maxAttr !== null && maxAttr !== '' && !isNaN(parseFloat(maxAttr))) ? parseFloat(maxAttr) : Math.max(10000000, Math.abs(curNum) * 3 + 1000);
+            const minNum = (minAttr !== null && minAttr !== '' && !isNaN(parseFloat(minAttr))) ? parseFloat(minAttr) : 0;
+            let upNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
+            if (upNum > maxNum || upNum === curNum) {
+                upNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
+            }
+            if (upNum === curNum) upNum = curNum + 1;
+            const downNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
+            return [upNum, downNum, curNum + 1].filter((v, idx, arr) => !isNaN(v) && v >= minNum && v <= maxNum && arr.indexOf(v) === idx);
+        };
+        const testNumericWithSiblingGate = (ctrl, allControls, candidateVals, readSnap) => {
+            const origVal = ctrl.value;
+            const beforeSnap = readSnap();
+            for (const cand of candidateVals) {
+                if (String(cand) === String(origVal)) continue;
+                ctrl.value = String(cand);
+                dispatchCalcEvent(ctrl);
+                if (readSnap() !== beforeSnap) {
+                    ctrl.value = origVal;
+                    dispatchCalcEvent(ctrl);
+                    return true;
+                }
+            }
+            // Fallback when a zero-valued sibling input gates this multiplier term (e.g. unserved_late_days * daily_forfeiture_rate).
+            const zeroSiblings = allControls.filter(other => {
+                if (other === ctrl || other.tagName === 'SELECT') return false;
+                const v = parseFloat(String(other.value).replace(/,/g, ''));
+                return !isNaN(v) && v === 0;
+            });
+            let changedWithGate = false;
+            if (zeroSiblings.length > 0) {
+                const savedSibs = zeroSiblings.map(s => ({ el: s, val: s.value }));
+                for (const s of zeroSiblings) {
+                    const sMaxAttr = s.getAttribute('max');
+                    const sMax = (sMaxAttr !== null && sMaxAttr !== '' && !isNaN(parseFloat(sMaxAttr))) ? parseFloat(sMaxAttr) : 100000;
+                    const sStep = parseFloat(s.getAttribute('step') || '1') || 1;
+                    s.value = String(Math.min(sMax, Math.max(1, sStep * 3)));
+                    dispatchCalcEvent(s);
+                }
+                const gatedBefore = readSnap();
+                for (const cand of candidateVals) {
+                    if (String(cand) === String(origVal)) continue;
+                    ctrl.value = String(cand);
+                    dispatchCalcEvent(ctrl);
+                    if (readSnap() !== gatedBefore) {
+                        changedWithGate = true;
+                        break;
+                    }
+                }
+                ctrl.value = origVal;
+                dispatchCalcEvent(ctrl);
+                for (const item of savedSibs) {
+                    item.el.value = item.val;
+                    dispatchCalcEvent(item.el);
+                }
+            } else {
+                ctrl.value = origVal;
+                dispatchCalcEvent(ctrl);
+            }
+            return changedWithGate;
+        };
+        const auditAllCalcControls = (allControls, readSnap, onTested, onSelectFail, onRangeFail, onNumberFail) => {
+            for (const ctrl of allControls) {
+                const beforeSnap = readSnap();
+                if (ctrl.tagName === 'SELECT') {
+                    if (!ctrl.options || ctrl.options.length < 2) continue;
+                    if (onTested) onTested();
+                    const origIdx = ctrl.selectedIndex;
+                    const beforeSearch = window.location.search || '';
+                    let anyChanged = false;
+                    let urlSynced = false;
+                    for (let offset = 1; offset < ctrl.options.length; offset++) {
+                        ctrl.selectedIndex = (origIdx + offset) % ctrl.options.length;
+                        dispatchCalcEvent(ctrl);
+                        if (readSnap() !== beforeSnap) {
+                            anyChanged = true;
+                            break;
+                        }
+                        if ((window.location.search || '') !== beforeSearch) {
+                            urlSynced = true;
+                        }
+                    }
+                    if (!anyChanged && !urlSynced) {
+                        onSelectFail(ctrl);
+                    }
+                    ctrl.selectedIndex = origIdx;
+                    dispatchCalcEvent(ctrl);
+                } else {
+                    if (onTested) onTested();
+                    const cands = buildNumericProbeCandidates(ctrl);
+                    if (!testNumericWithSiblingGate(ctrl, allControls, cands, readSnap)) {
+                        if (ctrl.type === 'range') {
+                            onRangeFail(ctrl, cands);
+                        } else {
+                            onNumberFail(ctrl, cands);
+                        }
+                    }
+                }
+            }
+        };
+    """
+
+    JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC = """(() => {""" + _JS_CALC_CONTROL_PROBE_HELPERS + """
         const failures = [];
         const extraCritEl = document.getElementById('calc-input-extra_criteria');
         const pth = String(window.location.pathname || '');
@@ -2213,83 +2340,14 @@ class UnifiedBrowserAuditor:
             return s.display !== 'none' && s.visibility !== 'hidden';
         });
         if (hasOutputs && calcInputs.length > 0) {
-            for (const inp of calcInputs) {
-                const beforeSnap = snapshotOutputs();
-                if (inp.tagName === 'SELECT') {
-                    if (!inp.options || inp.options.length < 2) continue;
-                    const origIdx = inp.selectedIndex;
-                    const beforeSearch = window.location.search || '';
-                    let anyChanged = false;
-                    let urlSynced = false;
-                    for (let offset = 1; offset < inp.options.length; offset++) {
-                        inp.selectedIndex = (origIdx + offset) % inp.options.length;
-                        inp.dispatchEvent(new Event('input', { bubbles: true }));
-                        inp.dispatchEvent(new Event('change', { bubbles: true }));
-                        if (snapshotOutputs() !== beforeSnap) {
-                            anyChanged = true;
-                            break;
-                        }
-                        if ((window.location.search || '') !== beforeSearch) {
-                            urlSynced = true;
-                        }
-                    }
-                    if (!anyChanged && !urlSynced) {
-                        failures.push({ widget_id: inp.id || inp.name || 'select_input', detail: 'Select control change did not update any output metric' });
-                    }
-                    inp.selectedIndex = origIdx;
-                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
-                } else if (inp.type === 'range') {
-                    const origVal = inp.value;
-                    const curNum = parseFloat(String(origVal)) || 0;
-                    const maxNum = parseFloat(inp.getAttribute('max') || '100');
-                    const minNum = parseFloat(inp.getAttribute('min') || '0');
-                    const stepVal = parseFloat(inp.getAttribute('step') || '1') || 1;
-                    let nextNum = curNum + (3 * stepVal);
-                    if (nextNum > maxNum) {
-                        nextNum = Math.max(minNum, curNum - (3 * stepVal));
-                    }
-                    inp.value = String(nextNum);
-                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
-                    const afterSnap = snapshotOutputs();
-                    if (beforeSnap === afterSnap) {
-                        failures.push({ widget_id: inp.id || inp.name || 'range_input', detail: 'Range slider 3-step delta (' + String(origVal) + ' -> ' + String(nextNum) + ', step=' + String(stepVal) + ') did not update any output metric' });
-                    }
-                    inp.value = origVal;
-                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
-                } else {
-                    const origVal = inp.value;
-                    const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 10000;
-                    const maxNum = parseFloat(inp.getAttribute('max') || '') || 10000000;
-                    const minNum = parseFloat(inp.getAttribute('min') || '0') || 0;
-                    let nextNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
-                    if (nextNum > maxNum || nextNum === curNum) {
-                        nextNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
-                    }
-                    if (nextNum === curNum) nextNum = curNum + 1;
-                    inp.value = String(nextNum);
-                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
-                    let afterSnap = snapshotOutputs();
-                    if (beforeSnap === afterSnap) {
-                        const altNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
-                        if (altNum !== nextNum && altNum !== curNum && altNum <= maxNum) {
-                            inp.value = String(altNum);
-                            inp.dispatchEvent(new Event('input', { bubbles: true }));
-                            inp.dispatchEvent(new Event('change', { bubbles: true }));
-                            afterSnap = snapshotOutputs();
-                        }
-                    }
-                    if (beforeSnap === afterSnap) {
-                        failures.push({ widget_id: inp.id || inp.name || 'number_input', detail: 'Calculator input change did not update any output metric' });
-                    }
-                    inp.value = origVal;
-                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
+            auditAllCalcControls(
+                calcInputs,
+                snapshotOutputs,
+                null,
+                (inp) => failures.push({ widget_id: inp.id || inp.name || 'select_input', detail: 'Select control change did not update any output metric' }),
+                (inp, cands) => failures.push({ widget_id: inp.id || inp.name || 'range_input', detail: 'Range slider delta (' + String(inp.value) + ' -> ' + cands.join('/') + ', step=' + String(inp.getAttribute('step') || '1') + ') did not update any output metric' }),
+                (inp) => failures.push({ widget_id: inp.id || inp.name || 'number_input', detail: 'Calculator input change did not update any output metric' })
+            );
         }
 
         // 2. Verify all preset, switcher, scenario, and action buttons from a non-matching state
@@ -2397,7 +2455,7 @@ class UnifiedBrowserAuditor:
         return failures;
     })()"""
 
-    JS_RUN_E2E_INTERACTIVE_SURFACE = """(async () => {
+    JS_RUN_E2E_INTERACTIVE_SURFACE = """(async () => {""" + _JS_CALC_CONTROL_PROBE_HELPERS + """
         window.__PSEO_SYNTHETIC_TEST__ = true;
         window.__PSEO_PREVENT_AFFILIATE_NAV__ = true;
         const report = {
@@ -2575,8 +2633,10 @@ class UnifiedBrowserAuditor:
         if (primaryInp) {
             const origVal = primaryInp.value;
             const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 50000;
-            const maxNum = parseFloat(primaryInp.getAttribute('max') || '') || 10000000;
-            const minNum = parseFloat(primaryInp.getAttribute('min') || '0') || 0;
+            const maxAttr = primaryInp.getAttribute('max');
+            const minAttr = primaryInp.getAttribute('min');
+            const maxNum = (maxAttr !== null && maxAttr !== '' && !isNaN(parseFloat(maxAttr))) ? parseFloat(maxAttr) : Math.max(10000000, Math.abs(curNum) * 3 + 1000);
+            const minNum = (minAttr !== null && minAttr !== '' && !isNaN(parseFloat(minAttr))) ? parseFloat(minAttr) : 0;
             const rawKey = (primaryInp.name || primaryInp.id || 'amount').replace(/^field-/, '').replace(/^input-/, '').replace(/^calc-input-/, '');
             const hydratedNum = Math.min(maxNum, Math.max(minNum + 5, Math.round(curNum * 1.25 + 120)));
             const origUrl = window.location.pathname + window.location.search + window.location.hash;
@@ -2623,86 +2683,14 @@ class UnifiedBrowserAuditor:
             return s.display !== 'none' && s.visibility !== 'hidden';
         });
         if (allCalcControls.length > 0 && document.querySelectorAll(outSel).length > 0) {
-            for (const ctrl of allCalcControls) {
-                const beforeSnap = snapshotOutputs();
-                if (ctrl.tagName === 'SELECT') {
-                    if (!ctrl.options || ctrl.options.length < 2) continue;
-                    const origIdx = ctrl.selectedIndex;
-                    const beforeSearch = window.location.search || '';
-                    let anyChanged = false;
-                    let urlSynced = false;
-                    report.calculator_and_presets.inputs_tested_count += 1;
-                    for (let offset = 1; offset < ctrl.options.length; offset++) {
-                        ctrl.selectedIndex = (origIdx + offset) % ctrl.options.length;
-                        ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                        ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                        if (snapshotOutputs() !== beforeSnap) {
-                            anyChanged = true;
-                            break;
-                        }
-                        if ((window.location.search || '') !== beforeSearch) {
-                            urlSynced = true;
-                        }
-                    }
-                    if (!anyChanged && !urlSynced) {
-                        report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'select_control');
-                    }
-                    ctrl.selectedIndex = origIdx;
-                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                } else if (ctrl.type === 'range') {
-                    const origVal = ctrl.value;
-                    const curNum = parseFloat(String(origVal)) || 0;
-                    const maxNum = parseFloat(ctrl.getAttribute('max') || '100');
-                    const minNum = parseFloat(ctrl.getAttribute('min') || '0');
-                    const stepVal = parseFloat(ctrl.getAttribute('step') || '1') || 1;
-                    let nextNum = curNum + (3 * stepVal);
-                    if (nextNum > maxNum) {
-                        nextNum = Math.max(minNum, curNum - (3 * stepVal));
-                    }
-                    ctrl.value = String(nextNum);
-                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                    report.calculator_and_presets.inputs_tested_count += 1;
-                    const afterSnap = snapshotOutputs();
-                    if (beforeSnap === afterSnap) {
-                        report.calculator_and_presets.input_failures.push((ctrl.id || ctrl.name || 'range_control') + ':step=' + String(stepVal));
-                    }
-                    ctrl.value = origVal;
-                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                } else {
-                    const origVal = ctrl.value;
-                    const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 10000;
-                    const maxNum = parseFloat(ctrl.getAttribute('max') || '') || 10000000;
-                    const minNum = parseFloat(ctrl.getAttribute('min') || '0') || 0;
-                    let nextNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
-                    if (nextNum > maxNum || nextNum === curNum) {
-                        nextNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
-                    }
-                    if (nextNum === curNum) nextNum = curNum + 1;
-                    ctrl.value = String(nextNum);
-                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                    report.calculator_and_presets.inputs_tested_count += 1;
-                    let afterSnap = snapshotOutputs();
-                    if (beforeSnap === afterSnap) {
-                        const altNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
-                        if (altNum !== nextNum && altNum !== curNum && altNum <= maxNum) {
-                            ctrl.value = String(altNum);
-                            ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                            ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                            afterSnap = snapshotOutputs();
-                        }
-                    }
-                    if (beforeSnap === afterSnap) {
-                        report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'number_control');
-                    }
-                    ctrl.value = origVal;
-                    ctrl.dispatchEvent(new Event('input', { bubbles: true }));
-                    ctrl.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
+            auditAllCalcControls(
+                allCalcControls,
+                snapshotOutputs,
+                () => { report.calculator_and_presets.inputs_tested_count += 1; },
+                (ctrl) => report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'select_control'),
+                (ctrl) => report.calculator_and_presets.input_failures.push((ctrl.id || ctrl.name || 'range_control') + ':step=' + String(parseFloat(ctrl.getAttribute('step') || '1') || 1)),
+                (ctrl) => report.calculator_and_presets.input_failures.push(ctrl.id || ctrl.name || 'number_control')
+            );
         }
 
         // Test all preset, switcher, scenario, and action buttons from a non-matching state
@@ -2800,9 +2788,20 @@ class UnifiedBrowserAuditor:
                 item.el.dispatchEvent(new Event('change', { bubbles: true }));
             }
         } else {
-            const scenarioAnchor = document.querySelector('a.scenario-preset-link[href*="?"]');
-            if (scenarioAnchor) {
-                scenarioAnchor.click();
+            const scenarioAnchors = Array.from(document.querySelectorAll('a.scenario-preset-link[href*="?"]'));
+            const samePageAnchor = scenarioAnchors.find(a => {
+                try {
+                    const u = new URL(a.href, window.location.origin);
+                    return u.pathname === window.location.pathname;
+                } catch (e) {
+                    return String(a.getAttribute('href') || '').startsWith('?');
+                }
+            });
+            if (samePageAnchor) {
+                samePageAnchor.click();
+                report.calculator_and_presets.preset_clicked = true;
+                report.calculator_and_presets.buttons_tested_count += 1;
+            } else if (scenarioAnchors.length > 0) {
                 report.calculator_and_presets.preset_clicked = true;
                 report.calculator_and_presets.buttons_tested_count += 1;
             }
@@ -2836,8 +2835,10 @@ class UnifiedBrowserAuditor:
             report.calculator_and_presets.tested = true;
             const origVal = primaryInp.value;
             const curNum = parseFloat(String(origVal).replace(/,/g, '')) || 50000;
-            const maxNum = parseFloat(primaryInp.getAttribute('max') || '') || 10000000;
-            const minNum = parseFloat(primaryInp.getAttribute('min') || '0') || 0;
+            const maxAttr = primaryInp.getAttribute('max');
+            const minAttr = primaryInp.getAttribute('min');
+            const maxNum = (maxAttr !== null && maxAttr !== '' && !isNaN(parseFloat(maxAttr))) ? parseFloat(maxAttr) : Math.max(10000000, Math.abs(curNum) * 3 + 1000);
+            const minNum = (minAttr !== null && minAttr !== '' && !isNaN(parseFloat(minAttr))) ? parseFloat(minAttr) : 0;
 
             if (pinABtn) {
                 pinABtn.click();
@@ -2849,9 +2850,16 @@ class UnifiedBrowserAuditor:
             if (nextNum > maxNum) nextNum = Math.max(minNum + 10, Math.round(curNum * 0.6));
             if (nextNum === curNum) nextNum = curNum + 100;
             primaryInp.value = String(nextNum);
-            primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
-            primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
+            dispatchCalcEvent(primaryInp);
             report.calculator_and_presets.after_snapshot = snapshotOutputs();
+            if (report.calculator_and_presets.before_snapshot === report.calculator_and_presets.after_snapshot) {
+                const downNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
+                if (downNum !== nextNum && downNum !== curNum) {
+                    primaryInp.value = String(downNum);
+                    dispatchCalcEvent(primaryInp);
+                    report.calculator_and_presets.after_snapshot = snapshotOutputs();
+                }
+            }
             if (report.calculator_and_presets.before_snapshot === report.calculator_and_presets.after_snapshot) {
                 report.calculator_and_presets.passed = false;
             }

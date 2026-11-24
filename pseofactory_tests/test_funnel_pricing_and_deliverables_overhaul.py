@@ -681,3 +681,113 @@ def test_interactive_regressions_d1_d2_d4_d7_in_node_and_compiled_html(tmp_path:
     sig_js = edge.generate_edge_signal_function()
     assert "signal" in sig_js.lower()
     assert "\u2014" not in sig_js and "\u2013" not in sig_js
+
+
+def test_browser_verifier_probe_edge_cases_and_dead_input_detection(tmp_path: Path) -> None:
+    """
+    Verifies UnifiedBrowserAuditor handles bounded/clamped ranges, zero-gated sibling terms,
+    >10M unbounded numeric inputs, and cross-page scenario links without false failures or crashes,
+    while still strictly catching genuinely dead calculator inputs.
+    """
+    import asyncio
+    import websockets
+    from pseofactory.browser_verifier import EphemeralDistServer, UnifiedBrowserAuditor
+
+    dist = tmp_path / "dist"
+    (dist / "tools" / "edge-cases").mkdir(parents=True)
+    (dist / "tools" / "other").mkdir(parents=True)
+    (dist / "tools" / "other" / "index.html").write_text("<!DOCTYPE html><html><body>OK</body></html>", encoding="utf-8")
+    (dist / "tools" / "dead-input").mkdir(parents=True)
+
+    html_ok = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Edge Probe OK</title>
+<style>
+  a, button, input, select { min-height: 44px; min-width: 44px; font-size: 16px; }
+  a:focus, button:focus, input:focus, select:focus { outline: 2px solid #1d4ed8; }
+  .output-value { font-variant-numeric: tabular-nums; }
+</style></head><body>
+<a class="skip-to-content-link" href="#main-content">Skip</a>
+<main id="main-content">
+  <h1>Edge Probe OK</h1>
+  <form class="calculator-form">
+    <input type="range" id="field-multi_year_term" min="1" max="3" step="1" value="1">
+    <input type="range" id="range-cap_bal" min="0" max="370000" step="1000" value="185000">
+    <input type="number" id="input-late_days" value="0" min="0" step="1">
+    <input type="number" id="input-forfeit_rate" value="1250" min="0" step="10">
+    <input type="number" id="input-volume" value="50000000" min="0" step="any">
+  </form>
+  <a class="scenario-preset-link" href="/tools/other/?income=450000">Parent Preset</a>
+  <div class="result-box"><strong class="output-value" id="out-val">$50,000,000</strong></div>
+</main>
+<script>
+function recalc() {
+  const term = Number(document.getElementById('field-multi_year_term').value) || 1;
+  const capBal = Math.min(150000, Number(document.getElementById('range-cap_bal').value) || 0);
+  const late = Number(document.getElementById('input-late_days').value) || 0;
+  const rate = Number(document.getElementById('input-forfeit_rate').value) || 0;
+  const vol = Number(document.getElementById('input-volume').value) || 0;
+  const val = vol + capBal * term - (late * rate);
+  document.getElementById('out-val').textContent = '$' + Math.round(val).toLocaleString('en-US');
+}
+document.querySelectorAll('input').forEach(el => {
+  el.addEventListener('input', recalc);
+  el.addEventListener('change', recalc);
+});
+window.addEventListener('popstate', () => {
+  const sp = new URLSearchParams(window.location.search);
+  if (sp.has('late_days')) document.getElementById('input-late_days').value = sp.get('late_days');
+  recalc();
+});
+recalc();
+</script></body></html>"""
+
+    html_dead = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Dead Input</title>
+<style>
+  a, button, input { min-height: 44px; min-width: 44px; font-size: 16px; }
+  a:focus, button:focus, input:focus { outline: 2px solid #1d4ed8; }
+  .output-value { font-variant-numeric: tabular-nums; }
+</style></head><body>
+<a class="skip-to-content-link" href="#main-content">Skip</a>
+<main id="main-content">
+  <h1>Dead Input</h1>
+  <form class="calculator-form">
+    <input type="number" id="calc-input-live" value="100">
+    <input type="number" id="calc-input-dead" value="1500">
+  </form>
+  <div class="result-box"><strong class="output-value" id="out-val">$100</strong></div>
+</main>
+<script>
+function recalc() {
+  const v = Number(document.getElementById('calc-input-live').value) || 0;
+  document.getElementById('out-val').textContent = '$' + v;
+}
+document.querySelectorAll('input').forEach(el => {
+  el.addEventListener('input', recalc);
+  el.addEventListener('change', recalc);
+});
+</script></body></html>"""
+
+    (dist / "tools" / "edge-cases" / "index.html").write_text(html_ok, encoding="utf-8")
+    (dist / "tools" / "dead-input" / "index.html").write_text(html_dead, encoding="utf-8")
+
+    aud = UnifiedBrowserAuditor(dist_dir=dist, isolated_browser=False, no_verify_cache=True)
+
+    async def _run():
+        with EphemeralDistServer(dist) as srv:
+            info = aud._open_cdp_tab()
+            msg_c = [1]
+            try:
+                async with websockets.connect(info["webSocketDebuggerUrl"], max_size=20 * 1024 * 1024) as ws:
+                    await aud._configure_cdp_session(ws, msg_c)
+                    res_ok = await aud._audit_route_on_ws(ws, srv.base_url, "/tools/edge-cases/", msg_c)
+                    res_dead = await aud._audit_route_on_ws(ws, srv.base_url, "/tools/dead-input/", msg_c)
+                    return res_ok, res_dead
+            finally:
+                aud._close_cdp_tab_and_leaked_loopback(info["id"], active_origin=srv.base_url)
+
+    res_ok, res_dead = asyncio.run(_run())
+    assert res_ok["widget_failures"] == [], res_ok["widget_failures"]
+    assert res_ok["interactive_surface"]["passed"] is True, res_ok["interactive_surface"]
+
+    dead_ids = {f["widget_id"] for f in res_dead["widget_failures"]}
+    assert "mobile_375:calc-input-dead" in dead_ids, res_dead["widget_failures"]
+    assert res_dead["interactive_surface"]["passed"] is False

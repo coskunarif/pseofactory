@@ -550,15 +550,15 @@ main.main,
 main#main-content {{
   flex: 1 0 auto;
   width: 100%;
-  padding-top: 1.5rem;
-  padding-bottom: 3rem;
+  padding-top: 1rem;
+  padding-bottom: 2.25rem;
 }}
 
 .site-main > .container,
 main#main-content > .container {{
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }}
 
 .site-main > .container > *,
@@ -722,29 +722,29 @@ main#main-content > .container > * {{
 
 /* Typography Scale & Hierarchy */
 h1, .hero-title {{
-  font-size: 2rem;
-  line-height: 1.25;
+  font-size: 1.75rem;
+  line-height: 1.22;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--text-primary);
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.5rem 0;
 }}
 
 h2, .section-title {{
-  font-size: 1.375rem;
-  line-height: 1.35;
+  font-size: 1.25rem;
+  line-height: 1.3;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.5rem 0;
 }}
 
 h3, .card-title {{
-  font-size: 1.125rem;
-  line-height: 1.4;
+  font-size: 1.0625rem;
+  line-height: 1.38;
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.375rem 0;
 }}
 
 h4 {{
@@ -756,7 +756,7 @@ h4 {{
 }}
 
 p {{
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.5rem 0;
   color: var(--text-secondary);
 }}
 
@@ -898,10 +898,11 @@ summary:focus-visible,
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.875rem;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
   color: var(--text-muted);
-  padding: 0.25rem 0;
+  padding: 0;
 }}
 
 .breadcrumbs a {{
@@ -919,7 +920,8 @@ summary:focus-visible,
 .tool-hero {{
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.4375rem;
+  padding: 0.875rem 1.25rem;
 }}
 
 .hero-section > h1,
@@ -949,7 +951,7 @@ summary:focus-visible,
   border: 1px solid var(--brand-border);
   border-left: 4px solid var(--brand-primary);
   border-radius: var(--radius-md);
-  padding: 0.875rem 1.125rem;
+  padding: 0.625rem 1rem;
   margin-top: 0;
   color: var(--text-primary);
 }}
@@ -966,8 +968,8 @@ summary:focus-visible,
 .quick-answer p,
 .quick-answer .quick-answer-body {{
   color: var(--text-primary);
-  font-size: 0.9375rem;
-  line-height: 1.55;
+  font-size: 0.875rem;
+  line-height: 1.45;
   margin: 0;
 }}
 
@@ -1333,7 +1335,8 @@ output,
 .calc-matrix-table-wrap {{
   width: 100%;
   max-width: 100%;
-  overflow-x: auto;
+  max-height: 400px;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md);
@@ -1349,7 +1352,7 @@ table {{
 }}
 
 th, td {{
-  padding: 0.75rem 1rem;
+  padding: 0.625rem 0.875rem;
   text-align: left;
   border-bottom: 1px solid var(--border-hairline);
   vertical-align: top;
@@ -1360,6 +1363,9 @@ th {{
   color: var(--text-primary);
   font-weight: 600;
   font-size: 0.875rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }}
 
 tr:last-child td {{
@@ -1375,7 +1381,7 @@ tr:last-child td {{
 #gsc-striking-overlay {{
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
   padding: 0 !important;
   margin: 0 !important;
   border: none !important;
@@ -1735,9 +1741,9 @@ details.faq-accordion > summary::-webkit-details-marker {{
 .tool-desc,
 .partners-desc {{
   color: var(--text-secondary);
-  font-size: 1rem;
-  line-height: 1.6;
-  margin: 0 0 0.75rem 0;
+  font-size: 0.9375rem;
+  line-height: 1.48;
+  margin: 0 0 0.5rem 0;
 }}
 .verified-date-meta {{
   color: var(--text-secondary);
@@ -1779,9 +1785,9 @@ details.faq-accordion > summary::-webkit-details-marker {{
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem 0.5rem;
-  font-size: 0.875rem;
-  line-height: 1.4;
+  gap: 0.125rem 0.375rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
   color: var(--text-muted);
   margin: 0;
 }}
@@ -1829,14 +1835,14 @@ details.faq-accordion > summary::-webkit-details-marker {{
   align-self: flex-start;
   width: fit-content;
   max-width: 100%;
-  padding: 0.25rem 0.75rem;
+  padding: 0.2rem 0.625rem;
   border-radius: 9999px;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 600;
   background-color: var(--brand-soft);
   color: var(--brand-hover);
   border: 1px solid var(--brand-border);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }}
 
 .pill-trust-group {{
@@ -1922,9 +1928,22 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
-  padding: 1.5rem;
+  padding: 1.125rem 1.25rem;
   box-shadow: var(--shadow-sm);
   min-width: 0;
+}}
+
+.related-tools-section .tools-grid,
+.related-tools-section .card-grid,
+.site-main section div[style*="minmax(240px"] {{
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}}
+
+.statutory-compliance-section {{
+  max-height: 420px;
+  overflow-y: auto;
 }}
 
 .regulatory-lead-magnet-card {{
@@ -2050,30 +2069,32 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
-  padding: 1.5rem;
+  padding: 1rem 1.25rem;
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.75rem;
 }}
 
 .calc-header {{
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: 0.25rem;
   border-bottom: 1px solid var(--border-hairline);
-  padding-bottom: 0.875rem;
+  padding-bottom: 0.5rem;
 }}
 
 .calc-title {{
-  font-size: 1.375rem;
+  font-size: 1.25rem;
+  line-height: 1.25;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
 }}
 
 .calc-desc {{
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
   color: var(--text-secondary);
   margin: 0;
 }}
@@ -2097,10 +2118,14 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--bg-subtle);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md);
-  padding: 1rem 1.125rem;
+  padding: 0.625rem 0.875rem;
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.375rem;
+}}
+
+.calc-switcher-panel .calc-switcher-header {{
+  margin-bottom: 0;
 }}
 
 .calc-switcher-header,
@@ -2376,7 +2401,8 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
-  padding: 1.5rem;
+  padding: 1.125rem 1.25rem;
+  margin-top: 0.5rem !important;
   box-shadow: var(--shadow-sm);
 }}
 
@@ -2384,7 +2410,13 @@ details.faq-accordion > summary::-webkit-details-marker {{
 .calc-entrypoints-grid {{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  gap: 1rem;
+  gap: 0.875rem;
+}}
+
+.calc-scenarios-grid {{
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }}
 
 .calc-scenario-card,
@@ -3332,18 +3364,20 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--bg-subtle);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md);
-  padding: 1rem 1.125rem;
-  margin-bottom: 0.875rem;
+  padding: 0.75rem 0.875rem;
+  margin-bottom: 0.5rem;
+  max-height: 220px;
+  overflow-y: auto;
 }}
 
 .connected-queries-block {{
-  margin-top: 1.25rem;
-  padding-top: 1rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--border-hairline);
 }}
 
 .connected-query {{
-  margin-bottom: 0.875rem;
+  margin-bottom: 0.625rem;
 }}
 
 .next-step-prompt {{
@@ -3351,8 +3385,8 @@ details.faq-accordion > summary::-webkit-details-marker {{
   border: 1px solid var(--border-hairline);
   border-left: 3px solid var(--brand-primary);
   border-radius: var(--radius-sm);
-  padding: 0.75rem 1rem;
-  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  margin-bottom: 0.5rem;
 }}
 
 .overlay-autonomous-assertions,
@@ -3366,8 +3400,15 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
-  padding: 1.5rem;
+  padding: 1.125rem 1.25rem;
   box-shadow: var(--shadow-sm);
+}}
+
+.overlay-hub-links,
+.overlay-scenarios .scenarios-grid,
+.calculation-scenarios-section .scenarios-grid {{
+  max-height: 360px;
+  overflow-y: auto;
 }}
 
 .overlay-comparison-row,
@@ -3415,26 +3456,114 @@ details.faq-accordion > summary::-webkit-details-marker {{
     display: block;
   }}
 
-  h1, .hero-title {{
-    font-size: 1.625rem;
+  .nav-wrap {{
+    min-height: 52px;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
   }}
 
-  h2, .section-title {{
-    font-size: 1.25rem;
+  .site-main,
+  main.main,
+  main#main-content {{
+    padding-top: 0.5rem;
+    padding-bottom: 2rem;
+  }}
+
+  .site-main > .container,
+  main#main-content > .container,
+  .gsc-overlay-container,
+  #gsc-striking-overlay {{
+    gap: 12px;
+  }}
+
+  .breadcrumbs {{
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }}
+
+  h1, .hero-title {{
+    font-size: 1.375rem;
+    line-height: 1.2;
+  }}
+
+  h2, .section-title, .calc-title {{
+    font-size: 1.125rem;
+    line-height: 1.24;
   }}
 
   h3, .card-title {{
-    font-size: 1.0625rem;
+    font-size: 1rem;
+    line-height: 1.35;
   }}
 
   .card,
   .pseo-card,
   .calc-card,
   .interactive-calc-card,
-  .calculation-container,
+  .calculation-container {{
+    padding: 0.875rem 1rem;
+  }}
+
   .hero-section,
   .tool-hero {{
-    padding: 1.25rem;
+    padding: 0.75rem 1rem;
+    gap: 0.25rem;
+  }}
+
+  .hero-subtitle,
+  .hero-desc,
+  .calc-desc {{
+    font-size: 0.8125rem;
+    line-height: 1.34;
+  }}
+
+  .quick-answer {{
+    padding: 0.4375rem 0.75rem;
+  }}
+
+  .quick-answer p,
+  .quick-answer .quick-answer-body {{
+    font-size: 0.8125rem;
+    line-height: 1.32;
+  }}
+
+  .interactive-calculator-container {{
+    padding: 0.75rem 0.875rem;
+    gap: 0.375rem;
+  }}
+
+  .calc-header {{
+    padding-bottom: 0.375rem;
+    gap: 0.125rem;
+  }}
+
+  .calc-switcher-panel {{
+    padding: 0.5rem 0.75rem;
+    gap: 0.25rem;
+  }}
+
+  .calc-switcher-hint {{
+    display: none;
+  }}
+
+  .calc-switcher-title {{
+    font-size: 0.8125rem;
+  }}
+
+  .calc-switcher-pills {{
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    padding-bottom: 0.25rem;
+  }}
+
+  .calc-switcher-btn {{
+    flex: 0 0 auto;
+    white-space: nowrap;
   }}
 
   .footer-grid,
