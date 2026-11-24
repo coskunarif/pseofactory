@@ -2372,10 +2372,10 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     assert compile_public_benchmark_citation_hubs("gainhelm")["payload"]["citable_statistics_count"] == 3
     assert compile_broken_calculator_link_reclamation_briefs("gainhelm")["briefs_count"] == 2
 
-    gh_queue = prioritize_distribution_queue_by_referral_yield(property_id="gainhelm")
+    gh_queue = prioritize_distribution_queue_by_referral_yield(property_id="gainhelm", repo_root=gh_repo)
     assert len(gh_queue) >= 10
     assert gh_queue[0]["company_id"] == "106482195"
-    assert gh_queue[0]["revenue_priority_score"] == 65.0
+    assert gh_queue[0]["revenue_priority_score"] == 69.0
 
     gh_synd_dir = tmp_path / "gh_syndication"
     export_all_syndication_files(output_dir=gh_synd_dir, property_id="gainhelm")
