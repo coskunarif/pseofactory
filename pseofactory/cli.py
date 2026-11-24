@@ -206,6 +206,48 @@ def _print_browser_audit_report(label: str, report: Dict[str, Any], max_routes: 
         print(f"  - {report['message']}")
 
 
+def _get_available_ram_gb() -> float:
+    """Reads MemAvailable from /proc/meminfo in GiB; defaults to 8.0 on non-Linux hosts."""
+    try:
+        meminfo = Path("/proc/meminfo")
+        if meminfo.is_file():
+            for line in meminfo.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return int(parts[1]) / (1024.0 * 1024.0)
+    except Exception:
+        pass
+    return 8.0
+
+
+def compute_audit_tenant_workers(
+    tenant_count: int,
+    use_parallel: bool = True,
+    run_browser: bool = True,
+) -> int:
+    """
+    Computes CPU- and RAM-safe max_tenant_workers for cmd_audit --property all.
+    Preserves PSEUFACTORY_AUDIT_TENANT_WORKERS / PSEOFACTORY_AUDIT_TENANT_WORKERS overrides.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not use_parallel or tenant_count <= 1:
+        return 1
+    env_raw = (
+        os.environ.get("PSEUFACTORY_AUDIT_TENANT_WORKERS")
+        or os.environ.get("PSEOFACTORY_AUDIT_TENANT_WORKERS")
+        or ""
+    ).strip()
+    if env_raw.isdigit() and int(env_raw) >= 1:
+        return max(1, min(tenant_count, int(env_raw)))
+    cpu_count = os.cpu_count() or 4
+    cpu_cap = max(2, min(4, cpu_count // 2))
+    avail_ram_gb = _get_available_ram_gb()
+    ram_per_tenant_gb = 1.5 if run_browser else 0.5
+    ram_cap = max(2, int(avail_ram_gb // ram_per_tenant_gb))
+    return max(1, min(tenant_count, max(2, min(cpu_cap, ram_cap))))
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """
     Executes asset integrity audit across property static assets.
@@ -357,10 +399,23 @@ def cmd_audit(args: argparse.Namespace) -> int:
             and len(all_tenant_ids) > 1
             and "PYTEST_XDIST_WORKER" not in os.environ
         )
-        max_tenant_workers = 2 if use_parallel else 1
+        max_tenant_workers = compute_audit_tenant_workers(
+            len(all_tenant_ids),
+            use_parallel=use_parallel,
+            run_browser=run_default_browser,
+        )
         req_browser_workers = getattr(args, "workers", None)
         if use_parallel and req_browser_workers is None:
-            per_tenant_browser_workers: Optional[int] = max(1, ((os.cpu_count() or 4) + 1) // 3)
+            avail_ram_gb = _get_available_ram_gb()
+            cpu_count = os.cpu_count() or 4
+            total_chrome_budget = max(
+                max_tenant_workers,
+                min(cpu_count, max(1, int(avail_ram_gb // 0.6))),
+            )
+            per_tenant_browser_workers: Optional[int] = max(
+                1,
+                min(3, total_chrome_budget // max_tenant_workers),
+            )
         elif use_parallel and req_browser_workers is not None:
             per_tenant_browser_workers = max(1, int(req_browser_workers) // max_tenant_workers)
         else:

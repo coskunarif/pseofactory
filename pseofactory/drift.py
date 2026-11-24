@@ -9,24 +9,111 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 import os
 import json
 import hashlib
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Tuple
 
 
-_ENGINE_HASH_CACHE: Dict[Tuple[Any, ...], Tuple[float, str]] = {}
-_TENANT_SUBSTRATE_HASH_CACHE: Dict[Tuple[str, str], Tuple[Tuple[Tuple[str, float, int], ...], str]] = {}
+_DRIFT_CACHE_LOCK = threading.RLock()
+_PARTITION_LOOKUP_LOCK = threading.RLock()
+_ENGINE_HASH_CACHE: Dict[Tuple[Any, ...], Tuple[Tuple[Tuple[str, int, int, int], ...], str]] = {}
+_TENANT_SUBSTRATE_HASH_CACHE: Dict[Tuple[str, str], Tuple[Tuple[Tuple[str, int, int, int], ...], str]] = {}
+_DIST_LOCK_METRICS_CACHE: Dict[Tuple[str, bool], Tuple[Tuple[Tuple[str, int, int, int], ...], str, int, Dict[str, str]]] = {}
+_FILE_SHA256_CACHE: Dict[Tuple[str, int, int, int], str] = {}
+_MAX_FILE_SHA256_CACHE_ENTRIES = 8192
+_MAX_DIST_LOCK_METRICS_CACHE_ENTRIES = 128
 
 
 def clear_engine_hash_cache() -> None:
-    """Clears the in-memory engine hash and tenant substrate hash caches."""
-    _ENGINE_HASH_CACHE.clear()
-    _TENANT_SUBSTRATE_HASH_CACHE.clear()
+    """Clears the in-memory engine hash, tenant substrate hash, and dist lock caches."""
+    with _DRIFT_CACHE_LOCK:
+        _ENGINE_HASH_CACHE.clear()
+        _TENANT_SUBSTRATE_HASH_CACHE.clear()
+        _DIST_LOCK_METRICS_CACHE.clear()
+        _FILE_SHA256_CACHE.clear()
     try:
         from pseofactory.impact_planner import clear_partition_cache
         clear_partition_cache()
     except Exception:
         pass
+
+
+def _get_cached_file_sha256(
+    file_path: Union[str, Path],
+    mtime_ns: int,
+    ctime_ns: int,
+    size: int,
+) -> str:
+    """Computes SHA-256 hex digest with exact (path, mtime_ns, ctime_ns, size) caching."""
+    abs_key = (str(file_path), mtime_ns, ctime_ns, size)
+    with _DRIFT_CACHE_LOCK:
+        cached = _FILE_SHA256_CACHE.get(abs_key)
+        if cached is not None:
+            return cached
+    digest = hashlib.sha256(Path(file_path).read_bytes()).hexdigest()
+    with _DRIFT_CACHE_LOCK:
+        if len(_FILE_SHA256_CACHE) >= _MAX_FILE_SHA256_CACHE_ENTRIES:
+            _FILE_SHA256_CACHE.clear()
+        _FILE_SHA256_CACHE[abs_key] = digest
+    return digest
+
+
+def _scan_dir_files_with_stats(
+    root_dir: Path,
+    *,
+    include_exts: Optional[Tuple[str, ...]] = None,
+    exclude_dir_names: Tuple[str, ...] = (),
+    exclude_file_suffixes: Tuple[str, ...] = (".pyc",),
+    only_datasets_json: bool = False,
+) -> List[Tuple[str, Path, int, int, int]]:
+    """
+    Single-pass recursive os.scandir walker returning sorted
+    (rel_posix, path, st_mtime_ns, st_ctime_ns, st_size) tuples.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not root_dir.is_dir():
+        return []
+    out: List[Tuple[str, Path, int, int, int]] = []
+    excluded_dirs = set(exclude_dir_names)
+    stack: List[Tuple[Path, str]] = [(root_dir, "")]
+    while stack:
+        cur_dir, rel_prefix = stack.pop()
+        try:
+            with os.scandir(cur_dir) as it:
+                for entry in it:
+                    name = entry.name
+                    rel_posix = f"{rel_prefix}/{name}" if rel_prefix else name
+                    try:
+                        if entry.is_dir(follow_symlinks=True):
+                            if name not in excluded_dirs:
+                                stack.append((Path(entry.path), rel_posix))
+                            continue
+                        if not entry.is_file(follow_symlinks=True):
+                            continue
+                    except OSError:
+                        continue
+                    if exclude_file_suffixes and any(name.endswith(s) for s in exclude_file_suffixes):
+                        continue
+                    if include_exts is not None:
+                        low_name = name.lower()
+                        dot_idx = low_name.rfind(".")
+                        ext = low_name[dot_idx:] if dot_idx != -1 else ""
+                        if ext not in include_exts:
+                            continue
+                        if only_datasets_json and ext == ".json":
+                            parts = rel_posix.split("/")
+                            if len(parts) < 2 or parts[-2] != "datasets":
+                                continue
+                    try:
+                        st = entry.stat(follow_symlinks=True)
+                    except OSError:
+                        continue
+                    out.append((rel_posix, Path(entry.path), st.st_mtime_ns, st.st_ctime_ns, st.st_size))
+        except OSError:
+            continue
+    out.sort(key=lambda item: item[0].split("/"))
+    return out
 
 
 def compute_engine_hash(
@@ -39,121 +126,78 @@ def compute_engine_hash(
     """
     pseofactory_pkg_dir = Path(__file__).resolve().parent
 
-    # Determine stat/mtime of pkg and extra paths to check cache validity
-    mtimes: List[float] = []
-    try:
-        mtimes.append(pseofactory_pkg_dir.stat().st_mtime)
-        for p in pseofactory_pkg_dir.glob("**/*.py"):
-            if "__pycache__" in p.parts or p.name.endswith(".pyc"):
-                continue
-            try:
-                mtimes.append(p.stat().st_mtime)
-            except OSError:
-                pass
-    except OSError:
-        pass
+    # Single-pass stat + path scan across pseofactory package and optional dirs/paths
+    collected: Dict[str, Tuple[Path, int, int, int]] = {}
+    for rel_sub, fp, m_ns, c_ns, sz in _scan_dir_files_with_stats(
+        pseofactory_pkg_dir,
+        include_exts=(".py",),
+        exclude_dir_names=("__pycache__",),
+        exclude_file_suffixes=(".pyc",),
+    ):
+        collected[f"pseofactory/{rel_sub}"] = (fp, m_ns, c_ns, sz)
 
     if base_dirs:
+        b_exts = (".py", ".css", ".js", ".json")
+        b_ex_dirs = ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", "_pseo_substrate")
         for bdir in base_dirs:
             bpath = Path(bdir).resolve()
             if bpath.is_dir():
-                try:
-                    mtimes.append(bpath.stat().st_mtime)
-                except OSError:
-                    pass
-                for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json"):
-                    for p in bpath.glob(pattern):
-                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", "_pseo_substrate")) or p.name.endswith(".pyc"):
-                            continue
-                        try:
-                            mtimes.append(p.stat().st_mtime)
-                        except OSError:
-                            pass
+                for rel_sub, fp, m_ns, c_ns, sz in _scan_dir_files_with_stats(
+                    bpath,
+                    include_exts=b_exts,
+                    exclude_dir_names=b_ex_dirs,
+                    exclude_file_suffixes=(".pyc",),
+                    only_datasets_json=True,
+                ):
+                    collected[f"{bpath.name}/{rel_sub}"] = (fp, m_ns, c_ns, sz)
 
     if include_paths:
         for ip in include_paths:
             ipath = Path(ip).resolve()
             if ipath.is_file():
                 try:
-                    mtimes.append(ipath.stat().st_mtime)
+                    st = ipath.stat()
+                    collected[ipath.name] = (ipath, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
                 except OSError:
                     pass
             elif ipath.is_dir():
-                try:
-                    mtimes.append(ipath.stat().st_mtime)
-                except OSError:
-                    pass
-                for p in ipath.glob("**/*"):
-                    if p.is_file() and "__pycache__" not in p.parts and not p.name.endswith(".pyc"):
-                        try:
-                            mtimes.append(p.stat().st_mtime)
-                        except OSError:
-                            pass
+                for rel_sub, fp, m_ns, c_ns, sz in _scan_dir_files_with_stats(
+                    ipath,
+                    include_exts=None,
+                    exclude_dir_names=("__pycache__", ".git"),
+                    exclude_file_suffixes=(".pyc",),
+                ):
+                    collected[f"{ipath.name}/{rel_sub}"] = (fp, m_ns, c_ns, sz)
 
-    composite_mtime = max(mtimes) if mtimes else 0.0
+    sorted_keys = sorted(collected.keys())
+    stat_sig = tuple(
+        (rel_path, collected[rel_path][1], collected[rel_path][2], collected[rel_path][3])
+        for rel_path in sorted_keys
+    )
 
     cache_key = (
         tuple(sorted(str(Path(p).resolve()) for p in include_paths)) if include_paths else (),
         tuple(sorted(str(Path(b).resolve()) for b in base_dirs)) if base_dirs else (),
     )
 
-    if cache_key in _ENGINE_HASH_CACHE:
-        cached_mtime, cached_hash = _ENGINE_HASH_CACHE[cache_key]
-        if cached_mtime == composite_mtime:
-            return cached_hash
+    with _DRIFT_CACHE_LOCK:
+        cached_entry = _ENGINE_HASH_CACHE.get(cache_key)
+        if cached_entry is not None and cached_entry[0] == stat_sig:
+            return cached_entry[1]
 
-    files_to_hash: Dict[str, bytes] = {}
-    for p in pseofactory_pkg_dir.glob("**/*.py"):
-        if "__pycache__" in p.parts or p.name.endswith(".pyc"):
-            continue
-        rel = f"pseofactory/{p.relative_to(pseofactory_pkg_dir).as_posix()}"
+    # Deterministic master hash (only reads files whose stat signature is not in _FILE_SHA256_CACHE)
+    master = hashlib.sha256()
+    for rel_path in sorted_keys:
+        fp, m_ns, c_ns, sz = collected[rel_path]
         try:
-            files_to_hash[rel] = p.read_bytes()
+            file_sha = _get_cached_file_sha256(fp, m_ns, c_ns, sz)
+            master.update(f"{rel_path}:{file_sha}\n".encode("utf-8"))
         except Exception:
             pass
 
-    # 2. Add extra base directories if provided
-    if base_dirs:
-        for bdir in base_dirs:
-            bpath = Path(bdir).resolve()
-            if bpath.is_dir():
-                for pattern in ("**/*.py", "**/*.css", "**/*.js", "**/datasets/*.json"):
-                    for p in bpath.glob(pattern):
-                        if any(ex in p.parts for ex in ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", "_pseo_substrate")) or p.name.endswith(".pyc"):
-                            continue
-                        rel = f"{bpath.name}/{p.relative_to(bpath).as_posix()}"
-                        try:
-                            files_to_hash[rel] = p.read_bytes()
-                        except Exception:
-                            pass
-
-    # 3. Add explicit include paths if provided
-    if include_paths:
-        for ip in include_paths:
-            ipath = Path(ip).resolve()
-            if ipath.is_file():
-                rel = ipath.name
-                try:
-                    files_to_hash[rel] = ipath.read_bytes()
-                except Exception:
-                    pass
-            elif ipath.is_dir():
-                for p in ipath.glob("**/*"):
-                    if p.is_file() and ("__pycache__" not in p.parts) and not p.name.endswith(".pyc") and (".git" not in p.parts):
-                        rel = f"{ipath.name}/{p.relative_to(ipath).as_posix()}"
-                        try:
-                            files_to_hash[rel] = p.read_bytes()
-                        except Exception:
-                            pass
-
-    # Deterministic master hash
-    master = hashlib.sha256()
-    for rel_path in sorted(files_to_hash.keys()):
-        file_sha = hashlib.sha256(files_to_hash[rel_path]).hexdigest()
-        master.update(f"{rel_path}:{file_sha}\n".encode("utf-8"))
-
     final_hash = master.hexdigest()
-    _ENGINE_HASH_CACHE[cache_key] = (composite_mtime, final_hash)
+    with _DRIFT_CACHE_LOCK:
+        _ENGINE_HASH_CACHE[cache_key] = (stat_sig, final_hash)
     return final_hash
 
 
@@ -173,36 +217,39 @@ def compute_tenant_substrate_hash(
     raw_pid = (property_id or "").strip().lower()
     norm_pid = "profithelm" if raw_pid in ("profithelm-platform", "factory") else raw_pid
     resolved_pkg = Path(pkg_dir).resolve() if pkg_dir is not None else Path(__file__).resolve().parent
-    partition = get_tenant_engine_file_partition(resolved_pkg)
+    with _PARTITION_LOOKUP_LOCK:
+        partition = get_tenant_engine_file_partition(resolved_pkg)
     target_files = sorted(
         set(partition.get("shared") or set())
         | set((partition.get("exclusive") or {}).get(norm_pid, set()))
     )
-    stat_sig_items: List[Tuple[str, float, int]] = []
+    stat_sig_items: List[Tuple[str, int, int, int]] = []
+    file_entries: List[Tuple[str, Path, int, int, int]] = []
     for rel_path in target_files:
         sub_rel = rel_path[len("pseofactory/") :] if rel_path.startswith("pseofactory/") else rel_path
         fp = resolved_pkg / sub_rel
         try:
             st = fp.stat()
-            stat_sig_items.append((rel_path, st.st_mtime, st.st_size))
+            stat_sig_items.append((rel_path, st.st_mtime_ns, st.st_ctime_ns, st.st_size))
+            file_entries.append((rel_path, fp, st.st_mtime_ns, st.st_ctime_ns, st.st_size))
         except OSError:
-            stat_sig_items.append((rel_path, -1.0, -1))
+            stat_sig_items.append((rel_path, -1, -1, -1))
     stat_sig = tuple(stat_sig_items)
     t_cache_key = (str(resolved_pkg), norm_pid)
-    cached_t = _TENANT_SUBSTRATE_HASH_CACHE.get(t_cache_key)
-    if cached_t is not None and cached_t[0] == stat_sig:
-        return cached_t[1]
+    with _DRIFT_CACHE_LOCK:
+        cached_t = _TENANT_SUBSTRATE_HASH_CACHE.get(t_cache_key)
+        if cached_t is not None and cached_t[0] == stat_sig:
+            return cached_t[1]
     master = hashlib.sha256()
-    for rel_path in target_files:
-        sub_rel = rel_path[len("pseofactory/") :] if rel_path.startswith("pseofactory/") else rel_path
-        fp = resolved_pkg / sub_rel
+    for rel_path, fp, m_ns, c_ns, sz in file_entries:
         try:
-            file_sha = hashlib.sha256(fp.read_bytes()).hexdigest()
+            file_sha = _get_cached_file_sha256(fp, m_ns, c_ns, sz)
             master.update(f"{rel_path}:{file_sha}\n".encode("utf-8"))
         except Exception:
             pass
     final_tsh = master.hexdigest()
-    _TENANT_SUBSTRATE_HASH_CACHE[t_cache_key] = (stat_sig, final_tsh)
+    with _DRIFT_CACHE_LOCK:
+        _TENANT_SUBSTRATE_HASH_CACHE[t_cache_key] = (stat_sig, final_tsh)
     return final_tsh
 
 
@@ -279,33 +326,81 @@ def _compute_dist_lock_metrics_with_hashes(
     include_md_hashes: bool = False,
 ) -> Tuple[str, int, Dict[str, str]]:
     """
-    Single-pass scanner computing (dist_fingerprint, total_assets, per_file_sha256_map)
-    for a tenant's compiled dist/ directory.
+    Single-pass os.scandir scanner computing (dist_fingerprint, total_assets, per_file_sha256_map)
+    for a tenant's compiled dist/ directory, with exact (rel_path, mtime_ns, ctime_ns, size)
+    stat-signature validation so changed, added, or deleted files never return stale hashes.
+    Zero em-dashes. Zero en-dashes.
     """
     d_root = Path(dist_dir)
     if not d_root.is_dir():
         return hashlib.sha256(b"").hexdigest(), 0, {}
     lock_exts = (".html", ".xml", ".txt", ".json")
     scan_exts = (".html", ".xml", ".txt", ".json", ".md") if include_md_hashes else lock_exts
-    scanned_assets = sorted(
-        p
-        for p in d_root.glob("**/*")
-        if p.is_file()
-        and "syndication" not in p.relative_to(d_root).parts
-        and p.suffix.lower() in scan_exts
-        and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+    scanned_assets = _scan_dir_files_with_stats(
+        d_root,
+        include_exts=scan_exts,
+        exclude_dir_names=("syndication",),
+        exclude_file_suffixes=(".tmp", ".orig", ".backup"),
     )
+    stat_sig = tuple(
+        (rel_a, m_ns, c_ns, sz)
+        for rel_a, _, m_ns, c_ns, sz in scanned_assets
+    )
+    cache_key = (str(d_root.resolve()), bool(include_md_hashes))
+    with _DRIFT_CACHE_LOCK:
+        cached = _DIST_LOCK_METRICS_CACHE.get(cache_key)
+        if cached is not None and cached[0] == stat_sig:
+            return cached[1], cached[2], dict(cached[3])
+
     fp_hasher = hashlib.sha256()
     file_hashes: Dict[str, str] = {}
     lock_count = 0
-    for af in scanned_assets:
-        rel_a = af.relative_to(d_root).as_posix()
-        af_fp = hashlib.sha256(af.read_bytes()).hexdigest()
+    for rel_a, af, m_ns, c_ns, sz in scanned_assets:
+        af_fp = _get_cached_file_sha256(af, m_ns, c_ns, sz)
         file_hashes[rel_a] = af_fp
-        if af.suffix.lower() in lock_exts:
+        dot_idx = rel_a.rfind(".")
+        ext = rel_a[dot_idx:].lower() if dot_idx != -1 else ""
+        if ext in lock_exts:
             fp_hasher.update(f"{rel_a}:{af_fp}\n".encode("utf-8"))
             lock_count += 1
-    return fp_hasher.hexdigest(), lock_count, file_hashes
+    fp_hex = fp_hasher.hexdigest()
+    with _DRIFT_CACHE_LOCK:
+        if len(_DIST_LOCK_METRICS_CACHE) >= _MAX_DIST_LOCK_METRICS_CACHE_ENTRIES:
+            _DIST_LOCK_METRICS_CACHE.clear()
+        _DIST_LOCK_METRICS_CACHE[cache_key] = (stat_sig, fp_hex, lock_count, dict(file_hashes))
+    return fp_hex, lock_count, file_hashes
+
+
+def list_dist_lock_and_all_files(
+    dist_dir: Union[str, Path],
+    exclude_syndication: bool = True,
+) -> Tuple[List[str], List[str]]:
+    """
+    Single-pass os.scandir helper returning sorted (lock_assets_rel, all_dist_files_rel)
+    prefixed with 'dist/'. Eliminates duplicate Path.glob('**/*') tree walks.
+    Zero em-dashes. Zero en-dashes.
+    """
+    d_root = Path(dist_dir)
+    if not d_root.is_dir():
+        return [], []
+    lock_exts = (".html", ".xml", ".txt", ".json")
+    ex_dirs = ("syndication",) if exclude_syndication else ()
+    entries = _scan_dir_files_with_stats(
+        d_root,
+        include_exts=None,
+        exclude_dir_names=ex_dirs,
+        exclude_file_suffixes=(".tmp", ".orig", ".backup"),
+    )
+    lock_assets: List[str] = []
+    all_dist_files: List[str] = []
+    for rel_a, _, _, _, _ in entries:
+        dist_rel = f"dist/{rel_a}"
+        all_dist_files.append(dist_rel)
+        dot_idx = rel_a.rfind(".")
+        ext = rel_a[dot_idx:].lower() if dot_idx != -1 else ""
+        if ext in lock_exts:
+            lock_assets.append(dist_rel)
+    return lock_assets, all_dist_files
 
 
 def compute_dist_lock_metrics(dist_dir: Union[str, Path]) -> Tuple[str, int]:
@@ -679,27 +774,16 @@ def _verify_single_tenant_for_latch(
                     tracked_dist_set = {
                         ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()
                     }
-                    lock_assets = [
-                        f"dist/{p.relative_to(dist_dir).as_posix()}"
-                        for p in sorted(dist_dir.glob("**/*"))
-                        if p.is_file()
-                        and "syndication" not in p.relative_to(dist_dir).parts
-                        and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
-                        and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-                    ]
+                    lock_assets, all_dist_files = list_dist_lock_and_all_files(
+                        dist_dir,
+                        exclude_syndication=True,
+                    )
                     untracked_lock = [p for p in lock_assets if p not in tracked_dist_set]
                     if untracked_lock:
                         t_reasons.append(
                             f"{pid}: {len(untracked_lock)} untracked lock asset(s) in dist/ (first: {untracked_lock[0]})"
                         )
                     else:
-                        all_dist_files = [
-                            f"dist/{p.relative_to(dist_dir).as_posix()}"
-                            for p in sorted(dist_dir.glob("**/*"))
-                            if p.is_file()
-                            and "syndication" not in p.relative_to(dist_dir).parts
-                            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-                        ]
                         untracked_dist = [p for p in all_dist_files if p not in tracked_dist_set]
                         if untracked_dist:
                             t_reasons.append(
@@ -838,6 +922,30 @@ def verify_all_tenants_aligned_for_latch(
                 ]
                 for fut in future_by_tenant:
                     reasons.extend(fut.result())
+            return len(reasons) == 0, reasons
+        except Exception:
+            reasons = []
+
+    if len(canonical_tenants) > 1 and "PYTEST_XDIST_WORKER" not in os.environ:
+        try:
+            t_workers = min(8, max(2, int(os.cpu_count() or 4)), len(canonical_tenants))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=t_workers) as tpool:
+                t_results = list(
+                    tpool.map(
+                        lambda item: _verify_single_tenant_for_latch(
+                            str(ws),
+                            item[0],
+                            item[1],
+                            target_hash,
+                            is_prod_ws,
+                            require_git_clean_and_pushed,
+                            allow_tenant_scoped_hash,
+                        ),
+                        canonical_tenants,
+                    )
+                )
+            for t_reasons in t_results:
+                reasons.extend(t_reasons)
             return len(reasons) == 0, reasons
         except Exception:
             reasons = []

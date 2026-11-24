@@ -33,8 +33,50 @@ class SupervisorTimeoutError(Exception):
 MAX_CONSECUTIVE_FAILURES: int = 5
 DEFAULT_TICK_BUDGET: float = float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0"))
 DEFAULT_TENANT_BUDGET: float = 1800.0
-DEFAULT_CONCURRENCY_CEILING: int = 2
 HEARTBEAT_PATH: str = ".agy/supervisor_heartbeat.json"
+
+
+def _get_available_ram_gb() -> float:
+    """Reads MemAvailable from /proc/meminfo in GiB; defaults to 8.0 on non-Linux hosts."""
+    try:
+        meminfo = Path("/proc/meminfo")
+        if meminfo.is_file():
+            for line in meminfo.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return int(parts[1]) / (1024.0 * 1024.0)
+    except Exception:
+        pass
+    return 8.0
+
+
+def compute_default_concurrency_ceiling(tenant_count: Optional[int] = None) -> int:
+    """
+    Computes a CPU- and RAM-safe tenant concurrency ceiling.
+    Respects PSEUFACTORY_CONCURRENCY_CEILING / PSEOFACTORY_CONCURRENCY_CEILING env overrides.
+    Zero em-dashes. Zero en-dashes.
+    """
+    env_raw = (
+        os.environ.get("PSEUFACTORY_CONCURRENCY_CEILING")
+        or os.environ.get("PSEOFACTORY_CONCURRENCY_CEILING")
+        or ""
+    ).strip()
+    if env_raw.isdigit() and int(env_raw) >= 1:
+        ceiling = int(env_raw)
+    else:
+        cpu_count = os.cpu_count() or 4
+        cpu_cap = max(2, min(4, cpu_count // 2))
+        avail_ram_gb = _get_available_ram_gb()
+        ram_cap = max(2, int(avail_ram_gb // 2.0))
+        ceiling = max(2, min(cpu_cap, ram_cap))
+    if tenant_count is not None and tenant_count >= 1:
+        return max(1, min(tenant_count, ceiling))
+    return max(1, ceiling)
+
+
+_INITIAL_DEFAULT_CONCURRENCY_CEILING: int = compute_default_concurrency_ceiling()
+DEFAULT_CONCURRENCY_CEILING: int = _INITIAL_DEFAULT_CONCURRENCY_CEILING
 
 
 class AtomicStateLedger:
@@ -693,6 +735,34 @@ class DepartmentHandoffChainVerifier:
         self.strict_current_engine_hash = bool(strict_current_engine_hash)
 
     @staticmethod
+    def _compute_handoff_workers(tenant_count: int) -> int:
+        """Computes bounded ThreadPoolExecutor size for multi-tenant handoff verification."""
+        if tenant_count <= 1:
+            return 1
+        env_raw = (
+            os.environ.get("PSEUFACTORY_HANDOFF_WORKERS")
+            or os.environ.get("PSEOFACTORY_HANDOFF_WORKERS")
+            or ""
+        ).strip()
+        if env_raw.isdigit() and int(env_raw) >= 1:
+            return max(1, min(tenant_count, int(env_raw)))
+        cpu_count = os.cpu_count() or 4
+        return max(2, min(tenant_count, min(8, cpu_count)))
+
+    def _map_tenants_ordered(
+        self,
+        tenants: List[str],
+        fn: Callable[[str], Any],
+    ) -> List[Tuple[str, Any]]:
+        """Executes fn across tenants in parallel while preserving exact deterministic order."""
+        if len(tenants) <= 1:
+            return [(pid, fn(pid)) for pid in tenants]
+        max_workers = self._compute_handoff_workers(len(tenants))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(fn, tenants))
+        return list(zip(tenants, results))
+
+    @staticmethod
     def _validate_stage_inputs(
         contract: DepartmentContract,
         handoff_context: Dict[str, Any],
@@ -1118,11 +1188,10 @@ class DepartmentHandoffChainVerifier:
         compiler_smoke_by_tenant: Dict[str, Dict[str, Any]] = {}
         per_tenant_summary: Dict[str, Dict[str, Any]] = {}
 
-        for pid in discovered_tenants:
+        def _verify_eng_tenant(pid: str) -> Dict[str, Any]:
             t_errs: List[str] = []
             adapter = tenant_adapters[pid]
             dist_dir = Path(adapter.dist_dir)
-            compiled_dist_dirs[pid] = str(dist_dir)
 
             root_index = dist_dir / "index.html"
             if not root_index.is_file():
@@ -1132,7 +1201,6 @@ class DepartmentHandoffChainVerifier:
             tool_htmls = [
                 a for a in assets if a.suffix == ".html" and a.is_relative_to(dist_dir) and "tools/" in a.relative_to(dist_dir).as_posix()
             ]
-            compiled_assets_by_tenant[pid] = len(assets)
             if len(tool_htmls) < 1:
                 t_errs.append(f"no compiled tool HTML files found under {dist_dir / 'tools'}")
 
@@ -1155,7 +1223,7 @@ class DepartmentHandoffChainVerifier:
                         t_errs.append(f"invalid #calculation-manifest JSON in {sample_slug}: {exc}")
                 else:
                     t_errs.append(f"missing #calculation-manifest script tag in {sample_slug}")
-            calc_manifests_by_tenant[pid] = {
+            manifest_info = {
                 "sample_asset": sample_slug,
                 "tool_html_count": len(tool_htmls),
                 "manifest_verified": manifest_verified,
@@ -1189,22 +1257,35 @@ class DepartmentHandoffChainVerifier:
                 t_errs.append(f"compile_high_effort_page Factor-7 smoke check raised error: {exc}")
             if not smoke_ok:
                 t_errs.append(f"compile_high_effort_page Factor-7 smoke check failed for '{pid}'")
-            compiler_smoke_by_tenant[pid] = {
+            smoke_info = {
                 "query": smoke_q,
                 "html_bytes": len(smoke_html),
                 "factor_7_verified": smoke_ok,
             }
-
-            if t_errs:
-                failures.extend(f"ENGINEERING[{pid}]: {e}" for e in t_errs)
-            per_tenant_summary[pid] = {
-                "status": "PASS" if not t_errs else "FAIL",
-                "total_assets": len(assets),
-                "tool_html_count": len(tool_htmls),
-                "manifest_verified": manifest_verified,
-                "compiler_smoke_verified": smoke_ok,
+            return {
+                "dist_dir": str(dist_dir),
+                "assets_count": len(assets),
+                "manifest_info": manifest_info,
+                "smoke_info": smoke_info,
                 "errors": t_errs,
+                "summary": {
+                    "status": "PASS" if not t_errs else "FAIL",
+                    "total_assets": len(assets),
+                    "tool_html_count": len(tool_htmls),
+                    "manifest_verified": manifest_verified,
+                    "compiler_smoke_verified": smoke_ok,
+                    "errors": t_errs,
+                },
             }
+
+        for pid, res in self._map_tenants_ordered(discovered_tenants, _verify_eng_tenant):
+            compiled_dist_dirs[pid] = res["dist_dir"]
+            compiled_assets_by_tenant[pid] = res["assets_count"]
+            calc_manifests_by_tenant[pid] = res["manifest_info"]
+            compiler_smoke_by_tenant[pid] = res["smoke_info"]
+            if res["errors"]:
+                failures.extend(f"ENGINEERING[{pid}]: {e}" for e in res["errors"])
+            per_tenant_summary[pid] = res["summary"]
 
         outputs: Dict[str, Any] = {
             "compiled_dist_dirs": compiled_dist_dirs,
@@ -1237,8 +1318,6 @@ class DepartmentHandoffChainVerifier:
         tenant_adapters: Dict[str, PropertyAdapter] = ctx["tenant_adapters"]
         failures: List[str] = []
 
-        evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
-        scanner = CrossPropertyContaminationScanner()
         fact_store = TenantFactStore.get_instance()
 
         integrity_by_tenant: Dict[str, Dict[str, Any]] = {}
@@ -1247,23 +1326,35 @@ class DepartmentHandoffChainVerifier:
         aeo_by_tenant: Dict[str, Dict[str, Any]] = {}
         per_tenant_summary: Dict[str, Dict[str, Any]] = {}
 
-        for pid in discovered_tenants:
+        from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
+
+        spawned_dir_names = {
+            c.repo_dir_name for c in SPAWNED_TENANT_DECLARATIONS.values() if c.repo_dir_name
+        }
+        canonical_dir_names = set(list_canonical_repo_dir_names())
+
+        def _clear_tenant_eval_cache(ev: AssetIntegrityEvaluator, target_pid: str) -> None:
+            with ev._AUDIT_CACHE_LOCK:
+                for ck in [
+                    k for k in ev._audit_cache
+                    if isinstance(k, tuple) and len(k) >= 1 and k[0] == target_pid
+                ]:
+                    ev._audit_cache.pop(ck, None)
+
+        def _verify_verif_tenant(pid: str) -> Dict[str, Any]:
             t_errs: List[str] = []
             adapter = tenant_adapters[pid]
+            evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
+            scanner = CrossPropertyContaminationScanner()
             repo_path_cand = (
                 Path(adapter.repo_path)
                 if getattr(adapter, "repo_path", None)
                 else Path(adapter.dist_dir).parent
             )
-            from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
-
-            spawned_dir_names = {
-                c.repo_dir_name for c in SPAWNED_TENANT_DECLARATIONS.values() if c.repo_dir_name
-            }
             is_prod_canonical_tenant = (
                 repo_path_cand.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
                 and (
-                    repo_path_cand.name in list_canonical_repo_dir_names()
+                    repo_path_cand.name in canonical_dir_names
                     or repo_path_cand.name in spawned_dir_names
                 )
             )
@@ -1309,7 +1400,7 @@ class DepartmentHandoffChainVerifier:
                         property_id=pid,
                         canonical_base=adapter.canonical_base,
                     )
-                    evaluator._audit_cache.clear()
+                    _clear_tenant_eval_cache(evaluator, pid)
                     rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
                     retro_rep = RetroReflectionEngine.audit_estate(adapter.dist_dir, pid)
                     stale_cnt = int(retro_rep.get("stale_count", 0))
@@ -1326,7 +1417,7 @@ class DepartmentHandoffChainVerifier:
                 if self.heal_markers:
                     RetroReflectionEngine.retrofit_estate(adapter.dist_dir, pid)
                     aeo_mutated = True
-                    evaluator._audit_cache.clear()
+                    _clear_tenant_eval_cache(evaluator, pid)
                     rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
                 else:
                     lock_f = repo_path_cand / "substrate_lock.json"
@@ -1388,7 +1479,7 @@ class DepartmentHandoffChainVerifier:
                 t_errs.append(
                     f"AssetIntegrityEvaluator reported {rep.drifted_assets_count} drifted assets (status={rep.status})"
                 )
-            integrity_by_tenant[pid] = {
+            integrity_info = {
                 "status": rep.status,
                 "total_assets_checked": rep.total_assets_checked,
                 "compliant_assets_count": rep.compliant_assets_count,
@@ -1439,7 +1530,7 @@ class DepartmentHandoffChainVerifier:
                                 retro_rep["stale_count"] = 0
             if retro_rep.get("status") != "PASS" or stale_cnt > 0:
                 t_errs.append(f"RetroReflectionEngine reported stale_count={stale_cnt}")
-            retro_by_tenant[pid] = {
+            retro_info = {
                 "status": retro_rep.get("status"),
                 "pages_scanned": int(retro_rep.get("pages_scanned", 0)),
                 "stale_count": stale_cnt,
@@ -1470,7 +1561,7 @@ class DepartmentHandoffChainVerifier:
                     contam_violations.extend(idx_foreign)
             if contam_violations:
                 t_errs.append(f"CrossPropertyContaminationScanner found {len(contam_violations)} violations")
-            contamination_by_tenant[pid] = {
+            contamination_info = {
                 "fact_store_isolated": fact_isolated,
                 "violations_count": len(contam_violations),
             }
@@ -1485,23 +1576,37 @@ class DepartmentHandoffChainVerifier:
                 p_aeo["issues"] = []
             if not aeo_ready:
                 t_errs.append(f"AEO/GEO three-plane readiness check failed: {p_aeo.get('issues')}")
-            aeo_by_tenant[pid] = {
+            aeo_info = {
                 "ready": aeo_ready,
                 "status": p_aeo.get("status"),
                 "issues_count": len(p_aeo.get("issues") or []),
             }
 
-            if t_errs:
-                failures.extend(f"VERIFICATION[{pid}]: {e}" for e in t_errs)
-            per_tenant_summary[pid] = {
-                "status": "PASS" if not t_errs else "FAIL",
-                "assets_audited": rep.total_assets_checked,
-                "drifted_assets": rep.drifted_assets_count,
-                "retro_stale_count": stale_cnt,
-                "contamination_violations": len(contam_violations),
-                "aeo_geo_ready": aeo_ready,
+            return {
+                "integrity": integrity_info,
+                "retro": retro_info,
+                "contamination": contamination_info,
+                "aeo": aeo_info,
                 "errors": t_errs,
+                "summary": {
+                    "status": "PASS" if not t_errs else "FAIL",
+                    "assets_audited": rep.total_assets_checked,
+                    "drifted_assets": rep.drifted_assets_count,
+                    "retro_stale_count": stale_cnt,
+                    "contamination_violations": len(contam_violations),
+                    "aeo_geo_ready": aeo_ready,
+                    "errors": t_errs,
+                },
             }
+
+        for pid, res in self._map_tenants_ordered(discovered_tenants, _verify_verif_tenant):
+            integrity_by_tenant[pid] = res["integrity"]
+            retro_by_tenant[pid] = res["retro"]
+            contamination_by_tenant[pid] = res["contamination"]
+            aeo_by_tenant[pid] = res["aeo"]
+            if res["errors"]:
+                failures.extend(f"VERIFICATION[{pid}]: {e}" for e in res["errors"])
+            per_tenant_summary[pid] = res["summary"]
 
         outputs: Dict[str, Any] = {
             "integrity_reports_by_tenant": integrity_by_tenant,
@@ -1540,7 +1645,7 @@ class DepartmentHandoffChainVerifier:
             "feed.xml",
         )
 
-        for pid in discovered_tenants:
+        def _verify_syn_tenant(pid: str) -> Dict[str, Any]:
             t_errs: List[str] = []
             adapter = tenant_adapters[pid]
             dist_dir = Path(adapter.dist_dir)
@@ -1557,7 +1662,7 @@ class DepartmentHandoffChainVerifier:
                 t_errs.append(
                     f"IndexingPreflightEngine blocked_count={pre_rep.blocked_count} (is_gate_passed={pre_rep.is_gate_passed})"
                 )
-            preflight_by_tenant[pid] = {
+            preflight_info = {
                 "is_gate_passed": pre_rep.is_gate_passed,
                 "qualified_count": passed_cnt,
                 "blocked_count": pre_rep.blocked_count,
@@ -1577,7 +1682,6 @@ class DepartmentHandoffChainVerifier:
             rf_map["ai-benchmarks"] = ai_bench_exists
             if not ai_bench_exists:
                 t_errs.append("missing ai-benchmarks discovery hub in dist/")
-            root_files_by_tenant[pid] = rf_map
 
             syn_roots = [p for p in (repo_path / "syndication", dist_dir / "syndication") if p.is_dir()]
             pack_files: List[Path] = []
@@ -1589,7 +1693,7 @@ class DepartmentHandoffChainVerifier:
                 t_errs.append("no syndication_pack.json files found in syndication/")
             if deprecated_reddit:
                 t_errs.append(f"found {len(deprecated_reddit)} deprecated reddit.md artifacts in syndication/")
-            syndication_packs_by_tenant[pid] = {
+            syn_pack_info = {
                 "pack_count": len(pack_files),
                 "deprecated_reddit_count": len(deprecated_reddit),
             }
@@ -1598,7 +1702,7 @@ class DepartmentHandoffChainVerifier:
             mp4_files = sorted(video_dir.glob("*.mp4")) if video_dir.is_dir() else []
             if len(mp4_files) < 1:
                 t_errs.append("no rendered .mp4 video assets found in dist/videos")
-            videos_by_tenant[pid] = {
+            video_info = {
                 "mp4_count": len(mp4_files),
             }
 
@@ -1609,7 +1713,7 @@ class DepartmentHandoffChainVerifier:
                 t_errs.append(
                     f"missing distribution ledgers (broadcast={b_ledger}, index_push={i_ledger}, metric_recovery={m_ledger})"
                 )
-            ledgers_by_tenant[pid] = {
+            ledger_info = {
                 "broadcast_ledger": b_ledger,
                 "index_push_ledger": i_ledger,
                 "metric_recovery_ledger": m_ledger,
@@ -1647,20 +1751,37 @@ class DepartmentHandoffChainVerifier:
                     check_in_pytest=True,
                     ignore_git_dirty=True,
                 )
-            pending_by_tenant[pid] = has_pending
             if has_pending:
                 t_errs.append("_has_pending_downstream_work reported unfulfilled downstream work")
 
-            if t_errs:
-                failures.extend(f"SYNDICATION[{pid}]: {e}" for e in t_errs)
-            per_tenant_summary[pid] = {
-                "status": "PASS" if not t_errs else "FAIL",
-                "preflight_qualified_urls": passed_cnt,
-                "syndication_pack_count": len(pack_files),
-                "mp4_video_count": len(mp4_files),
-                "pending_downstream_work": has_pending,
+            return {
+                "preflight": preflight_info,
+                "root_files": rf_map,
+                "syn_packs": syn_pack_info,
+                "videos": video_info,
+                "ledgers": ledger_info,
+                "has_pending": has_pending,
                 "errors": t_errs,
+                "summary": {
+                    "status": "PASS" if not t_errs else "FAIL",
+                    "preflight_qualified_urls": passed_cnt,
+                    "syndication_pack_count": len(pack_files),
+                    "mp4_video_count": len(mp4_files),
+                    "pending_downstream_work": has_pending,
+                    "errors": t_errs,
+                },
             }
+
+        for pid, res in self._map_tenants_ordered(discovered_tenants, _verify_syn_tenant):
+            preflight_by_tenant[pid] = res["preflight"]
+            root_files_by_tenant[pid] = res["root_files"]
+            syndication_packs_by_tenant[pid] = res["syn_packs"]
+            videos_by_tenant[pid] = res["videos"]
+            ledgers_by_tenant[pid] = res["ledgers"]
+            pending_by_tenant[pid] = res["has_pending"]
+            if res["errors"]:
+                failures.extend(f"SYNDICATION[{pid}]: {e}" for e in res["errors"])
+            per_tenant_summary[pid] = res["summary"]
 
         outputs: Dict[str, Any] = {
             "indexing_preflight_by_tenant": preflight_by_tenant,
@@ -1684,6 +1805,7 @@ class DepartmentHandoffChainVerifier:
         cycle_id: str,
         persist: bool,
     ) -> Tuple[bool, Dict[str, Any], Dict[str, Any], List[str]]:
+        from pseofactory.drift import list_dist_lock_and_all_files
         from pseofactory.gitops import ShipperQueue
 
         discovered_tenants: List[str] = list(ctx["discovered_tenants"])
@@ -1697,7 +1819,7 @@ class DepartmentHandoffChainVerifier:
         shipper_queue_by_tenant: Dict[str, Dict[str, Any]] = {}
         per_tenant_summary: Dict[str, Dict[str, Any]] = {}
 
-        for pid in discovered_tenants:
+        def _verify_dep_tenant(pid: str) -> Dict[str, Any]:
             t_errs: List[str] = []
             adapter = tenant_adapters[pid]
             dist_dir = Path(adapter.dist_dir)
@@ -1812,13 +1934,10 @@ class DepartmentHandoffChainVerifier:
                         tracked_dist_set = {
                             ln.strip() for ln in ls_res.stdout.splitlines() if ln.strip()
                         }
-                        lock_assets = [
-                            f"dist/{p.relative_to(dist_dir).as_posix()}"
-                            for p in sorted(dist_dir.glob("**/*"))
-                            if p.is_file()
-                            and p.suffix.lower() in (".html", ".xml", ".txt", ".json")
-                            and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
-                        ]
+                        lock_assets, _ = list_dist_lock_and_all_files(
+                            dist_dir,
+                            exclude_syndication=False,
+                        )
                         untracked_lock = [p for p in lock_assets if p not in tracked_dist_set]
                         if untracked_lock:
                             t_errs.append(
@@ -1826,7 +1945,7 @@ class DepartmentHandoffChainVerifier:
                             )
                 except Exception as exc:
                     t_errs.append(f"git status check failed in {repo_path.name}: {exc}")
-            substrate_locks_by_tenant[pid] = {
+            substrate_lock_info = {
                 "present": lock_file.is_file(),
                 "engine_hash": lock_hash,
                 "aligned_to_current_engine": bool(lock_hash == current_engine_hash or scoped_ok),
@@ -1865,7 +1984,7 @@ class DepartmentHandoffChainVerifier:
                     t_errs.append(
                         f"tenant asset_ledger.json ('{al_hash[:12]}') diverges from substrate_lock.json ('{lock_hash[:12]}')"
                     )
-            engine_ledgers_by_tenant[pid] = {
+            engine_ledger_info = {
                 "engine_hash_file_present": eh_file.is_file(),
                 "asset_ledger_file_present": al_file.is_file(),
                 "ledger_asset_count": al_count,
@@ -1897,7 +2016,7 @@ class DepartmentHandoffChainVerifier:
                         t_errs.append(f"freshness_audit_report.json not passing: verdict={verdict}")
                 except Exception as exc:
                     t_errs.append(f"invalid freshness_audit_report.json: {exc}")
-            freshness_by_tenant[pid] = {
+            freshness_info = {
                 "present": fresh_file.is_file(),
                 "certified_fresh": fresh_ok,
             }
@@ -1911,20 +2030,34 @@ class DepartmentHandoffChainVerifier:
             dlq_items = sq.list_dlq(property_id=pid)
             if dlq_items:
                 t_errs.append(f"ShipperQueue has {len(dlq_items)} unresolved DLQ records for '{pid}'")
-            shipper_queue_by_tenant[pid] = {
+            shipper_info = {
                 "dlq_count": len(dlq_items),
             }
 
-            if t_errs:
-                failures.extend(f"DEPLOYMENT[{pid}]: {e}" for e in t_errs)
-            per_tenant_summary[pid] = {
-                "status": "PASS" if not t_errs else "FAIL",
-                "substrate_lock_aligned": engine_ledgers_by_tenant[pid]["internally_aligned"],
-                "ledger_asset_count": al_count,
-                "freshness_certified": fresh_ok,
-                "shipper_dlq_count": len(dlq_items),
+            return {
+                "substrate_lock": substrate_lock_info,
+                "engine_ledger": engine_ledger_info,
+                "freshness": freshness_info,
+                "shipper": shipper_info,
                 "errors": t_errs,
+                "summary": {
+                    "status": "PASS" if not t_errs else "FAIL",
+                    "substrate_lock_aligned": engine_ledger_info["internally_aligned"],
+                    "ledger_asset_count": al_count,
+                    "freshness_certified": fresh_ok,
+                    "shipper_dlq_count": len(dlq_items),
+                    "errors": t_errs,
+                },
             }
+
+        for pid, res in self._map_tenants_ordered(discovered_tenants, _verify_dep_tenant):
+            substrate_locks_by_tenant[pid] = res["substrate_lock"]
+            engine_ledgers_by_tenant[pid] = res["engine_ledger"]
+            freshness_by_tenant[pid] = res["freshness"]
+            shipper_queue_by_tenant[pid] = res["shipper"]
+            if res["errors"]:
+                failures.extend(f"DEPLOYMENT[{pid}]: {e}" for e in res["errors"])
+            per_tenant_summary[pid] = res["summary"]
 
         dep_summary: Dict[str, Any] = {
             "deployment_parity_verified": len(failures) == 0,
@@ -2393,14 +2526,20 @@ class AsyncFleetCoordinator:
         self,
         registry: Optional[TenantRegistry] = None,
         lifecycle: Optional[MaintenanceLifecycle] = None,
-        concurrency_ceiling: int = DEFAULT_CONCURRENCY_CEILING,
+        concurrency_ceiling: Optional[int] = None,
         tenant_timeout_budget: float = DEFAULT_TENANT_BUDGET,
         tenant_timeout_budget_seconds: Optional[float] = None,
         tenant_budgets: Optional[Dict[str, float]] = None,
     ):
         self.registry = registry or TenantRegistry.default()
         self.lifecycle = lifecycle or MaintenanceLifecycle(registry=self.registry)
-        self.concurrency_ceiling = max(1, concurrency_ceiling)
+        if concurrency_ceiling is not None:
+            resolved_ceiling = int(concurrency_ceiling)
+        elif DEFAULT_CONCURRENCY_CEILING != _INITIAL_DEFAULT_CONCURRENCY_CEILING:
+            resolved_ceiling = int(DEFAULT_CONCURRENCY_CEILING)
+        else:
+            resolved_ceiling = compute_default_concurrency_ceiling()
+        self.concurrency_ceiling = max(1, resolved_ceiling)
         self.tenant_timeout_budget = (
             tenant_timeout_budget_seconds
             if tenant_timeout_budget_seconds is not None
@@ -2802,7 +2941,7 @@ class AutonomousLifecycleSupervisor:
         execution_budget_seconds: float = DEFAULT_TICK_BUDGET,
         tenant_budget_seconds: float = DEFAULT_TENANT_BUDGET,
         max_consecutive_failures: int = MAX_CONSECUTIVE_FAILURES,
-        concurrency_ceiling: int = DEFAULT_CONCURRENCY_CEILING,
+        concurrency_ceiling: Optional[int] = None,
         registry: Optional[TenantRegistry] = None,
         coordinator: Optional[AsyncFleetCoordinator] = None,
         heartbeat_tracker: Optional[HeartbeatTracker] = None,
@@ -2839,7 +2978,13 @@ class AutonomousLifecycleSupervisor:
         self.execution_budget_seconds = execution_budget_seconds
         self.tenant_budget_seconds = tenant_budget_seconds
         self.max_consecutive_failures = max(1, max_consecutive_failures)
-        self.concurrency_ceiling = concurrency_ceiling
+        if concurrency_ceiling is not None:
+            resolved_sup_ceiling = max(1, int(concurrency_ceiling))
+        elif DEFAULT_CONCURRENCY_CEILING != _INITIAL_DEFAULT_CONCURRENCY_CEILING:
+            resolved_sup_ceiling = max(1, int(DEFAULT_CONCURRENCY_CEILING))
+        else:
+            resolved_sup_ceiling = compute_default_concurrency_ceiling()
+        self.concurrency_ceiling = resolved_sup_ceiling
 
         if registry is not None:
             self.registry = registry
