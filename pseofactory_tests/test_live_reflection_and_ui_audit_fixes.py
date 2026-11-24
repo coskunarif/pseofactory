@@ -147,8 +147,7 @@ def test_visual_primitives_never_clobbers_exact_calculator_math_and_fixes_hero_r
     from pseofactory.visual_primitives import (
         _render_runtime_sync_events_js,
         _render_runtime_sync_workbench_js,
-        _retrofit_hero_range_and_jurisdiction_bars,
-        _retrofit_partner_reg_and_quick_unlock,
+        normalize_html_visual_primitives,
     )
 
     js = _render_runtime_sync_workbench_js() + "\n" + _render_runtime_sync_events_js()
@@ -156,23 +155,30 @@ def test_visual_primitives_never_clobbers_exact_calculator_math_and_fixes_hero_r
     assert "* 0.065" not in js
     assert 'el.type !== "range"' in js or 'el.type === "range"' in js
 
-    # Hero range baseline must preserve $ when output-value sits next to $ prefix
+    # Active visual primitives pipeline must strip legacy hero/quick-unlock/pro-hook bloat while preserving $ output-value
     sample_html = (
-        '<section class="hero-section card"><h1>Calculator</h1></section>'
-        '<div id="saveable-decision-blueprint">'
+        '<html><head><link rel="canonical" href="https://gainhelm.com/tools/soc-2-audit-cost-calculator/"></head>'
+        '<body><main><section class="hero-section card"><h1>Calculator</h1></section>'
+        '<div id="hero-range-anchor" class="hero-range-anchor">Hero Range</div>'
+        '<div id="state-first-hero-bar" class="state-first-hero-bar">State Bar</div>'
+        '<div class="calc-grid"><div class="result-box">'
         '<div class="kpi-row"><span class="output-prefix">$</span><span class="output-value">14,800</span></div>'
-        '</div>'
+        '<div id="calc-result-quick-unlock-bar">Quick Unlock</div>'
+        '<div class="pro-hook-card">Pro Hook</div>'
+        '</div></div>'
+        '<div id="saveable-decision-blueprint"></div>'
+        '</main></body></html>'
     )
-    actions: list[str] = []
-    retro = _retrofit_hero_range_and_jurisdiction_bars(
-        sample_html,
-        tool_slug="soc-2-cost",
-        default_state="DE",
-        has_quote_intake=True,
-        us_jurisdictions=[("DE", "Delaware (DE)")],
-        actions=actions,
-    )
-    assert "hero-range-baseline" not in retro
+    retro, _ = normalize_html_visual_primitives(sample_html, is_tenant_porcelain=True)
+    from bs4 import BeautifulSoup as _AuditSoup
+
+    retro_soup = _AuditSoup(retro, "html.parser")
+    assert retro_soup.select(
+        "#hero-range-baseline, #hero-range-anchor, .hero-range-anchor, "
+        "#state-first-hero-bar, .state-first-hero-bar, "
+        "#calc-result-quick-unlock-bar, .pro-hook-card"
+    ) == []
+    assert '<span class="output-prefix">$</span><span class="output-value">14,800</span>' in retro
 
     # GainHelm #metric-* result container must sit ABOVE .calc-inline-cta
     gh_html = (
@@ -184,8 +190,6 @@ def test_visual_primitives_never_clobbers_exact_calculator_math_and_fixes_hero_r
         '<div class="lead-capture-card">Lead</div>'
         '</div></main></body></html>'
     )
-    from pseofactory.visual_primitives import normalize_html_visual_primitives
-
     gh_retro, _ = normalize_html_visual_primitives(gh_html, is_tenant_porcelain=True)
     assert 'id="metric-soc2_total_cost"' in gh_retro
     assert 'class="calc-inline-cta"' not in gh_retro

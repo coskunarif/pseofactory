@@ -2131,8 +2131,8 @@ def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspa
     Verifies:
     1) normalize_html_callout_message_match -> reposition_affiliate_placements_from_gsc_signals
        preserves 'partners-section' and resolves non-Vanta framework primary partner.
-    2) Balanced <div> matching on nested .pro-hook-sample-unlock and protection of inner spans
-       against _clean_pro_hook_outer_spans overwrite.
+    2) Balanced <div> matching on nested .pro-hook-card / .pro-hook-sample-unlock stripping
+       preserves downstream sibling blocks and injects clean #workpaper-unlock-card.
     3) Seeded stray leak inside #calculator-workspace-anchor on strict_isolated DORA heals cleanly,
        records 'gainhelm_framework_isolation' in repaired, and converges to 0 diffs on Pass 2.
     """
@@ -2142,11 +2142,8 @@ def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspa
         reposition_affiliate_placements_from_gsc_signals,
     )
     from pseofactory.maintenance import RetroReflectionEngine
-    import pseofactory.visual_primitives as vp_mod
 
     has_gainhelm_cross_framework_leak = getattr(aff_mod, "has_gainhelm_cross_framework_leak", None)
-    _clean_pro_hook_outer_spans = getattr(vp_mod, "_clean_pro_hook_outer_spans", None)
-    _gainhelm_pro_card_has_mismatch = getattr(vp_mod, "_gainhelm_pro_card_has_mismatch", None)
 
     pentest_slug = "penetration-testing-scoping-cost-calculator"
     pentest_html = (
@@ -2198,8 +2195,6 @@ def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspa
     assert sec_tag.get("data-partner") == "cobalt_pentest"
 
     assert callable(has_gainhelm_cross_framework_leak)
-    assert callable(_clean_pro_hook_outer_spans)
-    assert callable(_gainhelm_pro_card_has_mismatch)
 
     dora_slug = "dora-ict-third-party-risk-compliance-cost-calculator"
     nested_pro_html = (
@@ -2254,35 +2249,36 @@ def test_phase2_html_healers_partners_section_nested_pro_hook_and_strict_workspa
     assert ws_pass2 == ws_pass1
     assert rep2 == []
 
-    # Verify clean .pro-hook-card containing ($0) and ($57,590 DE Baseline) has zero mismatch,
-    # preserves outer <span> labels mentioning ($0) or ($57,590 DE Baseline), and hits fast-path.
-    clean_outer_span = (
-        '<span class="pro-hook-meta-note">DORA Zero-Baseline ($0) and ($57,590 DE Baseline) Export</span>'
-    )
-    clean_pro_card = (
+    # Verify seeded .pro-hook-card with stale ($79) / ($57,590 DE Baseline) copy is stripped cleanly
+    # by the active pipeline, leaving only the framework-pure #workpaper-unlock-card ($29).
+    stale_dora_with_pro = (
+        f'<html><head><link rel="canonical" href="https://gainhelm.com/tools/{dora_slug}/">'
+        "<title>DORA Calculator</title></head><body><h1>DORA Cost</h1>"
+        '<div class="calc-grid"><div class="result-box"><span class="output-value">$57,590</span></div></div>'
         '<div class="pro-hook-card">'
-        f"{clean_outer_span}"
+        '<span class="pro-hook-meta-note">DORA Zero-Baseline ($0) and ($57,590 DE Baseline) Export</span>'
         '<a class="pro-hook-link" href="#post-calculation-upgrade-drawer">Export DORA Workpaper ($49)</a>'
         '<div class="pro-hook-sample-unlock" data-mechanic="above_fold_packet_sample_unlock">'
         "<div>Unlocked Sample Preview ($57,590 DE Baseline): Line 1 DORA ICT Control Matrix | "
         "Line 3 Signed Audit Workpaper (Locked: $49)</div>"
-        '<div><a class="pro-hook-direct-checkout" href="/api/lead-capture?checkout=1&amp;sku=gh_hipaa_iso27001_governance_kit" '
-        'data-offer-sku="gh_hipaa_iso27001_governance_kit" data-offer-price="49">Instant Checkout &amp; Download ($49) &rarr;</a></div>'
-        "</div></div>"
+        "</div></div></body></html>"
     )
-    assert _gainhelm_pro_card_has_mismatch(
-        clean_pro_card, dora_slug, "gh_hipaa_iso27001_governance_kit", "49"
-    ) is False
-    assert (
-        _clean_pro_hook_outer_spans(
-            clean_pro_card,
-            tool_slug=dora_slug,
-            default_state="DE",
-            offer_price="49",
-            is_gainhelm=True,
-        )
-        == clean_pro_card
+    dora_pro_p1, _ = RetroReflectionEngine.retrofit_html(
+        stale_dora_with_pro, property_id="gainhelm", slug=dora_slug
     )
+    dora_pro_p2, dora_pro_rep2 = RetroReflectionEngine.retrofit_html(
+        dora_pro_p1, property_id="gainhelm", slug=dora_slug
+    )
+    assert dora_pro_p2 == dora_pro_p1
+    assert dora_pro_rep2 == []
+    dora_pro_soup = BeautifulSoup(dora_pro_p1, "html.parser")
+    assert dora_pro_soup.select(".pro-hook-card") == []
+    assert dora_pro_soup.select_one("#btn-preview-workpaper") is not None
+    dora_unlock = dora_pro_soup.select_one("#workpaper-unlock-card")
+    assert dora_unlock is not None
+    assert dora_unlock.get("data-offer-sku") == "gh_hipaa_iso27001_governance_kit"
+    assert dora_unlock.get("data-offer-price") == "29"
+    assert not has_gainhelm_cross_framework_leak(str(dora_unlock), dora_slug)
 
     clean_dora_base, _ = RetroReflectionEngine.retrofit_html(
         (LIVE_GAINHELM_REPO / "dist" / "tools" / dora_slug / "index.html").read_text(encoding="utf-8"),

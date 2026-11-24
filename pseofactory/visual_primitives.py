@@ -2794,11 +2794,8 @@ def _render_runtime_sync_events_js() -> str:
         }
       }
       if (bestAmt <= 0) {
-        var upgDrawer = document.getElementById("post-calculation-upgrade-drawer");
-        var qDrawer = document.getElementById("partner-quote-intake-step");
-        var dVal = upgDrawer ? parseFloat(upgDrawer.getAttribute("data-calculated-amount") || "0") : 0;
-        var qVal = qDrawer ? parseFloat(qDrawer.getAttribute("data-calculated-amount") || "0") : 0;
-        bestAmt = Math.max(dVal || 0, qVal || 0);
+        var unlockCardEl = document.getElementById("workpaper-unlock-card");
+        bestAmt = unlockCardEl ? (parseFloat(unlockCardEl.getAttribute("data-calculated-amount") || "0") || 0) : 0;
       }
       return Math.round(bestAmt);
     }
@@ -2865,50 +2862,22 @@ def _render_runtime_sync_events_js() -> str:
           lnk.setAttribute("data-traffic-source", trafficSource);
           lnk.setAttribute("data-tier", tier);
         }
-        var quoteDrawer = document.getElementById("partner-quote-intake-step");
-        if (quoteDrawer) {
-          var qThresh = parseFloat(quoteDrawer.getAttribute("data-quote-threshold") || "100000") || 100000;
-          var effVal = (!isNaN(numVal) && numVal > 0) ? numVal : (parseFloat(quoteDrawer.getAttribute("data-calculated-amount") || "0") || 0);
-          quoteDrawer.setAttribute("data-calculated-amount", String(Math.round(effVal)));
-          var qForm = document.getElementById("partner-quote-intake-form");
-          var qNote = document.getElementById("partner-quote-frictionless-note");
-          var bandSelect = document.getElementById("quote-intake-capital-band");
-          if (effVal >= qThresh) {
-            if (_userInteracted) {
-              quoteDrawer.setAttribute("data-threshold-active", "true");
-              quoteDrawer.setAttribute("data-frictionless-mode", "false");
-              if (qForm) qForm.style.display = "block";
-              if (qNote) qNote.style.display = "none";
-            }
-            if (bandSelect) {
-              if (effVal >= 500000) bandSelect.value = "500k_plus";
-              else if (effVal >= 250000) bandSelect.value = "250k_500k";
-              else if (effVal >= 100000) bandSelect.value = "100k_250k";
-              else bandSelect.value = "50k_100k";
-            }
-          } else if (_userInteracted) {
-            quoteDrawer.setAttribute("data-threshold-active", "false");
-            quoteDrawer.setAttribute("data-frictionless-mode", "true");
-            if (qForm) qForm.style.display = "none";
-            if (qNote) qNote.style.display = "block";
-          }
-        }
-        var upgradeDrawer = document.getElementById("workpaper-unlock-card") || document.getElementById("post-calculation-upgrade-drawer");
+        var upgradeDrawer = document.getElementById("workpaper-unlock-card");
         if (upgradeDrawer) {
           var uBaseAmt = (!isNaN(numVal) && numVal > 0) ? Math.round(numVal) : (parseInt(upgradeDrawer.getAttribute("data-calculated-amount") || "0", 10) || 0);
           if (uBaseAmt > 0) {
             upgradeDrawer.setAttribute("data-calculated-amount", String(uBaseAmt));
             var uSlug = upgradeDrawer.getAttribute("data-tool-slug") || slug;
-            var uQuickSku = upgradeDrawer.getAttribute("data-quick-sku") || upgradeDrawer.getAttribute("data-quick-unlock-sku") || "";
+            var uQuickSku = upgradeDrawer.getAttribute("data-quick-sku") || "";
             var uFullSku = upgradeDrawer.getAttribute("data-full-sku") || upgradeDrawer.getAttribute("data-offer-sku") || "";
-            var qChkBtn = document.getElementById("btn-workpaper-quick-checkout") || document.getElementById("btn-post-calc-quick-unlock-checkout");
+            var qChkBtn = document.getElementById("btn-workpaper-quick-checkout");
             if (qChkBtn) {
               var qBtnSku = qChkBtn.getAttribute("data-offer-sku") || uQuickSku;
               if (qBtnSku) {
                 qChkBtn.setAttribute("href", "/api/lead-capture?checkout=1&sku=" + encodeURIComponent(qBtnSku) + "&tool_slug=" + encodeURIComponent(uSlug) + "&amount=" + encodeURIComponent(String(uBaseAmt)) + "&redirect=1");
               }
             }
-            var fChkBtn = document.getElementById("btn-workpaper-full-checkout") || document.getElementById("btn-post-calc-upgrade-checkout");
+            var fChkBtn = document.getElementById("btn-workpaper-full-checkout");
             if (fChkBtn) {
               var fBtnSku = fChkBtn.getAttribute("data-offer-sku") || uFullSku;
               if (fBtnSku) {
@@ -3006,7 +2975,7 @@ def _render_runtime_sync_events_js() -> str:
       for (var i = 0; i < inps.length; i++) {
         var el = inps[i];
         if (el.type === "range" && findPairedNumberInput(el)) continue;
-        if (el.closest && el.closest("#partner-quote-intake-form, #lead-capture-form, #partner-registration-form")) continue;
+        if (el.closest && el.closest("#partner-registration-form")) continue;
         var key = el.id || el.name || "";
         if (key && !/^retro-range-/.test(key)) {
           state.inputs[key] = el.value;
@@ -3245,7 +3214,7 @@ def _render_runtime_sync_events_js() -> str:
           var statusLeadId = qs.get("lead_id") || "";
           var statusSku = qs.get("sku") || "";
           var statusSlug = resolveCurrentToolSlug();
-          var upgTarget = document.getElementById("workpaper-unlock-card") || document.getElementById("post-calculation-upgrade-drawer");
+          var upgTarget = document.getElementById("workpaper-unlock-card");
           var noticeHost = document.getElementById("workpaper-checkout-status") || upgTarget || document.querySelector("main");
           if (!noticeHost) return;
           if (upgTarget) {
@@ -3299,9 +3268,9 @@ def _render_runtime_sync_events_js() -> str:
         var sku = qs.get("sku") || "";
         var sessionId = qs.get("session_id") || "";
         var slug = resolveCurrentToolSlug();
-        var hostTarget = document.getElementById("workpaper-checkout-status") || document.getElementById("workpaper-unlock-card") || document.getElementById("post-calculation-upgrade-drawer") || document.querySelector("main");
+        var hostTarget = document.getElementById("workpaper-checkout-status") || document.getElementById("workpaper-unlock-card") || document.querySelector("main");
         if (!hostTarget) return;
-        var upgDrawer = document.getElementById("workpaper-unlock-card") || document.getElementById("post-calculation-upgrade-drawer");
+        var upgDrawer = document.getElementById("workpaper-unlock-card");
         if (!/^cs_live_[A-Za-z0-9_]+$/.test(sessionId)) {
           if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
           return;
@@ -3437,7 +3406,7 @@ def _render_runtime_sync_events_js() -> str:
     function syncInputsToLocationSearch(changedEl) {
       try {
         if (!window.history || typeof window.history.replaceState !== "function" || !window.location) return;
-        if (!changedEl || (changedEl.closest && changedEl.closest("#partner-registration-form, #lead-capture-form, #partner-quote-intake-form"))) return;
+        if (!changedEl || (changedEl.closest && changedEl.closest("#partner-registration-form"))) return;
         var rawName = changedEl.name || changedEl.id || "";
         if (!rawName || rawName === "company_website" || rawName === "email" || rawName === "firm_name" || rawName === "cf-turnstile-response") return;
         var paramKey = rawName;
@@ -3814,8 +3783,7 @@ def _render_runtime_sync_events_js() -> str:
     function resolveWorkpaperStatusNode(chkBtn) {
       return document.getElementById("workpaper-checkout-status")
         || (chkBtn && chkBtn.closest && chkBtn.closest("#workpaper-unlock-card, .workpaper-unlock-card") ? chkBtn.closest("#workpaper-unlock-card, .workpaper-unlock-card").querySelector(".workpaper-checkout-status") : null)
-        || document.querySelector(".workpaper-checkout-status")
-        || document.getElementById("lead-capture-status");
+        || document.querySelector(".workpaper-checkout-status");
     }
 
     function formatPreviewMetricLabel(rawKey) {
@@ -3946,7 +3914,7 @@ def _render_runtime_sync_events_js() -> str:
         disarmInlinePreviewOnclick();
         try {
           var pState = collectWorkbenchBlueprintState();
-          var pHost = document.getElementById("workpaper-preview-panel") || document.getElementById("post-calc-workpaper-preview-slot");
+          var pHost = document.getElementById("workpaper-preview-panel");
           if (pHost && pHost.getAttribute("data-preview-loaded") === "1" && !pHost.hasAttribute("hidden")) {
             pHost.setAttribute("hidden", "");
             pHost.style.display = "none";
@@ -3954,7 +3922,7 @@ def _render_runtime_sync_events_js() -> str:
             return;
           }
           prevTrigger.setAttribute("aria-expanded", "true");
-          var pCard = document.getElementById("workpaper-unlock-card") || document.getElementById("post-calculation-upgrade-drawer");
+          var pCard = document.getElementById("workpaper-unlock-card");
           var pAmt = pState.calculated_amount > 0 ? Math.round(pState.calculated_amount) : (pCard ? (parseInt(pCard.getAttribute("data-calculated-amount") || "100000", 10) || 100000) : 100000);
           var pbUrl = "/api/lead-capture?playbook=1&tool_slug=" + encodeURIComponent(pState.slug) + "&amount=" + encodeURIComponent(String(pAmt));
           if (pState.inputs && Object.keys(pState.inputs).length > 0) {
@@ -4075,7 +4043,7 @@ def _render_runtime_sync_events_js() -> str:
                 chkBtn.textContent = isLiveStripeRedirect
                   ? "Redirecting to Secure Stripe Checkout..."
                   : "Checkout Settled & Data Pack Ready (" + sessId + ")";
-                var parentStep = chkBtn.closest("#workpaper-unlock-card, .workpaper-unlock-card, #post-calculation-upgrade-drawer");
+                var parentStep = chkBtn.closest("#workpaper-unlock-card, .workpaper-unlock-card");
                 if (parentStep) {
                   parentStep.setAttribute("data-checkout-status", data.status || "checkout_session_ready");
                   parentStep.setAttribute("data-checkout-session-id", sessId);
@@ -4226,57 +4194,6 @@ def _render_runtime_sync_events_js() -> str:
             if (statusEl) {
               statusEl.textContent = "Blueprint Status: Exported audit-ready JSON decision blueprint (" + bpState.slug + "-decision-blueprint.json).";
             }
-          } else if (act === "preview_workpaper") {
-            var upgRoot = document.getElementById("post-calculation-upgrade-drawer");
-            var previewHost = document.getElementById("post-calc-workpaper-preview-slot") || upgRoot || bpRoot;
-            var uSku = upgRoot ? (upgRoot.getAttribute("data-offer-sku") || "") : "";
-            var uAmt = bpState.calculated_amount > 0 ? Math.round(bpState.calculated_amount) : (upgRoot ? (parseInt(upgRoot.getAttribute("data-calculated-amount") || "100000", 10) || 100000) : 100000);
-            var pbBase = "/api/lead-capture?playbook=1&tool_slug=" + encodeURIComponent(bpState.slug) + "&amount=" + encodeURIComponent(String(uAmt));
-            var ffBase = "/api/lead-capture?fulfill=1&sku=" + encodeURIComponent(uSku) + "&tool_slug=" + encodeURIComponent(bpState.slug) + "&amount=" + encodeURIComponent(String(uAmt));
-            if (bpState.inputs && Object.keys(bpState.inputs).length > 0) {
-              var inpEnc = encodeURIComponent(JSON.stringify(bpState.inputs).slice(0, 600));
-              pbBase += "&inputs_json=" + inpEnc;
-              ffBase += "&inputs_json=" + inpEnc;
-            }
-            if (previewHost) {
-              renderPlaybookAndFulfillmentDrawer(previewHost, {
-                playbook_url: pbBase,
-                playbook_csv_url: pbBase + "&format=csv",
-                playbook_datapack_url: pbBase + "&format=datapack",
-                fulfillment_url: ffBase,
-                csv_fulfillment_url: ffBase + "&format=csv",
-                datapack_url: ffBase + "&format=datapack",
-                reconciliation_schedule: []
-              }, "playbook");
-            }
-            if (typeof window.fetch === "function") {
-              var pbHeaders = { "Accept": "application/json" };
-              if (window.__PSEO_SYNTHETIC_TEST__) pbHeaders["X-Pseofactory-Test"] = "1";
-              window.fetch(pbBase, { method: "GET", headers: pbHeaders })
-                .then(function(r) { return r && r.ok ? r.json() : null; })
-                .then(function(pData) {
-                  if (pData && previewHost) {
-                    var resPbUrl = pData.playbook_url || pbBase;
-                    renderPlaybookAndFulfillmentDrawer(previewHost, {
-                      playbook_url: resPbUrl,
-                      playbook_csv_url: pData.playbook_csv_url || (resPbUrl + "&format=csv"),
-                      playbook_datapack_url: pData.playbook_datapack_url || (resPbUrl + "&format=datapack"),
-                      fulfillment_url: pData.fulfillment_url || ffBase,
-                      csv_fulfillment_url: pData.csv_fulfillment_url || (ffBase + "&format=csv"),
-                      datapack_url: pData.datapack_url || (ffBase + "&format=datapack"),
-                      reconciliation_schedule: Array.isArray(pData.reconciliation_schedule) ? pData.reconciliation_schedule : []
-                    }, "playbook");
-                  }
-                })
-                .catch(function() {});
-            }
-            if (statusEl) {
-              statusEl.textContent = "Blueprint Status: Personalized workpaper schedule and statutory data pack preview loaded.";
-            }
-          }
-          var upgHighlight = document.getElementById("post-calculation-upgrade-drawer");
-          if (upgHighlight) {
-            upgHighlight.setAttribute("data-upgrade-highlighted", "true");
           }
           syncOutboundAffiliateLinks();
           emitWorkbenchEngagementBeacon("blueprint_" + act, "calculator_result_inline", { blueprint_action: act, param_count: Object.keys(bpState.inputs).length });
@@ -4699,22 +4616,6 @@ def _render_runtime_sync_events_js() -> str:
             if (hiddenForm) {
               hiddenForm.style.display = "block";
             }
-            if (targetId === "partner-quote-intake-step" || hashLink.getAttribute("data-quote-jump") === "1") {
-              var qFormJump = document.getElementById("partner-quote-intake-form");
-              if (qFormJump && qFormJump.style.display === "none") {
-                qFormJump.style.display = "block";
-              }
-            }
-            if (targetId === "post-calculation-upgrade-drawer" || hashLink.getAttribute("data-checkout-nav") === "1") {
-              targetEl.setAttribute("data-upgrade-highlighted", "true");
-              var autoPrevBtn = document.getElementById("btn-preview-post-calc-workpaper");
-              var autoPrevSlot = document.getElementById("post-calc-workpaper-preview-slot");
-              if (autoPrevBtn && (!autoPrevSlot || !autoPrevSlot.children || autoPrevSlot.children.length === 0)) {
-                if (typeof autoPrevBtn.click === "function") {
-                  try { autoPrevBtn.click(); } catch (apErr) {}
-                }
-              }
-            }
             var focusEl = null;
             if (targetEl.querySelectorAll) {
               var focusCands = targetEl.querySelectorAll('[data-checkout-trigger], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href]');
@@ -4786,14 +4687,23 @@ def _render_runtime_sync_events_js() -> str:
       } catch (aaErr) {}
     }
 
-    function loadRuntimeTurnstileConfig() {
+    function isLocalStaticPreview() {
       var loc = window.location || null;
-      var isLocalStatic = Boolean(
-        loc && (loc.protocol === "http:" || loc.protocol === "file:")
-      );
+      return Boolean(loc && (loc.protocol === "http:" || loc.protocol === "file:"));
+    }
+
+    function loadRuntimeTurnstileConfig() {
+      var forceCfg = window.__PSEO_FORCE_TURNSTILE_CONFIG__;
+      if (forceCfg && typeof forceCfg === "object") {
+        return Promise.resolve({
+          turnstile_enabled: Boolean(forceCfg.turnstile_enabled && forceCfg.turnstile_site_key),
+          turnstile_site_key: String(forceCfg.turnstile_site_key || "")
+        });
+      }
+      var exerciseMount = Boolean(window.__PSEO_EXERCISE_TURNSTILE_MOUNT__);
       if (
-        window.__PSEO_SYNTHETIC_TEST__
-        || (isLocalStatic && !window.__PSEO_FORCE_TURNSTILE_CONFIG__)
+        (window.__PSEO_SYNTHETIC_TEST__ && !exerciseMount)
+        || (isLocalStaticPreview() && !forceCfg)
         || typeof window.fetch !== "function"
       ) {
         return Promise.resolve({ turnstile_enabled: false, turnstile_site_key: "" });
@@ -4805,12 +4715,21 @@ def _render_runtime_sync_events_js() -> str:
         })
           .then(function(r) { return r && r.ok ? r.json() : {}; })
           .then(function(cfg) {
+            var enabled = Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key);
+            var siteKey = String((cfg && cfg.turnstile_site_key) || "");
+            if (!enabled && exerciseMount && window.turnstile && typeof window.turnstile.render === "function") {
+              enabled = true;
+              siteKey = "1x00000000000000000000AA";
+            }
             return {
-              turnstile_enabled: Boolean(cfg && cfg.turnstile_enabled && cfg.turnstile_site_key),
-              turnstile_site_key: String((cfg && cfg.turnstile_site_key) || "")
+              turnstile_enabled: enabled,
+              turnstile_site_key: siteKey
             };
           })
           .catch(function() {
+            if (exerciseMount && window.turnstile && typeof window.turnstile.render === "function") {
+              return { turnstile_enabled: true, turnstile_site_key: "1x00000000000000000000AA" };
+            }
             return { turnstile_enabled: false, turnstile_site_key: "" };
           });
       }
@@ -4820,6 +4739,9 @@ def _render_runtime_sync_events_js() -> str:
     function ensureRuntimeTurnstileScript() {
       if (window.turnstile && typeof window.turnstile.render === "function") {
         return Promise.resolve(window.turnstile);
+      }
+      if (window.__PSEO_SYNTHETIC_TEST__) {
+        return Promise.resolve(null);
       }
       if (!window.__pseoTurnstileScriptPromise) {
         window.__pseoTurnstileScriptPromise = new Promise(function(resolve) {
@@ -4869,7 +4791,7 @@ def _render_runtime_sync_events_js() -> str:
     function mountRuntimeTurnstile(formEl) {
       if (!isPartnerFormEl(formEl)) return;
       ensureFormAntiAbuseFields(formEl);
-      if (window.__PSEO_SYNTHETIC_TEST__) return;
+      if (window.__PSEO_SYNTHETIC_TEST__ && !window.__PSEO_EXERCISE_TURNSTILE_MOUNT__) return;
       var slot = formEl.querySelector && formEl.querySelector(".cf-turnstile-slot");
       if (!slot || (document.body && typeof document.body.contains === "function" && !document.body.contains(slot))) return;
       var st = getRuntimeFormTsState(formEl);
@@ -4903,6 +4825,9 @@ def _render_runtime_sync_events_js() -> str:
           } catch (rErr) {
             st.mounted = false;
             if (typeof slot.removeAttribute === "function") slot.removeAttribute("data-turnstile-mounted");
+            if (window.__PSEO_EXERCISE_TURNSTILE_MOUNT__) {
+              window.__pseoTurnstileMountError = String((rErr && rErr.message) || rErr || "turnstile_render_error");
+            }
           }
           st.booting = false;
         });
@@ -4930,7 +4855,7 @@ def _render_runtime_sync_events_js() -> str:
     function waitForRuntimeTurnstileReady(formEl, statusEl, onReady) {
       ensureFormAntiAbuseFields(formEl);
       if (window.__PSEO_SYNTHETIC_TEST__) {
-        onReady("");
+        onReady(readRuntimeTurnstileToken(formEl));
         return;
       }
       loadRuntimeTurnstileConfig().then(function(cfg) {
@@ -4995,7 +4920,7 @@ def _render_runtime_sync_events_js() -> str:
     }
 
     function warmAllLeadFormsTurnstile() {
-      if (window.__PSEO_SYNTHETIC_TEST__ || typeof document.querySelectorAll !== "function") return;
+      if ((window.__PSEO_SYNTHETIC_TEST__ && !window.__PSEO_EXERCISE_TURNSTILE_MOUNT__) || typeof document.querySelectorAll !== "function") return;
       try {
         var forms = document.querySelectorAll("#partner-registration-form, .partner-registration-form");
         if (!forms || !forms.length) return;
@@ -5014,164 +4939,15 @@ def _render_runtime_sync_events_js() -> str:
       }
     }
 
+    window.__pseoWarmLeadFormsTurnstile = warmAllLeadFormsTurnstile;
+    window.__pseoMountRuntimeTurnstile = mountRuntimeTurnstile;
     document.addEventListener("focusin", handleLeadFormWarmup, true);
     document.addEventListener("mouseenter", handleLeadFormWarmup, true);
-    if (!window.__PSEO_SYNTHETIC_TEST__) {
+    if (!window.__PSEO_SYNTHETIC_TEST__ || window.__PSEO_EXERCISE_TURNSTILE_MOUNT__) {
       warmAllLeadFormsTurnstile();
     }
 
     document.addEventListener("submit", function(e) {
-      var pbForm = e.target && (e.target.id === "lead-capture-form" || (e.target.classList && e.target.classList.contains("lead-capture-form"))) ? e.target : null;
-      if (pbForm) {
-        e.preventDefault();
-        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-        try {
-          var pbEmailInp = pbForm.querySelector('input[type="email"]');
-          var pbBtn = pbForm.querySelector('button[type="submit"]');
-          var rawEmail = pbEmailInp ? String(pbEmailInp.value || "").trim() : "";
-          var statusBox = pbForm.querySelector(".lead-capture-status-readout, .footer-lead-status, #footer-lead-status") || document.getElementById("lead-capture-status");
-          if (!statusBox) {
-            statusBox = document.createElement("div");
-            statusBox.id = "lead-capture-status";
-            statusBox.className = "lead-capture-status-readout";
-            statusBox.setAttribute("role", "status");
-            statusBox.setAttribute("aria-live", "polite");
-            statusBox.style.cssText = "width:100%;margin-top:8px;font-size:13px;font-weight:600;";
-            pbForm.appendChild(statusBox);
-          }
-          if (!rawEmail || rawEmail.indexOf("@") === -1) {
-            statusBox.textContent = "Please enter a valid email address.";
-            statusBox.setAttribute("data-status", "validation_error");
-            if (pbEmailInp && typeof pbEmailInp.focus === "function") pbEmailInp.focus();
-            return;
-          }
-          waitForRuntimeTurnstileReady(pbForm, statusBox, function(pbToken) {
-            var pbAntiAbuse = readFormAntiAbuseFields(pbForm, pbToken);
-            var currentPath = (window.location && window.location.pathname) ? window.location.pathname : "/";
-            var ts = new Date().toISOString();
-            var bpSnapshot = collectWorkbenchBlueprintState();
-            var qStepNode = document.getElementById("partner-quote-intake-step");
-            var upgDrawerNode = document.getElementById("post-calculation-upgrade-drawer");
-            var pbPartnerEl = document.querySelector(".calc-inline-cta[data-partner], .affiliate-cta-section[data-partner], a[href^='/r/'][data-partner]");
-            var pbPartnerKey = (qStepNode && qStepNode.getAttribute("data-partner-key")) || (pbPartnerEl && pbPartnerEl.getAttribute("data-partner")) || "";
-            var pbOfferSku = pbForm.getAttribute("data-offer-sku") || (upgDrawerNode && upgDrawerNode.getAttribute("data-offer-sku")) || "";
-            var pbSlugInput = pbForm.querySelector('input[name="tool_slug"]');
-            var pbToolSlug = (pbSlugInput && pbSlugInput.value) ? String(pbSlugInput.value).trim() : resolveCurrentToolSlug();
-            var leadPayload = {
-              email: rawEmail,
-              source: currentPath,
-              tool_slug: pbToolSlug,
-              partner_key: pbPartnerKey,
-              offer_sku: pbOfferSku,
-              scenario_amount: bpSnapshot.calculated_amount || 0,
-              scenario_inputs: bpSnapshot.inputs || {},
-              scenario_outputs: bpSnapshot.outputs || {},
-              blueprint_state: bpSnapshot,
-              company_website: pbAntiAbuse.company_website,
-              form_rendered_at: pbAntiAbuse.form_rendered_at,
-              cf_turnstile_response: pbAntiAbuse.cf_turnstile_response,
-              timestamp: ts
-            };
-            window.__pseoActiveLeadEmail = rawEmail;
-            if (window.__PSEO_SYNTHETIC_TEST__) {
-              leadPayload.synthetic_test = true;
-            }
-            try {
-              if (window.localStorage) {
-                var storageKey = "pseo_captured_leads";
-                var existing = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
-                existing.push({ email: rawEmail, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0, timestamp: ts });
-                window.localStorage.setItem(storageKey, JSON.stringify(existing));
-                window.localStorage.setItem("pseo_blueprint_" + bpSnapshot.slug, JSON.stringify(bpSnapshot));
-              }
-            } catch (sErr) {}
-            var origPbBtnText = pbBtn ? pbBtn.textContent : "";
-            statusBox.textContent = "Preparing custom worksheet...";
-            statusBox.setAttribute("data-status", "submitting");
-            emitWorkbenchEngagementBeacon("playbook_subscription_submit", "lead_capture_form", { has_email: true, source: currentPath, scenario_amount: bpSnapshot.calculated_amount || 0 });
-            if (typeof window.fetch === "function") {
-              var pbHeaders = { "Content-Type": "application/json" };
-              if (window.__PSEO_SYNTHETIC_TEST__) {
-                pbHeaders["X-Pseofactory-Test"] = "1";
-              }
-              window.fetch("/api/lead-capture", {
-                method: "POST",
-                headers: pbHeaders,
-                body: JSON.stringify(leadPayload)
-              }).then(function(res) {
-                return res.json().catch(function() { return {}; }).then(function(data) {
-                  return { ok: Boolean(res && res.ok), status: res ? res.status : 0, data: data || {} };
-                });
-              }).then(function(out) {
-                var data = out.data;
-                if (out.ok && data && data.ok) {
-                  if (pbBtn) {
-                    pbBtn.textContent = "Playbook Confirmed";
-                    pbBtn.style.backgroundColor = "var(--status-positive)";
-                  }
-                  if (pbEmailInp) {
-                    pbEmailInp.value = "";
-                    pbEmailInp.placeholder = "Worksheet unlocked below";
-                  }
-                  pbForm.setAttribute("data-lead-captured", "true");
-                  window.__pseoActiveLeadId = data.lead_id || "verified";
-                  var upgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
-                  if (upgChkBtn) {
-                    upgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
-                    upgChkBtn.setAttribute("data-lead-email", rawEmail);
-                  }
-                  var qkChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
-                  if (qkChkBtn1) {
-                    qkChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
-                    qkChkBtn1.setAttribute("data-lead-email", rawEmail);
-                  }
-                  var qkChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
-                  if (qkChkBtn2) {
-                    qkChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
-                    qkChkBtn2.setAttribute("data-lead-email", rawEmail);
-                  }
-                  pbForm.setAttribute("data-submission-state", "success");
-                  pbForm.setAttribute("data-lead-id", data.lead_id || "verified");
-                  if (data.checkout_url) pbForm.setAttribute("data-checkout-url", data.checkout_url);
-                  if (data.playbook_url) pbForm.setAttribute("data-playbook-url", data.playbook_url);
-                  if (data.fulfillment_url) pbForm.setAttribute("data-fulfillment-url", data.fulfillment_url);
-                  if (data.redirect_url) pbForm.setAttribute("data-redirect-url", data.redirect_url);
-                  statusBox.setAttribute("data-status", data.status || "playbook_subscribed");
-                  statusBox.setAttribute("data-lead-id", data.lead_id || "verified");
-                  statusBox.textContent = "Playbook ready (" + (data.lead_id || "verified") + "). ";
-                  if (data.checkout_url) {
-                    var domTierPrice = pbForm.getAttribute("data-offer-price") || "";
-                    var resolvedOfferUsd = data.offer_price_usd !== undefined ? String(data.offer_price_usd) : domTierPrice;
-                    var priceTag = resolvedOfferUsd ? (" ($" + resolvedOfferUsd + ")") : "";
-                    appendActionLink(statusBox, "playbook-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + priceTag, true);
-                    var pbChkNode = document.getElementById("playbook-checkout-link");
-                    if (pbChkNode && typeof pbChkNode.focus === "function") {
-                      try { pbChkNode.focus({ preventScroll: true }); } catch (fE) { pbChkNode.focus(); }
-                    }
-                  }
-                  if (data.redirect_url) {
-                    appendActionLink(statusBox, "playbook-partner-link", data.redirect_url, "Matched Partner Desk", false);
-                  }
-                  renderPlaybookAndFulfillmentDrawer(statusBox, data, "playbook");
-                } else {
-                  if (pbBtn && origPbBtnText) pbBtn.textContent = origPbBtnText;
-                  pbForm.setAttribute("data-submission-state", "error");
-                  statusBox.setAttribute("data-status", "error");
-                  statusBox.textContent = formatRuntimeLeadError(data, out.status);
-                }
-                resetRuntimeTurnstile(pbForm);
-              }).catch(function() {
-                if (pbBtn && origPbBtnText) pbBtn.textContent = origPbBtnText;
-                pbForm.setAttribute("data-submission-state", "error");
-                statusBox.setAttribute("data-status", "error");
-                statusBox.textContent = "Network error while submitting. Please try again.";
-              });
-            }
-          });
-        } catch (pbErr) {}
-        return;
-      }
-
       var prForm = e.target && (e.target.id === "partner-registration-form" || (e.target.classList && e.target.classList.contains("partner-registration-form"))) ? e.target : null;
       if (prForm) {
         e.preventDefault();
@@ -5276,153 +5052,17 @@ def _render_runtime_sync_events_js() -> str:
         return;
       }
 
-      var qForm = e.target && e.target.id === "partner-quote-intake-form" ? e.target : null;
-      if (!qForm) {
-        var calcForm = e.target && e.target.tagName === "FORM" ? e.target : null;
-        if (calcForm) {
-          e.preventDefault();
-          _userInteracted = true;
-          initBaseValues();
-          calcForm.setAttribute("data-recalculated", "true");
-          var subBtn = calcForm.querySelector("#calc-submit-btn, button[type='submit']");
-          if (subBtn) subBtn.setAttribute("data-recalculated", "true");
-          updateOutputsSynchronously();
-          emitWorkbenchEngagementBeacon("calculator_recalculate_submit", "calculator_result_inline", { form_id: calcForm.id || "calculator-form" });
-        }
-        return;
+      var calcForm = e.target && e.target.tagName === "FORM" ? e.target : null;
+      if (calcForm) {
+        e.preventDefault();
+        _userInteracted = true;
+        initBaseValues();
+        calcForm.setAttribute("data-recalculated", "true");
+        var subBtn = calcForm.querySelector("#calc-submit-btn, button[type='submit']");
+        if (subBtn) subBtn.setAttribute("data-recalculated", "true");
+        updateOutputsSynchronously();
+        emitWorkbenchEngagementBeacon("calculator_recalculate_submit", "calculator_result_inline", { form_id: calcForm.id || "calculator-form" });
       }
-      e.preventDefault();
-      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-      try {
-        var drawer = document.getElementById("partner-quote-intake-step");
-        var statusNode = document.getElementById("partner-quote-intake-status");
-        var emailInp = document.getElementById("quote-intake-email") || qForm.querySelector('input[type="email"]');
-        var stateInp = document.getElementById("quote-intake-state") || document.getElementById("quote-intake-hero-state") || qForm.querySelector('select[name="state"]');
-        var bandInp = document.getElementById("quote-intake-capital-band") || qForm.querySelector('select[name="capital_band"]');
-        var consentInp = document.getElementById("quote-intake-consent") || qForm.querySelector('input[type="checkbox"]');
-        var emailVal = emailInp ? String(emailInp.value || "").trim() : "";
-        var stateVal = stateInp ? String(stateInp.value || "CA").trim() : "CA";
-        var bandVal = bandInp ? String(bandInp.value || "100k_250k").trim() : "100k_250k";
-        var hasConsent = Boolean(consentInp && consentInp.checked);
-        if (!emailVal || emailVal.indexOf("@") === -1) {
-          if (qForm && qForm.style && qForm.style.display === "none") qForm.style.display = "block";
-          if (drawer && drawer.style && drawer.style.display === "none") drawer.style.display = "block";
-          if (statusNode) statusNode.textContent = "Please enter a valid email address to receive your matched quote.";
-          if (emailInp && typeof emailInp.focus === "function") emailInp.focus();
-          return;
-        }
-        if (!hasConsent) {
-          if (qForm && qForm.style && qForm.style.display === "none") qForm.style.display = "block";
-          if (drawer && drawer.style && drawer.style.display === "none") drawer.style.display = "block";
-          if (statusNode) statusNode.textContent = "Please check the TCPA partner sharing consent box to proceed.";
-          if (consentInp && typeof consentInp.focus === "function") consentInp.focus();
-          return;
-        }
-        waitForRuntimeTurnstileReady(qForm, statusNode, function(qToken) {
-          var qAntiAbuse = readFormAntiAbuseFields(qForm, qToken);
-          var qThreshAmt = drawer ? (parseFloat(drawer.getAttribute("data-quote-threshold") || "50000") || 50000) : 50000;
-          var rawDrawerAmt = drawer ? (parseFloat(drawer.getAttribute("data-calculated-amount") || "100000") || 100000) : 100000;
-          var calcAmt = Math.max(rawDrawerAmt, qThreshAmt);
-          var toolSlug = drawer ? (drawer.getAttribute("data-tool-slug") || resolveCurrentToolSlug()) : resolveCurrentToolSlug();
-          var partnerKey = drawer ? (drawer.getAttribute("data-partner-key") || "") : "";
-          var vertical = drawer ? (drawer.getAttribute("data-vertical") || "") : "";
-          var qBpSnapshot = collectWorkbenchBlueprintState();
-          var reqPayload = {
-            email: emailVal,
-            state: stateVal,
-            capital_band: bandVal,
-            calculated_amount: calcAmt,
-            partner_sharing_consent: true,
-            tool_slug: toolSlug,
-            partner_key: partnerKey,
-            vertical: vertical,
-            scenario_inputs: qBpSnapshot.inputs || {},
-            scenario_outputs: qBpSnapshot.outputs || {},
-            blueprint_state: qBpSnapshot,
-            company_website: qAntiAbuse.company_website,
-            form_rendered_at: qAntiAbuse.form_rendered_at,
-            cf_turnstile_response: qAntiAbuse.cf_turnstile_response,
-            traffic_source: resolveTrafficSourceAttribution()
-          };
-          if (window.__PSEO_SYNTHETIC_TEST__) {
-            reqPayload.synthetic_test = true;
-          }
-          if (statusNode) statusNode.textContent = "Routing consented quote parameters to matched partner desk...";
-          emitWorkbenchEngagementBeacon("partner_quote_intake_submit", "partner_quote_intake_cta", {
-            state: stateVal,
-            capital_band: bandVal,
-            calculated_amount: calcAmt
-          });
-          if (typeof window.fetch === "function") {
-            var qHeaders = { "Content-Type": "application/json" };
-            if (window.__PSEO_SYNTHETIC_TEST__) {
-              qHeaders["X-Pseofactory-Test"] = "1";
-            }
-            window.fetch("/api/lead-capture", {
-              method: "POST",
-              headers: qHeaders,
-              body: JSON.stringify(reqPayload)
-            }).then(function(res) {
-              return res.json().catch(function() { return {}; }).then(function(data) {
-                return { ok: Boolean(res && res.ok), status: res ? res.status : 0, data: data || {} };
-              });
-            }).then(function(out) {
-              var data = out.data;
-              if (out.ok && data && data.ok && (data.redirect_url || data.playbook_url)) {
-                if (drawer) drawer.setAttribute("data-lead-captured", "true");
-                window.__pseoActiveLeadId = data.lead_id || "verified";
-                window.__pseoActiveLeadEmail = emailVal;
-                var qUpgChkBtn = document.getElementById("btn-post-calc-upgrade-checkout");
-                if (qUpgChkBtn) {
-                  qUpgChkBtn.setAttribute("data-lead-id", data.lead_id || "verified");
-                  qUpgChkBtn.setAttribute("data-lead-email", emailVal);
-                }
-                var qQuickChkBtn1 = document.getElementById("btn-post-calc-quick-unlock-checkout");
-                if (qQuickChkBtn1) {
-                  qQuickChkBtn1.setAttribute("data-lead-id", data.lead_id || "verified");
-                  qQuickChkBtn1.setAttribute("data-lead-email", emailVal);
-                }
-                var qQuickChkBtn2 = document.getElementById("btn-calc-result-quick-unlock");
-                if (qQuickChkBtn2) {
-                  qQuickChkBtn2.setAttribute("data-lead-id", data.lead_id || "verified");
-                  qQuickChkBtn2.setAttribute("data-lead-email", emailVal);
-                }
-                qForm.setAttribute("data-submission-state", "success");
-                if (drawer) {
-                  if (data.lead_id) drawer.setAttribute("data-lead-id", data.lead_id);
-                  if (data.redirect_url) drawer.setAttribute("data-redirect-url", data.redirect_url);
-                  if (data.checkout_url) drawer.setAttribute("data-checkout-url", data.checkout_url);
-                  if (data.playbook_url) drawer.setAttribute("data-playbook-url", data.playbook_url);
-                  if (data.fulfillment_url) drawer.setAttribute("data-fulfillment-url", data.fulfillment_url);
-                  if (data.zeptomail_status) drawer.setAttribute("data-fulfillment-status", data.zeptomail_status);
-                }
-                if (statusNode) {
-                  statusNode.textContent = "Quote matched (" + (data.lead_id || "verified") + "). ";
-                  if (data.redirect_url) {
-                    appendActionLink(statusNode, "quote-matched-partner-link", data.redirect_url, "Continue to Matched Partner Desk", false);
-                  }
-                  if (data.checkout_url) {
-                    var qDefTierPrice = (window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 39 : 49;
-                    appendActionLink(statusNode, "quote-matched-checkout-link", data.checkout_url, "Unlock " + (data.offer_title || "Compliance Toolkit") + " ($" + String(data.offer_price_usd || qDefTierPrice) + ")", true);
-                  }
-                  var qFocusNode = document.getElementById("quote-matched-checkout-link") || document.getElementById("quote-matched-partner-link");
-                  if (qFocusNode && typeof qFocusNode.focus === "function") {
-                    try { qFocusNode.focus({ preventScroll: true }); } catch (fE) { qFocusNode.focus(); }
-                  }
-                  renderPlaybookAndFulfillmentDrawer(statusNode, data, "playbook");
-                }
-              } else {
-                qForm.setAttribute("data-submission-state", "error");
-                if (statusNode) statusNode.textContent = formatRuntimeLeadError(data, out.status);
-              }
-              resetRuntimeTurnstile(qForm);
-            }).catch(function() {
-              qForm.setAttribute("data-submission-state", "error");
-              if (statusNode) statusNode.textContent = "Network error while submitting. Please try again.";
-            });
-          }
-        });
-      } catch (err) {}
     }, true);
 
     if (typeof window.copyScenarioLink !== "function") {
@@ -7023,6 +6663,101 @@ def _strip_legacy_funnel_elements(
     return updated, actions
 
 
+def _resolve_html_property_id(updated: str, canon_url: str = "") -> str:
+    """
+    Dynamically resolves the tenant property_id from data-property / data-property-id,
+    discover_active_tenants(), tenant_facts declarations, or canonical domain matching.
+    Never silently misclassifies an unknown/5th+ tenant as profithelm.
+    """
+    import json as _vp_json
+    from urllib.parse import urlsplit
+
+    prop_m = re.search(
+        r'data-property(?:-id)?=["\']([a-z0-9_-]+)["\']',
+        updated,
+        re.IGNORECASE,
+    )
+    if prop_m:
+        raw_pid = prop_m.group(1).strip().lower()
+        if raw_pid in ("profithelm-platform", "factory", "exchange1031"):
+            return "profithelm"
+        return raw_pid
+
+    canon_host = ""
+    if canon_url:
+        try:
+            canon_host = (urlsplit(canon_url).hostname or "").strip().lower()
+            if canon_host.startswith("www."):
+                canon_host = canon_host[4:]
+        except Exception:
+            canon_host = ""
+
+    domain_to_pid: Dict[str, str] = {}
+    try:
+        from pseofactory.impact_planner import discover_active_tenants
+
+        for t_pid, repo_dir in discover_active_tenants():
+            clean_pid = str(t_pid or "").strip().lower()
+            if not clean_pid:
+                continue
+            marker = Path(repo_dir) / ".pseofactory.json"
+            if marker.is_file():
+                try:
+                    m_data = _vp_json.loads(marker.read_text(encoding="utf-8"))
+                    if isinstance(m_data, dict):
+                        m_pid = str(m_data.get("property_id") or clean_pid).strip().lower()
+                        if m_pid in ("profithelm-platform", "factory", "exchange1031"):
+                            m_pid = "profithelm"
+                        for dom_key in ("domain", "canonical_domain", "canonical_base"):
+                            raw_dom = str(m_data.get(dom_key) or "").strip().lower()
+                            if "://" in raw_dom:
+                                raw_dom = urlsplit(raw_dom).hostname or ""
+                            raw_dom = raw_dom.strip("/")
+                            if raw_dom.startswith("www."):
+                                raw_dom = raw_dom[4:]
+                            if raw_dom:
+                                domain_to_pid[raw_dom] = m_pid
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        from pseofactory.tenant_facts import (
+            CANONICAL_TENANT_DECLARATIONS,
+            SPAWNED_TENANT_DECLARATIONS,
+        )
+
+        for t_pid, contract in {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}.items():
+            raw_dom = str(getattr(contract, "domain", "") or "").strip().lower()
+            if raw_dom.startswith("www."):
+                raw_dom = raw_dom[4:]
+            if raw_dom and raw_dom not in domain_to_pid:
+                domain_to_pid[raw_dom] = str(t_pid).strip().lower()
+    except Exception:
+        pass
+
+    if canon_host:
+        if canon_host in domain_to_pid:
+            return domain_to_pid[canon_host]
+        for known_dom, known_pid in domain_to_pid.items():
+            if canon_host.endswith(f".{known_dom}"):
+                return known_pid
+        # Derive a clean tenant slug from an unrecognized 5th+ domain rather than misclassifying as profithelm.
+        host_label = canon_host.split(".")[0].strip().lower()
+        clean_label = re.sub(r"[^a-z0-9_-]+", "_", host_label).strip("_-")
+        if clean_label:
+            return clean_label
+
+    updated_lower = updated.lower()
+    canon_lower = canon_url.lower()
+    for known_dom, known_pid in sorted(domain_to_pid.items(), key=lambda kv: (kv[1] == "profithelm", -len(kv[0]))):
+        if known_dom in canon_lower or known_dom in updated_lower:
+            return known_pid
+
+    return "profithelm"
+
+
 def _sync_three_step_funnel_on_calculator_pages(updated: str) -> Tuple[str, List[str]]:
     """
     1. Strips any stale <section ... data-first-party-checkout="true"> lacking id="workpaper-unlock-card".
@@ -7101,17 +6836,7 @@ def _sync_three_step_funnel_on_calculator_pages(updated: str) -> Tuple[str, List
     if not has_calc_workspace:
         return updated, actions
 
-    prop_m = re.search(r'data-property(?:-id)?=["\'](profithelm|prexvo|gainhelm|lienbond)["\']', updated, re.IGNORECASE)
-    if prop_m:
-        prop_id = prop_m.group(1).lower()
-    elif "prexvo.com" in canon_url or "prexvo.com" in updated:
-        prop_id = "prexvo"
-    elif "gainhelm.com" in canon_url or "gainhelm.com" in updated:
-        prop_id = "gainhelm"
-    elif "lienbond.com" in canon_url or "lienbond.com" in updated:
-        prop_id = "lienbond"
-    else:
-        prop_id = "profithelm"
+    prop_id = _resolve_html_property_id(updated, canon_url=canon_url)
 
     import html as _vp_html
 
@@ -7263,428 +6988,6 @@ def _sync_three_step_funnel_on_calculator_pages(updated: str) -> Tuple[str, List
     return updated, actions
 
 
-def _inject_post_calc_workpaper_upgrade_drawer(updated: str) -> Tuple[str, bool]:
-    """
-    Legacy #post-calculation-upgrade-drawer injection has been retired in favor of the
-    clean 3-step template funnel (#workpaper-unlock-card). Strips any stale drawer present.
-    """
-    cleaned, changed = _remove_balanced_tag_blocks(
-        updated,
-        "post-calculation-upgrade-drawer",
-        tag_names=("div", "section"),
-        attr_name="id",
-    )
-    return cleaned, changed
-
-
-def _pro_hook_has_mismatched_price(html_fragment: str, exp_price: str) -> bool:
-    """Checks whether an HTML fragment cites a package or Locked price differing from exp_price."""
-    target = str(exp_price)
-    for pm in re.findall(r"\(\$(\d+)\)", html_fragment):
-        if pm not in ("0", target):
-            return True
-    for lm in re.findall(r"Locked:\s*\$(\d+)(?![,\d])", html_fragment, flags=re.IGNORECASE):
-        if lm != target:
-            return True
-    return False
-
-
-def _gainhelm_pro_card_has_stale_tax_copy(frag: str) -> bool:
-    """Detects legacy DE/tax-worded .pro-hook-card copy while preserving synthetic clean DORA baselines."""
-    if not frag:
-        return False
-    if any(
-        tok in frag
-        for tok in (
-            "Statutory Bracket",
-            "Effective vs. Marginal",
-            "Statutory Reconciliation Schedule",
-            "Statutory Control & Scope Schedule",
-            "Statutory Control &amp; Scope Schedule",
-            "Instant DE Partner Quote",
-            "Export Personalized DE Schedule",
-            "ProfitHelm Pro",
-        )
-    ):
-        return True
-    if "DE Baseline" in frag and "DORA ICT Control Matrix" not in frag and "DORA Zero-Baseline" not in frag:
-        return True
-    return False
-
-
-def _gainhelm_pro_card_has_mismatch(
-    pro_html: str,
-    tool_slug: str,
-    exp_sku: str,
-    exp_price: str,
-) -> bool:
-    """Detects cross-framework leaks or stale SKU/price attributes inside a single .pro-hook-card block."""
-    from pseofactory.affiliates import has_gainhelm_cross_framework_leak
-
-    if has_gainhelm_cross_framework_leak(pro_html, tool_slug) or _gainhelm_pro_card_has_stale_tax_copy(pro_html):
-        return True
-    for dc_m in re.finditer(
-        r'<a\b[^>]*\bclass=["\'][^"\']*\bpro-hook-direct-checkout\b[^"\']*["\'][^>]*>',
-        pro_html,
-        flags=re.IGNORECASE,
-    ):
-        dc_tag = dc_m.group(0)
-        dc_sku = (_extract_attr(dc_tag, "data-offer-sku") or "").strip().lower()
-        dc_price = (_extract_attr(dc_tag, "data-offer-price") or "").strip()
-        dc_href = _extract_attr(dc_tag, "href") or ""
-        if (
-            (dc_sku and dc_sku != exp_sku)
-            or (dc_price and dc_price != exp_price)
-            or (f"sku={exp_sku}" not in dc_href.lower() and "sku=" in dc_href.lower())
-        ):
-            return True
-    return _pro_hook_has_mismatched_price(pro_html, exp_price)
-
-
-_GAINHELM_PRO_SHORT_LABELS: Dict[str, str] = {
-    "soc2": "SOC 2",
-    "cmmc": "CMMC 2.0",
-    "iso_27001": "ISO 27001",
-    "hipaa": "HIPAA",
-    "pci_dss": "PCI DSS 4.0",
-    "fedramp": "FedRAMP",
-    "hitrust": "HITRUST CSF",
-    "pentest": "Pentest",
-    "cyber_insurance": "Cyber Insurance",
-    "dora": "DORA ICT",
-    "eu_ai_act": "EU AI Act",
-    "nis2": "NIS2",
-    "gdpr": "GDPR",
-    "ccpa": "CCPA/CPRA",
-    "sec_8k": "SEC 8-K",
-}
-
-
-def _resolve_gainhelm_pro_short_label(tool_slug: str) -> str:
-    """Returns a framework-pure short label for GainHelm .pro-hook-card copy."""
-    s_low = str(tool_slug or "").strip().lower()
-    if s_low in ("", "index"):
-        return "Compliance"
-    if "800-171" in s_low or "sprs" in s_low:
-        return "NIST 800-171"
-    from pseofactory.affiliates import classify_gainhelm_framework
-
-    fw_key = classify_gainhelm_framework(slug=s_low)
-    return _GAINHELM_PRO_SHORT_LABELS.get(fw_key, "Compliance")
-
-
-def _build_pro_hook_card_copy(
-    *,
-    tool_slug: str,
-    default_state: str,
-    calc_amt_fmt: str,
-    offer_price: str,
-    is_gainhelm: bool,
-    is_injected: bool = False,
-) -> Dict[str, str]:
-    """Builds tenant-appropriate .pro-hook-card labels and sample-preview lines."""
-    if is_gainhelm:
-        fw_short = _resolve_gainhelm_pro_short_label(tool_slug)
-        return {
-            "prefix": f"{fw_short} Audit Workpaper:",
-            "outer_span": (
-                f'<span><strong style="color: var(--brand-primary);">{fw_short} Audit Workpaper:</strong> '
-                f"Export Personalized Compliance Schedule &amp; Data Pack (PDF/CSV)</span>"
-            ),
-            "quote_jump_label": "Instant Partner Readiness Quote ($0) &rarr;",
-            "sample_preview": (
-                f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {fw_short} Baseline):</strong> '
-                f"Line 1 Control &amp; Assessor Cost Schedule (Unlocked) | "
-                f"Line 2 Maturity &amp; Penalty Sensitivity Matrix (Unlocked) | "
-                f"Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>"
-            ),
-        }
-    line1_label = (
-        "Statutory Reconciliation Schedule"
-        if is_injected
-        else "Statutory Bracket &amp; Deduction Schedule"
-    )
-    line2_label = "Sensitivity Matrix" if is_injected else "Effective vs. Marginal Sensitivity Matrix"
-    return {
-        "prefix": "Statutory Audit Workpaper:",
-        "outer_span": (
-            f'<span><strong style="color: var(--brand-primary);">Statutory Audit Workpaper:</strong> '
-            f"Export Personalized {default_state} Schedule &amp; Data Pack (PDF/CSV)</span>"
-        ),
-        "quote_jump_label": f"Instant {default_state} Partner Quote ($0) &rarr;",
-        "sample_preview": (
-            f'<div><strong>Unlocked Sample Preview ({calc_amt_fmt} {default_state} Baseline):</strong> '
-            f"Line 1 {line1_label} (Unlocked) | "
-            f"Line 2 {line2_label} (Unlocked) | "
-            f"Line 3 Signed Audit Workpaper &amp; 2024-2030 CSV/JSON Data Pack (Locked: ${offer_price})</div>"
-        ),
-    }
-
-
-def _clean_pro_hook_outer_spans(
-    pro_card_html: str,
-    *,
-    tool_slug: str,
-    default_state: str,
-    offer_price: str,
-    is_gainhelm: bool,
-) -> str:
-    """Rewrites leaky or mismatched outer <span> labels inside .pro-hook-card to clean statutory copy."""
-    if not is_gainhelm:
-        return pro_card_html
-    from pseofactory.affiliates import has_gainhelm_cross_framework_leak
-
-    sample_span = _find_balanced_div_span(pro_card_html, "pro-hook-sample-unlock", attr_name="class")
-    canonical_span = _build_pro_hook_card_copy(
-        tool_slug=tool_slug,
-        default_state=default_state,
-        calc_amt_fmt="$0",
-        offer_price=str(offer_price),
-        is_gainhelm=True,
-    )["outer_span"]
-
-    def _sub_span(m: re.Match) -> str:
-        if sample_span and m.start() >= sample_span[0] and m.end() <= sample_span[1]:
-            return m.group(0)
-        span_full = m.group(0)
-        has_leak = has_gainhelm_cross_framework_leak(span_full, tool_slug)
-        wrong_price = _pro_hook_has_mismatched_price(span_full, str(offer_price))
-        has_tax_leak = _gainhelm_pro_card_has_stale_tax_copy(span_full)
-        if has_leak or wrong_price or has_tax_leak:
-            return canonical_span
-        return span_full
-
-    return re.sub(r"<span\b[^>]*>[\s\S]*?</span>", _sub_span, pro_card_html, flags=re.IGNORECASE)
-
-
-def _split_top_level_html_nodes(inner_html: str) -> List[str]:
-    """Splits direct HTML element blocks and text runs inside a container using balanced tag depth."""
-    nodes: List[str] = []
-    pos = 0
-    n = len(inner_html)
-    void_tags = {"br", "hr", "img", "input", "meta", "link"}
-    while pos < n:
-        if inner_html[pos] != "<":
-            nxt = inner_html.find("<", pos)
-            end = n if nxt < 0 else nxt
-            chunk = inner_html[pos:end]
-            if chunk.strip():
-                nodes.append(chunk)
-            pos = end
-            continue
-        open_m = re.match(r"<([a-zA-Z0-9]+)\b[^>]*>", inner_html[pos:])
-        if not open_m:
-            end_gt = inner_html.find(">", pos)
-            pos = (end_gt + 1) if end_gt >= 0 else n
-            continue
-        tag = open_m.group(1).lower()
-        if open_m.group(0).rstrip().endswith("/>") or tag in void_tags:
-            nodes.append(open_m.group(0))
-            pos += open_m.end()
-            continue
-        depth = 0
-        matched_end = n
-        for tok_m in re.finditer(rf"</?{re.escape(tag)}\b[^>]*>", inner_html[pos:], flags=re.IGNORECASE):
-            tok_s = tok_m.group(0).lower()
-            if tok_s.startswith(f"</{tag}"):
-                depth -= 1
-                if depth == 0:
-                    matched_end = pos + tok_m.end()
-                    break
-            elif not tok_s.endswith("/>"):
-                depth += 1
-        nodes.append(inner_html[pos:matched_end])
-        pos = matched_end
-    return nodes
-
-
-def _heal_pro_hook_sample_unlock(
-    pro_card_html: str,
-    *,
-    tool_slug: str,
-    default_state: str,
-    calc_amt_fmt: str,
-    offer_price: str,
-    offer_sku: str,
-    is_gainhelm: bool,
-) -> str:
-    """Repairs .pro-hook-sample-unlock preview, pricing, and checkout attrs using balanced tag spans."""
-    sample_span = _find_balanced_div_span(pro_card_html, "pro-hook-sample-unlock", attr_name="class")
-    if sample_span:
-        block = pro_card_html[sample_span[0]:sample_span[1]]
-        block = block.replace("(Locked - $", "(Locked: $")
-        open_m = re.match(r"<div\b[^>]*>", block, flags=re.IGNORECASE)
-        close_idx = block.rfind("</div>")
-        if open_m and close_idx > open_m.end():
-            open_tag = open_m.group(0)
-            inner = block[open_m.end():close_idx]
-            if is_gainhelm:
-                from pseofactory.affiliates import has_gainhelm_cross_framework_leak
-
-                has_stale_tax = _gainhelm_pro_card_has_stale_tax_copy(block)
-                if has_gainhelm_cross_framework_leak(block, tool_slug) or has_stale_tax:
-                    clean_preview_div = _build_pro_hook_card_copy(
-                        tool_slug=tool_slug,
-                        default_state=default_state,
-                        calc_amt_fmt=calc_amt_fmt,
-                        offer_price=offer_price,
-                        is_gainhelm=True,
-                    )["sample_preview"]
-                    top_nodes = _split_top_level_html_nodes(inner)
-                    action_nodes = [
-                        nd for nd in top_nodes
-                        if "pro-hook-direct-checkout" in nd or "pro-hook-quote-jump" in nd
-                    ]
-                    cleaned_actions: List[str] = []
-                    for act in action_nodes:
-                        if has_gainhelm_cross_framework_leak(act, tool_slug):
-                            anchors = re.findall(
-                                r'<a\b[^>]*class=["\'][^"\']*(?:pro-hook-direct-checkout|pro-hook-quote-jump)[^"\']*["\'][^>]*>[\s\S]*?</a>',
-                                act,
-                                flags=re.IGNORECASE,
-                            )
-                            if anchors:
-                                cleaned_actions.append(
-                                    '<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">'
-                                    + " ".join(anchors)
-                                    + "</div>"
-                                )
-                                continue
-                        cleaned_actions.append(act)
-                    inner = clean_preview_div + "".join(cleaned_actions)
-                inner = re.sub(
-                    r"Instant\s+(?:DE|US)\s+Partner Quote\s*\(\$0\)",
-                    "Instant Partner Readiness Quote ($0)",
-                    inner,
-                    flags=re.IGNORECASE,
-                )
-            inner = re.sub(
-                r"(Locked:\s*\$)\d+",
-                rf"\g<1>{offer_price}",
-                inner,
-                flags=re.IGNORECASE,
-            )
-            block = f"{open_tag}{inner}</div>"
-        pro_card_html = pro_card_html[:sample_span[0]] + block + pro_card_html[sample_span[1]:]
-    if is_gainhelm:
-        pro_card_html = re.sub(
-            r"Instant\s+(?:DE|US)\s+Partner Quote\s*\(\$0\)",
-            "Instant Partner Readiness Quote ($0)",
-            pro_card_html,
-            flags=re.IGNORECASE,
-        )
-    return _rewrite_anchor_attrs_by_class(
-        pro_card_html,
-        "pro-hook-direct-checkout",
-        sku_replace=offer_sku,
-        attr_updates={
-            "data-offer-sku": str(offer_sku),
-            "data-offer-price": str(offer_price),
-        },
-        inner_html=f"Instant Checkout &amp; Download (${offer_price}) &rarr;",
-    )
-
-
-def _retrofit_pro_hook_and_lead_capture_cards(
-    updated: str,
-    *,
-    tool_slug: str,
-    default_state: str,
-    has_quote_intake: bool,
-    is_restricted_ps: bool,
-    actions: List[str],
-    property_id: str = "",
-) -> str:
-    """Strips retired .pro-hook-card and .post-calc-sample-schedule-preview clutter."""
-    for attr_val, attr_name, tags, act_name in (
-        ("pro-hook-card", "class", ("div", "section"), "strip_legacy_pro_hook_card"),
-        ("post-calc-sample-schedule-preview", "class", ("div",), "strip_legacy_sample_preview"),
-    ):
-        if attr_val in updated:
-            cleaned, changed = _remove_balanced_tag_blocks(
-                updated, attr_val, tag_names=tags, attr_name=attr_name
-            )
-            if changed:
-                updated = cleaned
-                if act_name not in actions:
-                    actions.append(act_name)
-    return updated
-
-
-def _normalize_pro_hook_link_contrast(html_fragment: str) -> Tuple[str, bool]:
-    """Ensures .pro-hook-link tags with accent/brand-primary inline text color pair it with a light surface."""
-    if "pro-hook-link" not in html_fragment or (
-        "var(--brand-primary)" not in html_fragment and "var(--accent)" not in html_fragment
-    ):
-        return html_fragment, False
-
-    def _fix_tag(m: re.Match) -> str:
-        tag = m.group(0)
-        if "background" in tag.lower():
-            return tag
-        return re.sub(
-            r'style=(["\'])([^"\']*?)(color:\s*var\(--(?:brand-primary|accent)\)\s*;?)',
-            r'style=\1\2background-color: var(--bg-surface); border: 1px solid var(--brand-border); border-radius: 6px; \3',
-            tag,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-
-    repaired = re.sub(
-        r'<a\b[^>]*\bclass=["\'][^"\']*\bpro-hook-link\b[^"\']*["\'][^>]*>',
-        _fix_tag,
-        html_fragment,
-        flags=re.IGNORECASE,
-    )
-    return repaired, repaired != html_fragment
-
-
-def _retrofit_partner_reg_and_quick_unlock(
-    updated: str,
-    *,
-    prop_id: str,
-    tool_slug: str,
-    default_state: str,
-    has_quote_intake: bool,
-    q_tag: str,
-    actions: List[str],
-) -> str:
-    """Strips retired #partner-registration-drawer (off /partners/), #calc-result-quick-unlock-bar, and #inline-worksheet-capture-form."""
-    is_partners_route = _is_standalone_partners_page(updated)
-    strip_list: List[Tuple[str, str, Tuple[str, ...], str]] = [
-        ("calc-result-quick-unlock-bar", "id", ("div",), "strip_legacy_quick_unlock_bar"),
-        ("inline-worksheet-capture-form", "id", ("form",), "strip_legacy_inline_worksheet_form"),
-        ("partner-quote-intake-step", "id", ("div", "section"), "strip_legacy_quote_intake"),
-        ("partner-quote-intake-form", "id", ("form",), "strip_legacy_quote_intake_form"),
-    ]
-    if not is_partners_route:
-        strip_list.extend(
-            [
-                ("partner-registration-drawer", "id", ("div", "section"), "strip_legacy_partner_reg_drawer"),
-                ("partner-registration-form", "id", ("form",), "strip_legacy_partner_reg_form"),
-            ]
-        )
-    for attr_val, attr_name, tags, act_name in strip_list:
-        if attr_val in updated:
-            cleaned, changed = _remove_balanced_tag_blocks(
-                updated, attr_val, tag_names=tags, attr_name=attr_name
-            )
-            if changed:
-                updated = cleaned
-                if act_name not in actions:
-                    actions.append(act_name)
-    updated_nf = re.sub(
-        r'<a\b(?![^>]*\brel=)([^>]*\bhref=["\']/api/lead-capture\?checkout=1[^"\']*["\'][^>]*)>',
-        r'<a rel="nofollow"\1>',
-        updated,
-        flags=re.IGNORECASE,
-    )
-    if updated_nf != updated:
-        updated = updated_nf
-        actions.append("checkout_links_rel_nofollow")
-    return updated
-
-
 def _strip_enclosing_div_containing(html_text: str, marker: str, div_class_hint: str = "") -> Tuple[str, bool]:
     """Removes the innermost <div ...>...</div> enclosing `marker` (optionally matching `div_class_hint`)."""
     idx = html_text.find(marker)
@@ -7722,102 +7025,6 @@ def _strip_enclosing_div_containing(html_text: str, marker: str, div_class_hint:
     before = html_text[:start].rstrip(" \t")
     after = html_text[end:].lstrip(" \t\r\n")
     return f"{before}\n{after}", True
-
-
-def _retrofit_hero_range_and_jurisdiction_bars(
-    updated: str,
-    *,
-    tool_slug: str,
-    default_state: str,
-    has_quote_intake: bool,
-    us_jurisdictions: Any,
-    actions: List[str],
-    property_id: str = "",
-) -> str:
-    """Strips retired hero range anchors, state-first hero bars, firm registration links, and syncs remaining jurisdiction selects."""
-    for attr_val, attr_name, tags, act_name in (
-        ("hero-range-anchor", "id", ("div", "section"), "strip_legacy_hero_range_anchor"),
-        ("hero-range-anchor", "class", ("div", "section"), "strip_legacy_hero_range_anchor"),
-        ("state-first-hero-bar", "id", ("div", "section"), "strip_legacy_state_first_hero_bar"),
-        ("state-first-hero-bar", "class", ("div", "section"), "strip_legacy_state_first_hero_bar"),
-        ("above-fold-preset-bar", "class", ("div",), "strip_legacy_above_fold_preset_bar"),
-    ):
-        if attr_val in updated:
-            cleaned, changed = _remove_balanced_tag_blocks(
-                updated, attr_val, tag_names=tags, attr_name=attr_name
-            )
-            if changed:
-                updated = cleaned
-                if act_name not in actions:
-                    actions.append(act_name)
-
-    if "hero-register-firm-link" in updated:
-        cleaned_href = re.sub(
-            r'\s*<a\b[^>]*class=["\'][^"\']*\bhero-register-firm-link\b[^"\']*["\'][^>]*>[\s\S]*?</a>',
-            "",
-            updated,
-            flags=re.IGNORECASE,
-        )
-        if cleaned_href != updated:
-            updated = cleaned_href
-            actions.append("strip_legacy_hero_register_firm_link")
-
-    if tool_slug != "index" and 'id="quote-intake-partner-reg-state"' in updated:
-        slug_low = str(tool_slug or "").strip().lower()
-        is_intl_gh = property_id == "gainhelm" and (
-            any(tok in slug_low for tok in ("philippines", "eu-ai-act", "dora-ict", "eu-dora", "nis2", "iso-27001", "iso27001", "gdpr"))
-            or "dora" in slug_low.split("-")
-        )
-        is_eu_gh = is_intl_gh and (
-            any(tok in slug_low for tok in ("eu-ai-act", "dora-ict", "eu-dora", "nis2", "gdpr"))
-            or "dora" in slug_low.split("-")
-        )
-        eff_state = ("EU" if is_eu_gh else "US") if is_intl_gh else default_state
-        eff_jurisdictions = (
-            (("EU", "European Union / EEA (EU)"), ("UK", "United Kingdom (UK)"), ("US", "United States (US)"))
-            + tuple(us_jurisdictions)
-            if is_intl_gh
-            else us_jurisdictions
-        )
-        full_opts_14 = "\n".join(
-            f'              <option value="{sc}"{" selected" if sc == eff_state else ""}>{sl}</option>'
-            for sc, sl in eff_jurisdictions
-        )
-        sel_pat = re.compile(
-            r'(<select\b[^>]*id=["\']quote-intake-partner-reg-state["\'][^>]*>)([\s\S]*?)(</select>)',
-            re.IGNORECASE,
-        )
-        sel_m = sel_pat.search(updated)
-        if sel_m:
-            cur_inner = sel_m.group(2)
-            if f'value="{eff_state}" selected' not in cur_inner or 'value="ME"' not in cur_inner:
-                new_sel = sel_m.group(1) + "\n" + full_opts_14 + "\n            " + sel_m.group(3)
-                if new_sel != sel_m.group(0):
-                    updated = updated[: sel_m.start()] + new_sel + updated[sel_m.end() :]
-                    if "state_select_jurisdiction_sync" not in actions:
-                        actions.append("state_select_jurisdiction_sync")
-
-    if "<main" not in updated and 'id="gsc-striking-overlay"' in updated:
-        ov_tail_m = re.search(
-            r'\n?([ \t]*<div\b[^>]*id=["\']gsc-striking-overlay["\'][^>]*>[\s\S]*?</section>\s*</div>)\s*(?=</body>)',
-            updated,
-            re.IGNORECASE,
-        )
-        if ov_tail_m and re.search(r"\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>", updated[: ov_tail_m.start()], re.IGNORECASE):
-            ov_block = ov_tail_m.group(1)
-            stripped_doc = updated[: ov_tail_m.start()] + "\n" + updated[ov_tail_m.end() :]
-            relocated_doc, n_reloc = re.subn(
-                r"(\n[ \t]*<footer\b[\s\S]*?</footer>\s*</div>)",
-                lambda m: f"\n    {ov_block.strip()}{m.group(1)}",
-                stripped_doc,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-            if n_reloc > 0:
-                updated = relocated_doc
-                actions.append("relocate_gsc_overlay_into_container")
-
-    return updated
 
 
 def _retrofit_monetization_and_navigation_ux(updated: str) -> Tuple[str, List[str]]:

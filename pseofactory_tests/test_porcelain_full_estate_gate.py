@@ -34,7 +34,7 @@ from pseofactory.porcelain_shell import (
     normalize_html_to_porcelain_shell,
     sanitize_inline_styles_outside_svg,
 )
-from pseofactory.visual_primitives import _retrofit_hero_range_and_jurisdiction_bars
+from pseofactory.visual_primitives import normalize_html_visual_primitives
 
 
 TENANT_REPOS: Dict[str, str] = {
@@ -396,7 +396,8 @@ def test_compiled_lienbond_stylesheet_covers_all_rendered_ui_classes(compiled_li
     missing_core = [
         cls_name
         for cls_name in (
-            "calc-result-quick-unlock-bar",
+            "workpaper-unlock-card",
+            "workpaper-preview-controls",
             "calc-number-input",
             "comparison-table",
             "hero-register-firm-link",
@@ -540,37 +541,29 @@ def test_real_dist_zero_duplicate_calcs_faqs_raw_python_and_legacy_clutter(tenan
 @pytest.mark.host_estate
 def test_no_wrong_jurisdiction_state_first_hero_bar_on_non_state_tools() -> None:
     """
-    Federal, international, and non-state tools must NOT inject US-state #state-first-hero-bar.
-    Checks both central _retrofit_hero_range_and_jurisdiction_bars and real dist/ HTML on disk.
+    Federal, international, and non-state tools must NOT inject or retain US-state #state-first-hero-bar.
+    Checks both central normalize_html_visual_primitives and real dist/ HTML on disk.
     """
-    us_jurisdictions = [("CA", "California (CA)"), ("TX", "Texas (TX)"), ("ME", "Maine (ME)")]
     failures: List[str] = []
 
-    for slug in (
-        "soc-2-audit-cost-calculator",
-        "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
-        "student-loans-gov",
-        "surety-bond-cost-calculator-philippines",
+    for domain, slug in (
+        ("gainhelm.com", "soc-2-audit-cost-calculator"),
+        ("gainhelm.com", "eu-ai-act-high-risk-conformity-assessment-cost-calculator"),
+        ("prexvo.com", "student-loans-gov"),
+        ("lienbond.com", "surety-bond-cost-calculator-philippines"),
     ):
         sample_html = (
-            "<!DOCTYPE html><html><body><main>"
+            f"<!DOCTYPE html><html><head><link rel='canonical' href='https://{domain}/tools/{slug}/'></head><body><main>"
             "<section class='hero-section tool-hero card'><h1>Sample Federal/Global Tool</h1></section>"
+            "<div id='state-first-hero-bar' class='state-first-hero-bar'>State Bar</div>"
             "<form id='partner-quote-intake-form'><select id='quote-intake-state'></select></form>"
             "<div id='saveable-decision-blueprint'></div>"
             "<strong class='output-value'>$12,500</strong>"
             "</main></body></html>"
         )
-        actions: List[str] = []
-        out = _retrofit_hero_range_and_jurisdiction_bars(
-            sample_html,
-            tool_slug=slug,
-            default_state="CA",
-            has_quote_intake=True,
-            us_jurisdictions=us_jurisdictions,
-            actions=actions,
-        )
-        if 'id="state-first-hero-bar"' in out:
-            failures.append(f"central:_retrofit_hero_range_and_jurisdiction_bars({slug})")
+        out, _ = normalize_html_visual_primitives(sample_html, is_tenant_porcelain=True)
+        if 'id="state-first-hero-bar"' in out or 'id="partner-quote-intake-form"' in out:
+            failures.append(f"central:normalize_html_visual_primitives({slug})")
 
     ws_root = _resolve_workspace_root()
     if ws_root is not None:

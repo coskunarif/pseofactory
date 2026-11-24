@@ -11,6 +11,7 @@ Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -196,6 +197,20 @@ def get_audience_tier(
                 return c_tier
     except Exception:
         pass
+
+    if prop_clean and prop_clean not in TENANT_DEFAULT_AUDIENCE_TIER:
+        try:
+            from pseofactory.impact_planner import discover_active_tenants
+
+            ws_root = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+            for pid, t_repo in discover_active_tenants(ws_root):
+                if pid == prop_clean:
+                    marker_tier = _read_audience_tier_from_marker(t_repo)
+                    if marker_tier:
+                        return marker_tier
+                    break
+        except Exception:
+            pass
 
     return TENANT_DEFAULT_AUDIENCE_TIER.get(prop_clean, DEFAULT_AUDIENCE_TIER)
 
@@ -696,41 +711,11 @@ def _select_full_sku_for_slug(property_id: str, slug: str = "", vertical: str = 
         return "px_refi_amortization_decision_audit"
 
     if prop_clean == "gainhelm":
-        try:
-            from pseofactory.affiliates import get_gainhelm_framework_profile
+        from pseofactory.affiliates import get_gainhelm_framework_profile
 
-            prof = get_gainhelm_framework_profile(slug=s, vertical=v)
-            prof_sku = normalize_sku(str((prof or {}).get("offer_sku") or ""))
-            if prof_sku:
-                return prof_sku
-        except Exception:
-            pass
-        if any(
-            tok in s or tok in v
-            for tok in (
-                "hipaa",
-                "iso-27001",
-                "iso27001",
-                "pci",
-                "hitrust",
-                "cyber-liability",
-                "cyber-insurance",
-                "dora",
-                "eu-ai",
-                "eu_ai",
-                "gdpr",
-                "ccpa",
-                "cpra",
-                "nis2",
-                "sec-8k",
-                "sec_8k",
-                "sec_cyber",
-                "sec-cybersecurity",
-                "8k-item-105",
-            )
-        ):
-            return "gh_hipaa_iso27001_governance_kit"
-        return "gh_soc2_cmmc_audit_workpapers"
+        prof = get_gainhelm_framework_profile(slug=s, vertical=v)
+        prof_sku = normalize_sku(str((prof or {}).get("offer_sku") or ""))
+        return prof_sku or "gh_soc2_cmmc_audit_workpapers"
 
     if prop_clean == "lienbond":
         if any(tok in s or tok in v for tok in ("lien", "waiver", "retainage", "preliminary-notice")):
@@ -963,12 +948,16 @@ def get_all_digital_products() -> Dict[str, Dict[str, Any]]:
     return products
 
 
-def get_edge_pricing_table_json(property_id: str) -> str:
+def get_edge_pricing_table_json(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+    audience_tier: Optional[str] = None,
+) -> str:
     """
     Serializes the canonical per-tenant SKU catalog into deterministic JSON
     for direct embedding in generated functions/api/lead-capture.js.
     """
-    catalog = get_tenant_catalog(property_id)
+    catalog = get_tenant_catalog(property_id, repo_root=repo_root, audience_tier=audience_tier)
     edge_map: Dict[str, Dict[str, Any]] = {}
     for sku, item in catalog.items():
         edge_map[sku] = {

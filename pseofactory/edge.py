@@ -5519,55 +5519,87 @@ async function dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSyntheticPr
     return js_block
 
 
-def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
+def _render_edge_pricing_and_workpaper_engine_js(
+    property_id: str,
+    audience_tier: Optional[str] = None,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> str:
     """
     Renders the unified per-tenant canonical pricing catalog (sourced strictly from
     pseofactory/pricing.py), unique per-buyer lead_id generator, pre-checkout KV/metadata
     input persistence helpers, and buyer-input-driven Quick vs Full workpaper/CSV/JSON
     engine with full HTML escaping and zero bank/merchant leaks.
+    Supports both canonical tenants and any dynamic 5th+ tenant.
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
     from pseofactory.pricing import (
-        PARTNER_SLOT_SKU_BY_PROPERTY,
-        QUICK_SKU_BY_PROPERTY,
         SKU_ALIASES,
         TENANT_BRAND_NAMES,
         TENANT_SKU_PREFIX,
         get_edge_pricing_table_json,
+        resolve_offer_pricing,
     )
 
     prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-        raise ValueError(f"Unsupported property_id for edge pricing engine: {property_id!r}")
+    if prop_clean == "profithelm-platform":
+        prop_clean = "profithelm"
+    if not prop_clean:
+        raise ValueError(f"Unsupported empty property_id for edge pricing engine: {property_id!r}")
 
-    catalog_json = get_edge_pricing_table_json(prop_clean)
-    sku_prefix = TENANT_SKU_PREFIX[prop_clean] + "_"
+    quick_offer = resolve_offer_pricing(
+        prop_clean,
+        tier_kind="quick",
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    full_offer = resolve_offer_pricing(
+        prop_clean,
+        tier_kind="full",
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    partner_offer = resolve_offer_pricing(
+        prop_clean,
+        tier_kind="partner_slot",
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    catalog_json = get_edge_pricing_table_json(
+        prop_clean,
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    sku_prefix_stem = TENANT_SKU_PREFIX.get(prop_clean, prop_clean[:3] or "pf")
+    sku_prefix = sku_prefix_stem + "_"
+    exec_prefix = sku_prefix_stem.upper()
     tenant_aliases = {
         k: v for k, v in SKU_ALIASES.items()
         if str(k).startswith(sku_prefix) or str(v).startswith(sku_prefix)
     }
     aliases_json = json.dumps(tenant_aliases, sort_keys=True)
-    quick_sku = QUICK_SKU_BY_PROPERTY[prop_clean]
-    partner_sku = PARTNER_SLOT_SKU_BY_PROPERTY[prop_clean]
-    brand_name = TENANT_BRAND_NAMES[prop_clean]
+    quick_sku = str(quick_offer["sku"])
+    partner_sku = str(partner_offer["sku"])
+    brand_name = TENANT_BRAND_NAMES.get(
+        prop_clean,
+        prop_clean.replace("-", " ").replace("_", " ").title(),
+    )
+    full_price_int = int(round(float(full_offer["price_usd"])))
     default_full_sku_map = {
         "profithelm": "ph_statutory_tax_audit_workpapers",
         "prexvo": "px_refi_amortization_decision_audit",
         "gainhelm": "gh_soc2_cmmc_audit_workpapers",
         "lienbond": "lb_surety_lien_wh347_packet",
     }
-    default_state_map = {"profithelm": "US", "prexvo": "US", "gainhelm": "US", "lienbond": "CA"}
+    default_state_map = {"lienbond": "CA"}
     default_buyer_label_map = {
-        "profithelm": "Verified Buyer",
         "prexvo": "Verified Borrower",
-        "gainhelm": "Verified Buyer",
         "lienbond": "Verified Contractor",
     }
     default_amt_map = {"profithelm": 250000, "prexvo": 85000, "gainhelm": 48500, "lienbond": 125000}
-    default_full_sku = default_full_sku_map[prop_clean]
-    default_state = default_state_map[prop_clean]
-    default_buyer_label = default_buyer_label_map[prop_clean]
-    default_amt = default_amt_map[prop_clean]
+    default_full_sku = default_full_sku_map.get(prop_clean, str(full_offer["sku"]))
+    default_state = default_state_map.get(prop_clean, "US")
+    default_buyer_label = default_buyer_label_map.get(prop_clean, "Verified Buyer")
+    default_amt = default_amt_map.get(prop_clean, 100000)
 
     if prop_clean == "prexvo":
         tenant_compute_js = """
@@ -5665,7 +5697,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `FORFEITURE AUDIT (${stateCode}): Refinancing ${fmtUsd(baseAmount)} from ${fmtPct(curRatePct)} to ${fmtPct(refiRatePct)} over ${termYears} years reduces monthly payment by ${fmtUsd(monthlyDelta)} and saves ${fmtUsd(lifetimeSavings)} in lifetime interest. Confirm zero active PSLF qualifying payments (34 CFR 685.219) or RAP/IBR interest subsidies before signing.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($19) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "PX-EXEC-102",
@@ -5675,7 +5707,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `REGULATION Z CHECKLIST: (1) Request competing Approval Disclosures within 30 days under 12 CFR 1026.48(c); (2) Submit lowest competing APR (${fmtPct(refiRatePct)}) for written rate-match credit; (3) Preserve 3-business-day non-disbursement cancellation right under 12 CFR 1026.48(d).`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($19) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "PX-EXEC-103",
@@ -5685,7 +5717,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `PROMISSORY NOTE CHECKLIST: Confirm explicit written contractual inclusion of (a) death and total permanent disability discharge parity and (b) cosigner release eligibility after 12 to 24 consecutive on-time payments of ${fmtUsd(refiRes.pmt)}/mo.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($19) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
     ];
 """
@@ -5895,7 +5927,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `SUBSTANTIATION RECORD (${stateCode}): Pursuant to ${offer.statutory_authority}, modeled transaction/income basis of ${fmtUsd(baseAmount)} (${capitalBand}) for ${toolSlug} is documented for CPA workpaper review under IRC Section 6662 substantial authority standards.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "PH-EXEC-102",
@@ -5905,7 +5937,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `EXECUTION CHECKLIST (${stateCode}): (1) Lock QI exchange agreement or placed-in-service asset log before statutory cutoff; (2) Reconcile Form 4562 / Form 8824 / Form 8995 line items against general ledger; (3) Schedule quarterly safe-harbor tax remittances to avoid IRC Section 6654 penalties.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "PH-EXEC-103",
@@ -5915,7 +5947,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `AUDIT RETENTION (${stateCode}): Retain this calculation workpaper, underlying invoices/closing statements, and CPA sign-off for the applicable federal (3-year) and state (4-to-6-year) statutory assessment period.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
     ];
 """
@@ -6014,7 +6046,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `SCOPE DECLARATION (${stateCode}): Modeled compliance boundary for ${toolSlug} (${headcount} staff) establishes unautomated baseline of ${fmtUsd(baseAmount)} and GRC-optimized budget of ${fmtUsd(netOptimized)} under ${offer.statutory_authority}.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "GH-EXEC-102",
@@ -6024,7 +6056,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `READINESS CHECKLIST: ${(fwMeta && fwMeta.exec102Body) || "Day 1-30: Lock SSP & scope; Day 31-90: Automate continuous evidence; Day 91-180: Close POA&M items and complete CPA/C3PAO assessment."}`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "GH-EXEC-103",
@@ -6034,11 +6066,11 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `GOVERNANCE MEMO (${stateCode}): Documented continuous control monitoring over 12 preceding months substantiates ${fmtUsd(reuseCredit)} in multi-framework control overlap and reduces enforcement exposure.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
     ];
 """
-    else:
+    elif prop_clean == "lienbond":
         tenant_compute_js = """
     const stLien = stateSpec || { cite: `${stateCode} Statutory Mechanics Lien & Miller Act`, prelim: "20-45 Days", record: "90 Days", enforce: "90-365 Days" };
     const emrVal = extractEdgeNumericParam(inputs, outputs, ["emr", "mod_rate", "experience"], 1.0, 0.5, 2.5);
@@ -6103,7 +6135,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `CONDITIONAL WAIVER (${stateCode} - ${stLien.cite}): Effective only upon actual bank clearance of payment for modeled claim ${fmtUsd(baseAmount)}. Statutory retainage of ${fmtUsd(retainageHoldback)} and unapproved change orders remain expressly reserved.`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "LB-EXEC-102",
@@ -6113,7 +6145,7 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `PAYMENT BOND NOTICE (${stateCode}): Serve certified written notice of unpaid sum (${fmtUsd(baseAmount)}) within 90 days of last furnishing under 40 U.S.C. 3133(b)(2). Target preferred surety tier (${fmtUsd(prefBondPrem)}) vs standard tariff (${fmtUsd(stdBondPrem)}).`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
       },
       {
         instrument_id: "LB-EXEC-103",
@@ -6123,7 +6155,98 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
           ? `WH-347 & NCCI AUDIT (${stateCode}): Certify full prevailing wage and bona fide fringe disbursement under 29 CFR 5.5(a)(3)(ii). Segregate overtime premium pay (1/3 of 1.5x OT) before applying NCCI class rate and EMR (${emrVal.toFixed(2)}).`
-          : "Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack ($29) to unlock unredacted execution checklists.",
+          : lockedChecklistNotice,
+      },
+    ];
+"""
+    else:
+        tenant_compute_js = """
+    const ratePct = extractEdgeNumericParam(inputs, outputs, ["rate", "apr", "pct", "percent", "margin", "yield", "efficiency", "discount"], 6.5, 0.1, 100);
+    const horizonYears = Math.round(extractEdgeNumericParam(inputs, outputs, ["term", "year", "horizon", "period", "month"], 10, 1, 40));
+    const optFactor = Math.min(0.45, Math.max(0.05, ratePct / 100));
+    const annualBaseline = Math.round((baseAmount / Math.max(1, horizonYears)) * 100) / 100;
+    const annualOptimized = Math.round(annualBaseline * (1 - optFactor) * 100) / 100;
+    const totalProjectedBenefit = Math.round((annualBaseline - annualOptimized) * horizonYears * 100) / 100;
+    const netModeledTotal = Math.max(0, Math.round((baseAmount - totalProjectedBenefit) * 100) / 100);
+
+    kpis = [
+      { label: "Modeled Baseline Amount", value: fmtUsd(baseAmount) },
+      { label: "Modeled Rate / Factor", value: fmtPct(ratePct) },
+      { label: "Projected Cumulative Delta", value: fmtUsd(totalProjectedBenefit) },
+      { label: "Evaluation Horizon", value: `${horizonYears} Years` },
+    ];
+    reconciliationSchedule = [
+      { line_code: `${CANONICAL_EXEC_PREFIX}-100`, line_item: `Modeled Principal / Scope Basis (${stateCode})`, authority: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Calculation Reference`, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `Tool: ${toolSlug}` },
+      { line_code: `${CANONICAL_EXEC_PREFIX}-200`, line_item: `Annualized Baseline vs Optimized Run-Rate (${fmtPct(ratePct)})`, authority: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Statutory Methodology`, baseline_value: `${fmtUsd(annualBaseline)}/yr`, optimized_value: `${fmtUsd(annualOptimized)}/yr`, delta_impact: `-${fmtUsd(annualBaseline - annualOptimized)}/yr` },
+      { line_code: `${CANONICAL_EXEC_PREFIX}-300`, line_item: `Cumulative ${horizonYears}-Year Modeled Impact`, authority: "Deterministic Compounding & Amortization Reference", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(netModeledTotal), delta_impact: `${fmtUsd(totalProjectedBenefit)} Net Delta` },
+      { line_code: `${CANONICAL_EXEC_PREFIX}-400`, line_item: `Jurisdiction & Filing Readiness (${stateCode})`, authority: `${CANONICAL_BRAND_NAME} Compliance Verification Protocol`, baseline_value: "Unverified Estimate", optimized_value: "Substantiated Workpaper", delta_impact: `Band: ${capitalBand}` },
+    ];
+    const sensSteps = [0.80, 0.90, 1.00, 1.10, 1.20];
+    sensitivityMatrix = sensSteps.map((sf) => {
+      const scAmt = Math.round(baseAmount * sf * 100) / 100;
+      const scDelta = Math.round(scAmt * optFactor * 100) / 100;
+      const lbl = sf === 1.0 ? "Modeled Baseline (100%)" : `${sf < 1 ? "-" : "+"}${Math.round(Math.abs(sf - 1) * 100)}% Scenario Sensitivity`;
+      return {
+        scenario_label: lbl,
+        modeled_principal: fmtUsd(scAmt),
+        effective_rate: fmtPct(ratePct),
+        estimated_net_benefit: `${fmtUsd(scDelta)} Projected Delta`,
+      };
+    });
+    const periodSteps = 6;
+    for (let pIdx = 1; pIdx <= periodSteps; pIdx++) {
+      const yrScale = Math.min(horizonYears, Math.max(1, Math.round((pIdx / periodSteps) * horizonYears)));
+      const cumBase = Math.round(annualBaseline * yrScale * 100) / 100;
+      const cumOpt = Math.round(annualOptimized * yrScale * 100) / 100;
+      const cumSav = Math.round((cumBase - cumOpt) * 100) / 100;
+      periodSchedule.push({
+        period: `Year ${yrScale}`,
+        metric_a: fmtUsd(cumBase),
+        metric_b: fmtUsd(cumOpt),
+        metric_c: fmtPct(ratePct),
+        metric_d: `+${fmtUsd(cumSav)}`,
+        note: `Cumulative ${yrScale}-year modeled benchmark checkpoint`,
+      });
+    }
+    statutoryTrendTimeseries = [
+      { series_id: `${propertyId}_baseline_idx`, metric_label: `${CANONICAL_BRAND_NAME} Modeled Baseline Benchmark`, statutory_citation: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Reference`, unit: "USD", points: { "2024": Math.round(baseAmount * 0.92), "2025": Math.round(baseAmount * 0.96), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.06), "2030": Math.round(baseAmount * 1.12) } },
+      { series_id: `${propertyId}_rate_idx`, metric_label: "Effective Benchmark Rate / Factor", statutory_citation: "Deterministic Model Parameter", unit: "PCT", points: { "2024": Math.round(ratePct * 0.94 * 100) / 100, "2025": Math.round(ratePct * 0.97 * 100) / 100, "2026": Math.round(ratePct * 100) / 100, "2028": Math.round(ratePct * 0.95 * 100) / 100, "2030": Math.round(ratePct * 0.92 * 100) / 100 } },
+      { series_id: `${propertyId}_net_delta_idx`, metric_label: "Cumulative Projected Net Delta", statutory_citation: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Reference`, unit: "USD", points: { "2024": Math.round(totalProjectedBenefit * 0.85), "2025": Math.round(totalProjectedBenefit * 0.92), "2026": Math.round(totalProjectedBenefit), "2028": Math.round(totalProjectedBenefit * 1.08), "2030": Math.round(totalProjectedBenefit * 1.16) } },
+    ];
+    methodologyNotes = [
+      `Deterministic calculation for ${toolSlug} (${stateCode}) modeled from baseline ${fmtUsd(baseAmount)} at ${fmtPct(ratePct)} over ${horizonYears} years.`,
+      "All workpaper figures, sensitivity bands, and multi-period projections are computed directly from your submitted calculator inputs and do not constitute legal, tax, or investment advice.",
+    ];
+    statutoryExecutionArtifacts = [
+      {
+        instrument_id: `${CANONICAL_EXEC_PREFIX}-EXEC-101`,
+        instrument_title: `${CANONICAL_BRAND_NAME} Scenario Substantiation & Input Audit`,
+        controlling_statute: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Statutory Reference`,
+        filing_deadline_rule: "Verify Prior to Filing / Transaction Execution",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `SUBSTANTIATION RECORD (${stateCode}): Modeled baseline of ${fmtUsd(baseAmount)} at ${fmtPct(ratePct)} over ${horizonYears} years yields projected delta of ${fmtUsd(totalProjectedBenefit)} for ${toolSlug}.`
+          : lockedChecklistNotice,
+      },
+      {
+        instrument_id: `${CANONICAL_EXEC_PREFIX}-EXEC-102`,
+        instrument_title: "Multi-Period Projection & Sensitivity Verification Checklist",
+        controlling_statute: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Methodology`,
+        filing_deadline_rule: "Review Prior to Commitment",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `SENSITIVITY CHECKLIST (${stateCode}): Cross-check -20% to +20% stress scenarios against actual quotes, contracts, and local jurisdiction rules before finalizing.`
+          : lockedChecklistNotice,
+      },
+      {
+        instrument_id: `${CANONICAL_EXEC_PREFIX}-EXEC-103`,
+        instrument_title: "Jurisdiction Compliance & Workpaper Retention Protocol",
+        controlling_statute: `${stateCode} Applicable Regulatory & Audit Standards`,
+        filing_deadline_rule: "Retain Supporting Documentation 3 to 6 Years",
+        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+        statutory_clause_body: isFullPaid
+          ? `RETENTION RECORD (${stateCode}): Retain this workpaper, raw calculator inputs, and supporting third-party statements for audit substantiation.`
+          : lockedChecklistNotice,
       },
     ];
 """
@@ -6140,10 +6263,11 @@ def _render_edge_pricing_and_workpaper_engine_js(property_id: str) -> str:
     js_engine = f"""
 const CANONICAL_OFFER_CATALOG = {catalog_json};
 const CANONICAL_SKU_ALIASES = {aliases_json};
-const CANONICAL_QUICK_SKU = "{quick_sku}";
-const CANONICAL_DEFAULT_FULL_SKU = "{default_full_sku}";
-const CANONICAL_PARTNER_SLOT_SKU = "{partner_sku}";
-const CANONICAL_BRAND_NAME = "{brand_name}";
+const CANONICAL_QUICK_SKU = {json.dumps(quick_sku)};
+const CANONICAL_DEFAULT_FULL_SKU = {json.dumps(default_full_sku)};
+const CANONICAL_PARTNER_SLOT_SKU = {json.dumps(partner_sku)};
+const CANONICAL_BRAND_NAME = {json.dumps(brand_name)};
+const CANONICAL_EXEC_PREFIX = {json.dumps(exec_prefix)};
 
 function normalizeEdgeSku(rawSku) {{
   const clean = String(rawSku || "").trim().toLowerCase();
@@ -6388,6 +6512,9 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   const capitalBand = String((record && record.capital_band) || (typeof deriveCapitalBand === "function" ? deriveCapitalBand(baseAmount) : "standard"));
   const fmtUsd = (n) => "$" + Number(n || 0).toLocaleString("en-US", {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
   const fmtPct = (n) => Number(n || 0).toFixed(2) + "%";
+  const fullTierOfferRef = getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU);
+  const fullTierPriceLabel = "$" + Number((fullTierOfferRef && fullTierOfferRef.price_usd) || {full_price_int});
+  const lockedChecklistNotice = `Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack (${{fullTierPriceLabel}}) to unlock unredacted execution checklists.`;
 
   let reconciliationSchedule = [];
   let sensitivityMatrix = [];
@@ -6401,7 +6528,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
 
   const offerSku = String((offer && (offer.sku || offer.offerSku)) || CANONICAL_DEFAULT_FULL_SKU);
   const offerTitle = String((offer && (offer.title || offer.offerTitle)) || (CANONICAL_BRAND_NAME + " Workpaper"));
-  const offerPriceUsd = Number((offer && (offer.price_usd !== undefined ? offer.price_usd : offer.offerPriceUsd)) || 29);
+  const offerPriceUsd = Number((offer && (offer.price_usd !== undefined ? offer.price_usd : offer.offerPriceUsd)) || {full_price_int});
   const offerAuth = String((offer && (offer.statutory_authority || offer.statutoryAuthority)) || "");
   const offerDeliverables = Array.isArray(offer && offer.deliverables) ? offer.deliverables : [];
 

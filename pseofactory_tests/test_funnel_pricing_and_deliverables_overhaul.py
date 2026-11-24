@@ -792,3 +792,349 @@ document.querySelectorAll('input').forEach(el => {
     dead_ids = {f["widget_id"] for f in res_dead["widget_failures"]}
     assert "mobile_375:calc-input-dead" in dead_ids, res_dead["widget_failures"]
     assert res_dead["interactive_surface"]["passed"] is False
+
+
+def _build_minimal_clean_estate(
+    dist_dir: Path,
+    *,
+    quick_price: int = 15,
+    full_price: int = 29,
+    partner_price: int = 299,
+    canonical_host: str = "",
+    data_property: str = "",
+) -> None:
+    (dist_dir / "tools" / "sample-calc").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "about").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "partners").mkdir(parents=True, exist_ok=True)
+    prop_attr = f' data-property="{data_property}"' if data_property else ""
+    canon_home = f'<link rel="canonical" href="https://{canonical_host}/">' if canonical_host else ""
+    canon_tool = (
+        f'<link rel="canonical" href="https://{canonical_host}/tools/sample-calc/">'
+        if canonical_host
+        else ""
+    )
+    (dist_dir / "index.html").write_text(
+        f"<!DOCTYPE html><html lang='en'{prop_attr}><head><title>Home</title>{canon_home}</head>"
+        "<body><main><h1>Home</h1></main><footer><a href='/partners/'>Partners</a></footer></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>Tools</title></head><body><main><h1>Tools</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "about" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>About</title></head><body><main><h1>About</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "partners" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>Partners</title></head><body><main>"
+        f"<form id='partner-registration-form' data-offer-price='{partner_price}'><button>Reserve ${partner_price}</button></form>"
+        "</main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "sample-calc" / "index.html").write_text(
+        f"<!DOCTYPE html><html lang='en'{prop_attr}><head><title>Calc</title>{canon_tool}</head><body><main>"
+        "<form class='calculator-form'><input type='number' value='100000'></form>"
+        "<section id='workpaper-unlock-card'>"
+        f"<a data-checkout-trigger='1' data-offer-price='{quick_price}' href='/api/lead-capture?checkout=1'>Quick ${quick_price}</a>"
+        f"<a data-checkout-trigger='1' data-offer-price='{full_price}' href='/api/lead-capture?checkout=1'>Full ${full_price}</a>"
+        "</section>"
+        "</main></body></html>",
+        encoding="utf-8",
+    )
+
+
+def test_gate_26b_vault_pricing_parity_is_not_noop_and_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves Gate 26b (verify_estate_monetization_and_funnel_hygiene) reads
+    master_networks.stripe.digital_products, fails on price drift, fails closed on
+    missing/empty digital_products, and fails closed when partner_tracker throws.
+    """
+    from pseofactory import partner_tracker, verifier
+
+    dist = tmp_path / "ph_dist"
+    _build_minimal_clean_estate(dist, quick_price=15, full_price=29, partner_price=299, canonical_host="profithelm.com")
+
+    ok_res = verifier.verify_estate_monetization_and_funnel_hygiene(dist, property_id="profithelm")
+    assert ok_res["status"] == "PASS", ok_res["issues"]
+
+    real_vault = json.loads((REPO_ROOT / "pseofactory" / "monetization_vault.json").read_text(encoding="utf-8"))
+
+    # 1. Mutate one Stripe product price under master_networks.stripe.digital_products
+    mutated_vault = json.loads(json.dumps(real_vault))
+    mutated_vault["master_networks"]["stripe"]["digital_products"]["ph_1031_boot_replacement_workpapers"][
+        "price_cents"
+    ] = 4900
+    mutated_vault["master_networks"]["stripe"]["digital_products"]["ph_1031_boot_replacement_workpapers"][
+        "price_usd"
+    ] = 49.0
+    mutated_path = tmp_path / "mutated_vault.json"
+    mutated_path.write_text(json.dumps(mutated_vault), encoding="utf-8")
+
+    monkeypatch.setattr(verifier, "MONETIZATION_VAULT_PATH", mutated_path)
+    drift_res = verifier.verify_estate_monetization_and_funnel_hygiene(dist, property_id="profithelm")
+    assert drift_res["status"] == "FAIL"
+    drift_joined = " | ".join(drift_res["issues"])
+    assert "ph_1031_boot_replacement_workpapers" in drift_joined
+    assert "4900" in drift_joined and "2900" in drift_joined
+
+    # 2. Empty list, empty dict, or missing digital_products must fail closed
+    for bad_dp in ([], {}, None):
+        empty_vault = json.loads(json.dumps(real_vault))
+        if bad_dp is None:
+            empty_vault["master_networks"]["stripe"].pop("digital_products", None)
+        else:
+            empty_vault["master_networks"]["stripe"]["digital_products"] = bad_dp
+        empty_path = tmp_path / "empty_vault.json"
+        empty_path.write_text(json.dumps(empty_vault), encoding="utf-8")
+        monkeypatch.setattr(verifier, "MONETIZATION_VAULT_PATH", empty_path)
+        empty_res = verifier.verify_estate_monetization_and_funnel_hygiene(dist, property_id="profithelm")
+        assert empty_res["status"] == "FAIL"
+        assert any("digital_products" in msg for msg in empty_res["issues"]), empty_res["issues"]
+
+    # 3. Check 1b partner_tracker resolver error must fail closed (never silently pass)
+    monkeypatch.setattr(verifier, "MONETIZATION_VAULT_PATH", REPO_ROOT / "pseofactory" / "monetization_vault.json")
+
+    def _boom(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("simulated resolver failure")
+
+    monkeypatch.setattr(partner_tracker, "resolve_lead_monetization_offer", _boom)
+    pt_err_res = verifier.verify_estate_monetization_and_funnel_hygiene(dist, property_id="profithelm")
+    assert pt_err_res["status"] == "FAIL"
+    assert any("simulated resolver failure" in msg for msg in pt_err_res["issues"]), pt_err_res["issues"]
+
+
+def test_gate_26b_cross_tenant_consumer_sku_in_vault_does_not_inherit_business_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves Gate 26b does not pass profithelm's business repo_root when resolving
+    a consumer 5th-site SKU (acme_solar at 900 cents) present in monetization_vault.json.
+    """
+    from pseofactory import verifier
+
+    ws_tmp = tmp_path / "ws"
+    ph_repo = ws_tmp / "profithelm-platform"
+    ph_dist = ph_repo / "dist"
+    ph_repo.mkdir(parents=True)
+    _build_minimal_clean_estate(
+        ph_dist, quick_price=15, full_price=29, partner_price=299, canonical_host="profithelm.com"
+    )
+    (ph_repo / ".pseofactory.json").write_text(
+        json.dumps(
+            {
+                "property_id": "profithelm",
+                "domain": "profithelm.com",
+                "canonical_base": "https://profithelm.com",
+                "audience_tier": "business",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    acme_repo = ws_tmp / "acme_solar"
+    acme_repo.mkdir(parents=True)
+    (acme_repo / ".pseofactory.json").write_text(
+        json.dumps(
+            {
+                "property_id": "acme_solar",
+                "domain": "acmesolar.com",
+                "canonical_base": "https://acmesolar.com",
+                "audience_tier": "consumer",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    real_vault = json.loads((REPO_ROOT / "pseofactory" / "monetization_vault.json").read_text(encoding="utf-8"))
+    cross_vault = json.loads(json.dumps(real_vault))
+    cross_vault["master_networks"]["stripe"]["digital_products"]["acm_quick_worksheet"] = {
+        "sku": "acm_quick_worksheet",
+        "property_id": "acme_solar",
+        "audience_tier": "consumer",
+        "tier_kind": "quick",
+        "price_cents": 900,
+        "price_usd": 9.0,
+    }
+    cross_vault_path = tmp_path / "cross_vault.json"
+    cross_vault_path.write_text(json.dumps(cross_vault), encoding="utf-8")
+
+    monkeypatch.setenv("WORKSPACE_ROOT", str(ws_tmp))
+    monkeypatch.setattr(verifier, "MONETIZATION_VAULT_PATH", cross_vault_path)
+
+    res = verifier.verify_estate_monetization_and_funnel_hygiene(
+        ph_dist, property_id="profithelm", repo_root=ph_repo
+    )
+    assert res["status"] == "PASS", res["issues"]
+
+
+def test_dynamic_fifth_tenant_acme_solar_edge_and_verifier_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves a dynamic 5th+ tenant ('acme_solar') works end-to-end in:
+    1. _render_edge_pricing_and_workpaper_engine_js() for both business ($15/$29) and consumer ($9/$19)
+       with valid JS syntax, computed workpaper/CSV/JSON outputs, and zero profithelm leaks.
+    2. MasterSEOVerifier.check_monetization_and_funnel_hygiene_gate() via .pseofactory.json,
+       HTML data-property, canonical URL, and fail-closed unresolved dist.
+    3. Zero hardcoded '($19)'/'($29)' literals in _render_edge_pricing_and_workpaper_engine_js source
+       and zero U+2014 / U+2013 in all touched files.
+    """
+    import inspect
+    import shutil
+    from pseofactory import edge, verifier
+
+    engine_src = inspect.getsource(edge._render_edge_pricing_and_workpaper_engine_js)
+    assert '"($19)"' not in engine_src and '"($29)"' not in engine_src
+    assert "'($19)'" not in engine_src and "'($29)'" not in engine_src
+
+    has_node = shutil.which("node") is not None
+
+    for aud_tier, exp_q, exp_f in (("business", 15, 29), ("consumer", 9, 19)):
+        js_block = edge._render_edge_pricing_and_workpaper_engine_js(
+            "acme_solar",
+            audience_tier=aud_tier,
+        )
+        assert "profithelm" not in js_block.lower()
+        assert "prexvo" not in js_block.lower()
+        assert "gainhelm" not in js_block.lower()
+        assert "lienbond" not in js_block.lower()
+        assert f'"price_cents": {exp_q * 100}' in js_block
+        assert f'"price_cents": {exp_f * 100}' in js_block
+        assert '"price_cents": 29900' in js_block
+
+        if has_node:
+            js_file = tmp_path / f"acme_solar_{aud_tier}.mjs"
+            stub_helpers = (
+                "function escapeEdgeHtml(v) { return String(v ?? ''); }\n"
+                "function isEdgeVerifiedPaidRecord(r) { return Boolean(r && r.settled); }\n"
+                "function getLeadsKv() { return null; }\n"
+                "function getMemoryBuffer() { return []; }\n"
+                "function buildEdgeLeadKvMetadata() { return {}; }\n"
+                "function deriveCapitalBand(a) { return a >= 100000 ? '100k_plus' : 'standard'; }\n"
+            )
+            js_file.write_text(stub_helpers + js_block, encoding="utf-8")
+            chk = subprocess.run(["node", "--check", str(js_file)], capture_output=True, text=True, check=False)
+            assert chk.returncode == 0, chk.stderr
+
+            run_js = f"""
+import fs from 'node:fs';
+import vm from 'node:vm';
+const code = fs.readFileSync({json.dumps(str(js_file))}, 'utf8');
+const ctx = vm.createContext({{ URLSearchParams, Math, Number, String, Array, Object, JSON, Date }});
+vm.runInContext(code, ctx);
+const resObj = vm.runInContext(`(() => {{
+  const q = getCanonicalEdgeOffer(CANONICAL_QUICK_SKU);
+  const f = getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU);
+  const p = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+  const preview = buildCanonicalWorkpaperDeliverable({{
+    propertyId: 'acme_solar',
+    record: {{ lead_id: 'lead_acme_1', tool_slug: 'solar-roi-calculator', calculated_amount: 42000, scenario_inputs: {{ rate: 7.5, term: 12 }} }},
+    offer: f,
+    mode: 'free_playbook',
+  }});
+  const paid = buildCanonicalWorkpaperDeliverable({{
+    propertyId: 'acme_solar',
+    record: {{ lead_id: 'lead_acme_1', settled: true, tool_slug: 'solar-roi-calculator', calculated_amount: 42000, scenario_inputs: {{ rate: 7.5, term: 12 }} }},
+    offer: f,
+    mode: 'paid_toolkit',
+    sessionId: 'cs_live_ACME_1',
+  }});
+  return {{
+    qCents: q.price_cents,
+    fCents: f.price_cents,
+    pCents: p.price_cents,
+    reconLen: paid.reconciliation_schedule.length,
+    sensLen: paid.sensitivity_matrix.length,
+    perLen: paid.period_schedule.length,
+    trendLen: paid.statutory_trend_timeseries.length,
+    execLen: paid.statutory_execution_artifacts.length,
+    previewLockBody: preview.statutory_execution_artifacts[0].statutory_clause_body,
+  }};
+}})()`, ctx);
+console.log(JSON.stringify(resObj));
+"""
+            res = subprocess.run(["node", "-e", run_js], capture_output=True, text=True, check=True)
+            out = json.loads(res.stdout.strip().splitlines()[-1])
+            assert out["qCents"] == exp_q * 100
+            assert out["fCents"] == exp_f * 100
+            assert out["pCents"] == 29900
+            assert out["reconLen"] == 4
+            assert out["sensLen"] == 5
+            assert out["perLen"] == 6
+            assert out["trendLen"] == 3
+            assert out["execLen"] == 3
+            assert f"(${exp_f})" in out["previewLockBody"]
+
+    # Check all 4 canonical tenants still compile cleanly in node --check
+    if has_node:
+        for canon_prop in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+            canon_js = tmp_path / f"{canon_prop}_engine.mjs"
+            canon_js.write_text(edge._render_edge_pricing_and_workpaper_engine_js(canon_prop), encoding="utf-8")
+            chk_c = subprocess.run(["node", "--check", str(canon_js)], capture_output=True, text=True, check=False)
+            assert chk_c.returncode == 0, f"{canon_prop} syntax error: {chk_c.stderr}"
+
+    # Verifier check_monetization_and_funnel_hygiene_gate() dynamic 5th-tenant resolution
+    ws_tmp = tmp_path / "ws"
+    acme_repo = ws_tmp / "acme_solar"
+    acme_dist = acme_repo / "dist"
+    (acme_repo / ".pseofactory.json").parent.mkdir(parents=True, exist_ok=True)
+    _build_minimal_clean_estate(acme_dist, quick_price=9, full_price=19, partner_price=299, canonical_host="acmesolar.com")
+    (acme_repo / ".pseofactory.json").write_text(
+        json.dumps(
+            {
+                "property_id": "acme_solar",
+                "domain": "acmesolar.com",
+                "canonical_base": "https://acmesolar.com",
+                "audience_tier": "consumer",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WORKSPACE_ROOT", str(ws_tmp))
+    gate_marker = verifier.MasterSEOVerifier(dist_dir=acme_dist).check_monetization_and_funnel_hygiene_gate()
+    assert gate_marker["status"] == "PASS", gate_marker["issues"]
+    assert gate_marker["property_id"] == "acme_solar"
+
+    # Standalone dist resolved via HTML data-property (no .pseofactory.json, no domain arg)
+    attr_dist = tmp_path / "standalone_attr_dist"
+    _build_minimal_clean_estate(attr_dist, quick_price=15, full_price=29, partner_price=299, data_property="solar_standalone")
+    gate_attr = verifier.MasterSEOVerifier(dist_dir=attr_dist).check_monetization_and_funnel_hygiene_gate()
+    assert gate_attr["status"] == "PASS", gate_attr["issues"]
+    assert gate_attr["property_id"] == "solar_standalone"
+
+    # Standalone dist resolved via canonical URL matching discover_active_tenants() -> acme_solar
+    canon_dist = tmp_path / "standalone_canon_dist"
+    _build_minimal_clean_estate(canon_dist, quick_price=9, full_price=19, partner_price=299, canonical_host="acmesolar.com")
+    gate_canon = verifier.MasterSEOVerifier(dist_dir=canon_dist).check_monetization_and_funnel_hygiene_gate()
+    assert gate_canon["status"] == "PASS", gate_canon["issues"]
+    assert gate_canon["property_id"] == "acme_solar"
+
+    # Standalone dist with unregistered canonical URL resolves to host label (never profithelm)
+    unreg_dist = tmp_path / "standalone_unreg_dist"
+    _build_minimal_clean_estate(unreg_dist, quick_price=15, full_price=29, partner_price=299, canonical_host="solardemo.com")
+    gate_unreg = verifier.MasterSEOVerifier(dist_dir=unreg_dist).check_monetization_and_funnel_hygiene_gate()
+    assert gate_unreg["status"] == "PASS", gate_unreg["issues"]
+    assert gate_unreg["property_id"] == "solardemo"
+
+    # Unresolvable dist must fail closed (never silently default to profithelm)
+    unknown_dist = tmp_path / "unknown_dist"
+    unknown_dist.mkdir(parents=True)
+    (unknown_dist / "index.html").write_text("<!DOCTYPE html><html><body>Hi</body></html>", encoding="utf-8")
+    gate_unknown = verifier.MasterSEOVerifier(dist_dir=unknown_dist).check_monetization_and_funnel_hygiene_gate()
+    assert gate_unknown["status"] == "FAIL"
+    assert gate_unknown["property_id"] == ""
+
+    # Zero U+2014 / U+2013 in all touched files
+    for rel_path in (
+        "pseofactory/verifier.py",
+        "pseofactory/edge.py",
+        "pseofactory/pricing.py",
+        "pseofactory/gainhelm_estate.py",
+        "pseofactory_tests/test_funnel_pricing_and_deliverables_overhaul.py",
+    ):
+        txt = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+        assert "\u2014" not in txt, f"U+2014 found in {rel_path}"
+        assert "\u2013" not in txt, f"U+2013 found in {rel_path}"

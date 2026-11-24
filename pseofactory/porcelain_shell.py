@@ -205,10 +205,47 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
     from pseofactory.tenant_facts import get_tenant_contract
 
     contract = get_tenant_contract(prop)
+    is_known_contract = str(getattr(contract, "property_id", "") or "").strip().lower() == prop
+    b_name = (
+        contract.brand_name
+        if is_known_contract
+        else (" ".join(w.capitalize() for w in prop.replace("-", "_").split("_") if w) or "Site")
+    )
     pal = dict(TENANT_BRAND_PALETTES.get(prop) or TENANT_BRAND_PALETTES["profithelm"])
     if prop not in TENANT_BRAND_PALETTES:
         pal["default_gsc_token"] = ""
+        pal["badge_letter"] = b_name[0].upper() if b_name else "S"
+        pal["css_href"] = "/css/style.css"
     assert_porcelain_palette_wcag(pal)
+
+    if is_known_contract:
+        domain = contract.domain
+        canonical_base = contract.canonical_base
+        package_name = contract.package_name or prop
+        repo_dir_name = contract.repo_dir_name or prop
+        linkedin_company_id = contract.linkedin_company_id or ""
+        research_entity = contract.research_entity or f"{b_name} Research"
+        legal_entity = contract.legal_entity or f"{b_name} LLC"
+        editorial_classification = contract.editorial_classification
+        primary_statutory_authority = contract.primary_statutory_authority
+        economic_dataset_label = contract.economic_dataset_label
+        home_topic_label = contract.home_topic_label
+        tools_directory_topic_label = contract.tools_directory_topic_label
+        contact_email = "compliance@lienbond.com" if prop == "lienbond" else f"editorial@{domain}"
+    else:
+        domain = f"{prop.replace('_', '-')}.com"
+        canonical_base = f"https://{domain}"
+        package_name = prop
+        repo_dir_name = prop
+        linkedin_company_id = ""
+        research_entity = f"{b_name} Research"
+        legal_entity = f"{b_name} LLC"
+        editorial_classification = f"Deterministic {b_name} Quantitative & Statutory Modeling Engine"
+        primary_statutory_authority = "Applicable Federal and State Statutory Schedules"
+        economic_dataset_label = "Published Government and Industry Benchmark Datasets"
+        home_topic_label = f"{b_name} Statutory & Quantitative Calculators"
+        tools_directory_topic_label = f"{b_name} Calculators and Decision Tools"
+        contact_email = f"support@{domain}"
 
     if prop == "prexvo":
         compliance_text = (
@@ -283,7 +320,7 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
         restricted_compliance_text = compliance_text
         partner_list_summary = "Simply Business, SuretyBondsDirect.com, Thimble, Jobber, and Levelset"
         disclaimers_sections_html = ""
-    else:
+    elif prop == "profithelm":
         compliance_text = (
             "Statutory & FTC Disclosure (16 CFR Part 255): Financial, depreciation, and tax models are provided "
             "for educational and informational modeling purposes only and do not constitute formal tax, legal, "
@@ -293,10 +330,20 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
         restricted_compliance_text = compliance_text
         partner_list_summary = "Mercury, CoinLedger, Koinly, IPX1031, Xendoo, and Collective"
         disclaimers_sections_html = ""
+    else:
+        compliance_text = (
+            f"Statutory & FTC Disclosure (16 CFR Part 255): Quantitative models on {b_name} are provided "
+            "for educational and informational modeling purposes only and do not constitute formal legal, "
+            "financial, or professional advice. Partner links routed via /r/ follow FTC 16 CFR Part 255 "
+            "disclosure standards and never alter deterministic calculator outputs."
+        )
+        restricted_compliance_text = compliance_text
+        partner_list_summary = "vetted category service providers"
+        disclaimers_sections_html = ""
 
     if not disclaimers_sections_html:
-        b_esc = html_lib.escape(contract.brand_name)
-        l_esc = html_lib.escape(contract.legal_entity or f"{contract.brand_name} LLC")
+        b_esc = html_lib.escape(b_name)
+        l_esc = html_lib.escape(legal_entity)
         disclaimers_sections_html = f"""      <section class="card">
         <h2>Not Legal, Tax, or Financial Advice</h2>
         <p>All calculators, statutory matrices, and downloadable workpapers published on {b_esc} by {l_esc} are provided strictly for educational and informational modeling purposes only and do not constitute legal, tax, accounting, surety underwriting, or certified financial advice.</p>
@@ -311,16 +358,19 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
       </section>
       <section class="card">
         <h2>Model Limitations</h2>
-        <p>Scenario calculations model enacted provisions under {html_lib.escape(contract.primary_statutory_authority)} and {html_lib.escape(contract.economic_dataset_label)}. Individual filing outcomes, state conformity rules, and underwriting approvals depend on complete entity facts reviewed by a licensed professional.</p>
+        <p>Scenario calculations model enacted provisions under {html_lib.escape(primary_statutory_authority)} and {html_lib.escape(economic_dataset_label)}. Individual filing outcomes, state conformity rules, and underwriting approvals depend on complete entity facts reviewed by a licensed professional.</p>
       </section>"""
 
-    default_tools = [
-        (str(t.get("slug", "")).strip(), _format_porcelain_tool_label(str(t.get("primary_keyword", "")).title()))
-        for t in (contract.default_core_tools or ())
-        if t.get("slug")
-    ]
-    if not default_tools and contract.default_complementary_peers:
-        default_tools = [(s, lbl) for s, lbl in contract.default_complementary_peers]
+    if is_known_contract:
+        default_tools = [
+            (str(t.get("slug", "")).strip(), _format_porcelain_tool_label(str(t.get("primary_keyword", "")).title()))
+            for t in (contract.default_core_tools or ())
+            if t.get("slug")
+        ]
+        if not default_tools and contract.default_complementary_peers:
+            default_tools = [(s, lbl) for s, lbl in contract.default_complementary_peers]
+    else:
+        default_tools = []
 
     from pseofactory.affiliate_intent import (
         CJ_PROPERTY_ID_BY_TENANT,
@@ -336,26 +386,24 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
 
     return {
         "property_id": prop,
-        "package_name": contract.package_name or prop,
-        "repo_dir_name": contract.repo_dir_name or prop,
-        "brand_name": contract.brand_name,
-        "domain": contract.domain,
-        "canonical_base": contract.canonical_base,
-        "linkedin_company_id": contract.linkedin_company_id or "",
-        "research_entity": contract.research_entity or f"{contract.brand_name} Research",
-        "legal_entity": contract.legal_entity or f"{contract.brand_name} LLC",
-        "publisher_entity_label": publisher_entity_by_prop.get(prop, f"{contract.brand_name} LLC"),
-        "impact_verification_uuid": IMPACT_VERIFICATION_UUID_BY_TENANT.get(
-            prop, IMPACT_VERIFICATION_UUID_BY_TENANT["profithelm"]
-        ),
-        "cj_property_id": CJ_PROPERTY_ID_BY_TENANT.get(prop, CJ_PROPERTY_ID_BY_TENANT["profithelm"]),
+        "package_name": package_name,
+        "repo_dir_name": repo_dir_name,
+        "brand_name": b_name,
+        "domain": domain,
+        "canonical_base": canonical_base,
+        "linkedin_company_id": linkedin_company_id,
+        "research_entity": research_entity,
+        "legal_entity": legal_entity,
+        "publisher_entity_label": publisher_entity_by_prop.get(prop, f"{b_name} LLC"),
+        "impact_verification_uuid": IMPACT_VERIFICATION_UUID_BY_TENANT.get(prop, ""),
+        "cj_property_id": CJ_PROPERTY_ID_BY_TENANT.get(prop, ""),
         "sovrn_domain_key": "0a5ac1bfe04034bff021b394f5e71d90" if prop == "profithelm" else "",
-        "editorial_classification": contract.editorial_classification,
-        "primary_statutory_authority": contract.primary_statutory_authority,
-        "economic_dataset_label": contract.economic_dataset_label,
-        "home_topic_label": contract.home_topic_label,
-        "tools_directory_topic_label": contract.tools_directory_topic_label,
-        "contact_email": "compliance@lienbond.com" if prop == "lienbond" else f"editorial@{contract.domain}",
+        "editorial_classification": editorial_classification,
+        "primary_statutory_authority": primary_statutory_authority,
+        "economic_dataset_label": economic_dataset_label,
+        "home_topic_label": home_topic_label,
+        "tools_directory_topic_label": tools_directory_topic_label,
+        "contact_email": contact_email,
         "compliance_text": compliance_text,
         "restricted_compliance_text": restricted_compliance_text,
         "partner_list_summary": partner_list_summary,
@@ -882,7 +930,6 @@ summary:focus-visible,
 .post-calc-upgrade-drawer,
 .partner-registration-drawer,
 .serp-depth-workbench,
-.pro-hook-card,
 .playbook-capture-card,
 .calc-inline-cta {{
   background-color: #ffffff !important;
@@ -1718,7 +1765,6 @@ details.faq-accordion > summary::-webkit-details-marker {{
 .hero-range-anchor,
 .state-first-hero-bar,
 .above-fold-preset-bar,
-.pro-hook-card,
 .calc-inline-cta,
 .lead-capture-card,
 .playbook-capture-card {{
@@ -2645,8 +2691,7 @@ details.faq-accordion > summary::-webkit-details-marker {{
   background-color: var(--status-warning);
 }}
 
-/* Quick Unlock, Lead Capture, Post-Calc Upgrade & Partner Quote Forms */
-.calc-result-quick-unlock-bar,
+/* Lead Capture, Post-Calc Upgrade & Partner Quote Forms */
 .inline-lead-box {{
   background-color: var(--bg-elevated);
   border: 1px solid var(--brand-border);
@@ -3650,7 +3695,6 @@ details.faq-accordion > summary::-webkit-details-marker {{
 
   .calc-inline-cta a,
   .comparison-table-cta-bar a,
-  .pro-hook-card a,
   .affiliate-card a,
   .partner-card a,
   .workpaper-unlock-actions a,
@@ -4273,8 +4317,8 @@ def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
             "profithelm": "https://www.wikidata.org/wiki/Q8161",
         }
         canonical_wikidata = wikidata_map.get(
-            str(profile.get("property_id") or "profithelm"),
-            "https://www.wikidata.org/wiki/Q8161",
+            str(profile.get("property_id") or "").strip().lower(),
+            str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397"),
         )
         for k, v in value.items():
             if k == "sameAs":
@@ -4570,7 +4614,7 @@ def _ensure_porcelain_publisher_head_tags(head_html: str, profile: Dict[str, Any
     expected_cj_tag = f'<meta name="cj-promotional-property-id" content="{cj_pid}">'
 
     def _filter_impact(m: re.Match[str]) -> str:
-        return m.group(0) if expected_impact_tag in m.group(0) else ""
+        return m.group(0) if (impact_uuid and expected_impact_tag in m.group(0)) else ""
 
     if "impact-site-verification" in cleaned.lower():
         cleaned = re.sub(
@@ -4582,7 +4626,7 @@ def _ensure_porcelain_publisher_head_tags(head_html: str, profile: Dict[str, Any
 
     def _filter_cj(m: re.Match[str]) -> str:
         raw_t = m.group(0)
-        if f'content="{cj_pid}"' in raw_t or f"content='{cj_pid}'" in raw_t:
+        if cj_pid and (f'content="{cj_pid}"' in raw_t or f"content='{cj_pid}'" in raw_t):
             return raw_t
         return ""
 
@@ -5742,14 +5786,15 @@ def _render_governance_document(
         desc = desc[:149].rsplit(" ", 1)[0].rstrip(".,;:") + "."
 
     li_id = str(profile.get("linkedin_company_id") or "").strip()
-    prop_key = str(profile.get("property_id") or "profithelm").strip().lower()
+    prop_key = str(profile.get("property_id") or "").strip().lower()
     wikidata_gov_map = {
         "lienbond": "https://www.wikidata.org/wiki/Q192161",
         "prexvo": "https://www.wikidata.org/wiki/Q633315",
         "gainhelm": "https://www.wikidata.org/wiki/Q166142",
         "profithelm": "https://www.wikidata.org/wiki/Q8161",
     }
-    same_as_links: List[str] = [wikidata_gov_map.get(prop_key, "https://www.wikidata.org/wiki/Q8161")]
+    generic_wikidata = str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397").strip()
+    same_as_links: List[str] = [wikidata_gov_map.get(prop_key, generic_wikidata)]
     if li_id:
         same_as_links.append(f"https://www.linkedin.com/company/{li_id}/")
     org_node: Dict[str, Any] = {
@@ -6114,10 +6159,16 @@ def build_governance_pages(
         f"<li>{html_lib.escape(str(d))}</li>" for d in (partner_offer.get("deliverables") or [])
     )
     default_partner_state = "DE" if prop_id == "gainhelm" else "CA"
-    firm_placeholder = (
-        "Vanguard Cyber Assurance CPA LLP"
-        if prop_id == "gainhelm"
-        else ("Summit Student Loan Advisory Group" if prop_id == "prexvo" else "Apex Tax & Advisory LLP")
+    partner_firm_placeholders = {
+        "gainhelm": "Vanguard Cyber Assurance CPA LLP",
+        "prexvo": "Summit Student Loan Advisory Group",
+        "lienbond": "Summit Surety & Bond Agency",
+        "profithelm": "Apex Tax & Advisory LLP",
+    }
+    brand_base = str(brand or "").strip() or "Partner"
+    firm_placeholder = partner_firm_placeholders.get(
+        prop_id,
+        f"{brand_base} Partner Advisory Group",
     )
     pages["partners"] = _render_governance_document(
         profile=profile,
@@ -7464,8 +7515,8 @@ def _scrub_tenant_personal_maker_and_inline_js(repo_path: Path, profile: Dict[st
             "profithelm": "https://www.wikidata.org/wiki/Q8161",
         }
         target_wikidata = wikidata_builder_map.get(
-            str(profile.get("property_id") or "profithelm"),
-            "https://www.wikidata.org/wiki/Q8161",
+            str(profile.get("property_id") or "").strip().lower(),
+            str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397"),
         )
         if "https://www.wikidata.org/wiki/Q499388" in b_new:
             b_new = b_new.replace("https://www.wikidata.org/wiki/Q499388", target_wikidata)
@@ -8488,14 +8539,20 @@ def audit_porcelain_shell_page(
         prof = get_porcelain_tenant_profile(property_id)
         head_m = re.search(r"<head\b[^>]*>([\s\S]*?)</head>", raw_html_in, flags=re.IGNORECASE)
         head_str = head_m.group(1) if head_m else ""
-        exp_imp = f"<meta name='impact-site-verification' value='{prof['impact_verification_uuid']}'>"
-        if exp_imp not in head_str:
-            post_issues_list.append(f"Missing canonical Impact verification meta tag in {rel_path}")
-        if (
-            "cj-promotional-property-id" not in head_str
-            or (f'content="{prof["cj_property_id"]}"' not in head_str and f"content='{prof['cj_property_id']}'" not in head_str)
-        ):
-            post_issues_list.append(f"Missing canonical CJ promotional property meta tag in {rel_path}")
+        if prof["impact_verification_uuid"]:
+            exp_imp = f"<meta name='impact-site-verification' value='{prof['impact_verification_uuid']}'>"
+            if exp_imp not in head_str:
+                post_issues_list.append(f"Missing canonical Impact verification meta tag in {rel_path}")
+        elif "impact-site-verification" in head_str.lower():
+            post_issues_list.append(f"Foreign Impact verification meta tag leaked into {rel_path}")
+        if prof["cj_property_id"]:
+            if (
+                "cj-promotional-property-id" not in head_str
+                or (f'content="{prof["cj_property_id"]}"' not in head_str and f"content='{prof['cj_property_id']}'" not in head_str)
+            ):
+                post_issues_list.append(f"Missing canonical CJ promotional property meta tag in {rel_path}")
+        elif "cj-promotional-property-id" in head_str.lower():
+            post_issues_list.append(f"Foreign CJ promotional property meta tag leaked into {rel_path}")
         if prof["sovrn_domain_key"] and f'content="{prof["sovrn_domain_key"]}"' not in head_str:
             post_issues_list.append(f"Missing Sovrn commerce domain key meta tag in {rel_path}")
         if not prof["sovrn_domain_key"] and "sovrn-commerce-domain-key" in head_str.lower():

@@ -719,7 +719,7 @@ def test_wave2_zero_cls_checkout_unavailable_and_cancelled_notice(tmp_path: Path
     """
     Executes render_runtime_synchronizer_js() in Node.js vm to prove:
     - checkout_status=unavailable and checkout_status=cancelled append #checkout-status-notice
-      at the BOTTOM of #post-calculation-upgrade-drawer (never prepending above the fold).
+      at the BOTTOM of #workpaper-unlock-card (never prepending above the fold).
     - Uses Porcelain warning tokens, role=alert/status, aria-live=polite, zero em/en-dashes,
       two .touch-target links (#checkout-status-retry-link & #checkout-status-free-pack-link).
     - Emits telemetry beacons checkout_status_unavailable / checkout_status_cancelled.
@@ -779,7 +779,7 @@ function runScenario(searchQs) {{
     return el;
   }}
 
-  const drawer = makeEl("div", "post-calculation-upgrade-drawer");
+  const drawer = makeEl("div", "workpaper-unlock-card");
   const existingHeading = makeEl("h3", "upgrade-drawer-heading");
   drawer.appendChild(existingHeading);
 

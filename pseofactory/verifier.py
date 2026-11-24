@@ -4957,18 +4957,84 @@ class MasterSEOVerifier:
         )
         prop_id = str(resolved_meta.get("property_id") or "").strip().lower()
         if not prop_id:
-            dom_low = str(self.domain or "").lower()
-            dir_low = (target.parent.name if target.name == "dist" else target.name).lower()
-            for cand in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-                if cand in dom_low or cand in dir_low:
-                    prop_id = cand
+            prop_id = str(getattr(self, "property_id", "") or "").strip().lower()
+
+        scanned_html = self._iter_html_files(target) if target.exists() else None
+        canon_host = ""
+        if not prop_id and scanned_html:
+            idx_path = target / "index.html"
+            sample_paths = ([idx_path] if idx_path.is_file() else []) + [
+                p for p in scanned_html[:10] if p != idx_path
+            ]
+            for html_p in sample_paths:
+                if not html_p.is_file():
+                    continue
+                sample_txt = self._read_cached_html(html_p)
+                prop_m = re.search(
+                    r'\bdata-property(?:-id)?=["\']([a-z0-9_-]+)["\']',
+                    sample_txt,
+                    re.IGNORECASE,
+                )
+                if prop_m:
+                    prop_id = prop_m.group(1).strip().lower()
                     break
-        repo_root_hint = self.repo_root or (target.parent if target.name == "dist" else None)
+                if not canon_host:
+                    canon_m = re.search(
+                        r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\']https?://([^/"\'>]+)',
+                        sample_txt,
+                        re.IGNORECASE,
+                    )
+                    if canon_m:
+                        canon_host = canon_m.group(1).strip().lower()
+
+        if not prop_id and canon_host:
+            canon_meta = _resolve_pseofactory_tenant_meta(
+                dist_dir=target if target.exists() else None,
+                repo_root=self.repo_root,
+                domain=canon_host,
+                brand_name=self.brand_name,
+            )
+            if canon_meta:
+                resolved_meta = canon_meta
+                prop_id = str(canon_meta.get("property_id") or "").strip().lower()
+
+        if not prop_id:
+            host_src = canon_host or str(self.domain or "").strip().lower()
+            if not host_src and getattr(self, "canonical_base", ""):
+                host_src = re.sub(r"^https?://", "", str(self.canonical_base).strip().lower()).split("/")[0]
+            if host_src:
+                host_clean = host_src.split(":")[0].strip().lower()
+                if host_clean.startswith("www."):
+                    host_clean = host_clean[4:]
+                host_label = host_clean.split(".")[0].strip()
+                if host_label:
+                    prop_id = host_label
+
+        if prop_id in ("profithelm-platform", "factory"):
+            prop_id = "profithelm"
+
+        if not prop_id:
+            return {
+                "status": "FAIL",
+                "gate": "check_monetization_and_funnel_hygiene_gate",
+                "property_id": "",
+                "pages_checked": 0,
+                "violations_count": 1,
+                "issues": [
+                    f"Unable to dynamically resolve tenant property_id from .pseofactory.json, HTML attributes, or canonical domain for {target}"
+                ],
+            }
+
+        repo_root_hint = (
+            self.repo_root
+            or (Path(resolved_meta["repo_root"]) if resolved_meta.get("repo_root") else None)
+            or (target.parent if target.name == "dist" else None)
+        )
         return verify_estate_monetization_and_funnel_hygiene(
             dist_dir=target,
-            property_id=prop_id or "profithelm",
+            property_id=prop_id,
             repo_root=repo_root_hint,
-            html_files=self._iter_html_files(target) if target.exists() else None,
+            html_files=scanned_html,
             read_html_fn=self._read_cached_html,
         )
 
@@ -11120,12 +11186,16 @@ def evaluate_x_like_2109835011772035193_capability_matrix(
     }
 
 
+MONETIZATION_VAULT_PATH = Path(__file__).resolve().parent / "monetization_vault.json"
+
+
 def verify_estate_monetization_and_funnel_hygiene(
     dist_dir: Union[str, Path],
     property_id: str = "profithelm",
     repo_root: Optional[Union[str, Path]] = None,
     html_files: Optional[List[Path]] = None,
     read_html_fn: Optional[Callable[[Union[str, Path]], str]] = None,
+    vault_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Deterministic monetization truth, 3-step funnel discipline, /partners/ ($299) presence,
@@ -11161,26 +11231,76 @@ def verify_estate_monetization_and_funnel_hygiene(
     allowed_page_prices = {str(quick_price_int), str(full_price_int)}
 
     # 1a. monetization_vault.json parity with pricing.py
-    vault_path = Path(__file__).resolve().parent / "monetization_vault.json"
+    # In synced tenant CI (_pseo_substrate), monetization_vault.json is excluded by design.
+    in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
+    eff_vault_path = Path(vault_path) if vault_path is not None else Path(MONETIZATION_VAULT_PATH)
     vault_data: Dict[str, Any] = {}
-    if vault_path.is_file():
+    run_vault_parity_check = True
+    if not eff_vault_path.is_file():
+        if in_synced_substrate and vault_path is None:
+            run_vault_parity_check = False
+        else:
+            issues.append(f"Missing monetization_vault.json at {eff_vault_path}")
+    else:
         try:
-            vault_data = json.loads(vault_path.read_text(encoding="utf-8"))
+            parsed_vault = json.loads(eff_vault_path.read_text(encoding="utf-8"))
+            if not isinstance(parsed_vault, dict):
+                issues.append("monetization_vault.json root payload must be a JSON object")
+            else:
+                vault_data = parsed_vault
         except Exception as exc:
             issues.append(f"Failed to parse monetization_vault.json: {exc}")
 
-    vault_products = vault_data.get("digital_products") if isinstance(vault_data, dict) else None
-    if isinstance(vault_products, dict):
+    vault_products_map: Dict[str, Dict[str, Any]] = {}
+    if run_vault_parity_check:
+        master_nets = vault_data.get("master_networks") if isinstance(vault_data, dict) else None
+        stripe_net = master_nets.get("stripe") if isinstance(master_nets, dict) else None
+        vault_products = stripe_net.get("digital_products") if isinstance(stripe_net, dict) else None
+
+        if not isinstance(vault_products, (dict, list)) or len(vault_products) == 0:
+            issues.append("monetization_vault.json missing or empty master_networks.stripe.digital_products")
+        elif isinstance(vault_products, dict):
+            for sku_k, v_item in vault_products.items():
+                if not isinstance(v_item, dict):
+                    issues.append(f"monetization_vault.json Stripe digital_products entry '{sku_k}' is not an object")
+                    continue
+                vault_products_map[str(sku_k)] = v_item
+        else:
+            for idx, v_item in enumerate(vault_products):
+                if not isinstance(v_item, dict) or not v_item.get("sku"):
+                    issues.append(f"monetization_vault.json Stripe digital_products list item[{idx}] missing 'sku'")
+                    continue
+                vault_products_map[str(v_item["sku"])] = v_item
+
+    if vault_products_map:
         ssot_products = get_all_digital_products()
         for sku_k, ssot_spec in ssot_products.items():
-            v_item = vault_products.get(sku_k)
+            v_item = vault_products_map.get(sku_k)
             if not isinstance(v_item, dict):
                 issues.append(f"monetization_vault.json missing canonical SKU '{sku_k}'")
                 continue
-            if int(v_item.get("price_cents") or -1) != int(ssot_spec["price_cents"]):
+            v_cents = int(v_item.get("price_cents") if v_item.get("price_cents") is not None else -1)
+            if v_cents != int(ssot_spec["price_cents"]):
                 issues.append(
                     f"Pricing parity drift in monetization_vault.json for '{sku_k}': "
                     f"got {v_item.get('price_cents')} cents, expected {ssot_spec['price_cents']}"
+                )
+            elif v_item.get("price_usd") is not None and abs(float(v_item["price_usd"]) - float(ssot_spec["price_usd"])) > 0.001:
+                issues.append(
+                    f"Pricing USD parity drift in monetization_vault.json for '{sku_k}': "
+                    f"got {v_item.get('price_usd')} USD, expected {ssot_spec['price_usd']}"
+                )
+
+        for v_sku, v_item in vault_products_map.items():
+            if v_sku in ssot_products:
+                continue
+            v_prop = str(v_item.get("property_id") or prop).strip().lower()
+            resolved_extra = resolve_offer_pricing(v_prop, sku=v_sku, repo_root=eff_repo_root if v_prop == prop else None)
+            v_cents = int(v_item.get("price_cents") if v_item.get("price_cents") is not None else -1)
+            if v_cents != int(resolved_extra["price_cents"]):
+                issues.append(
+                    f"Pricing parity drift in monetization_vault.json for '{v_sku}': "
+                    f"got {v_item.get('price_cents')} cents, expected {resolved_extra['price_cents']}"
                 )
 
     # 1b. partner_tracker.py parity with pricing.py
@@ -11194,13 +11314,21 @@ def verify_estate_monetization_and_funnel_hygiene(
                 tool_slug=str(sku_spec.get("default_slug") or "general"),
                 sku=sku_k,
             )
-            if int(pt_offer.get("offer_price_cents") or -1) != int(sku_spec["price_cents"]):
+            expected_spec = (
+                sku_spec
+                if pt_offer.get("audience_tier") == sku_spec.get("audience_tier")
+                or prop in ("profithelm", "prexvo", "gainhelm", "lienbond")
+                else resolve_offer_pricing(prop, sku=sku_k)
+            )
+            if int(pt_offer.get("offer_price_cents") or -1) != int(expected_spec["price_cents"]):
                 issues.append(
                     f"Pricing parity drift in partner_tracker.py for '{sku_k}': "
-                    f"got {pt_offer.get('offer_price_cents')} cents, expected {sku_spec['price_cents']}"
+                    f"got {pt_offer.get('offer_price_cents')} cents, expected {expected_spec['price_cents']}"
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            issues.append(
+                f"Failed to resolve partner_tracker.py offer parity for '{sku_k}' ({prop}): {exc}"
+            )
 
     # 1c. Compiled functions/api/lead-capture.js unit_amount & catalog parity
     if eff_repo_root is not None:

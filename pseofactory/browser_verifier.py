@@ -1515,6 +1515,7 @@ class UnifiedBrowserAuditor:
         "*unpkg.com*",
         "*jsdelivr.net*",
         "*cdnjs.cloudflare.com*",
+        "*challenges.cloudflare.com*",
         "*doubleclick.net*",
         "*facebook.net*",
         "*plausible.io*",
@@ -2473,7 +2474,7 @@ class UnifiedBrowserAuditor:
             post_calc_upgrade_drawer: { present: false, passed: true, preview_rendered: false, checkout_status: '', settlement_id: '', datapack_download_triggered: false },
             playbook_lead_capture_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
             partner_quote_intake_and_checkout: { present: false, passed: true, submission_state: '', partner_href: '', checkout_status: '', checkout_session_id: '' },
-            partner_registration_and_slot_checkout: { present: false, passed: true, submission_state: '', checkout_href: '', checkout_status: '', checkout_session_id: '', slot_price_usd: 0, focused_after_submit: false },
+            partner_registration_and_slot_checkout: { present: false, passed: true, turnstile_mounted: false, turnstile_mount_calls: 0, turnstile_mount_error: '', submission_state: '', checkout_href: '', checkout_status: '', checkout_session_id: '', slot_price_usd: 0, focused_after_submit: false },
             hash_navigation_and_focus: { present: false, passed: true, links_tested_count: 0, failures: [] },
             hero_state_and_range_anchor: { present: false, passed: true, range_anchor_present: false, synced_state: '', peer_sync_passed: true },
             validation_focus_and_error_states: { present: false, passed: true, forms_tested_count: 0, focus_failures: [] },
@@ -3068,7 +3069,7 @@ class UnifiedBrowserAuditor:
             }
         }
 
-        // 4. Dedicated /partners/ route ($299 Verified Partner Slot) POST + checkout trigger
+        // 4. Dedicated /partners/ route ($299 Verified Partner Slot) POST + Turnstile mount + checkout trigger
         const prForm = isPartnersRoute ? (document.getElementById('partner-registration-form') || document.querySelector('form.partner-registration-form')) : null;
         if (isPartnersRoute && !prForm) {
             report.partner_registration_and_slot_checkout.present = true;
@@ -3078,6 +3079,61 @@ class UnifiedBrowserAuditor:
             const prFirm = prForm.querySelector('input[name="firm_name"]');
             const prEmail = prForm.querySelector('input[type="email"], input[name="email"]');
             const prState = prForm.querySelector('select[name="state"]');
+
+            // Exercise Turnstile mount with deterministic stub (never hitting Cloudflare network)
+            window.__pseoTurnstileMountCalls = [];
+            window.__pseoTurnstileMountError = '';
+            window.turnstile = {
+                render: function(el, opts) {
+                    const id = 'ts_stub_' + String(window.__pseoTurnstileMountCalls.length + 1);
+                    window.__pseoTurnstileMountCalls.push({
+                        id: id,
+                        hasEl: Boolean(el),
+                        inBody: Boolean(el && document.body && document.body.contains(el)),
+                        hasSlotClass: Boolean(el && el.classList && el.classList.contains('cf-turnstile-slot')),
+                        sitekey: opts && opts.sitekey ? String(opts.sitekey) : ''
+                    });
+                    if (opts && typeof opts.callback === 'function') {
+                        opts.callback('synthetic_turnstile_token_ok');
+                    }
+                    return id;
+                },
+                reset: function() {},
+                remove: function() {}
+            };
+            window.__PSEO_EXERCISE_TURNSTILE_MOUNT__ = true;
+            window.__PSEO_FORCE_TURNSTILE_CONFIG__ = true;
+            window.__pseoLeadConfigPromise = null;
+            if (typeof window.__pseoWarmLeadFormsTurnstile === 'function') {
+                window.__pseoWarmLeadFormsTurnstile();
+            } else if (typeof window.__pseoMountRuntimeTurnstile === 'function') {
+                window.__pseoMountRuntimeTurnstile(prForm);
+            } else {
+                (prFirm || prForm).dispatchEvent(new Event('focusin', { bubbles: true }));
+            }
+            const tsSlot = prForm.querySelector('.cf-turnstile-slot');
+            for (let i = 0; i < 200; i++) {
+                if (
+                    tsSlot &&
+                    tsSlot.getAttribute('data-turnstile-mounted') === '1' &&
+                    Array.isArray(window.__pseoTurnstileMountCalls) &&
+                    window.__pseoTurnstileMountCalls.length > 0
+                ) break;
+                await new Promise(r => setTimeout(r, 5));
+            }
+            const tsMountCalls = Array.isArray(window.__pseoTurnstileMountCalls) ? window.__pseoTurnstileMountCalls : [];
+            report.partner_registration_and_slot_checkout.turnstile_mounted = Boolean(
+                tsSlot && tsSlot.getAttribute('data-turnstile-mounted') === '1'
+            );
+            report.partner_registration_and_slot_checkout.turnstile_mount_calls = tsMountCalls.length;
+            report.partner_registration_and_slot_checkout.turnstile_mount_error = String(window.__pseoTurnstileMountError || '');
+            const tsMountValid = (
+                report.partner_registration_and_slot_checkout.turnstile_mounted &&
+                tsMountCalls.length > 0 &&
+                !report.partner_registration_and_slot_checkout.turnstile_mount_error &&
+                tsMountCalls.some(c => c.inBody && c.hasSlotClass)
+            );
+
             if (prFirm) prFirm.value = 'Apex Statutory Advisory LLP';
             if (prEmail) prEmail.value = 'partner-desk@synthetic.pseofactory.test';
             if (prState && !prState.value) prState.value = 'CA';
@@ -3106,6 +3162,7 @@ class UnifiedBrowserAuditor:
                 ) || 0;
             }
             if (
+                !tsMountValid ||
                 report.partner_registration_and_slot_checkout.submission_state !== 'success' ||
                 !report.partner_registration_and_slot_checkout.checkout_href.includes('_verified_partner_slot') ||
                 report.partner_registration_and_slot_checkout.checkout_status !== 'checkout_session_ready' ||
