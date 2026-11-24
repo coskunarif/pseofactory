@@ -307,13 +307,14 @@ def _make_solid_png(width: int, height: int, textured: bool = False) -> bytes:
 
 
 @pytest.mark.host_estate
+@pytest.mark.xdist_group("ephemeral_chrome_workers")
 def test_cold_load_unsized_image_cls_not_silenced_by_reload_or_shared_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     Blocker #1 reproducer: an unsized 1200x600 <img> above <p> causes genuine cold-load CLS.
-    Adding deterministic 80ms network latency to hero.png proves BOTH / and /page2/ (sharing
+    Adding deterministic 250ms network latency to hero.png proves BOTH / and /page2/ (sharing
     the same image in the same worker) observe cold-load CLS > 0 and are never silenced by
     HTTP caching or reload confirmation.
     """
@@ -328,7 +329,7 @@ def test_cold_load_unsized_image_cls_not_silenced_by_reload_or_shared_worker(
 
     def _delayed_hero_get(self):
         if "hero.png" in (getattr(self, "path", "") or ""):
-            time.sleep(0.08)
+            time.sleep(0.25)
         return orig_do_get(self)
 
     monkeypatch.setattr(QuietHTTPRequestHandler, "do_GET", _delayed_hero_get)
