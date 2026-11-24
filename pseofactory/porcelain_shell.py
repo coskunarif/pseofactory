@@ -3261,6 +3261,16 @@ details.faq-accordion > summary::-webkit-details-marker {{
   border-top: 1px solid var(--border-hairline);
 }}
 
+.serp-reference-details {{
+  margin-top: 1.125rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-hairline);
+}}
+
+.serp-reference-details > h3 {{
+  margin: 0 0 0.5rem;
+}}
+
 /* Tables, Scenarios, Overlays, Affiliates & Topic Clusters */
 .comparison-table,
 .data-table,
