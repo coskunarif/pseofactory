@@ -1610,6 +1610,118 @@ def simulate_crawler_traversal(
 # Master SEO Verifier Class
 # =============================================================================
 
+def _read_pseofactory_marker(marker_path: Path) -> Dict[str, str]:
+    """Reads normalized tenant metadata from a .pseofactory.json marker file."""
+    if not marker_path.is_file():
+        return {}
+    try:
+        data = json.loads(marker_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    pid = str(data.get("property_id") or "").strip().lower()
+    if pid in ("profithelm-platform", "factory"):
+        pid = "profithelm"
+    dom = str(data.get("domain") or "").strip()
+    canon = str(data.get("canonical_base") or (f"https://{dom}" if dom else "")).strip().rstrip("/")
+    bname = str(data.get("brand_name") or "").strip()
+    dist_rel = str(data.get("dist_dir") or "dist").strip() or "dist"
+    return {
+        "property_id": pid,
+        "domain": dom,
+        "canonical_base": canon,
+        "brand_name": bname,
+        "dist_dir": dist_rel,
+    }
+
+
+def _resolve_pseofactory_tenant_meta(
+    dist_dir: Optional[Path] = None,
+    repo_root: Optional[Path] = None,
+    domain: str = "",
+    brand_name: str = "",
+    property_id: str = "",
+) -> Dict[str, str]:
+    """
+    Dynamically resolves tenant metadata (property_id, domain, canonical_base, brand_name, repo_root)
+    from .pseofactory.json markers across all active tenants instead of hardcoded 4-tenant checks.
+    Zero em-dashes. Zero en-dashes.
+    """
+    candidate_roots: List[Path] = []
+    if repo_root is not None:
+        candidate_roots.append(Path(repo_root))
+    if dist_dir is not None:
+        d_path = Path(dist_dir)
+        candidate_roots.append(d_path.parent)
+        candidate_roots.append(d_path)
+    for root in candidate_roots:
+        meta = _read_pseofactory_marker(root / ".pseofactory.json")
+        if meta and (meta.get("domain") or meta.get("property_id")):
+            meta["repo_root"] = str(root.resolve())
+            return meta
+
+    from pseofactory.impact_planner import discover_active_tenants
+
+    ws_root = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+    norm_prop = (property_id or "").strip().lower()
+    if norm_prop in ("profithelm-platform", "factory"):
+        norm_prop = "profithelm"
+    norm_dom = (domain or "").strip().lower()
+    norm_brand = (brand_name or "").strip().lower()
+
+    resolved_dist: Optional[Path] = None
+    dist_names: Set[str] = set()
+    if dist_dir is not None:
+        d_path = Path(dist_dir)
+        try:
+            resolved_dist = d_path.resolve()
+        except OSError:
+            resolved_dist = d_path
+        dist_names.add(d_path.name.lower())
+        if d_path.parent:
+            dist_names.add(d_path.parent.name.lower())
+
+    for pid, t_repo in discover_active_tenants(ws_root):
+        meta = _read_pseofactory_marker(t_repo / ".pseofactory.json")
+        if not meta:
+            meta = {
+                "property_id": pid,
+                "domain": f"{pid}.com",
+                "canonical_base": f"https://{pid}.com",
+                "brand_name": pid.capitalize(),
+                "dist_dir": "dist",
+            }
+        m_pid = meta.get("property_id") or pid
+        m_dom = meta.get("domain", "").lower()
+        m_brand = meta.get("brand_name", "").lower()
+        t_repo_name = t_repo.name.lower()
+
+        matched = False
+        if norm_prop and norm_prop == m_pid:
+            matched = True
+        elif resolved_dist is not None:
+            try:
+                t_res = t_repo.resolve()
+                if resolved_dist == t_res or resolved_dist.is_relative_to(t_res):
+                    matched = True
+            except OSError:
+                pass
+            if not matched and (m_pid in dist_names or t_repo_name in dist_names):
+                matched = True
+        if not matched and norm_dom and m_dom and norm_dom == m_dom:
+            matched = True
+        if not matched and norm_brand and m_brand and norm_brand == m_brand:
+            matched = True
+
+        if matched:
+            meta["property_id"] = m_pid
+            meta["repo_root"] = str(t_repo.resolve())
+            return meta
+
+    return {}
+
+
 class MasterSEOVerifier:
     """
     Parametric Master SEO & GEO Audit Checklist Verification Engine.
@@ -1669,6 +1781,21 @@ class MasterSEOVerifier:
             if dist_dir is not None
             else Path(os.environ.get("FACTORY_DIST_DIR", "."))
         )
+        has_explicit_dist = dist_dir is not None or bool(os.environ.get("FACTORY_DIST_DIR"))
+        resolved_meta = _resolve_pseofactory_tenant_meta(
+            dist_dir=self.dist_dir if has_explicit_dist else None,
+            repo_root=self.repo_root,
+            domain=self.domain,
+            brand_name=self.brand_name,
+        )
+        if not self.domain and resolved_meta.get("domain"):
+            self.domain = resolved_meta["domain"]
+            self.brand_domain = self.domain
+        if not self.canonical_base and resolved_meta.get("canonical_base"):
+            self.canonical_base = resolved_meta["canonical_base"].rstrip("/")
+        if not self.brand_name and resolved_meta.get("brand_name"):
+            self.brand_name = resolved_meta["brand_name"]
+
         self.tools = list(tools) if tools else []
         self.min_manifests = min_manifests
         self.strict_robots = strict_robots
@@ -1713,39 +1840,21 @@ class MasterSEOVerifier:
                     from pseofactory.maintenance import RetroReflectionEngine
                     res_d = self.dist_dir.resolve()
                     dist_low = res_d.parent.name.lower() if res_d.name.lower() == "dist" else res_d.name.lower()
-                    if "lienbond" in dist_low:
-                        prop_id = "lienbond"
-                    elif "gainhelm" in dist_low:
-                        prop_id = "gainhelm"
-                    elif "profithelm" in dist_low:
-                        prop_id = "profithelm"
-                    elif "prexvo" in dist_low:
-                        prop_id = "prexvo"
-                    elif "prexvo" in str(self.domain).lower() or "prexvo" in str(self.brand_name).lower():
-                        prop_id = "prexvo"
-                    elif "gainhelm" in str(self.domain).lower() or "gainhelm" in str(self.brand_name).lower():
-                        prop_id = "gainhelm"
-                    elif "lienbond" in str(self.domain).lower() or "lienbond" in str(self.brand_name).lower():
-                        prop_id = "lienbond"
-                    else:
-                        prop_id = "profithelm"
+                    prop_id = resolved_meta.get("property_id", "")
+                    if not prop_id:
+                        if "lienbond" in dist_low or "lienbond" in str(self.domain).lower() or "lienbond" in str(self.brand_name).lower():
+                            prop_id = "lienbond"
+                        elif "gainhelm" in dist_low or "gainhelm" in str(self.domain).lower() or "gainhelm" in str(self.brand_name).lower():
+                            prop_id = "gainhelm"
+                        elif "prexvo" in dist_low or "prexvo" in str(self.domain).lower() or "prexvo" in str(self.brand_name).lower():
+                            prop_id = "prexvo"
+                        else:
+                            prop_id = "profithelm"
                     safe_canon = (
-                        "https://prexvo.com"
-                        if prop_id == "prexvo"
-                        else (
-                            "https://gainhelm.com"
-                            if prop_id == "gainhelm"
-                            else ("https://lienbond.com" if prop_id == "lienbond" else "https://profithelm.com")
-                        )
+                        self.canonical_base
+                        or resolved_meta.get("canonical_base")
+                        or (f"https://{self.domain}".rstrip("/") if self.domain else f"https://{prop_id}.com")
                     )
-                    if prop_id == "lienbond":
-                        if not self.domain:
-                            self.domain = "lienbond.com"
-                            self.brand_domain = "lienbond.com"
-                        if not self.canonical_base:
-                            self.canonical_base = "https://lienbond.com"
-                        if not self.brand_name:
-                            self.brand_name = "LienBond"
                     if self.allow_mutations:
                         RetroReflectionEngine.sync_tenant_publisher_prerequisites(
                             self.dist_dir,
@@ -7632,7 +7741,27 @@ def _resolve_tenant_dist_and_domain(
     dist_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[str, str, Path]:
     """Resolves normalized tenant ID, canonical domain, and dist directory path."""
-    prop = (property_id or "profithelm").strip().lower()
+    raw_prop = (property_id or "profithelm").strip().lower()
+    if raw_prop in ("profithelm-platform", "factory"):
+        raw_prop = "profithelm"
+    meta = _resolve_pseofactory_tenant_meta(
+        dist_dir=Path(dist_dir) if dist_dir is not None else None,
+        property_id=raw_prop,
+    )
+    if meta:
+        prop = meta.get("property_id") or raw_prop
+        domain = meta.get("canonical_base") or (
+            f"https://{meta['domain']}" if meta.get("domain") else f"https://{prop}.com"
+        )
+        if dist_dir is not None:
+            resolved_dist = Path(dist_dir).resolve()
+        elif meta.get("repo_root"):
+            resolved_dist = (Path(meta["repo_root"]) / (meta.get("dist_dir") or "dist")).resolve()
+        else:
+            resolved_dist = Path(f"/home/ubuntuadmin/projects/{prop}/dist").resolve()
+        return prop, domain.rstrip("/"), resolved_dist
+
+    prop = raw_prop
     if prop == "prexvo":
         domain = "https://prexvo.com"
         default_dist = Path("/home/ubuntuadmin/projects/prexvo/dist")
@@ -7821,11 +7950,6 @@ def audit_estate_technical_seo_and_cannibalization(
             cross_tenant_leaks.append(f"{rel}: foreign tokens {leaks}")
         if fact_store.get_profile(prop) is not None:
             ok_claim, f_viol = fact_store.verify_claim(prop, content, context=rel)
-            if not ok_claim and dist_dir is None:
-                from pseofactory.maintenance import RetroReflectionEngine
-                RetroReflectionEngine.retrofit_estate(d_path, prop)
-                content = f.read_text(encoding="utf-8", errors="ignore")
-                ok_claim, f_viol = fact_store.verify_claim(prop, content, context=rel)
             if not ok_claim:
                 cross_tenant_leaks.extend(f"{rel}: {v}" for v in f_viol)
 
@@ -8077,10 +8201,6 @@ def evaluate_x_like_2109219955271196726_capability_matrix(
     if include_live_estate_audit:
         for t_id in _discover_live_audit_tenants():
             rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
-            if not rep.get("passed", False):
-                from pseofactory.maintenance import RetroReflectionEngine
-                RetroReflectionEngine.retrofit_estate(rep["dist_dir"], t_id)
-                rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             tenant_reports[t_id] = rep
             if not rep["passed"]:
                 all_passed = False
@@ -8581,10 +8701,6 @@ def evaluate_x_like_2102328294410461564_capability_matrix(
         }
         for t_id in _discover_live_audit_tenants():
             est_rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
-            if not est_rep.get("passed", False):
-                from pseofactory.maintenance import RetroReflectionEngine
-                RetroReflectionEngine.retrofit_estate(est_rep["dist_dir"], t_id)
-                est_rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             seed_q = sample_seeds.get(t_id, f"{t_id} compliance cost calculator")
             kw_std = expand_commercial_and_question_keywords(
                 seed_query=seed_q,
@@ -9872,18 +9988,10 @@ def evaluate_x_like_2108272246804648049_capability_matrix(
     )
 
     if include_live_tenant_check:
-        for t_id, r_path in (
-            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist")),
-            ("prexvo", Path("/home/ubuntuadmin/projects/prexvo/dist")),
-            ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm/dist")),
-            ("lienbond", Path("/home/ubuntuadmin/projects/lienbond/dist")),
-        ):
+        for t_id in _discover_live_audit_tenants():
+            _, _, r_path = _resolve_tenant_dist_and_domain(t_id)
             if r_path.is_dir():
                 rep = audit_free_tool_seo_and_instant_ux_readiness(dist_dir=r_path, property_id=t_id)
-                if not rep.get("passed", False):
-                    from pseofactory.maintenance import RetroReflectionEngine
-                    RetroReflectionEngine.retrofit_estate(dist_dir=r_path, property_id=t_id)
-                    rep = audit_free_tool_seo_and_instant_ux_readiness(dist_dir=r_path, property_id=t_id)
                 tenant_readiness[t_id] = rep
                 if not rep.get("passed", False):
                     all_passed = False
@@ -10358,10 +10466,6 @@ def evaluate_x_like_2109835011772035193_capability_matrix(
     if include_live_estate_audit:
         for t_id in _discover_live_audit_tenants():
             rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
-            if not rep.get("passed", False):
-                from pseofactory.maintenance import RetroReflectionEngine
-                RetroReflectionEngine.retrofit_estate(rep["dist_dir"], t_id)
-                rep = audit_estate_technical_seo_and_cannibalization(property_id=t_id)
             rub = score_estate_jev_seo_rubric(dist_dir=rep["dist_dir"], property_id=t_id)
             tenant_reports[t_id] = rep
             rubric_reports[t_id] = rub

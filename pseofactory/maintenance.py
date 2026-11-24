@@ -3022,52 +3022,77 @@ class AssetIntegrityEvaluator:
     @classmethod
     def _compute_engine_fingerprint(cls, adapter: Optional[PropertyAdapter] = None) -> str:
         """
-        Computes composite cryptographic fingerprint across engine logic,
-        statutory fact stores, audit stages, compilers, distributors, and tenant formula engines.
+        Computes composite cryptographic fingerprint across the full pseofactory/
+        Python source tree and dynamically discovered tenant formula/build engines.
         Zero em-dashes. Zero en-dashes.
         """
+        from pseofactory.impact_planner import discover_active_tenants
+
         pkg_root = Path(__file__).resolve().parent
-        sig_parts = []
-        core_files = (
-            "maintenance.py",
-            "contracts.py",
-            "visual_primitives.py",
-            "tenant_facts.py",
-            "audit.py",
-            "compiler.py",
-            "distributor.py",
-        )
-        for rel_eng in core_files:
-            efp = pkg_root / rel_eng
-            if efp.is_file():
+        sig_parts: List[str] = []
+        for efp in sorted(pkg_root.rglob("*.py")):
+            if "__pycache__" in efp.parts or efp.name.endswith(".pyc"):
+                continue
+            try:
+                rel_eng = efp.relative_to(pkg_root).as_posix()
                 h = hashlib.sha256(efp.read_bytes()).hexdigest()[:16]
                 sig_parts.append(f"{rel_eng}:{h}")
+            except Exception:
+                pass
 
         projects_root = Path("/home/ubuntuadmin/projects")
-        formula_candidates = [
-            projects_root / "gainhelm" / "gainhelm" / "engine" / "compliance_formulas.py",
-            projects_root / "prexvo" / "prexvo" / "engine" / "repayment_formulas.py",
-            projects_root / "profithelm-platform" / "profithelm" / "data" / "statutory.db",
-            projects_root / "lienbond" / "lienbond" / "builder.py",
-            projects_root / "lienbond" / "lienbond" / "_pseo_porcelain.py",
-        ]
-        ph_engine_dir = projects_root / "profithelm-platform" / "profithelm" / "engine"
-        if ph_engine_dir.is_dir():
-            for pef in sorted(ph_engine_dir.glob("*.py")):
-                formula_candidates.append(pef)
-        lb_engine_dir = projects_root / "lienbond" / "lienbond" / "engine"
-        if lb_engine_dir.is_dir():
-            for lbf in sorted(lb_engine_dir.glob("*.py")):
-                formula_candidates.append(lbf)
+        tenant_entries: List[Tuple[str, Path]] = discover_active_tenants(projects_root)
+        seen_repos: Set[Path] = set()
+        if adapter is not None:
+            ad_repo = getattr(adapter, "repo_path", None)
+            if not ad_repo and getattr(adapter, "dist_dir", None):
+                ad_repo = Path(adapter.dist_dir).parent
+            if ad_repo:
+                ad_repo_path = Path(ad_repo)
+                ad_pid = (getattr(adapter, "property_id", "") or ad_repo_path.name).strip().lower()
+                if ad_repo_path.is_dir():
+                    tenant_entries = list(tenant_entries) + [(ad_pid, ad_repo_path)]
 
-        for fc in formula_candidates:
-            if fc.is_file():
+        for pid, repo_dir in tenant_entries:
+            try:
+                resolved_repo = repo_dir.resolve()
+            except OSError:
+                resolved_repo = repo_dir
+            if resolved_repo in seen_repos or not repo_dir.is_dir():
+                continue
+            seen_repos.add(resolved_repo)
+
+            pkg_name = pid
+            marker = repo_dir / ".pseofactory.json"
+            if marker.is_file():
                 try:
-                    h = hashlib.sha256(fc.read_bytes()).hexdigest()[:16]
-                    label = f"{fc.parent.name}/{fc.name}" if fc.parent.name == "lienbond" else fc.name
-                    sig_parts.append(f"{label}:{h}")
+                    m_data = json.loads(marker.read_text(encoding="utf-8"))
+                    if isinstance(m_data, dict) and m_data.get("package_name"):
+                        pkg_name = str(m_data["package_name"]).strip()
+                    sig_parts.append(
+                        f"{pid}/.pseofactory.json:{hashlib.sha256(marker.read_bytes()).hexdigest()[:16]}"
+                    )
                 except Exception:
                     pass
+
+            pkg_dir = repo_dir / pkg_name
+            candidates: List[Path] = [
+                pkg_dir / "builder.py",
+                pkg_dir / "_pseo_porcelain.py",
+                pkg_dir / "data" / "statutory.db",
+            ]
+            engine_dir = pkg_dir / "engine"
+            if engine_dir.is_dir():
+                candidates.extend(sorted(engine_dir.glob("*.py")))
+
+            for fc in candidates:
+                if fc.is_file():
+                    try:
+                        h = hashlib.sha256(fc.read_bytes()).hexdigest()[:16]
+                        label = f"{pid}/{fc.name}" if fc.parent == pkg_dir else f"{pid}/{fc.parent.name}/{fc.name}"
+                        sig_parts.append(f"{label}:{h}")
+                    except Exception:
+                        pass
 
         return "|".join(sig_parts)
 
@@ -5295,6 +5320,7 @@ class MaintenanceLifecycle:
             # Stage 10 -> Preflight Airlock: Crawl Budget Airlock Inspection
             indexing_status_val: Optional[str] = None
             pre_report = None
+            airlock_failed = False
             try:
                 from pseofactory.indexing.preflight import IndexingPreflightEngine
                 preflight_engine = IndexingPreflightEngine(
@@ -5309,7 +5335,8 @@ class MaintenanceLifecycle:
                 indexing_status_val = "AIRLOCK_PASSED"
             except Exception as idx_err:
                 print(f"Warning: Indexing airlock stage error for '{adapter.property_id}': {idx_err}")
-                indexing_status_val = "DRY_RUN" if dry_run else "SUCCESS"
+                airlock_failed = True
+                indexing_status_val = "FAILED"
 
             gitops_status_val = "SKIPPED"
             dist_status_val = "SKIPPED"
@@ -5422,7 +5449,9 @@ class MaintenanceLifecycle:
 
             # Post-Deployment Push Indexing Dispatch (triggered after shipper edge verification passes)
             try:
-                if (enable_gitops and gitops_status_val in ("SUCCESS", "DRY_RUN")) or (not enable_gitops):
+                if not airlock_failed and (
+                    (enable_gitops and gitops_status_val in ("SUCCESS", "DRY_RUN")) or (not enable_gitops)
+                ):
                     if self.indexer is not None:
                         indexer_instance = self.indexer
                     else:

@@ -6,6 +6,7 @@ search essentials, and spam prevention policies across programmatic calculation 
 Zero em-dashes. Zero en-dashes.
 """
 
+import html as html_lib
 import json
 import re
 import subprocess
@@ -313,12 +314,16 @@ class GoogleSearchCentralComplianceMatrix:
 
         # GSC-SPAM-02: Thin Content & Template Integrity (spaced format strings & NaN)
         spam02_violations: List[str] = []
-        spaced_fmt_matches = re.findall(r"\{\s*[a-zA-Z0-9_]+\s*\}", html)
+        spaced_fmt_matches = [
+            m
+            for m in re.findall(r"\{\s*[a-zA-Z0-9_]+\s*\}", no_scripts_html)
+            if "search_term_string" not in m
+        ]
         if spaced_fmt_matches:
             spam02_violations.append(
                 f"Unrendered format strings detected in HTML: {spaced_fmt_matches}"
             )
-        jinja_matches = re.findall(r"\{\{.*?\}\}", html)
+        jinja_matches = re.findall(r"\{\{.*?\}\}", no_scripts_html)
         if jinja_matches:
             spam02_violations.append(
                 f"Unrendered template brackets detected in HTML: {jinja_matches}"
@@ -344,6 +349,10 @@ class GoogleSearchCentralComplianceMatrix:
 
         # GSC-SPAM-03: Structured Data Policies & Hidden Markup
         spam03_violations: List[str] = []
+        unescaped_no_scripts = html_lib.unescape(no_scripts_html)
+        plain_no_scripts = " ".join(
+            html_lib.unescape(re.sub(r"<[^>]+>", " ", no_scripts_html)).split()
+        )
         try:
             jsonld_blocks = assert_valid_jsonld(html, context=f"ComplianceMatrix '{slug}'")
             has_faq = False
@@ -355,19 +364,34 @@ class GoogleSearchCentralComplianceMatrix:
                         spam03_violations.append("FAQPage JSON-LD schema has empty mainEntity")
                     for q_item in main_entity:
                         if isinstance(q_item, dict):
-                            q_name = q_item.get("name", "").strip()
+                            q_name = html_lib.unescape(str(q_item.get("name", ""))).strip()
                             ans_obj = q_item.get("acceptedAnswer", {})
-                            a_text = ans_obj.get("text", "").strip() if isinstance(ans_obj, dict) else ""
-                            if q_name and q_name not in no_scripts_html:
+                            a_text = (
+                                html_lib.unescape(str(ans_obj.get("text", ""))).strip()
+                                if isinstance(ans_obj, dict)
+                                else ""
+                            )
+                            q_norm = " ".join(q_name.split())
+                            a_norm = " ".join(a_text.split())
+                            if q_name and q_name not in unescaped_no_scripts and q_norm not in plain_no_scripts:
                                 spam03_violations.append(
                                     f"FAQPage question '{q_name}' is not rendered in visible HTML body"
                                 )
-                            if a_text and a_text not in no_scripts_html:
+                            if a_text and a_text not in unescaped_no_scripts and a_norm not in plain_no_scripts:
                                 spam03_violations.append(
                                     f"FAQPage answer text is not rendered in visible HTML body: '{a_text[:60]}...'"
                                 )
-                    # Verify presence of visible interactive FAQ accordion
-                    faq_details = soup.find_all("details", class_=lambda c: c and "faq-accordion" in c)
+                    # Verify presence of visible interactive FAQ accordion (legacy faq-accordion or Porcelain faq-item/faq-card)
+                    faq_details = soup.find_all(
+                        "details",
+                        class_=lambda c: bool(
+                            c
+                            and any(
+                                cls in (c if isinstance(c, (list, tuple)) else str(c).split())
+                                for cls in ("faq-accordion", "faq-item", "faq-card")
+                            )
+                        ),
+                    )
                     if len(faq_details) == 0 and len(main_entity) > 0:
                         spam03_violations.append(
                             "FAQPage schema exists but 0 visible <details class=\"faq-accordion\"> elements rendered"
@@ -451,14 +475,30 @@ class GoogleSearchCentralComplianceMatrix:
         blocking_violations.extend(help02_violations)
 
         # GSC-HELP-03: Direct Query Answer Match
+        help03_violations: List[str] = []
+        qa_el = soup.select_one(".quick-answer")
+        if qa_el is None:
+            help03_violations.append("Missing required .quick-answer executive takeaway block")
+        else:
+            qa_words = [
+                w for w in qa_el.get_text(" ", strip=True).split()
+                if re.search(r"[a-zA-Z0-9]", w)
+            ]
+            qa_word_count = len(qa_words)
+            if qa_word_count < 40 or qa_word_count > 60:
+                help03_violations.append(
+                    f".quick-answer word count {qa_word_count} outside 40-60 word range"
+                )
+
         verdicts["GSC-HELP-03"] = ComplianceVerdict(
             principle_id="GSC-HELP-03",
-            status=ComplianceStatus.PASS,
-            score=1.0,
+            status=ComplianceStatus.PASS if not help03_violations else ComplianceStatus.FAIL,
+            score=1.0 if not help03_violations else 0.0,
             code_seam="pseofactory.compliance:GSC-HELP-03",
-            evidence="Above-the-fold executive takeaway presence verified",
-            violations=[],
+            evidence="Above-the-fold .quick-answer presence and 40-60 word count verified",
+            violations=help03_violations,
         )
+        blocking_violations.extend(help03_violations)
 
         # GSC-SPAM-01: Single asset doorway placeholder (evaluated in corpus)
         verdicts["GSC-SPAM-01"] = ComplianceVerdict(
