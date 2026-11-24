@@ -11,7 +11,9 @@ import os
 import sys
 import re
 import collections
+import concurrent.futures
 import inspect
+import multiprocessing
 import urllib.parse
 import fcntl
 import json
@@ -2982,6 +2984,56 @@ def _collect_adapter_asset_hashes(adapter: Any) -> Dict[str, str]:
     return asset_hashes
 
 
+_FORK_EVAL_CTX: Optional[Tuple[Any, ...]] = None
+
+
+def _fork_audit_one_asset(asset_path: Path) -> Tuple[Optional[AssetDriftRecord], Optional[Tuple[str, str, float, int]], Optional[Tuple[str, str, int, int, int]], Optional[str]]:
+    """Fork-worker helper executing AssetIntegrityEvaluator.audit_asset and returning cache metadata for parent."""
+    evaluator, adapter, ledger, engine_drifted, degraded_overlays, eng_sig_hash, dist_snapshot = _FORK_EVAL_CTX
+    rec = evaluator.audit_asset(
+        asset_path,
+        adapter=adapter,
+        ledger=ledger,
+        engine_drifted=engine_drifted,
+        degraded_overlays=degraded_overlays,
+        expected_eng_sig=eng_sig_hash,
+        dist_snapshot=dist_snapshot,
+    )
+    p = Path(asset_path).resolve()
+    try:
+        st = p.stat()
+        ck = ((adapter.property_id or "").strip().lower(), str(p), st.st_mtime, int(st.st_size))
+        sk = ((adapter.property_id or "").strip().lower(), str(p), int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size))
+    except OSError:
+        ck, sk = None, None
+    fp = None
+    if rec is not None:
+        fp = rec.current_hash
+    elif ck is not None:
+        fp = evaluator._fingerprint_cache.get(ck)
+    return rec, ck, sk, fp
+
+
+_FORK_ESTATE_FN: Optional[Callable[[Tuple[str, Path, str]], Tuple[str, bool, Optional[List[str]]]]] = None
+
+
+def _is_single_threaded_for_fork() -> bool:
+    """Returns True only when the current OS process has a single thread (safe for POSIX fork)."""
+    if os.name != "posix":
+        return False
+    if threading.current_thread() is not threading.main_thread() or threading.active_count() != 1:
+        return False
+    try:
+        return len(os.listdir("/proc/self/task")) == 1
+    except OSError:
+        return False
+
+
+def _fork_audit_estate_page(item: Tuple[str, Path, str]) -> Tuple[str, bool, Optional[List[str]]]:
+    """Fork-worker helper executing a single RetroReflectionEngine.audit_estate page evaluation."""
+    return _FORK_ESTATE_FN(item)
+
+
 class AssetIntegrityEvaluator:
     """
     Audits compiled static assets against engine baselines:
@@ -2999,6 +3051,9 @@ class AssetIntegrityEvaluator:
     _AUDIT_CACHE_LOCK = threading.RLock()
     _GLOBAL_AUDIT_CACHE: Dict[Tuple[str, str, float, int], Optional[AssetDriftRecord]] = {}
     _GLOBAL_FINGERPRINT_CACHE: Dict[Tuple[str, str, float, int], str] = {}
+    _GLOBAL_STAT_FAST_CACHE: Dict[Tuple[str, str, int, int, int], Tuple[str, str]] = {}
+    _ENGINE_FP_FILE_LOCK = threading.Lock()
+    _ENGINE_FP_FILE_CACHE: "collections.OrderedDict[Tuple[str, int, int, int], str]" = collections.OrderedDict()
 
     def __init__(
         self,
@@ -3016,8 +3071,28 @@ class AssetIntegrityEvaluator:
         self._audit_cache: Dict[Tuple[str, str, float, int], Optional[AssetDriftRecord]] = self._GLOBAL_AUDIT_CACHE
         self._asset_audit_cache = self._audit_cache
         self._fingerprint_cache: Dict[Tuple[str, str, float, int], str] = self._GLOBAL_FINGERPRINT_CACHE
+        self._stat_fast_cache: Dict[Tuple[str, str, int, int, int], Tuple[str, str]] = self._GLOBAL_STAT_FAST_CACHE
         self._seo_verifier: Optional[Any] = None
         self._seo_verifiers: Dict[str, Any] = {}
+
+    @classmethod
+    def _hash_engine_fp_file(cls, file_path: Path) -> str:
+        """Returns 16-char SHA-256 prefix for an engine file, memoized by (resolved_path, mtime_ns, ctime_ns, size)."""
+        resolved = file_path.resolve()
+        st = resolved.stat()
+        ck = (str(resolved), int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size))
+        with cls._ENGINE_FP_FILE_LOCK:
+            cached = cls._ENGINE_FP_FILE_CACHE.get(ck)
+            if cached is not None:
+                cls._ENGINE_FP_FILE_CACHE.move_to_end(ck)
+                return cached
+        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16]
+        with cls._ENGINE_FP_FILE_LOCK:
+            cls._ENGINE_FP_FILE_CACHE[ck] = digest
+            cls._ENGINE_FP_FILE_CACHE.move_to_end(ck)
+            while len(cls._ENGINE_FP_FILE_CACHE) > 4096:
+                cls._ENGINE_FP_FILE_CACHE.popitem(last=False)
+        return digest
 
     @classmethod
     def _compute_engine_fingerprint(cls, adapter: Optional[PropertyAdapter] = None) -> str:
@@ -3035,7 +3110,7 @@ class AssetIntegrityEvaluator:
                 continue
             try:
                 rel_eng = efp.relative_to(pkg_root).as_posix()
-                h = hashlib.sha256(efp.read_bytes()).hexdigest()[:16]
+                h = cls._hash_engine_fp_file(efp)
                 sig_parts.append(f"{rel_eng}:{h}")
             except Exception:
                 pass
@@ -3070,7 +3145,7 @@ class AssetIntegrityEvaluator:
                     if isinstance(m_data, dict) and m_data.get("package_name"):
                         pkg_name = str(m_data["package_name"]).strip()
                     sig_parts.append(
-                        f"{pid}/.pseofactory.json:{hashlib.sha256(marker.read_bytes()).hexdigest()[:16]}"
+                        f"{pid}/.pseofactory.json:{cls._hash_engine_fp_file(marker)}"
                     )
                 except Exception:
                     pass
@@ -3088,7 +3163,7 @@ class AssetIntegrityEvaluator:
             for fc in candidates:
                 if fc.is_file():
                     try:
-                        h = hashlib.sha256(fc.read_bytes()).hexdigest()[:16]
+                        h = cls._hash_engine_fp_file(fc)
                         label = f"{pid}/{fc.name}" if fc.parent == pkg_dir else f"{pid}/{fc.parent.name}/{fc.name}"
                         sig_parts.append(f"{label}:{h}")
                     except Exception:
@@ -3117,6 +3192,8 @@ class AssetIntegrityEvaluator:
         ledger: Optional[Dict[str, Any]] = None,
         engine_drifted: bool = False,
         degraded_overlays: Optional[Dict[str, Dict[str, Any]]] = None,
+        expected_eng_sig: Optional[str] = None,
+        dist_snapshot: Optional[Any] = None,
     ) -> Optional[AssetDriftRecord]:
         """
         Audits a single compiled asset against all structural and property contracts.
@@ -3141,12 +3218,13 @@ class AssetIntegrityEvaluator:
 
         try:
             st = p.stat()
-            mtime, size = st.st_mtime, st.st_size
+            mtime, mtime_ns, ctime_ns, size = st.st_mtime, int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size)
         except OSError:
-            mtime, size = None, None
+            mtime, mtime_ns, ctime_ns, size = None, None, None, None
 
         prop_cache_id = (adapter.property_id or "").strip().lower()
         cache_key = (prop_cache_id, str(p), mtime, size) if mtime is not None else None
+        stat_key = (prop_cache_id, str(p), mtime_ns, ctime_ns, size) if mtime_ns is not None else None
         rel_key = (
             p.relative_to(adapter.dist_dir).as_posix()
             if p.is_relative_to(adapter.dist_dir)
@@ -3157,32 +3235,54 @@ class AssetIntegrityEvaluator:
         if ledger and "assets" in ledger:
             recorded_hash = ledger["assets"].get(rel_key)
 
-        # Differential cache check for verified clean assets
+        # (st_mtime_ns, st_ctime_ns, st_size) + engine-fingerprint fast-path BEFORE reading/hashing full bytes
         live_fingerprint: Optional[str] = None
-        if not engine_drifted and cache_key and not self.enforce_operational_shield:
+        if not engine_drifted and cache_key and stat_key and not self.enforce_operational_shield:
             with self._AUDIT_CACHE_LOCK:
                 in_cache = cache_key in self._audit_cache
                 cached_rec = self._audit_cache.get(cache_key) if in_cache else None
+                stat_hit = self._stat_fast_cache.get(stat_key) if hasattr(self, "_stat_fast_cache") else None
                 cached_fingerprint = (
                     self._fingerprint_cache.get(cache_key)
                     if in_cache and hasattr(self, "_fingerprint_cache")
                     else None
                 )
+            if in_cache and cached_rec is None and stat_hit is not None:
+                cached_eng_sig, stat_fp = stat_hit
+                if (expected_eng_sig is None or cached_eng_sig == expected_eng_sig) and (
+                    recorded_hash is None or stat_fp == recorded_hash
+                ):
+                    return None
             if in_cache and cached_rec is None:
                 live_fingerprint = compute_asset_fingerprint(p)
                 if cached_fingerprint is not None and cached_fingerprint == live_fingerprint:
                     if recorded_hash is None or cached_fingerprint == recorded_hash:
+                        with self._AUDIT_CACHE_LOCK:
+                            if hasattr(self, "_stat_fast_cache"):
+                                self._stat_fast_cache[stat_key] = (expected_eng_sig or "__direct__", live_fingerprint)
                         return None
 
-        try:
-            content = p.read_text(encoding="utf-8", errors="ignore")
-        except Exception as ex:
-            return AssetDriftRecord(
-                asset_path=str(p),
-                slug=self.extract_slug(p, adapter.dist_dir),
-                reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
-                details=[f"Failed to read file: {ex}"],
-            )
+        content: Optional[str] = None
+        if dist_snapshot is not None and mtime_ns is not None:
+            snap_entry = dist_snapshot.get_entry(p)
+            if (
+                snap_entry is not None
+                and snap_entry.mtime_ns == mtime_ns
+                and snap_entry.ctime_ns == ctime_ns
+                and snap_entry.size == size
+            ):
+                content = snap_entry.content
+
+        if content is None:
+            try:
+                content = p.read_text(encoding="utf-8", errors="ignore")
+            except Exception as ex:
+                return AssetDriftRecord(
+                    asset_path=str(p),
+                    slug=self.extract_slug(p, adapter.dist_dir),
+                    reasons=[DriftReason.STRUCTURAL_CONTRACT_VIOLATION],
+                    details=[f"Failed to read file: {ex}"],
+                )
 
         current_hash = live_fingerprint if live_fingerprint is not None else compute_asset_fingerprint(p)
 
@@ -3411,8 +3511,12 @@ class AssetIntegrityEvaluator:
                         self._audit_cache[cache_key] = None
                         if hasattr(self, "_fingerprint_cache"):
                             self._fingerprint_cache[cache_key] = current_hash
+                        if stat_key and hasattr(self, "_stat_fast_cache"):
+                            self._stat_fast_cache[stat_key] = (expected_eng_sig or "__direct__", current_hash)
                     elif not engine_drifted:
                         self._audit_cache[cache_key] = rec
+                        if stat_key and hasattr(self, "_stat_fast_cache"):
+                            self._stat_fast_cache.pop(stat_key, None)
             return rec
 
         if cache_key:
@@ -3420,6 +3524,8 @@ class AssetIntegrityEvaluator:
                 self._audit_cache[cache_key] = None
                 if hasattr(self, "_fingerprint_cache"):
                     self._fingerprint_cache[cache_key] = current_hash
+                if stat_key and hasattr(self, "_stat_fast_cache"):
+                    self._stat_fast_cache[stat_key] = (expected_eng_sig or "__direct__", current_hash)
         return None
 
     def audit_all(
@@ -3553,8 +3659,9 @@ class AssetIntegrityEvaluator:
         prop_slug = re.sub(r"[^a-z0-9_-]+", "_", prop_key) or "default"
         xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "").strip()
         worker_tag = f"_{xdist_worker}" if xdist_worker else ""
+        dist_tag = hashlib.sha256(resolved_dist_str.encode("utf-8")).hexdigest()[:8] if resolved_dist_str else "nodist"
         disk_eval_cache_path = Path(
-            f"/tmp/pseofactory_asset_eval_cache_v2_{prop_slug}{worker_tag}.json"
+            f"/tmp/pseofactory_asset_eval_cache_v3_{prop_slug}_{dist_tag}{worker_tag}.json"
         )
         if engine_drifted and disk_eval_cache_path.is_file():
             try:
@@ -3562,10 +3669,16 @@ class AssetIntegrityEvaluator:
             except Exception:
                 pass
         eng_code_sig_str = ""
-        disk_clean_entries: Dict[str, str] = {}
-        if use_disk_eval_cache:
+        eng_sig_hash = "__direct__"
+        try:
+            eng_code_sig_str = self._compute_engine_fingerprint(adapter=adapter)
+            if eng_code_sig_str:
+                eng_sig_hash = hashlib.sha256(eng_code_sig_str.encode("utf-8")).hexdigest()[:16]
+        except Exception:
+            eng_code_sig_str = ""
+        disk_clean_entries: Dict[str, Any] = {}
+        if use_disk_eval_cache and eng_code_sig_str:
             try:
-                eng_code_sig_str = self._compute_engine_fingerprint(adapter=adapter)
                 if disk_eval_cache_path.is_file():
                     raw_disk = json.loads(disk_eval_cache_path.read_text(encoding="utf-8"))
                     if isinstance(raw_disk, dict) and raw_disk.get("engine_sig") == eng_code_sig_str:
@@ -3573,29 +3686,130 @@ class AssetIntegrityEvaluator:
                         if isinstance(entries, dict):
                             disk_clean_entries = entries
                             with self._AUDIT_CACHE_LOCK:
-                                for k_str, fp_hash in entries.items():
+                                for k_str, val_obj in entries.items():
                                     parts = k_str.split("|")
-                                    if len(parts) == 4 and parts[0] == prop_key:
-                                        ck = (parts[0], parts[1], float(parts[2]), int(parts[3]))
+                                    if len(parts) == 5 and parts[0] == prop_key and isinstance(val_obj, list) and len(val_obj) == 2:
+                                        mtime_f = float(val_obj[0])
+                                        fp_hash = str(val_obj[1])
+                                        mtime_ns_i = int(parts[2])
+                                        ctime_ns_i = int(parts[3])
+                                        size_i = int(parts[4])
+                                        ck = (parts[0], parts[1], mtime_f, size_i)
+                                        sk = (parts[0], parts[1], mtime_ns_i, ctime_ns_i, size_i)
                                         if ck not in self._audit_cache:
                                             self._audit_cache[ck] = None
                                             self._fingerprint_cache[ck] = fp_hash
+                                        if sk not in self._stat_fast_cache:
+                                            self._stat_fast_cache[sk] = (eng_sig_hash, fp_hash)
             except Exception:
                 pass
 
         estate_degraded_overlays = _collect_degraded_rolled_back_overlays(
             getattr(adapter, "repo_path", None) or adapter.dist_dir.parent
         )
-        for asset in assets:
-            record = self.audit_asset(
-                asset,
+        dist_snapshot = None
+        if adapter.dist_dir and adapter.dist_dir.is_dir():
+            try:
+                from pseofactory.verifier import DistHtmlSnapshot
+
+                dist_snapshot = DistHtmlSnapshot.capture(adapter.dist_dir)
+            except Exception:
+                dist_snapshot = None
+
+        def _audit_one(asset_path: Path) -> Optional[AssetDriftRecord]:
+            return self.audit_asset(
+                asset_path,
                 adapter=adapter,
                 ledger=ledger,
                 engine_drifted=engine_drifted,
                 degraded_overlays=estate_degraded_overlays,
+                expected_eng_sig=eng_sig_hash,
+                dist_snapshot=dist_snapshot,
             )
-            if record:
-                drifted.append(record)
+
+        def _is_fast_warm_hit(asset_path: Path) -> bool:
+            if engine_drifted or self.enforce_operational_shield:
+                return False
+            try:
+                p_res = Path(asset_path).resolve()
+                st = p_res.stat()
+            except OSError:
+                return False
+            ck = (prop_key, str(p_res), st.st_mtime, int(st.st_size))
+            sk = (prop_key, str(p_res), int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size))
+            rel_k = (
+                p_res.relative_to(adapter.dist_dir).as_posix()
+                if p_res.is_relative_to(adapter.dist_dir)
+                else p_res.name
+            )
+            rec_h = ledger["assets"].get(rel_k) if (ledger and "assets" in ledger) else None
+            with self._AUDIT_CACHE_LOCK:
+                if ck not in self._audit_cache or self._audit_cache.get(ck) is not None:
+                    return False
+                stat_hit = self._stat_fast_cache.get(sk)
+                if stat_hit is None:
+                    return False
+                c_eng, s_fp = stat_hit
+                return (c_eng == eng_sig_hash) and (rec_h is None or s_fp == rec_h)
+
+        cold_indices: List[int] = []
+        records_by_idx: Dict[int, Optional[AssetDriftRecord]] = {}
+        for idx_a, asset in enumerate(assets):
+            if _is_fast_warm_hit(asset):
+                records_by_idx[idx_a] = None
+            else:
+                cold_indices.append(idx_a)
+
+        can_fork_assets = (
+            len(cold_indices) > 16
+            and (os.cpu_count() or 1) > 1
+            and type(self.audit_asset).__name__ == "method"
+            and not hasattr(self.audit_asset, "assert_called")
+            and _is_single_threaded_for_fork()
+        )
+        if can_fork_assets:
+            global _FORK_EVAL_CTX
+            prev_fork_ctx = _FORK_EVAL_CTX
+            _FORK_EVAL_CTX = (
+                self,
+                adapter,
+                ledger,
+                engine_drifted,
+                estate_degraded_overlays,
+                eng_sig_hash,
+                dist_snapshot,
+            )
+            try:
+                cold_paths = [assets[i] for i in cold_indices]
+                mp_ctx = multiprocessing.get_context("fork")
+                max_workers = min(6, os.cpu_count() or 4)
+                chunk_sz = max(1, len(cold_paths) // (max_workers * 2))
+                with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, mp_context=mp_ctx) as pool:
+                    fork_results = list(pool.map(_fork_audit_one_asset, cold_paths, chunksize=chunk_sz))
+                for idx_a, (rec, ck, sk, fp) in zip(cold_indices, fork_results):
+                    records_by_idx[idx_a] = rec
+                    if ck is not None:
+                        with self._AUDIT_CACHE_LOCK:
+                            if rec is None or rec.reasons == [DriftReason.ENGINE_HASH_DRIFT]:
+                                self._audit_cache[ck] = None
+                                if fp:
+                                    self._fingerprint_cache[ck] = fp
+                                    if sk is not None:
+                                        self._stat_fast_cache[sk] = (eng_sig_hash, fp)
+                            elif not engine_drifted:
+                                self._audit_cache[ck] = rec
+                                if sk is not None:
+                                    self._stat_fast_cache.pop(sk, None)
+            finally:
+                _FORK_EVAL_CTX = prev_fork_ctx
+        else:
+            for idx_a in cold_indices:
+                records_by_idx[idx_a] = _audit_one(assets[idx_a])
+
+        for idx_a in range(len(assets)):
+            rec = records_by_idx.get(idx_a)
+            if rec is not None:
+                drifted.append(rec)
 
         if use_disk_eval_cache and eng_code_sig_str:
             try:
@@ -3604,20 +3818,32 @@ class AssetIntegrityEvaluator:
                 }
                 changed = False
                 with self._AUDIT_CACHE_LOCK:
-                    cache_snapshot = list(self._audit_cache.items())
-                    fp_snapshot = dict(self._fingerprint_cache)
-                for ck, rec_val in cache_snapshot:
+                    stat_snapshot = list(self._stat_fast_cache.items())
+                    cache_snapshot = dict(self._audit_cache)
+                # Map (prop, path, size) -> mtime float from _audit_cache for clean records
+                mtime_by_path: Dict[Tuple[str, str, int], float] = {}
+                for ck_item, rec_val in cache_snapshot.items():
                     if (
-                        isinstance(ck, tuple)
-                        and len(ck) == 4
-                        and ck[0] == prop_key
+                        isinstance(ck_item, tuple)
+                        and len(ck_item) == 4
+                        and ck_item[0] == prop_key
                         and rec_val is None
-                        and ck in fp_snapshot
                     ):
-                        k_str = f"{ck[0]}|{ck[1]}|{ck[2]}|{ck[3]}"
-                        fp_val = fp_snapshot[ck]
-                        if updated_entries.get(k_str) != fp_val:
-                            updated_entries[k_str] = fp_val
+                        mtime_by_path[(ck_item[0], ck_item[1], int(ck_item[3]))] = float(ck_item[2])
+                for sk_item, (s_eng, s_fp) in stat_snapshot:
+                    if (
+                        isinstance(sk_item, tuple)
+                        and len(sk_item) == 5
+                        and sk_item[0] == prop_key
+                        and s_eng == eng_sig_hash
+                    ):
+                        mtime_f_val = mtime_by_path.get((sk_item[0], sk_item[1], int(sk_item[4])))
+                        if mtime_f_val is None:
+                            continue
+                        k_str = f"{sk_item[0]}|{sk_item[1]}|{sk_item[2]}|{sk_item[3]}|{sk_item[4]}"
+                        new_val = [mtime_f_val, s_fp]
+                        if updated_entries.get(k_str) != new_val:
+                            updated_entries[k_str] = new_val
                             changed = True
                 if changed:
                     if len(updated_entries) > 10000:
@@ -3644,9 +3870,19 @@ class AssetIntegrityEvaluator:
         if self.enforce_master_seo and adapter.dist_dir.exists() and (adapter.dist_dir / "sitemap.xml").is_file():
             from pseofactory.porcelain_shell import audit_porcelain_estate_structure
 
+            preloaded_porc_html = (
+                {
+                    rel_e: ent.content
+                    for rel_e, ent in dist_snapshot.html_entries.items()
+                    if not ent.name.startswith(".")
+                }
+                if dist_snapshot is not None
+                else None
+            )
             porcelain_estate_issues = audit_porcelain_estate_structure(
                 adapter.dist_dir,
                 adapter.property_id,
+                preloaded_html=preloaded_porc_html,
             )
             for pe_issue in porcelain_estate_issues:
                 drifted.append(
@@ -6298,12 +6534,42 @@ def _ensure_llms_noindex_in_headers(
     return result.rstrip() + "\n" if result.strip() else result
 
 
+_GEO_NORM_CACHE_LOCK = threading.Lock()
+_GEO_NORM_CACHE: "collections.OrderedDict[Tuple[bytes, bool, bool], bool]" = collections.OrderedDict()
+_GEO_NORM_CACHE_MAXSIZE = 4096
+
+
 def _needs_page_structure_geo_normalization(
     html_content: str,
     check_aeo_geo_graph: bool = True,
     allow_rolled_back_zero_tax_title: bool = False,
 ) -> bool:
     """Checks whether an HTML document has structural or GEO answer-delivery gaps requiring normalization."""
+    digest = hashlib.blake2b((html_content or "").encode("utf-8", errors="ignore"), digest_size=16).digest()
+    ck = (digest, bool(check_aeo_geo_graph), bool(allow_rolled_back_zero_tax_title))
+    with _GEO_NORM_CACHE_LOCK:
+        cached = _GEO_NORM_CACHE.get(ck)
+        if cached is not None:
+            _GEO_NORM_CACHE.move_to_end(ck)
+            return cached
+    res = _needs_page_structure_geo_normalization_impl(
+        html_content,
+        check_aeo_geo_graph=check_aeo_geo_graph,
+        allow_rolled_back_zero_tax_title=allow_rolled_back_zero_tax_title,
+    )
+    with _GEO_NORM_CACHE_LOCK:
+        _GEO_NORM_CACHE[ck] = res
+        _GEO_NORM_CACHE.move_to_end(ck)
+        while len(_GEO_NORM_CACHE) > _GEO_NORM_CACHE_MAXSIZE:
+            _GEO_NORM_CACHE.popitem(last=False)
+    return res
+
+
+def _needs_page_structure_geo_normalization_impl(
+    html_content: str,
+    check_aeo_geo_graph: bool = True,
+    allow_rolled_back_zero_tax_title: bool = False,
+) -> bool:
     if any(
         generic_h2 in html_content
         for generic_h2 in (
@@ -14935,20 +15201,22 @@ class RetroReflectionEngine:
         )
         from pseofactory.tenant_facts import TruthReconciliationEngine
 
+        from pseofactory.verifier import DistHtmlSnapshot
+
         active_overlays = cls._resolve_active_estate_overlays(d, property_id, heal_legacy=False)
         degraded_overlays = _collect_degraded_rolled_back_overlays(d.parent)
+        snapshot = DistHtmlSnapshot.capture(d)
         stale_pages: Dict[str, List[str]] = {}
         html_cache: Dict[str, str] = {}
-        scanned = 0
-        for html_file in sorted(d.rglob("*.html")):
-            if html_file.name.startswith("."):
+        html_items: List[Tuple[str, Path, str]] = []
+        for rel, entry in snapshot.html_entries.items():
+            if entry.name.startswith("."):
                 continue
-            try:
-                content = html_file.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
-            rel = html_file.relative_to(d).as_posix()
-            html_cache[rel] = content
+            html_cache[rel] = entry.content
+            html_items.append((rel, entry.path, entry.content))
+
+        def _audit_estate_page(item: Tuple[str, Path, str]) -> Tuple[str, bool, Optional[List[str]]]:
+            rel, html_file, content = item
             if not cls.is_tool_or_calculator_page(html_file, d, content):
                 non_tool_issues = detect_visual_and_ux_contract_issues(
                     content,
@@ -14992,9 +15260,9 @@ class RetroReflectionEngine:
                         )
                     )
                 ):
-                    stale_pages[rel] = ["deterministic_visual_primitives"]
-                continue
-            scanned += 1
+                    return (rel, False, ["deterministic_visual_primitives"])
+                return (rel, False, None)
+
             tool_slug_key = rel[len("tools/") : -len("/index.html")] if (rel.startswith("tools/") and rel.endswith("/index.html")) else ""
             missing = cls.audit_html_mechanics(
                 content,
@@ -15072,8 +15340,34 @@ class RetroReflectionEngine:
                 ):
                     if "gsc_striking_overlay" not in missing:
                         missing.append("gsc_striking_overlay")
-            if missing:
-                stale_pages[rel] = missing
+            return (rel, True, missing if missing else None)
+
+        scanned = 0
+        can_fork_estate = (
+            len(html_items) > 16
+            and (os.cpu_count() or 1) > 1
+            and _is_single_threaded_for_fork()
+        )
+        if can_fork_estate:
+            global _FORK_ESTATE_FN
+            prev_efn = _FORK_ESTATE_FN
+            _FORK_ESTATE_FN = _audit_estate_page
+            try:
+                mp_ctx = multiprocessing.get_context("fork")
+                max_w = min(6, os.cpu_count() or 4)
+                chunk_sz = max(1, len(html_items) // (max_w * 2))
+                with concurrent.futures.ProcessPoolExecutor(max_workers=max_w, mp_context=mp_ctx) as pool:
+                    page_outcomes = list(pool.map(_fork_audit_estate_page, html_items, chunksize=chunk_sz))
+            finally:
+                _FORK_ESTATE_FN = prev_efn
+        else:
+            page_outcomes = [_audit_estate_page(it) for it in html_items]
+
+        for rel, is_tool_pg, page_missing in page_outcomes:
+            if is_tool_pg:
+                scanned += 1
+            if page_missing:
+                stale_pages[rel] = page_missing
 
         if cls._has_stale_llms_manifests(d, property_id):
             stale_pages["llms.txt"] = ["llms_manifest_parity"]

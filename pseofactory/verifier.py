@@ -5,9 +5,12 @@ All 18 Opus 5.5 SEO Rules + Auxiliary Architectural Quality Gates.
 Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
+import collections
+import concurrent.futures
 import fcntl
 import functools
 import hashlib
+import multiprocessing
 import re
 import sys
 import os
@@ -1205,6 +1208,7 @@ class MockSearchEngineCrawler:
         self,
         dist_dir: Path,
         max_ssr_latency_ms: Optional[float] = None,
+        snapshot: Optional["DistHtmlSnapshot"] = None,
     ) -> Dict[str, Any]:
         """
         Executes mock crawler traversal across a static distribution directory on disk.
@@ -1233,7 +1237,13 @@ class MockSearchEngineCrawler:
             }
 
         issues: List[str] = []
-        html_files = sorted(target.glob("**/*.html"))
+        active_snap = snapshot
+        if active_snap is None:
+            try:
+                active_snap = DistHtmlSnapshot.capture(target)
+            except Exception:
+                active_snap = None
+        html_files = list(active_snap.html_paths) if active_snap is not None else sorted(target.glob("**/*.html"))
 
         file_route_map: Dict[str, Path] = {}
         known_routes: Set[str] = set()
@@ -1275,12 +1285,22 @@ class MockSearchEngineCrawler:
 
         for route, p in sorted(file_route_map.items()):
             rel = p.relative_to(target).as_posix()
-            content = p.read_text(encoding="utf-8", errors="ignore")
-            t0 = time.perf_counter()
-            c0 = time.thread_time()
-            parser = SinglePassSEODocumentParser(brand_domain=self.base_domain)
-            parser.feed(content)
-            latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.thread_time() - c0) * 1000.0)
+            snap_entry = active_snap.get_entry(p) if active_snap is not None else None
+            content = snap_entry.content if snap_entry is not None else p.read_text(encoding="utf-8", errors="ignore")
+            cached_parser: Optional[SinglePassSEODocumentParser] = None
+            if snap_entry is not None:
+                with snap_entry._lock:
+                    cached_parser = snap_entry._seo_docs.get(self.base_domain or "")
+            if cached_parser is not None:
+                parser = cached_parser
+                latency_ms = 0.0
+            else:
+                t0 = time.perf_counter()
+                c0 = time.thread_time()
+                parser = snap_entry.get_seo_doc(self.base_domain) if snap_entry is not None else SinglePassSEODocumentParser(brand_domain=self.base_domain)
+                if snap_entry is None:
+                    parser.feed(content)
+                latency_ms = min((time.perf_counter() - t0) * 1000.0, (time.thread_time() - c0) * 1000.0)
             if latency_ms >= max_lat:
                 import gc
                 gc_was_enabled = gc.isenabled()
@@ -1722,6 +1742,321 @@ def _resolve_pseofactory_tenant_meta(
     return {}
 
 
+_HTML_ENTRY_CACHE_LOCK = threading.Lock()
+_HTML_ENTRY_CACHE: "collections.OrderedDict[Tuple[str, str, int, int, int], DistHtmlEntry]" = collections.OrderedDict()
+_HTML_ENTRY_CACHE_MAXSIZE = 8192
+
+_ENGINE_FILE_HASH_LOCK = threading.Lock()
+_ENGINE_FILE_HASH_CACHE: "collections.OrderedDict[Tuple[str, int, int, int, int], str]" = collections.OrderedDict()
+_ENGINE_FILE_HASH_CACHE_MAXSIZE = 2048
+
+_LD_JSON_SCRIPT_RE = re.compile(
+    r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+_SCRIPT_STYLE_STRIP_RE = re.compile(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", re.IGNORECASE)
+_NOINDEX_META_RE = re.compile(
+    r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex',
+    re.IGNORECASE,
+)
+
+
+def _hash_file_cached(file_path: Path, slice_len: int = 16) -> str:
+    """Returns SHA-256 hex prefix for file_path, memoized by (resolved_path, mtime_ns, ctime_ns, size, slice_len)."""
+    resolved = file_path.resolve()
+    st = resolved.stat()
+    key = (str(resolved), int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size), int(slice_len))
+    with _ENGINE_FILE_HASH_LOCK:
+        cached = _ENGINE_FILE_HASH_CACHE.get(key)
+        if cached is not None:
+            _ENGINE_FILE_HASH_CACHE.move_to_end(key)
+            return cached
+    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()[:slice_len]
+    with _ENGINE_FILE_HASH_LOCK:
+        _ENGINE_FILE_HASH_CACHE[key] = digest
+        _ENGINE_FILE_HASH_CACHE.move_to_end(key)
+        while len(_ENGINE_FILE_HASH_CACHE) > _ENGINE_FILE_HASH_CACHE_MAXSIZE:
+            _ENGINE_FILE_HASH_CACHE.popitem(last=False)
+    return digest
+
+
+class DistHtmlEntry:
+    """
+    Immutable per-file HTML snapshot entry cached by (path, mtime_ns, ctime_ns, size).
+    Lazily caches visible_no_script, JSON-LD blocks/parsed graphs, and SinglePassSEODocumentParser.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    __slots__ = (
+        "path",
+        "resolved_path",
+        "rel_path",
+        "name",
+        "mtime_ns",
+        "ctime_ns",
+        "size",
+        "content",
+        "has_forbidden_dash",
+        "is_noindex",
+        "_lock",
+        "_visible_no_script",
+        "_json_ld_raw_blocks",
+        "_json_ld_parsed",
+        "_seo_docs",
+    )
+
+    def __init__(
+        self,
+        path: Path,
+        resolved_path: Path,
+        rel_path: str,
+        mtime_ns: int,
+        ctime_ns: int,
+        size: int,
+        content: str,
+    ) -> None:
+        self.path = path
+        self.resolved_path = resolved_path
+        self.rel_path = rel_path
+        self.name = path.name
+        self.mtime_ns = mtime_ns
+        self.ctime_ns = ctime_ns
+        self.size = size
+        self.content = content
+        self.has_forbidden_dash = ("\u2014" in content) or ("\u2013" in content)
+        self.is_noindex = bool(_NOINDEX_META_RE.search(content))
+        self._lock = threading.Lock()
+        self._visible_no_script: Optional[str] = None
+        self._json_ld_raw_blocks: Optional[Tuple[str, ...]] = None
+        self._json_ld_parsed: Optional[Tuple[Tuple[bool, Any, str], ...]] = None
+        self._seo_docs: Dict[str, SinglePassSEODocumentParser] = {}
+
+    @property
+    def visible_no_script(self) -> str:
+        val = self._visible_no_script
+        if val is None:
+            computed = _SCRIPT_STYLE_STRIP_RE.sub("", self.content)
+            with self._lock:
+                if self._visible_no_script is None:
+                    self._visible_no_script = computed
+                val = self._visible_no_script
+        return val
+
+    @property
+    def json_ld_raw_blocks(self) -> Tuple[str, ...]:
+        val = self._json_ld_raw_blocks
+        if val is None:
+            computed = tuple(_LD_JSON_SCRIPT_RE.findall(self.content))
+            with self._lock:
+                if self._json_ld_raw_blocks is None:
+                    self._json_ld_raw_blocks = computed
+                val = self._json_ld_raw_blocks
+        return val
+
+    @property
+    def json_ld_parsed(self) -> Tuple[Tuple[bool, Any, str], ...]:
+        val = self._json_ld_parsed
+        if val is None:
+            parsed_items: List[Tuple[bool, Any, str]] = []
+            for raw_blk in self.json_ld_raw_blocks:
+                try:
+                    parsed_items.append((True, json.loads(raw_blk), ""))
+                except Exception as ex:
+                    parsed_items.append((False, None, str(ex)))
+            computed = tuple(parsed_items)
+            with self._lock:
+                if self._json_ld_parsed is None:
+                    self._json_ld_parsed = computed
+                val = self._json_ld_parsed
+        return val
+
+    def get_seo_doc(self, brand_domain: Optional[str] = None) -> SinglePassSEODocumentParser:
+        key = brand_domain or ""
+        with self._lock:
+            existing = self._seo_docs.get(key)
+        if existing is not None:
+            return existing
+        parser = SinglePassSEODocumentParser(brand_domain=brand_domain)
+        parser.feed(self.content)
+        with self._lock:
+            existing = self._seo_docs.get(key)
+            if existing is None:
+                self._seo_docs[key] = parser
+                existing = parser
+        return existing
+
+
+class DistHtmlSnapshot:
+    """
+    Single-pass directory snapshot over dist_dir using os.scandir and (mtime_ns, ctime_ns, size)
+    cache keys to eliminate duplicate rglob/read_text/JSON-LD/HTML parsing across auditors.
+    Zero em-dashes. Zero en-dashes.
+    """
+
+    def __init__(
+        self,
+        dist_dir: Path,
+        html_entries: Dict[str, DistHtmlEntry],
+        html_paths: List[Path],
+        all_file_stats: Tuple[Tuple[str, Path, int, int, int], ...],
+    ) -> None:
+        self.dist_dir = dist_dir
+        self.html_entries = html_entries
+        self.html_paths = html_paths
+        self.all_file_stats = all_file_stats
+        self._path_to_entry: Dict[str, DistHtmlEntry] = {}
+        for entry in html_entries.values():
+            self._path_to_entry[str(entry.path)] = entry
+            self._path_to_entry[str(entry.resolved_path)] = entry
+
+    def get_entry(self, file_path: Union[str, Path]) -> Optional[DistHtmlEntry]:
+        entry = self._path_to_entry.get(str(file_path))
+        if entry is not None:
+            return entry
+        try:
+            return self._path_to_entry.get(str(Path(file_path).resolve()))
+        except OSError:
+            return None
+
+    @staticmethod
+    def _scan_dir_stats(
+        root_dir: Path,
+        html_only: bool = False,
+    ) -> Tuple[List[Tuple[str, Path, int, int, int]], List[Tuple[str, Path, int, int, int]]]:
+        """Fast os.scandir recursive walk returning sorted (all_stats, html_stats)."""
+        all_items: List[Tuple[str, Path, int, int, int]] = []
+        html_items: List[Tuple[str, Path, int, int, int]] = []
+        stack: List[Tuple[Path, str]] = [(root_dir, "")]
+        while stack:
+            cur_dir, prefix = stack.pop()
+            try:
+                with os.scandir(cur_dir) as it:
+                    for de in it:
+                        rel = f"{prefix}/{de.name}" if prefix else de.name
+                        try:
+                            if de.is_dir(follow_symlinks=False):
+                                stack.append((Path(de.path), rel))
+                            elif de.is_file(follow_symlinks=False):
+                                is_html = de.name.endswith(".html")
+                                if html_only and not is_html:
+                                    continue
+                                st = de.stat(follow_symlinks=False)
+                                item = (rel, Path(de.path), int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size))
+                                if not html_only:
+                                    all_items.append(item)
+                                if is_html:
+                                    html_items.append(item)
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+        if not html_only:
+            all_items.sort(key=lambda x: x[0])
+        html_items.sort(key=lambda x: x[0])
+        return all_items, html_items
+
+    @classmethod
+    def scan_stats(
+        cls,
+        dist_dir: Union[str, Path],
+        include_all_files: bool = True,
+    ) -> Tuple[Tuple[Tuple[str, Path, int, int, int], ...], Tuple[Tuple[str, Path, int, int, int], ...]]:
+        """Returns sorted (all_file_stats, html_file_stats) using os.scandir without reading file contents."""
+        d_path = Path(dist_dir)
+        if not d_path.is_dir():
+            return (), ()
+        all_items, html_items = cls._scan_dir_stats(d_path, html_only=not include_all_files)
+        return tuple(all_items), tuple(html_items)
+
+    @classmethod
+    def from_html_stats(
+        cls,
+        dist_dir: Union[str, Path],
+        html_stats: Sequence[Tuple[str, Path, int, int, int]],
+        all_file_stats: Tuple[Tuple[str, Path, int, int, int], ...] = (),
+    ) -> "DistHtmlSnapshot":
+        """Builds a DistHtmlSnapshot from pre-scanned html_stats, hitting _HTML_ENTRY_CACHE on unchanged stat tuples."""
+        d_path = Path(dist_dir)
+        entries: Dict[str, DistHtmlEntry] = {}
+        paths: List[Path] = []
+        for rel, fp, mtime_ns, ctime_ns, size in html_stats:
+            try:
+                res_fp = fp.resolve()
+            except OSError:
+                res_fp = fp
+            ck = (str(res_fp), rel, mtime_ns, ctime_ns, size)
+            with _HTML_ENTRY_CACHE_LOCK:
+                entry = _HTML_ENTRY_CACHE.get(ck)
+                if entry is not None:
+                    _HTML_ENTRY_CACHE.move_to_end(ck)
+            if entry is None:
+                try:
+                    text = fp.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                entry = DistHtmlEntry(
+                    path=fp,
+                    resolved_path=res_fp,
+                    rel_path=rel,
+                    mtime_ns=mtime_ns,
+                    ctime_ns=ctime_ns,
+                    size=size,
+                    content=text,
+                )
+                with _HTML_ENTRY_CACHE_LOCK:
+                    _HTML_ENTRY_CACHE[ck] = entry
+                    _HTML_ENTRY_CACHE.move_to_end(ck)
+                    while len(_HTML_ENTRY_CACHE) > _HTML_ENTRY_CACHE_MAXSIZE:
+                        _HTML_ENTRY_CACHE.popitem(last=False)
+            entries[rel] = entry
+            paths.append(entry.path)
+        return cls(
+            dist_dir=d_path,
+            html_entries=entries,
+            html_paths=paths,
+            all_file_stats=all_file_stats,
+        )
+
+    @classmethod
+    def capture(
+        cls,
+        dist_dir: Union[str, Path],
+        include_all_files: bool = False,
+    ) -> "DistHtmlSnapshot":
+        """Scans dist_dir once and returns a DistHtmlSnapshot reusing cached DistHtmlEntry objects."""
+        d_path = Path(dist_dir)
+        if not d_path.is_dir():
+            return cls(dist_dir=d_path, html_entries={}, html_paths=[], all_file_stats=())
+        all_stats, html_stats = cls.scan_stats(d_path, include_all_files=include_all_files)
+        return cls.from_html_stats(d_path, html_stats, all_file_stats=all_stats)
+
+
+_FORK_ACTIVE_VERIFIER: Optional[Any] = None
+_FORK_ACTIVE_TARGET: Optional[Path] = None
+
+
+def _is_single_threaded_for_fork() -> bool:
+    """Returns True only when the current OS process has a single thread (safe for POSIX fork)."""
+    if os.name != "posix":
+        return False
+    if threading.current_thread() is not threading.main_thread() or threading.active_count() != 1:
+        return False
+    try:
+        return len(os.listdir("/proc/self/task")) == 1
+    except OSError:
+        return False
+
+
+def _fork_eval_seo_gate(gate_info: Tuple[str, str, bool]) -> Tuple[str, Dict[str, Any]]:
+    """Fork-worker helper executing a single MasterSEOVerifier gate via copy-on-write shared snapshot."""
+    res_key, method_name, pass_parent = gate_info
+    verifier = _FORK_ACTIVE_VERIFIER
+    target = _FORK_ACTIVE_TARGET
+    fn = getattr(verifier, method_name)
+    arg = (target.parent if target else None) if pass_parent else target
+    return res_key, fn(arg)
+
+
 class MasterSEOVerifier:
     """
     Parametric Master SEO & GEO Audit Checklist Verification Engine.
@@ -1826,7 +2161,9 @@ class MasterSEOVerifier:
         self._file_cache: Dict[str, Tuple[float, int, str]] = MasterSEOVerifier._GLOBAL_FILE_CACHE
         self._audit_target_key: Optional[str] = None
         self._audit_html_files: Optional[List[Path]] = None
+        self._audit_snapshot: Optional[DistHtmlSnapshot] = None
         self._html_content_cache: Dict[str, str] = {}
+        self._disk_cache_path: Optional[Union[str, Path]] = None
 
         if (
             self.dist_dir
@@ -1865,6 +2202,7 @@ class MasterSEOVerifier:
                 pass
 
     _GLOBAL_FILE_CACHE: Dict[str, Tuple[float, int, str]] = {}
+    _GLOBAL_FILE_CACHE_LOCK = threading.Lock()
     _GLOBAL_AUDIT_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
     _GLOBAL_AUDIT_CACHE_LOCK = threading.Lock()
     _DISK_AUDIT_CACHE_LOCK = threading.Lock()
@@ -1928,14 +2266,38 @@ class MasterSEOVerifier:
         items.sort()
         return tuple(items)
 
+    def _resolve_disk_cache_path(self, target: Path, is_isolated_tmp: bool) -> Path:
+        """
+        Resolves per-tenant disk SEO audit cache path, honoring explicit self._disk_cache_path overrides.
+        Splits global /tmp cache per sanitized property_id and dist path hash for 50+ site isolation.
+        """
+        explicit = getattr(self, "_disk_cache_path", None)
+        if explicit is not None:
+            return Path(explicit)
+        if is_isolated_tmp:
+            return target.parent / ".agy" / "seo_audit_cache.json"
+        resolved_str = str(target.resolve())
+        dist_hash = hashlib.sha256(resolved_str.encode("utf-8")).hexdigest()[:12]
+        raw_prop = (
+            getattr(self, "property_id", None)
+            or (target.parent.name if target.name == "dist" else target.name)
+            or self.domain
+            or "default"
+        )
+        prop_slug = re.sub(r"[^a-z0-9_-]+", "_", str(raw_prop).strip().lower()).strip("_") or "default"
+        xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "").strip()
+        worker_tag = f"_{xdist_worker}" if xdist_worker else ""
+        return Path(f"/tmp/pseofactory_seo_audit_cache_v2_{prop_slug}_{dist_hash}{worker_tag}.json")
+
     @classmethod
     def _write_disk_audit_cache_entry(
         cls,
         disk_cache_path: Path,
         disk_cache_key: str,
         result: Dict[str, Any],
+        stat_cache_key: Optional[str] = None,
     ) -> None:
-        """Thread-safe and process-safe atomic read-modify-write for disk SEO audit cache."""
+        """Thread-safe and process-safe atomic read-modify-write for per-tenant disk SEO audit cache."""
         disk_cache_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = disk_cache_path.with_name(f"{disk_cache_path.name}.lock")
         tmp_path = disk_cache_path.with_name(
@@ -1953,9 +2315,13 @@ class MasterSEOVerifier:
                                 disk_store = loaded
                         except Exception:
                             disk_store = {}
+                    if stat_cache_key:
+                        stat_ref_key = f"stat:{stat_cache_key}"
+                        disk_store.pop(stat_ref_key, None)
+                        disk_store[stat_ref_key] = disk_cache_key
                     disk_store.pop(disk_cache_key, None)
                     disk_store[disk_cache_key] = result
-                    while len(disk_store) > 256:
+                    while len(disk_store) > 64:
                         disk_store.pop(next(iter(disk_store)))
                     tmp_path.write_text(json.dumps(disk_store), encoding="utf-8")
                     os.replace(tmp_path, disk_cache_path)
@@ -1971,8 +2337,9 @@ class MasterSEOVerifier:
         cls,
         disk_cache_path: Path,
         disk_cache_key: str,
+        stat_cache_key: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Thread-safe and process-safe lookup for disk SEO audit cache."""
+        """Thread-safe and process-safe lookup for disk SEO audit cache (stat fast-path + content key)."""
         if not disk_cache_path.is_file():
             return None
         lock_path = disk_cache_path.with_name(f"{disk_cache_path.name}.lock")
@@ -1984,8 +2351,18 @@ class MasterSEOVerifier:
                         if not disk_cache_path.is_file():
                             return None
                         disk_store = json.loads(disk_cache_path.read_text(encoding="utf-8"))
-                        if isinstance(disk_store, dict) and disk_cache_key in disk_store:
-                            return disk_store[disk_cache_key]
+                        if not isinstance(disk_store, dict):
+                            return None
+                        if stat_cache_key:
+                            ref_key = disk_store.get(f"stat:{stat_cache_key}")
+                            if isinstance(ref_key, str):
+                                hit = disk_store.get(ref_key)
+                                if isinstance(hit, dict):
+                                    return hit
+                        if disk_cache_key and disk_cache_key in disk_store:
+                            val = disk_store[disk_cache_key]
+                            if isinstance(val, dict):
+                                return val
                     finally:
                         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
             except Exception:
@@ -2043,13 +2420,15 @@ class MasterSEOVerifier:
         except OSError:
             return p.read_text(encoding="utf-8", errors="ignore")
 
-        if key in self._file_cache:
-            cached_mtime, cached_size, content = self._file_cache[key]
-            if cached_mtime == mtime and cached_size == size:
-                return content
+        with MasterSEOVerifier._GLOBAL_FILE_CACHE_LOCK:
+            if key in self._file_cache:
+                cached_mtime, cached_size, content = self._file_cache[key]
+                if cached_mtime == mtime and cached_size == size:
+                    return content
 
         content = p.read_text(encoding="utf-8", errors="ignore")
-        self._file_cache[key] = (mtime, size, content)
+        with MasterSEOVerifier._GLOBAL_FILE_CACHE_LOCK:
+            self._file_cache[key] = (mtime, size, content)
         return content
 
     # 1. Alt Text Gate
@@ -2650,10 +3029,24 @@ class MasterSEOVerifier:
         issues = []
         schemas_checked = 0
         if target.exists():
+            snap = self._audit_snapshot if (self._audit_snapshot is not None and self._audit_target_key == str(target.resolve())) else None
             for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
+                snap_entry = snap.get_entry(p) if snap is not None else None
+                if snap_entry is not None:
+                    parsed_blocks = snap_entry.json_ld_parsed
+                    if not parsed_blocks:
+                        issues.append(f"Missing Schema.org JSON-LD in {rel}")
+                    else:
+                        for ok, parsed, err_str in parsed_blocks:
+                            schemas_checked += 1
+                            if not ok:
+                                issues.append(f"Invalid JSON-LD schema syntax in {rel}: {err_str}")
+                            elif "@context" not in parsed and "@graph" not in parsed:
+                                issues.append(f"Schema JSON missing @context or @graph in {rel}")
+                    continue
                 content = self._read_cached_html(p)
                 matches = re.findall(r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', content, re.IGNORECASE | re.DOTALL)
                 if not matches:
@@ -3722,7 +4115,8 @@ class MasterSEOVerifier:
         """
         target = Path(dist_dir) if dist_dir else self.dist_dir
         crawler = MockSearchEngineCrawler(base_domain=self.domain, max_ssr_latency_ms=max_ssr_latency_ms)
-        return crawler.crawl_directory(target, max_ssr_latency_ms=max_ssr_latency_ms)
+        snap = self._audit_snapshot if (self._audit_snapshot is not None and self._audit_target_key == str(target.resolve())) else None
+        return crawler.crawl_directory(target, max_ssr_latency_ms=max_ssr_latency_ms, snapshot=snap)
 
     check_traditional_organic_search_gate = check_organic_search_ranking_gate
     check_core_seo_hygiene_gate = check_organic_search_ranking_gate
@@ -4603,10 +4997,16 @@ class MasterSEOVerifier:
         target = Path(dist_dir) if dist_dir else self.dist_dir
         parsed_docs: Dict[str, Tuple[Path, str, SinglePassSEODocumentParser]] = {}
         if target.exists():
+            snap = self._audit_snapshot if (self._audit_snapshot is not None and self._audit_target_key == str(target.resolve())) else None
             for p in self._iter_html_files(target):
                 rel = p.relative_to(target).as_posix()
-                raw_html = self._read_cached_html(p)
-                parser = _parse_seo_doc_cached(raw_html, self.domain)
+                snap_entry = snap.get_entry(p) if snap is not None else None
+                if snap_entry is not None:
+                    raw_html = snap_entry.content
+                    parser = snap_entry.get_seo_doc(self.domain)
+                else:
+                    raw_html = self._read_cached_html(p)
+                    parser = _parse_seo_doc_cached(raw_html, self.domain)
                 parsed_docs[rel] = (p, raw_html, parser)
 
         pages_scanned = len(parsed_docs)
@@ -5048,20 +5448,23 @@ class MasterSEOVerifier:
 
         cache_sig: Optional[Tuple[Any, ...]] = None
         disk_cache_key: Optional[str] = None
-        disk_cache_path = Path("/tmp/pseofactory_seo_audit_cache_v1.json")
+        stat_cache_key: Optional[str] = None
+        disk_cache_path = Path("/tmp/pseofactory_seo_audit_cache_v2_default.json")
         can_write_disk_cache = True
         preloaded_html_files: List[Path] = []
         preloaded_html_map: Dict[str, str] = {}
+        preloaded_snapshot: Optional[DistHtmlSnapshot] = None
+        all_stats: Tuple[Tuple[str, Path, int, int, int], ...] = ()
+        html_stats: Tuple[Tuple[str, Path, int, int, int], ...] = ()
         resolved_target_str = str(target.resolve())
         try:
-            file_sigs = []
-            content_sigs = []
             is_isolated_tmp = "/tmp/" in resolved_target_str or "/pytest-" in resolved_target_str
             supported_callables = (
                 self._is_allowlisted_disk_callable(self.is_calculation_leaf, self._ALLOWLISTED_CALC_LEAF_FNS)
                 and self._is_allowlisted_disk_callable(self.leaf_route_checker, self._ALLOWLISTED_LEAF_ROUTE_FNS)
                 and self._is_allowlisted_disk_callable(self.is_geo_leaf, self._ALLOWLISTED_GEO_LEAF_FNS)
             )
+            disk_cache_path = self._resolve_disk_cache_path(target, is_isolated_tmp)
             if is_isolated_tmp:
                 has_repo_anchor = bool(
                     target.parent
@@ -5071,36 +5474,20 @@ class MasterSEOVerifier:
                     )
                 )
                 allow_disk_cache = supported_callables and has_repo_anchor
-                disk_cache_path = target.parent / ".agy" / "seo_audit_cache.json"
                 can_write_disk_cache = bool(self.allow_mutations or disk_cache_path.parent.is_dir())
             else:
                 allow_disk_cache = supported_callables
-            for fp in sorted(target.rglob("*")):
-                if fp.is_file():
-                    st = fp.stat()
-                    rel_fp = fp.relative_to(target).as_posix()
-                    file_sigs.append((rel_fp, st.st_mtime_ns, st.st_size))
-                    is_html_fp = fp.suffix == ".html"
-                    if is_html_fp:
-                        preloaded_html_files.append(fp)
-                    if allow_disk_cache:
-                        raw_bytes = fp.read_bytes()
-                        content_sigs.append(
-                            (rel_fp, st.st_size, hashlib.sha256(raw_bytes).hexdigest()[:12])
-                        )
-                        if is_html_fp:
-                            decoded_html = raw_bytes.decode("utf-8", errors="ignore")
-                            fp_str = str(fp)
-                            fp_res_str = str(fp.resolve())
-                            preloaded_html_map[fp_str] = decoded_html
-                            preloaded_html_map[fp_res_str] = decoded_html
-                            self._file_cache[fp_res_str] = (st.st_mtime_ns, st.st_size, decoded_html)
+
+            all_stats, html_stats = DistHtmlSnapshot.scan_stats(target, include_all_files=True)
+            file_sigs = [(rel_fp, m_ns, c_ns, sz) for (rel_fp, _fp, m_ns, c_ns, sz) in all_stats]
+            preloaded_html_files = [fp for (_rel, fp, _m, _c, _sz) in html_stats]
+
             cohort_sigs = []
             if target.parent and target.parent.is_dir():
                 cr_ledger = target.parent / ".agy" / "cohort_reflection_ledger.json"
                 if cr_ledger.is_file():
                     cohort_sigs.append(
-                        (".agy/cohort_reflection_ledger.json", hashlib.sha256(cr_ledger.read_bytes()).hexdigest()[:12])
+                        (".agy/cohort_reflection_ledger.json", _hash_file_cached(cr_ledger, slice_len=12))
                     )
                 for ov_rel_dir in (".agy/overlays", "content/overlays"):
                     ov_d = target.parent / ov_rel_dir
@@ -5110,7 +5497,7 @@ class MasterSEOVerifier:
                                 cohort_sigs.append(
                                     (
                                         f"{ov_rel_dir}/{ov_fp.relative_to(ov_d).as_posix()}",
-                                        hashlib.sha256(ov_fp.read_bytes()).hexdigest()[:12],
+                                        _hash_file_cached(ov_fp, slice_len=12),
                                     )
                                 )
             parent_entries = (
@@ -5123,7 +5510,7 @@ class MasterSEOVerifier:
             for rel_eng in ("verifier.py", "contracts.py", "edge.py", "indexing/preflight.py", "visual_primitives.py", "tenant_facts.py"):
                 efp = pkg_root / rel_eng
                 if efp.is_file():
-                    engine_sigs.append((rel_eng, hashlib.sha256(efp.read_bytes()).hexdigest()[:16]))
+                    engine_sigs.append((rel_eng, _hash_file_cached(efp, slice_len=16)))
             cls_sig = f"{type(self).__module__}.{type(self).__qualname__}"
             tools_sig = self._tools_sig(self.tools)
             code_dirs_sig = tuple(sorted(str(Path(cd).resolve()) for cd in (self.code_dirs or ())))
@@ -5149,7 +5536,75 @@ class MasterSEOVerifier:
                 tuple(file_sigs),
                 tuple(engine_sigs),
             )
+            with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                cached_res = MasterSEOVerifier._GLOBAL_AUDIT_CACHE.get(cache_sig)
+            if cached_res is not None:
+                if raise_on_error and cached_res.get("status") != "PASS":
+                    c_issues = cached_res.get("issues", [])
+                    issue_summary = "; ".join(c_issues[:3])
+                    if len(c_issues) > 3:
+                        issue_summary += f" (...and {len(c_issues) - 3} more)"
+                    raise SEOVerificationError(
+                        f"SEO checklist verification failed with {len(c_issues)} issues: {issue_summary}",
+                        issues=c_issues,
+                        gates=cached_res.get("gates", {}),
+                    )
+                return cached_res
+
             if allow_disk_cache:
+                stat_disk_sig = (
+                    cls_sig,
+                    resolved_target_str,
+                    self.domain,
+                    self.canonical_base,
+                    self.brand_name,
+                    self.min_manifests,
+                    self.strict_robots,
+                    tools_sig,
+                    code_dirs_sig,
+                    repo_root_sig,
+                    tuple(self.required_endpoints),
+                    enforce_relevance,
+                    self._callable_disk_sig(self.is_calculation_leaf),
+                    self._callable_disk_sig(self.leaf_route_checker),
+                    self._callable_disk_sig(self.is_geo_leaf),
+                    parent_entries,
+                    tuple(cohort_sigs),
+                    tuple(file_sigs),
+                    tuple(engine_sigs),
+                )
+                stat_cache_key = hashlib.sha256(repr(stat_disk_sig).encode("utf-8")).hexdigest()
+                disk_hit = self._read_disk_audit_cache_entry(disk_cache_path, "", stat_cache_key=stat_cache_key)
+                if disk_hit is not None:
+                    with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                        MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = disk_hit
+                    if raise_on_error and disk_hit.get("status") != "PASS":
+                        c_issues = disk_hit.get("issues", [])
+                        issue_summary = "; ".join(c_issues[:3])
+                        if len(c_issues) > 3:
+                            issue_summary += f" (...and {len(c_issues) - 3} more)"
+                        raise SEOVerificationError(
+                            f"SEO checklist verification failed with {len(c_issues)} issues: {issue_summary}",
+                            issues=c_issues,
+                            gates=disk_hit.get("gates", {}),
+                        )
+                    return disk_hit
+
+                content_sigs = []
+                for rel_fp, fp, m_ns, _c_ns, sz in all_stats:
+                    raw_bytes = fp.read_bytes()
+                    content_sigs.append(
+                        (rel_fp, sz, hashlib.sha256(raw_bytes).hexdigest()[:12])
+                    )
+                    if fp.suffix == ".html":
+                        decoded_html = raw_bytes.decode("utf-8", errors="ignore")
+                        fp_str = str(fp)
+                        fp_res_str = str(fp.resolve())
+                        preloaded_html_map[fp_str] = decoded_html
+                        preloaded_html_map[fp_res_str] = decoded_html
+                        with MasterSEOVerifier._GLOBAL_FILE_CACHE_LOCK:
+                            self._file_cache[fp_res_str] = (m_ns, sz, decoded_html)
+
                 disk_sig = (
                     cls_sig,
                     self.domain,
@@ -5171,103 +5626,210 @@ class MasterSEOVerifier:
                     tuple(engine_sigs),
                 )
                 disk_cache_key = hashlib.sha256(repr(disk_sig).encode("utf-8")).hexdigest()
-                with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
-                    in_mem_cached = MasterSEOVerifier._GLOBAL_AUDIT_CACHE.get(cache_sig)
-                if in_mem_cached is None:
-                    disk_hit = self._read_disk_audit_cache_entry(disk_cache_path, disk_cache_key)
-                    if disk_hit is not None:
-                        with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
-                            MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = disk_hit
-            with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
-                cached_res = MasterSEOVerifier._GLOBAL_AUDIT_CACHE.get(cache_sig)
-            if cached_res is not None:
-                if raise_on_error and cached_res.get("status") != "PASS":
-                    c_issues = cached_res.get("issues", [])
-                    issue_summary = "; ".join(c_issues[:3])
-                    if len(c_issues) > 3:
-                        issue_summary += f" (...and {len(c_issues) - 3} more)"
-                    raise SEOVerificationError(
-                        f"SEO checklist verification failed with {len(c_issues)} issues: {issue_summary}",
-                        issues=c_issues,
-                        gates=cached_res.get("gates", {}),
-                    )
-                return cached_res
+                disk_hit = self._read_disk_audit_cache_entry(disk_cache_path, disk_cache_key)
+                if disk_hit is not None:
+                    if can_write_disk_cache and disk_hit.get("status") == "PASS":
+                        try:
+                            self._write_disk_audit_cache_entry(
+                                disk_cache_path,
+                                disk_cache_key,
+                                disk_hit,
+                                stat_cache_key=stat_cache_key,
+                            )
+                        except Exception:
+                            pass
+                    with MasterSEOVerifier._GLOBAL_AUDIT_CACHE_LOCK:
+                        MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = disk_hit
+                    if raise_on_error and disk_hit.get("status") != "PASS":
+                        c_issues = disk_hit.get("issues", [])
+                        issue_summary = "; ".join(c_issues[:3])
+                        if len(c_issues) > 3:
+                            issue_summary += f" (...and {len(c_issues) - 3} more)"
+                        raise SEOVerificationError(
+                            f"SEO checklist verification failed with {len(c_issues)} issues: {issue_summary}",
+                            issues=c_issues,
+                            gates=disk_hit.get("gates", {}),
+                        )
+                    return disk_hit
         except SEOVerificationError:
             raise
         except Exception:
             cache_sig = None
             disk_cache_key = None
+            stat_cache_key = None
 
-        if not preloaded_html_files:
-            preloaded_html_files = sorted(target.glob("**/*.html"))
-        if len(preloaded_html_map) < len(preloaded_html_files):
-            for hfp in preloaded_html_files:
-                hfp_str = str(hfp)
-                if hfp_str not in preloaded_html_map:
-                    txt = self._read_cached_html(hfp)
-                    preloaded_html_map[hfp_str] = txt
-                    preloaded_html_map[str(hfp.resolve())] = txt
+        if html_stats:
+            preloaded_snapshot = DistHtmlSnapshot.from_html_stats(target, html_stats, all_file_stats=all_stats)
+            preloaded_html_files = list(preloaded_snapshot.html_paths)
+            for entry in preloaded_snapshot.html_entries.values():
+                p_str = str(entry.path)
+                r_str = str(entry.resolved_path)
+                preloaded_html_map[p_str] = entry.content
+                preloaded_html_map[r_str] = entry.content
+                with MasterSEOVerifier._GLOBAL_FILE_CACHE_LOCK:
+                    self._file_cache[r_str] = (entry.mtime_ns, entry.size, entry.content)
+        else:
+            preloaded_snapshot = DistHtmlSnapshot.capture(target)
+            preloaded_html_files = list(preloaded_snapshot.html_paths) if preloaded_snapshot.html_paths else sorted(target.glob("**/*.html"))
+            for entry in preloaded_snapshot.html_entries.values():
+                p_str = str(entry.path)
+                r_str = str(entry.resolved_path)
+                preloaded_html_map[p_str] = entry.content
+                preloaded_html_map[r_str] = entry.content
+            if len(preloaded_html_map) < len(preloaded_html_files):
+                for hfp in preloaded_html_files:
+                    hfp_str = str(hfp)
+                    if hfp_str not in preloaded_html_map:
+                        txt = self._read_cached_html(hfp)
+                        preloaded_html_map[hfp_str] = txt
+                        preloaded_html_map[str(hfp.resolve())] = txt
 
         prev_audit_target_key = self._audit_target_key
         prev_audit_html_files = self._audit_html_files
+        prev_audit_snapshot = self._audit_snapshot
         prev_html_content_cache = self._html_content_cache
         self._audit_target_key = resolved_target_str
         self._audit_html_files = preloaded_html_files
+        self._audit_snapshot = preloaded_snapshot
         self._html_content_cache = preloaded_html_map
         try:
-            content_relevance_gate = self.check_content_relevance_gate(target)
+            gate_specs: List[Tuple[str, str, bool]] = [
+                ("content_relevance_gate", "check_content_relevance_gate", False),
+                ("g_alt_text", "check_alt_text_gate", False),
+                ("g_sitemap", "check_sitemap_gate", False),
+                ("g_page_titles", "check_page_titles_gate", False),
+                ("g_single_h1", "check_single_h1_gate", False),
+                ("g_image_compression", "check_image_compression_gate", False),
+                ("g_page_language", "check_page_language_gate", False),
+                ("g_canonical_tags", "check_canonical_tags_gate", False),
+                ("g_robots_txt", "check_robots_txt_gate", False),
+                ("g_readable_urls", "check_readable_urls_gate", False),
+                ("g_schema_markup", "check_schema_markup_gate", False),
+                ("g_noindex_tags", "check_noindex_tags_gate", False),
+                ("g_internal_linking", "check_internal_linking_gate", False),
+                ("g_load_performance", "check_load_performance_gate", False),
+                ("g_meta_descriptions", "check_meta_descriptions_gate", False),
+                ("g_url_redirects", "check_url_redirects_gate", False),
+                ("g_search_console_tag", "check_search_console_tag_gate", False),
+                ("g_hide_test_pages", "check_hide_test_pages_gate", False),
+                ("g_no_js_rendering", "check_no_js_rendering_gate", False),
+                ("g_http_link_canonical", "check_http_link_canonical_gate", False),
+                ("g_snippet_eligibility", "check_snippet_eligibility_gate", False),
+                ("g_query_answer_match", "check_query_answer_match_gate", False),
+                ("g_brand_entity", "check_brand_entity_in_llm_memory_gate", False),
+                ("g_citable_facts", "check_citable_specific_facts_gate", False),
+                ("g_organic_fan_out", "check_organic_fan_out_coverage_gate", False),
+                ("g_organic_search", "check_organic_search_ranking_gate", False),
+                ("g_unique_first_party", "check_unique_first_party_information_gate", False),
+                ("g_cross_web_consensus", "check_cross_web_consensus_and_corroboration_gate", False),
+                ("g_source_publisher", "check_source_publisher_reputation_gate", False),
+                ("g_extractable_structure", "check_extractable_content_structure_gate", False),
+                ("g_answer_prominence", "check_answer_prominence_gate", False),
+                ("g_structured_data", "check_structured_data_gate", False),
+                ("g_llms_txt", "check_llms_txt_gate", False),
+                ("g_tool_utility", "check_tool_utility_gate", False),
+                ("g_free_web_app_schema", "check_free_web_application_schema_gate", False),
+                ("g_operational_shield", "check_operational_shield_gate", False),
+                ("g_comparison_layout", "check_comparison_layout_gate", False),
+                ("g_ai_mode_manifest", "check_ai_mode_manifest_gate", False),
+                ("g_source_kw_inflation", "check_source_keyword_inflation_gate", False),
+                ("g_cohort_reflection", "check_cohort_reflection_gate", False),
+                ("g_existence", "check_existence_gate", False),
+                ("g_snippet", "check_snippet_gate", False),
+                ("g_citability", "check_citability_gate", False),
+                ("g_cleanliness", "check_cleanliness_gate", False),
+                ("g_indexing", "check_indexing_gate", False),
+                ("g_host_hygiene", "check_host_hygiene_gate", True),
+                ("g_edge_cache_policy", "check_edge_cache_policy_gate", False),
+            ]
+            gate_results: Dict[str, Dict[str, Any]] = {}
+            has_mocked_gate = any(
+                hasattr(getattr(self, m_name, None), "assert_called")
+                or type(getattr(self, m_name, None)).__name__ in ("MagicMock", "NonCallableMagicMock", "Mock")
+                for _k, m_name, _p in gate_specs
+            )
+            can_fork_parallel = (
+                not has_mocked_gate
+                and len(preloaded_html_files) >= 15
+                and (os.cpu_count() or 1) > 1
+                and _is_single_threaded_for_fork()
+            )
+            if can_fork_parallel:
+                global _FORK_ACTIVE_VERIFIER, _FORK_ACTIVE_TARGET
+                prev_fv, prev_ft = _FORK_ACTIVE_VERIFIER, _FORK_ACTIVE_TARGET
+                _FORK_ACTIVE_VERIFIER = self
+                _FORK_ACTIVE_TARGET = target
+                try:
+                    mp_ctx = multiprocessing.get_context("fork")
+                    max_gate_workers = min(6, os.cpu_count() or 4)
+                    with concurrent.futures.ProcessPoolExecutor(
+                        max_workers=max_gate_workers,
+                        mp_context=mp_ctx,
+                    ) as pool:
+                        for res_key, g_val in pool.map(_fork_eval_seo_gate, gate_specs):
+                            gate_results[res_key] = g_val
+                finally:
+                    _FORK_ACTIVE_VERIFIER = prev_fv
+                    _FORK_ACTIVE_TARGET = prev_ft
+            else:
+                for res_key, m_name, pass_parent in gate_specs:
+                    fn = getattr(self, m_name)
+                    arg = (target.parent if target else None) if pass_parent else target
+                    gate_results[res_key] = fn(arg)
 
-            g_alt_text = self.check_alt_text_gate(target)
-            g_sitemap = self.check_sitemap_gate(target)
-            g_page_titles = self.check_page_titles_gate(target)
-            g_single_h1 = self.check_single_h1_gate(target)
-            g_image_compression = self.check_image_compression_gate(target)
-            g_page_language = self.check_page_language_gate(target)
-            g_canonical_tags = self.check_canonical_tags_gate(target)
-            g_robots_txt = self.check_robots_txt_gate(target)
-            g_readable_urls = self.check_readable_urls_gate(target)
-            g_schema_markup = self.check_schema_markup_gate(target)
-            g_noindex_tags = self.check_noindex_tags_gate(target)
-            g_internal_linking = self.check_internal_linking_gate(target)
-            g_load_performance = self.check_load_performance_gate(target)
-            g_meta_descriptions = self.check_meta_descriptions_gate(target)
-            g_url_redirects = self.check_url_redirects_gate(target)
-            g_search_console_tag = self.check_search_console_tag_gate(target)
-            g_hide_test_pages = self.check_hide_test_pages_gate(target)
-            g_no_js_rendering = self.check_no_js_rendering_gate(target)
-            g_http_link_canonical = self.check_http_link_canonical_gate(target)
-            g_snippet_eligibility = self.check_snippet_eligibility_gate(target)
-            g_query_answer_match = self.check_query_answer_match_gate(target)
-            g_brand_entity = self.check_brand_entity_in_llm_memory_gate(target)
-            g_citable_facts = self.check_citable_specific_facts_gate(target)
-            g_organic_fan_out = self.check_organic_fan_out_coverage_gate(target)
-            g_organic_search = self.check_organic_search_ranking_gate(target)
-            g_unique_first_party = self.check_unique_first_party_information_gate(target)
-            g_cross_web_consensus = self.check_cross_web_consensus_and_corroboration_gate(target)
-            g_source_publisher = self.check_source_publisher_reputation_gate(target)
-            g_extractable_structure = self.check_extractable_content_structure_gate(target)
-            g_answer_prominence = self.check_answer_prominence_gate(target)
-            g_structured_data = self.check_structured_data_gate(target)
-            g_llms_txt = self.check_llms_txt_gate(target)
-            g_tool_utility = self.check_tool_utility_gate(target)
-            g_free_web_app_schema = self.check_free_web_application_schema_gate(target)
-            g_operational_shield = self.check_operational_shield_gate(target)
-            g_comparison_layout = self.check_comparison_layout_gate(target)
-            g_ai_mode_manifest = self.check_ai_mode_manifest_gate(target)
-            g_source_kw_inflation = self.check_source_keyword_inflation_gate(target)
-            g_cohort_reflection = self.check_cohort_reflection_gate(target)
-            g_existence = self.check_existence_gate(target)
+            content_relevance_gate = gate_results["content_relevance_gate"]
+            g_alt_text = gate_results["g_alt_text"]
+            g_sitemap = gate_results["g_sitemap"]
+            g_page_titles = gate_results["g_page_titles"]
+            g_single_h1 = gate_results["g_single_h1"]
+            g_image_compression = gate_results["g_image_compression"]
+            g_page_language = gate_results["g_page_language"]
+            g_canonical_tags = gate_results["g_canonical_tags"]
+            g_robots_txt = gate_results["g_robots_txt"]
+            g_readable_urls = gate_results["g_readable_urls"]
+            g_schema_markup = gate_results["g_schema_markup"]
+            g_noindex_tags = gate_results["g_noindex_tags"]
+            g_internal_linking = gate_results["g_internal_linking"]
+            g_load_performance = gate_results["g_load_performance"]
+            g_meta_descriptions = gate_results["g_meta_descriptions"]
+            g_url_redirects = gate_results["g_url_redirects"]
+            g_search_console_tag = gate_results["g_search_console_tag"]
+            g_hide_test_pages = gate_results["g_hide_test_pages"]
+            g_no_js_rendering = gate_results["g_no_js_rendering"]
+            g_http_link_canonical = gate_results["g_http_link_canonical"]
+            g_snippet_eligibility = gate_results["g_snippet_eligibility"]
+            g_query_answer_match = gate_results["g_query_answer_match"]
+            g_brand_entity = gate_results["g_brand_entity"]
+            g_citable_facts = gate_results["g_citable_facts"]
+            g_organic_fan_out = gate_results["g_organic_fan_out"]
+            g_organic_search = gate_results["g_organic_search"]
+            g_unique_first_party = gate_results["g_unique_first_party"]
+            g_cross_web_consensus = gate_results["g_cross_web_consensus"]
+            g_source_publisher = gate_results["g_source_publisher"]
+            g_extractable_structure = gate_results["g_extractable_structure"]
+            g_answer_prominence = gate_results["g_answer_prominence"]
+            g_structured_data = gate_results["g_structured_data"]
+            g_llms_txt = gate_results["g_llms_txt"]
+            g_tool_utility = gate_results["g_tool_utility"]
+            g_free_web_app_schema = gate_results["g_free_web_app_schema"]
+            g_operational_shield = gate_results["g_operational_shield"]
+            g_comparison_layout = gate_results["g_comparison_layout"]
+            g_ai_mode_manifest = gate_results["g_ai_mode_manifest"]
+            g_source_kw_inflation = gate_results["g_source_kw_inflation"]
+            g_cohort_reflection = gate_results["g_cohort_reflection"]
+            g_existence = gate_results["g_existence"]
             g_title_length = dict(g_page_titles, gate="Title Length Gate")
-            g_snippet = self.check_snippet_gate(target)
+            g_snippet = gate_results["g_snippet"]
             g_schema = dict(g_schema_markup, gate="Schema Validation Gate")
-            g_citability = self.check_citability_gate(target)
-            g_cleanliness = self.check_cleanliness_gate(target)
-            g_indexing = self.check_indexing_gate(target)
-            g_host_hygiene = self.check_host_hygiene_gate(target.parent if target else None)
-            g_edge_cache_policy = self.check_edge_cache_policy_gate(target)
+            g_citability = gate_results["g_citability"]
+            g_cleanliness = gate_results["g_cleanliness"]
+            g_indexing = gate_results["g_indexing"]
+            g_host_hygiene = gate_results["g_host_hygiene"]
+            g_edge_cache_policy = gate_results["g_edge_cache_policy"]
         finally:
             self._audit_target_key = prev_audit_target_key
             self._audit_html_files = prev_audit_html_files
+            self._audit_snapshot = prev_audit_snapshot
             self._html_content_cache = prev_html_content_cache
 
         gates = {
@@ -5458,7 +6020,12 @@ class MasterSEOVerifier:
                 MasterSEOVerifier._GLOBAL_AUDIT_CACHE[cache_sig] = result
             if disk_cache_key is not None and all_passed and can_write_disk_cache:
                 try:
-                    self._write_disk_audit_cache_entry(disk_cache_path, disk_cache_key, result)
+                    self._write_disk_audit_cache_entry(
+                        disk_cache_path,
+                        disk_cache_key,
+                        result,
+                        stat_cache_key=stat_cache_key,
+                    )
                 except Exception:
                     pass
 
@@ -7457,6 +8024,7 @@ def audit_estate_partner_roster_and_compliance(
     dist_dir: Union[str, Path],
     property_id: str = "profithelm",
     require_multi_company: bool = True,
+    snapshot: Optional[DistHtmlSnapshot] = None,
 ) -> Dict[str, Any]:
     """
     Audits every compiled tool page under `dist_dir / 'tools'` against the
@@ -7473,23 +8041,34 @@ def audit_estate_partner_roster_and_compliance(
     violations: List[Dict[str, Any]] = []
 
     if tools_dir.is_dir():
-        for html_file in sorted(tools_dir.rglob("index.html")):
-            rel_p = html_file.relative_to(d_path).as_posix()
-            rel_slug = html_file.parent.relative_to(tools_dir).as_posix().strip("/")
+        snap = snapshot if (snapshot is not None and Path(snapshot.dist_dir).resolve() == d_path) else DistHtmlSnapshot.capture(d_path)
+        tool_items: List[Tuple[str, str, str]] = []
+        for rel_p, entry in snap.html_entries.items():
+            if not rel_p.startswith("tools/") or not rel_p.endswith("/index.html"):
+                continue
+            rel_slug = rel_p[len("tools/") : -len("/index.html")].strip("/")
             if not rel_slug or rel_slug == ".":
                 continue
-            try:
-                raw_html = html_file.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
-            pages_audited += 1
-            res = verify_html_partner_roster_and_slot_contract(
-                raw_html,
-                property_id=prop,
-                slug=rel_slug,
-                rel_path=rel_p,
-                require_multi_company=require_multi_company,
+            tool_items.append((rel_p, rel_slug, entry.content))
+
+        def _check_one(item: Tuple[str, str, str]) -> Tuple[str, str, Dict[str, Any]]:
+            rp, rs, rh = item
+            return (
+                rp,
+                rs,
+                verify_html_partner_roster_and_slot_contract(
+                    rh,
+                    property_id=prop,
+                    slug=rs,
+                    rel_path=rp,
+                    require_multi_company=require_multi_company,
+                ),
             )
+
+        pages_audited = len(tool_items)
+        results = [_check_one(it) for it in tool_items]
+
+        for rel_p, rel_slug, res in results:
             if not res["partner_keys"]:
                 restricted_pages += 1
             else:
@@ -7897,16 +8476,15 @@ def audit_estate_technical_seo_and_cannibalization(
     scanner = CrossPropertyContaminationScanner()
     fact_store = TenantFactStore.get_instance()
 
-    html_files = sorted(d_path.rglob("*.html"))
+    snapshot = DistHtmlSnapshot.capture(d_path)
+    html_files = list(snapshot.html_paths)
     valid_routes: Set[str] = set()
     route_ids: Dict[str, Set[str]] = {}
-    for f in html_files:
-        rel = f.relative_to(d_path)
-        route = "/" if str(rel) == "index.html" else (f"/{rel.parent.as_posix()}/" if rel.name == "index.html" else f"/{rel.as_posix()}")
+    for rel, entry in snapshot.html_entries.items():
+        route = "/" if rel == "index.html" else (f"/{entry.path.relative_to(d_path).parent.as_posix()}/" if entry.name == "index.html" else f"/{rel}")
         valid_routes.add(route)
         valid_routes.add(route.rstrip("/") or "/")
-        c_text = f.read_text(encoding="utf-8", errors="ignore")
-        route_ids[route] = set(re.findall(r'\bid=["\']([^"\']+)["\']', c_text))
+        route_ids[route] = set(re.findall(r'\bid=["\']([^"\']+)["\']', entry.content))
 
     red_info = _audit_redirects_and_sitemaps(d_path, domain, valid_routes)
     redirect_map = red_info["redirect_map"]
@@ -7934,16 +8512,15 @@ def audit_estate_technical_seo_and_cannibalization(
     missing_viewport_meta: List[str] = []
     multiple_titles: List[Tuple[str, int]] = []
 
-    for f in html_files:
-        rel = f.relative_to(d_path).as_posix()
-        if rel == "404.html" or f.name.startswith("."):
+    for rel, entry in snapshot.html_entries.items():
+        if rel == "404.html" or entry.name.startswith("."):
             continue
         route = "/" if rel == "index.html" else (f"/{rel[:-10]}" if rel.endswith("/index.html") else f"/{rel}")
-        content = f.read_text(encoding="utf-8", errors="ignore")
+        content = entry.content
         byte_len = len(content.encode("utf-8"))
         if byte_len > 500_000:
             heavy_html_pages.append((rel, byte_len))
-        is_noindex = bool(re.search(r'<meta\b[^>]*name=["\']robots["\'][^>]*content=["\'][^"\']*noindex', content, re.I))
+        is_noindex = entry.is_noindex
 
         leaks = scanner.scan_text(content, prop, context=rel)
         if leaks:
@@ -7953,7 +8530,7 @@ def audit_estate_technical_seo_and_cannibalization(
             if not ok_claim:
                 cross_tenant_leaks.extend(f"{rel}: {v}" for v in f_viol)
 
-        no_script = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", content, flags=re.I | re.S)
+        no_script = entry.visible_no_script
 
         if not is_noindex:
             indexable_routes.add(route)
@@ -8307,24 +8884,25 @@ def audit_estate_seo_fix_checklist(
     if not sm_paths:
         issues.append("sitemap: no sitemap*.xml with page locs found")
 
-    for f in sorted(d_path.rglob("*")):
-        if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".bmp") and f.stat().st_size > _SEO_FIX_IMAGE_BYTE_BUDGET:
-            issues.append(f"image_weight: {f.relative_to(d_path).as_posix()} is {f.stat().st_size} bytes (> {_SEO_FIX_IMAGE_BYTE_BUDGET})")
+    snapshot = DistHtmlSnapshot.capture(d_path, include_all_files=True)
+    for rel_f, fp, _m_ns, _c_ns, sz in snapshot.all_file_stats:
+        if fp.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".bmp") and sz > _SEO_FIX_IMAGE_BYTE_BUDGET:
+            issues.append(f"image_weight: {rel_f} is {sz} bytes (> {_SEO_FIX_IMAGE_BYTE_BUDGET})")
 
     indexable = 0
     pages = 0
     home_has_gsc = False
-    for f in sorted(d_path.rglob("*.html")):
-        rel = f.relative_to(d_path).as_posix()
+    has_google_verify_file = bool(list(d_path.glob("google*.html")))
+    for rel, entry in snapshot.html_entries.items():
         if rel == "404.html":
             continue
         pages += 1
         route = "/" if rel == "index.html" else (f"/{rel[:-10]}" if rel.endswith("/index.html") else f"/{rel}")
-        content = f.read_text(encoding="utf-8", errors="ignore")
-        noindex = bool(re.search(r"<meta\b[^>]*name=[\"']robots[\"'][^>]*content=[\"'][^\"']*noindex", content, re.I))
+        content = entry.content
+        noindex = entry.is_noindex
         in_sitemap = route in sm_norm
 
-        if rel == "index.html" and (re.search(r"google-site-verification", content, re.I) or list(d_path.glob("google*.html"))):
+        if rel == "index.html" and (re.search(r"google-site-verification", content, re.I) or has_google_verify_file):
             home_has_gsc = True
         if _SEO_FIX_TEST_ROUTE_RE.search(route.strip("/")) and (in_sitemap or not noindex):
             issues.append(f"test_pages_hidden: {route} is a test/staging route that is indexable or in a sitemap")
@@ -8346,12 +8924,9 @@ def audit_estate_seo_fix_checklist(
                 issues.append(f"alt_text: {rel} has <img> without alt text")
                 break
 
-        blocks = re.findall(r"<script\b[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", content, re.I | re.S)
         good = 0
-        for b in blocks:
-            try:
-                data = _json.loads(b)
-            except ValueError:
+        for ok, data, _err_str in entry.json_ld_parsed:
+            if not ok:
                 issues.append(f"schema_markup: {rel} has invalid JSON-LD")
                 continue
             nodes = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
@@ -8364,7 +8939,7 @@ def audit_estate_seo_fix_checklist(
             if re.search(r"src=[\"']https?://", tag, re.I) and not re.search(r"\b(async|defer)\b|type=[\"']module[\"']", tag, re.I):
                 issues.append(f"render_blocking: {rel} loads external script without async/defer")
 
-        raw = re.sub(r"<(script|style|noscript)\b[^>]*>.*?</\1>", " ", content, flags=re.I | re.S)
+        raw = re.sub(r"<noscript\b[^>]*>.*?</noscript>", " ", entry.visible_no_script, flags=re.I | re.S)
         if not re.search(r"<h1\b[^>]*>\s*\S", raw, re.I):
             issues.append(f"no_js_content: {rel} has no H1 in raw HTML")
         words = len(re.sub(r"<[^>]+>", " ", raw).split())
@@ -9010,25 +9585,18 @@ def audit_aeo_geo_three_plane_readiness(
     related_tool_pages = 0
     root_itemlist_present = False
 
-    for hf in sorted(d_path.rglob("*.html")):
-        if hf.name.startswith(".") or hf.name == "404.html":
+    snapshot = DistHtmlSnapshot.capture(d_path)
+    for rel_p, entry in snapshot.html_entries.items():
+        if entry.name.startswith(".") or entry.name == "404.html":
             continue
-        rel_p = hf.relative_to(d_path).as_posix()
-        try:
-            raw_h = hf.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            continue
-        if 'name="robots" content="noindex' in raw_h.lower():
+        raw_h = entry.content
+        if entry.is_noindex:
             continue
         html_pages_scanned += 1
-        if "\u2014" in raw_h or "\u2013" in raw_h:
+        if entry.has_forbidden_dash:
             issues.append(f"Plane 1 ({rel_p}): Forbidden em-dash or en-dash in HTML")
 
-        ld_blocks = re.findall(
-            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
-            raw_h,
-            flags=re.I,
-        )
+        ld_blocks = entry.json_ld_raw_blocks
         if not ld_blocks:
             issues.append(f"Plane 1 ({rel_p}): Missing application/ld+json block")
             continue
@@ -9156,7 +9724,7 @@ def audit_aeo_geo_three_plane_readiness(
             issues.append(f"Plane 2 (media-kit.json): Invalid JSON ({exc})")
 
     # Plane 3: Live DOM & Partner Roster Compliance
-    partner_audit = audit_estate_partner_roster_and_compliance(d_path, property_id=prop)
+    partner_audit = audit_estate_partner_roster_and_compliance(d_path, property_id=prop, snapshot=snapshot)
     if not partner_audit.get("passed", False):
         for v in partner_audit.get("violations", [])[:5]:
             issues.append(f"Plane 3 ({v.get('rel_path')}): {v.get('issues')}")

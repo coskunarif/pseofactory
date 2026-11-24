@@ -7739,6 +7739,93 @@ def _find_undefined_ui_classes_in_html(
     return undef
 
 
+_PORCELAIN_CACHE_LOCK = threading.Lock()
+_PORCELAIN_PAGE_AUDIT_CACHE: "collections.OrderedDict[Tuple[Any, ...], Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]]]" = collections.OrderedDict()
+_PORCELAIN_PAGE_AUDIT_CACHE_MAXSIZE = 4096
+_PERSONAL_ATTR_FILE_CACHE: "collections.OrderedDict[Tuple[str, int, int, int, str], Tuple[str, ...]]" = collections.OrderedDict()
+_PERSONAL_ATTR_FILE_CACHE_MAXSIZE = 8192
+
+
+def _extract_local_asset_refs_from_html(
+    raw_html: str,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+    """Extracts local script, og:image, favicon, and JSON-LD image/logo URLs from HTML."""
+    js_srcs = tuple(
+        m.group(1)
+        for m in re.finditer(
+            r'<script\b[^>]*\bsrc\s*=\s*["\'](/(?:static/)?js/[^"\']+)["\']',
+            raw_html,
+            flags=re.IGNORECASE,
+        )
+    )
+    og_imgs = tuple(
+        re.findall(
+            r'<meta\b[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
+            raw_html,
+            flags=re.IGNORECASE,
+        )
+    )
+    fav_urls = tuple(
+        u
+        for u in re.findall(
+            r'<link\b[^>]*rel=["\'][^"\']*icon[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
+            raw_html,
+            flags=re.IGNORECASE,
+        )
+        if not u.startswith("data:")
+    )
+    ld_imgs: List[str] = []
+    for jtxt in re.findall(
+        r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        raw_html,
+        flags=re.IGNORECASE,
+    ):
+        ld_imgs.extend(re.findall(r'"(?:logo|image)"\s*:\s*"([^"]+)"', jtxt))
+    return js_srcs, og_imgs, fav_urls, tuple(ld_imgs)
+
+
+def _check_local_asset_refs_against_dist(
+    dist_dir: Path,
+    domain: str,
+    rel_path: str,
+    asset_refs: Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]],
+) -> List[str]:
+    """Checks extracted local script/og:image/favicon/JSON-LD asset references against dist_dir."""
+    issues: List[str] = []
+    d_root = Path(dist_dir)
+    has_compiled_estate = (
+        (d_root / "tools" / "index.html").is_file()
+        and (d_root / "sitemap.xml").is_file()
+    )
+    js_srcs, og_imgs, fav_urls, ld_imgs = asset_refs
+    for src_u in js_srcs:
+        clean_js_src = src_u.split("?", 1)[0].split("#", 1)[0]
+        local_js_path = d_root / clean_js_src.lstrip("/")
+        local_js_exists = local_js_path.is_file()
+        is_content_hashed = bool(_CONTENT_HASHED_JS_RE.search(clean_js_src))
+        if has_compiled_estate and (not local_js_exists or local_js_path.stat().st_size == 0):
+            issues.append(f"Missing local script asset '{clean_js_src}' referenced in {rel_path}")
+        if (
+            (local_js_exists or has_compiled_estate)
+            and not is_content_hashed
+            and not re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_u)
+        ):
+            issues.append(f"Unversioned local script '{src_u}' without ?v= in {rel_path}")
+    for og_u in og_imgs:
+        tgt = _resolve_local_dist_asset_url(d_root, domain, og_u)
+        if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
+            issues.append(f"Missing local og:image asset '{og_u}' referenced in {rel_path}")
+    for fav_u in fav_urls:
+        tgt = _resolve_local_dist_asset_url(d_root, domain, fav_u)
+        if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
+            issues.append(f"Missing local favicon asset '{fav_u}' referenced in {rel_path}")
+    for img_u in ld_imgs:
+        tgt = _resolve_local_dist_asset_url(d_root, domain, img_u)
+        if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
+            issues.append(f"Missing JSON-LD image/logo asset '{img_u}' in {rel_path}")
+    return issues
+
+
 def _collect_html_asset_and_hygiene_issues(
     html_content: str,
     rel_path: str,
@@ -7788,56 +7875,8 @@ def _collect_html_asset_and_hygiene_issues(
         issues.append(f"Legacy YMYL/FTC disclaimer clutter present in {rel_path}")
 
     if dist_dir is not None:
-        d_root = Path(dist_dir)
-        has_compiled_estate = (
-            (d_root / "tools" / "index.html").is_file()
-            and (d_root / "sitemap.xml").is_file()
-        )
-        for js_m in re.finditer(
-            r'<script\b[^>]*\bsrc\s*=\s*["\'](/(?:static/)?js/[^"\']+)["\']',
-            raw_html,
-            flags=re.IGNORECASE,
-        ):
-            src_u = js_m.group(1)
-            clean_js_src = src_u.split("?", 1)[0].split("#", 1)[0]
-            local_js_path = d_root / clean_js_src.lstrip("/")
-            local_js_exists = local_js_path.is_file()
-            is_content_hashed = bool(_CONTENT_HASHED_JS_RE.search(clean_js_src))
-            if has_compiled_estate and (not local_js_exists or local_js_path.stat().st_size == 0):
-                issues.append(f"Missing local script asset '{clean_js_src}' referenced in {rel_path}")
-            if (
-                (local_js_exists or has_compiled_estate)
-                and not is_content_hashed
-                and not re.search(r"[?&]v=[a-zA-Z0-9._-]+", src_u)
-            ):
-                issues.append(f"Unversioned local script '{src_u}' without ?v= in {rel_path}")
-        for og_u in re.findall(
-            r'<meta\b[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
-            raw_html,
-            flags=re.IGNORECASE,
-        ):
-            tgt = _resolve_local_dist_asset_url(d_root, domain, og_u)
-            if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
-                issues.append(f"Missing local og:image asset '{og_u}' referenced in {rel_path}")
-        for fav_u in re.findall(
-            r'<link\b[^>]*rel=["\'][^"\']*icon[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
-            raw_html,
-            flags=re.IGNORECASE,
-        ):
-            if fav_u.startswith("data:"):
-                continue
-            tgt = _resolve_local_dist_asset_url(d_root, domain, fav_u)
-            if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
-                issues.append(f"Missing local favicon asset '{fav_u}' referenced in {rel_path}")
-        for jtxt in re.findall(
-            r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
-            raw_html,
-            flags=re.IGNORECASE,
-        ):
-            for img_u in re.findall(r'"(?:logo|image)"\s*:\s*"([^"]+)"', jtxt):
-                tgt = _resolve_local_dist_asset_url(d_root, domain, img_u)
-                if tgt is not None and (not tgt.is_file() or tgt.stat().st_size == 0):
-                    issues.append(f"Missing JSON-LD image/logo asset '{img_u}' in {rel_path}")
+        asset_refs = _extract_local_asset_refs_from_html(raw_html)
+        issues.extend(_check_local_asset_refs_against_dist(dist_dir, domain, rel_path, asset_refs))
 
     return issues
 
@@ -7856,8 +7895,41 @@ def audit_porcelain_shell_page(
     asset-integrity, publisher-tag, and personal-attribution contract auditor for a single HTML page.
     Exempts operator_pwa (/signal/) layout while enforcing non-placeholder GSC verification tokens.
     """
-    blueprint = classify_porcelain_blueprint(rel_path, html_content)
+    raw_html_in = html_content or ""
+    vars_key = (
+        css_defined_vars
+        if (css_defined_vars is None or isinstance(css_defined_vars, frozenset))
+        else frozenset(css_defined_vars)
+    )
+    classes_key = (
+        css_defined_classes
+        if (css_defined_classes is None or isinstance(css_defined_classes, frozenset))
+        else frozenset(css_defined_classes)
+    )
+    content_digest = hashlib.blake2b(raw_html_in.encode("utf-8", errors="ignore"), digest_size=16).digest()
+    cache_key = (
+        content_digest,
+        rel_path,
+        property_id or "",
+        bool(check_shell_landmarks),
+        vars_key,
+        classes_key,
+    )
+    with _PORCELAIN_CACHE_LOCK:
+        cached_entry = _PORCELAIN_PAGE_AUDIT_CACHE.get(cache_key)
+        if cached_entry is not None:
+            _PORCELAIN_PAGE_AUDIT_CACHE.move_to_end(cache_key)
+    if cached_entry is not None:
+        pre_issues, post_issues, asset_refs = cached_entry
+        if dist_dir is None or not check_shell_landmarks:
+            return list(pre_issues) + list(post_issues)
+        prof_dom = get_porcelain_tenant_profile(property_id or "profithelm")["domain"]
+        dist_issues = _check_local_asset_refs_against_dist(dist_dir, prof_dom, rel_path, asset_refs)
+        return list(pre_issues) + dist_issues + list(post_issues)
+
+    blueprint = classify_porcelain_blueprint(rel_path, raw_html_in)
     if blueprint == "operator_pwa":
+        pwa_issues: List[str] = []
         for fake_tok in (
             "google-site-verification-profithelm-2026",
             "google-site-verification-prexvo-2026",
@@ -7865,12 +7937,17 @@ def audit_porcelain_shell_page(
             "google-site-verification-lienbond-2026",
             "google-site-verification-verified-2026",
         ):
-            if fake_tok in (html_content or ""):
-                return [f"Placeholder GSC token '{fake_tok}' present in {rel_path}"]
-        return []
+            if fake_tok in raw_html_in:
+                pwa_issues = [f"Placeholder GSC token '{fake_tok}' present in {rel_path}"]
+                break
+        with _PORCELAIN_CACHE_LOCK:
+            _PORCELAIN_PAGE_AUDIT_CACHE[cache_key] = (tuple(pwa_issues), (), ((), (), (), ()))
+            while len(_PORCELAIN_PAGE_AUDIT_CACHE) > _PORCELAIN_PAGE_AUDIT_CACHE_MAXSIZE:
+                _PORCELAIN_PAGE_AUDIT_CACHE.popitem(last=False)
+        return pwa_issues
 
-    issues: List[str] = []
-    work_no_svg = re.sub(r"<(script|template|svg)\b[^>]*>[\s\S]*?</\1>", "", html_content or "", flags=re.IGNORECASE)
+    pre_issues_list: List[str] = []
+    work_no_svg = re.sub(r"<(script|template|svg)\b[^>]*>[\s\S]*?</\1>", "", raw_html_in, flags=re.IGNORECASE)
     for tag_m in re.finditer(
         r"<([a-zA-Z][a-zA-Z0-9_-]*)\b[^>]*?\bstyle\s*=\s*([\"'])([\s\S]*?)\2[^>]*>",
         work_no_svg,
@@ -7883,7 +7960,7 @@ def audit_porcelain_shell_page(
             or re.search(r"\bhsla?\s*\(", style_val, flags=re.IGNORECASE)
         ):
             snippet = re.sub(r"\s+", " ", style_val.strip())[:80]
-            issues.append(
+            pre_issues_list.append(
                 f"Raw color literal (#hex/rgb/hsl) inside HTML style attribute on <{tag_name}> in {rel_path}: {snippet}"
             )
             break
@@ -7899,7 +7976,7 @@ def audit_porcelain_shell_page(
         allowed_vars = set(css_defined_vars)
 
     inline_styles_concat = "\n".join(
-        m.group(1) for m in re.finditer(r"<style\b[^>]*>([\s\S]*?)</style>", html_content or "", flags=re.IGNORECASE)
+        m.group(1) for m in re.finditer(r"<style\b[^>]*>([\s\S]*?)</style>", raw_html_in, flags=re.IGNORECASE)
     )
     if inline_styles_concat and not check_shell_landmarks:
         inl_def, _ = extract_defined_and_referenced_css_vars(inline_styles_concat)
@@ -7914,12 +7991,16 @@ def audit_porcelain_shell_page(
 
     undefined_vars = sorted(referenced_vars - allowed_vars)
     if undefined_vars:
-        issues.append(f"Undefined CSS custom property reference(s) {undefined_vars[:5]} in {rel_path}")
+        pre_issues_list.append(f"Undefined CSS custom property reference(s) {undefined_vars[:5]} in {rel_path}")
 
-    issues.extend(_find_personal_attribution_violations(html_content or "", rel_path))
+    pre_issues_list.extend(_find_personal_attribution_violations(raw_html_in, rel_path))
 
     if not check_shell_landmarks:
-        return issues
+        with _PORCELAIN_CACHE_LOCK:
+            _PORCELAIN_PAGE_AUDIT_CACHE[cache_key] = (tuple(pre_issues_list), (), ((), (), (), ()))
+            while len(_PORCELAIN_PAGE_AUDIT_CACHE) > _PORCELAIN_PAGE_AUDIT_CACHE_MAXSIZE:
+                _PORCELAIN_PAGE_AUDIT_CACHE.popitem(last=False)
+        return pre_issues_list
 
     allowed_classes = (
         css_defined_classes
@@ -7927,118 +8008,135 @@ def audit_porcelain_shell_page(
         else (cached_classes if cached_classes is not None else get_porcelain_css_audit_sets(property_id or "profithelm")[1])
     )
     visible_no_script = re.sub(
-        r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", html_content or "", flags=re.IGNORECASE
+        r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", raw_html_in, flags=re.IGNORECASE
     )
     undef_classes = sorted(
         _find_undefined_ui_classes_in_html(
-            html_content or "",
+            raw_html_in,
             allowed_classes,
             visible_no_script=visible_no_script,
         )
     )
     if undef_classes:
-        issues.append(f"Undefined CSS class(es) {undef_classes[:8]} in {rel_path}")
+        pre_issues_list.append(f"Undefined CSS class(es) {undef_classes[:8]} in {rel_path}")
 
     prof_for_dom = get_porcelain_tenant_profile(property_id or "profithelm")
-    issues.extend(
+    pre_issues_list.extend(
         _collect_html_asset_and_hygiene_issues(
-            html_content or "",
+            raw_html_in,
             rel_path,
             prof_for_dom["domain"],
-            dist_dir,
+            dist_dir=None,
             visible_no_script=visible_no_script,
         )
     )
+    asset_refs = _extract_local_asset_refs_from_html(raw_html_in)
+    post_issues_list: List[str] = []
 
-    if re.search(r"<style\b", html_content or "", flags=re.IGNORECASE):
-        issues.append(f"Competing inline <style> block present in {rel_path}; must use single external style.css")
+    if re.search(r"<style\b", raw_html_in, flags=re.IGNORECASE):
+        post_issues_list.append(f"Competing inline <style> block present in {rel_path}; must use single external style.css")
 
-    if not re.search(r'<link\b[^>]*id=["\']pseo-visual-primitives["\']', html_content or "", flags=re.IGNORECASE):
-        issues.append(f"Missing canonical <link id='pseo-visual-primitives'> stylesheet link in {rel_path}")
+    if not re.search(r'<link\b[^>]*id=["\']pseo-visual-primitives["\']', raw_html_in, flags=re.IGNORECASE):
+        post_issues_list.append(f"Missing canonical <link id='pseo-visual-primitives'> stylesheet link in {rel_path}")
 
     if property_id:
         prof = get_porcelain_tenant_profile(property_id)
-        head_m = re.search(r"<head\b[^>]*>([\s\S]*?)</head>", html_content or "", flags=re.IGNORECASE)
+        head_m = re.search(r"<head\b[^>]*>([\s\S]*?)</head>", raw_html_in, flags=re.IGNORECASE)
         head_str = head_m.group(1) if head_m else ""
         exp_imp = f"<meta name='impact-site-verification' value='{prof['impact_verification_uuid']}'>"
         if exp_imp not in head_str:
-            issues.append(f"Missing canonical Impact verification meta tag in {rel_path}")
+            post_issues_list.append(f"Missing canonical Impact verification meta tag in {rel_path}")
         if (
             "cj-promotional-property-id" not in head_str
             or (f'content="{prof["cj_property_id"]}"' not in head_str and f"content='{prof['cj_property_id']}'" not in head_str)
         ):
-            issues.append(f"Missing canonical CJ promotional property meta tag in {rel_path}")
+            post_issues_list.append(f"Missing canonical CJ promotional property meta tag in {rel_path}")
         if prof["sovrn_domain_key"] and f'content="{prof["sovrn_domain_key"]}"' not in head_str:
-            issues.append(f"Missing Sovrn commerce domain key meta tag in {rel_path}")
+            post_issues_list.append(f"Missing Sovrn commerce domain key meta tag in {rel_path}")
         if not prof["sovrn_domain_key"] and "sovrn-commerce-domain-key" in head_str.lower():
-            issues.append(f"Foreign Sovrn commerce domain key leaked into {rel_path}")
+            post_issues_list.append(f"Foreign Sovrn commerce domain key leaked into {rel_path}")
         if f'<meta name="partnerstack-publisher-entity" content="{prof["publisher_entity_label"]}">' not in head_str:
-            issues.append(f"Missing canonical PartnerStack publisher entity meta tag in {rel_path}")
+            post_issues_list.append(f"Missing canonical PartnerStack publisher entity meta tag in {rel_path}")
         if 'name="ftc-affiliate-disclosure"' not in head_str:
-            issues.append(f"Missing FTC affiliate disclosure meta tag in {rel_path}")
+            post_issues_list.append(f"Missing FTC affiliate disclosure meta tag in {rel_path}")
         if 'href="/media-kit.json"' not in head_str:
-            issues.append(f"Missing /media-kit.json publisher link tag in {rel_path}")
+            post_issues_list.append(f"Missing /media-kit.json publisher link tag in {rel_path}")
         if 'href="/catalog.json"' not in head_str:
-            issues.append(f"Missing /catalog.json tool catalog link tag in {rel_path}")
+            post_issues_list.append(f"Missing /catalog.json tool catalog link tag in {rel_path}")
 
-    if not re.search(r'<header\b[^>]*class=["\'][^"\']*\bsite-header\b', html_content or "", flags=re.IGNORECASE):
-        issues.append(f"Missing canonical <header class='site-header'> landmark in {rel_path}")
+    if not re.search(r'<header\b[^>]*class=["\'][^"\']*\bsite-header\b', raw_html_in, flags=re.IGNORECASE):
+        post_issues_list.append(f"Missing canonical <header class='site-header'> landmark in {rel_path}")
 
-    if not re.search(r'<details\b[^>]*class=["\'][^"\']*\bmobile-nav-menu\b', html_content or "", flags=re.IGNORECASE):
-        issues.append(f"Missing <details class='mobile-nav-menu'> drawer in {rel_path}")
+    if not re.search(r'<details\b[^>]*class=["\'][^"\']*\bmobile-nav-menu\b', raw_html_in, flags=re.IGNORECASE):
+        post_issues_list.append(f"Missing <details class='mobile-nav-menu'> drawer in {rel_path}")
 
-    mm = re.search(r'<main\b[^>]*id=["\']main-content["\'][^>]*>', html_content or "", flags=re.IGNORECASE)
+    mm = re.search(r'<main\b[^>]*id=["\']main-content["\'][^>]*>', raw_html_in, flags=re.IGNORECASE)
     if not mm:
-        issues.append(f"Missing canonical <main id='main-content'> landmark in {rel_path}")
+        post_issues_list.append(f"Missing canonical <main id='main-content'> landmark in {rel_path}")
     else:
-        main_block, _ = _extract_balanced_element(html_content, mm, "main")
+        main_block, _ = _extract_balanced_element(raw_html_in, mm, "main")
         main_inner = re.sub(r"^<main\b[^>]*>|</main\s*>$", "", main_block, flags=re.IGNORECASE)
         main_inner_no_script = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", main_inner, flags=re.IGNORECASE).strip()
         cm = re.match(r'^<div\b[^>]*class=["\'][^"\']*\bcontainer\b[^"\']*["\'][^>]*>', main_inner_no_script, flags=re.IGNORECASE)
         if not cm:
-            issues.append(f"Content inside <main id='main-content'> is not wrapped in <div class='container'> in {rel_path}")
+            post_issues_list.append(f"Content inside <main id='main-content'> is not wrapped in <div class='container'> in {rel_path}")
         else:
             _, rest_outside_container = _extract_balanced_element(main_inner_no_script, cm, "div")
             if rest_outside_container.strip():
-                issues.append(f"Sibling elements leaked outside main#main-content > div.container in {rel_path}")
+                post_issues_list.append(f"Sibling elements leaked outside main#main-content > div.container in {rel_path}")
 
-    fm = re.search(r'<footer\b[^>]*class=["\'][^"\']*\bsite-footer\b[^>]*>', html_content or "", flags=re.IGNORECASE)
+    fm = re.search(r'<footer\b[^>]*class=["\'][^"\']*\bsite-footer\b[^>]*>', raw_html_in, flags=re.IGNORECASE)
     if not fm:
-        issues.append(f"Missing canonical <footer class='site-footer'> landmark in {rel_path}")
+        post_issues_list.append(f"Missing canonical <footer class='site-footer'> landmark in {rel_path}")
     else:
-        footer_block, _ = _extract_balanced_element(html_content, fm, "footer")
+        footer_block, _ = _extract_balanced_element(raw_html_in, fm, "footer")
         for gov_slug in GOVERNANCE_ROUTES:
             if f'href="/{gov_slug}/"' not in footer_block:
-                issues.append(f"Canonical footer missing governance link '/{gov_slug}/' in {rel_path}")
+                post_issues_list.append(f"Canonical footer missing governance link '/{gov_slug}/' in {rel_path}")
 
     if blueprint in ("calculator_leaf", "comparison_leaf", "editorial_guide"):
-        bc_m = re.search(r'<nav\b[^>]*class=["\'][^"\']*\bbreadcrumbs\b[^>]*>([\s\S]*?)</nav>', html_content or "", flags=re.IGNORECASE)
+        bc_m = re.search(r'<nav\b[^>]*class=["\'][^"\']*\bbreadcrumbs\b[^>]*>([\s\S]*?)</nav>', raw_html_in, flags=re.IGNORECASE)
         if not bc_m:
-            issues.append(f"Missing <nav class='breadcrumbs'> on {blueprint} {rel_path}")
+            post_issues_list.append(f"Missing <nav class='breadcrumbs'> on {blueprint} {rel_path}")
         elif blueprint in ("comparison_leaf", "editorial_guide") and not str(rel_path or "").strip().lstrip("/").lower().startswith("tools/"):
             if 'href="/tools/"' in bc_m.group(1) and ">Calculators<" in bc_m.group(1):
-                issues.append(f"Non-calculator {blueprint} {rel_path} mislabeled with Calculators (/tools/) breadcrumb")
-        qa_m = re.search(r'<aside\b[^>]*class=["\'][^"\']*\bquick-answer\b[^>]*>([\s\S]*?)</aside>', html_content or "", flags=re.IGNORECASE)
+                post_issues_list.append(f"Non-calculator {blueprint} {rel_path} mislabeled with Calculators (/tools/) breadcrumb")
+        qa_m = re.search(r'<aside\b[^>]*class=["\'][^"\']*\bquick-answer\b[^>]*>([\s\S]*?)</aside>', raw_html_in, flags=re.IGNORECASE)
         if not qa_m:
-            issues.append(f"Missing <aside class='quick-answer'> on {blueprint} {rel_path}")
+            post_issues_list.append(f"Missing <aside class='quick-answer'> on {blueprint} {rel_path}")
         elif blueprint in ("comparison_leaf", "editorial_guide") and "to compute audit-grade scenario outputs" in qa_m.group(1):
-            issues.append(f"Non-calculator {blueprint} {rel_path} contains synthetic calculator quick-answer boilerplate")
+            post_issues_list.append(f"Non-calculator {blueprint} {rel_path} contains synthetic calculator quick-answer boilerplate")
         strip_count = len(
             re.findall(
                 r'<div\b[^>]*class=["\'][^"\']*\bcompliance-strip\b[^"\']*\bftc-disclosure-banner\b',
-                html_content or "",
+                raw_html_in,
                 flags=re.IGNORECASE,
             )
         )
         if strip_count != 1:
-            issues.append(f"Expected exact 1 .compliance-strip.ftc-disclosure-banner on {rel_path}, found {strip_count}")
+            post_issues_list.append(f"Expected exact 1 .compliance-strip.ftc-disclosure-banner on {rel_path}, found {strip_count}")
     elif blueprint == "error_404":
-        if "status 404" not in (html_content or "").lower():
-            issues.append(f"404 page missing 'Status 404' marker in {rel_path}")
-        if re.search(r'class=["\'][^"\']*\b(?:ftc-disclosure-banner|ymyl-disclaimer-banner|compliance-strip)\b', html_content or "", flags=re.IGNORECASE):
-            issues.append(f"404 page must not render YMYL/FTC disclosure banners in {rel_path}")
+        if "status 404" not in raw_html_in.lower():
+            post_issues_list.append(f"404 page missing 'Status 404' marker in {rel_path}")
+        if re.search(r'class=["\'][^"\']*\b(?:ftc-disclosure-banner|ymyl-disclaimer-banner|compliance-strip)\b', raw_html_in, flags=re.IGNORECASE):
+            post_issues_list.append(f"404 page must not render YMYL/FTC disclosure banners in {rel_path}")
 
-    return issues
+    with _PORCELAIN_CACHE_LOCK:
+        _PORCELAIN_PAGE_AUDIT_CACHE[cache_key] = (
+            tuple(pre_issues_list),
+            tuple(post_issues_list),
+            asset_refs,
+        )
+        _PORCELAIN_PAGE_AUDIT_CACHE.move_to_end(cache_key)
+        while len(_PORCELAIN_PAGE_AUDIT_CACHE) > _PORCELAIN_PAGE_AUDIT_CACHE_MAXSIZE:
+            _PORCELAIN_PAGE_AUDIT_CACHE.popitem(last=False)
+
+    dist_issues_list = (
+        _check_local_asset_refs_against_dist(dist_dir, prof_for_dom["domain"], rel_path, asset_refs)
+        if dist_dir is not None
+        else []
+    )
+    return pre_issues_list + dist_issues_list + post_issues_list
 
 
 def audit_porcelain_estate_structure(
@@ -8122,13 +8220,14 @@ def audit_porcelain_estate_structure(
     if preloaded_html is not None:
         html_items = [(d / rel_hp, rel_hp, txt_hp) for rel_hp, txt_hp in preloaded_html.items()]
     else:
-        html_items = []
-        for hp in sorted(d.rglob("*.html")):
-            if hp.name.startswith("."):
-                continue
-            rel_hp = hp.relative_to(d).as_posix()
-            txt_hp = hp.read_text(encoding="utf-8", errors="ignore")
-            html_items.append((hp, rel_hp, txt_hp))
+        from pseofactory.verifier import DistHtmlSnapshot
+
+        snap = DistHtmlSnapshot.capture(d)
+        html_items = [
+            (entry.path, rel_hp, entry.content)
+            for rel_hp, entry in snap.html_entries.items()
+            if not entry.name.startswith(".")
+        ]
 
     for hp, rel_hp, txt_hp in html_items:
         dist_html_text_cache[hp] = txt_hp
@@ -8188,11 +8287,33 @@ def audit_porcelain_estate_structure(
     for sf in scan_targets:
         if skip_non_pwa_html_checks and sf in checked_non_pwa_dist_html:
             continue
-        raw_sf = dist_html_text_cache.get(sf)
-        if raw_sf is None:
-            raw_sf = sf.read_text(encoding="utf-8", errors="ignore")
         rel_lbl = sf.relative_to(repo_root).as_posix() if sf.is_relative_to(repo_root) else str(sf)
-        issues.extend(_find_personal_attribution_violations(raw_sf, rel_lbl))
+        raw_sf = dist_html_text_cache.get(sf)
+        if raw_sf is not None:
+            issues.extend(_find_personal_attribution_violations(raw_sf, rel_lbl))
+            continue
+        try:
+            st = sf.stat()
+            pa_key = (str(sf.resolve()), int(st.st_mtime_ns), int(st.st_ctime_ns), int(st.st_size), rel_lbl)
+        except OSError:
+            pa_key = None
+        if pa_key is not None:
+            with _PORCELAIN_CACHE_LOCK:
+                pa_cached = _PERSONAL_ATTR_FILE_CACHE.get(pa_key)
+                if pa_cached is not None:
+                    _PERSONAL_ATTR_FILE_CACHE.move_to_end(pa_key)
+            if pa_cached is not None:
+                issues.extend(pa_cached)
+                continue
+        raw_sf = sf.read_text(encoding="utf-8", errors="ignore")
+        pa_found = _find_personal_attribution_violations(raw_sf, rel_lbl)
+        if pa_key is not None:
+            with _PORCELAIN_CACHE_LOCK:
+                _PERSONAL_ATTR_FILE_CACHE[pa_key] = tuple(pa_found)
+                _PERSONAL_ATTR_FILE_CACHE.move_to_end(pa_key)
+                while len(_PERSONAL_ATTR_FILE_CACHE) > _PERSONAL_ATTR_FILE_CACHE_MAXSIZE:
+                    _PERSONAL_ATTR_FILE_CACHE.popitem(last=False)
+        issues.extend(pa_found)
 
     return issues
 
