@@ -15181,7 +15181,13 @@ class RetroReflectionEngine:
             if (
                 _has_stale_pending_status(content, property_id)
                 or 'data-partner="sofi_refi"' in content
-                or ("1031" in rel and 'data-partner="ipx1031"' not in content and 'data-partner="lawdepot"' not in content)
+                or (
+                    "1031" in rel
+                    and 'data-partner="ipx1031"' not in content
+                    and 'data-partner="lawdepot"' not in content
+                    and 'data-partner="mercury"' not in content
+                    and 'data-partner="xendoo"' not in content
+                )
                 or ('href="/r/' in content and "source_tool=" not in content)
                 or any(
                     "sponsored" not in m.group(1).lower() or "noopener" not in m.group(1).lower()
