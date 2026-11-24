@@ -152,7 +152,7 @@ def test_upgraded_statutory_execution_packets_across_all_tenants() -> None:
         assert_no_forbidden_dashes(js_code, context=f"edge lead-capture {prop}")
         assert "statutory_execution_artifacts" in js_code
         assert "UNREDACTED_READY_FOR_FILING" in js_code
-        assert "PREVIEW_REDACTED_PENDING_CHECKOUT" in js_code
+        assert "LOCKED_FULL_PACK_ONLY" in js_code
         assert f'"payment_intent_data[statement_descriptor_suffix]": "{suffix}"' in js_code
 
     redir_js = generate_edge_redirect_function("lienbond")
@@ -164,12 +164,12 @@ def test_upgraded_statutory_execution_packets_across_all_tenants() -> None:
     assert "LIENBOND_TELEMETRY_KV" in tel_js
 
     offer = resolve_lead_monetization_offer("lienbond", "contractor-license-bond-cost-calculator")
-    assert offer["offer_sku"] == "lb_surety_lien_wh347_packet"
-    assert offer["offer_price_usd"] == 79.0
+    assert offer["offer_sku"] == "lb_surety_bond_underwriting_kit"
+    assert offer["offer_price_usd"] == 29.0
 
     wc_offer = resolve_lead_monetization_offer("lienbond", "workers-comp-class-code-rate-calculator")
     assert wc_offer["offer_sku"] == "lb_workers_comp_emr_audit_packet"
-    assert wc_offer["offer_price_usd"] == 49.0
+    assert wc_offer["offer_price_usd"] == 29.0
 
     thresh = evaluate_lead_quote_threshold("lienbond", "performance-payment-bond-cost-calculator", 120000.0)
     assert thresh["eligible"] is True
@@ -178,7 +178,7 @@ def test_upgraded_statutory_execution_packets_across_all_tenants() -> None:
 
     upgrade_spec = resolve_post_calculation_upgrade_spec("lienbond", "mechanics-lien-filing-deadline-calculator")
     assert upgrade_spec is not None
-    assert upgrade_spec["offer_sku"] == "lb_surety_lien_wh347_packet"
+    assert upgrade_spec["offer_sku"] == "lb_mechanics_lien_waiver_packet"
     assert upgrade_spec["trend_series_count"] >= 3
 
 

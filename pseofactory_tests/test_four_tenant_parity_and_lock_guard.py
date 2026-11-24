@@ -381,6 +381,13 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
 
     def _reset_to_baseline_unrepositioned(html_doc: str, inject_vanta_tm: bool = False) -> str:
         s = html_doc
+        # Strip modern 3-step #workpaper-unlock-card so multi-slot partner repositioning runs on synthetic baseline
+        s = re.sub(
+            r'<section\b[^>]*\bid=["\']workpaper-unlock-card["\'][^>]*>[\s\S]*?</section>',
+            "",
+            s,
+            flags=re.IGNORECASE,
+        )
         s = re.sub(r'data-gsc-repositioned=["\']true["\']', 'data-gsc-repositioned="false"', s, flags=re.IGNORECASE)
         s = re.sub(
             r'data-gsc-tier=["\'](?:EMPIRICAL_YIELD_SWAP|BASELINE_MULTI_SLOT)["\']',
@@ -390,6 +397,44 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
         )
         s = re.sub(r'data-yield-score=["\'][^"\']+["\']', 'data-yield-score="0"', s, flags=re.IGNORECASE)
         s = re.sub(r'data-primary-partner=["\'][a-z0-9_]+["\']', 'data-primary-partner="vanta_security"', s, flags=re.IGNORECASE)
+
+        if not re.search(r'class=["\'][^"\']*\bcalc-inline-cta\b', s, flags=re.IGNORECASE):
+            inline_seed = (
+                '<div class="calc-inline-cta" data-partner="vanta_security">'
+                '<div class="calc-inline-cta-copy"><div>GRC Automation</div><div>Vanta Trust Management</div></div>'
+                '<a href="/r/vanta_security" data-cta-slot="calculator_result_inline">Explore Vanta &rarr;</a></div>'
+            )
+            results_col_re = re.compile(
+                r'(<div\b[^>]*class=["\'][^"\']*\bcalc-results-column\b[^"\']*["\'][^>]*>\s*<h3[^>]*>.*?</h3>)',
+                flags=re.S | re.I,
+            )
+            if results_col_re.search(s):
+                s = results_col_re.sub(rf"\1\n          {inline_seed}", s, count=1)
+            else:
+                from pseofactory.visual_primitives import _find_balanced_div_span
+
+                rb_span = _find_balanced_div_span(s, "result-box", attr_name="class")
+                if rb_span is not None:
+                    close_idx = s.find("</div>", rb_span[0], rb_span[1])
+                    if close_idx != -1:
+                        s = s[:close_idx].rstrip() + f'\n          {inline_seed}<div id="calc-result-quick-unlock-bar"></div>\n      ' + s[close_idx:]
+                elif "</main>" in s:
+                    s = s.replace("</main>", f"\n{inline_seed}\n</main>", 1)
+                elif "</body>" in s:
+                    s = s.replace("</body>", f"\n{inline_seed}\n</body>", 1)
+
+        if not re.search(r'<section\b[^>]*class=["\'][^"\']*(?:affiliates?-section|partners-section|refinance-partner-section)', s, flags=re.IGNORECASE):
+            sec_seed = (
+                '<section class="affiliate-section affiliates-section" data-primary-partner="vanta_security">'
+                '<h2>Recommended Partner Solutions</h2>'
+                '<div class="partner-card" data-partner="vanta_security">'
+                '<a href="/r/vanta_security">Vanta</a></div>'
+                '</section>'
+            )
+            if "</main>" in s:
+                s = s.replace("</main>", f"\n{sec_seed}\n</main>", 1)
+            elif "</body>" in s:
+                s = s.replace("</body>", f"\n{sec_seed}\n</body>", 1)
 
         def _force_vanta_partner(m: re.Match) -> str:
             return re.sub(r'data-partner=["\'][a-z0-9_]+["\']', 'data-partner="vanta_security"', m.group(0), flags=re.IGNORECASE)
@@ -412,19 +457,24 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
             )
         return s
 
-    # 1. Verify live iso-27001 conforms cleanly AND unhealed static non-Vanta baseline heals to thoropass_audit & keeps <h2>
-    #    Works both pre-reflection (live /r/ links on disk) and post-reflection (zero-contract stripped HTML on disk).
+    # 1. Verify live iso-27001 conforms cleanly AND unhealed baseline heals to thoropass_audit & keeps <h2>
     iso_live_raw = (live_gh_dist / "tools" / "iso-27001-certification-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    iso_is_stripped = 'data-partner-ctas-hidden="unapproved"' in iso_live_raw and 'href="/r/' not in iso_live_raw
-    if iso_is_stripped:
-        assert 'data-first-party-checkout="true"' in iso_live_raw
-        iso_live_doc, _ = reposition_affiliate_placements_from_gsc_signals(
-            iso_live_raw,
-            property_id="gainhelm",
-            slug="iso-27001-certification-cost-calculator",
-        )
-    else:
-        iso_live_doc = iso_live_raw
+    assert 'id="workpaper-unlock-card"' in iso_live_raw
+    assert 'id="partner-registration-drawer"' not in iso_live_raw
+    assert 'href="/r/' not in iso_live_raw
+    iso_clean_rep, _ = reposition_affiliate_placements_from_gsc_signals(
+        iso_live_raw,
+        property_id="gainhelm",
+        slug="iso-27001-certification-cost-calculator",
+    )
+    assert normalize_html_callout_message_match(iso_clean_rep, property_id="gainhelm") == iso_clean_rep
+
+    iso_baseline = _reset_to_baseline_unrepositioned(iso_live_raw, inject_vanta_tm=True)
+    iso_live_doc, _ = reposition_affiliate_placements_from_gsc_signals(
+        iso_baseline,
+        property_id="gainhelm",
+        slug="iso-27001-certification-cost-calculator",
+    )
     live_iso_slots = _extract_slot_partners(iso_live_doc)
     assert live_iso_slots["h2_text"] == "Recommended Partner Solutions"
     assert live_iso_slots["sec_pk"] == live_iso_slots["card1_pk"] == live_iso_slots["inline_pk"]
@@ -450,8 +500,9 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
 
     # 2. Query-intent swap on SOC 2 (promoting thoropass_audit) with id= before class= on <section>
     soc2_raw = (live_gh_dist / "tools" / "soc-2-audit-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    if '<section class="affiliate-section affiliates-section' in soc2_raw:
-        soc2_with_id = soc2_raw.replace(
+    soc2_base = _reset_to_baseline_unrepositioned(soc2_raw)
+    if '<section class="affiliate-section affiliates-section' in soc2_base:
+        soc2_with_id = soc2_base.replace(
             '<section class="affiliate-section affiliates-section',
             '<section id="gainhelm-partners" class="affiliate-section affiliates-section',
             1,
@@ -460,7 +511,7 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
         soc2_with_id = re.sub(
             r'<section\b(?![^>]*\bid=)([^>]*\bdata-partner-ctas-hidden=["\']unapproved["\'])',
             r'<section id="gainhelm-partners"\1',
-            soc2_raw,
+            soc2_base,
             count=1,
             flags=re.IGNORECASE,
         )
@@ -558,16 +609,18 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
     )
     assert fb_pass2["pages_updated"] == 0
 
-    # 4. Explicitly verify simulated post-reflection stripped GainHelm HTML restores cleanly when partners go live
+    # 4. Explicitly verify simulated post-reflection stripped GainHelm HTML replaces unapproved partner blocks
+    #    with clean #workpaper-unlock-card (zero /r/ links or empty placeholder boxes) and stays idempotent when live.
     real_vault_path = Path(_aff.__file__).resolve().parent / "monetization_vault.json"
     with monkeypatch.context() as mp_zero:
         mp_zero.setattr(_aff, "MONETIZATION_VAULT_PATH", real_vault_path)
         iso_stripped_sim = _aff.strip_unapproved_partner_ctas_from_html(
-            iso_live_raw,
+            iso_baseline,
             property_id="gainhelm",
             slug="iso-27001-certification-cost-calculator",
         )
-    assert 'data-partner-ctas-hidden="unapproved"' in iso_stripped_sim
+    assert 'id="workpaper-unlock-card"' in iso_stripped_sim
+    assert 'data-partner-ctas-hidden="unapproved"' not in iso_stripped_sim
     assert 'href="/r/' not in iso_stripped_sim
     assert 'class="calc-inline-cta"' not in iso_stripped_sim
     assert "overlay-partner-offer" not in iso_stripped_sim
@@ -576,12 +629,9 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
         property_id="gainhelm",
         slug="iso-27001-certification-cost-calculator",
     )
-    restored_sim_slots = _extract_slot_partners(iso_restored_sim)
     assert 'data-partner-ctas-hidden="unapproved"' not in iso_restored_sim
-    assert restored_sim_slots["h2_text"] == "Recommended Partner Solutions"
-    assert restored_sim_slots["sec_pk"] == restored_sim_slots["card1_pk"] == restored_sim_slots["inline_pk"]
-    assert restored_sim_slots["ov_pk"] is None
-    assert BeautifulSoup(iso_restored_sim, "html.parser").select_one("#partner-registration-drawer") is not None
+    assert 'id="workpaper-unlock-card"' in iso_restored_sim
+    assert BeautifulSoup(iso_restored_sim, "html.parser").select_one("#partner-registration-drawer") is None
     assert normalize_html_callout_message_match(iso_restored_sim, property_id="gainhelm") == iso_restored_sim
 
 

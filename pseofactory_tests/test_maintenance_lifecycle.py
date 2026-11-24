@@ -956,12 +956,13 @@ def test_retro_reflection_engine_repairs_legacy_stale_estate_in_single_pass(tmp_
     page_path = tool_dir / "index.html"
     page_path.write_text(legacy_html, encoding="utf-8")
 
-    # Pre-audit should detect all 7 missing mechanics
+    # Pre-audit detects all mechanics expected on a fresh minimal fixture
+    # (serp_incumbent_depth_upgrade is only flagged when legacy workbench pollution is present).
     pre_audit = RetroReflectionEngine.audit_estate(dist_dir, "prexvo")
     assert pre_audit["status"] == "STALE"
     assert pre_audit["stale_count"] == 1
-    assert set(pre_audit["stale_pages"]["tools/rap-payment-calculator/index.html"]) == set(
-        RetroReflectionEngine.REQUIRED_MECHANICS
+    assert set(pre_audit["stale_pages"]["tools/rap-payment-calculator/index.html"]) == (
+        set(RetroReflectionEngine.REQUIRED_MECHANICS) - {"serp_incumbent_depth_upgrade"}
     )
 
     # Single-pass retro-reflection repairs the page
@@ -1414,14 +1415,29 @@ def test_prexvo_tools_index_ymyl_audit_estate_passes_while_broken_ctas_fail(tmp_
     from pseofactory_tests._vault_fixtures import live_partners_in_temp_vault
 
     # 1. Default real vault (all Prexvo partners pending/declined):
-    # unapproved /r/splash_financial is stripped, 1st-party Stripe checkout + YMYL warning renders, audit passes.
+    # unapproved /r/splash_financial is stripped from tools/index.html, Title IV warning renders, audit passes.
     repo_default = tmp_path / "prexvo_default"
     dist_default = _write_porcelain_seed_estate(repo_default)
+    refi_dir = dist_default / "tools" / "student-loan-refinance-break-even-calculator"
+    refi_dir.mkdir(parents=True, exist_ok=True)
+    refi_dir.joinpath("index.html").write_text(
+        (dist_default / "tools" / "rap-payment-calculator" / "index.html")
+        .read_text(encoding="utf-8")
+        .replace("/tools/rap-payment-calculator/", "/tools/student-loan-refinance-break-even-calculator/")
+        .replace("RAP Payment Calculator", "Student Loan Refinance Break-Even Calculator")
+        .replace("</main>", '<div class="result-box"><strong class="output-value">$412</strong></div></main>'),
+        encoding="utf-8",
+    )
     RetroReflectionEngine.retrofit_estate(dist_default, "prexvo", "https://prexvo.com")
     default_tools_html = (dist_default / "tools" / "index.html").read_text(encoding="utf-8")
     assert "/r/splash_financial" not in default_tools_html
-    assert 'data-first-party-checkout="true"' in default_tools_html
-    assert "pslf" in default_tools_html.lower()
+    assert "waives federal protections" in default_tools_html.lower()
+    default_refi_html = (refi_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-first-party-checkout="true"' in default_refi_html
+    assert 'id="workpaper-unlock-card"' in default_refi_html
+    default_rap_html = (dist_default / "tools" / "rap-payment-calculator" / "index.html").read_text(encoding="utf-8")
+    assert 'data-first-party-checkout="true"' not in default_rap_html
+    assert "pslf" in default_tools_html.lower() or "idr" in default_tools_html.lower()
     audit_default_ok = RetroReflectionEngine.audit_estate(dist_default, "prexvo")
     assert audit_default_ok["status"] == "PASS", audit_default_ok
     assert audit_default_ok["stale_count"] == 0, audit_default_ok

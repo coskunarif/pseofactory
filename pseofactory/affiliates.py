@@ -4237,21 +4237,9 @@ def build_contextual_referral_card_html(
     if forced_partner_key and is_partner_live_in_vault(prop, forced_partner_key):
         p_key = str(forced_partner_key).strip().lower()
         p_obj = registry.get(p_key)
-    elif (slot_plan_ref.get("gsc_repositioned") or gsc_metrics or engagement_metrics) and promoted_pk_ref and is_partner_live_in_vault(prop, promoted_pk_ref):
+    elif (slot_plan_ref.get("gsc_repositioned") or engagement_metrics) and promoted_pk_ref and is_partner_live_in_vault(prop, promoted_pk_ref):
         p_key = promoted_pk_ref
         p_obj = registry.get(p_key)
-    elif prop in ("profithelm", "exchange1031"):
-        live_offer = next(
-            (
-                o
-                for o in (roster_info.get("roster_offers") or [])
-                if isinstance(o, dict) and is_partner_live_in_vault(prop, str(o.get("partner_key") or ""))
-            ),
-            None,
-        )
-        if live_offer:
-            p_key = str(live_offer["partner_key"])
-            p_obj = registry.get(p_key)
 
     if not p_key:
         p_obj = resolve_optimal_partner_for_slug(
@@ -4853,7 +4841,7 @@ def resolve_optimal_partner_for_slug(
         if matched_bucket_name == "tax" and s not in RETAIL_TAX_SLUGS:
             cls_info = classify_asset_archetype_and_intent(prop, s, s.replace("-", " "))
             vf = str(cls_info.get("vertical_family") or "")
-            if vf and vf not in ("tax_compliance", "retail_tax") and vf in VERTICAL_DIVERSIFIED_PARTNER_ROSTERS:
+            if vf and vf not in ("tax_compliance", "retail_tax", "federal_state_tax_brackets") and vf in VERTICAL_DIVERSIFIED_PARTNER_ROSTERS:
                 raw_keys = list(VERTICAL_DIVERSIFIED_PARTNER_ROSTERS[vf])
                 is_b2b = True
                 is_retail = False

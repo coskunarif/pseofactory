@@ -534,14 +534,36 @@ def _inject_legacy_gainhelm_drift(html_txt: str, slug: str) -> str:
         span = _find_balanced_div_span(mutated, target_val, attr_name=attr_name)
         if span is not None:
             mutated = mutated[: span[0]] + legacy_block + mutated[span[1] :]
+        elif target_val == "post-calculation-upgrade-drawer":
+            wp_span = _find_balanced_div_span(mutated, "workpaper-unlock-card", attr_name="id")
+            if wp_span is not None:
+                mutated = mutated[: wp_span[0]] + legacy_block + mutated[wp_span[1] :]
+            else:
+                close_main = mutated.rfind("</main>")
+                assert close_main != -1, f"Missing </main> in live fixture {slug}"
+                mutated = mutated[:close_main] + "\n" + legacy_block + "\n" + mutated[close_main:]
+        elif target_val == "calc-result-quick-unlock-bar":
+            rb_span = _find_balanced_div_span(mutated, "result-box", attr_name="class")
+            if rb_span is not None:
+                close_idx = mutated.rfind("</div>", rb_span[0], rb_span[1])
+                assert close_idx != -1, f"Missing closing </div> for result-box in live fixture {slug}"
+                mutated = mutated[:close_idx] + "\n" + legacy_block + "\n" + mutated[close_idx:]
+            else:
+                close_main = mutated.rfind("</main>")
+                assert close_main != -1, f"Missing </main> in live fixture {slug}"
+                mutated = mutated[:close_main] + "\n" + legacy_block + "\n" + mutated[close_main:]
         elif target_val == "calc-inline-cta":
             # Post-847424d GainHelm hides unapproved /r/ .calc-inline-cta; inject stale legacy CTA
-            # inside .result-box (its authentic pre-847424d DOM location) to test full legacy drift healing.
+            # inside .result-box (or before </main> on clean 3-step fixtures) to test full legacy drift healing.
             rb_span = _find_balanced_div_span(mutated, "result-box", attr_name="class")
-            assert rb_span is not None, f"Missing class=result-box in live fixture {slug}"
-            close_idx = mutated.rfind("</div>", rb_span[0], rb_span[1])
-            assert close_idx != -1, f"Missing closing </div> for result-box in live fixture {slug}"
-            mutated = mutated[:close_idx] + "\n" + legacy_block + "\n" + mutated[close_idx:]
+            if rb_span is not None:
+                close_idx = mutated.rfind("</div>", rb_span[0], rb_span[1])
+                assert close_idx != -1, f"Missing closing </div> for result-box in live fixture {slug}"
+                mutated = mutated[:close_idx] + "\n" + legacy_block + "\n" + mutated[close_idx:]
+            else:
+                close_main = mutated.rfind("</main>")
+                assert close_main != -1, f"Missing </main> in live fixture {slug}"
+                mutated = mutated[:close_main] + "\n" + legacy_block + "\n" + mutated[close_main:]
         else:
             assert span is not None, f"Missing {attr_name}={target_val} in live fixture {slug}"
 
@@ -3216,6 +3238,9 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
 
 (async () => {{
   const allOfferPrices = [39, 49, 79];
+  for (const item of items) {{
+    expectedCentsByLeadId[item.lead_id] = Number(item.exp_cents);
+  }}
   for (const item of items) {{
     const {{ ctx, mockKv }} = ctxByTenant[item.property_id];
     const env = {{ STRIPE_SECRET_KEY: "sk_live_mock", LEADS_KV: mockKv }};

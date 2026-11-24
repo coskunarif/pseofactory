@@ -1960,7 +1960,7 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
     assert "hoh: 12900" in healed_ph_html
     assert "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)" in healed_ph_html
     assert "(1 - 13.3% state rate)" in healed_ph_html
-    assert '"price":"49"' in healed_ph_html
+    assert '"price":"29"' in healed_ph_html
     assert (
         TruthReconciliationEngine.audit_html_truth_reconciliation(
             healed_ph_html,
@@ -2164,7 +2164,7 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     1. Multi-channel syndication generation, curated statutory calculation proofs,
        YouTube transcript brand parity ('GainHelm'), and AI benchmark matrices.
     2. Partner tracking readiness, publisher prerequisites, cluster monetization gaps,
-       and three-rail checkout/fulfillment workpapers ($79 SOC 2/CMMC and $49 HIPAA/ISO).
+       and three-rail checkout/fulfillment workpapers ($29 SOC 2/CMMC and HIPAA/ISO).
     3. Indexing inspector, indexing feedback loop, and push indexer tenant boundaries.
     4. Trend history DB statutory economic timeseries, cron property assignment, and
        competitor query modifier expansion.
@@ -2229,9 +2229,9 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     assert mod_eval["action"] == "REFACTOR_PAGE"
     assert mod_eval["matched_tool_slug"] == "soc-2-audit-cost-calculator"
 
-    offer_79 = resolve_lead_monetization_offer("gainhelm", "soc-2-audit-cost-calculator", lead_id="lead_gh_test")
-    assert offer_79["offer_sku"] == "gh_soc2_cmmc_audit_workpapers"
-    assert offer_79["offer_price_usd"] == 79.0
+    offer_29 = resolve_lead_monetization_offer("gainhelm", "soc-2-audit-cost-calculator", lead_id="lead_gh_test")
+    assert offer_29["offer_sku"] == "gh_soc2_cmmc_audit_workpapers"
+    assert offer_29["offer_price_usd"] == 29.0
     wp_79 = synthesize_personalized_audit_workpaper(
         property_id="gainhelm",
         tool_slug="soc-2-audit-cost-calculator",
@@ -2375,7 +2375,7 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
     gh_queue = prioritize_distribution_queue_by_referral_yield(property_id="gainhelm")
     assert len(gh_queue) >= 10
     assert gh_queue[0]["company_id"] == "106482195"
-    assert gh_queue[0]["revenue_priority_score"] == 69.0
+    assert gh_queue[0]["revenue_priority_score"] == 65.0
 
     gh_synd_dir = tmp_path / "gh_syndication"
     export_all_syndication_files(output_dir=gh_synd_dir, property_id="gainhelm")
@@ -2512,7 +2512,7 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
         const m = String(url).match(/api\\.stripe\\.com\\/v1\\/checkout\\/sessions\\/cs_live_PAIDFOR_([A-Za-z0-9_]+)$/);
         if (m) {{
           return new Response(JSON.stringify({{
-            id: "cs_live_PAIDFOR_" + m[1], livemode: true, payment_status: "paid", amount_total: 7900,
+            id: "cs_live_PAIDFOR_" + m[1], livemode: true, payment_status: "paid", amount_total: 2900,
             currency: "usd", client_reference_id: m[1], metadata: {{ lead_id: m[1] }}
           }}), {{ status: 200 }});
         }}
@@ -2526,14 +2526,14 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
       const data = await fulfillRes.json();
       if (data.status !== "toolkit_fulfilled") process.exit(41);
       if (!Array.isArray(data.reconciliation_schedule) || data.reconciliation_schedule.length !== 4) process.exit(42);
-      if (!Array.isArray(data.sensitivity_matrix) || data.sensitivity_matrix.length !== 3) process.exit(43);
+      if (!Array.isArray(data.sensitivity_matrix) || data.sensitivity_matrix.length !== 5) process.exit(43);
       if (!Array.isArray(data.statutory_trend_timeseries) || data.statutory_trend_timeseries.length !== 3) process.exit(44);
       if (!Array.isArray(data.deliverables) || data.deliverables.length !== 4) process.exit(45);
       if (!data.playbook_url || !data.custom_parameter_ledger) process.exit(46);
       const tableCount = String(data.html_report || "").split("<table").length - 1;
       if (tableCount < 3 || String(data.html_report || "").length < 4500) process.exit(47);
       const csvLines = String(data.csv_content || "").trim().split("\\n");
-      if (csvLines.length !== 8) process.exit(48);
+      if (csvLines.length !== 19) process.exit(48);
       process.exit(0);
     }})().catch(err => {{ console.error(err); process.exit(98); }});
     """

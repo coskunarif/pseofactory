@@ -3479,9 +3479,36 @@ details.faq-accordion > summary::-webkit-details-marker {{
   .breadcrumbs {{
     flex-wrap: nowrap;
     overflow-x: auto;
-    white-space: nowrap;
+    gap: 0.35rem;
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
+  }}
+
+  .breadcrumbs ol {{
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.35rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-width: 100%;
+    overflow-x: auto;
+  }}
+
+  .breadcrumbs a,
+  .breadcrumbs .separator {{
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }}
+
+  .breadcrumbs > span:last-child,
+  .breadcrumbs li:last-child {{
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }}
 
   h1, .hero-title {{
@@ -3554,16 +3581,25 @@ details.faq-accordion > summary::-webkit-details-marker {{
   }}
 
   .calc-switcher-pills {{
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    flex-wrap: wrap;
+    overflow-x: visible;
     max-width: 100%;
-    padding-bottom: 0.25rem;
+    gap: 0.375rem;
   }}
 
-  .calc-switcher-btn {{
-    flex: 0 0 auto;
-    white-space: nowrap;
+  .calc-switcher-btn,
+  .preset-btn,
+  .calc-scenario-btn,
+  [data-calc-preset] {{
+    white-space: normal;
+    height: auto;
+    min-height: 44px;
+    max-width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+    line-height: 1.3;
+    overflow-wrap: break-word;
+    box-sizing: border-box;
   }}
 
   .footer-grid,

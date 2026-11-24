@@ -543,12 +543,14 @@ def test_p2_daily_builder_stale_ledger_reconciliation_and_fallback_manifests(tmp
     assert "34 CFR 685.208" in meta_pp
 
     built_html = missing_out.read_text(encoding="utf-8")
-    assert 'id="partner-registration-drawer"' in built_html
+    assert 'id="workpaper-unlock-card"' in built_html
+    assert 'id="partner-registration-drawer"' not in built_html
     retro_html, _ = reposition_affiliate_placements_from_gsc_signals(
         built_html,
         property_id="gainhelm",
         slug="dora-ict-third-party-risk-compliance-cost-calculator",
     )
-    assert 'id="partner-registration-drawer"' in retro_html
+    assert 'id="workpaper-unlock-card"' in retro_html
+    assert 'id="partner-registration-drawer"' not in retro_html
 
 

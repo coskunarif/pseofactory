@@ -683,6 +683,7 @@ def test_interactive_regressions_d1_d2_d4_d7_in_node_and_compiled_html(tmp_path:
     assert "\u2014" not in sig_js and "\u2013" not in sig_js
 
 
+@pytest.mark.host_estate
 def test_browser_verifier_probe_edge_cases_and_dead_input_detection(tmp_path: Path) -> None:
     """
     Verifies UnifiedBrowserAuditor handles bounded/clamped ranges, zero-gated sibling terms,

@@ -86,12 +86,39 @@ def _build_minimal_dist(root: Path, prop: str = "profithelm", domain: str = "pro
             1,
         )
 
+    if 'href="/partners/"' not in sample_html:
+        sample_html = sample_html.replace(
+            "</footer>",
+            '<a href="/partners/">Partner With Us</a></footer>',
+            1,
+        )
+        if 'href="/partners/"' not in sample_html:
+            sample_html = sample_html.replace(
+                "</body>",
+                '<footer><a href="/partners/">Partner With Us</a></footer></body>',
+                1,
+            )
+
     (dist / "index.html").write_text(sample_html, encoding="utf-8")
     (dist / "tools").mkdir(exist_ok=True)
     (dist / "tools" / "index.html").write_text(sample_html, encoding="utf-8")
+    (dist / "partners").mkdir(exist_ok=True)
+    partners_html = (
+        f'<!DOCTYPE html><html lang="en"><head>'
+        f'<title>Verified Calculator Partner Placement Desk | {brand}</title>'
+        f'<meta name="google-site-verification" content="1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U">'
+        f'<link rel="canonical" href="https://{domain}/partners/">'
+        f'<script type="application/ld+json">{{"@context":"https://schema.org","@type":"WebPage","name":"Partner Desk","url":"https://{domain}/partners/"}}</script>'
+        f'</head>'
+        f'<body><main><h1>Partner With {brand}</h1>'
+        f'<form id="partner-registration-form" data-offer-sku="ph_verified_partner_slot" data-offer-price="299">'
+        f'<p>$299 Verified Partner Placement</p><button type="submit">Apply ($299)</button></form>'
+        f'</main><footer><a href="/partners/">Partner With Us</a></footer></body></html>'
+    )
+    (dist / "partners" / "index.html").write_text(partners_html, encoding="utf-8")
     (dist / "manifests").mkdir(exist_ok=True)
 
-    urls = [f"https://{domain}/", f"https://{domain}/tools/"]
+    urls = [f"https://{domain}/", f"https://{domain}/tools/", f"https://{domain}/partners/"]
     for i in range(num_tools):
         slug = f"tool-calc-{i:02d}"
         t_dir = dist / "tools" / slug
