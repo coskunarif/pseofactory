@@ -3548,27 +3548,27 @@ details.faq-accordion > summary::-webkit-details-marker {{
   }}
 
   .quick-answer {{
-    padding: 0.4375rem 0.75rem;
+    padding: 0.375rem 0.625rem;
   }}
 
   .quick-answer p,
   .quick-answer .quick-answer-body {{
     font-size: 0.8125rem;
-    line-height: 1.32;
+    line-height: 1.3;
   }}
 
   .interactive-calculator-container {{
     padding: 0.75rem 0.875rem;
-    gap: 0.375rem;
+    gap: 0.25rem;
   }}
 
   .calc-header {{
-    padding-bottom: 0.375rem;
+    padding-bottom: 0.25rem;
     gap: 0.125rem;
   }}
 
   .calc-switcher-panel {{
-    padding: 0.5rem 0.75rem;
+    padding: 0.375rem 0.625rem;
     gap: 0.25rem;
   }}
 
@@ -3584,20 +3584,22 @@ details.faq-accordion > summary::-webkit-details-marker {{
     flex-wrap: wrap;
     overflow-x: visible;
     max-width: 100%;
-    gap: 0.375rem;
+    gap: 0.25rem;
   }}
 
   .calc-switcher-btn,
   .preset-btn,
   .calc-scenario-btn,
-  [data-calc-preset] {{
+  button[data-calc-preset] {{
     white-space: normal;
     height: auto;
     min-height: 44px;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.8125rem;
     max-width: 100%;
     text-align: left;
     justify-content: flex-start;
-    line-height: 1.3;
+    line-height: 1.24;
     overflow-wrap: break-word;
     box-sizing: border-box;
   }}
