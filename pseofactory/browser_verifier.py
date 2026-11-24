@@ -38,6 +38,8 @@ from pseofactory.server import EphemeralDistServer
 
 _CHROME_VERSION_CACHE: Dict[str, str] = {}
 _CHROME_VERSION_LOCK = threading.Lock()
+_VERIFIER_DIGEST_CACHE: Dict[str, Tuple[Tuple[Tuple[str, int, int], ...], str]] = {}
+_VERIFIER_DIGEST_LOCK = threading.Lock()
 _ACTIVE_CHROME_INSTANCES: Dict[int, Tuple[int, str]] = {}
 _ACTIVE_CHROME_LOCK = threading.Lock()
 _DEFAULT_RECEIPTS_DIR = Path("/home/ubuntuadmin/projects/.agy/browser_verify_receipts")
@@ -192,13 +194,13 @@ def _get_available_ram_gb() -> float:
 def compute_auto_worker_count(num_routes: int, requested_workers: Optional[int] = None) -> int:
     """
     Safely sizes the isolated headless Chromium worker pool based on route count, CPU cores,
-    and available host RAM (~0.6 GiB headroom per worker).
+    and available host RAM (~0.55 GiB headroom per worker after 1.0 GiB OS reserve).
     """
     if num_routes <= 1:
         return 1
     cpu_count = max(1, os.cpu_count() or 2)
     avail_ram_gb = _get_available_ram_gb()
-    ram_cap = max(1, int(avail_ram_gb // 0.6))
+    ram_cap = max(1, int(max(0.55, avail_ram_gb - 1.0) // 0.55))
 
     if requested_workers is None:
         env_w = (os.environ.get("PSEOFACTORY_BROWSER_WORKERS") or "").strip()
@@ -213,8 +215,11 @@ def compute_auto_worker_count(num_routes: int, requested_workers: Optional[int] 
     if "PYTEST_XDIST_WORKER" in os.environ:
         return 1
 
-    auto_cpu_cap = max(1, cpu_count // 2)
-    return max(1, min(num_routes, auto_cpu_cap, ram_cap))
+    # Scale up to ~60% of CPU cores (capped at 6 per tenant so concurrent tenants never OOM or thrash Chrome)
+    # and require at least ~2 routes per worker for small route sets to amortize browser startup.
+    auto_cpu_cap = max(1, min(6, (cpu_count * 3) // 5))
+    route_amortized_cap = num_routes if num_routes <= 3 else max(2, (num_routes + 1) // 2)
+    return max(1, min(num_routes, route_amortized_cap, auto_cpu_cap, ram_cap))
 
 
 def parse_and_apply_shard(routes: List[str], shard: Optional[str]) -> List[str]:
@@ -428,25 +433,59 @@ class BrowserVerifyReceiptStore:
     def compute_verifier_source_digest() -> str:
         """Computes closed SHA-256 over all Python source files in the pseofactory package."""
         pkg_dir = Path(__file__).resolve().parent
+        pkg_str = str(pkg_dir)
+        py_entries: List[Tuple[str, str, int, int]] = []
+
+        def _walk_py(dir_path: str, rel_prefix: str) -> None:
+            try:
+                with os.scandir(dir_path) as it:
+                    for entry in it:
+                        name = entry.name
+                        if name.startswith(".") or name == "__pycache__":
+                            continue
+                        rel_posix = f"{rel_prefix}/{name}" if rel_prefix else name
+                        if entry.is_dir(follow_symlinks=False):
+                            _walk_py(entry.path, rel_posix)
+                        elif name.endswith(".py") and entry.is_file(follow_symlinks=False):
+                            try:
+                                st = entry.stat(follow_symlinks=False)
+                                py_entries.append((rel_posix, entry.path, st.st_mtime_ns, st.st_size))
+                            except OSError:
+                                py_entries.append((rel_posix, entry.path, -1, -1))
+            except OSError:
+                pass
+
+        _walk_py(pkg_str, "")
+        py_entries.sort(key=lambda item: item[0])
+        sig = tuple((rel, mt, sz) for rel, _p, mt, sz in py_entries)
+        with _VERIFIER_DIGEST_LOCK:
+            cached = _VERIFIER_DIGEST_CACHE.get(pkg_str)
+            if cached is not None and cached[0] == sig:
+                return cached[1]
+
         h = hashlib.sha256()
-        py_files: List[Tuple[str, Path]] = []
-        for fp in pkg_dir.rglob("*.py"):
-            if not fp.is_file():
-                continue
-            rel = fp.relative_to(pkg_dir)
-            if "__pycache__" in rel.parts or any(part.startswith(".") for part in rel.parts):
-                continue
-            py_files.append((rel.as_posix(), fp))
-        py_files.sort(key=lambda item: item[0])
-        for rel_posix, fp in py_files:
+        for rel_posix, full_path, _mt, _sz in py_entries:
             h.update(rel_posix.encode("utf-8"))
             h.update(b"\0")
             try:
-                h.update(fp.read_bytes())
+                with open(full_path, "rb") as fp:
+                    h.update(hashlib.file_digest(fp, "sha256").digest())
             except OSError:
                 h.update(b"<unreadable>")
             h.update(b"\0")
-        return h.hexdigest()
+        digest = h.hexdigest()
+        with _VERIFIER_DIGEST_LOCK:
+            _VERIFIER_DIGEST_CACHE[pkg_str] = (sig, digest)
+        return digest
+
+    @staticmethod
+    def _hash_file_digest_worker(item: Tuple[str, str]) -> Tuple[str, bytes]:
+        rel_posix, full_path = item
+        try:
+            with open(full_path, "rb") as fp:
+                return (rel_posix, hashlib.file_digest(fp, "sha256").digest())
+        except OSError:
+            return (rel_posix, b"<unreadable>")
 
     @staticmethod
     def compute_estate_shared_digest(
@@ -477,40 +516,55 @@ class BrowserVerifyReceiptStore:
         h.update(b"\0")
 
         if dist_dir.is_dir():
-            non_html_full: List[Tuple[str, Path]] = []
+            non_html_full: List[Tuple[str, str]] = []
             non_html_large: List[Tuple[str, int, int]] = []
             html_paths: List[str] = []
-            for p in dist_dir.rglob("*"):
-                if not p.is_file():
-                    continue
-                rel = p.relative_to(dist_dir)
-                parts = rel.parts
-                if "syndication" in parts or any(part.startswith(".") for part in parts):
-                    continue
-                rel_posix = rel.as_posix()
-                suf_low = p.suffix.lower()
-                if suf_low == ".html":
-                    html_paths.append(rel_posix)
-                    continue
-                try:
-                    st = p.stat()
-                except OSError:
-                    non_html_large.append((rel_posix, -1, -1))
-                    continue
-                if st.st_size <= _MAX_FULL_HASH_ASSET_BYTES:
-                    non_html_full.append((rel_posix, p))
-                else:
-                    non_html_large.append((rel_posix, st.st_size, st.st_mtime_ns))
 
+            def _scan_dist(dir_path: str, rel_prefix: str) -> None:
+                try:
+                    with os.scandir(dir_path) as it:
+                        for entry in it:
+                            name = entry.name
+                            if name.startswith(".") or name == "syndication":
+                                continue
+                            rel_posix = f"{rel_prefix}/{name}" if rel_prefix else name
+                            try:
+                                if entry.is_dir(follow_symlinks=False):
+                                    _scan_dist(entry.path, rel_posix)
+                                    continue
+                                if not entry.is_file(follow_symlinks=False):
+                                    continue
+                            except OSError:
+                                continue
+                            if name.lower().endswith(".html"):
+                                html_paths.append(rel_posix)
+                                continue
+                            try:
+                                st = entry.stat(follow_symlinks=False)
+                            except OSError:
+                                non_html_large.append((rel_posix, -1, -1))
+                                continue
+                            if st.st_size <= _MAX_FULL_HASH_ASSET_BYTES:
+                                non_html_full.append((rel_posix, entry.path))
+                            else:
+                                non_html_large.append((rel_posix, st.st_size, st.st_mtime_ns))
+                except OSError:
+                    pass
+
+            _scan_dist(str(dist_dir), "")
             non_html_full.sort(key=lambda item: item[0])
-            for rel_posix, fp in non_html_full:
+            if len(non_html_full) >= 150:
+                pool_workers = min(4, max(1, os.cpu_count() or 2))
+                with ThreadPoolExecutor(max_workers=pool_workers) as pool:
+                    hashed_assets = list(pool.map(BrowserVerifyReceiptStore._hash_file_digest_worker, non_html_full))
+            else:
+                hashed_assets = [BrowserVerifyReceiptStore._hash_file_digest_worker(item) for item in non_html_full]
+
+            for rel_posix, file_dig in hashed_assets:
                 h.update(b"asset:")
                 h.update(rel_posix.encode("utf-8"))
                 h.update(b"\0")
-                try:
-                    h.update(fp.read_bytes())
-                except OSError:
-                    h.update(b"<unreadable>")
+                h.update(file_dig)
                 h.update(b"\0")
 
             non_html_large.sort(key=lambda item: item[0])
@@ -536,8 +590,12 @@ class BrowserVerifyReceiptStore:
             cand = dist_dir / "index.html"
             return cand if cand.is_file() else None
         rel = clean.lstrip("/")
+        if clean.endswith("/"):
+            as_idx = dist_dir / rel.rstrip("/") / "index.html"
+            if as_idx.is_file():
+                return as_idx
         direct = dist_dir / rel
-        if direct.is_file() and direct.suffix.lower() == ".html":
+        if direct.suffix.lower() == ".html" and direct.is_file():
             return direct
         if direct.is_dir():
             idx = direct / "index.html"
@@ -561,7 +619,8 @@ class BrowserVerifyReceiptStore:
         if html_file is None:
             return None
         try:
-            html_sha = hashlib.sha256(html_file.read_bytes()).hexdigest()
+            with open(html_file, "rb") as fp:
+                html_sha = hashlib.file_digest(fp, "sha256").hexdigest()
         except OSError:
             return None
         payload = f"{estate_shared_digest}|{route}|{html_sha}".encode("utf-8")
@@ -585,6 +644,13 @@ class BrowserVerifyReceiptStore:
     def __init__(self, receipt_path: Path):
         self.receipt_path = Path(receipt_path)
         self.lock_path = Path(f"{self.receipt_path}.lock")
+        self._batch_lock = threading.Lock()
+        self._batch_depth = 0
+        self._batch_flush_every = 0
+        self._batch_meta: Optional[Tuple[Optional[str], str, str]] = None
+        self._pending_passed: Dict[str, Dict[str, Any]] = {}
+        self._pending_evict: set = set()
+        self._write_count: int = 0
 
     def load_routes(self) -> Dict[str, Dict[str, Any]]:
         """Loads persisted pass-only route receipts under a shared flock."""
@@ -605,7 +671,57 @@ class BrowserVerifyReceiptStore:
         except Exception:
             return {}
 
-    def update_routes(
+    def batch(
+        self,
+        property_id: Optional[str] = None,
+        chrome_version: str = "",
+        estate_shared_digest: str = "",
+        flush_every: int = 32,
+    ):
+        """
+        Context manager coalescing multiple route updates into periodic/final atomic disk writes
+        instead of rewriting JSON on every single route.
+        """
+        import contextlib
+
+        @contextlib.contextmanager
+        def _batch_ctx():
+            with self._batch_lock:
+                self._batch_depth += 1
+                self._batch_flush_every = max(0, int(flush_every))
+                self._batch_meta = (property_id, chrome_version, estate_shared_digest)
+            try:
+                yield self
+            finally:
+                should_flush = False
+                with self._batch_lock:
+                    self._batch_depth = max(0, self._batch_depth - 1)
+                    if self._batch_depth == 0 and (self._pending_passed or self._pending_evict):
+                        should_flush = True
+                if should_flush:
+                    self.flush()
+
+        return _batch_ctx()
+
+    def flush(self) -> None:
+        """Atomically flushes any buffered batch receipt updates to disk."""
+        with self._batch_lock:
+            if not self._pending_passed and not self._pending_evict:
+                return
+            meta = self._batch_meta or (None, "", "")
+            passed_copy = dict(self._pending_passed)
+            evict_copy = list(self._pending_evict)
+            self._write_routes_atomic(
+                property_id=meta[0],
+                chrome_version=meta[1],
+                estate_shared_digest=meta[2],
+                passed_entries=passed_copy,
+                evict_routes=evict_copy,
+            )
+            self._pending_passed.clear()
+            self._pending_evict.clear()
+
+    def _write_routes_atomic(
         self,
         property_id: Optional[str],
         chrome_version: str,
@@ -613,10 +729,6 @@ class BrowserVerifyReceiptStore:
         passed_entries: Dict[str, Dict[str, Any]],
         evict_routes: Optional[List[str]] = None,
     ) -> None:
-        """
-        Atomically merges verified PASS route receipts and evicts any failed routes
-        under an exclusive flock using .tmp + fsync + os.replace.
-        """
         if not passed_entries and not evict_routes:
             return
         self.receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -624,6 +736,7 @@ class BrowserVerifyReceiptStore:
         with open(self.lock_path, "a+", encoding="utf-8") as lf:
             fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
             try:
+                existing_doc: Optional[Dict[str, Any]] = None
                 existing_routes: Dict[str, Dict[str, Any]] = {}
                 if self.receipt_path.is_file():
                     try:
@@ -633,21 +746,42 @@ class BrowserVerifyReceiptStore:
                             and cur.get("schema_version") == self.SCHEMA_VERSION
                             and isinstance(cur.get("routes"), dict)
                         ):
+                            existing_doc = cur
                             existing_routes = dict(cur["routes"])
                     except Exception:
                         existing_routes = {}
 
+                changed = existing_doc is None or (
+                    existing_doc.get("chrome_version") != chrome_version
+                    or existing_doc.get("estate_shared_digest") != estate_shared_digest
+                )
+
                 for bad_route in (evict_routes or []):
-                    existing_routes.pop(bad_route, None)
+                    if bad_route in existing_routes:
+                        existing_routes.pop(bad_route, None)
+                        changed = True
 
                 for route, entry in passed_entries.items():
                     if entry.get("status") == "PASS" and entry.get("verify_key"):
+                        arch = entry.get("screen_archetype", "statutory_guide")
+                        prev = existing_routes.get(route)
+                        if (
+                            isinstance(prev, dict)
+                            and prev.get("verify_key") == entry["verify_key"]
+                            and prev.get("status") == "PASS"
+                            and prev.get("screen_archetype") == arch
+                        ):
+                            continue
                         existing_routes[route] = {
                             "verify_key": entry["verify_key"],
                             "status": "PASS",
                             "verified_at": now_iso,
-                            "screen_archetype": entry.get("screen_archetype", "statutory_guide"),
+                            "screen_archetype": arch,
                         }
+                        changed = True
+
+                if not changed:
+                    return
 
                 doc = {
                     "schema_version": self.SCHEMA_VERSION,
@@ -660,14 +794,62 @@ class BrowserVerifyReceiptStore:
                 tmp_file = self.receipt_path.with_name(
                     f"{self.receipt_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
                 )
-                payload = json.dumps(doc, indent=2, sort_keys=False) + "\n"
+                payload = json.dumps(doc, separators=(",", ":"), sort_keys=False) + "\n"
                 with open(tmp_file, "w", encoding="utf-8") as tf:
                     tf.write(payload)
                     tf.flush()
                     os.fsync(tf.fileno())
                 os.replace(tmp_file, self.receipt_path)
+                self._write_count += 1
             finally:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+    def update_routes(
+        self,
+        property_id: Optional[str],
+        chrome_version: str,
+        estate_shared_digest: str,
+        passed_entries: Dict[str, Dict[str, Any]],
+        evict_routes: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Atomically merges verified PASS route receipts and evicts any failed routes
+        under an exclusive flock using .tmp + fsync + os.replace.
+        When called inside `with store.batch(...):`, coalesces updates in memory and
+        flushes atomically at batch boundaries (`flush_every` / batch exit).
+        """
+        if not passed_entries and not evict_routes:
+            return
+        with self._batch_lock:
+            if self._batch_depth > 0:
+                self._batch_meta = (property_id, chrome_version, estate_shared_digest)
+                for bad_route in (evict_routes or []):
+                    self._pending_passed.pop(bad_route, None)
+                    self._pending_evict.add(bad_route)
+                for route, entry in passed_entries.items():
+                    self._pending_evict.discard(route)
+                    self._pending_passed[route] = entry
+                total_pending = len(self._pending_passed) + len(self._pending_evict)
+                if self._batch_flush_every > 0 and total_pending >= self._batch_flush_every:
+                    passed_copy = dict(self._pending_passed)
+                    evict_copy = list(self._pending_evict)
+                    self._write_routes_atomic(
+                        property_id=property_id,
+                        chrome_version=chrome_version,
+                        estate_shared_digest=estate_shared_digest,
+                        passed_entries=passed_copy,
+                        evict_routes=evict_copy,
+                    )
+                    self._pending_passed.clear()
+                    self._pending_evict.clear()
+                return
+        self._write_routes_atomic(
+            property_id=property_id,
+            chrome_version=chrome_version,
+            estate_shared_digest=estate_shared_digest,
+            passed_entries=passed_entries,
+            evict_routes=evict_routes,
+        )
 
 
 @dataclass
@@ -1656,25 +1838,25 @@ class UnifiedBrowserAuditor:
             };
             return 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b);
         };
+        const _baseDocBg = (() => {
+            const b = parseRgb(window.getComputedStyle(document.documentElement).backgroundColor);
+            return (!b || b.a === 0) ? { r: 251, g: 252, b: 253, a: 1 } : b;
+        })();
+        const _bgCache = new WeakMap();
         const getEffectiveBg = el => {
-            const layers = [];
-            let cur = el;
-            while (cur && cur !== document.documentElement) {
-                const bg = parseRgb(window.getComputedStyle(cur).backgroundColor);
-                if (bg && bg.a > 0) {
-                    layers.push(bg);
-                    if (bg.a >= 0.999) break;
-                }
-                cur = cur.parentElement;
+            if (!el || el === document.documentElement) return _baseDocBg;
+            const hit = _bgCache.get(el);
+            if (hit) return hit;
+            const ownBg = parseRgb(window.getComputedStyle(el).backgroundColor);
+            let eff;
+            if (ownBg && ownBg.a >= 0.999) {
+                eff = { r: ownBg.r, g: ownBg.g, b: ownBg.b, a: 1 };
+            } else {
+                const parentBg = getEffectiveBg(el.parentElement);
+                eff = (ownBg && ownBg.a > 0) ? blendOver(ownBg, parentBg) : parentBg;
             }
-            let base = parseRgb(window.getComputedStyle(document.documentElement).backgroundColor);
-            if (!base || base.a === 0) {
-                base = { r: 251, g: 252, b: 253, a: 1 };
-            }
-            for (let i = layers.length - 1; i >= 0; i--) {
-                base = blendOver(layers[i], base);
-            }
-            return base;
+            _bgCache.set(el, eff);
+            return eff;
         };
         const hasDirectText = el => {
             if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') return true;
@@ -1924,6 +2106,9 @@ class UnifiedBrowserAuditor:
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const isVisibleOutput = (el) => {
             if (!el || el.nodeType !== 1) return false;
+            if (typeof el.checkVisibility === 'function') {
+                return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getClientRects().length > 0;
+            }
             const cs = window.getComputedStyle(el);
             if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) return false;
             if (el.getClientRects().length === 0) return false;
@@ -2139,6 +2324,9 @@ class UnifiedBrowserAuditor:
         const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
         const isVisibleOutput = (el) => {
             if (!el || el.nodeType !== 1) return false;
+            if (typeof el.checkVisibility === 'function') {
+                return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getClientRects().length > 0;
+            }
             const cs = window.getComputedStyle(el);
             if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) return false;
             if (el.getClientRects().length === 0) return false;
@@ -2345,23 +2533,62 @@ class UnifiedBrowserAuditor:
         const allPresetBtns = Array.from(document.querySelectorAll(presetSelector));
         if (allPresetBtns.length > 0) {
             const savedControls = allCalcControls.map(el => ({ el, val: el.value, idx: el.tagName === 'SELECT' ? el.selectedIndex : -1 }));
+            const _perturbControl = (el) => {
+                if (el.tagName === 'INPUT') {
+                    const cVal = parseFloat(String(el.value).replace(/,/g, '')) || 100;
+                    const maxV = parseFloat(el.getAttribute('max') || '') || 10000000;
+                    const minV = parseFloat(el.getAttribute('min') || '0') || 0;
+                    let pVal = cVal < 50 ? Math.min(maxV, cVal + 1) : Math.min(maxV, cVal + 17);
+                    if (pVal === cVal) pVal = Math.max(minV, cVal - 1);
+                    el.value = String(pVal);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (el.tagName === 'SELECT' && el.options && el.options.length >= 2) {
+                    el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            };
+            const _matchPresetKey = (el, presetObj) => {
+                const rawId = el.id || '';
+                const rawName = el.name || '';
+                const stripped = rawId.replace(/^(field-|calc-input-|input-)/, '');
+                for (const k of [rawId, rawName, stripped]) {
+                    if (k && Object.prototype.hasOwnProperty.call(presetObj, k)) return k;
+                }
+                return null;
+            };
             for (let bIdx = 0; bIdx < allPresetBtns.length; bIdx++) {
                 const btn = allPresetBtns[bIdx];
-                for (const el of allCalcControls) {
-                    if (el.tagName === 'INPUT') {
-                        const cVal = parseFloat(String(el.value).replace(/,/g, '')) || 100;
-                        const maxV = parseFloat(el.getAttribute('max') || '') || 10000000;
-                        const minV = parseFloat(el.getAttribute('min') || '0') || 0;
-                        let pVal = cVal < 50 ? Math.min(maxV, cVal + 1) : Math.min(maxV, cVal + 17);
-                        if (pVal === cVal) pVal = Math.max(minV, cVal - 1);
-                        el.value = String(pVal);
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                    } else if (el.tagName === 'SELECT' && el.options && el.options.length >= 2) {
-                        el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                let presetJson = null;
+                const rawPresetAttr = (btn.getAttribute('data-calc-preset') || '').trim();
+                if (rawPresetAttr.startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(rawPresetAttr);
+                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) presetJson = parsed;
+                    } catch (e) {}
+                }
+                if (presetJson) {
+                    let matchedAny = false;
+                    let anyDiffers = false;
+                    const matchingEls = [];
+                    for (const el of allCalcControls) {
+                        const mk = _matchPresetKey(el, presetJson);
+                        if (mk !== null) {
+                            matchedAny = true;
+                            matchingEls.push(el);
+                            if (String(el.value) !== String(presetJson[mk])) {
+                                anyDiffers = true;
+                            }
+                        }
                     }
+                    if (!matchedAny) {
+                        for (const el of allCalcControls) _perturbControl(el);
+                    } else if (!anyDiffers) {
+                        for (const el of matchingEls) _perturbControl(el);
+                    }
+                } else {
+                    for (const el of allCalcControls) _perturbControl(el);
                 }
                 btn.classList.remove('active');
                 const beforeOut = snapshotOutputs();
@@ -3199,6 +3426,9 @@ class UnifiedBrowserAuditor:
         self._html_id_cache: Dict[Path, set] = {}
         self._redirects_rules_cache: Optional[List[Tuple[str, str, int]]] = None
         self._invalid_redirects_cache: Optional[List[str]] = None
+        self._disk_file_cache: Dict[str, Optional[Path]] = {}
+        self._broken_assets_js_cache: Dict[Tuple[bool, bool, Optional[str]], str] = {}
+        self._prepared_ws_ids: set = set()
 
     def _get_redirects_rules(self) -> List[Tuple[str, str, int]]:
         if self._redirects_rules_cache is not None:
@@ -3351,13 +3581,17 @@ class UnifiedBrowserAuditor:
         clean = (url_path or "/").strip()
         if not clean.startswith("/"):
             clean = "/" + clean
+        if clean in self._disk_file_cache:
+            return self._disk_file_cache[clean]
         rel = clean.lstrip("/")
         found = self._resolve_in_root(self.dist_dir, rel)
         if found is not None:
+            self._disk_file_cache[clean] = found
             return found
         try:
             resolved_dist = str(self.dist_dir.resolve())
         except Exception:
+            self._disk_file_cache[clean] = None
             return None
         if (
             "PYTEST_CURRENT_TEST" in os.environ
@@ -3368,7 +3602,10 @@ class UnifiedBrowserAuditor:
             if eff_pid:
                 own_dist = self._resolve_own_tenant_dist_dir(eff_pid)
                 if own_dist is not None and own_dist.resolve() != self.dist_dir.resolve():
-                    return self._resolve_in_root(own_dist, rel)
+                    res = self._resolve_in_root(own_dist, rel)
+                    self._disk_file_cache[clean] = res
+                    return res
+        self._disk_file_cache[clean] = None
         return None
 
     def _get_ids_in_html_file(self, html_file: Path) -> set:
@@ -3758,6 +3995,70 @@ class UnifiedBrowserAuditor:
             msg_id=msg_counter[0],
         )
 
+    @staticmethod
+    def _build_js_settle_prelude(
+        expected_width: Optional[int] = None,
+        expected_height: Optional[int] = None,
+        include_equals_token: bool = False,
+    ) -> str:
+        """Builds an async JS snippet that resolves once viewport dimensions, readyState, fonts, and frame paint settle."""
+        checks = ["document.readyState === 'complete'"]
+        if expected_width is not None:
+            w_val = int(expected_width)
+            checks.append(f"window.innerWidth === {w_val}" if include_equals_token else f"Number(window.innerWidth) == {w_val}")
+        if expected_height is not None:
+            h_val = int(expected_height)
+            checks.append(f"window.innerHeight === {h_val}" if include_equals_token else f"Number(window.innerHeight) == {h_val}")
+        dim_check = " && ".join(checks)
+        return f"""await new Promise(resolve => {{
+            let done = false;
+            const finish = () => {{
+                if (done) return;
+                done = true;
+                resolve({dim_check});
+            }};
+            const afterFonts = (alreadySettled) => {{
+                const runFrames = () => {{
+                    if (document.documentElement) {{
+                        void document.documentElement.offsetWidth;
+                    }}
+                    if (typeof requestAnimationFrame === 'function') {{
+                        if (alreadySettled) {{
+                            requestAnimationFrame(finish);
+                        }} else {{
+                            requestAnimationFrame(() => requestAnimationFrame(finish));
+                        }}
+                    }} else {{
+                        setTimeout(finish, 16);
+                    }}
+                }};
+                const fontsObj = document.fonts;
+                if (fontsObj && fontsObj.status !== 'loaded' && fontsObj.ready) {{
+                    Promise.race([fontsObj.ready.catch(() => {{}}), new Promise(r => setTimeout(r, 100))]).then(runFrames);
+                }} else {{
+                    runFrames();
+                }}
+            }};
+            if ({dim_check}) {{
+                afterFonts(true);
+                return;
+            }}
+            const deadline = Date.now() + 250;
+            setTimeout(finish, 320);
+            const check = () => {{
+                if (done) return;
+                if (document.documentElement) {{
+                    void document.documentElement.offsetWidth;
+                }}
+                if (({dim_check}) || Date.now() >= deadline) {{
+                    afterFonts(false);
+                    return;
+                }}
+                setTimeout(check, 5);
+            }};
+            setTimeout(check, 5);
+        }});"""
+
     async def _wait_for_layout_settle(
         self,
         ws: Any,
@@ -3765,42 +4066,13 @@ class UnifiedBrowserAuditor:
         expected_width: Optional[int] = None,
         expected_height: Optional[int] = None,
     ) -> None:
-        """Flushes layout and waits for expected viewport dimensions plus two animation frames."""
-        checks = []
-        if expected_width is not None:
-            checks.append(f"window.innerWidth === {int(expected_width)}")
-        if expected_height is not None:
-            checks.append(f"window.innerHeight === {int(expected_height)}")
-        dim_check = " && ".join(checks) if checks else "true"
-        js_settle = f"""new Promise(resolve => {{
-            let done = false;
-            const deadline = Date.now() + 250;
-            const finish = () => {{
-                if (done) return;
-                done = true;
-                resolve({dim_check});
-            }};
-            const waitFrames = () => {{
-                if (typeof requestAnimationFrame === 'function') {{
-                    requestAnimationFrame(() => requestAnimationFrame(finish));
-                }} else {{
-                    setTimeout(finish, 20);
-                }}
-            }};
-            const check = () => {{
-                if (done) return;
-                if (document.documentElement) {{
-                    void document.documentElement.offsetWidth;
-                }}
-                if (({dim_check}) || Date.now() >= deadline) {{
-                    waitFrames();
-                    return;
-                }}
-                setTimeout(check, 15);
-            }};
-            setTimeout(finish, 320);
-            check();
-        }})"""
+        """Flushes layout and waits for expected viewport dimensions, readyState, fonts, and animation frame settle."""
+        prelude = self._build_js_settle_prelude(
+            expected_width=expected_width,
+            expected_height=expected_height,
+            include_equals_token=True,
+        )
+        js_settle = f"(async () => {{ {prelude} return true; }})()"
         msg_counter[0] += 1
         await self._eval_js(ws, js_settle, msg_id=msg_counter[0])
 
@@ -3834,16 +4106,37 @@ class UnifiedBrowserAuditor:
                 expected_width=width,
                 expected_height=height,
             )
-        else:
-            await asyncio.sleep(0.02)
+
+    @staticmethod
+    def _layout_metrics_match_1440(m_res: Any) -> Tuple[bool, bool]:
+        """Returns (has_payload, matches_1440x900) from CDP Page.getLayoutMetrics response."""
+        payload = m_res.get("result") if isinstance(m_res, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            return False, False
+        css_vis = payload.get("cssVisualViewport") or payload.get("visualViewport") or {}
+        css_lay = payload.get("cssLayoutViewport") or payload.get("layoutViewport") or {}
+        vw = int(round(float(css_vis.get("clientWidth") or 0)))
+        vh = int(round(float(css_vis.get("clientHeight") or 0)))
+        lw = int(round(float(css_lay.get("clientWidth") or vw)))
+        lh = int(round(float(css_lay.get("clientHeight") or vh)))
+        return True, (vw == 1440 and vh == 900 and lw == 1440 and lh == 900)
 
     async def _prepare_audit_viewport(self, ws: Any, msg_counter: List[int]) -> None:
         """
         Brings the CDP tab forward, enables focus emulation, and locks initial 1440x900 viewport
-        before Page.navigate. Uses native CDP Page.getLayoutMetrics to confirm BOTH 1440 width
-        and 900 height are committed in Blink/compositor (avoiding extra Runtime.evaluate calls
-        on a stale pre-navigation document) plus verifies window.innerWidth === 1440.
+        before Page.navigate. Fast-paths reused tabs already confirmed at 1440x900 via Page.getLayoutMetrics.
         """
+        ws_key = id(ws)
+        if ws_key in self._prepared_ws_ids:
+            try:
+                msg_counter[0] += 1
+                m_res = await self._send_cdp(ws, "Page.getLayoutMetrics", {}, msg_id=msg_counter[0])
+                has_payload, matched = self._layout_metrics_match_1440(m_res)
+                if has_payload and matched:
+                    return
+            except Exception:
+                pass
+
         msg_counter[0] += 1
         await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
         msg_counter[0] += 1
@@ -3858,41 +4151,39 @@ class UnifiedBrowserAuditor:
             settle_layout=False,
         )
         # Confirm both 1440x900 layout & visual viewport via native CDP Page.getLayoutMetrics
+        metrics_confirmed = False
         metrics_deadline = time.monotonic() + 0.35
         while True:
             try:
                 msg_counter[0] += 1
                 m_res = await self._send_cdp(ws, "Page.getLayoutMetrics", {}, msg_id=msg_counter[0])
-                payload = m_res.get("result") if isinstance(m_res, dict) else None
-                if not isinstance(payload, dict) or not payload:
+                has_payload, matched = self._layout_metrics_match_1440(m_res)
+                if not has_payload:
                     # Mock/minimal CDP transport with no layout metrics payload
                     break
-                css_vis = payload.get("cssVisualViewport") or payload.get("visualViewport") or {}
-                css_lay = payload.get("cssLayoutViewport") or payload.get("layoutViewport") or {}
-                vw = int(round(float(css_vis.get("clientWidth") or 0)))
-                vh = int(round(float(css_vis.get("clientHeight") or 0)))
-                lw = int(round(float(css_lay.get("clientWidth") or vw)))
-                lh = int(round(float(css_lay.get("clientHeight") or vh)))
-                if vw == 1440 and vh == 900 and lw == 1440 and lh == 900:
+                if matched:
+                    metrics_confirmed = True
+                    self._prepared_ws_ids.add(ws_key)
                     break
             except Exception:
                 break
             if time.monotonic() >= metrics_deadline:
                 break
-            await asyncio.sleep(0.015)
+            await asyncio.sleep(0.01)
 
-        deadline = time.monotonic() + 0.30
-        while True:
-            try:
-                msg_counter[0] += 1
-                cur_w = await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
-                if cur_w == 1440:
+        if not metrics_confirmed:
+            deadline = time.monotonic() + 0.30
+            while True:
+                try:
+                    msg_counter[0] += 1
+                    cur_w = await self._eval_js(ws, "window.innerWidth", msg_id=msg_counter[0])
+                    if cur_w == 1440:
+                        break
+                except CDPEvalError:
                     break
-            except CDPEvalError:
-                break
-            if time.monotonic() >= deadline:
-                break
-            await asyncio.sleep(0.015)
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.01)
 
     async def _navigate_and_wait_ready(
         self,
@@ -3901,7 +4192,7 @@ class UnifiedBrowserAuditor:
         route: str,
         msg_counter: List[int],
         timeout_s: Optional[float] = None,
-        poll_interval: float = 0.025,
+        poll_interval: float = 0.01,
     ) -> Tuple[bool, Optional[str]]:
         """
         Navigates a fresh or reused CDP tab to `route` and waits until a fresh document
@@ -4006,6 +4297,96 @@ class UnifiedBrowserAuditor:
 
         return False, f"Navigation timeout waiting for {page_url} (last_state={last_state!r}, last_error={last_err!r})"
 
+    def _get_broken_assets_js(self) -> str:
+        """Builds and caches the broken-asset JS payload per auditor configuration."""
+        has_full_sitemap = (self.dist_dir / "sitemap.xml").is_file()
+        has_local_scripts = (
+            has_full_sitemap
+            or (self.dist_dir / "static" / "js").is_dir()
+            or (self.dist_dir / "js").is_dir()
+        )
+        canonical_domain_hint: Optional[str] = (
+            self.adapter.canonical_domain if self.adapter is not None else None
+        )
+        if not canonical_domain_hint:
+            marker_file = self.dist_dir.parent / ".pseofactory.json"
+            if marker_file.is_file():
+                try:
+                    marker_meta = json.loads(marker_file.read_text(encoding="utf-8"))
+                    if isinstance(marker_meta, dict):
+                        canonical_domain_hint = str(
+                            marker_meta.get("domain") or marker_meta.get("canonical_base") or ""
+                        ).strip() or None
+                except Exception:
+                    pass
+        cache_key = (has_full_sitemap, has_local_scripts, canonical_domain_hint)
+        cached = self._broken_assets_js_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        js_code = self._build_broken_assets_js(
+            check_meta_assets=has_full_sitemap,
+            check_script_assets=has_local_scripts,
+            canonical_domain=canonical_domain_hint,
+        )
+        self._broken_assets_js_cache[cache_key] = js_code
+        return js_code
+
+    def _build_viewport_1440_batch_js(self) -> str:
+        """Consolidates 1440x900 layout settle, overflow, visual primitives, touch targets, and load/scroll CLS into 1 eval."""
+        settle_js = self._build_js_settle_prelude(1440, 900, include_equals_token=False)
+        return f"""(async () => {{
+            {settle_js}
+            const _vw = window.innerWidth;
+            const _ov = Boolean(document.documentElement.scrollWidth > _vw || document.body.scrollWidth > _vw);
+            const _prim = {self.JS_CHECK_VISUAL_PRIMITIVES};
+            const _targets = {self.JS_CHECK_TARGETS};
+            const _cls = await ({self.JS_CHECK_CLS});
+            return Object.assign({{}}, _prim, {{
+                overflow: _ov,
+                targets: _targets,
+                cls: _cls
+            }});
+        }})()"""
+
+    def _build_viewport_1280_batch_js(self) -> str:
+        """Consolidates 1280x800 layout settle and horizontal overflow check into 1 eval."""
+        settle_js = self._build_js_settle_prelude(1280, 800, include_equals_token=False)
+        return f"""(async () => {{
+            {settle_js}
+            return Boolean(document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth);
+        }})()"""
+
+    def _build_viewport_375_batch_js(self) -> str:
+        """Consolidates 375x812 settle, overflow, visual primitives, targets, interaction CLS, dashes, and broken assets into 1 eval."""
+        settle_js = self._build_js_settle_prelude(375, 812, include_equals_token=False)
+        broken_js = self._get_broken_assets_js()
+        return f"""(async () => {{
+            {settle_js}
+            const _vw = window.innerWidth;
+            const _ov = Boolean(document.documentElement.scrollWidth > _vw || document.body.scrollWidth > _vw);
+            const _prim = {self.JS_CHECK_VISUAL_PRIMITIVES};
+            const _targets = {self.JS_CHECK_TARGETS};
+            const _brokenPromise = {broken_js};
+            const _icls = await ({self.JS_CHECK_RESIZE_AND_INTERACTION_CLS});
+            const _dashes = {self.JS_CHECK_DASHES};
+            const _broken = await _brokenPromise;
+            return Object.assign({{}}, _prim, {{
+                overflow: _ov,
+                targets: _targets,
+                interaction_cls: _icls,
+                dashes: _dashes,
+                broken_assets: _broken
+            }});
+        }})()"""
+
+    def _build_e2e_interactive_with_settle_js(self) -> str:
+        """Combines 1440x900 settle prelude with JS_RUN_E2E_INTERACTIVE_SURFACE into 1 eval."""
+        settle_js = self._build_js_settle_prelude(1440, 900, include_equals_token=False)
+        return f"""(async () => {{
+            {settle_js}
+            return await ({self.JS_RUN_E2E_INTERACTIVE_SURFACE});
+        }})()"""
+
     async def _audit_route_on_ws(
         self,
         ws: Any,
@@ -4060,37 +4441,22 @@ class UnifiedBrowserAuditor:
             return defects
 
         try:
+            # 1a + 4a. Wide Desktop Viewport (1440x900) batched settle, overflow, visual primitives, targets, & load/scroll CLS
             msg_counter[0] += 1
-            await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-            await self._wait_for_layout_settle(ws, msg_counter, expected_width=1440, expected_height=900)
-
-            # 1a. Wide Desktop Viewport (1440x900)
-            msg_counter[0] += 1
-            overflow_1440 = await self._eval_js(
-                ws,
-                "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
-                msg_id=msg_counter[0],
-            )
-            if overflow_1440:
-                defects["overflow_1440"] = True
-
-            msg_counter[0] += 1
-            prim_1440 = await self._eval_js(ws, self.JS_CHECK_VISUAL_PRIMITIVES, msg_id=msg_counter[0])
-            if isinstance(prim_1440, dict):
-                if prim_1440.get("screen_archetype"):
-                    defects["screen_archetype"] = prim_1440["screen_archetype"]
+            batch_1440 = await self._eval_js(ws, self._build_viewport_1440_batch_js(), msg_id=msg_counter[0])
+            cls_raw: Any = None
+            if isinstance(batch_1440, dict):
+                if batch_1440.get("overflow"):
+                    defects["overflow_1440"] = True
+                if batch_1440.get("screen_archetype"):
+                    defects["screen_archetype"] = batch_1440["screen_archetype"]
                 for k in prim_keys:
-                    if prim_1440.get(k):
-                        defects[k].extend(prim_1440[k])
+                    if batch_1440.get(k):
+                        defects[k].extend(batch_1440[k])
+                if batch_1440.get("targets"):
+                    defects["targets_under_44"].extend(batch_1440["targets"])
+                cls_raw = batch_1440.get("cls")
 
-            msg_counter[0] += 1
-            targets_1440 = await self._eval_js(ws, self.JS_CHECK_TARGETS, msg_id=msg_counter[0])
-            if targets_1440:
-                defects["targets_under_44"].extend(targets_1440)
-
-            # 4a. Initial load & scroll CLS check before Emulation.setDeviceMetricsOverride resizes viewport
-            msg_counter[0] += 1
-            cls_raw = await self._eval_js(ws, self.JS_CHECK_CLS, msg_id=msg_counter[0])
             cls_val, cls_sources = self._parse_cls_result(cls_raw)
             if (
                 cls_val > 0.0
@@ -4120,94 +4486,46 @@ class UnifiedBrowserAuditor:
                     defects.setdefault("cls_sources", []).extend(cls_sources)
 
             # 1b. Standard Desktop Viewport (1280x800)
-            await self._set_viewport_and_settle(ws, 1280, 800, 1, False, msg_counter)
+            await self._set_viewport_and_settle(ws, 1280, 800, 1, False, msg_counter, settle_layout=False)
             msg_counter[0] += 1
             desktop_overflow = await self._eval_js(
                 ws,
-                "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
+                self._build_viewport_1280_batch_js(),
                 msg_id=msg_counter[0],
             )
             if desktop_overflow:
                 defects["overflow_1280"] = True
 
-            # 2. Mobile Viewport (375x812)
-            await self._set_viewport_and_settle(ws, 375, 812, 2, True, msg_counter)
+            # 2 + 3 + 4b + 5 + 6. Mobile Viewport (375x812) batched checks
+            await self._set_viewport_and_settle(ws, 375, 812, 2, True, msg_counter, settle_layout=False)
             msg_counter[0] += 1
-            mobile_overflow = await self._eval_js(
-                ws,
-                "document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth",
-                msg_id=msg_counter[0],
-            )
-            if mobile_overflow:
-                defects["overflow_375"] = True
-
-            msg_counter[0] += 1
-            prim_375 = await self._eval_js(ws, self.JS_CHECK_VISUAL_PRIMITIVES, msg_id=msg_counter[0])
-            if isinstance(prim_375, dict):
+            batch_375 = await self._eval_js(ws, self._build_viewport_375_batch_js(), msg_id=msg_counter[0])
+            if isinstance(batch_375, dict):
+                if batch_375.get("overflow"):
+                    defects["overflow_375"] = True
                 for k in prim_keys:
-                    if prim_375.get(k):
+                    if batch_375.get(k):
                         existing_reprs = {json.dumps(item, sort_keys=True) for item in defects[k]}
-                        for item in prim_375[k]:
+                        for item in batch_375[k]:
                             if json.dumps(item, sort_keys=True) not in existing_reprs:
                                 defects[k].append(item)
-
-            # 3. Touch targets check (>= 43.5x43.5px)
-            msg_counter[0] += 1
-            targets = await self._eval_js(ws, self.JS_CHECK_TARGETS, msg_id=msg_counter[0])
-            if targets:
-                existing_t = {json.dumps(item, sort_keys=True) for item in defects["targets_under_44"]}
-                for item in targets:
-                    if json.dumps(item, sort_keys=True) not in existing_t:
-                        defects["targets_under_44"].append(item)
-
-            # 4b. Interactive CLS check (PerformanceObserver layout-shift must be 0.0)
-            msg_counter[0] += 1
-            interaction_cls_raw = await self._eval_js(ws, self.JS_CHECK_RESIZE_AND_INTERACTION_CLS, msg_id=msg_counter[0])
-            interaction_cls, interaction_cls_sources = self._parse_cls_result(interaction_cls_raw)
-            if interaction_cls > defects["cls_value"]:
-                defects["cls_value"] = interaction_cls
-            if interaction_cls > 0.0 and interaction_cls_sources:
-                defects.setdefault("cls_sources", []).extend(interaction_cls_sources)
-
-            # 5. Dashes check (zero forbidden em/en dashes and spaced hyphens)
-            msg_counter[0] += 1
-            dashes = await self._eval_js(ws, self.JS_CHECK_DASHES, msg_id=msg_counter[0])
-            if dashes:
-                defects["dashes"] = dashes
-
-            # 6. Broken asset check
-            msg_counter[0] += 1
-            has_full_sitemap = (self.dist_dir / "sitemap.xml").is_file()
-            has_local_scripts = (
-                has_full_sitemap
-                or (self.dist_dir / "static" / "js").is_dir()
-                or (self.dist_dir / "js").is_dir()
-            )
-            canonical_domain_hint: Optional[str] = (
-                self.adapter.canonical_domain if self.adapter is not None else None
-            )
-            if not canonical_domain_hint:
-                marker_file = self.dist_dir.parent / ".pseofactory.json"
-                if marker_file.is_file():
-                    try:
-                        marker_meta = json.loads(marker_file.read_text(encoding="utf-8"))
-                        if isinstance(marker_meta, dict):
-                            canonical_domain_hint = str(
-                                marker_meta.get("domain") or marker_meta.get("canonical_base") or ""
-                            ).strip() or None
-                    except Exception:
-                        pass
-            broken_assets = await self._eval_js(
-                ws,
-                self._build_broken_assets_js(
-                    check_meta_assets=has_full_sitemap,
-                    check_script_assets=has_local_scripts,
-                    canonical_domain=canonical_domain_hint,
-                ),
-                msg_id=msg_counter[0],
-            )
-            if broken_assets:
-                defects["broken_assets"] = broken_assets
+                targets = batch_375.get("targets")
+                if targets:
+                    existing_t = {json.dumps(item, sort_keys=True) for item in defects["targets_under_44"]}
+                    for item in targets:
+                        if json.dumps(item, sort_keys=True) not in existing_t:
+                            defects["targets_under_44"].append(item)
+                interaction_cls, interaction_cls_sources = self._parse_cls_result(batch_375.get("interaction_cls"))
+                if interaction_cls > defects["cls_value"]:
+                    defects["cls_value"] = interaction_cls
+                if interaction_cls > 0.0 and interaction_cls_sources:
+                    defects.setdefault("cls_sources", []).extend(interaction_cls_sources)
+                dashes = batch_375.get("dashes")
+                if dashes:
+                    defects["dashes"] = dashes
+                broken_assets = batch_375.get("broken_assets")
+                if broken_assets:
+                    defects["broken_assets"] = broken_assets
 
             # 7. Reactive widget updates and popstate hydration
             for spec in self.widget_specs:
@@ -4273,16 +4591,9 @@ class UnifiedBrowserAuditor:
                         })
 
             # 8. Restore desktop viewport (1440x900) and run full E2E interactive surface verification
-            # (strict superset of JS_CHECK_UNIVERSAL_INTERACTIVE_SYNC: inputs, presets, focus outlines,
-            # positive tabindex, affiliate CTAs, extra_criteria guard, console/page errors, forms, checkout, telemetry)
+            await self._set_viewport_and_settle(ws, 1440, 900, 1, False, msg_counter, settle_layout=False)
             msg_counter[0] += 1
-            await self._send_cdp(ws, "Page.bringToFront", {}, msg_id=msg_counter[0])
-            msg_counter[0] += 1
-            await self._send_cdp(ws, "Emulation.setFocusEmulationEnabled", {"enabled": True}, msg_id=msg_counter[0])
-            await self._set_viewport_and_settle(ws, 1440, 900, 1, False, msg_counter)
-
-            msg_counter[0] += 1
-            raw_e2e = await self._eval_js(ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+            raw_e2e = await self._eval_js(ws, self._build_e2e_interactive_with_settle_js(), msg_id=msg_counter[0])
             e2e_rep = self._postprocess_interactive_report(base_url, route, raw_e2e)
             defects["interactive_surface"] = e2e_rep
             if not e2e_rep.get("passed", False):
@@ -4433,6 +4744,9 @@ class UnifiedBrowserAuditor:
         )
         worker.widget_specs = list(self.widget_specs)
         worker.excluded_routes = set(self.excluded_routes)
+        worker._broken_assets_js_cache = dict(self._broken_assets_js_cache)
+        worker._redirects_rules_cache = self._redirects_rules_cache
+        worker._invalid_redirects_cache = self._invalid_redirects_cache
         return worker
 
     def audit_route(self, base_url: str, route: str) -> Dict[str, Any]:
@@ -4480,9 +4794,8 @@ class UnifiedBrowserAuditor:
             if not nav_ok:
                 return {"passed": False, "route": route, "error": nav_err or "navigation_timeout"}
             try:
-                await self._wait_for_layout_settle(active_ws, msg_counter, expected_width=1440)
                 msg_counter[0] += 1
-                res = await self._eval_js(active_ws, self.JS_RUN_E2E_INTERACTIVE_SURFACE, msg_id=msg_counter[0])
+                res = await self._eval_js(active_ws, self._build_e2e_interactive_with_settle_js(), msg_id=msg_counter[0])
             except CDPEvalError as exc:
                 return {"passed": False, "route": route, "error": str(exc)}
             if not isinstance(res, dict):
@@ -4524,6 +4837,7 @@ class UnifiedBrowserAuditor:
         chrome_bin: str,
         is_headless_shell: bool,
         prop_id: Optional[str],
+        on_route_done: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """Executes routes dynamically from a shared work queue inside its own EphemeralDistServer + isolated Chromium."""
         import websockets
@@ -4549,6 +4863,8 @@ class UnifiedBrowserAuditor:
                                     break
                                 res = await worker_auditor.verify_route(base_url, r, msg_counter, ws=ws)
                                 worker_findings.append(res)
+                                if on_route_done is not None:
+                                    on_route_done(res)
                     finally:
                         worker_auditor._close_cdp_tab_and_leaked_loopback(
                             tab_id,
@@ -4731,12 +5047,28 @@ class UnifiedBrowserAuditor:
                 verifier_digest=self._verifier_digest_override,
             )
             stored_routes = {} if eff_no_cache else receipt_store.load_routes()
-            for r in routes_to_audit:
-                vkey = BrowserVerifyReceiptStore.compute_route_verify_key(
-                    self.dist_dir,
-                    estate_shared_digest,
-                    r,
-                )
+            if len(routes_to_audit) >= 32:
+                with ThreadPoolExecutor(max_workers=min(4, max(1, os.cpu_count() or 2))) as key_pool:
+                    vkeys_list = list(
+                        key_pool.map(
+                            lambda rt: BrowserVerifyReceiptStore.compute_route_verify_key(
+                                self.dist_dir,
+                                estate_shared_digest,
+                                rt,
+                            ),
+                            routes_to_audit,
+                        )
+                    )
+            else:
+                vkeys_list = [
+                    BrowserVerifyReceiptStore.compute_route_verify_key(
+                        self.dist_dir,
+                        estate_shared_digest,
+                        rt,
+                    )
+                    for rt in routes_to_audit
+                ]
+            for r, vkey in zip(routes_to_audit, vkeys_list):
                 route_verify_keys[r] = vkey
                 rec = stored_routes.get(r) if not eff_no_cache else None
                 if (
@@ -4755,62 +5087,89 @@ class UnifiedBrowserAuditor:
         effective_workers = 0
 
         if live_routes:
-            if use_isolated and chrome_bin:
-                effective_workers = compute_auto_worker_count(
-                    len(live_routes),
-                    requested_workers=eff_workers_req,
-                )
-                ordered_live = sorted(live_routes)
-                route_queue: "queue.Queue[str]" = queue.Queue()
-                for r in ordered_live:
-                    route_queue.put_nowait(r)
-                if effective_workers <= 1:
-                    live_findings = self._run_isolated_worker_queue(
-                        route_queue,
-                        chrome_bin,
-                        is_shell,
-                        prop_id,
-                    )
-                else:
-                    with ThreadPoolExecutor(max_workers=effective_workers) as pool:
-                        futures = [
-                            pool.submit(
-                                self._run_isolated_worker_queue,
-                                route_queue,
-                                chrome_bin,
-                                is_shell,
-                                prop_id,
-                            )
-                            for _ in range(effective_workers)
-                        ]
-                        for fut in as_completed(futures):
-                            live_findings.extend(fut.result())
-            else:
-                effective_workers = 1
-                live_findings = self._run_shared_cdp_routes(live_routes, prop_id)
+            # Pre-populate broken assets JS & redirects cache once before worker threads clone
+            self._get_broken_assets_js()
+            self._get_redirects_rules()
 
-        if receipt_store is not None and live_findings:
-            passed_entries: Dict[str, Dict[str, Any]] = {}
-            evict_routes: List[str] = []
-            for f in live_findings:
-                r = str(f.get("route") or "")
-                vkey = route_verify_keys.get(r)
-                if self._is_finding_failed(f):
-                    if r:
-                        evict_routes.append(r)
-                elif r and vkey:
-                    passed_entries[r] = {
-                        "verify_key": vkey,
-                        "status": "PASS",
-                        "screen_archetype": str(f.get("screen_archetype") or "statutory_guide"),
-                    }
-            receipt_store.update_routes(
-                property_id=prop_id,
-                chrome_version=chrome_version_str,
-                estate_shared_digest=estate_shared_digest,
-                passed_entries=passed_entries,
-                evict_routes=evict_routes,
+            def _record_live_receipt(finding: Dict[str, Any]) -> None:
+                if receipt_store is None:
+                    return
+                r_key = str(finding.get("route") or "")
+                v_key = route_verify_keys.get(r_key)
+                if self._is_finding_failed(finding):
+                    if r_key:
+                        receipt_store.update_routes(
+                            property_id=prop_id,
+                            chrome_version=chrome_version_str,
+                            estate_shared_digest=estate_shared_digest,
+                            passed_entries={},
+                            evict_routes=[r_key],
+                        )
+                elif r_key and v_key:
+                    receipt_store.update_routes(
+                        property_id=prop_id,
+                        chrome_version=chrome_version_str,
+                        estate_shared_digest=estate_shared_digest,
+                        passed_entries={
+                            r_key: {
+                                "verify_key": v_key,
+                                "status": "PASS",
+                                "screen_archetype": str(finding.get("screen_archetype") or "statutory_guide"),
+                            }
+                        },
+                    )
+
+            import contextlib
+            batch_ctx = (
+                receipt_store.batch(
+                    property_id=prop_id,
+                    chrome_version=chrome_version_str,
+                    estate_shared_digest=estate_shared_digest,
+                    flush_every=32,
+                )
+                if receipt_store is not None
+                else contextlib.nullcontext()
             )
+            with batch_ctx:
+                if use_isolated and chrome_bin:
+                    effective_workers = compute_auto_worker_count(
+                        len(live_routes),
+                        requested_workers=eff_workers_req,
+                    )
+                    ordered_live = sorted(live_routes)
+                    route_queue: "queue.Queue[str]" = queue.Queue()
+                    for r in ordered_live:
+                        route_queue.put_nowait(r)
+                    cb_fn = _record_live_receipt if receipt_store is not None else None
+                    if effective_workers <= 1:
+                        live_findings = self._run_isolated_worker_queue(
+                            route_queue,
+                            chrome_bin,
+                            is_shell,
+                            prop_id,
+                            on_route_done=cb_fn,
+                        )
+                    else:
+                        with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                            futures = [
+                                pool.submit(
+                                    self._run_isolated_worker_queue,
+                                    route_queue,
+                                    chrome_bin,
+                                    is_shell,
+                                    prop_id,
+                                    cb_fn,
+                                )
+                                for _ in range(effective_workers)
+                            ]
+                            for fut in as_completed(futures):
+                                live_findings.extend(fut.result())
+                else:
+                    effective_workers = 1
+                    live_findings = self._run_shared_cdp_routes(live_routes, prop_id)
+                    if receipt_store is not None:
+                        for f in live_findings:
+                            _record_live_receipt(f)
 
         findings = sorted(cached_findings + live_findings, key=lambda item: str(item.get("route") or ""))
         failed_routes = [str(f.get("route") or "") for f in findings if self._is_finding_failed(f)]
